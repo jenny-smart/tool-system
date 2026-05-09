@@ -1,138 +1,146 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any, Dict, List, Optional
 
 import gspread
-from gspread.utils import a1_to_rowcol, rowcol_to_a1
-
-from config.vip_config import TIMEZONE, DEFAULT_MONTHLY_LOG_ITEMS
+from gspread import Spreadsheet, Worksheet
 
 
-def now_tw() -> str:
-    # Streamlit server may run UTC. Use zoneinfo if available.
-    try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y/%m/%d %H:%M:%S")
-    except Exception:
-        return datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+TZ_FORMAT = "%Y/%m/%d %H:%M:%S"
 
 
-def col_to_num(col: str) -> int:
-    return a1_to_rowcol(f"{col.upper()}1")[1]
-
-
-def num_to_col(num: int) -> str:
-    return rowcol_to_a1(1, num).rstrip("1")
-
-
-def col_values_until_blank(ws: gspread.Worksheet, col_num: int, start_row: int = 2) -> list[Any]:
-    values = ws.col_values(col_num)[start_row - 1:]
-    out = []
-    for v in values:
-        if v == "":
-            break
-        out.append(v)
-    return out
+def now_text() -> str:
+    return datetime.now().strftime(TZ_FORMAT)
 
 
 class SheetsService:
-    def __init__(self, gc: gspread.Client, sheets_api):
+    def __init__(self, gc: gspread.Client):
         self.gc = gc
-        self.sheets_api = sheets_api
 
-    def open_by_id(self, spreadsheet_id: str) -> gspread.Spreadsheet:
+    def open_by_id(self, spreadsheet_id: str) -> Spreadsheet:
         return self.gc.open_by_key(spreadsheet_id)
 
-    def worksheet(self, sh: gspread.Spreadsheet, name: str) -> gspread.Worksheet:
+    def get_or_create_ws(
+        self,
+        spreadsheet: Spreadsheet,
+        title: str,
+        rows: int = 1000,
+        cols: int = 50,
+    ) -> Worksheet:
         try:
-            return sh.worksheet(name)
+            return spreadsheet.worksheet(title)
         except gspread.WorksheetNotFound:
-            return sh.add_worksheet(title=name, rows=1000, cols=80)
+            return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
 
-    def clear_data_area(self, ws: gspread.Worksheet, end_col: str, start_row: int = 2) -> None:
-        last = max(ws.row_count, ws.row_values(1).__len__(), 1000)
-        ws.batch_clear([f"A{start_row}:{end_col}{last}"])
+    def clear_from_row(
+        self,
+        ws: Worksheet,
+        start_row: int = 2,
+        start_col: int = 1,
+        end_col: Optional[int] = None,
+    ) -> None:
+        last_row = ws.row_count
+        if end_col is None:
+            end_col = ws.col_count
 
-    def get_values(self, ws: gspread.Worksheet, a1: str) -> list[list[Any]]:
-        return ws.get(a1)
+        if last_row < start_row:
+            return
 
-    def update_values(self, ws: gspread.Worksheet, start_a1: str, values: list[list[Any]], user_entered: bool = False) -> None:
+        start_a1 = rowcol_to_a1(start_row, start_col)
+        end_a1 = rowcol_to_a1(last_row, end_col)
+        ws.batch_clear([f"{start_a1}:{end_a1}"])
+
+    def write_values(
+        self,
+        ws: Worksheet,
+        start_row: int,
+        start_col: int,
+        values: List[List[Any]],
+    ) -> None:
         if not values:
             return
-        ws.update(start_a1, values, value_input_option="USER_ENTERED" if user_entered else "RAW")
 
-    def paste_rows_at_a2(self, ws: gspread.Worksheet, rows: list[list[Any]]) -> None:
-        if rows:
-            self.update_values(ws, "A2", rows)
+        end_row = start_row + len(values) - 1
+        end_col = start_col + max(len(r) for r in values) - 1
 
-    def write_formula_and_copy_down(self, spreadsheet_id: str, sheet_id: int, col: str, formula: str, start_row: int, row_count: int) -> None:
-        if row_count <= 0:
-            return
-        col_num = col_to_num(col)
-        first_a1 = rowcol_to_a1(start_row, col_num)
-        body = {"values": [[formula if str(formula).startswith("=") else "=" + str(formula)]]}
-        self.sheets_api.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=first_a1,
-            valueInputOption="USER_ENTERED",
-            body=body,
-        ).execute()
-        if row_count == 1:
-            return
-        requests = [{
-            "copyPaste": {
-                "source": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": start_row - 1,
-                    "endRowIndex": start_row,
-                    "startColumnIndex": col_num - 1,
-                    "endColumnIndex": col_num,
-                },
-                "destination": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": start_row - 1,
-                    "endRowIndex": start_row - 1 + row_count,
-                    "startColumnIndex": col_num - 1,
-                    "endColumnIndex": col_num,
-                },
-                "pasteType": "PASTE_FORMULA",
-            }
-        }]
-        self.sheets_api.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
+        range_name = f"{rowcol_to_a1(start_row, start_col)}:{rowcol_to_a1(end_row, end_col)}"
+        ws.update(range_name, values, value_input_option="USER_ENTERED")
+
+    def read_all_values(self, ws: Worksheet) -> List[List[Any]]:
+        return ws.get_all_values()
+
+    def read_range(self, ws: Worksheet, range_name: str) -> List[List[Any]]:
+        return ws.get(range_name)
 
 
-class MasterLog:
-    def __init__(self, sheets: SheetsService, master: gspread.Spreadsheet, monthly_sheet_name: str):
-        self.sheets = sheets
-        self.master = master
-        self.ws = sheets.worksheet(master, monthly_sheet_name)
-        self.ensure_structure()
+class MonthlyLog:
+    """
+    主控表「月度作業紀錄」用。
 
-    def ensure_structure(self) -> None:
-        if not self.ws.acell("A1").value:
+    這版重點：
+    1. 初始化時只讀一次標題列與項目欄
+    2. ensure_period_col / ensure_item_row 使用快取
+    3. stamp_many 可批次寫入，減少 Google Sheets API 次數
+    """
+
+    def __init__(self, worksheet: Worksheet):
+        self.ws = worksheet
+
+        self.headers: List[str] = self.ws.row_values(1)
+        self.items: List[str] = self.ws.col_values(1)
+
+        if not self.headers:
             self.ws.update("A1", [["項目"]])
-        existing = set(self.ws.col_values(1)[1:])
-        rows_to_add = [[item] for item in DEFAULT_MONTHLY_LOG_ITEMS if item not in existing]
-        if rows_to_add:
-            start = len(self.ws.col_values(1)) + 1
-            self.ws.update(f"A{start}", rows_to_add)
+            self.headers = ["項目"]
+
+        if not self.items:
+            self.ws.update("A1", [["項目"]])
+            self.items = ["項目"]
+
+        if self.headers[0] != "項目":
+            self.ws.update_cell(1, 1, "項目")
+            self.headers[0] = "項目"
+
+        if self.items[0] != "項目":
+            self.ws.update_cell(1, 1, "項目")
+            self.items[0] = "項目"
+
+        self.period_col_cache: Dict[str, int] = {}
+        self.item_row_cache: Dict[str, int] = {}
+
+        for idx, header in enumerate(self.headers, start=1):
+            if header:
+                self.period_col_cache[str(header)] = idx
+
+        for idx, item in enumerate(self.items, start=1):
+            if item:
+                self.item_row_cache[str(item)] = idx
 
     def ensure_period_col(self, period: str) -> int:
-        headers = self.ws.row_values(1)
-        if period in headers:
-            return headers.index(period) + 1
-        col = len(headers) + 1
+        period = str(period).strip()
+
+        if period in self.period_col_cache:
+            return self.period_col_cache[period]
+
+        col = len(self.headers) + 1
         self.ws.update_cell(1, col, period)
+
+        self.headers.append(period)
+        self.period_col_cache[period] = col
         return col
 
     def ensure_item_row(self, item: str) -> int:
-        items = self.ws.col_values(1)
-        if item in items:
-            return items.index(item) + 1
-        row = len(items) + 1
+        item = str(item).strip()
+
+        if item in self.item_row_cache:
+            return self.item_row_cache[item]
+
+        row = len(self.items) + 1
         self.ws.update_cell(row, 1, item)
+
+        self.items.append(item)
+        self.item_row_cache[item] = row
         return row
 
     def stamp(self, period: str, item: str, value: Any) -> None:
@@ -140,12 +148,186 @@ class MasterLog:
         col = self.ensure_period_col(period)
         self.ws.update_cell(row, col, value)
 
-    def stamp_count_time(self, period: str, area: str, typ: str, step: str, count: int) -> None:
-        self.stamp(period, f"{area}{typ}{step}筆數", count)
-        self.stamp(period, f"{area}{typ}{step}時間", now_tw())
+    def stamp_many(self, period: str, data: Dict[str, Any]) -> None:
+        """
+        一次寫入多個項目。
+        data 格式：
+        {
+            "台北儲值金結算轉檔筆數": 100,
+            "台北儲值金結算轉檔時間": "2026/05/10 07:30:00",
+        }
+        """
+        if not data:
+            return
 
-    def append_execution_log(self, sheet_name: str, rows: list[list[Any]]) -> None:
-        ws = self.sheets.worksheet(self.master, sheet_name)
-        if not ws.acell("A1").value:
-            ws.update("A1", [["時間", "期別", "步驟", "區域", "類型", "訊息"]])
-        ws.append_rows(rows, value_input_option="USER_ENTERED")
+        col = self.ensure_period_col(period)
+
+        updates = []
+        for item, value in data.items():
+            row = self.ensure_item_row(item)
+            updates.append(
+                {
+                    "range": rowcol_to_a1(row, col),
+                    "values": [[value]],
+                }
+            )
+
+        if updates:
+            self.ws.batch_update(updates, value_input_option="USER_ENTERED")
+
+    def stamp_count_time(
+        self,
+        period: str,
+        area: str,
+        typ: str,
+        step: str,
+        count: Any,
+        timestamp: Optional[str] = None,
+    ) -> None:
+        """
+        例如：
+        台北儲值金結算轉檔筆數
+        台北儲值金結算轉檔時間
+        """
+        if timestamp is None:
+            timestamp = now_text()
+
+        self.stamp_many(
+            period,
+            {
+                f"{area}{typ}{step}筆數": count,
+                f"{area}{typ}{step}時間": timestamp,
+            },
+        )
+
+    def stamp_link(
+        self,
+        period: str,
+        item: str,
+        url: str,
+    ) -> None:
+        self.stamp(period, item, url)
+
+
+class FormulaSettings:
+    """
+    主控表「公式設定」用。
+
+    建議欄位：
+    啟用 | 類型 | 區域 | 目標頁籤 | 目標欄位 | 公式 | 套用起始列 | 套用完成時間 | 套用筆數 | 備註
+    """
+
+    def __init__(self, worksheet: Worksheet):
+        self.ws = worksheet
+
+    def read_enabled(self) -> List[Dict[str, Any]]:
+        values = self.ws.get_all_values()
+        if len(values) < 2:
+            return []
+
+        headers = values[0]
+        rows = []
+
+        for idx, row in enumerate(values[1:], start=2):
+            data = dict(zip(headers, row))
+
+            enabled = str(data.get("啟用", "")).strip().upper()
+            if enabled not in {"TRUE", "Y", "YES", "1", "是"}:
+                continue
+
+            data["_row"] = idx
+            rows.append(data)
+
+        return rows
+
+    def stamp_formula_result(
+        self,
+        row: int,
+        count: int,
+        timestamp: Optional[str] = None,
+    ) -> None:
+        if timestamp is None:
+            timestamp = now_text()
+
+        headers = self.ws.row_values(1)
+
+        time_col = find_header_col(headers, "套用完成時間")
+        count_col = find_header_col(headers, "套用筆數")
+
+        updates = []
+
+        if time_col:
+            updates.append(
+                {
+                    "range": rowcol_to_a1(row, time_col),
+                    "values": [[timestamp]],
+                }
+            )
+
+        if count_col:
+            updates.append(
+                {
+                    "range": rowcol_to_a1(row, count_col),
+                    "values": [[count]],
+                }
+            )
+
+        if updates:
+            self.ws.batch_update(updates, value_input_option="USER_ENTERED")
+
+
+class ExecutionLog:
+    """
+    主控表「執行紀錄」用。
+    """
+
+    def __init__(self, worksheet: Worksheet):
+        self.ws = worksheet
+        headers = self.ws.row_values(1)
+
+        if not headers:
+            self.ws.update(
+                "A1:E1",
+                [["時間", "期別", "步驟", "狀態", "訊息"]],
+            )
+
+    def append(
+        self,
+        period: str,
+        step: str,
+        status: str,
+        message: str,
+    ) -> None:
+        self.ws.append_row(
+            [now_text(), period, step, status, message],
+            value_input_option="USER_ENTERED",
+        )
+
+
+def find_header_col(headers: List[str], name: str) -> Optional[int]:
+    for idx, header in enumerate(headers, start=1):
+        if str(header).strip() == name:
+            return idx
+    return None
+
+
+def col_to_number(col: str) -> int:
+    col = str(col).strip().upper()
+    num = 0
+    for char in col:
+        if not ("A" <= char <= "Z"):
+            continue
+        num = num * 26 + (ord(char) - ord("A") + 1)
+    return num
+
+
+def number_to_col(num: int) -> str:
+    result = ""
+    while num > 0:
+        num, rem = divmod(num - 1, 26)
+        result = chr(65 + rem) + result
+    return result
+
+
+def rowcol_to_a1(row: int, col: int) -> str:
+    return f"{number_to_col(col)}{row}"
