@@ -2,14 +2,10 @@ name: Performance Report
 
 on:
   schedule:
-    # 台灣 00:00
-    - cron: "0 16 * * *"
-    # 台灣 08:00
-    - cron: "0 0 * * *"
-    # 台灣 12:00
-    - cron: "0 4 * * *"
-    # 台灣 18:00
-    - cron: "0 10 * * *"
+    - cron: "0 16 * * *"  # 台灣 00:00
+    - cron: "0 0 * * *"   # 台灣 08:00
+    - cron: "0 4 * * *"   # 台灣 12:00
+    - cron: "0 10 * * *"  # 台灣 18:00
 
   workflow_dispatch:
 
@@ -25,9 +21,12 @@ jobs:
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
-
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
+
+      NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+      NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
+      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
 
     steps:
       - name: Checkout
@@ -44,20 +43,39 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run Performance Report
+      - name: Run performance report
+        shell: bash
         run: |
-          python tools/scheduled_daily/performance_report.py schedule true
+          set +e
 
-      - name: Commit dashboard data
+          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+          LOG_DIR="logs/$TODAY"
+          mkdir -p "$LOG_DIR"
+
+          python tools/scheduled_daily/performance_report.py schedule true > "$LOG_DIR/performance_report.log" 2>&1
+          EXIT_CODE=$?
+
+          echo "$EXIT_CODE" > "$LOG_DIR/performance_report.exit"
+
+          cat "$LOG_DIR/performance_report.log"
+
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "❌ performance_report failed"
+            exit "$EXIT_CODE"
+          fi
+
+      - name: Commit dashboard data and logs
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add dashboard_data/latest
+          git add dashboard_data/latest logs
 
           if git diff --cached --quiet; then
-            echo "No dashboard data changes"
+            echo "No report or log changes"
           else
-            git commit -m "Update dashboard data"
+            git commit -m "Update performance report data and logs"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
             git push
           fi
