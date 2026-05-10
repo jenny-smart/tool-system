@@ -1,0 +1,33 @@
+systems:
+
+  - name: 外場日排程系統
+    type: scheduled_daily
+    enabled: true
+
+    folder_ids:
+      schedule_stats: "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
+
+      order:
+        台北: "1QnOJzn-xmZ_oAMoiM6Qnfk3Y2CWuM1c4"
+        台中: "1QnOJzn-xmZ_oAMoiM6Qnfk3Y2CWuM1c4"
+
+      staff_profile:
+        台北: "199wJef-ISEP5bsSWaSseCAHynoVRE26e"
+        台中: "199wJef-ISEP5bsSWaSseCAHynoVRE26e"
+
+      staff_schedule:
+        台北: "10__ajnbpu2oabAVUG_u3RAHK2a2vcgj2"
+        台中: "10__ajnbpu2oabAVUG_u3RAHK2a2vcgj2"
+
+    spreadsheet_ids:
+      roster:
+        台北: "1hsmwhA36I0BPXQ8d6OYGGn8R_SETQe4vTR_FB5Sp8Uc"
+        台中: "1MKadGGTkIefcbPpEVCEPo0SS_wnqsmZSfqjcdhxg6Gk"
+
+      salary:
+        台北: "1AvoUGlFCxaKsPOPavgBmqHoyn-_t4c0I82bIth7SvRQ"
+        台中: "1q4-S4cbSPXklNfE380_e7lrHYMaQ7Y_0ZGmgTeWfGfI"
+
+      office:
+        台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
+        台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
