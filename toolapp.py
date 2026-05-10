@@ -280,6 +280,7 @@ if "view" not in st.session_state:
 
 
 
+
 def set_view(view_name: str) -> None:
     st.session_state.view = view_name
     try:
@@ -297,8 +298,8 @@ def sync_view_from_query_params() -> None:
     except Exception:
         view = None
 
-    if view == "performance_dashboard":
-        st.session_state.view = "performance_dashboard"
+    if view in ["report", "log"]:
+        st.session_state.view = view
 
 
 # ═══════════════════════════════════════════════════════════
@@ -348,7 +349,7 @@ def render_log() -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
-def render_performance_dashboard() -> None:
+def render_report() -> None:
     import json
     import pandas as pd
     from pathlib import Path
@@ -452,9 +453,9 @@ def render_performance_dashboard() -> None:
 
     with top_cols[3]:
         try:
-            st.link_button("🔗 開啟獨立連結", "?view=performance_dashboard", use_container_width=True)
+            st.link_button("🔗 開啟獨立連結", "?view=report", use_container_width=True)
         except Exception:
-            st.caption("網址加上 ?view=performance_dashboard 可直接開啟此頁")
+            st.caption("網址加上 ?view=report 可直接開啟此頁")
 
     if not df4_path.exists():
         st.info("尚未產生業績報表資料，請先在主控台執行「日排程系統 → 業績報表」。")
@@ -546,6 +547,96 @@ def render_performance_dashboard() -> None:
             st.components.v1.html(html, height=600, scrolling=True)
         else:
             st.info("尚無 Email HTML")
+
+
+def render_log_page() -> None:
+    from pathlib import Path
+
+    st.markdown(
+        """
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+          <div>
+            <div style="font-size:2.2rem;font-weight:900;color:#0f172a;letter-spacing:1px;">
+              📋 排程執行 Log
+            </div>
+            <div style="font-size:0.82rem;font-weight:800;color:#94a3b8;letter-spacing:5px;margin-top:8px;">
+              GITHUB ACTIONS / LOCAL LOGS
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns([1, 1, 2])
+    with cols[0]:
+        if st.button("← 返回主控台", use_container_width=True):
+            set_view("main")
+            st.rerun()
+    with cols[1]:
+        if st.button("🔄 重新讀取", use_container_width=True):
+            st.rerun()
+
+    log_root = Path("logs")
+
+    if not log_root.exists():
+        st.info("目前沒有 logs/ 資料夾。若要看到 GitHub Actions 排程 log，需要 workflow 將 logs/ commit 回 repo，或改成讀取 GitHub artifacts/API。")
+        return
+
+    day_dirs = sorted([p for p in log_root.iterdir() if p.is_dir()], reverse=True)
+
+    if not day_dirs:
+        st.info("目前 logs/ 裡沒有日期資料夾。")
+        return
+
+    selected_day = st.selectbox("選擇日期", [p.name for p in day_dirs])
+    selected_dir = log_root / selected_day
+    log_files = sorted(selected_dir.glob("*.log"))
+
+    if not log_files:
+        st.info(f"{selected_day} 沒有 log 檔。")
+        return
+
+    st.markdown(
+        f"""
+        <div style="
+            background:white;
+            border:1px solid #e2e8f0;
+            border-radius:18px;
+            padding:18px;
+            margin:16px 0;
+            box-shadow:0 8px 24px rgba(15,23,42,0.06);
+        ">
+          <div style="font-size:1.1rem;font-weight:900;color:#0f172a;margin-bottom:8px;">
+            📅 {selected_day}
+          </div>
+          <div style="color:#64748b;font-size:0.9rem;">
+            共 {len(log_files)} 個 log 檔
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tabs = st.tabs([p.stem for p in log_files])
+
+    for tab, log_file in zip(tabs, log_files):
+        with tab:
+            try:
+                content = log_file.read_text(encoding="utf-8")
+            except Exception as e:
+                st.error(f"讀取失敗：{e}")
+                continue
+
+            exit_file = log_file.with_suffix(".exit")
+            if exit_file.exists():
+                exit_code = exit_file.read_text(encoding="utf-8").strip()
+                if exit_code == "0":
+                    st.success(f"exit code：{exit_code}")
+                else:
+                    st.error(f"exit code：{exit_code}")
+
+            st.code(content or "空 log", language="text")
 
 def mask_id(value: str) -> str:
     if not value:
@@ -672,7 +763,6 @@ def functions_for_system(sys_cfg: dict) -> list[str]:
     system_type = sys_cfg.get("type", "vip")
     return SYSTEM_FUNCTIONS_BY_TYPE.get(system_type, ["尚未設定功能"])
 
-
 sync_view_from_query_params()
 
 config = merge_legacy_secrets(load_config())
@@ -683,8 +773,17 @@ if not system_names:
     system_names = ["儲值金管理"]
 
 
-if st.session_state.view == "performance_dashboard":
-    render_performance_dashboard()
+if st.session_state.view == "report":
+    render_report()
+    st.stop()
+
+
+if st.session_state.view == "report":
+    render_report()
+    st.stop()
+
+if st.session_state.view == "log":
+    render_log_page()
     st.stop()
 
 
@@ -696,40 +795,26 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ═══════════════════════════════════════════════════════════
-# UI — 快捷入口
-# ═══════════════════════════════════════════════════════════
-latest_meta_path = Path("dashboard_data/latest/meta.json")
-latest_df4_path = Path("dashboard_data/latest/df4.csv")
-
-st.markdown(
-    '<div class="card"><div class="card-title">📌 快捷入口</div>',
-    unsafe_allow_html=True,
-)
-
-q1, q2 = st.columns([1, 2])
-
-with q1:
-    if st.button("📊 查看業績報表", use_container_width=True):
-        set_view("performance_dashboard")
-        st.rerun()
-
-with q2:
-    if latest_df4_path.exists():
-        st.caption("業績報表已有資料，可點左側按鈕查看。")
-    else:
-        st.caption("尚未產生業績報表資料，請先執行「日排程系統 → 業績報表」。")
-
-st.markdown("</div>", unsafe_allow_html=True)
-
 
 # ═══════════════════════════════════════════════════════════
 # UI — 執行設定
 # ═══════════════════════════════════════════════════════════
-st.markdown(
-    '<div class="card"><div class="card-title">⚙️ 執行設定</div>',
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="card">', unsafe_allow_html=True)
+
+head_left, head_report, head_log = st.columns([2.2, 1, 1])
+
+with head_left:
+    st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
+
+with head_report:
+    if st.button("📊 查看業績報表", use_container_width=True):
+        set_view("report")
+        st.rerun()
+
+with head_log:
+    if st.button("📋 查看排程 Log", use_container_width=True):
+        set_view("log")
+        st.rerun()
 
 c1, c2 = st.columns(2)
 
