@@ -4,25 +4,36 @@ on:
   schedule:
     # 台灣 00:00
     - cron: "0 16 * * *"
-
     # 台灣 08:00
     - cron: "0 0 * * *"
-
     # 台灣 12:00
     - cron: "0 4 * * *"
-
     # 台灣 18:00
     - cron: "0 10 * * *"
 
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   performance-report:
     runs-on: ubuntu-latest
 
+    env:
+      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
+      TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
+      TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
+
+      TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
+      TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -34,7 +45,19 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Performance Report
-        env:
-          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
         run: |
-          python tools/scheduled_daily/performance_report.py
+          python tools/scheduled_daily/performance_report.py schedule true
+
+      - name: Commit dashboard data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add dashboard_data/latest
+
+          if git diff --cached --quiet; then
+            echo "No dashboard data changes"
+          else
+            git commit -m "Update dashboard data"
+            git push
+          fi
