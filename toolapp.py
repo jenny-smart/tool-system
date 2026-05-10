@@ -35,6 +35,13 @@ CONFIG_PATH = Path("config/systems.yaml")
 DEFAULT_CONFIG = {
     "systems": [
         {
+            "name": "儲值金管理",
+            "type": "vip",
+            "master_spreadsheet_id": "",
+            "folder_id": "",
+            "enabled": True,
+        },
+        {
             "name": "日排程系統",
             "type": "daily_scheduler",
             "master_spreadsheet_id": "",
@@ -48,14 +55,6 @@ DEFAULT_CONFIG = {
             "folder_id": "",
             "enabled": True,
         },
-        {
-            "name": "儲值金管理",
-            "type": "vip",
-            "master_spreadsheet_id": "",
-            "folder_id": "",
-            "enabled": True,
-        },
-        
     ]
 }
 
@@ -350,6 +349,7 @@ def render_log() -> None:
 
 
 def render_performance_dashboard() -> None:
+    import html
     import json
     import pandas as pd
     from pathlib import Path
@@ -369,14 +369,14 @@ def render_performance_dashboard() -> None:
 
     def money(value) -> str:
         try:
-            return f"{int(float(str(value).replace(',', ''))):,}"
+            return f"{int(float(str(value).replace(',', '').replace('%', ''))):,}"
         except Exception:
             return "0"
 
     def ratio(value) -> str:
         try:
-            if isinstance(value, str) and value.endswith("%"):
-                return value
+            if isinstance(value, str) and value.strip().endswith("%"):
+                return value.strip()
             return f"{float(value):.2%}"
         except Exception:
             return "-"
@@ -387,9 +387,9 @@ def render_performance_dashboard() -> None:
         total_row = df[df["城市"].astype(str) == "加總"] if "城市" in df.columns else pd.DataFrame()
         if not total_row.empty:
             return money(total_row.iloc[0][col])
-        return money(df[col].sum())
+        return money(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
 
-    def format_money_ratio_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    def format_table_df(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         show = df.copy()
         numeric_cols = []
 
@@ -409,21 +409,121 @@ def render_performance_dashboard() -> None:
                 )
                 numeric_cols.append(col)
 
-        return show.style.set_properties(
-            subset=numeric_cols,
-            **{"text-align": "right"},
-        )
+        return show, numeric_cols
+
+    def render_html_table(df: pd.DataFrame, height: int | None = None) -> None:
+        show, numeric_cols = format_table_df(df)
+
+        table_html = ['<div class="report-table-wrap">']
+        table_html.append('<table class="report-table">')
+        table_html.append("<thead><tr>")
+        for col in show.columns:
+            table_html.append(f"<th>{html.escape(str(col))}</th>")
+        table_html.append("</tr></thead><tbody>")
+
+        for _, row in show.iterrows():
+            is_total = str(row.get("城市", "")) == "加總"
+            cls = ' class="total-row"' if is_total else ""
+            table_html.append(f"<tr{cls}>")
+            for col in show.columns:
+                align = "num" if col in numeric_cols else "text"
+                table_html.append(f'<td class="{align}">{html.escape(str(row[col]))}</td>')
+            table_html.append("</tr>")
+
+        table_html.append("</tbody></table></div>")
+        st.markdown("".join(table_html), unsafe_allow_html=True)
 
     st.markdown(
         """
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+        <style>
+          .report-hero {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            margin-bottom:20px;
+          }
+          .report-title {
+            font-size:2.3rem;
+            font-weight:900;
+            color:#0f172a;
+            letter-spacing:1px;
+            line-height:1.1;
+          }
+          .report-subtitle {
+            font-size:0.82rem;
+            font-weight:800;
+            color:#94a3b8;
+            letter-spacing:5px;
+            margin-top:8px;
+          }
+          .report-card {
+            background:linear-gradient(135deg,#ffffff,#f8fafc);
+            border:1px solid #e2e8f0;
+            border-radius:22px;
+            padding:24px;
+            margin:20px 0 28px 0;
+            box-shadow:0 8px 28px rgba(15,23,42,0.06);
+          }
+          .section-title {
+            font-size:1.45rem;
+            font-weight:900;
+            color:#0f172a;
+            margin-bottom:14px;
+          }
+          .section-note {
+            color:#64748b;
+            font-size:0.9rem;
+            margin-bottom:14px;
+          }
+          .report-table-wrap {
+            overflow-x:auto;
+            border:1px solid #e2e8f0;
+            border-radius:16px;
+            background:white;
+          }
+          table.report-table {
+            width:100%;
+            border-collapse:separate;
+            border-spacing:0;
+            font-size:0.95rem;
+          }
+          .report-table th {
+            background:#f8fafc;
+            color:#64748b;
+            font-weight:800;
+            text-align:center;
+            padding:13px 14px;
+            border-bottom:1px solid #e2e8f0;
+            border-right:1px solid #e2e8f0;
+            white-space:nowrap;
+          }
+          .report-table td {
+            padding:12px 14px;
+            border-bottom:1px solid #edf2f7;
+            border-right:1px solid #edf2f7;
+            color:#1e293b;
+            background:white;
+            white-space:nowrap;
+          }
+          .report-table td.num {
+            text-align:right !important;
+            font-variant-numeric:tabular-nums;
+          }
+          .report-table td.text {
+            text-align:left;
+          }
+          .report-table tr.total-row td {
+            background:#f8fafc;
+            font-weight:900;
+          }
+          .report-table tr:hover td {
+            background:#f1f5f9;
+          }
+        </style>
+        <div class="report-hero">
           <div>
-            <div style="font-size:2.2rem;font-weight:900;color:#0f172a;letter-spacing:1px;">
-              📊 業績報表
-            </div>
-            <div style="font-size:0.85rem;font-weight:800;color:#94a3b8;letter-spacing:5px;margin-top:4px;">
-              LATEST DATA · CURRENT / NEXT MONTH / SNAPSHOT
-            </div>
+            <div class="report-title">📊 業績報表</div>
+            <div class="report-subtitle">LATEST DATA · CURRENT / NEXT MONTH / SNAPSHOT</div>
           </div>
         </div>
         """,
@@ -492,59 +592,55 @@ def render_performance_dashboard() -> None:
     with k4:
         st.metric("儲值金", get_total(df4, "儲值金"))
 
-    st.divider()
-
-    st.markdown("### 📍 各區月度摘要")
-    st.dataframe(
-        format_money_ratio_table(df4),
-        use_container_width=True,
-        hide_index=True,
+    st.markdown(
+        '<div class="report-card"><div class="section-title">📍 各區月度摘要</div>',
+        unsafe_allow_html=True,
     )
+    render_html_table(df4)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.divider()
-
-    st.markdown("## 月度追蹤")
+    st.markdown(
+        '<div class="report-card"><div class="section-title">月度追蹤</div>',
+        unsafe_allow_html=True,
+    )
     tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
 
     with tabs[0]:
-        st.caption("資料來源：上方各區月度摘要 df4.csv 的本月加總；每次更新資料會新增一筆。")
+        st.markdown(
+            '<div class="section-note">資料來源：上方各區月度摘要 df4.csv 的本月加總；每次更新資料會新增一筆。</div>',
+            unsafe_allow_html=True,
+        )
         if daily_df.empty:
             st.info("尚無當月每日業績資料")
         else:
-            st.dataframe(
-                format_money_ratio_table(daily_df),
-                use_container_width=True,
-                hide_index=True,
-            )
+            render_html_table(daily_df)
 
     with tabs[1]:
-        st.caption("資料來源：上方各區月度摘要 df4.csv 的次月加總；每次更新資料會新增一筆。")
+        st.markdown(
+            '<div class="section-note">資料來源：上方各區月度摘要 df4.csv 的次月加總；每次更新資料會新增一筆。</div>',
+            unsafe_allow_html=True,
+        )
         if next_df.empty:
             st.info("尚無次月每日業績資料")
         else:
-            st.dataframe(
-                format_money_ratio_table(next_df),
-                use_container_width=True,
-                hide_index=True,
-            )
+            render_html_table(next_df)
 
     with tabs[2]:
-        st.caption("月底快照只在月底執行時產生。")
+        st.markdown(
+            '<div class="section-note">月底快照只在月底執行時產生。</div>',
+            unsafe_allow_html=True,
+        )
         if month_end_df.empty:
             st.info("尚無月底快照")
         else:
-            st.dataframe(
-                format_money_ratio_table(month_end_df),
-                use_container_width=True,
-                hide_index=True,
-            )
+            render_html_table(month_end_df)
 
-    st.divider()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("📧 信件預覽", expanded=False):
         if html_path.exists():
-            html = html_path.read_text(encoding="utf-8")
-            st.components.v1.html(html, height=600, scrolling=True)
+            html_text = html_path.read_text(encoding="utf-8")
+            st.components.v1.html(html_text, height=600, scrolling=True)
         else:
             st.info("尚無 Email HTML")
 
@@ -673,7 +769,6 @@ def functions_for_system(sys_cfg: dict) -> list[str]:
     system_type = sys_cfg.get("type", "vip")
     return SYSTEM_FUNCTIONS_BY_TYPE.get(system_type, ["尚未設定功能"])
 
-
 sync_view_from_query_params()
 
 config = merge_legacy_secrets(load_config())
@@ -696,33 +791,6 @@ st.markdown(
     '<div class="app-title">🧰 Tools App 作業系統</div>',
     unsafe_allow_html=True,
 )
-
-# ═══════════════════════════════════════════════════════════
-# UI — 快捷入口
-# ═══════════════════════════════════════════════════════════
-latest_meta_path = Path("dashboard_data/latest/meta.json")
-latest_df4_path = Path("dashboard_data/latest/df4.csv")
-
-st.markdown(
-    '<div class="card"><div class="card-title">📌 快捷入口</div>',
-    unsafe_allow_html=True,
-)
-
-q1, q2 = st.columns([1, 2])
-
-with q1:
-    if st.button("📊 查看業績報表", use_container_width=True):
-        set_view("performance_dashboard")
-        st.rerun()
-
-with q2:
-    if latest_df4_path.exists():
-        st.caption("業績報表已有資料，可點左側按鈕查看。")
-    else:
-        st.caption("尚未產生業績報表資料，請先執行「日排程系統 → 業績報表」。")
-
-st.markdown("</div>", unsafe_allow_html=True)
-
 
 # ═══════════════════════════════════════════════════════════
 # UI — 執行設定
@@ -756,6 +824,12 @@ with c2:
 
 selected_system = get_system_by_name(config, system_name)
 system_type = selected_system.get("type", "vip")
+
+dash_col_left, dash_col_right = st.columns([3, 1])
+with dash_col_right:
+    if st.button("📊 查看業績報表", use_container_width=True):
+        set_view("performance_dashboard")
+        st.rerun()
 
 with c1:
     label = "📆 執行期別" if system_type in ["vip", "monthly_scheduler"] else "📆 執行日期"
