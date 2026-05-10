@@ -1,5 +1,8 @@
 logs/*
 !logs/.gitkeep
+!logs/**/
+!logs/**/*.log
+!logs/**/*.exit
 
 dashboard_data/*
 !dashboard_data/.gitkeep
