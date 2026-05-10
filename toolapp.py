@@ -350,30 +350,27 @@ def import_vip_get_workflow():
 
 def build_vip_workflow(master_id: str, root_id: str, system_name: str):
     """
-    自動判斷 get_workflow() 支援新版參數或舊版無參數。
-
-    新版：
-        get_workflow(master_spreadsheet_id=..., root_folder_id=..., system_name=...)
-
-    舊版：
-        get_workflow()
+    直接用目前 toolapp.py 的設定建立 workflow。
+    不再呼叫舊版 get_workflow()，避免 SheetsService 參數不一致。
     """
-    get_workflow = import_vip_get_workflow()
-    sig = inspect.signature(get_workflow)
-    params = sig.parameters
+    from services.google_auth import get_gspread_client, get_drive_service
+    from services.google_sheets import SheetsService
+    from services.vip_workflow import VipStoredValueWorkflow
 
-    kwargs = {}
-    if "master_spreadsheet_id" in params:
-        kwargs["master_spreadsheet_id"] = master_id
-    if "root_folder_id" in params:
-        kwargs["root_folder_id"] = root_id
-    if "system_name" in params:
-        kwargs["system_name"] = system_name
+    try:
+        from services.google_drive import DriveService
+    except ModuleNotFoundError:
+        from services.drive_service import DriveService
 
-    if kwargs:
-        return get_workflow(**kwargs)
+    sheets = SheetsService(get_gspread_client())
+    drive = DriveService(get_drive_service())
 
-    return get_workflow()
+    return VipStoredValueWorkflow(
+        drive,
+        sheets,
+        master_id,
+        root_id,
+    )
 
 
 # ═══════════════════════════════════════════════════════════
