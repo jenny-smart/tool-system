@@ -2,28 +2,52 @@ name: Scheduled Daily Jobs
 
 on:
   schedule:
-    - cron: "0 17 * * *"
+    - cron: "0 17 * * *"   # 台灣 01:00 排班統計表
+    - cron: "10 17 * * *"  # 台灣 01:10 專員班表
+    - cron: "20 17 * * *"  # 台灣 01:20 當月次月訂單
+    - cron: "30 17 * * *"  # 台灣 01:30 專員個資
+    - cron: "0 18 * * *"   # 台灣 02:00 寄通知
 
   workflow_dispatch:
+    inputs:
+      target:
+        description: "要執行的任務"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - schedule_report
+          - staff_schedule
+          - orders_report
+          - staff_info
+          - notify
+
+permissions:
+  contents: write
 
 jobs:
-  run-job:
+  run-daily-jobs:
     runs-on: ubuntu-latest
 
     env:
       DAILY_ROOT_FOLDER_ID: ${{ secrets.DAILY_ROOT_FOLDER_ID }}
-
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
-
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
+
+      NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+      NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
+      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -34,17 +58,104 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run Daily Jobs
+      - name: Decide task
+        id: decide
+        shell: bash
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TASK="${{ github.event.inputs.target }}"
+          else
+            HOUR=$(date -u +"%H")
+            MIN=$(date -u +"%M")
 
-          echo "===== 排班統計表 ====="
-          python tools/scheduled_daily/schedule_report.py --folder-id "$DAILY_ROOT_FOLDER_ID"
+            if [ "$HOUR" = "17" ] && [ "$MIN" = "00" ]; then
+              TASK="schedule_report"
+            elif [ "$HOUR" = "17" ] && [ "$MIN" = "10" ]; then
+              TASK="staff_schedule"
+            elif [ "$HOUR" = "17" ] && [ "$MIN" = "20" ]; then
+              TASK="orders_report"
+            elif [ "$HOUR" = "17" ] && [ "$MIN" = "30" ]; then
+              TASK="staff_info"
+            elif [ "$HOUR" = "18" ] && [ "$MIN" = "00" ]; then
+              TASK="notify"
+            else
+              TASK="none"
+            fi
+          fi
 
-          echo "===== 專員班表 ====="
-          python tools/scheduled_daily/staff_schedule.py --folder-id "$DAILY_ROOT_FOLDER_ID"
+          echo "task=$TASK" >> "$GITHUB_OUTPUT"
+          echo "TASK=$TASK"
 
-          echo "===== 當月次月訂單 ====="
-          python tools/scheduled_daily/orders_report.py --folder-id "$DAILY_ROOT_FOLDER_ID"
+      - name: Run daily task
+        shell: bash
+        run: |
+          set +e
 
-          echo "===== 專員個資 ====="
-          python tools/scheduled_daily/staff_info.py --folder-id "$DAILY_ROOT_FOLDER_ID"
+          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+          LOG_DIR="logs/$TODAY"
+          mkdir -p "$LOG_DIR"
+
+          TASK="${{ steps.decide.outputs.task }}"
+
+          run_one () {
+            NAME="$1"
+            CMD="$2"
+
+            echo "===== $NAME ====="
+            echo "Command: $CMD"
+
+            bash -lc "$CMD" > "$LOG_DIR/$NAME.log" 2>&1
+            EXIT_CODE=$?
+
+            echo "$EXIT_CODE" > "$LOG_DIR/$NAME.exit"
+
+            cat "$LOG_DIR/$NAME.log"
+
+            if [ "$EXIT_CODE" -ne 0 ]; then
+              echo "❌ $NAME failed with exit code $EXIT_CODE"
+            else
+              echo "✅ $NAME success"
+            fi
+
+            return 0
+          }
+
+          if [ "$TASK" = "schedule_report" ] || [ "$TASK" = "all" ]; then
+            run_one "schedule_report" "python tools/scheduled_daily/schedule_report.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+          fi
+
+          if [ "$TASK" = "staff_schedule" ] || [ "$TASK" = "all" ]; then
+            run_one "staff_schedule" "python tools/scheduled_daily/staff_schedule.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+          fi
+
+          if [ "$TASK" = "orders_report" ] || [ "$TASK" = "all" ]; then
+            run_one "orders_report" "python tools/scheduled_daily/orders_report.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+          fi
+
+          if [ "$TASK" = "staff_info" ] || [ "$TASK" = "all" ]; then
+            run_one "staff_info" "python tools/scheduled_daily/staff_info.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+          fi
+
+          if [ "$TASK" = "notify" ] || [ "$TASK" = "all" ]; then
+            run_one "send_daily_result" "python tools/notify/send_daily_result.py"
+          fi
+
+          if [ "$TASK" = "none" ]; then
+            echo "No matching task."
+          fi
+
+      - name: Commit logs
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add logs
+
+          if git diff --cached --quiet; then
+            echo "No log changes"
+          else
+            git commit -m "Update daily logs"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push
+          fi
