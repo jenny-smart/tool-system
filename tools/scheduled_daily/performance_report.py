@@ -15,8 +15,10 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from accounts import ACCOUNTS
-from paths import PATH_REPORT
+from services.backend import load_accounts_dict
+from config.op_paths import PATH_REPORT
+
+ACCOUNTS = load_accounts_dict()
 
 
 LOGIN_URL = "https://backend.lemonclean.com.tw/login"
