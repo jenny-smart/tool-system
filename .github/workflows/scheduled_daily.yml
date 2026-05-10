@@ -3,32 +3,39 @@ name: Scheduled Daily Jobs
 on:
   schedule:
     - cron: "0 17 * * *"
+
   workflow_dispatch:
 
 jobs:
-  run-daily-jobs:
+  run-job:
     runs-on: ubuntu-latest
 
     env:
       DAILY_ROOT_FOLDER_ID: ${{ secrets.DAILY_ROOT_FOLDER_ID }}
+
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
+
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - run: pip install -r requirements.txt
-
-      - name: Run all daily jobs
+      - name: Install packages
         run: |
-          set -e
+          pip install -r requirements.txt
+
+      - name: Run Daily Jobs
+        run: |
 
           echo "===== 排班統計表 ====="
           python tools/scheduled_daily/schedule_report.py --folder-id "$DAILY_ROOT_FOLDER_ID"
