@@ -1,0 +1,10 @@
+systems:
+  - name: 日排程系統
+    type: daily_scheduler
+    folder_id: 日排程根資料夾ID
+    enabled: true
+
+  - name: 月排程系統
+    type: monthly_scheduler
+    folder_id: 月排程根資料夾ID
+    enabled: true
