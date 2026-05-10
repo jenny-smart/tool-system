@@ -336,8 +336,33 @@ def rowcol_to_a1(row: int, col: int) -> str:
 # 舊版相容別名
 # ============================================================
 
-MasterLog = MonthlyLog
-now_tw = now_text
+from zoneinfo import ZoneInfo
+
+TW_TZ = ZoneInfo("Asia/Taipei")
+
+
+def now_tw() -> str:
+    return datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
+
+
+def now_text() -> str:
+    return now_tw()
+
+
+class MasterLog(MonthlyLog):
+    """
+    相容舊版 vip_workflow.py：
+
+    舊版呼叫：
+    MasterLog(sheets, spreadsheet, sheet_name)
+
+    新版 MonthlyLog 原本只吃：
+    MonthlyLog(worksheet)
+    """
+
+    def __init__(self, sheets, spreadsheet, sheet_name: str):
+        ws = sheets.get_or_create_ws(spreadsheet, sheet_name)
+        super().__init__(ws)
+
+
 col_to_num = col_to_number
-
-
