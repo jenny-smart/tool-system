@@ -4,21 +4,12 @@ Tool App 主控入口
 - 儲值金管理
 - 日排程系統
 - 月排程系統
-
-版面：
-1. 執行設定
-2. 執行日誌
-3. 可收合設定檔管理
-
-重點：
-- 設定檔可新增 / 編輯 / 刪除
-- 設定檔放在執行日誌下方，且可收合
-- 使用台北時區 Asia/Taipei
-- 儲值金管理直接建立 VipStoredValueWorkflow，不再呼叫舊版 get_workflow()
 """
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -28,7 +19,6 @@ import yaml
 
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-
 
 st.set_page_config(
     page_title="Tools App",
@@ -102,14 +92,6 @@ def get_secret_text(key: str, default: str = "") -> str:
 
 
 def merge_legacy_secrets(cfg: dict) -> dict:
-    """
-    相容舊版 secrets：
-    MASTER_SPREADSHEET_ID
-    ROOT_FOLDER_ID
-
-    若 config/systems.yaml 內的儲值金管理尚未填 ID，
-    會先用 secrets 內的舊設定顯示與執行。
-    """
     legacy_master = get_secret_text("MASTER_SPREADSHEET_ID")
     legacy_root = get_secret_text("ROOT_FOLDER_ID")
 
@@ -228,6 +210,7 @@ st.markdown(
     font-size: 0.75rem;
     color: #cde3ec;
     line-height: 1.4;
+    white-space: pre-wrap;
   }
 
   .log-entry.success { color: #6ee7b7; }
@@ -358,18 +341,10 @@ def get_system_type_label(system_type: str) -> str:
 
 
 def build_vip_workflow(master_id: str, root_id: str, system_name: str):
-    """
-    直接用目前 toolapp.py 的設定建立 workflow。
-    不再呼叫舊版 get_workflow()，避免 SheetsService 參數不一致。
-    """
-    from services.google_auth import get_gspread_client, get_drive_service
+    from services.auth import get_gspread_client, get_drive_service
+    from services.google_drive import DriveService
     from services.google_sheets import SheetsService
     from services.vip_workflow import VipStoredValueWorkflow
-
-    try:
-        from services.google_drive import DriveService
-    except ModuleNotFoundError:
-        from services.drive_service import DriveService
 
     sheets = SheetsService(get_gspread_client())
     drive = DriveService(get_drive_service())
@@ -389,6 +364,35 @@ def build_vip_workflow(master_id: str, root_id: str, system_name: str):
             master_id,
             root_id,
         )
+
+
+def run_script(script_path: str, args: list[str] | None = None) -> str:
+    args = args or []
+
+    cmd = [sys.executable, script_path, *args]
+
+    completed = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        cwd=Path(__file__).resolve().parent,
+    )
+
+    if completed.stdout:
+        add_log(completed.stdout, "info")
+
+    if completed.stderr:
+        add_log(completed.stderr, "error")
+
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"執行失敗：{script_path}\n"
+            f"exit={completed.returncode}\n"
+            f"STDOUT:\n{completed.stdout}\n"
+            f"STDERR:\n{completed.stderr}"
+        )
+
+    return f"{script_path} 執行完成"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -420,6 +424,23 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "儲值金預收",
         "一鍵執行月排程",
     ],
+}
+
+DAILY_SCRIPT_MAP = {
+    "排班統計表": "tools/scheduled_daily/schedule_report.py",
+    "專員班表": "tools/scheduled_daily/staff_schedule.py",
+    "專員個資": "tools/scheduled_daily/staff_info.py",
+    "當月次月訂單": "tools/scheduled_daily/orders_report.py",
+    "業績報表": "tools/scheduled_daily/performance_report.py",
+}
+
+MONTHLY_SCRIPT_MAP = {
+    "上半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "1"],
+    "下半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "2"],
+    "已退款": ["tools/scheduled_monthly/refund_report.py"],
+    "預收": ["tools/scheduled_monthly/prepaid_report.py"],
+    "儲值金結算": ["tools/scheduled_monthly/stored_value_settlement.py"],
+    "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
 }
 
 
@@ -455,19 +476,6 @@ st.markdown(
 
 c1, c2 = st.columns(2)
 
-with c1:
-    st.markdown(
-        '<div class="field-label">📆 執行期別</div>',
-        unsafe_allow_html=True,
-    )
-    period = st.text_input(
-        "執行期別",
-        value=tw_now_text("%Y%m"),
-        placeholder="例如：202605",
-        label_visibility="collapsed",
-        key="period",
-    )
-
 with c2:
     st.markdown(
         '<div class="field-label">🗂️ 執行系統</div>',
@@ -489,6 +497,32 @@ with c2:
     st.session_state.selected_system_name = system_name
 
 selected_system = get_system_by_name(config, system_name)
+system_type = selected_system.get("type", "vip")
+
+with c1:
+    label = "📆 執行期別" if system_type in ["vip", "monthly_scheduler"] else "📆 執行日期"
+    st.markdown(
+        f'<div class="field-label">{label}</div>',
+        unsafe_allow_html=True,
+    )
+
+    if system_type in ["vip", "monthly_scheduler"]:
+        period = st.text_input(
+            "執行期別",
+            value=tw_now_text("%Y%m"),
+            placeholder="例如：202605",
+            label_visibility="collapsed",
+            key="period",
+        )
+    else:
+        period = tw_now_text("%Y%m%d")
+        st.text_input(
+            "執行日期",
+            value=period,
+            disabled=True,
+            label_visibility="collapsed",
+            key="daily_date",
+        )
 
 st.markdown(
     '<div class="field-label">🎯 執行功能</div>',
@@ -508,7 +542,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════
-# UI — 日誌：在執行視窗下方
+# UI — 日誌
 # ═══════════════════════════════════════════════════════════
 render_log()
 
@@ -521,7 +555,7 @@ with clear_col:
 
 
 # ═══════════════════════════════════════════════════════════
-# UI — 設定檔：在執行視窗下方，可收合，可新增/編輯
+# UI — 設定檔管理
 # ═══════════════════════════════════════════════════════════
 with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expanded=False):
     st.markdown(
@@ -591,12 +625,12 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
 
     for i, sys_cfg in enumerate(config.get("systems", [])):
         name = sys_cfg.get("name", f"系統{i + 1}")
-        system_type = sys_cfg.get("type", "vip")
+        current_type = sys_cfg.get("type", "vip")
         master_id = sys_cfg.get("master_spreadsheet_id", "")
         root_id = sys_cfg.get("root_folder_id", "")
         enabled = sys_cfg.get("enabled", True)
 
-        needs_ids = system_type == "vip"
+        needs_ids = current_type == "vip"
         complete = bool(name and (not needs_ids or (master_id and root_id)))
         badge = (
             '<span class="badge-ok">已設定</span>'
@@ -612,9 +646,11 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                 e_type = st.selectbox(
                     "設定系統類型",
                     ["vip", "daily_scheduler", "monthly_scheduler"],
-                    index=["vip", "daily_scheduler", "monthly_scheduler"].index(system_type)
-                    if system_type in ["vip", "daily_scheduler", "monthly_scheduler"]
-                    else 0,
+                    index=(
+                        ["vip", "daily_scheduler", "monthly_scheduler"].index(current_type)
+                        if current_type in ["vip", "daily_scheduler", "monthly_scheduler"]
+                        else 0
+                    ),
                     format_func=get_system_type_label,
                 )
                 e_master_id = st.text_input("設定主控表 ID", value=master_id)
@@ -655,7 +691,7 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
     <strong style="color:#0a4b6e;">🗂️ {name}</strong>{badge}
   </div>
-  <div class="detail-row"><strong>系統類型</strong>：{get_system_type_label(system_type)}</div>
+  <div class="detail-row"><strong>系統類型</strong>：{get_system_type_label(current_type)}</div>
   <div class="detail-row"><strong>狀態</strong>：{enabled_text}</div>
   <div class="detail-row"><strong>主控表 ID</strong>：{mask_id(master_id)}</div>
   <div class="detail-row"><strong>根目錄 ID</strong>：{mask_id(root_id)}</div>
@@ -683,11 +719,6 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
 # 執行邏輯
 # ═══════════════════════════════════════════════════════════
 if run_clicked:
-    if system_type in ["vip", "monthly_scheduler"]:
-        if not period:
-            add_log("請先輸入執行期別", "error")
-            st.rerun()
-
     if not selected_system:
         add_log("請先新增或啟用系統設定", "error")
         st.rerun()
@@ -696,14 +727,16 @@ if run_clicked:
     master_id = selected_system.get("master_spreadsheet_id", "")
     root_id = selected_system.get("root_folder_id", "")
 
+    if system_type in ["vip", "monthly_scheduler"]:
+        if not period:
+            add_log("請先輸入執行期別", "error")
+            st.rerun()
+
     add_log(f"開始執行：{system_name} / {selected_function} / 期別 {period}")
 
     try:
         result = None
 
-        # ───────────────────────────────────────────────
-        # 儲值金管理
-        # ───────────────────────────────────────────────
         if system_type == "vip":
             if not master_id:
                 add_log("尚未設定主控表 ID", "error")
@@ -746,21 +779,36 @@ if run_clicked:
             else:
                 add_log(f"未知功能：{selected_function}", "warning")
 
-        # ───────────────────────────────────────────────
-        # 日排程系統
-        # ───────────────────────────────────────────────
         elif system_type == "daily_scheduler":
-            from tools.scheduled_daily.scheduler import main as run_daily_scheduler
+            if selected_function == "一鍵執行日排程":
+                from tools.scheduled_daily.scheduler import main as run_daily_scheduler
 
-            result = run_daily_scheduler()
+                result = run_daily_scheduler()
 
-        # ───────────────────────────────────────────────
-        # 月排程系統
-        # ───────────────────────────────────────────────
+            else:
+                script = DAILY_SCRIPT_MAP.get(selected_function)
+
+                if not script:
+                    raise RuntimeError(f"找不到日排程功能：{selected_function}")
+
+                result = run_script(script)
+
         elif system_type == "monthly_scheduler":
-            from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
+            if selected_function == "一鍵執行月排程":
+                from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
 
-            result = run_monthly_scheduler()
+                result = run_monthly_scheduler()
+
+            else:
+                cmd = MONTHLY_SCRIPT_MAP.get(selected_function)
+
+                if not cmd:
+                    raise RuntimeError(f"找不到月排程功能：{selected_function}")
+
+                script = cmd[0]
+                args = cmd[1:]
+
+                result = run_script(script, args)
 
         else:
             add_log(f"{system_type} 尚未實作", "warning")
