@@ -278,7 +278,27 @@ if "editing_system" not in st.session_state:
 if "view" not in st.session_state:
     st.session_state.view = "main"
 
-sync_view_from_query_params()
+
+
+def set_view(view_name: str) -> None:
+    st.session_state.view = view_name
+    try:
+        if view_name == "main":
+            st.query_params.clear()
+        else:
+            st.query_params["view"] = view_name
+    except Exception:
+        pass
+
+
+def sync_view_from_query_params() -> None:
+    try:
+        view = st.query_params.get("view")
+    except Exception:
+        view = None
+
+    if view == "performance_dashboard":
+        st.session_state.view = "performance_dashboard"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -301,24 +321,6 @@ def add_log(message: str, level: str = "info") -> None:
 
     if len(st.session_state.logs) > 500:
         st.session_state.logs = st.session_state.logs[-500:]
-
-
-def set_view(view_name: str) -> None:
-    st.session_state.view = view_name
-    try:
-        st.query_params["view"] = view_name
-    except Exception:
-        pass
-
-
-def sync_view_from_query_params() -> None:
-    try:
-        view = st.query_params.get("view")
-    except Exception:
-        view = None
-
-    if view == "performance_dashboard":
-        st.session_state.view = "performance_dashboard"
 
 
 def render_log() -> None:
@@ -385,6 +387,31 @@ def render_performance_dashboard() -> None:
         if not total_row.empty:
             return money(total_row.iloc[0][col])
         return money(df[col].sum())
+
+    def format_money_ratio_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+        show = df.copy()
+        numeric_cols = []
+
+        for col in show.columns:
+            if "佔比" in col:
+                show[col] = (
+                    pd.to_numeric(show[col], errors="coerce")
+                    .fillna(0)
+                    .map(lambda x: f"{x:.2%}")
+                )
+                numeric_cols.append(col)
+            elif any(x in col for x in ["業績", "加總", "家電", "儲值金"]):
+                show[col] = (
+                    pd.to_numeric(show[col], errors="coerce")
+                    .fillna(0)
+                    .map(lambda x: f"{int(x):,}")
+                )
+                numeric_cols.append(col)
+
+        return show.style.set_properties(
+            subset=numeric_cols,
+            **{"text-align": "right"},
+        )
 
     st.markdown(
         """
@@ -467,14 +494,11 @@ def render_performance_dashboard() -> None:
     st.divider()
 
     st.markdown("### 📍 各區月度摘要")
-    show_df4 = df4.copy()
-    for col in ["本月加總", "次月加總", "本月家電加總", "次月家電加總", "儲值金"]:
-        if col in show_df4.columns:
-            show_df4[col] = show_df4[col].apply(money)
-    for col in ["本月佔比", "次月佔比"]:
-        if col in show_df4.columns:
-            show_df4[col] = show_df4[col].apply(ratio)
-    st.dataframe(show_df4, use_container_width=True, hide_index=True)
+    st.dataframe(
+        format_money_ratio_table(df4),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.divider()
 
@@ -486,21 +510,33 @@ def render_performance_dashboard() -> None:
         if daily_df.empty:
             st.info("尚無當月每日業績資料")
         else:
-            st.dataframe(daily_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                format_money_ratio_table(daily_df),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     with tabs[1]:
         st.caption("資料來源：上方各區月度摘要 df4.csv 的次月加總；每次更新資料會新增一筆。")
         if next_df.empty:
             st.info("尚無次月每日業績資料")
         else:
-            st.dataframe(next_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                format_money_ratio_table(next_df),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     with tabs[2]:
         st.caption("月底快照只在月底執行時產生。")
         if month_end_df.empty:
             st.info("尚無月底快照")
         else:
-            st.dataframe(month_end_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                format_money_ratio_table(month_end_df),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     st.divider()
 
@@ -636,6 +672,8 @@ def functions_for_system(sys_cfg: dict) -> list[str]:
     system_type = sys_cfg.get("type", "vip")
     return SYSTEM_FUNCTIONS_BY_TYPE.get(system_type, ["尚未設定功能"])
 
+
+sync_view_from_query_params()
 
 config = merge_legacy_secrets(load_config())
 systems = get_enabled_systems(config)
