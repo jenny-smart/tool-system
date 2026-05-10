@@ -4,21 +4,27 @@ Tool App 主控入口
 - 儲值金管理
 - 日排程系統
 - 月排程系統
+- 外場日排程系統
 """
 
 from __future__ import annotations
 
+import html
+import json
 import subprocess
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import streamlit as st
 import yaml
 
 
 TW_TZ = ZoneInfo("Asia/Taipei")
+BASE_DIR = Path(__file__).resolve().parent
 
 st.set_page_config(
     page_title="Tools App",
@@ -54,6 +60,22 @@ DEFAULT_CONFIG = {
             "master_spreadsheet_id": "",
             "folder_id": "",
             "enabled": True,
+        },
+        {
+            "name": "外場日排程系統",
+            "type": "field_daily_schedule",
+            "enabled": True,
+            "folder_ids": {
+                "schedule_stats": "",
+                "order": {"台北": "", "台中": ""},
+                "staff_profile": {"台北": "", "台中": ""},
+                "staff_schedule": {"台北": "", "台中": ""},
+            },
+            "spreadsheet_ids": {
+                "roster": {"台北": "", "台中": ""},
+                "salary": {"台北": "", "台中": ""},
+                "office": {"台北": "", "台中": ""},
+            },
         },
     ]
 }
@@ -254,6 +276,54 @@ st.markdown(
     color: #3e6c87;
     margin: 3px 0;
   }
+
+  .report-table-wrap {
+    overflow-x:auto;
+    border:1px solid #e2e8f0;
+    border-radius:16px;
+    background:white;
+  }
+
+  table.report-table {
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    font-size:0.95rem;
+  }
+
+  .report-table th {
+    background:#f8fafc;
+    color:#64748b;
+    font-weight:800;
+    text-align:center;
+    padding:13px 14px;
+    border-bottom:1px solid #e2e8f0;
+    border-right:1px solid #e2e8f0;
+    white-space:nowrap;
+  }
+
+  .report-table td {
+    padding:12px 14px;
+    border-bottom:1px solid #edf2f7;
+    border-right:1px solid #edf2f7;
+    color:#1e293b;
+    background:white;
+    white-space:nowrap;
+  }
+
+  .report-table td.num {
+    text-align:right !important;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .report-table td.text { text-align:left; }
+
+  .report-table tr.total-row td {
+    background:#f8fafc;
+    font-weight:900;
+  }
+
+  .report-table tr:hover td { background:#f1f5f9; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -277,8 +347,6 @@ if "editing_system" not in st.session_state:
 
 if "view" not in st.session_state:
     st.session_state.view = "main"
-
-
 
 
 def set_view(view_name: str) -> None:
@@ -325,7 +393,7 @@ def add_log(message: str, level: str = "info") -> None:
 
 
 def render_log() -> None:
-    html = (
+    log_html = (
         '<div class="log-box">'
         '<div class="log-header">'
         '<span>📋 執行日誌</span>'
@@ -343,17 +411,149 @@ def render_log() -> None:
         elif "⚠️" in entry:
             css += " warning"
 
-        html += f'<div class="{css}">{entry}</div>'
+        log_html += f'<div class="{css}">{html.escape(entry)}</div>'
 
-    html += "</div></div>"
-    st.markdown(html, unsafe_allow_html=True)
+    log_html += "</div></div>"
+    st.markdown(log_html, unsafe_allow_html=True)
 
 
+def mask_id(value: str) -> str:
+    if not value:
+        return "❌ 未設定"
+    value = str(value)
+    if len(value) <= 14:
+        return value
+    return f"{value[:8]}...{value[-6:]}"
+
+
+def mask_nested_ids(value):
+    if isinstance(value, dict):
+        return {k: mask_nested_ids(v) for k, v in value.items()}
+    return mask_id(str(value or ""))
+
+
+def get_system_type_label(system_type: str) -> str:
+    mapping = {
+        "vip": "儲值金管理",
+        "daily_scheduler": "日排程系統",
+        "monthly_scheduler": "月排程系統",
+        "field_daily_schedule": "外場日排程系統",
+    }
+    return mapping.get(system_type, system_type or "未設定")
+
+
+def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
+    from services.auth import get_gspread_client, get_drive_service
+    from services.google_drive import DriveService
+    from services.google_sheets import SheetsService
+    from services.vip_workflow import VipStoredValueWorkflow
+
+    sheets = SheetsService(get_gspread_client())
+    drive = DriveService(get_drive_service())
+
+    try:
+        return VipStoredValueWorkflow(
+            drive,
+            sheets,
+            master_id,
+            folder_id,
+            system_name,
+        )
+    except TypeError:
+        return VipStoredValueWorkflow(
+            drive,
+            sheets,
+            master_id,
+            folder_id,
+        )
+
+
+def run_script(script_path: str, args: list[str] | None = None) -> str:
+    args = args or []
+    script = BASE_DIR / script_path
+
+    if not script.exists():
+        raise RuntimeError(f"找不到執行檔：{script_path}")
+
+    cmd = [sys.executable, str(script), *args]
+
+    completed = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        cwd=BASE_DIR,
+    )
+
+    if completed.stdout:
+        for line in completed.stdout.splitlines()[-120:]:
+            add_log(line, "info")
+
+    if completed.stderr:
+        for line in completed.stderr.splitlines()[-120:]:
+            add_log(line, "error")
+
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"執行失敗：{script_path}\n"
+            f"exit={completed.returncode}\n"
+            f"STDOUT:\n{completed.stdout}\n"
+            f"STDERR:\n{completed.stderr}"
+        )
+
+    return f"{script_path} 執行完成"
+
+
+def render_html_table(df: pd.DataFrame) -> None:
+    if df.empty:
+        st.info("尚無資料")
+        return
+
+    show = df.copy()
+    numeric_cols = []
+
+    for col in show.columns:
+        col_text = str(col)
+        if "佔比" in col_text:
+            show[col] = (
+                pd.to_numeric(show[col], errors="coerce")
+                .fillna(0)
+                .map(lambda x: f"{x:.2%}")
+            )
+            numeric_cols.append(col)
+        elif any(x in col_text for x in ["業績", "加總", "家電", "儲值金", "金額", "總額"]):
+            show[col] = (
+                pd.to_numeric(show[col], errors="coerce")
+                .fillna(0)
+                .map(lambda x: f"{int(x):,}")
+            )
+            numeric_cols.append(col)
+
+    out = ['<div class="report-table-wrap"><table class="report-table"><thead><tr>']
+
+    for col in show.columns:
+        out.append(f"<th>{html.escape(str(col))}</th>")
+
+    out.append("</tr></thead><tbody>")
+
+    for _, row in show.iterrows():
+        is_total = str(row.get("城市", "")) == "加總"
+        cls = ' class="total-row"' if is_total else ""
+        out.append(f"<tr{cls}>")
+
+        for col in show.columns:
+            cell_cls = "num" if col in numeric_cols else "text"
+            out.append(f'<td class="{cell_cls}">{html.escape(str(row[col]))}</td>')
+
+        out.append("</tr>")
+
+    out.append("</tbody></table></div>")
+    st.markdown("".join(out), unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# 業績報表
+# ═══════════════════════════════════════════════════════════
 def render_report() -> None:
-    import json
-    import pandas as pd
-    from pathlib import Path
-
     latest_dir = Path("dashboard_data/latest")
     df4_path = latest_dir / "df4.csv"
     daily_path = latest_dir / "daily_df.csv"
@@ -369,17 +569,9 @@ def render_report() -> None:
 
     def money(value) -> str:
         try:
-            return f"{int(float(str(value).replace(',', ''))):,}"
+            return f"{int(float(str(value).replace(',', '').replace('%', ''))):,}"
         except Exception:
             return "0"
-
-    def ratio(value) -> str:
-        try:
-            if isinstance(value, str) and value.endswith("%"):
-                return value
-            return f"{float(value):.2%}"
-        except Exception:
-            return "-"
 
     def get_total(df: pd.DataFrame, col: str) -> str:
         if df.empty or col not in df.columns:
@@ -387,32 +579,7 @@ def render_report() -> None:
         total_row = df[df["城市"].astype(str) == "加總"] if "城市" in df.columns else pd.DataFrame()
         if not total_row.empty:
             return money(total_row.iloc[0][col])
-        return money(df[col].sum())
-
-    def format_money_ratio_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
-        show = df.copy()
-        numeric_cols = []
-
-        for col in show.columns:
-            if "佔比" in col:
-                show[col] = (
-                    pd.to_numeric(show[col], errors="coerce")
-                    .fillna(0)
-                    .map(lambda x: f"{x:.2%}")
-                )
-                numeric_cols.append(col)
-            elif any(x in col for x in ["業績", "加總", "家電", "儲值金"]):
-                show[col] = (
-                    pd.to_numeric(show[col], errors="coerce")
-                    .fillna(0)
-                    .map(lambda x: f"{int(x):,}")
-                )
-                numeric_cols.append(col)
-
-        return show.style.set_properties(
-            subset=numeric_cols,
-            **{"text-align": "right"},
-        )
+        return money(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
 
     st.markdown(
         """
@@ -452,10 +619,7 @@ def render_report() -> None:
             st.rerun()
 
     with top_cols[3]:
-        try:
-            st.link_button("🔗 開啟獨立連結", "?view=report", use_container_width=True)
-        except Exception:
-            st.caption("網址加上 ?view=report 可直接開啟此頁")
+        st.link_button("🔗 開啟獨立連結", "?view=report", use_container_width=True)
 
     if not df4_path.exists():
         st.info("尚未產生業績報表資料，請先在主控台執行「日排程系統 → 業績報表」。")
@@ -466,17 +630,14 @@ def render_report() -> None:
     next_df = load_csv(next_path)
     month_end_df = load_csv(month_end_path)
 
-    meta = {}
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            st.info(f"📅 最新更新時間：{meta.get('updated_at', '-')}")
+            if meta.get("error"):
+                st.warning(meta.get("error"))
         except Exception:
-            meta = {}
-
-    if meta:
-        st.info(f"📅 最新更新時間：{meta.get('updated_at', '-')}")
-        if meta.get("error"):
-            st.warning(meta.get("error"))
+            pass
 
     if df4.empty:
         st.warning("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
@@ -492,69 +653,35 @@ def render_report() -> None:
     with k4:
         st.metric("儲值金", get_total(df4, "儲值金"))
 
-    st.divider()
+    st.markdown('<div class="card"><div class="card-title">📍 各區月度摘要</div>', unsafe_allow_html=True)
+    render_html_table(df4)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("### 📍 各區月度摘要")
-    st.dataframe(
-        format_money_ratio_table(df4),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.divider()
-
-    st.markdown("## 月度追蹤")
+    st.markdown('<div class="card"><div class="card-title">📈 月度追蹤</div>', unsafe_allow_html=True)
     tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
 
     with tabs[0]:
-        st.caption("資料來源：上方各區月度摘要 df4.csv 的本月加總；每次更新資料會新增一筆。")
-        if daily_df.empty:
-            st.info("尚無當月每日業績資料")
-        else:
-            st.dataframe(
-                format_money_ratio_table(daily_df),
-                use_container_width=True,
-                hide_index=True,
-            )
+        render_html_table(daily_df)
 
     with tabs[1]:
-        st.caption("資料來源：上方各區月度摘要 df4.csv 的次月加總；每次更新資料會新增一筆。")
-        if next_df.empty:
-            st.info("尚無次月每日業績資料")
-        else:
-            st.dataframe(
-                format_money_ratio_table(next_df),
-                use_container_width=True,
-                hide_index=True,
-            )
+        render_html_table(next_df)
 
     with tabs[2]:
-        st.caption("月底快照只在月底執行時產生。")
-        if month_end_df.empty:
-            st.info("尚無月底快照")
-        else:
-            st.dataframe(
-                format_money_ratio_table(month_end_df),
-                use_container_width=True,
-                hide_index=True,
-            )
+        render_html_table(month_end_df)
 
-    st.divider()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("📧 信件預覽", expanded=False):
         if html_path.exists():
-            html = html_path.read_text(encoding="utf-8")
-            st.components.v1.html(html, height=600, scrolling=True)
+            st.components.v1.html(html_path.read_text(encoding="utf-8"), height=600, scrolling=True)
         else:
             st.info("尚無 Email HTML")
 
 
+# ═══════════════════════════════════════════════════════════
+# 排程 Log 頁
+# ═══════════════════════════════════════════════════════════
 def render_log_page() -> None:
-    from pathlib import Path
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    import html
-
     JOB_LABELS = {
         "schedule_report": "排班統計表",
         "staff_schedule": "專員班表",
@@ -562,27 +689,19 @@ def render_log_page() -> None:
         "staff_info": "專員個資",
         "send_daily_result": "通知信",
         "performance_report": "業績報表",
+        "field_management": "外場日排程",
+        "schedule_stats": "外場排班統計表",
+        "orders": "外場訂單",
+        "staff_profile": "外場專員個資",
     }
 
-    JOB_ORDER = [
-        "schedule_report",
-        "staff_schedule",
-        "orders_report",
-        "staff_info",
-        "send_daily_result",
-        "performance_report",
-    ]
-
     def today_key() -> str:
-        return datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m%d")
+        return datetime.now(TW_TZ).strftime("%Y%m%d")
 
     def read_text_safe(path: Path) -> str:
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8", errors="replace")
-
-    def exit_code_for(log_dir: Path, job_name: str) -> str:
-        return read_text_safe(log_dir / f"{job_name}.exit").strip() or "missing"
 
     def status_for(exit_code: str) -> tuple[str, str, str]:
         if exit_code == "0":
@@ -616,10 +735,7 @@ def render_log_page() -> None:
             "登入失敗",
         ]
 
-        matched = []
-        for line in lines:
-            if any(k in line for k in keywords):
-                matched.append(line)
+        matched = [line for line in lines if any(k in line for k in keywords)]
 
         if matched:
             return matched[-limit:]
@@ -627,15 +743,18 @@ def render_log_page() -> None:
         return lines[-min(limit, len(lines)):]
 
     def summary_line(content: str, exit_code: str) -> str:
-        lines = important_lines(content, limit=1)
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        if not lines:
+            return "沒有摘要"
+
         if exit_code == "0":
             success_keywords = ["全部完成", "執行完成", "已上傳", "完成"]
-            all_lines = [line.strip() for line in content.splitlines() if line.strip()]
             for keyword in success_keywords:
-                for line in reversed(all_lines):
+                for line in reversed(lines):
                     if keyword in line:
                         return line[-130:]
-        return lines[-1][-130:] if lines else "沒有摘要"
+
+        return important_lines(content, limit=1)[-1][-130:]
 
     st.markdown(
         """
@@ -652,6 +771,7 @@ def render_log_page() -> None:
             font-weight:800;
             color:#94a3b8;
             letter-spacing:4px;
+            margin-top:6px;
             margin-bottom:22px;
           }
           .log-top-card {
@@ -780,43 +900,47 @@ def render_log_page() -> None:
             st.rerun()
 
     log_root = Path("logs")
-    selected_day = today_key()
-    selected_dir = log_root / selected_day
 
     if not log_root.exists():
         st.info("目前沒有 logs/ 資料夾。請確認 GitHub Actions 已將 logs/ commit 回 repo。")
         return
 
-    if not selected_dir.exists():
-        st.warning(f"今日尚無排程紀錄：{selected_day}")
+    day_dirs = sorted([p for p in log_root.iterdir() if p.is_dir()], reverse=True)
+
+    if not day_dirs:
+        st.info("目前 logs/ 裡沒有日期資料夾。")
         return
 
+    today = today_key()
+    day_options = [p.name for p in day_dirs]
+    default_index = day_options.index(today) if today in day_options else 0
+
+    selected_day = st.selectbox(
+        "選擇日期",
+        day_options,
+        index=default_index,
+    )
+
+    selected_dir = log_root / selected_day
     log_files = sorted(selected_dir.glob("*.log"))
 
-    job_names = []
-    for name in JOB_ORDER:
-        if (selected_dir / f"{name}.log").exists() or (selected_dir / f"{name}.exit").exists():
-            job_names.append(name)
-
-    for log_file in log_files:
-        if log_file.stem not in job_names:
-            job_names.append(log_file.stem)
-
-    if not job_names:
-        st.info("今日尚無 log 檔。")
+    if not log_files:
+        st.info(f"{selected_day} 沒有 log 檔。")
         return
 
     rows = []
-    for job_name in job_names:
-        label = JOB_LABELS.get(job_name, job_name)
-        log_path = selected_dir / f"{job_name}.log"
-        content = read_text_safe(log_path)
-        exit_code = exit_code_for(selected_dir, job_name)
+
+    for log_file in log_files:
+        job_name = log_file.stem
+        exit_file = log_file.with_suffix(".exit")
+        exit_code = read_text_safe(exit_file).strip() if exit_file.exists() else "missing"
         status_text, icon, color = status_for(exit_code)
+        content = read_text_safe(log_file)
+
         rows.append(
             {
                 "job_name": job_name,
-                "label": label,
+                "label": JOB_LABELS.get(job_name, job_name),
                 "content": content,
                 "exit_code": exit_code,
                 "status_text": status_text,
@@ -883,6 +1007,7 @@ def render_log_page() -> None:
     )
 
     cards = ['<div class="status-grid">']
+
     for row in rows:
         error_html = ""
         if row["exit_code"] not in ["0", "missing"]:
@@ -901,12 +1026,12 @@ def render_log_page() -> None:
             </div>
             """
         )
+
     cards.append("</div>")
     st.markdown("".join(cards), unsafe_allow_html=True)
 
     with st.expander("🔎 查看詳細 log", expanded=failed_count > 0):
-        label_by_job = {row["job_name"]: f"{row['icon']} {row['label']}" for row in rows}
-        tabs = st.tabs([label_by_job[row["job_name"]] for row in rows])
+        tabs = st.tabs([f"{row['icon']} {row['label']}" for row in rows])
 
         for tab, row in zip(tabs, rows):
             with tab:
@@ -918,77 +1043,6 @@ def render_log_page() -> None:
                     st.error(f"{row['label']}：失敗 / exit code {row['exit_code']}")
 
                 st.code(row["content"] or "空 log", language="text")
-
-def mask_id(value: str) -> str:
-    if not value:
-        return "❌ 未設定"
-    if len(value) <= 14:
-        return value
-    return f"{value[:8]}...{value[-6:]}"
-
-
-def get_system_type_label(system_type: str) -> str:
-    mapping = {
-        "vip": "儲值金管理",
-        "daily_scheduler": "日排程系統",
-        "monthly_scheduler": "月排程系統",
-    }
-    return mapping.get(system_type, system_type or "未設定")
-
-
-def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
-    from services.auth import get_gspread_client, get_drive_service
-    from services.google_drive import DriveService
-    from services.google_sheets import SheetsService
-    from services.vip_workflow import VipStoredValueWorkflow
-
-    sheets = SheetsService(get_gspread_client())
-    drive = DriveService(get_drive_service())
-
-    try:
-        return VipStoredValueWorkflow(
-            drive,
-            sheets,
-            master_id,
-            folder_id,
-            system_name,
-        )
-    except TypeError:
-        return VipStoredValueWorkflow(
-            drive,
-            sheets,
-            master_id,
-            folder_id,
-        )
-
-
-def run_script(script_path: str, args: list[str] | None = None) -> str:
-    args = args or []
-
-    cmd = [sys.executable, script_path, *args]
-
-    completed = subprocess.run(
-        cmd,
-        text=True,
-        capture_output=True,
-        cwd=Path(__file__).resolve().parent,
-    )
-
-    if completed.stdout:
-        add_log(completed.stdout, "info")
-
-    if completed.stderr:
-        add_log(completed.stderr, "error")
-
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"執行失敗：{script_path}\n"
-            f"exit={completed.returncode}\n"
-            f"STDOUT:\n{completed.stdout}\n"
-            f"STDERR:\n{completed.stderr}"
-        )
-
-    return f"{script_path} 執行完成"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1020,6 +1074,13 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "儲值金預收",
         "一鍵執行月排程",
     ],
+    "field_daily_schedule": [
+        "外場排班統計表",
+        "外場專員班表",
+        "外場當月次月訂單",
+        "外場專員個資",
+        "一鍵執行外場日排程",
+    ],
 }
 
 DAILY_SCRIPT_MAP = {
@@ -1039,11 +1100,23 @@ MONTHLY_SCRIPT_MAP = {
     "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
 }
 
+FIELD_SCRIPT_MAP = {
+    "外場排班統計表": ["tools/field_management/schedule_stats.py"],
+    "外場專員班表": ["tools/field_management/staff_schedule.py"],
+    "外場當月次月訂單": ["tools/field_management/orders.py"],
+    "外場專員個資": ["tools/field_management/staff_profile.py"],
+    "一鍵執行外場日排程": ["tools/field_management/scheduler.py", "--target", "all"],
+}
+
 
 def functions_for_system(sys_cfg: dict) -> list[str]:
     system_type = sys_cfg.get("type", "vip")
     return SYSTEM_FUNCTIONS_BY_TYPE.get(system_type, ["尚未設定功能"])
 
+
+# ═══════════════════════════════════════════════════════════
+# Router
+# ═══════════════════════════════════════════════════════════
 sync_view_from_query_params()
 
 config = merge_legacy_secrets(load_config())
@@ -1052,12 +1125,6 @@ system_names = [s.get("name", "") for s in systems if s.get("name")]
 
 if not system_names:
     system_names = ["儲值金管理"]
-
-
-if st.session_state.view == "report":
-    render_report()
-    st.stop()
-
 
 if st.session_state.view == "report":
     render_report()
@@ -1138,11 +1205,10 @@ with c1:
             key="period",
         )
     else:
-        period = tw_now_text("%Y%m%d")
-        st.text_input(
+        period = st.text_input(
             "執行日期",
-            value=period,
-            disabled=True,
+            value=tw_now_text("%Y%m%d"),
+            placeholder="例如：20260511",
             label_visibility="collapsed",
             key="daily_date",
         )
@@ -1184,9 +1250,9 @@ with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expand
     st.markdown(
         """
 <div class="setting-note">
-可在這裡新增 / 編輯不同系統對應的主控表 ID 與共用雲端資料夾 ID。
-Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
-系統設定會存到 <code>config/systems.yaml</code>。
+可在這裡新增 / 編輯不同系統設定。<br>
+舊系統使用主控表 ID / 共用雲端資料夾 ID。<br>
+外場日排程系統的 folder_ids / spreadsheet_ids 建議直接維護在 <code>config/systems.yaml</code>。
 </div>
 """,
         unsafe_allow_html=True,
@@ -1199,14 +1265,16 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
             st.session_state.editing_system = None
             st.rerun()
 
+    system_type_options = ["vip", "daily_scheduler", "monthly_scheduler", "field_daily_schedule"]
+
     if st.session_state.adding_system:
         with st.form("add_system_form"):
             st.markdown("**新增系統設定**")
 
-            new_name = st.text_input("設定系統名稱", placeholder="例如：儲值金管理")
+            new_name = st.text_input("設定系統名稱", placeholder="例如：外場日排程系統")
             new_type = st.selectbox(
                 "設定系統類型",
-                ["vip", "daily_scheduler", "monthly_scheduler"],
+                system_type_options,
                 format_func=get_system_type_label,
             )
             new_master_id = st.text_input("設定主控表 ID")
@@ -1227,15 +1295,32 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                 elif any(s.get("name") == new_name for s in systems_all):
                     st.error(f"系統「{new_name}」已存在")
                 else:
-                    systems_all.append(
-                        {
-                            "name": new_name,
-                            "type": new_type,
-                            "master_spreadsheet_id": new_master_id,
-                            "folder_id": new_folder_id,
-                            "enabled": new_enabled,
-                        }
-                    )
+                    new_system = {
+                        "name": new_name,
+                        "type": new_type,
+                        "master_spreadsheet_id": new_master_id,
+                        "folder_id": new_folder_id,
+                        "enabled": new_enabled,
+                    }
+
+                    if new_type == "field_daily_schedule":
+                        new_system.update(
+                            {
+                                "folder_ids": {
+                                    "schedule_stats": "",
+                                    "order": {"台北": "", "台中": ""},
+                                    "staff_profile": {"台北": "", "台中": ""},
+                                    "staff_schedule": {"台北": "", "台中": ""},
+                                },
+                                "spreadsheet_ids": {
+                                    "roster": {"台北": "", "台中": ""},
+                                    "salary": {"台北": "", "台中": ""},
+                                    "office": {"台北": "", "台中": ""},
+                                },
+                            }
+                        )
+
+                    systems_all.append(new_system)
                     config["systems"] = systems_all
                     save_config(config)
                     add_log(f"新增系統設定：{new_name}", "success")
@@ -1268,12 +1353,8 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                 e_name = st.text_input("設定系統名稱", value=name)
                 e_type = st.selectbox(
                     "設定系統類型",
-                    ["vip", "daily_scheduler", "monthly_scheduler"],
-                    index=(
-                        ["vip", "daily_scheduler", "monthly_scheduler"].index(current_type)
-                        if current_type in ["vip", "daily_scheduler", "monthly_scheduler"]
-                        else 0
-                    ),
+                    system_type_options,
+                    index=system_type_options.index(current_type) if current_type in system_type_options else 0,
                     format_func=get_system_type_label,
                 )
                 e_master_id = st.text_input("設定主控表 ID", value=master_id)
@@ -1290,13 +1371,22 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                     if not e_name:
                         st.error("請輸入系統名稱")
                     else:
-                        config["systems"][i] = {
-                            "name": e_name,
-                            "type": e_type,
-                            "master_spreadsheet_id": e_master_id,
-                            "folder_id": e_folder_id,
-                            "enabled": e_enabled,
-                        }
+                        updated = dict(config["systems"][i])
+                        updated.update(
+                            {
+                                "name": e_name,
+                                "type": e_type,
+                                "master_spreadsheet_id": e_master_id,
+                                "folder_id": e_folder_id,
+                                "enabled": e_enabled,
+                            }
+                        )
+
+                        if e_type == "field_daily_schedule":
+                            updated.setdefault("folder_ids", {})
+                            updated.setdefault("spreadsheet_ids", {})
+
+                        config["systems"][i] = updated
                         save_config(config)
                         add_log(f"更新系統設定：{e_name}", "success")
                         st.session_state.editing_system = None
@@ -1308,16 +1398,28 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
 
         else:
             enabled_text = "✅ 啟用" if enabled else "⚠️ 停用"
+            extra_detail = ""
+
+            if current_type == "field_daily_schedule":
+                extra_detail = f"""
+  <div class="detail-row"><strong>資料夾設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("folder_ids", {}))))}</div>
+  <div class="detail-row"><strong>表單設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("spreadsheet_ids", {}))))}</div>
+"""
+            else:
+                extra_detail = f"""
+  <div class="detail-row"><strong>主控表 ID</strong>：{mask_id(master_id)}</div>
+  <div class="detail-row"><strong>共用雲端資料夾 ID</strong>：{mask_id(folder_id)}</div>
+"""
+
             st.markdown(
                 f"""
 <div class="system-card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <strong style="color:#0a4b6e;">🗂️ {name}</strong>{badge}
+    <strong style="color:#0a4b6e;">🗂️ {html.escape(name)}</strong>{badge}
   </div>
   <div class="detail-row"><strong>系統類型</strong>：{get_system_type_label(current_type)}</div>
   <div class="detail-row"><strong>狀態</strong>：{enabled_text}</div>
-  <div class="detail-row"><strong>主控表 ID</strong>：{mask_id(master_id)}</div>
-  <div class="detail-row"><strong>共用雲端資料夾 ID</strong>：{mask_id(folder_id)}</div>
+  {extra_detail}
 </div>
 """,
                 unsafe_allow_html=True,
@@ -1350,10 +1452,9 @@ if run_clicked:
     master_id = selected_system.get("master_spreadsheet_id", "")
     folder_id = selected_system.get("folder_id", "")
 
-    if system_type in ["vip", "monthly_scheduler"]:
-        if not period:
-            add_log("請先輸入執行期別", "error")
-            st.rerun()
+    if system_type in ["vip", "monthly_scheduler"] and not period:
+        add_log("請先輸入執行期別", "error")
+        st.rerun()
 
     add_log(f"開始執行：{system_name} / {selected_function} / 期別 {period}")
 
@@ -1410,7 +1511,10 @@ if run_clicked:
             if selected_function == "一鍵執行日排程":
                 from tools.scheduled_daily.scheduler import main as run_daily_scheduler
 
-                result = run_daily_scheduler(folder_id=folder_id)
+                try:
+                    result = run_daily_scheduler(folder_id=folder_id)
+                except TypeError:
+                    result = run_daily_scheduler()
 
             else:
                 script = DAILY_SCRIPT_MAP.get(selected_function)
@@ -1432,7 +1536,10 @@ if run_clicked:
             if selected_function == "一鍵執行月排程":
                 from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
 
-                result = run_monthly_scheduler(folder_id=folder_id)
+                try:
+                    result = run_monthly_scheduler(folder_id=folder_id)
+                except TypeError:
+                    result = run_monthly_scheduler()
 
             else:
                 cmd = MONTHLY_SCRIPT_MAP.get(selected_function)
@@ -1444,6 +1551,19 @@ if run_clicked:
                 args = cmd[1:]
 
                 result = run_script(script, [*args, "--folder-id", folder_id])
+
+        elif system_type == "field_daily_schedule":
+            cmd = FIELD_SCRIPT_MAP.get(selected_function)
+
+            if not cmd:
+                raise RuntimeError(f"找不到外場日排程功能：{selected_function}")
+
+            script = cmd[0]
+            args = list(cmd[1:])
+            args.extend(["--date", period])
+            args.extend(["--system-name", system_name])
+
+            result = run_script(script, args)
 
         else:
             add_log(f"{system_type} 尚未實作", "warning")
@@ -1458,8 +1578,6 @@ if run_clicked:
         add_log("執行完成", "success")
 
     except Exception as e:
-        import traceback
-
         add_log(f"執行失敗：{e}", "error")
         add_log(traceback.format_exc(), "error")
 
