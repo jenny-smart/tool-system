@@ -10,16 +10,17 @@ Tool App 主控入口
 2. 執行日誌
 3. 可收合設定檔管理
 
-設定檔：
-- 可新增 / 編輯 / 刪除系統
-- 存放於 config/systems.yaml
-- Service Account 憑證仍放在 .streamlit/secrets.toml
+重點：
+- 設定檔可新增 / 編輯 / 刪除
+- 設定檔放在執行日誌下方，且可收合
+- get_workflow() 會自動相容新版 / 舊版，不再因參數不支援而中斷
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import inspect
 
 import streamlit as st
 import yaml
@@ -32,6 +33,9 @@ st.set_page_config(
 )
 
 
+# ═══════════════════════════════════════════════════════════
+# 設定檔讀寫
+# ═══════════════════════════════════════════════════════════
 CONFIG_PATH = Path("config/systems.yaml")
 
 DEFAULT_CONFIG = {
@@ -94,6 +98,11 @@ def get_secret_text(key: str, default: str = "") -> str:
 
 
 def merge_legacy_secrets(cfg: dict) -> dict:
+    """
+    相容舊版 secrets：
+    MASTER_SPREADSHEET_ID
+    ROOT_FOLDER_ID
+    """
     legacy_master = get_secret_text("MASTER_SPREADSHEET_ID")
     legacy_root = get_secret_text("ROOT_FOLDER_ID")
 
@@ -124,81 +133,163 @@ def get_system_by_name(cfg: dict, name: str) -> dict:
     return {}
 
 
+# ═══════════════════════════════════════════════════════════
+# UI 樣式
+# ═══════════════════════════════════════════════════════════
 st.markdown(
     """
 <style>
   .stApp { background: #f4f8fc; }
   #MainMenu, footer, header { visibility: hidden; }
+
   .app-title {
-    font-size: 1.45rem; font-weight: 800; color: #0a4b6e;
-    letter-spacing: 1px; text-align: center; margin-bottom: 16px;
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: #0a4b6e;
+    letter-spacing: 1px;
+    text-align: center;
+    margin-bottom: 16px;
   }
+
   .card {
-    background: white; border-radius: 20px; padding: 16px 20px;
-    margin-bottom: 14px; box-shadow: 0 4px 12px rgba(0,32,48,0.06);
+    background: white;
+    border-radius: 20px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    box-shadow: 0 4px 12px rgba(0,32,48,0.06);
     border: 1px solid #e2edf2;
   }
+
   .card-title {
-    font-size: 0.96rem; font-weight: 800; color: #164a5e;
-    margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1.5px solid #e7f0f5;
+    font-size: 0.96rem;
+    font-weight: 800;
+    color: #164a5e;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1.5px solid #e7f0f5;
   }
-  .field-label { color: #2a5770; font-weight: 700; font-size: 0.76rem; margin-bottom: 4px; }
+
+  .field-label {
+    color: #2a5770;
+    font-weight: 700;
+    font-size: 0.76rem;
+    margin-bottom: 4px;
+  }
+
   .stButton > button {
-    background: #1f6c9e !important; color: white !important;
-    border: none !important; border-radius: 40px !important;
-    font-weight: 700 !important; font-size: 0.9rem !important;
+    background: #1f6c9e !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 40px !important;
+    font-weight: 700 !important;
+    font-size: 0.9rem !important;
   }
+
   .stButton > button:hover { background: #135b84 !important; }
+
   .log-box {
-    background: #0c2835; color: #d7ecf5; border-radius: 20px;
-    padding: 14px 16px; margin-bottom: 14px; font-family: 'Courier New', monospace;
+    background: #0c2835;
+    color: #d7ecf5;
+    border-radius: 20px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    font-family: 'Courier New', monospace;
     border: 1px solid #254f60;
   }
+
   .log-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 10px; color: #b0d1dd; font-size: 0.8rem;
-    padding-bottom: 8px; border-bottom: 1px solid #2c5a6a;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    color: #b0d1dd;
+    font-size: 0.8rem;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #2c5a6a;
   }
+
   .log-scroll { max-height: 300px; overflow-y: auto; }
+
   .log-entry {
-    padding: 4px 0; border-bottom: 1px solid #1c4452;
-    font-size: 0.75rem; color: #cde3ec; line-height: 1.4;
+    padding: 4px 0;
+    border-bottom: 1px solid #1c4452;
+    font-size: 0.75rem;
+    color: #cde3ec;
+    line-height: 1.4;
   }
+
   .log-entry.success { color: #6ee7b7; }
   .log-entry.error   { color: #fca5a5; }
   .log-entry.warning { color: #fcd34d; }
+
   .setting-note {
-    font-size: 0.75rem; color: #497084; line-height: 1.5;
-    margin-top: 6px; margin-bottom: 10px;
+    font-size: 0.75rem;
+    color: #497084;
+    line-height: 1.5;
+    margin-top: 6px;
+    margin-bottom: 10px;
   }
+
   .system-card {
-    background: #f8fcff; border-radius: 16px; padding: 12px 14px;
-    margin-bottom: 10px; border: 1px solid #d9eaf2;
+    background: #f8fcff;
+    border-radius: 16px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    border: 1px solid #d9eaf2;
   }
-  .badge-ok { background: #2a8c5a; color: white; padding: 2px 8px; border-radius: 20px; font-size: 0.65rem; }
-  .badge-err { background: #dc2626; color: white; padding: 2px 8px; border-radius: 20px; font-size: 0.65rem; }
-  .detail-row { font-size: 0.75rem; color: #3e6c87; margin: 3px 0; }
+
+  .badge-ok {
+    background: #2a8c5a;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.65rem;
+  }
+
+  .badge-err {
+    background: #dc2626;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.65rem;
+  }
+
+  .detail-row {
+    font-size: 0.75rem;
+    color: #3e6c87;
+    margin: 3px 0;
+  }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 
+# ═══════════════════════════════════════════════════════════
+# Session State
+# ═══════════════════════════════════════════════════════════
 if "logs" not in st.session_state:
     st.session_state.logs = ["[--:--:--] 系統已就緒，請選擇作業..."]
+
 if "selected_system_name" not in st.session_state:
     st.session_state.selected_system_name = "儲值金管理"
+
 if "adding_system" not in st.session_state:
     st.session_state.adding_system = False
+
 if "editing_system" not in st.session_state:
     st.session_state.editing_system = None
 
 
+# ═══════════════════════════════════════════════════════════
+# 工具函式
+# ═══════════════════════════════════════════════════════════
 def add_log(message: str, level: str = "info") -> None:
     now = datetime.now().strftime("%H:%M:%S")
     icons = {"info": "🔵", "success": "✅", "error": "❌", "warning": "⚠️"}
     icon = icons.get(level, "🔵")
     st.session_state.logs.append(f"[{now}] {icon} {message}")
+
     if len(st.session_state.logs) > 500:
         st.session_state.logs = st.session_state.logs[-500:]
 
@@ -211,6 +302,7 @@ def render_log() -> None:
         '<span style="background:#1e4757;padding:3px 10px;border-radius:20px;font-size:0.75rem;">即時更新</span>'
         '</div><div class="log-scroll">'
     )
+
     for entry in reversed(st.session_state.logs):
         css = "log-entry"
         if "✅" in entry:
@@ -220,6 +312,7 @@ def render_log() -> None:
         elif "⚠️" in entry:
             css += " warning"
         html += f'<div class="{css}">{entry}</div>'
+
     html += "</div></div>"
     st.markdown(html, unsafe_allow_html=True)
 
@@ -241,6 +334,51 @@ def get_system_type_label(system_type: str) -> str:
     return mapping.get(system_type, system_type or "未設定")
 
 
+def import_vip_get_workflow():
+    """
+    相容兩種專案結構：
+    1. tools/vip/vip_stored_value.py
+    2. tools/vip_stored_value.py
+    """
+    try:
+        from tools.vip.vip_stored_value import get_workflow
+        return get_workflow
+    except ModuleNotFoundError:
+        from tools.vip_stored_value import get_workflow
+        return get_workflow
+
+
+def build_vip_workflow(master_id: str, root_id: str, system_name: str):
+    """
+    自動判斷 get_workflow() 支援新版參數或舊版無參數。
+
+    新版：
+        get_workflow(master_spreadsheet_id=..., root_folder_id=..., system_name=...)
+
+    舊版：
+        get_workflow()
+    """
+    get_workflow = import_vip_get_workflow()
+    sig = inspect.signature(get_workflow)
+    params = sig.parameters
+
+    kwargs = {}
+    if "master_spreadsheet_id" in params:
+        kwargs["master_spreadsheet_id"] = master_id
+    if "root_folder_id" in params:
+        kwargs["root_folder_id"] = root_id
+    if "system_name" in params:
+        kwargs["system_name"] = system_name
+
+    if kwargs:
+        return get_workflow(**kwargs)
+
+    return get_workflow()
+
+
+# ═══════════════════════════════════════════════════════════
+# 系統 / 功能設定
+# ═══════════════════════════════════════════════════════════
 SYSTEM_FUNCTIONS_BY_TYPE = {
     "vip": [
         "建立當月彙整檔",
@@ -263,15 +401,30 @@ def functions_for_system(sys_cfg: dict) -> list[str]:
 config = merge_legacy_secrets(load_config())
 systems = get_enabled_systems(config)
 system_names = [s.get("name", "") for s in systems if s.get("name")]
+
 if not system_names:
     system_names = ["儲值金管理"]
 
 
-st.markdown('<div class="app-title">🧰 Tools App 作業系統</div>', unsafe_allow_html=True)
+# ═══════════════════════════════════════════════════════════
+# UI — 主標題
+# ═══════════════════════════════════════════════════════════
+st.markdown(
+    '<div class="app-title">🧰 Tools App 作業系統</div>',
+    unsafe_allow_html=True,
+)
 
-st.markdown('<div class="card"><div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════
+# UI — 執行設定
+# ═══════════════════════════════════════════════════════════
+st.markdown(
+    '<div class="card"><div class="card-title">⚙️ 執行設定</div>',
+    unsafe_allow_html=True,
+)
 
 c1, c2 = st.columns(2)
+
 with c1:
     st.markdown('<div class="field-label">📆 執行期別</div>', unsafe_allow_html=True)
     period = st.text_input(
@@ -281,11 +434,14 @@ with c1:
         label_visibility="collapsed",
         key="period",
     )
+
 with c2:
     st.markdown('<div class="field-label">🗂️ 執行系統</div>', unsafe_allow_html=True)
+
     default_index = 0
     if st.session_state.selected_system_name in system_names:
         default_index = system_names.index(st.session_state.selected_system_name)
+
     system_name = st.selectbox(
         "執行系統",
         system_names,
@@ -309,6 +465,9 @@ run_clicked = st.button("▶ 執行", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 
+# ═══════════════════════════════════════════════════════════
+# UI — 日誌
+# ═══════════════════════════════════════════════════════════
 render_log()
 
 clear_col, _ = st.columns([1, 3])
@@ -318,6 +477,9 @@ with clear_col:
         st.rerun()
 
 
+# ═══════════════════════════════════════════════════════════
+# UI — 可收合設定檔
+# ═══════════════════════════════════════════════════════════
 with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expanded=False):
     st.markdown(
         """
@@ -340,6 +502,7 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
     if st.session_state.adding_system:
         with st.form("add_system_form"):
             st.markdown("**新增系統設定**")
+
             new_name = st.text_input("設定系統名稱", placeholder="例如：儲值金管理")
             new_type = st.selectbox(
                 "設定系統類型",
@@ -358,6 +521,7 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
 
             if submit_add:
                 systems_all = config.get("systems", [])
+
                 if not new_name:
                     st.error("請輸入系統名稱")
                 elif any(s.get("name") == new_name for s in systems_all):
@@ -391,11 +555,16 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
 
         needs_ids = system_type == "vip"
         complete = bool(name and (not needs_ids or (master_id and root_id)))
-        badge = '<span class="badge-ok">已設定</span>' if complete else '<span class="badge-err">未完整</span>'
+        badge = (
+            '<span class="badge-ok">已設定</span>'
+            if complete
+            else '<span class="badge-err">未完整</span>'
+        )
 
         if st.session_state.editing_system == name:
             with st.form(f"edit_system_{i}"):
                 st.markdown(f"**編輯系統：{name}**")
+
                 e_name = st.text_input("設定系統名稱", value=name)
                 e_type = st.selectbox(
                     "設定系統類型",
@@ -452,12 +621,13 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                 unsafe_allow_html=True,
             )
 
-            b1, b2, b3 = st.columns([2, 1, 1])
+            _, b2, b3 = st.columns([2, 1, 1])
             with b2:
                 if st.button("📝 編輯", key=f"edit_system_{i}", use_container_width=True):
                     st.session_state.editing_system = name
                     st.session_state.adding_system = False
                     st.rerun()
+
             with b3:
                 if st.button("🗑️ 刪除", key=f"delete_system_{i}", use_container_width=True):
                     config["systems"].pop(i)
@@ -466,6 +636,9 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                     st.rerun()
 
 
+# ═══════════════════════════════════════════════════════════
+# 執行邏輯
+# ═══════════════════════════════════════════════════════════
 if run_clicked:
     if not period:
         add_log("請先輸入執行期別", "error")
@@ -488,28 +661,32 @@ if run_clicked:
             if not master_id:
                 add_log("尚未設定主控表 ID", "error")
                 st.rerun()
+
             if not root_id:
                 add_log("尚未設定根目錄 ID", "error")
                 st.rerun()
 
-            from tools.vip.vip_stored_value import get_workflow
-
-            workflow = get_workflow(
-                master_spreadsheet_id=master_id,
-                root_folder_id=root_id,
+            workflow = build_vip_workflow(
+                master_id=master_id,
+                root_id=root_id,
                 system_name=system_name,
             )
 
             if selected_function == "建立當月彙整檔":
                 result = workflow.create_monthly_summary(period)
+
             elif selected_function == "轉檔＋高雄/新竹彙整":
                 result = workflow.convert_files(period)
+
             elif selected_function == "搬運":
                 result = workflow.move_files(period)
+
             elif selected_function == "計算":
                 result = workflow.apply_formulas(period)
+
             elif selected_function == "彙整金額":
                 result = workflow.summarize_amounts(period)
+
             elif selected_function == "一鍵執行：建立＋轉檔＋搬運＋計算＋彙整金額":
                 result = [
                     workflow.create_monthly_summary(period),
@@ -518,6 +695,7 @@ if run_clicked:
                     workflow.apply_formulas(period),
                     workflow.summarize_amounts(period),
                 ]
+
             else:
                 add_log(f"未知功能：{selected_function}", "warning")
 
@@ -535,21 +713,15 @@ if run_clicked:
         if isinstance(result, list):
             for item in result:
                 add_log(str(item), "success")
+
         elif result is not None:
             add_log(str(result), "success")
 
         add_log("執行完成", "success")
 
-    except TypeError:
-        add_log(
-            "get_workflow() 目前可能還是舊版，不支援傳入 "
-            "master_spreadsheet_id/root_folder_id/system_name。"
-            "請同步修改 tools/vip/vip_stored_value.py。",
-            "error",
-        )
-
     except Exception as e:
         import traceback
+
         add_log(f"執行失敗：{e}", "error")
         add_log(traceback.format_exc(), "error")
 
