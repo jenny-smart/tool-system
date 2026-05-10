@@ -1,4 +1,23 @@
-- name: 外場排程系統
+systems:
+  - name: 儲值金管理
+    type: vip
+    master_spreadsheet_id: ""
+    folder_id: ""
+    enabled: true
+
+  - name: 日排程系統
+    type: daily_scheduler
+    master_spreadsheet_id: ""
+    folder_id: "0AK9RcXu_35GZUk9PVA"
+    enabled: true
+
+  - name: 月排程系統
+    type: monthly_scheduler
+    master_spreadsheet_id: ""
+    folder_id: ""
+    enabled: true
+
+  - name: 外場排程系統
     type: field_daily_schedule
     enabled: true
 
