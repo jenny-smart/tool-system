@@ -2,9 +2,7 @@ name: Scheduled Daily Jobs
 
 on:
   schedule:
-    # 台灣時間每日 01:00，UTC 前一天 17:00
     - cron: "0 17 * * *"
-
   workflow_dispatch:
 
 jobs:
@@ -13,73 +11,33 @@ jobs:
 
     env:
       DAILY_ROOT_FOLDER_ID: ${{ secrets.DAILY_ROOT_FOLDER_ID }}
-
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
 
-      NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
-      NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
-      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install packages
+      - run: pip install -r requirements.txt
+
+      - name: Run all daily jobs
         run: |
-          pip install -r requirements.txt
+          set -e
 
-      - name: Run daily jobs with logs
-        shell: bash
-        run: |
-          set +e
+          echo "===== 排班統計表 ====="
+          python tools/scheduled_daily/schedule_report.py --folder-id "$DAILY_ROOT_FOLDER_ID"
 
-          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
-          LOG_DIR="logs/$TODAY"
-          mkdir -p "$LOG_DIR"
+          echo "===== 專員班表 ====="
+          python tools/scheduled_daily/staff_schedule.py --folder-id "$DAILY_ROOT_FOLDER_ID"
 
-          echo "Taipei date = $TODAY"
-          echo "Log dir = $LOG_DIR"
+          echo "===== 當月次月訂單 ====="
+          python tools/scheduled_daily/orders_report.py --folder-id "$DAILY_ROOT_FOLDER_ID"
 
-          echo "===== 01:00 排班統計表 ====="
-          python tools/scheduled_daily/schedule_report.py --folder-id "$DAILY_ROOT_FOLDER_ID" > "$LOG_DIR/schedule_report.log" 2>&1
-          echo $? > "$LOG_DIR/schedule_report.exit"
-
-          echo "===== 01:10 專員班表 ====="
-          sleep 600
-          python tools/scheduled_daily/staff_schedule.py --folder-id "$DAILY_ROOT_FOLDER_ID" > "$LOG_DIR/staff_schedule.log" 2>&1
-          echo $? > "$LOG_DIR/staff_schedule.exit"
-
-          echo "===== 01:20 當月次月訂單 ====="
-          sleep 600
-          python tools/scheduled_daily/orders_report.py --folder-id "$DAILY_ROOT_FOLDER_ID" > "$LOG_DIR/orders_report.log" 2>&1
-          echo $? > "$LOG_DIR/orders_report.exit"
-
-          echo "===== 01:30 專員個資 ====="
-          sleep 600
-          python tools/scheduled_daily/staff_info.py --folder-id "$DAILY_ROOT_FOLDER_ID" > "$LOG_DIR/staff_info.log" 2>&1
-          echo $? > "$LOG_DIR/staff_info.exit"
-
-          echo "===== 等到 02:00 寄送通知 ====="
-          sleep 1800
-
-          python tools/notify/send_daily_result.py > "$LOG_DIR/send_daily_result.log" 2>&1
-          echo $? > "$LOG_DIR/send_daily_result.exit"
-
-          echo "===== Logs ====="
-          ls -R logs
-
-      - name: Upload logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily-logs
-          path: logs/
+          echo "===== 專員個資 ====="
+          python tools/scheduled_daily/staff_info.py --folder-id "$DAILY_ROOT_FOLDER_ID"
