@@ -33,7 +33,7 @@ GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 TZ = timezone(timedelta(hours=8))
 
 LOCAL_OUTPUT_DIR = Path(
-    "/Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員系統個資"
+    "/Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員個資"
 )
 
 
@@ -314,13 +314,13 @@ def main():
     upload_folder_id = get_or_create_child_folder(
         service,
         args.folder_id,
-        "專員系統個資",
+        "專員個資",
     )
 
     today_stamp = get_today_stamp()
 
     log(f"today_stamp = {today_stamp}")
-    log(f"專員系統個資 folder_id = {upload_folder_id}")
+    log(f"專員個資 folder_id = {upload_folder_id}")
 
     regions = load_accounts()
     log(f"帳號數量 = {len(regions)}")
@@ -332,7 +332,7 @@ def main():
         try:
             session = login(email, password)
 
-            filename = f"{today_stamp}專員系統個資-{city}.xlsx"
+            filename = f"{today_stamp}專員個資-{city}.xlsx"
             export_staff_info(session, city, filename, upload_folder_id)
 
             log(f"✅ {city} 全部完成")
