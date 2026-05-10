@@ -31,3 +31,16 @@ systems:
       office:
         台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
         台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
+
+      functions:
+      - name: 排班統計表
+        script: tools/field_daily/schedule_report.py
+
+      - name: 專員班表
+        script: tools/field_daily/staff_schedule.py
+
+      - name: 當月次月訂單
+        script: tools/field_daily/orders_report.py
+
+      - name: 專員個資
+        script: tools/field_daily/staff_info.py
