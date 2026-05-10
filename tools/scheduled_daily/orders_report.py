@@ -1,6 +1,9 @@
+from __future__ import annotations
+
+import argparse
+import calendar
 import json
 import os
-import calendar
 import shutil
 import tempfile
 from datetime import datetime, timezone, timedelta
@@ -27,17 +30,22 @@ HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 }
 
-# Google Drive（訂單資料資料夾）
-GDRIVE_FOLDER_ID = "1QnOJzn-xmZ_oAMoiM6Qnfk3Y2CWuM1c4"
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-# 台北時區
 TZ = timezone(timedelta(hours=8))
 
-# 本機輸出資料夾（只有本機跑時才會用）
 LOCAL_OUTPUT_DIR = Path(
     "/Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/訂單資料"
 )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--folder-id",
+        required=True,
+        help="日排程系統的 Google Drive 根資料夾 ID",
+    )
+    return parser.parse_args()
 
 
 def log(msg: str):
@@ -63,6 +71,7 @@ def get_secret(path_list, env_name=None, required=True, default=None):
 
     if required:
         raise RuntimeError(f"讀不到設定值：{'/'.join(path_list)}")
+
     return default
 
 
@@ -87,16 +96,16 @@ def login(email: str, password: str) -> requests.Session:
     log(f"開始登入：{email}")
 
     res = session.get(LOGIN_URL, headers=HEADERS, allow_redirects=True, timeout=60)
-    soup = BeautifulSoup(res.text, "html.parser")
+    res.raise_for_status()
 
+    soup = BeautifulSoup(res.text, "html.parser")
     token_input = soup.find("input", {"name": "_token"})
+
     if not token_input:
         raise RuntimeError("找不到 _token，無法登入")
 
-    token = token_input.get("value")
-
     payload = {
-        "_token": token,
+        "_token": token_input.get("value"),
         "email": email,
         "password": password,
     }
@@ -108,6 +117,7 @@ def login(email: str, password: str) -> requests.Session:
         allow_redirects=True,
         timeout=60,
     )
+    login_res.raise_for_status()
 
     if "login" in login_res.url.lower():
         raise RuntimeError(f"{email} 登入失敗")
@@ -145,7 +155,6 @@ def build_export_url(start, end):
 
 
 def get_service_account_info():
-    # 1. Streamlit secrets
     if HAS_STREAMLIT:
         try:
             creds_dict = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
@@ -154,12 +163,10 @@ def get_service_account_info():
         except Exception:
             pass
 
-    # 2. 舊環境變數名稱
     json_str = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if json_str:
         return json.loads(json_str)
 
-    # 3. GitHub Actions 目前使用的名稱
     json_str = os.getenv("GOOGLE_SERVICE_ACCOUNT")
     if json_str:
         return json.loads(json_str)
@@ -180,13 +187,63 @@ def get_drive_service():
         raise RuntimeError(f"Google Drive 初始化失敗：{e}")
 
 
-def upload_to_gdrive(local_path: str):
+def q_escape(value: str) -> str:
+    return value.replace("'", "\\'")
+
+
+def find_child_folder(service, parent_id: str, folder_name: str):
+    q = (
+        f"'{q_escape(parent_id)}' in parents and "
+        f"mimeType='application/vnd.google-apps.folder' and "
+        f"name='{q_escape(folder_name)}' and "
+        f"trashed=false"
+    )
+
+    res = service.files().list(
+        q=q,
+        fields="files(id,name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+
+    files = res.get("files", [])
+    return files[0]["id"] if files else None
+
+
+def create_child_folder(service, parent_id: str, folder_name: str):
+    body = {
+        "name": folder_name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id],
+    }
+
+    created = service.files().create(
+        body=body,
+        fields="id,name",
+        supportsAllDrives=True,
+    ).execute()
+
+    log(f"📁 已建立資料夾：{created['name']}")
+    return created["id"]
+
+
+def get_or_create_child_folder(service, parent_id: str, folder_name: str):
+    folder_id = find_child_folder(service, parent_id, folder_name)
+
+    if folder_id:
+        log(f"📁 使用既有資料夾：{folder_name}")
+        return folder_id
+
+    return create_child_folder(service, parent_id, folder_name)
+
+
+def upload_to_gdrive(local_path: str, folder_id: str):
     service = get_drive_service()
     filename = os.path.basename(local_path)
 
     file_metadata = {
         "name": filename,
-        "parents": [GDRIVE_FOLDER_ID],
+        "parents": [folder_id],
     }
 
     media = MediaFileUpload(
@@ -231,7 +288,13 @@ def save_to_local_if_possible(temp_file_path: str, filename: str):
         log(f"⚠️ 本機存檔失敗，已略過：{e}")
 
 
-def export_order(session: requests.Session, city: str, export_url: str, file_date: str):
+def export_order(
+    session: requests.Session,
+    city: str,
+    export_url: str,
+    file_date: str,
+    upload_folder_id: str,
+):
     log(f"開始下載：city={city} / export_url={export_url}")
 
     res = session.get(export_url, headers=HEADERS, allow_redirects=True, timeout=120)
@@ -240,6 +303,7 @@ def export_order(session: requests.Session, city: str, export_url: str, file_dat
         raise RuntimeError(f"{city} 匯出失敗，status={res.status_code}")
 
     content_type = res.headers.get("Content-Type", "")
+
     if "excel" not in content_type.lower() and "octet-stream" not in content_type.lower():
         raise RuntimeError(f"{city} 不是 Excel，Content-Type={content_type}")
 
@@ -257,12 +321,14 @@ def export_order(session: requests.Session, city: str, export_url: str, file_dat
         log(f"📄 暫存檔案存在：{Path(path).exists()}")
 
         save_to_local_if_possible(path, filename)
-        upload_to_gdrive(path)
+        upload_to_gdrive(path, upload_folder_id)
 
         log(f"✅ 完成處理：{filename}")
 
 
 def main():
+    args = parse_args()
+
     log("====================================================")
     log("orders_report.py 開始執行")
     log(f"GITHUB_ACTIONS = {os.getenv('GITHUB_ACTIONS')}")
@@ -270,13 +336,22 @@ def main():
     log(f"LOCAL_OUTPUT_DIR = {LOCAL_OUTPUT_DIR}")
     log(f"LOCAL_OUTPUT_DIR exists = {LOCAL_OUTPUT_DIR.exists()}")
     log(f"can_use_local_output_dir = {can_use_local_output_dir()}")
+    log(f"root folder_id = {args.folder_id}")
     log("====================================================")
+
+    service = get_drive_service()
+    orders_folder_id = get_or_create_child_folder(
+        service,
+        args.folder_id,
+        "訂單資料",
+    )
 
     start, end, file_date = get_date_range()
     export_url = build_export_url(start, end)
 
     log(f"服務日期：{start} ~ {end}")
     log(f"file_date = {file_date}")
+    log(f"訂單資料 folder_id = {orders_folder_id}")
 
     regions = load_accounts()
     log(f"帳號數量 = {len(regions)}")
@@ -287,7 +362,15 @@ def main():
 
         try:
             session = login(email, password)
-            export_order(session, city, export_url, file_date)
+
+            export_order(
+                session=session,
+                city=city,
+                export_url=export_url,
+                file_date=file_date,
+                upload_folder_id=orders_folder_id,
+            )
+
             log(f"✅ {city} 完成")
 
         except Exception as e:
