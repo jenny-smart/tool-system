@@ -1,5 +1,7 @@
 dashboard_data/*
 !dashboard_data/.gitkeep
+!dashboard_data/latest/
+!dashboard_data/latest/**
 
 *.csv
 *.html
