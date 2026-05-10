@@ -551,6 +551,8 @@ def render_report() -> None:
 
 def render_log_page() -> None:
     from pathlib import Path
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     import html
 
     JOB_LABELS = {
@@ -571,6 +573,9 @@ def render_log_page() -> None:
         "performance_report",
     ]
 
+    def today_key() -> str:
+        return datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m%d")
+
     def read_text_safe(path: Path) -> str:
         if not path.exists():
             return ""
@@ -586,82 +591,138 @@ def render_log_page() -> None:
             return "尚無紀錄", "⚪", "#64748b"
         return "失敗", "❌", "#dc2626"
 
-    def short_summary(content: str) -> str:
+    def important_lines(content: str, limit: int = 8) -> list[str]:
         if not content:
-            return "沒有 log 內容"
+            return ["沒有 log 內容"]
+
         lines = [line.strip() for line in content.splitlines() if line.strip()]
         if not lines:
-            return "沒有 log 內容"
+            return ["沒有 log 內容"]
 
-        priority_keywords = [
-            "執行完成",
-            "全部完成",
-            "已上傳",
-            "初始化成功",
-            "RuntimeError",
+        keywords = [
             "Traceback",
+            "RuntimeError",
             "ModuleNotFoundError",
+            "Error",
+            "ERROR",
+            "Exception",
+            "SMTPAuthenticationError",
+            "HttpError",
             "failed",
+            "Failed",
             "失敗",
             "錯誤",
+            "找不到",
+            "登入失敗",
         ]
 
-        for keyword in priority_keywords:
-            for line in reversed(lines):
-                if keyword in line:
-                    return line[-120:]
+        matched = []
+        for line in lines:
+            if any(k in line for k in keywords):
+                matched.append(line)
 
-        return lines[-1][-120:]
+        if matched:
+            return matched[-limit:]
+
+        return lines[-min(limit, len(lines)):]
+
+    def summary_line(content: str, exit_code: str) -> str:
+        lines = important_lines(content, limit=1)
+        if exit_code == "0":
+            success_keywords = ["全部完成", "執行完成", "已上傳", "完成"]
+            all_lines = [line.strip() for line in content.splitlines() if line.strip()]
+            for keyword in success_keywords:
+                for line in reversed(all_lines):
+                    if keyword in line:
+                        return line[-130:]
+        return lines[-1][-130:] if lines else "沒有摘要"
 
     st.markdown(
         """
         <style>
-          .log-hero {
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            margin-bottom:18px;
-          }
           .log-title {
             font-size:2.2rem;
             font-weight:900;
             color:#0f172a;
             letter-spacing:1px;
+            margin-bottom:4px;
           }
           .log-subtitle {
             font-size:0.82rem;
             font-weight:800;
             color:#94a3b8;
             letter-spacing:4px;
-            margin-top:6px;
+            margin-bottom:22px;
           }
-          .nav-card {
+          .log-top-card {
             background:linear-gradient(135deg,#ffffff,#f8fafc);
             border:1px solid #e2e8f0;
-            border-radius:22px;
-            padding:22px;
-            margin:18px 0;
-            box-shadow:0 8px 26px rgba(15,23,42,0.06);
+            border-radius:24px;
+            padding:26px;
+            margin:20px 0 26px 0;
+            box-shadow:0 12px 30px rgba(15,23,42,0.07);
+          }
+          .log-overall {
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:18px;
+            flex-wrap:wrap;
+          }
+          .log-overall-title {
+            font-size:1.55rem;
+            font-weight:900;
+            color:#0f172a;
+          }
+          .log-overall-note {
+            color:#64748b;
+            margin-top:8px;
+            font-size:0.98rem;
+          }
+          .overall-status {
+            font-size:1.55rem;
+            font-weight:900;
+          }
+          .result-strip {
+            display:flex;
+            gap:12px;
+            flex-wrap:wrap;
+            margin-top:18px;
+          }
+          .result-pill {
+            background:#f1f5f9;
+            border:1px solid #e2e8f0;
+            border-radius:999px;
+            padding:9px 14px;
+            color:#334155;
+            font-weight:900;
+            font-size:0.93rem;
           }
           .status-grid {
             display:grid;
-            grid-template-columns:repeat(3,minmax(0,1fr));
-            gap:14px;
-            margin-top:14px;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:16px;
+            margin-top:16px;
           }
           .status-card {
             background:white;
             border:1px solid #e2e8f0;
-            border-left:7px solid var(--status-color);
-            border-radius:18px;
-            padding:18px;
-            box-shadow:0 4px 14px rgba(15,23,42,0.04);
+            border-left:8px solid var(--status-color);
+            border-radius:20px;
+            padding:20px;
+            box-shadow:0 5px 18px rgba(15,23,42,0.05);
+          }
+          .status-head {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            margin-bottom:10px;
           }
           .status-name {
-            font-size:1.05rem;
+            font-size:1.18rem;
             font-weight:900;
             color:#0f172a;
-            margin-bottom:8px;
           }
           .status-badge {
             display:inline-flex;
@@ -671,48 +732,40 @@ def render_log_page() -> None:
             background:#f8fafc;
             border:1px solid #e2e8f0;
             border-radius:999px;
-            padding:5px 10px;
-            font-size:0.86rem;
-            font-weight:800;
+            padding:6px 12px;
+            font-size:0.92rem;
+            font-weight:900;
+            white-space:nowrap;
           }
           .status-summary {
-            color:#64748b;
-            font-size:0.86rem;
-            margin-top:12px;
-            line-height:1.45;
-            min-height:38px;
+            color:#475569;
+            font-size:0.93rem;
+            line-height:1.55;
+            margin:10px 0 12px 0;
           }
           .status-meta {
             color:#94a3b8;
-            font-size:0.78rem;
-            margin-top:10px;
+            font-size:0.8rem;
             font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
           }
-          .result-strip {
-            display:flex;
-            gap:12px;
-            flex-wrap:wrap;
+          .error-box {
+            background:#fff1f2;
+            border:1px solid #fecdd3;
+            color:#991b1b;
+            border-radius:14px;
+            padding:12px 14px;
             margin-top:12px;
-          }
-          .result-pill {
-            background:#f1f5f9;
-            border:1px solid #e2e8f0;
-            border-radius:999px;
-            padding:8px 13px;
-            color:#334155;
-            font-weight:800;
-            font-size:0.9rem;
+            font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+            font-size:0.84rem;
+            line-height:1.55;
+            white-space:pre-wrap;
           }
           @media (max-width: 900px) {
             .status-grid { grid-template-columns:1fr; }
           }
         </style>
-        <div class="log-hero">
-          <div>
-            <div class="log-title">📋 排程執行狀態</div>
-            <div class="log-subtitle">SYSTEM STATUS · DAILY JOBS · ACTION LOGS</div>
-          </div>
-        </div>
+        <div class="log-title">📋 今日排程狀態</div>
+        <div class="log-subtitle">DAILY SCHEDULE STATUS · ACTION LOGS</div>
         """,
         unsafe_allow_html=True,
     )
@@ -727,24 +780,17 @@ def render_log_page() -> None:
             st.rerun()
 
     log_root = Path("logs")
+    selected_day = today_key()
+    selected_dir = log_root / selected_day
 
     if not log_root.exists():
         st.info("目前沒有 logs/ 資料夾。請確認 GitHub Actions 已將 logs/ commit 回 repo。")
         return
 
-    day_dirs = sorted([p for p in log_root.iterdir() if p.is_dir()], reverse=True)
-
-    if not day_dirs:
-        st.info("目前 logs/ 裡沒有日期資料夾。")
+    if not selected_dir.exists():
+        st.warning(f"今日尚無排程紀錄：{selected_day}")
         return
 
-    selected_day = st.selectbox(
-        "選擇日期",
-        [p.name for p in day_dirs],
-        label_visibility="visible",
-    )
-
-    selected_dir = log_root / selected_day
     log_files = sorted(selected_dir.glob("*.log"))
 
     job_names = []
@@ -757,7 +803,7 @@ def render_log_page() -> None:
             job_names.append(log_file.stem)
 
     if not job_names:
-        st.info(f"{selected_day} 沒有 log 檔。")
+        st.info("今日尚無 log 檔。")
         return
 
     rows = []
@@ -776,28 +822,53 @@ def render_log_page() -> None:
                 "status_text": status_text,
                 "icon": icon,
                 "color": color,
-                "summary": short_summary(content),
+                "summary": summary_line(content, exit_code),
+                "important": important_lines(content),
             }
         )
 
     success_count = sum(1 for r in rows if r["exit_code"] == "0")
-    failed_count = sum(1 for r in rows if r["exit_code"] not in ["0", "missing"])
+    failed_rows = [r for r in rows if r["exit_code"] not in ["0", "missing"]]
+    failed_count = len(failed_rows)
     missing_count = sum(1 for r in rows if r["exit_code"] == "missing")
 
-    overall_text = "全部成功" if failed_count == 0 and success_count > 0 else "有失敗項目" if failed_count else "尚無成功紀錄"
-    overall_icon = "✅" if failed_count == 0 and success_count > 0 else "❌" if failed_count else "⚪"
+    if failed_count:
+        overall_text = "有失敗項目"
+        overall_icon = "❌"
+        overall_color = "#dc2626"
+    elif success_count:
+        overall_text = "全部成功"
+        overall_icon = "✅"
+        overall_color = "#16a34a"
+    else:
+        overall_text = "尚無成功紀錄"
+        overall_icon = "⚪"
+        overall_color = "#64748b"
+
+    failed_summary_html = ""
+    if failed_rows:
+        items = []
+        for r in failed_rows:
+            msg = "\n".join(r["important"][:5])
+            items.append(
+                f"<div style='margin-top:10px;'><b>{html.escape(r['label'])}</b><br>{html.escape(msg)}</div>"
+            )
+        failed_summary_html = (
+            "<div class='error-box'>"
+            + "<b>失敗項目與錯誤內容：</b>"
+            + "".join(items)
+            + "</div>"
+        )
 
     st.markdown(
         f"""
-        <div class="nav-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div class="log-top-card">
+          <div class="log-overall">
             <div>
-              <div style="font-size:1.65rem;font-weight:900;color:#0f172a;">📅 {html.escape(selected_day)}</div>
-              <div style="color:#64748b;margin-top:6px;font-size:0.98rem;">以執行結果為主，詳細 log 放在下方展開查看。</div>
+              <div class="log-overall-title">今日排程</div>
+              <div class="log-overall-note">日期：{html.escape(selected_day)}。以執行結果為主，失敗內容會優先顯示。</div>
             </div>
-            <div style="font-size:1.35rem;font-weight:900;color:{'#16a34a' if failed_count == 0 and success_count > 0 else '#dc2626' if failed_count else '#64748b'};">
-              {overall_icon} {overall_text}
-            </div>
+            <div class="overall-status" style="color:{overall_color};">{overall_icon} {overall_text}</div>
           </div>
           <div class="result-strip">
             <div class="result-pill">✅ 成功：{success_count}</div>
@@ -805,6 +876,7 @@ def render_log_page() -> None:
             <div class="result-pill">⚪ 尚無紀錄：{missing_count}</div>
             <div class="result-pill">📄 Log 檔：{len(log_files)}</div>
           </div>
+          {failed_summary_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -812,35 +884,40 @@ def render_log_page() -> None:
 
     cards = ['<div class="status-grid">']
     for row in rows:
+        error_html = ""
+        if row["exit_code"] not in ["0", "missing"]:
+            error_html = "<div class='error-box'>" + html.escape("\n".join(row["important"][:6])) + "</div>"
+
         cards.append(
             f"""
             <div class="status-card" style="--status-color:{row['color']};">
-              <div class="status-name">{html.escape(row['label'])}</div>
-              <div class="status-badge">{row['icon']} {html.escape(row['status_text'])}</div>
+              <div class="status-head">
+                <div class="status-name">{html.escape(row['label'])}</div>
+                <div class="status-badge">{row['icon']} {html.escape(row['status_text'])}</div>
+              </div>
               <div class="status-summary">{html.escape(row['summary'])}</div>
               <div class="status-meta">exit code: {html.escape(row['exit_code'])}</div>
+              {error_html}
             </div>
             """
         )
     cards.append("</div>")
     st.markdown("".join(cards), unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("### 🔎 詳細 Log")
+    with st.expander("🔎 查看詳細 log", expanded=failed_count > 0):
+        label_by_job = {row["job_name"]: f"{row['icon']} {row['label']}" for row in rows}
+        tabs = st.tabs([label_by_job[row["job_name"]] for row in rows])
 
-    label_by_job = {row["job_name"]: f"{row['icon']} {row['label']}" for row in rows}
-    tabs = st.tabs([label_by_job[row["job_name"]] for row in rows])
+        for tab, row in zip(tabs, rows):
+            with tab:
+                if row["exit_code"] == "0":
+                    st.success(f"{row['label']}：成功")
+                elif row["exit_code"] == "missing":
+                    st.warning(f"{row['label']}：尚無 exit code")
+                else:
+                    st.error(f"{row['label']}：失敗 / exit code {row['exit_code']}")
 
-    for tab, row in zip(tabs, rows):
-        with tab:
-            if row["exit_code"] == "0":
-                st.success(f"{row['label']}：成功")
-            elif row["exit_code"] == "missing":
-                st.warning(f"{row['label']}：尚無 exit code")
-            else:
-                st.error(f"{row['label']}：失敗 / exit code {row['exit_code']}")
-
-            st.code(row["content"] or "空 log", language="text")
+                st.code(row["content"] or "空 log", language="text")
 
 def mask_id(value: str) -> str:
     if not value:
