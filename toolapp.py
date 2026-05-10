@@ -62,7 +62,7 @@ DEFAULT_CONFIG = {
             "enabled": True,
         },
         {
-            "name": "外場日排程系統",
+            "name": "外場排程系統",
             "type": "field_daily_schedule",
             "enabled": True,
             "folder_ids": {
@@ -94,15 +94,33 @@ def ensure_config_file() -> None:
         save_config(DEFAULT_CONFIG)
 
 
+def merge_default_systems(data: dict) -> dict:
+    """
+    保留 GitHub / 現有 systems.yaml 內容，只補缺少的預設系統。
+    這樣重新部署時不會把日排程、月排程或外場排程弄不見。
+    """
+    if "systems" not in data or not isinstance(data["systems"], list):
+        data["systems"] = []
+
+    existing_names = {
+        str(system.get("name", "")).strip()
+        for system in data.get("systems", [])
+        if system.get("name")
+    }
+
+    for default_system in DEFAULT_CONFIG["systems"]:
+        if default_system["name"] not in existing_names:
+            data["systems"].append(default_system)
+
+    return data
+
+
 def load_config() -> dict:
     ensure_config_file()
     with CONFIG_PATH.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
-    if "systems" not in data or not isinstance(data["systems"], list):
-        data = DEFAULT_CONFIG
-        save_config(data)
-
+    data = merge_default_systems(data)
     return data
 
 
@@ -437,7 +455,7 @@ def get_system_type_label(system_type: str) -> str:
         "vip": "儲值金管理",
         "daily_scheduler": "日排程系統",
         "monthly_scheduler": "月排程系統",
-        "field_daily_schedule": "外場日排程系統",
+        "field_daily_schedule": "外場排程系統",
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -1252,7 +1270,7 @@ with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expand
 <div class="setting-note">
 可在這裡新增 / 編輯不同系統設定。<br>
 舊系統使用主控表 ID / 共用雲端資料夾 ID。<br>
-外場日排程系統的 folder_ids / spreadsheet_ids 建議直接維護在 <code>config/systems.yaml</code>。
+外場排程系統的 folder_ids / spreadsheet_ids 建議直接維護在 GitHub repo 的 <code>config/systems.yaml</code>。Streamlit Cloud 畫面上修改只會存在目前執行環境，重新部署或重啟後可能消失。
 </div>
 """,
         unsafe_allow_html=True,
