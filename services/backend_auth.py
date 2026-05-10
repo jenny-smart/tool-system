@@ -62,3 +62,14 @@ def login_backend(email: str, password: str) -> requests.Session:
         raise RuntimeError("登入失敗")
 
     return session
+
+def load_accounts_dict():
+    accounts = {}
+
+    for city in ["台北", "台中", "桃園", "新竹", "高雄"]:
+        try:
+            accounts[city] = get_account(city)
+        except Exception:
+            pass
+
+    return accounts
