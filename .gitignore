@@ -1,0 +1,6 @@
+dashboard_data/*
+!dashboard_data/.gitkeep
+
+*.csv
+*.html
+*.json
