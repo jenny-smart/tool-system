@@ -331,3 +331,11 @@ def number_to_col(num: int) -> str:
 
 def rowcol_to_a1(row: int, col: int) -> str:
     return f"{number_to_col(col)}{row}"
+
+# ============================================================
+# 舊版相容別名
+# ============================================================
+
+MasterLog = MonthlyLog
+now_tw = now_text
+col_to_num = col_to_number
