@@ -27,6 +27,9 @@ st.set_page_config(
 )
 
 
+# ═══════════════════════════════════════════════════════════
+# 設定檔讀寫
+# ═══════════════════════════════════════════════════════════
 CONFIG_PATH = Path("config/systems.yaml")
 
 DEFAULT_CONFIG = {
@@ -69,27 +72,15 @@ def ensure_config_file() -> None:
         save_config(DEFAULT_CONFIG)
 
 
-def normalize_config(data: dict) -> dict:
-    if "systems" not in data or not isinstance(data["systems"], list):
-        return DEFAULT_CONFIG
-
-    for sys_cfg in data["systems"]:
-        if "folder_id" not in sys_cfg:
-            sys_cfg["folder_id"] = sys_cfg.get("root_folder_id", "")
-        if "master_spreadsheet_id" not in sys_cfg:
-            sys_cfg["master_spreadsheet_id"] = ""
-        if "enabled" not in sys_cfg:
-            sys_cfg["enabled"] = True
-
-    return data
-
-
 def load_config() -> dict:
     ensure_config_file()
     with CONFIG_PATH.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
-    data = normalize_config(data)
+    if "systems" not in data or not isinstance(data["systems"], list):
+        data = DEFAULT_CONFIG
+        save_config(data)
+
     return data
 
 
@@ -103,6 +94,9 @@ def get_secret_text(key: str, default: str = "") -> str:
 def merge_legacy_secrets(cfg: dict) -> dict:
     legacy_master = get_secret_text("MASTER_SPREADSHEET_ID")
     legacy_folder = get_secret_text("ROOT_FOLDER_ID")
+
+    if not legacy_master and not legacy_folder:
+        return cfg
 
     for sys_cfg in cfg.get("systems", []):
         if sys_cfg.get("name") == "儲值金管理":
@@ -128,6 +122,9 @@ def get_system_by_name(cfg: dict, name: str) -> dict:
     return {}
 
 
+# ═══════════════════════════════════════════════════════════
+# UI 樣式
+# ═══════════════════════════════════════════════════════════
 st.markdown(
     """
 <style>
@@ -263,6 +260,9 @@ st.markdown(
 )
 
 
+# ═══════════════════════════════════════════════════════════
+# Session State
+# ═══════════════════════════════════════════════════════════
 if "logs" not in st.session_state:
     st.session_state.logs = ["[--:--:--] 系統已就緒，請選擇作業..."]
 
@@ -275,7 +275,13 @@ if "adding_system" not in st.session_state:
 if "editing_system" not in st.session_state:
     st.session_state.editing_system = None
 
+if "view" not in st.session_state:
+    st.session_state.view = "main"
 
+
+# ═══════════════════════════════════════════════════════════
+# 工具函式
+# ═══════════════════════════════════════════════════════════
 def tw_now_text(fmt: str = "%H:%M:%S") -> str:
     return datetime.now(TW_TZ).strftime(fmt)
 
@@ -306,6 +312,7 @@ def render_log() -> None:
 
     for entry in reversed(st.session_state.logs):
         css = "log-entry"
+
         if "✅" in entry:
             css += " success"
         elif "❌" in entry:
@@ -317,6 +324,96 @@ def render_log() -> None:
 
     html += "</div></div>"
     st.markdown(html, unsafe_allow_html=True)
+
+
+def render_performance_dashboard() -> None:
+    import json
+    import pandas as pd
+    from pathlib import Path
+
+    st.markdown(
+        '<div class="app-title">📊 業績報表</div>',
+        unsafe_allow_html=True,
+    )
+
+    top_left, top_right = st.columns([1, 3])
+    with top_left:
+        if st.button("← 返回主控台", use_container_width=True):
+            st.session_state.view = "main"
+            st.rerun()
+
+    latest_dir = Path("dashboard_data/latest")
+
+    df4_path = latest_dir / "df4.csv"
+    daily_path = latest_dir / "daily_df.csv"
+    next_path = latest_dir / "next_month_daily_df.csv"
+    meta_path = latest_dir / "meta.json"
+    html_path = latest_dir / "email_preview.html"
+
+    st.markdown(
+        '<div class="card"><div class="card-title">📈 業績資料</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not df4_path.exists():
+        st.info("尚未產生業績報表資料，請先回主控台執行「日排程系統 → 業績報表」。")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            st.caption(f"最後更新：{meta.get('updated_at', '-')}")
+            if meta.get("error"):
+                st.warning(meta.get("error"))
+        except Exception as e:
+            st.warning(f"讀取 meta.json 失敗：{e}")
+
+    def load_csv(path: Path) -> pd.DataFrame:
+        if not path.exists():
+            return pd.DataFrame()
+        return pd.read_csv(path, encoding="utf-8-sig")
+
+    df4 = load_csv(df4_path)
+    daily_df = load_csv(daily_path)
+    next_df = load_csv(next_path)
+
+    if df4.empty:
+        st.info("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    st.subheader("各區業績總覽")
+    st.dataframe(df4, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.subheader("本月每日追蹤")
+        if daily_df.empty:
+            st.info("尚無本月每日追蹤資料")
+        else:
+            st.dataframe(daily_df, use_container_width=True, hide_index=True)
+
+    with c2:
+        st.subheader("次月每日追蹤")
+        if next_df.empty:
+            st.info("尚無次月每日追蹤資料")
+        else:
+            st.dataframe(next_df, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    st.subheader("Email 預覽")
+    if html_path.exists():
+        html = html_path.read_text(encoding="utf-8")
+        st.components.v1.html(html, height=600, scrolling=True)
+    else:
+        st.info("尚無 Email HTML")
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def mask_id(value: str) -> str:
@@ -364,6 +461,7 @@ def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
 
 def run_script(script_path: str, args: list[str] | None = None) -> str:
     args = args or []
+
     cmd = [sys.executable, script_path, *args]
 
     completed = subprocess.run(
@@ -390,6 +488,9 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
     return f"{script_path} 執行完成"
 
 
+# ═══════════════════════════════════════════════════════════
+# 系統 / 功能設定
+# ═══════════════════════════════════════════════════════════
 SYSTEM_FUNCTIONS_BY_TYPE = {
     "vip": [
         "建立當月彙整檔",
@@ -449,12 +550,23 @@ if not system_names:
     system_names = ["儲值金管理"]
 
 
+if st.session_state.view == "performance_dashboard":
+    render_performance_dashboard()
+    st.stop()
+
+
+# ═══════════════════════════════════════════════════════════
+# UI — 主標題
+# ═══════════════════════════════════════════════════════════
 st.markdown(
     '<div class="app-title">🧰 Tools App 作業系統</div>',
     unsafe_allow_html=True,
 )
 
 
+# ═══════════════════════════════════════════════════════════
+# UI — 執行設定
+# ═══════════════════════════════════════════════════════════
 st.markdown(
     '<div class="card"><div class="card-title">⚙️ 執行設定</div>',
     unsafe_allow_html=True,
@@ -527,6 +639,9 @@ run_clicked = st.button("▶ 執行", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 
+# ═══════════════════════════════════════════════════════════
+# UI — 日誌
+# ═══════════════════════════════════════════════════════════
 render_log()
 
 clear_col, _ = st.columns([1, 3])
@@ -537,6 +652,9 @@ with clear_col:
         st.rerun()
 
 
+# ═══════════════════════════════════════════════════════════
+# UI — 設定檔管理
+# ═══════════════════════════════════════════════════════════
 with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expanded=False):
     st.markdown(
         """
@@ -550,7 +668,6 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
     )
 
     add_col, _ = st.columns([1, 3])
-
     with add_col:
         if st.button("➕ 新增系統", use_container_width=True):
             st.session_state.adding_system = True
@@ -561,7 +678,7 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
         with st.form("add_system_form"):
             st.markdown("**新增系統設定**")
 
-            new_name = st.text_input("設定系統名稱", placeholder="例如：日排程系統")
+            new_name = st.text_input("設定系統名稱", placeholder="例如：儲值金管理")
             new_type = st.selectbox(
                 "設定系統類型",
                 ["vip", "daily_scheduler", "monthly_scheduler"],
@@ -572,10 +689,8 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
             new_enabled = st.checkbox("啟用", value=True)
 
             f1, f2 = st.columns(2)
-
             with f1:
                 submit_add = st.form_submit_button("💾 儲存", use_container_width=True)
-
             with f2:
                 cancel_add = st.form_submit_button("✕ 取消", use_container_width=True)
 
@@ -613,9 +728,8 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
         folder_id = sys_cfg.get("folder_id", "")
         enabled = sys_cfg.get("enabled", True)
 
-        needs_master_id = current_type == "vip"
-        complete = bool(name and folder_id and (not needs_master_id or master_id))
-
+        needs_ids = current_type == "vip"
+        complete = bool(name and (not needs_ids or (master_id and folder_id)))
         badge = (
             '<span class="badge-ok">已設定</span>'
             if complete
@@ -642,10 +756,8 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                 e_enabled = st.checkbox("啟用", value=enabled)
 
                 e1, e2 = st.columns(2)
-
                 with e1:
                     save_edit = st.form_submit_button("💾 儲存", use_container_width=True)
-
                 with e2:
                     cancel_edit = st.form_submit_button("✕ 取消", use_container_width=True)
 
@@ -687,7 +799,6 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
             )
 
             _, b2, b3 = st.columns([2, 1, 1])
-
             with b2:
                 if st.button("📝 編輯", key=f"edit_system_{i}", use_container_width=True):
                     st.session_state.editing_system = name
@@ -702,6 +813,9 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                     st.rerun()
 
 
+# ═══════════════════════════════════════════════════════════
+# 執行邏輯
+# ═══════════════════════════════════════════════════════════
 if run_clicked:
     if not selected_system:
         add_log("請先新增或啟用系統設定", "error")
@@ -716,10 +830,6 @@ if run_clicked:
             add_log("請先輸入執行期別", "error")
             st.rerun()
 
-    if system_type in ["vip", "daily_scheduler", "monthly_scheduler"] and not folder_id:
-        add_log("尚未設定共用雲端資料夾 ID", "error")
-        st.rerun()
-
     add_log(f"開始執行：{system_name} / {selected_function} / 期別 {period}")
 
     try:
@@ -728,6 +838,10 @@ if run_clicked:
         if system_type == "vip":
             if not master_id:
                 add_log("尚未設定主控表 ID", "error")
+                st.rerun()
+
+            if not folder_id:
+                add_log("尚未設定共用雲端資料夾 ID", "error")
                 st.rerun()
 
             workflow = build_vip_workflow(
@@ -764,6 +878,10 @@ if run_clicked:
                 add_log(f"未知功能：{selected_function}", "warning")
 
         elif system_type == "daily_scheduler":
+            if not folder_id:
+                add_log("尚未設定共用雲端資料夾 ID", "error")
+                st.rerun()
+
             if selected_function == "一鍵執行日排程":
                 from tools.scheduled_daily.scheduler import main as run_daily_scheduler
 
@@ -774,13 +892,18 @@ if run_clicked:
 
                 if not script:
                     raise RuntimeError(f"找不到日排程功能：{selected_function}")
-        
+
                 if selected_function == "業績報表":
                     result = run_script(script)
+                    st.session_state.view = "performance_dashboard"
                 else:
                     result = run_script(script, ["--folder-id", folder_id])
 
         elif system_type == "monthly_scheduler":
+            if not folder_id:
+                add_log("尚未設定共用雲端資料夾 ID", "error")
+                st.rerun()
+
             if selected_function == "一鍵執行月排程":
                 from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
 
@@ -794,6 +917,7 @@ if run_clicked:
 
                 script = cmd[0]
                 args = cmd[1:]
+
                 result = run_script(script, [*args, "--folder-id", folder_id])
 
         else:
