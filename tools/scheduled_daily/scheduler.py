@@ -1,19 +1,69 @@
-elif system_name == "日排程系統":
-    import subprocess
-    import sys
+from __future__ import annotations
 
-    daily_map = {
-        "排班統計表": "tools/scheduled_daily/schedule_report.py",
-        "專員班表": "tools/scheduled_daily/staff_schedule.py",
-        "專員個資": "tools/scheduled_daily/staff_info.py",
-        "當月次月訂單": "tools/scheduled_daily/orders_report.py",
-        "業績報表": "tools/scheduled_daily/performance_report.py",
-    }
+import subprocess
+import sys
+from pathlib import Path
 
-    if selected_function == "一鍵執行日排程":
-        from tools.scheduled_daily.scheduler import main as run_daily_scheduler
-        result = run_daily_scheduler()
-    else:
-        script = daily_map[selected_function]
-        subprocess.run([sys.executable, script], check=True)
-        result = f"{selected_function} 執行完成"
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+
+DAILY_JOBS = [
+    {
+        "name": "排班統計表",
+        "script": BASE_DIR / "tools" / "scheduled_daily" / "schedule_report.py",
+        "args": [],
+    },
+    {
+        "name": "專員班表",
+        "script": BASE_DIR / "tools" / "scheduled_daily" / "staff_schedule.py",
+        "args": [],
+    },
+    {
+        "name": "專員個資",
+        "script": BASE_DIR / "tools" / "scheduled_daily" / "staff_info.py",
+        "args": [],
+    },
+    {
+        "name": "當月次月訂單",
+        "script": BASE_DIR / "tools" / "scheduled_daily" / "orders_report.py",
+        "args": [],
+    },
+    {
+        "name": "業績報表",
+        "script": BASE_DIR / "tools" / "scheduled_daily" / "performance_report.py",
+        "args": ["schedule", "true"],
+    },
+]
+
+
+def run_job(job: dict) -> str:
+    name = job["name"]
+    script = job["script"]
+    args = job.get("args", [])
+
+    if not script.exists():
+        raise FileNotFoundError(f"找不到檔案：{script}")
+
+    print(f"開始執行：{name}")
+    subprocess.run(
+        [sys.executable, str(script), *args],
+        check=True,
+        cwd=BASE_DIR,
+    )
+    print(f"完成：{name}")
+
+    return f"{name} 執行完成"
+
+
+def main():
+    results = []
+
+    for job in DAILY_JOBS:
+        results.append(run_job(job))
+
+    return results
+
+
+if __name__ == "__main__":
+    main()
