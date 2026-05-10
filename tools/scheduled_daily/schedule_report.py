@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import argparse
 import json
 import os
 import shutil
@@ -26,14 +29,18 @@ HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 }
 
-GDRIVE_FOLDER_ID = "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-
 TZ = timezone(timedelta(hours=8))
 
 LOCAL_OUTPUT_DIR = Path(
     "/Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/.shortcut-targets-by-id/1zbu45AG1adMzz24HPdi_tLfh2Tncw_Br/排班統計表"
 )
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--folder-id", required=True, help="日排程系統 Google Drive 根資料夾 ID")
+    return parser.parse_args()
 
 
 def log(msg: str):
@@ -59,6 +66,7 @@ def get_secret(path_list, env_name=None, required=True, default=None):
 
     if required:
         raise RuntimeError(f"讀不到設定值：{'/'.join(path_list)}")
+
     return default
 
 
@@ -86,12 +94,10 @@ def get_service_account_info():
         except Exception:
             pass
 
-    # 先支援舊名稱
     json_str = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if json_str:
         return json.loads(json_str)
 
-    # 🔥 新增：支援你現在用的名稱
     json_str = os.getenv("GOOGLE_SERVICE_ACCOUNT")
     if json_str:
         return json.loads(json_str)
@@ -105,16 +111,16 @@ def login(email: str, password: str) -> requests.Session:
     log(f"開始登入：{email}")
 
     res = session.get(LOGIN_URL, headers=HEADERS, allow_redirects=True, timeout=60)
-    soup = BeautifulSoup(res.text, "html.parser")
+    res.raise_for_status()
 
+    soup = BeautifulSoup(res.text, "html.parser")
     token_input = soup.find("input", {"name": "_token"})
+
     if not token_input:
         raise RuntimeError("找不到 _token，無法登入。")
 
-    csrf_token = token_input.get("value")
-
     payload = {
-        "_token": csrf_token,
+        "_token": token_input.get("value"),
         "email": email,
         "password": password,
     }
@@ -126,6 +132,7 @@ def login(email: str, password: str) -> requests.Session:
         allow_redirects=True,
         timeout=60,
     )
+    login_res.raise_for_status()
 
     if "login" in login_res.url.lower():
         raise RuntimeError(f"{email} 登入失敗")
@@ -155,10 +162,8 @@ def get_month_strings():
 
 def get_drive_service():
     try:
-        creds_dict = get_service_account_info()
-
         credentials = service_account.Credentials.from_service_account_info(
-            creds_dict,
+            get_service_account_info(),
             scopes=GDRIVE_SCOPES,
         )
 
@@ -168,6 +173,56 @@ def get_drive_service():
 
     except Exception as e:
         raise RuntimeError(f"Google Drive 初始化失敗: {e}")
+
+
+def q_escape(value: str) -> str:
+    return value.replace("'", "\\'")
+
+
+def find_child_folder(service, parent_id: str, folder_name: str):
+    q = (
+        f"'{q_escape(parent_id)}' in parents and "
+        f"mimeType='application/vnd.google-apps.folder' and "
+        f"name='{q_escape(folder_name)}' and "
+        f"trashed=false"
+    )
+
+    res = service.files().list(
+        q=q,
+        fields="files(id,name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+
+    files = res.get("files", [])
+    return files[0]["id"] if files else None
+
+
+def create_child_folder(service, parent_id: str, folder_name: str):
+    body = {
+        "name": folder_name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id],
+    }
+
+    created = service.files().create(
+        body=body,
+        fields="id,name",
+        supportsAllDrives=True,
+    ).execute()
+
+    log(f"📁 已建立資料夾：{created['name']}")
+    return created["id"]
+
+
+def get_or_create_child_folder(service, parent_id: str, folder_name: str):
+    folder_id = find_child_folder(service, parent_id, folder_name)
+
+    if folder_id:
+        log(f"📁 使用既有資料夾：{folder_name}")
+        return folder_id
+
+    return create_child_folder(service, parent_id, folder_name)
 
 
 def upload_to_gdrive(local_path: str, folder_id: str):
@@ -190,7 +245,7 @@ def upload_to_gdrive(local_path: str, folder_id: str):
     created = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields="id, name",
+        fields="id,name",
         supportsAllDrives=True,
     ).execute()
 
@@ -199,10 +254,6 @@ def upload_to_gdrive(local_path: str, folder_id: str):
 
 
 def can_use_local_output_dir() -> bool:
-    """
-    只有在本機真的存在 /Users/jenny 時才嘗試存本機。
-    雲端 / Linux / Streamlit Cloud 一律跳過。
-    """
     try:
         users_dir = Path("/Users")
         jenny_dir = Path("/Users/jenny")
@@ -212,9 +263,6 @@ def can_use_local_output_dir() -> bool:
 
 
 def save_to_local_if_possible(temp_file_path: str, filename: str):
-    """
-    可存就存，不可存就跳過，絕不讓整支程式因此失敗。
-    """
     if not can_use_local_output_dir():
         log("目前不是 Jenny 本機環境，略過本機存檔")
         return
@@ -228,13 +276,19 @@ def save_to_local_if_possible(temp_file_path: str, filename: str):
         log(f"⚠️ 本機存檔失敗，已略過：{e}")
 
 
-def export_schedule(session: requests.Session, month: str, filename: str):
+def export_schedule(
+    session: requests.Session,
+    month: str,
+    filename: str,
+    upload_folder_id: str,
+):
     url = f"{EXPORT_BASE}?month={month}"
     log(f"開始下載：month={month} / filename={filename}")
 
     res = session.get(url, headers=HEADERS, allow_redirects=True, timeout=120)
 
     content_type = res.headers.get("Content-Type", "")
+
     if res.status_code != 200:
         raise RuntimeError(f"{filename} 下載失敗，status={res.status_code}")
 
@@ -253,12 +307,14 @@ def export_schedule(session: requests.Session, month: str, filename: str):
         log(f"📄 暫存檔案存在：{Path(full_path).exists()}")
 
         save_to_local_if_possible(full_path, filename)
-        upload_to_gdrive(full_path, GDRIVE_FOLDER_ID)
+        upload_to_gdrive(full_path, upload_folder_id)
 
         log(f"✅ 完成處理：{filename}")
 
 
 def main():
+    args = parse_args()
+
     log("====================================================")
     log("schedule_report.py 開始執行")
     log(f"GITHUB_ACTIONS = {os.getenv('GITHUB_ACTIONS')}")
@@ -266,13 +322,23 @@ def main():
     log(f"LOCAL_OUTPUT_DIR = {LOCAL_OUTPUT_DIR}")
     log(f"LOCAL_OUTPUT_DIR exists = {LOCAL_OUTPUT_DIR.exists()}")
     log(f"can_use_local_output_dir = {can_use_local_output_dir()}")
+    log(f"root folder_id = {args.folder_id}")
     log("====================================================")
 
+    service = get_drive_service()
+    upload_folder_id = get_or_create_child_folder(
+        service,
+        args.folder_id,
+        "排班統計表",
+    )
+
     this_month, next_month, today_stamp, next_month_stamp = get_month_strings()
+
     log(f"this_month = {this_month}")
     log(f"next_month = {next_month}")
     log(f"today_stamp = {today_stamp}")
     log(f"next_month_stamp = {next_month_stamp}")
+    log(f"排班統計表 folder_id = {upload_folder_id}")
 
     regions = load_accounts()
     log(f"帳號數量 = {len(regions)}")
@@ -287,8 +353,8 @@ def main():
             current_filename = f"排班統計表{today_stamp}-{city}.xlsx"
             next_filename = f"排班統計表{next_month_stamp}-{city}.xlsx"
 
-            export_schedule(session, this_month, current_filename)
-            export_schedule(session, next_month, next_filename)
+            export_schedule(session, this_month, current_filename, upload_folder_id)
+            export_schedule(session, next_month, next_filename, upload_folder_id)
 
             log(f"✅ {city} 全部完成")
 
