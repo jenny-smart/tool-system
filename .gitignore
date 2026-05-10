@@ -1,3 +1,6 @@
+logs/*
+!logs/.gitkeep
+
 dashboard_data/*
 !dashboard_data/.gitkeep
 !dashboard_data/latest/
