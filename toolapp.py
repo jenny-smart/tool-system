@@ -331,90 +331,154 @@ def render_performance_dashboard() -> None:
     import pandas as pd
     from pathlib import Path
 
-    st.markdown(
-        '<div class="app-title">📊 業績報表</div>',
-        unsafe_allow_html=True,
-    )
-
-    top_left, top_right = st.columns([1, 3])
-    with top_left:
-        if st.button("← 返回主控台", use_container_width=True):
-            st.session_state.view = "main"
-            st.rerun()
-
     latest_dir = Path("dashboard_data/latest")
-
     df4_path = latest_dir / "df4.csv"
     daily_path = latest_dir / "daily_df.csv"
     next_path = latest_dir / "next_month_daily_df.csv"
+    month_end_path = latest_dir / "month_end_summary.csv"
     meta_path = latest_dir / "meta.json"
     html_path = latest_dir / "email_preview.html"
-
-    st.markdown(
-        '<div class="card"><div class="card-title">📈 業績資料</div>',
-        unsafe_allow_html=True,
-    )
-
-    if not df4_path.exists():
-        st.info("尚未產生業績報表資料，請先回主控台執行「日排程系統 → 業績報表」。")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            st.caption(f"最後更新：{meta.get('updated_at', '-')}")
-            if meta.get("error"):
-                st.warning(meta.get("error"))
-        except Exception as e:
-            st.warning(f"讀取 meta.json 失敗：{e}")
 
     def load_csv(path: Path) -> pd.DataFrame:
         if not path.exists():
             return pd.DataFrame()
         return pd.read_csv(path, encoding="utf-8-sig")
 
+    def money(value) -> str:
+        try:
+            return f"{int(float(str(value).replace(',', ''))):,}"
+        except Exception:
+            return "0"
+
+    def ratio(value) -> str:
+        try:
+            if isinstance(value, str) and value.endswith("%"):
+                return value
+            return f"{float(value):.2%}"
+        except Exception:
+            return "-"
+
+    def get_total(df: pd.DataFrame, col: str) -> str:
+        if df.empty or col not in df.columns:
+            return "0"
+        total_row = df[df["城市"].astype(str) == "加總"] if "城市" in df.columns else pd.DataFrame()
+        if not total_row.empty:
+            return money(total_row.iloc[0][col])
+        return money(df[col].sum())
+
+    st.markdown(
+        """
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+          <div>
+            <div style="font-size:2.2rem;font-weight:900;color:#0f172a;letter-spacing:1px;">
+              📊 業績報表
+            </div>
+            <div style="font-size:0.85rem;font-weight:800;color:#94a3b8;letter-spacing:5px;margin-top:4px;">
+              LATEST DATA · CURRENT / NEXT MONTH / SNAPSHOT
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    top_cols = st.columns([1, 1, 1, 1])
+    with top_cols[0]:
+        if st.button("← 返回主控台", use_container_width=True):
+            st.session_state.view = "main"
+            st.rerun()
+    with top_cols[1]:
+        if st.button("🔄 重新讀取資料", use_container_width=True):
+            st.rerun()
+    with top_cols[2]:
+        if st.button("🧰 回主控台執行更新", use_container_width=True):
+            st.session_state.view = "main"
+            st.session_state.selected_system_name = "日排程系統"
+            st.rerun()
+    with top_cols[3]:
+        st.write("")
+
+    if not df4_path.exists():
+        st.info("尚未產生業績報表資料，請先在主控台執行「日排程系統 → 業績報表」。")
+        return
+
     df4 = load_csv(df4_path)
     daily_df = load_csv(daily_path)
     next_df = load_csv(next_path)
+    month_end_df = load_csv(month_end_path)
+
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+
+    if meta:
+        st.info(f"📅 最新更新時間：{meta.get('updated_at', '-')}")
+        if meta.get("error"):
+            st.warning(meta.get("error"))
 
     if df4.empty:
-        st.info("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.warning("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
         return
 
-    st.subheader("各區業績總覽")
-    st.dataframe(df4, use_container_width=True, hide_index=True)
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.metric("本月加總", get_total(df4, "本月加總"))
+    with k2:
+        st.metric("次月加總", get_total(df4, "次月加總"))
+    with k3:
+        st.metric("本月家電加總", get_total(df4, "本月家電加總"))
+    with k4:
+        st.metric("儲值金", get_total(df4, "儲值金"))
 
     st.divider()
 
-    c1, c2 = st.columns(2)
+    st.markdown("### 📍 各區月度摘要")
+    show_df4 = df4.copy()
+    for col in ["本月加總", "次月加總", "本月家電加總", "次月家電加總", "儲值金"]:
+        if col in show_df4.columns:
+            show_df4[col] = show_df4[col].apply(money)
+    for col in ["本月佔比", "次月佔比"]:
+        if col in show_df4.columns:
+            show_df4[col] = show_df4[col].apply(ratio)
+    st.dataframe(show_df4, use_container_width=True, hide_index=True)
 
-    with c1:
-        st.subheader("本月每日追蹤")
+    st.divider()
+
+    st.markdown("## 月度追蹤")
+    tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
+
+    with tabs[0]:
+        st.caption("資料來源：上方各區月度摘要 df4.csv 的本月加總；每次更新資料會新增一筆。")
         if daily_df.empty:
-            st.info("尚無本月每日追蹤資料")
+            st.info("尚無當月每日業績資料")
         else:
             st.dataframe(daily_df, use_container_width=True, hide_index=True)
 
-    with c2:
-        st.subheader("次月每日追蹤")
+    with tabs[1]:
+        st.caption("資料來源：上方各區月度摘要 df4.csv 的次月加總；每次更新資料會新增一筆。")
         if next_df.empty:
-            st.info("尚無次月每日追蹤資料")
+            st.info("尚無次月每日業績資料")
         else:
             st.dataframe(next_df, use_container_width=True, hide_index=True)
 
+    with tabs[2]:
+        st.caption("月底快照只在月底執行時產生。")
+        if month_end_df.empty:
+            st.info("尚無月底快照")
+        else:
+            st.dataframe(month_end_df, use_container_width=True, hide_index=True)
+
     st.divider()
 
-    st.subheader("Email 預覽")
-    if html_path.exists():
-        html = html_path.read_text(encoding="utf-8")
-        st.components.v1.html(html, height=600, scrolling=True)
-    else:
-        st.info("尚無 Email HTML")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
+    with st.expander("📧 信件預覽", expanded=False):
+        if html_path.exists():
+            html = html_path.read_text(encoding="utf-8")
+            st.components.v1.html(html, height=600, scrolling=True)
+        else:
+            st.info("尚無 Email HTML")
 
 def mask_id(value: str) -> str:
     if not value:
@@ -562,6 +626,32 @@ st.markdown(
     '<div class="app-title">🧰 Tools App 作業系統</div>',
     unsafe_allow_html=True,
 )
+
+# ═══════════════════════════════════════════════════════════
+# UI — 快捷入口
+# ═══════════════════════════════════════════════════════════
+latest_meta_path = Path("dashboard_data/latest/meta.json")
+latest_df4_path = Path("dashboard_data/latest/df4.csv")
+
+st.markdown(
+    '<div class="card"><div class="card-title">📌 快捷入口</div>',
+    unsafe_allow_html=True,
+)
+
+q1, q2 = st.columns([1, 2])
+
+with q1:
+    if st.button("📊 查看業績報表", use_container_width=True):
+        st.session_state.view = "performance_dashboard"
+        st.rerun()
+
+with q2:
+    if latest_df4_path.exists():
+        st.caption("業績報表已有資料，可點左側按鈕查看。")
+    else:
+        st.caption("尚未產生業績報表資料，請先執行「日排程系統 → 業績報表」。")
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -895,7 +985,7 @@ if run_clicked:
 
                 if selected_function == "業績報表":
                     result = run_script(script)
-                    st.session_state.view = "performance_dashboard"
+                    add_log("業績報表已更新，可點「📊 查看業績報表」開啟。", "success")
                 else:
                     result = run_script(script, ["--folder-id", folder_id])
 
