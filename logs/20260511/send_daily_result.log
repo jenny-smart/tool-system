@@ -1,15 +1,2 @@
-Traceback (most recent call last):
-  File "/home/runner/work/tool-system/tool-system/tools/notify/send_daily_result.py", line 219, in <module>
-    main()
-  File "/home/runner/work/tool-system/tool-system/tools/notify/send_daily_result.py", line 212, in main
-    send_email(subject, plain_body, html_body)
-  File "/home/runner/work/tool-system/tool-system/tools/notify/send_daily_result.py", line 195, in send_email
-    server.login(sender, password)
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/smtplib.py", line 750, in login
-    raise last_exception
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/smtplib.py", line 739, in login
-    (code, resp) = self.auth(
-                   ^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/smtplib.py", line 662, in auth
-    raise SMTPAuthenticationError(code, resp)
-smtplib.SMTPAuthenticationError: (534, b'5.7.9 Application-specific password required. For more information, go to\n5.7.9  https://support.google.com/mail/?p=InvalidSecondFactor af79cd13be357-907b9772b87sm821925185a.5 - gsmtp')
+✅ 日排程結果通知寄送完成
+[Tools App] 日排程執行結果 20260511 ✅ 已執行
