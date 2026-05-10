@@ -51,7 +51,7 @@ else:
     PATH_JENNY = CLOUD_BASE / "Jenny"
     PATH_SCHEDULE = CLOUD_BASE / "排班統計表"
     PATH_CLEANER_SCHEDULE = CLOUD_BASE / "專員班表"
-    PATH_CLEANER_DATA = CLOUD_BASE / "專員系統個資"
+    PATH_CLEANER_DATA = CLOUD_BASE / "專員個資"
     PATH_ORDER = CLOUD_BASE / "訂單資料"
     PATH_REPORT = CLOUD_BASE / "業績報表"
     PATH_VIP = CLOUD_BASE / "VIP儲值金"
