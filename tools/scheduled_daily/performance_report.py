@@ -15,10 +15,61 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from services.backend import load_accounts_dict
-from config.op_paths import PATH_REPORT
+try:
+    import streamlit as st
+    HAS_STREAMLIT = True
+except Exception:
+    HAS_STREAMLIT = False
+
+
+def get_secret(path_list, env_name=None, required=False, default=None):
+    if HAS_STREAMLIT:
+        try:
+            cur = st.secrets
+            for key in path_list:
+                cur = cur[key]
+            if cur is not None and str(cur) != "":
+                return cur
+        except Exception:
+            pass
+
+    if env_name:
+        value = os.getenv(env_name)
+        if value not in (None, ""):
+            return value
+
+    if required:
+        raise RuntimeError(f"讀不到設定值：{'/'.join(path_list)}")
+
+    return default
+
+
+def load_accounts_dict():
+    city_env_map = {
+        "台北": ("taipei", "TAIPEI_EMAIL", "TAIPEI_PASSWORD"),
+        "台中": ("taichung", "TAICHUNG_EMAIL", "TAICHUNG_PASSWORD"),
+        "桃園": ("taoyuan", "TAOYUAN_EMAIL", "TAOYUAN_PASSWORD"),
+        "新竹": ("hsinchu", "HSINCHU_EMAIL", "HSINCHU_PASSWORD"),
+        "高雄": ("kaohsiung", "KAOHSIUNG_EMAIL", "KAOHSIUNG_PASSWORD"),
+    }
+
+    accounts = {}
+
+    for city, (key, email_env, password_env) in city_env_map.items():
+        email = get_secret(["accounts", key, "email"], env_name=email_env, required=False)
+        password = get_secret(["accounts", key, "password"], env_name=password_env, required=False)
+
+        if email and password:
+            accounts[city] = {
+                "email": email,
+                "password": password,
+            }
+
+    return accounts
+
 
 ACCOUNTS = load_accounts_dict()
+PATH_REPORT = os.path.join(".", "dashboard_data", "latest")
 
 
 LOGIN_URL = "https://backend.lemonclean.com.tw/login"
@@ -42,6 +93,7 @@ REGION3_CATEGORY_ORDER = [
     "清潔+水洗+收納現金+儲值金",
 ]
 
+# Local Streamlit runtime output only. This file does NOT upload dashboard data to Google Drive.
 DASHBOARD_DIR = os.path.join(".", "dashboard_data")
 LATEST_DIR = os.path.join(DASHBOARD_DIR, "latest")
 SNAPSHOT_DIR = os.path.join(DASHBOARD_DIR, "snapshots")
@@ -756,10 +808,15 @@ def build_region4_email_html(df4):
 
 
 def send_region4_email(df4, recipient="jenny@lemonclean.com.tw"):
-    sender = "jenny@lemonclean.com.tw"
-    password = "bkhe akob wvse ibhm"
+    sender = get_secret(["email", "sender"], env_name="REPORT_EMAIL_SENDER", required=False)
+    password = get_secret(["email", "app_password"], env_name="REPORT_EMAIL_APP_PASSWORD", required=False)
+    recipient = get_secret(["email", "recipient"], env_name="REPORT_EMAIL_RECIPIENT", required=False, default=recipient)
 
-    today_str = datetime.today().strftime("%Y%m%d")
+    if not sender or not password or not recipient:
+        log("⚠️ 未設定 email.sender / email.app_password / email.recipient，略過寄信")
+        return
+
+    today_str = now_dt().strftime("%Y%m%d")
     subject = f"業績報表{today_str}"
     html = build_region4_email_html(df4)
 
@@ -961,26 +1018,9 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
             "execution_log_df": pd.DataFrame(),
             "daily_history_df": pd.DataFrame(),
             "output_file_log_df": load_output_file_log(),
-            "error": error_msg,
+             "error": error_msg,
         }
 
-        return {
-            "raw_df": pd.DataFrame(),
-            "df1": pd.DataFrame(),
-            "df2": pd.DataFrame(),
-            "df3": pd.DataFrame(),
-            "df4": empty_df4,
-            "daily_df": empty_daily,
-            "next_month_daily_df": pd.DataFrame(),
-            "month_end_df": pd.DataFrame(),
-            "month_end_history_df": load_month_end_history(),
-            "email_html": "",
-            "updated_at": now_dt().strftime("%Y-%m-%d %H:%M:%S"),
-            "execution_log_df": pd.DataFrame(),
-            "daily_history_df": pd.DataFrame(),
-            "output_file_log_df": load_output_file_log(),
-            "error": error_msg,
-        }
 
     for city in enabled_cities:
         log(f"===== {city} =====")
@@ -1082,26 +1122,9 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
             "execution_log_df": pd.DataFrame(),
             "daily_history_df": pd.DataFrame(),
             "output_file_log_df": load_output_file_log(),
-           "error": error_msg,
-        }
-
-        return {
-            "raw_df": pd.DataFrame(),
-            "df1": pd.DataFrame(),
-            "df2": pd.DataFrame(),
-            "df3": pd.DataFrame(),
-            "df4": empty_df4,
-            "daily_df": empty_daily,
-            "next_month_daily_df": pd.DataFrame(),
-            "month_end_df": pd.DataFrame(),
-            "month_end_history_df": load_month_end_history(),
-            "email_html": "",
-            "updated_at": now_dt().strftime("%Y-%m-%d %H:%M:%S"),
-            "execution_log_df": pd.DataFrame(),
-            "daily_history_df": pd.DataFrame(),
-            "output_file_log_df": load_output_file_log(),
             "error": error_msg,
         }
+
 
     df1 = build_region1_df(raw_df)
     df2 = build_region2_df(raw_df)
@@ -1169,13 +1192,26 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
 
 def main():
     trigger = "schedule"
-    send_email = True
+    send_email = False
 
-    if len(os.sys.argv) >= 2:
-        trigger = os.sys.argv[1]
+    args = [arg for arg in os.sys.argv[1:] if arg != "--folder-id"]
+    # 若 toolapp 誤傳 --folder-id <id>，業績報表不需要雲端資料夾，直接忽略。
+    cleaned_args = []
+    skip_next = False
+    for arg in os.sys.argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--folder-id":
+            skip_next = True
+            continue
+        cleaned_args.append(arg)
 
-    if len(os.sys.argv) >= 3:
-        send_email = os.sys.argv[2].lower() in ("1", "true", "yes", "y")
+    if len(cleaned_args) >= 1:
+        trigger = cleaned_args[0]
+
+    if len(cleaned_args) >= 2:
+        send_email = cleaned_args[1].lower() in ("1", "true", "yes", "y")
 
     generate_sales_report(
         send_email=send_email,
