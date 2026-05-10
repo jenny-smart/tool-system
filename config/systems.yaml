@@ -1,6 +1,6 @@
 systems:
 
-  - name: 外場日排程系統
+  - name: 外場排程系統
     type: scheduled_daily
     enabled: true
 
