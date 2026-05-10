@@ -278,6 +278,8 @@ if "editing_system" not in st.session_state:
 if "view" not in st.session_state:
     st.session_state.view = "main"
 
+sync_view_from_query_params()
+
 
 # ═══════════════════════════════════════════════════════════
 # 工具函式
@@ -299,6 +301,24 @@ def add_log(message: str, level: str = "info") -> None:
 
     if len(st.session_state.logs) > 500:
         st.session_state.logs = st.session_state.logs[-500:]
+
+
+def set_view(view_name: str) -> None:
+    st.session_state.view = view_name
+    try:
+        st.query_params["view"] = view_name
+    except Exception:
+        pass
+
+
+def sync_view_from_query_params() -> None:
+    try:
+        view = st.query_params.get("view")
+    except Exception:
+        view = None
+
+    if view == "performance_dashboard":
+        st.session_state.view = "performance_dashboard"
 
 
 def render_log() -> None:
@@ -385,18 +405,29 @@ def render_performance_dashboard() -> None:
     top_cols = st.columns([1, 1, 1, 1])
     with top_cols[0]:
         if st.button("← 返回主控台", use_container_width=True):
-            st.session_state.view = "main"
+            set_view("main")
             st.rerun()
+
     with top_cols[1]:
-        if st.button("🔄 重新讀取資料", use_container_width=True):
-            st.rerun()
+        if st.button("🔄 更新業績報表", use_container_width=True):
+            try:
+                add_log("開始更新業績報表", "info")
+                run_script("tools/scheduled_daily/performance_report.py")
+                add_log("業績報表更新完成", "success")
+                st.rerun()
+            except Exception as e:
+                add_log(f"業績報表更新失敗：{e}", "error")
+                st.error(f"業績報表更新失敗：{e}")
+
     with top_cols[2]:
-        if st.button("🧰 回主控台執行更新", use_container_width=True):
-            st.session_state.view = "main"
-            st.session_state.selected_system_name = "日排程系統"
+        if st.button("📂 重新讀取資料", use_container_width=True):
             st.rerun()
+
     with top_cols[3]:
-        st.write("")
+        try:
+            st.link_button("🔗 開啟獨立連結", "?view=performance_dashboard", use_container_width=True)
+        except Exception:
+            st.caption("網址加上 ?view=performance_dashboard 可直接開啟此頁")
 
     if not df4_path.exists():
         st.info("尚未產生業績報表資料，請先在主控台執行「日排程系統 → 業績報表」。")
@@ -642,7 +673,7 @@ q1, q2 = st.columns([1, 2])
 
 with q1:
     if st.button("📊 查看業績報表", use_container_width=True):
-        st.session_state.view = "performance_dashboard"
+        set_view("performance_dashboard")
         st.rerun()
 
 with q2:
