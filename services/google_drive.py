@@ -1,257 +1,313 @@
+"""
+services/google_drive.py
+
+Google Drive Service
+- 找資料夾
+- 建立資料夾
+- 搜尋檔案
+- 複製檔案
+- xlsx/xls/csv 轉 Google Sheet
+- 同名 Google Sheet 覆蓋：先移到垃圾桶，再重新轉檔
+
+注意：
+- 需要 Google Drive API v3
+- Service Account 需要對根目錄與檔案有編輯權限
+"""
+
 from __future__ import annotations
 
-import io
-import os
-import re
-from typing import Iterable, Optional
-
-from googleapiclient.http import (
-    MediaFileUpload,
-    MediaIoBaseDownload,
-    MediaIoBaseUpload,
-)
-
-GOOGLE_SHEETS_MIME = "application/vnd.google-apps.spreadsheet"
-FOLDER_MIME = "application/vnd.google-apps.folder"
-SUPPORTED_SOURCE_EXTENSIONS = (".xls", ".xlsx", ".csv")
+import time
+from typing import Any, Dict, List, Optional
 
 
-def q_escape(value: str) -> str:
-    return value.replace("'", "\\'")
+GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+
+EXCEL_MIMES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "text/csv",
+    "application/csv",
+}
 
 
 class DriveService:
-    def __init__(self, drive):
-        self.drive = drive
+    def __init__(self, service):
+        self.service = service
 
-    def get_or_create_folder(self, parent_id: str, name: str) -> dict:
-        q = (
-            f"'{q_escape(parent_id)}' in parents and "
-            f"mimeType='{FOLDER_MIME}' and "
-            f"name='{q_escape(name)}' and trashed=false"
+    # ============================================================
+    # 基礎工具
+    # ============================================================
+    def _escape_query_value(self, value: str) -> str:
+        return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+    def _execute(self, request):
+        return request.execute()
+
+    # ============================================================
+    # Folder
+    # ============================================================
+    def get_file(self, file_id: str) -> Dict[str, Any]:
+        return (
+            self.service.files()
+            .get(
+                fileId=file_id,
+                fields="id,name,mimeType,webViewLink,parents",
+                supportsAllDrives=True,
+            )
+            .execute()
         )
 
-        res = self.drive.files().list(
-            q=q,
-            fields="files(id,name,mimeType,webViewLink)",
-            pageSize=10,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-        ).execute()
-
-        files = res.get("files", [])
-        if files:
-            return files[0]
-
-        meta = {
-            "name": name,
-            "mimeType": FOLDER_MIME,
-            "parents": [parent_id],
-        }
-
-        return self.drive.files().create(
-            body=meta,
-            fields="id,name,mimeType,webViewLink",
-            supportsAllDrives=True,
-        ).execute()
-
-    def list_files(self, folder_id: str) -> list[dict]:
-        files: list[dict] = []
-        token = None
+    def list_children(self, folder_id: str) -> List[Dict[str, Any]]:
+        files: List[Dict[str, Any]] = []
+        page_token: Optional[str] = None
 
         while True:
-            res = self.drive.files().list(
-                q=f"'{q_escape(folder_id)}' in parents and trashed=false",
-                fields="nextPageToken,files(id,name,mimeType,webViewLink,size)",
-                pageSize=1000,
-                pageToken=token,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
-            ).execute()
-
+            res = (
+                self.service.files()
+                .list(
+                    q=f"'{folder_id}' in parents and trashed = false",
+                    fields="nextPageToken, files(id,name,mimeType,webViewLink,parents)",
+                    pageToken=page_token,
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                    pageSize=1000,
+                )
+                .execute()
+            )
             files.extend(res.get("files", []))
-            token = res.get("nextPageToken")
-
-            if not token:
+            page_token = res.get("nextPageToken")
+            if not page_token:
                 break
 
         return files
 
-    def find_files_by_name(self, folder_id: str, name: str) -> list[dict]:
+    def find_folder(self, parent_folder_id: str, folder_name: str) -> Optional[Dict[str, Any]]:
+        folder_name = self._escape_query_value(folder_name)
         q = (
-            f"'{q_escape(folder_id)}' in parents and "
-            f"name='{q_escape(name)}' and trashed=false"
+            f"'{parent_folder_id}' in parents and "
+            f"name = '{folder_name}' and "
+            f"mimeType = 'application/vnd.google-apps.folder' and "
+            f"trashed = false"
         )
 
-        res = self.drive.files().list(
-            q=q,
-            fields="files(id,name,mimeType,webViewLink)",
-            pageSize=20,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-        ).execute()
+        res = (
+            self.service.files()
+            .list(
+                q=q,
+                fields="files(id,name,mimeType,webViewLink)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageSize=10,
+            )
+            .execute()
+        )
+
+        files = res.get("files", [])
+        return files[0] if files else None
+
+    def get_or_create_folder(self, parent_folder_id: str, folder_name: str) -> Dict[str, Any]:
+        existing = self.find_folder(parent_folder_id, folder_name)
+        if existing:
+            return existing
+
+        body = {
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_folder_id],
+        }
+
+        return (
+            self.service.files()
+            .create(
+                body=body,
+                fields="id,name,mimeType,webViewLink",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+
+    # ============================================================
+    # File search
+    # ============================================================
+    def find_files_by_name(
+        self,
+        folder_id: str,
+        file_name: str,
+        mime_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        safe_name = self._escape_query_value(file_name)
+
+        q = (
+            f"'{folder_id}' in parents and "
+            f"name = '{safe_name}' and "
+            f"trashed = false"
+        )
+
+        if mime_type:
+            q += f" and mimeType = '{mime_type}'"
+
+        res = (
+            self.service.files()
+            .list(
+                q=q,
+                fields="files(id,name,mimeType,webViewLink,parents)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageSize=100,
+            )
+            .execute()
+        )
 
         return res.get("files", [])
 
-    def find_file_contains(
-        self,
-        folder_id: str,
-        keywords: Iterable[str],
-    ) -> Optional[dict]:
-        keys = [k for k in keywords if k]
+    def find_google_sheet_by_name(self, folder_id: str, file_name: str) -> List[Dict[str, Any]]:
+        return self.find_files_by_name(
+            folder_id=folder_id,
+            file_name=file_name,
+            mime_type=GOOGLE_SHEET_MIME,
+        )
 
-        for file in self.list_files(folder_id):
-            name = file["name"]
+    # ============================================================
+    # Trash / delete
+    # ============================================================
+    def trash_file(self, file_id: str) -> Dict[str, Any]:
+        return (
+            self.service.files()
+            .update(
+                fileId=file_id,
+                body={"trashed": True},
+                fields="id,name,trashed",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
 
-            if all(k in name for k in keys):
-                return file
+    def trash_google_sheet_by_name(self, folder_id: str, file_name: str) -> int:
+        """
+        將指定資料夾內，同名 Google Sheet 全部移到垃圾桶。
+        用於轉檔覆蓋：
+        - 若 202604儲值金結算-台北 Google Sheet 已存在
+        - 先 trash 舊檔
+        - 再由 xlsx 重新轉成同名 Google Sheet
+        """
+        files = self.find_google_sheet_by_name(folder_id, file_name)
 
-        return None
+        count = 0
+        for file in files:
+            self.trash_file(file["id"])
+            count += 1
+            time.sleep(0.2)
 
-    def copy_file(
-        self,
-        file_id: str,
-        new_name: str,
-        parent_folder_id: str,
-    ) -> dict:
-        meta = {
+        return count
+
+    # ============================================================
+    # Copy / convert
+    # ============================================================
+    def copy_file(self, file_id: str, new_name: str, parent_folder_id: str) -> Dict[str, Any]:
+        body = {
             "name": new_name,
             "parents": [parent_folder_id],
         }
 
-        return self.drive.files().copy(
-            fileId=file_id,
-            body=meta,
-            fields="id,name,mimeType,webViewLink",
-            supportsAllDrives=True,
-        ).execute()
-
-    def create_blank_spreadsheet_in_folder(
-        self,
-        name: str,
-        folder_id: str,
-    ) -> dict:
-        meta = {
-            "name": name,
-            "mimeType": GOOGLE_SHEETS_MIME,
-            "parents": [folder_id],
-        }
-
-        return self.drive.files().create(
-            body=meta,
-            fields="id,name,mimeType,webViewLink",
-            supportsAllDrives=True,
-        ).execute()
-
-    def trash_duplicates_named_google_sheet(
-        self,
-        folder_id: str,
-        base_name: str,
-    ) -> None:
-        for file in self.find_files_by_name(folder_id, base_name):
-            if file.get("mimeType") == GOOGLE_SHEETS_MIME:
-                self.drive.files().update(
-                    fileId=file["id"],
-                    body={"trashed": True},
+        try:
+            return (
+                self.service.files()
+                .copy(
+                    fileId=file_id,
+                    body=body,
+                    fields="id,name,mimeType,webViewLink",
                     supportsAllDrives=True,
-                ).execute()
+                )
+                .execute()
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"複製檔案失敗：file_id={file_id}, "
+                f"new_name={new_name}, "
+                f"parent_folder_id={parent_folder_id}, "
+                f"error={e}"
+            ) from e
 
-    def download_file_bytes(self, file_id: str) -> bytes:
-        request = self.drive.files().get_media(fileId=file_id)
-        buf = io.BytesIO()
-
-        downloader = MediaIoBaseDownload(buf, request)
-        done = False
-
-        while not done:
-            _, done = downloader.next_chunk()
-
-        return buf.getvalue()
-
-    def upload_bytes_as_google_sheet(
+    def convert_to_google_sheet(
         self,
-        content: bytes,
-        name: str,
-        folder_id: str,
-        mime_type: str,
-    ) -> dict:
-        media = MediaIoBaseUpload(
-            io.BytesIO(content),
-            mimetype=mime_type,
-            resumable=True,
-        )
-
-        meta = {
-            "name": name,
-            "mimeType": GOOGLE_SHEETS_MIME,
-            "parents": [folder_id],
+        source_file_id: str,
+        new_name: str,
+        parent_folder_id: str,
+    ) -> Dict[str, Any]:
+        """
+        將 xlsx/xls/csv 轉成 Google Sheet。
+        """
+        body = {
+            "name": new_name,
+            "mimeType": GOOGLE_SHEET_MIME,
+            "parents": [parent_folder_id],
         }
 
-        return self.drive.files().create(
-            body=meta,
-            media_body=media,
-            fields="id,name,mimeType,webViewLink",
-            supportsAllDrives=True,
-        ).execute()
+        try:
+            return (
+                self.service.files()
+                .copy(
+                    fileId=source_file_id,
+                    body=body,
+                    fields="id,name,mimeType,webViewLink",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"轉檔失敗：source_file_id={source_file_id}, "
+                f"new_name={new_name}, "
+                f"parent_folder_id={parent_folder_id}, "
+                f"error={e}"
+            ) from e
 
-    def upload_file(
+    def replace_google_sheet_from_source(
         self,
-        local_path: str,
-        folder_id: str,
-    ) -> dict:
-        meta = {
-            "name": os.path.basename(local_path),
-            "parents": [folder_id],
-        }
-
-        media = MediaFileUpload(
-            local_path,
-            resumable=True,
+        source_file_id: str,
+        source_name: str,
+        parent_folder_id: str,
+    ) -> Dict[str, Any]:
+        """
+        覆蓋式轉檔：
+        1. 用來源檔名去掉 .xlsx/.xls/.csv 得到 base_name
+        2. 刪除同名 Google Sheet
+        3. 重新轉檔
+        """
+        base_name = strip_spreadsheet_extension(source_name)
+        trashed_count = self.trash_google_sheet_by_name(parent_folder_id, base_name)
+        converted = self.convert_to_google_sheet(
+            source_file_id=source_file_id,
+            new_name=base_name,
+            parent_folder_id=parent_folder_id,
         )
+        converted["replaced_count"] = trashed_count
+        return converted
 
-        return self.drive.files().create(
-            body=meta,
-            media_body=media,
-            fields="id,name,mimeType,webViewLink",
-            supportsAllDrives=True,
-        ).execute()
 
-    def ensure_google_sheet(
-        self,
-        file: dict,
-        target_folder_id: str,
-    ) -> dict:
-        name = file["name"]
+def strip_spreadsheet_extension(name: str) -> str:
+    lower = name.lower()
+    for ext in [".xlsx", ".xls", ".csv"]:
+        if lower.endswith(ext):
+            return name[: -len(ext)]
+    return name
 
-        if file["mimeType"] == GOOGLE_SHEETS_MIME:
-            return file
 
-        base_name = re.sub(
-            r"\.(xls|xlsx|csv)$",
-            "",
-            name,
-            flags=re.I,
-        )
+def is_source_spreadsheet_file(file: Dict[str, Any]) -> bool:
+    """
+    判斷是不是需要轉檔的來源檔。
+    只處理 xlsx/xls/csv，不把已轉好的 Google Sheet 再當來源。
+    """
+    name = file.get("name", "").lower()
+    mime_type = file.get("mimeType", "")
 
-        if not name.lower().endswith(SUPPORTED_SOURCE_EXTENSIONS):
-            raise ValueError(f"不支援的檔案格式：{name}")
+    if mime_type == GOOGLE_SHEET_MIME:
+        return False
 
-        self.trash_duplicates_named_google_sheet(
-            target_folder_id,
-            base_name,
-        )
+    if name.endswith((".xlsx", ".xls", ".csv")):
+        return True
 
-        mime_type = (
-            "text/csv"
-            if name.lower().endswith(".csv")
-            else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    if mime_type in EXCEL_MIMES:
+        return True
 
-        content = self.download_file_bytes(file["id"])
-
-        return self.upload_bytes_as_google_sheet(
-            content=content,
-            name=base_name,
-            folder_id=target_folder_id,
-            mime_type=mime_type,
-        )
+    return False
