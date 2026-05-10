@@ -774,8 +774,11 @@ if run_clicked:
 
                 if not script:
                     raise RuntimeError(f"找不到日排程功能：{selected_function}")
-
-                result = run_script(script, ["--folder-id", folder_id])
+        
+                if selected_function == "業績報表":
+                    result = run_script(script)
+                else:
+                    result = run_script(script, ["--folder-id", folder_id])
 
         elif system_type == "monthly_scheduler":
             if selected_function == "一鍵執行月排程":
