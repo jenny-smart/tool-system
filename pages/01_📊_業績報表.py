@@ -54,6 +54,17 @@ next_month_df = load_csv(NEXT_MONTH_PATH)
 
 if df4.empty:
     st.info("尚未產生業績報表資料")
+
+    st.markdown(
+        """
+請先回到：
+
+- ⚙️ 主控台
+- 日排程系統
+- 執行「業績報表」
+"""
+    )
+
     st.stop()
 
 st.subheader("各區業績總覽")
@@ -85,6 +96,11 @@ st.subheader("Email 預覽")
 
 if EMAIL_HTML_PATH.exists():
     html = EMAIL_HTML_PATH.read_text(encoding="utf-8")
-    st.components.v1.html(html, height=500, scrolling=True)
+
+    st.components.v1.html(
+        html,
+        height=600,
+        scrolling=True,
+    )
 else:
     st.info("尚無 Email HTML")
