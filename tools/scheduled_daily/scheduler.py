@@ -46,13 +46,28 @@ def run_job(job: dict) -> str:
         raise FileNotFoundError(f"找不到檔案：{script}")
 
     print(f"開始執行：{name}")
-    subprocess.run(
-        [sys.executable, str(script), *args],
-        check=True,
-        cwd=BASE_DIR,
-    )
-    print(f"完成：{name}")
 
+    result = subprocess.run(
+        [sys.executable, str(script), *args],
+        cwd=BASE_DIR,
+        text=True,
+        capture_output=True,
+    )
+
+    if result.stdout:
+        print(result.stdout)
+
+    if result.stderr:
+        print(result.stderr)
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{name} 執行失敗，exit={result.returncode}\n"
+            f"STDOUT:\n{result.stdout}\n\n"
+            f"STDERR:\n{result.stderr}"
+        )
+
+    print(f"完成：{name}")
     return f"{name} 執行完成"
 
 
