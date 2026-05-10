@@ -683,9 +683,10 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
 # 執行邏輯
 # ═══════════════════════════════════════════════════════════
 if run_clicked:
-    if not period:
-        add_log("請先輸入執行期別", "error")
-        st.rerun()
+    if system_type in ["vip", "monthly_scheduler"]:
+        if not period:
+            add_log("請先輸入執行期別", "error")
+            st.rerun()
 
     if not selected_system:
         add_log("請先新增或啟用系統設定", "error")
