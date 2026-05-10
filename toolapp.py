@@ -35,13 +35,6 @@ CONFIG_PATH = Path("config/systems.yaml")
 DEFAULT_CONFIG = {
     "systems": [
         {
-            "name": "儲值金管理",
-            "type": "vip",
-            "master_spreadsheet_id": "",
-            "folder_id": "",
-            "enabled": True,
-        },
-        {
             "name": "日排程系統",
             "type": "daily_scheduler",
             "master_spreadsheet_id": "",
@@ -55,6 +48,14 @@ DEFAULT_CONFIG = {
             "folder_id": "",
             "enabled": True,
         },
+        {
+            "name": "儲值金管理",
+            "type": "vip",
+            "master_spreadsheet_id": "",
+            "folder_id": "",
+            "enabled": True,
+        },
+        
     ]
 }
 
