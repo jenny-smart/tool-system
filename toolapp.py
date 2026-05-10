@@ -27,9 +27,6 @@ st.set_page_config(
 )
 
 
-# ═══════════════════════════════════════════════════════════
-# 設定檔讀寫
-# ═══════════════════════════════════════════════════════════
 CONFIG_PATH = Path("config/systems.yaml")
 
 DEFAULT_CONFIG = {
@@ -38,21 +35,21 @@ DEFAULT_CONFIG = {
             "name": "儲值金管理",
             "type": "vip",
             "master_spreadsheet_id": "",
-            "root_folder_id": "",
+            "folder_id": "",
             "enabled": True,
         },
         {
             "name": "日排程系統",
             "type": "daily_scheduler",
             "master_spreadsheet_id": "",
-            "root_folder_id": "",
+            "folder_id": "",
             "enabled": True,
         },
         {
             "name": "月排程系統",
             "type": "monthly_scheduler",
             "master_spreadsheet_id": "",
-            "root_folder_id": "",
+            "folder_id": "",
             "enabled": True,
         },
     ]
@@ -72,15 +69,27 @@ def ensure_config_file() -> None:
         save_config(DEFAULT_CONFIG)
 
 
+def normalize_config(data: dict) -> dict:
+    if "systems" not in data or not isinstance(data["systems"], list):
+        return DEFAULT_CONFIG
+
+    for sys_cfg in data["systems"]:
+        if "folder_id" not in sys_cfg:
+            sys_cfg["folder_id"] = sys_cfg.get("root_folder_id", "")
+        if "master_spreadsheet_id" not in sys_cfg:
+            sys_cfg["master_spreadsheet_id"] = ""
+        if "enabled" not in sys_cfg:
+            sys_cfg["enabled"] = True
+
+    return data
+
+
 def load_config() -> dict:
     ensure_config_file()
     with CONFIG_PATH.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
-    if "systems" not in data or not isinstance(data["systems"], list):
-        data = DEFAULT_CONFIG
-        save_config(data)
-
+    data = normalize_config(data)
     return data
 
 
@@ -93,17 +102,14 @@ def get_secret_text(key: str, default: str = "") -> str:
 
 def merge_legacy_secrets(cfg: dict) -> dict:
     legacy_master = get_secret_text("MASTER_SPREADSHEET_ID")
-    legacy_root = get_secret_text("ROOT_FOLDER_ID")
-
-    if not legacy_master and not legacy_root:
-        return cfg
+    legacy_folder = get_secret_text("ROOT_FOLDER_ID")
 
     for sys_cfg in cfg.get("systems", []):
         if sys_cfg.get("name") == "儲值金管理":
             if legacy_master and not sys_cfg.get("master_spreadsheet_id"):
                 sys_cfg["master_spreadsheet_id"] = legacy_master
-            if legacy_root and not sys_cfg.get("root_folder_id"):
-                sys_cfg["root_folder_id"] = legacy_root
+            if legacy_folder and not sys_cfg.get("folder_id"):
+                sys_cfg["folder_id"] = legacy_folder
             break
 
     return cfg
@@ -122,9 +128,6 @@ def get_system_by_name(cfg: dict, name: str) -> dict:
     return {}
 
 
-# ═══════════════════════════════════════════════════════════
-# UI 樣式
-# ═══════════════════════════════════════════════════════════
 st.markdown(
     """
 <style>
@@ -260,9 +263,6 @@ st.markdown(
 )
 
 
-# ═══════════════════════════════════════════════════════════
-# Session State
-# ═══════════════════════════════════════════════════════════
 if "logs" not in st.session_state:
     st.session_state.logs = ["[--:--:--] 系統已就緒，請選擇作業..."]
 
@@ -276,9 +276,6 @@ if "editing_system" not in st.session_state:
     st.session_state.editing_system = None
 
 
-# ═══════════════════════════════════════════════════════════
-# 工具函式
-# ═══════════════════════════════════════════════════════════
 def tw_now_text(fmt: str = "%H:%M:%S") -> str:
     return datetime.now(TW_TZ).strftime(fmt)
 
@@ -309,7 +306,6 @@ def render_log() -> None:
 
     for entry in reversed(st.session_state.logs):
         css = "log-entry"
-
         if "✅" in entry:
             css += " success"
         elif "❌" in entry:
@@ -340,7 +336,7 @@ def get_system_type_label(system_type: str) -> str:
     return mapping.get(system_type, system_type or "未設定")
 
 
-def build_vip_workflow(master_id: str, root_id: str, system_name: str):
+def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
     from services.auth import get_gspread_client, get_drive_service
     from services.google_drive import DriveService
     from services.google_sheets import SheetsService
@@ -354,7 +350,7 @@ def build_vip_workflow(master_id: str, root_id: str, system_name: str):
             drive,
             sheets,
             master_id,
-            root_id,
+            folder_id,
             system_name,
         )
     except TypeError:
@@ -362,13 +358,12 @@ def build_vip_workflow(master_id: str, root_id: str, system_name: str):
             drive,
             sheets,
             master_id,
-            root_id,
+            folder_id,
         )
 
 
 def run_script(script_path: str, args: list[str] | None = None) -> str:
     args = args or []
-
     cmd = [sys.executable, script_path, *args]
 
     completed = subprocess.run(
@@ -395,9 +390,6 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
     return f"{script_path} 執行完成"
 
 
-# ═══════════════════════════════════════════════════════════
-# 系統 / 功能設定
-# ═══════════════════════════════════════════════════════════
 SYSTEM_FUNCTIONS_BY_TYPE = {
     "vip": [
         "建立當月彙整檔",
@@ -457,18 +449,12 @@ if not system_names:
     system_names = ["儲值金管理"]
 
 
-# ═══════════════════════════════════════════════════════════
-# UI — 主標題
-# ═══════════════════════════════════════════════════════════
 st.markdown(
     '<div class="app-title">🧰 Tools App 作業系統</div>',
     unsafe_allow_html=True,
 )
 
 
-# ═══════════════════════════════════════════════════════════
-# UI — 執行設定
-# ═══════════════════════════════════════════════════════════
 st.markdown(
     '<div class="card"><div class="card-title">⚙️ 執行設定</div>',
     unsafe_allow_html=True,
@@ -541,9 +527,6 @@ run_clicked = st.button("▶ 執行", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════
-# UI — 日誌
-# ═══════════════════════════════════════════════════════════
 render_log()
 
 clear_col, _ = st.columns([1, 3])
@@ -554,14 +537,11 @@ with clear_col:
         st.rerun()
 
 
-# ═══════════════════════════════════════════════════════════
-# UI — 設定檔管理
-# ═══════════════════════════════════════════════════════════
 with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expanded=False):
     st.markdown(
         """
 <div class="setting-note">
-可在這裡新增 / 編輯不同系統對應的主控表 ID 與根目錄 ID。
+可在這裡新增 / 編輯不同系統對應的主控表 ID 與共用雲端資料夾 ID。
 Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
 系統設定會存到 <code>config/systems.yaml</code>。
 </div>
@@ -570,6 +550,7 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
     )
 
     add_col, _ = st.columns([1, 3])
+
     with add_col:
         if st.button("➕ 新增系統", use_container_width=True):
             st.session_state.adding_system = True
@@ -580,19 +561,21 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
         with st.form("add_system_form"):
             st.markdown("**新增系統設定**")
 
-            new_name = st.text_input("設定系統名稱", placeholder="例如：儲值金管理")
+            new_name = st.text_input("設定系統名稱", placeholder="例如：日排程系統")
             new_type = st.selectbox(
                 "設定系統類型",
                 ["vip", "daily_scheduler", "monthly_scheduler"],
                 format_func=get_system_type_label,
             )
             new_master_id = st.text_input("設定主控表 ID")
-            new_root_id = st.text_input("設定根目錄 ID")
+            new_folder_id = st.text_input("設定共用雲端資料夾 ID")
             new_enabled = st.checkbox("啟用", value=True)
 
             f1, f2 = st.columns(2)
+
             with f1:
                 submit_add = st.form_submit_button("💾 儲存", use_container_width=True)
+
             with f2:
                 cancel_add = st.form_submit_button("✕ 取消", use_container_width=True)
 
@@ -609,7 +592,7 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                             "name": new_name,
                             "type": new_type,
                             "master_spreadsheet_id": new_master_id,
-                            "root_folder_id": new_root_id,
+                            "folder_id": new_folder_id,
                             "enabled": new_enabled,
                         }
                     )
@@ -627,11 +610,12 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
         name = sys_cfg.get("name", f"系統{i + 1}")
         current_type = sys_cfg.get("type", "vip")
         master_id = sys_cfg.get("master_spreadsheet_id", "")
-        root_id = sys_cfg.get("root_folder_id", "")
+        folder_id = sys_cfg.get("folder_id", "")
         enabled = sys_cfg.get("enabled", True)
 
-        needs_ids = current_type == "vip"
-        complete = bool(name and (not needs_ids or (master_id and root_id)))
+        needs_master_id = current_type == "vip"
+        complete = bool(name and folder_id and (not needs_master_id or master_id))
+
         badge = (
             '<span class="badge-ok">已設定</span>'
             if complete
@@ -654,12 +638,14 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                     format_func=get_system_type_label,
                 )
                 e_master_id = st.text_input("設定主控表 ID", value=master_id)
-                e_root_id = st.text_input("設定根目錄 ID", value=root_id)
+                e_folder_id = st.text_input("設定共用雲端資料夾 ID", value=folder_id)
                 e_enabled = st.checkbox("啟用", value=enabled)
 
                 e1, e2 = st.columns(2)
+
                 with e1:
                     save_edit = st.form_submit_button("💾 儲存", use_container_width=True)
+
                 with e2:
                     cancel_edit = st.form_submit_button("✕ 取消", use_container_width=True)
 
@@ -671,7 +657,7 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                             "name": e_name,
                             "type": e_type,
                             "master_spreadsheet_id": e_master_id,
-                            "root_folder_id": e_root_id,
+                            "folder_id": e_folder_id,
                             "enabled": e_enabled,
                         }
                         save_config(config)
@@ -694,13 +680,14 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
   <div class="detail-row"><strong>系統類型</strong>：{get_system_type_label(current_type)}</div>
   <div class="detail-row"><strong>狀態</strong>：{enabled_text}</div>
   <div class="detail-row"><strong>主控表 ID</strong>：{mask_id(master_id)}</div>
-  <div class="detail-row"><strong>根目錄 ID</strong>：{mask_id(root_id)}</div>
+  <div class="detail-row"><strong>共用雲端資料夾 ID</strong>：{mask_id(folder_id)}</div>
 </div>
 """,
                 unsafe_allow_html=True,
             )
 
             _, b2, b3 = st.columns([2, 1, 1])
+
             with b2:
                 if st.button("📝 編輯", key=f"edit_system_{i}", use_container_width=True):
                     st.session_state.editing_system = name
@@ -715,9 +702,6 @@ Service Account 憑證仍放在 <code>.streamlit/secrets.toml</code>。
                     st.rerun()
 
 
-# ═══════════════════════════════════════════════════════════
-# 執行邏輯
-# ═══════════════════════════════════════════════════════════
 if run_clicked:
     if not selected_system:
         add_log("請先新增或啟用系統設定", "error")
@@ -725,12 +709,16 @@ if run_clicked:
 
     system_type = selected_system.get("type", "vip")
     master_id = selected_system.get("master_spreadsheet_id", "")
-    root_id = selected_system.get("root_folder_id", "")
+    folder_id = selected_system.get("folder_id", "")
 
     if system_type in ["vip", "monthly_scheduler"]:
         if not period:
             add_log("請先輸入執行期別", "error")
             st.rerun()
+
+    if system_type in ["vip", "daily_scheduler", "monthly_scheduler"] and not folder_id:
+        add_log("尚未設定共用雲端資料夾 ID", "error")
+        st.rerun()
 
     add_log(f"開始執行：{system_name} / {selected_function} / 期別 {period}")
 
@@ -742,13 +730,9 @@ if run_clicked:
                 add_log("尚未設定主控表 ID", "error")
                 st.rerun()
 
-            if not root_id:
-                add_log("尚未設定根目錄 ID", "error")
-                st.rerun()
-
             workflow = build_vip_workflow(
                 master_id=master_id,
-                root_id=root_id,
+                folder_id=folder_id,
                 system_name=system_name,
             )
 
@@ -783,7 +767,7 @@ if run_clicked:
             if selected_function == "一鍵執行日排程":
                 from tools.scheduled_daily.scheduler import main as run_daily_scheduler
 
-                result = run_daily_scheduler()
+                result = run_daily_scheduler(folder_id=folder_id)
 
             else:
                 script = DAILY_SCRIPT_MAP.get(selected_function)
@@ -791,13 +775,13 @@ if run_clicked:
                 if not script:
                     raise RuntimeError(f"找不到日排程功能：{selected_function}")
 
-                result = run_script(script)
+                result = run_script(script, ["--folder-id", folder_id])
 
         elif system_type == "monthly_scheduler":
             if selected_function == "一鍵執行月排程":
                 from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
 
-                result = run_monthly_scheduler()
+                result = run_monthly_scheduler(folder_id=folder_id)
 
             else:
                 cmd = MONTHLY_SCRIPT_MAP.get(selected_function)
@@ -807,8 +791,7 @@ if run_clicked:
 
                 script = cmd[0]
                 args = cmd[1:]
-
-                result = run_script(script, args)
+                result = run_script(script, [*args, "--folder-id", folder_id])
 
         else:
             add_log(f"{system_type} 尚未實作", "warning")
