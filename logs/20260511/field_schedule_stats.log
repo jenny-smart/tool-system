@@ -1,8 +1,19 @@
+[2026-05-11 13:10:46] 開始執行：schedule_stats
+[2026-05-11 13:10:46] 執行失敗：schedule_stats / systems.yaml 找不到系統：外場日排程系統
+Traceback (most recent call last):
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 26, in run_job
+    JOBS[job_name](date_key=date_key, area=area, system_name=system_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 370, in main
+    cfg = load_system_config(system_name)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 129, in load_system_config
+    raise RuntimeError(f"systems.yaml 找不到系統：{system_name}")
+RuntimeError: systems.yaml 找不到系統：外場日排程系統
 Traceback (most recent call last):
   File "<frozen runpy>", line 198, in _run_module_as_main
   File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 6, in <module>
-    from tools.field_management.schedule_stats import main as run_schedule_stats, today_yyyymmdd, log
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 15, in <module>
-    from google_sheet_reader import read_drive_spreadsheet_values
-ModuleNotFoundError: No module named 'google_sheet_reader'
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 53, in <module>
+    main(args.target, args.date, args.area or None, args.system_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 41, in main
+    raise RuntimeError(f"外場日排程有失敗項目：{failed}")
+RuntimeError: 外場日排程有失敗項目：[{'job': 'schedule_stats', 'status': 'failed', 'message': 'systems.yaml 找不到系統：外場日排程系統'}]
