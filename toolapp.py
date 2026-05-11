@@ -1646,38 +1646,33 @@ with area_col:
 
     area_options = available_areas_for_system(selected_system)
 
-    if len(area_options) <= 1:
-        selected_areas = area_options
-        st.selectbox(
-            "執行區域",
-            area_options,
-            index=0,
-            label_visibility="collapsed",
-            key="area_single",
-            disabled=True,
-        )
+    # 月排程如果設定檔還沒有 areas，就用預設地區。
+    # 這樣上下半月訂單一定可以選單一地區，不會被鎖住。
+    if system_type == "monthly_scheduler" and (not area_options or area_options == ["全區"]):
+        area_options = ["台北", "新北", "台中", "桃園", "新竹", "高雄"]
+
+    if not area_options:
+        area_options = ["全區"]
+
+    area_select_options = ["全區"] + [area for area in area_options if area != "全區"]
+
+    selected_area_value = st.selectbox(
+        "執行區域",
+        area_select_options,
+        index=0,
+        label_visibility="collapsed",
+        key=f"area_select_{system_name}_{selected_function}",
+    )
+
+    # selected_areas 一律只放使用者目前選到的值。
+    # 全區 -> 後面轉成 --area all
+    # 台北 -> 後面轉成 --area 台北
+    selected_areas = [selected_area_value]
+
+    if selected_area_value == "全區":
+        st.caption("將執行全部已啟用地區")
     else:
-        area_mode = st.selectbox(
-            "執行區域",
-            ["全區", "自選區域"],
-            label_visibility="collapsed",
-            key="area_mode",
-        )
-
-        if area_mode == "全區":
-            selected_areas = area_options
-            st.caption("將執行全部區域")
-        else:
-            selected_areas = st.multiselect(
-                "選擇區域",
-                area_options,
-                default=area_options,
-                label_visibility="collapsed",
-                key="selected_areas",
-            )
-
-            if not selected_areas:
-                st.warning("請至少選擇一個區域")
+        st.caption(f"只執行：{selected_area_value}")
 
 run_clicked = st.button("▶ 執行", use_container_width=True)
 
@@ -2124,7 +2119,9 @@ if run_clicked:
 
                         args.extend(["--folder-id", folder_id])
 
-                        if area_name != "全區":
+                        if area_name == "全區":
+                            args.extend(["--area", "all"])
+                        else:
                             args.extend(["--area", area_name])
 
                         add_log(f"月排程執行：{selected_function} / {period or '日期區間'} / {area_name}")
