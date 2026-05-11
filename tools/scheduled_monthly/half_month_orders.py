@@ -1,9 +1,17 @@
-import os
-import sys
+from __future__ import annotations
+
+import argparse
 import calendar
+import json
+import os
+import shutil
+import sys
 import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import requests
@@ -22,55 +30,188 @@ HEADERS = {
 }
 
 TZ = timezone(timedelta(hours=8))
-
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-# 👉 這裡填「上下半月訂單」主資料夾 ID
-ROOT_FOLDER_ID = "1VCb_y-zBA7tm9SF1s7GeixZVweWteWIc"
+# fallback：若未傳 --folder-id，才使用這個預設總根目錄 ID
+DEFAULT_ROOT_FOLDER_ID = "1VCb_y-zBA7tm9SF1s7GeixZVweWteWIc"
+
+DEFAULT_AREA_FOLDERS = {
+    "台北": "01.台北專員",
+    "新北": "01.台北專員",
+    "台中": "02.台中專員",
+    "桃園": "03.桃園專員",
+    "新竹": "04.新竹專員",
+    "高雄": "05.高雄專員",
+}
+
+# 高雄帳號會抓「高雄＋台南」合併成高雄檔。
+KAOHSIUNG_MERGE_REGIONS = ["高雄", "台南"]
 
 
-def load_accounts():
-    return {
+@dataclass
+class RunArgs:
+    half: str | None
+    period: str | None
+    start: str | None
+    end: str | None
+    area: str
+    folder_id: str
+    area_folder_id: str | None
+    snapshot_dir: str
+    skip_snapshot: bool
+
+
+def log(message: str) -> None:
+    print(message, flush=True)
+
+
+def tw_now() -> datetime:
+    return datetime.now(TZ)
+
+
+def normalize_area(area: str | None) -> str:
+    value = str(area or "all").strip()
+    if value in ["", "全區", "全部", "ALL", "All"]:
+        return "all"
+    return value
+
+
+def parse_args() -> RunArgs:
+    parser = argparse.ArgumentParser(description="上下半月訂單下載與上傳")
+
+    # 舊版相容：python half_month_orders.py 1
+    parser.add_argument(
+        "legacy_half",
+        nargs="?",
+        choices=["1", "2"],
+        help="舊版相容參數：1=上半月、2=下半月",
+    )
+
+    parser.add_argument("--half", choices=["1", "2"], default=None)
+    parser.add_argument("--period", default="", help="例如：202605-1 或 202605-2")
+    parser.add_argument("--start", default="", help="日期區間開始，例如：2026-05-01")
+    parser.add_argument("--end", default="", help="日期區間結束，例如：2026-05-15")
+    parser.add_argument("--area", default="all", help="地區，例如：台北 / 新北 / 台中 / all")
+    parser.add_argument("--folder-id", default="", help="月排程總根目錄 ID")
+    parser.add_argument("--area-folder-id", default="", help="指定地區根目錄 ID；單區執行時可使用")
+    parser.add_argument("--snapshot-dir", default="snapshots/monthly_orders")
+    parser.add_argument("--skip-snapshot", action="store_true")
+
+    args = parser.parse_args()
+
+    half = args.half or args.legacy_half
+
+    return RunArgs(
+        half=half,
+        period=args.period.strip() or None,
+        start=args.start.strip() or None,
+        end=args.end.strip() or None,
+        area=normalize_area(args.area),
+        folder_id=args.folder_id.strip() or os.getenv("MONTHLY_ORDERS_ROOT_FOLDER_ID", "").strip() or DEFAULT_ROOT_FOLDER_ID,
+        area_folder_id=args.area_folder_id.strip() or None,
+        snapshot_dir=args.snapshot_dir.strip() or "snapshots/monthly_orders",
+        skip_snapshot=bool(args.skip_snapshot),
+    )
+
+
+def load_accounts() -> dict[str, dict[str, str]]:
+    """讀取各區帳號。
+
+    同時支援：
+    1. Streamlit secrets accounts.*
+    2. GitHub/環境變數 TAIPEI_EMAIL / TAIPEI_PASSWORD 等
+    """
+
+    def from_secrets(path: list[str], default: str = "") -> str:
+        try:
+            value: Any = st.secrets
+            for key in path:
+                value = value[key]
+            return str(value)
+        except Exception:
+            return default
+
+    def env(name: str, default: str = "") -> str:
+        return os.getenv(name, default).strip()
+
+    accounts = {
         "台北": {
-            "email": st.secrets["accounts"]["taipei"]["email"],
-            "password": st.secrets["accounts"]["taipei"]["password"],
-            "folder": "01.台北專員",
+            "email": from_secrets(["accounts", "taipei", "email"], env("TAIPEI_EMAIL")),
+            "password": from_secrets(["accounts", "taipei", "password"], env("TAIPEI_PASSWORD")),
+            "folder": DEFAULT_AREA_FOLDERS["台北"],
+        },
+        "新北": {
+            # 新北若沒有獨立帳號，預設沿用台北帳號；可用 NEWTAIPEI_EMAIL / NEWTAIPEI_PASSWORD 覆蓋。
+            "email": from_secrets(["accounts", "newtaipei", "email"], env("NEWTAIPEI_EMAIL", env("TAIPEI_EMAIL"))),
+            "password": from_secrets(["accounts", "newtaipei", "password"], env("NEWTAIPEI_PASSWORD", env("TAIPEI_PASSWORD"))),
+            "folder": DEFAULT_AREA_FOLDERS["新北"],
         },
         "台中": {
-            "email": st.secrets["accounts"]["taichung"]["email"],
-            "password": st.secrets["accounts"]["taichung"]["password"],
-            "folder": "02.台中專員",
+            "email": from_secrets(["accounts", "taichung", "email"], env("TAICHUNG_EMAIL")),
+            "password": from_secrets(["accounts", "taichung", "password"], env("TAICHUNG_PASSWORD")),
+            "folder": DEFAULT_AREA_FOLDERS["台中"],
         },
         "桃園": {
-            "email": st.secrets["accounts"]["taoyuan"]["email"],
-            "password": st.secrets["accounts"]["taoyuan"]["password"],
-            "folder": "03.桃園專員",
+            "email": from_secrets(["accounts", "taoyuan", "email"], env("TAOYUAN_EMAIL")),
+            "password": from_secrets(["accounts", "taoyuan", "password"], env("TAOYUAN_PASSWORD")),
+            "folder": DEFAULT_AREA_FOLDERS["桃園"],
         },
         "新竹": {
-            "email": st.secrets["accounts"]["hsinchu"]["email"],
-            "password": st.secrets["accounts"]["hsinchu"]["password"],
-            "folder": "04.新竹專員",
+            "email": from_secrets(["accounts", "hsinchu", "email"], env("HSINCHU_EMAIL")),
+            "password": from_secrets(["accounts", "hsinchu", "password"], env("HSINCHU_PASSWORD")),
+            "folder": DEFAULT_AREA_FOLDERS["新竹"],
         },
         "高雄": {
-            "email": st.secrets["accounts"]["kaohsiung"]["email"],
-            "password": st.secrets["accounts"]["kaohsiung"]["password"],
-            "folder": "05.高雄專員",
+            "email": from_secrets(["accounts", "kaohsiung", "email"], env("KAOHSIUNG_EMAIL", env("HSINCHU_EMAIL"))),
+            "password": from_secrets(["accounts", "kaohsiung", "password"], env("KAOHSIUNG_PASSWORD", env("HSINCHU_PASSWORD"))),
+            "folder": DEFAULT_AREA_FOLDERS["高雄"],
         },
     }
+
+    return accounts
+
+
+def get_service_account_info() -> dict[str, Any]:
+    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT", "").strip()
+    if raw:
+        return json.loads(raw)
+
+    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if raw_json:
+        return json.loads(raw_json)
+
+    path = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+    if path and Path(path).exists():
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+
+    try:
+        return dict(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
+    except Exception as exc:
+        raise RuntimeError("找不到 GOOGLE_SERVICE_ACCOUNT 設定") from exc
 
 
 def get_drive_service():
     creds = service_account.Credentials.from_service_account_info(
-        dict(st.secrets["GOOGLE_SERVICE_ACCOUNT"]),
+        get_service_account_info(),
         scopes=GDRIVE_SCOPES,
     )
-    return build("drive", "v3", credentials=creds)
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
-def login(session, email, password):
+def login(session: requests.Session, email: str, password: str) -> None:
+    if not email or not password:
+        raise RuntimeError("帳號或密碼未設定")
+
     res = session.get(LOGIN_URL, headers=HEADERS, allow_redirects=True)
+    res.raise_for_status()
+
     soup = BeautifulSoup(res.text, "html.parser")
-    token = soup.find("input", {"name": "_token"}).get("value")
+    token_input = soup.find("input", {"name": "_token"})
+
+    if token_input is None:
+        raise RuntimeError("登入頁面找不到 _token")
+
+    token = token_input.get("value")
 
     payload = {
         "_token": token,
@@ -79,40 +220,58 @@ def login(session, email, password):
     }
 
     res = session.post(LOGIN_URL, data=payload, headers=HEADERS, allow_redirects=True)
+    res.raise_for_status()
+
     if "login" in res.url.lower():
         raise RuntimeError(f"{email} 登入失敗")
 
-    print(f"✅ 登入成功：{email}")
+    log(f"✅ 登入成功：{email}")
 
 
-def get_half():
-    if len(sys.argv) >= 2 and sys.argv[1] in ("1", "2"):
-        return sys.argv[1]
+def period_to_dates(period: str) -> tuple[str, str, str]:
+    """202605-1 / 202605-2 -> start, end, tag"""
+    if "-" not in period:
+        raise RuntimeError("期別格式錯誤，應為 202605-1 或 202605-2")
 
-    now = datetime.now(TZ)
-    return "1" if now.day <= 15 else "2"
+    yyyymm, half = period.split("-", 1)
 
+    if len(yyyymm) != 6 or half not in ["1", "2"]:
+        raise RuntimeError("期別格式錯誤，應為 202605-1 或 202605-2")
 
-def get_dates(half):
-    now = datetime.now(TZ)
-    year = now.year
-    month = now.month
-    yyyymm = f"{year}{month:02d}"
+    year = int(yyyymm[:4])
+    month = int(yyyymm[4:6])
 
     if half == "1":
-        start = f"{year}-{month:02d}-01"
-        end = f"{year}-{month:02d}-15"
-        tag = f"{yyyymm}-1"
-    else:
-        last_day = calendar.monthrange(year, month)[1]
-        start = f"{year}-{month:02d}-16"
-        end = f"{year}-{month:02d}-{last_day:02d}"
-        tag = f"{yyyymm}-2"
+        return f"{year}-{month:02d}-01", f"{year}-{month:02d}-15", period
 
-    return start, end, tag
+    last_day = calendar.monthrange(year, month)[1]
+    return f"{year}-{month:02d}-16", f"{year}-{month:02d}-{last_day:02d}", period
 
 
-def build_export_url(start, end, keyword=""):
+def half_to_dates(half: str | None) -> tuple[str, str, str]:
+    now = tw_now()
+    selected_half = half or ("1" if now.day <= 15 else "2")
+    yyyymm = f"{now.year}{now.month:02d}"
+    return period_to_dates(f"{yyyymm}-{selected_half}")
+
+
+def date_range_to_tag(start: str, end: str) -> str:
+    s = datetime.strptime(start, "%Y-%m-%d")
+    e = datetime.strptime(end, "%Y-%m-%d")
+    return f"{s.strftime('%Y%m%d')}-{e.strftime('%Y%m%d')}"
+
+
+def resolve_dates(args: RunArgs) -> tuple[str, str, str]:
+    if args.start and args.end:
+        return args.start, args.end, args.period or date_range_to_tag(args.start, args.end)
+
+    if args.period:
+        return period_to_dates(args.period)
+
+    return half_to_dates(args.half)
+
+
+def build_export_url(start: str, end: str, keyword: str = "") -> str:
     params = {
         "keyword": keyword,
         "clean_date_s": start,
@@ -128,21 +287,34 @@ def read_excel_from_response(content: bytes) -> pd.DataFrame:
     return pd.read_excel(BytesIO(content), engine="openpyxl")
 
 
-def download_single_export(session, start, end, keyword):
+def assert_excel_content(content: bytes, content_type: str) -> None:
+    # xlsx zip header starts with PK
+    if content[:2] == b"PK":
+        return
+
+    lower_type = (content_type or "").lower()
+    if "excel" in lower_type or "spreadsheet" in lower_type or "octet-stream" in lower_type:
+        return
+
+    preview = content[:200].decode("utf-8", errors="ignore").replace("\n", " ")
+    raise RuntimeError(f"不是 Excel，Content-Type={content_type}，內容預覽={preview}")
+
+
+def download_single_export(session: requests.Session, start: str, end: str, keyword: str) -> bytes:
     export_url = build_export_url(start, end, keyword)
     res = session.get(export_url, headers=HEADERS, allow_redirects=True)
     res.raise_for_status()
 
-    content_type = res.headers.get("Content-Type", "").lower()
-    if "excel" not in content_type and "spreadsheet" not in content_type and "octet-stream" not in content_type:
-        raise RuntimeError(f"不是 Excel，Content-Type={content_type}")
+    content_type = res.headers.get("Content-Type", "")
+    assert_excel_content(res.content, content_type)
 
     return res.content
 
 
-def find_child_folder(service, parent_id, folder_name):
+def find_child_folder(service, parent_id: str, folder_name: str) -> str | None:
+    escaped_name = folder_name.replace("'", "\\'")
     q = (
-        f"name='{folder_name}' and "
+        f"name='{escaped_name}' and "
         f"mimeType='application/vnd.google-apps.folder' and "
         f"'{parent_id}' in parents and trashed=false"
     )
@@ -156,7 +328,7 @@ def find_child_folder(service, parent_id, folder_name):
     return files[0]["id"] if files else None
 
 
-def create_child_folder(service, parent_id, folder_name):
+def create_child_folder(service, parent_id: str, folder_name: str) -> str:
     body = {
         "name": folder_name,
         "mimeType": "application/vnd.google-apps.folder",
@@ -170,15 +342,14 @@ def create_child_folder(service, parent_id, folder_name):
     return res["id"]
 
 
-def get_or_create_child_folder(service, parent_id, folder_name):
+def get_or_create_child_folder(service, parent_id: str, folder_name: str) -> str:
     folder_id = find_child_folder(service, parent_id, folder_name)
     if folder_id:
         return folder_id
     return create_child_folder(service, parent_id, folder_name)
 
 
-def upload_to_gdrive(local_path, parent_folder_id):
-    service = get_drive_service()
+def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     filename = os.path.basename(local_path)
 
     media = MediaFileUpload(local_path, resumable=True)
@@ -190,30 +361,31 @@ def upload_to_gdrive(local_path, parent_folder_id):
     created = service.files().create(
         body=body,
         media_body=media,
-        fields="id,name",
+        fields="id,name,webViewLink",
         supportsAllDrives=True,
     ).execute()
 
-    print(f"☁️ 已上傳：{created['name']}")
+    link = created.get("webViewLink", "")
+    log(f"☁️ 已上傳：{created['name']} → folder_id={parent_folder_id} {link}".strip())
     return created["id"]
 
 
-def export_kaohsiung(session, start, end, temp_dir, tag):
-    df_list = []
+def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: str, tag: str) -> str:
+    df_list: list[pd.DataFrame] = []
 
-    for region in ["高雄", "台南"]:
+    for region in KAOHSIUNG_MERGE_REGIONS:
         try:
-            print(f"👉 抓 {region}")
+            log(f"👉 抓 {region}")
             content = download_single_export(session, start, end, region)
             df = read_excel_from_response(content)
             df_list.append(df)
 
             single_path = os.path.join(temp_dir, f"{tag}訂單-{region}.xlsx")
             df.to_excel(single_path, index=False)
-            print(f"✅ 已下載：{single_path}")
+            log(f"✅ 已下載：{single_path}")
 
-        except Exception as e:
-            print(f"⚠️ {region} 失敗：{e}")
+        except Exception as exc:
+            log(f"⚠️ {region} 失敗：{exc}")
 
     if not df_list:
         raise RuntimeError("高雄 / 台南 都沒有資料")
@@ -223,51 +395,151 @@ def export_kaohsiung(session, start, end, temp_dir, tag):
     final_path = os.path.join(temp_dir, f"{tag}訂單-高雄.xlsx")
     merged_df.to_excel(final_path, index=False)
 
-    print(f"✅ 高雄合併完成：{final_path}")
+    log(f"✅ 高雄合併完成：{final_path}")
     return final_path
 
 
-def main():
-    half = get_half()
-    start, end, tag = get_dates(half)
+def choose_keyword(city: str) -> str:
+    # 舊邏輯保留：新竹帳號用 keyword=新竹。
+    if city == "新竹":
+        return "新竹"
 
-    print(f"📌 期別：{tag}")
-    print(f"📌 日期：{start} ~ {end}")
+    # 新北若沿用台北帳號，需要用 keyword 篩新北。
+    if city == "新北":
+        return "新北"
+
+    return ""
+
+
+def resolve_area_folder_id(service, root_folder_id: str, account: dict[str, str], args: RunArgs) -> str:
+    if args.area_folder_id and args.area != "all":
+        log(f"📁 使用指定地區根目錄：{args.area_folder_id}")
+        return args.area_folder_id
+
+    area_folder_name = account.get("folder") or args.area
+    area_folder_id = get_or_create_child_folder(service, root_folder_id, area_folder_name)
+    log(f"📁 地區根目錄：{area_folder_name} / {area_folder_id}")
+    return area_folder_id
+
+
+def save_snapshot(local_path: str, snapshot_root: str, tag: str, city: str, meta: dict[str, Any]) -> None:
+    snapshot_dir = Path(snapshot_root) / tag
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    src = Path(local_path)
+    target = snapshot_dir / src.name
+    shutil.copy2(src, target)
+
+    meta_name = target.with_suffix(".json").name
+    meta_path = snapshot_dir / meta_name
+    meta_path.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    log(f"🧾 已存 GitHub snapshot：{target}")
+
+
+def resolve_cities(args: RunArgs, accounts: dict[str, dict[str, str]]) -> list[str]:
+    if args.area == "all":
+        return list(accounts.keys())
+
+    if args.area not in accounts:
+        raise RuntimeError(f"找不到地區帳號設定：{args.area}")
+
+    return [args.area]
+
+
+def process_city(
+    city: str,
+    args: RunArgs,
+    accounts: dict[str, dict[str, str]],
+    service,
+    start: str,
+    end: str,
+    tag: str,
+) -> None:
+    acc = accounts[city]
+    session = requests.Session()
+
+    log(f"\n=== 處理 {city} ===")
+    login(session, acc["email"], acc["password"])
+
+    area_folder_id = resolve_area_folder_id(service, args.folder_id, acc, args)
+    tag_folder_id = get_or_create_child_folder(service, area_folder_id, tag)
+    log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        if city == "高雄":
+            final_path = export_kaohsiung(session, start, end, temp_dir, tag)
+        else:
+            keyword = choose_keyword(city)
+            content = download_single_export(session, start, end, keyword)
+
+            final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
+            with open(final_path, "wb") as file:
+                file.write(content)
+
+            log(f"✅ 已下載：{final_path}")
+
+        uploaded_id = upload_to_gdrive(service, final_path, tag_folder_id)
+
+        if not args.skip_snapshot:
+            save_snapshot(
+                final_path,
+                args.snapshot_dir,
+                tag,
+                city,
+                {
+                    "city": city,
+                    "tag": tag,
+                    "start": start,
+                    "end": end,
+                    "uploaded_file_id": uploaded_id,
+                    "area_folder_id": area_folder_id,
+                    "tag_folder_id": tag_folder_id,
+                    "generated_at": tw_now().strftime("%Y-%m-%d %H:%M:%S"),
+                },
+            )
+
+
+def main() -> None:
+    args = parse_args()
+    start, end, tag = resolve_dates(args)
+
+    log(f"📌 期別：{tag}")
+    log(f"📌 日期：{start} ~ {end}")
+    log(f"📌 執行區域：{args.area}")
+    log(f"📌 月排程總根目錄：{args.folder_id}")
 
     accounts = load_accounts()
     service = get_drive_service()
+    cities = resolve_cities(args, accounts)
 
-    for city in ["台北", "台中", "桃園", "新竹", "高雄"]:
-        acc = accounts[city]
-        session = requests.Session()
+    failed: list[tuple[str, str]] = []
+    succeeded: list[str] = []
 
+    for city in cities:
         try:
-            print(f"\n=== 處理 {city} ===")
-            login(session, acc["email"], acc["password"])
+            process_city(city, args, accounts, service, start, end, tag)
+            succeeded.append(city)
+        except Exception as exc:
+            log(f"❌ {city} 失敗：{exc}")
+            failed.append((city, str(exc)))
 
-            # 建立雲端資料夾：各區名稱 / 期別
-            city_folder_id = get_or_create_child_folder(service, ROOT_FOLDER_ID, acc["folder"])
-            tag_folder_id = get_or_create_child_folder(service, city_folder_id, tag)
+            # 單區執行時維持失敗退出；全區執行時繼續跑完其他區。
+            if args.area != "all":
+                raise
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                if city == "高雄":
-                    final_path = export_kaohsiung(session, start, end, temp_dir, tag)
-                    upload_to_gdrive(final_path, tag_folder_id)
-                    continue
+    log(f"\n✅ 成功地區：{', '.join(succeeded) if succeeded else '無'}")
 
-                keyword = "新竹" if city == "新竹" else ""
-                content = download_single_export(session, start, end, keyword)
+    if failed:
+        log("❌ 失敗地區：")
+        for city, message in failed:
+            log(f"- {city}: {message}")
+        raise RuntimeError(f"上下半月訂單有失敗地區：{failed}")
 
-                local_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
-                with open(local_path, "wb") as f:
-                    f.write(content)
-
-                print(f"✅ 已下載：{local_path}")
-                upload_to_gdrive(local_path, tag_folder_id)
-
-        except Exception as e:
-            print(f"❌ {city} 失敗：{e}")
-            raise
+    log("🎉 half_month_orders.py 全部完成")
 
 
 if __name__ == "__main__":
