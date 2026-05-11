@@ -167,19 +167,19 @@ jobs:
           fi
 
           if [ "$TASK" = "field_schedule_stats" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_schedule_stats" "python -u -m tools.field_management.scheduler --target schedule_stats --date '$TODAY' --system-name '外場日排程系統'"
+            run_one "field_schedule_stats" "python -u -m tools.field_management.scheduler --target schedule_stats --date '$TODAY' --system-name '外場排程系統'"
           fi
 
           if [ "$TASK" = "field_staff_schedule" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_staff_schedule" "python -u -m tools.field_management.scheduler --target staff_schedule --date '$TODAY' --system-name '外場日排程系統'"
+            run_one "field_staff_schedule" "python -u -m tools.field_management.scheduler --target staff_schedule --date '$TODAY' --system-name '外場排程系統'"
           fi
 
           if [ "$TASK" = "field_orders" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_orders" "python -u -m tools.field_management.scheduler --target orders --date '$TODAY' --system-name '外場日排程系統'"
+            run_one "field_orders" "python -u -m tools.field_management.scheduler --target orders --date '$TODAY' --system-name '外場排程系統'"
           fi
 
           if [ "$TASK" = "field_staff_profile" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_staff_profile" "python -u -m tools.field_management.scheduler --target staff_profile --date '$TODAY' --system-name '外場日排程系統'"
+            run_one "field_staff_profile" "python -u -m tools.field_management.scheduler --target staff_profile --date '$TODAY' --system-name '外場排程系統'"
           fi
 
           if [ "$TASK" = "notify" ] || [ "$TASK" = "all" ]; then
