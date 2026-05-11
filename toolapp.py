@@ -420,16 +420,84 @@ def require_login() -> None:
 
 
 def logout_button() -> None:
-    with st.sidebar:
-        st.markdown("### 👤 使用者")
-        st.caption(f"帳號：{st.session_state.get('username', '-')}")
-        st.caption(f"角色：{st.session_state.get('role', '-')}")
+    # 保留函式名稱，避免舊流程呼叫錯誤；實際顯示改到主畫面上方。
+    return
+
+
+def render_user_bar() -> None:
+    username = st.session_state.get("username", "-")
+    role = st.session_state.get("role", "-")
+
+    st.markdown(
+        f"""
+        <div style="
+          background:rgba(255,255,255,0.78);
+          border:1px solid #dbeaf2;
+          border-radius:999px;
+          padding:8px 14px;
+          margin:0 auto 14px auto;
+          max-width:760px;
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:10px;
+          box-shadow:0 4px 16px rgba(15,23,42,0.04);
+          font-size:0.82rem;
+          color:#4b6b7d;
+        ">
+          <div>👤 {html.escape(str(username))}</div>
+          <div>角色：<strong>{html.escape(str(role))}</strong></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _, mid, _ = st.columns([3, 1, 3])
+    with mid:
         if st.button("登出", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.username = ""
             st.session_state.role = ""
             st.session_state.view = "main"
             st.rerun()
+
+
+def parse_date_range(start_date, end_date) -> list[str]:
+    from datetime import timedelta
+
+    if not start_date or not end_date:
+        return []
+
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    days = []
+    current = start_date
+
+    while current <= end_date:
+        days.append(current.strftime("%Y%m%d"))
+        current += timedelta(days=1)
+
+    return days
+
+
+def available_areas_for_system(system: dict) -> list[str]:
+    system_type = system.get("type", "")
+
+    if system_type == "field_daily_schedule":
+        folder_ids = system.get("folder_ids", {}) or {}
+        for key in ["order", "staff_profile", "staff_schedule"]:
+            value = folder_ids.get(key)
+            if isinstance(value, dict) and value:
+                return list(value.keys())
+        spreadsheet_ids = system.get("spreadsheet_ids", {}) or {}
+        for value in spreadsheet_ids.values():
+            if isinstance(value, dict) and value:
+                return list(value.keys())
+        return ["台北", "台中"]
+
+    # 舊日排程目前腳本本身會跑全部區域，先提供全區。
+    return ["全區"]
 
 
 def set_view(view_name: str) -> None:
@@ -1201,7 +1269,6 @@ def functions_for_system(sys_cfg: dict) -> list[str]:
 # Router
 # ═══════════════════════════════════════════════════════════
 require_login()
-logout_button()
 
 sync_view_from_query_params()
 
@@ -1238,6 +1305,7 @@ st.markdown(
     '<div class="app-title">🧰 Tools App 作業系統</div>',
     unsafe_allow_html=True,
 )
+render_user_bar()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1292,13 +1360,11 @@ selected_system = get_system_by_name(config, system_name)
 system_type = selected_system.get("type", "vip")
 
 with c1:
-    label = "📆 執行期別" if system_type in ["vip", "monthly_scheduler"] else "📆 執行日期"
-    st.markdown(
-        f'<div class="field-label">{label}</div>',
-        unsafe_allow_html=True,
-    )
-
     if system_type in ["vip", "monthly_scheduler"]:
+        st.markdown(
+            '<div class="field-label">📆 執行期別</div>',
+            unsafe_allow_html=True,
+        )
         period = st.text_input(
             "執行期別",
             value=tw_now_text("%Y%m"),
@@ -1306,26 +1372,84 @@ with c1:
             label_visibility="collapsed",
             key="period",
         )
+        start_date_value = None
+        end_date_value = None
     else:
-        period = st.text_input(
-            "執行日期",
-            value=tw_now_text("%Y%m%d"),
-            placeholder="例如：20260511",
+        st.markdown(
+            '<div class="field-label">📆 執行日期區間</div>',
+            unsafe_allow_html=True,
+        )
+        d1, d2 = st.columns(2)
+        today_date = datetime.now(TW_TZ).date()
+        with d1:
+            start_date_value = st.date_input(
+                "開始日期",
+                value=today_date,
+                key="start_date",
+            )
+        with d2:
+            end_date_value = st.date_input(
+                "結束日期",
+                value=today_date,
+                key="end_date",
+            )
+        period = start_date_value.strftime("%Y%m%d")
+
+fcol, acol = st.columns([2, 1])
+
+with fcol:
+    st.markdown(
+        '<div class="field-label">🎯 執行功能</div>',
+        unsafe_allow_html=True,
+    )
+
+    selected_function = st.selectbox(
+        "執行功能",
+        functions_for_system(selected_system),
+        label_visibility="collapsed",
+        key="selected_function",
+    )
+
+with acol:
+    st.markdown(
+        '<div class="field-label">📍 執行區域</div>',
+        unsafe_allow_html=True,
+    )
+
+    area_options = available_areas_for_system(selected_system)
+
+    if len(area_options) <= 1:
+        selected_areas = area_options
+        st.selectbox(
+            "執行區域",
+            area_options,
+            index=0,
             label_visibility="collapsed",
-            key="daily_date",
+            key="area_single",
+            disabled=True,
+        )
+    else:
+        area_mode = st.selectbox(
+            "執行區域",
+            ["全區", "自選區域"],
+            label_visibility="collapsed",
+            key="area_mode",
         )
 
-st.markdown(
-    '<div class="field-label">🎯 執行功能</div>',
-    unsafe_allow_html=True,
-)
+        if area_mode == "全區":
+            selected_areas = area_options
+            st.caption("將執行全部區域")
+        else:
+            selected_areas = st.multiselect(
+                "選擇區域",
+                area_options,
+                default=area_options,
+                label_visibility="collapsed",
+                key="selected_areas",
+            )
 
-selected_function = st.selectbox(
-    "執行功能",
-    functions_for_system(selected_system),
-    label_visibility="collapsed",
-    key="selected_function",
-)
+            if not selected_areas:
+                st.warning("請至少選擇一個區域")
 
 run_clicked = st.button("▶ 執行", use_container_width=True)
 
@@ -1558,7 +1682,19 @@ if run_clicked:
         add_log("請先輸入執行期別", "error")
         st.rerun()
 
-    add_log(f"開始執行：{system_name} / {selected_function} / 期別 {period}")
+    if system_type in ["daily_scheduler", "field_daily_schedule"]:
+        date_keys = parse_date_range(start_date_value, end_date_value)
+        if not date_keys:
+            add_log("請選擇執行日期區間", "error")
+            st.rerun()
+    else:
+        date_keys = [period]
+
+    if system_type == "field_daily_schedule" and not selected_areas:
+        add_log("請至少選擇一個執行區域", "error")
+        st.rerun()
+
+    add_log(f"開始執行：{system_name} / {selected_function} / {date_keys[0]}~{date_keys[-1]} / 區域 {', '.join(selected_areas)}")
 
     try:
         result = None
@@ -1661,11 +1797,23 @@ if run_clicked:
                 raise RuntimeError(f"找不到外場日排程功能：{selected_function}")
 
             script = cmd[0]
-            args = list(cmd[1:])
-            args.extend(["--date", period])
-            args.extend(["--system-name", system_name])
+            base_args = list(cmd[1:])
+            results = []
 
-            result = run_script(script, args)
+            for date_key in date_keys:
+                for area_name in selected_areas:
+                    args = list(base_args)
+                    args.extend(["--date", date_key])
+                    args.extend(["--system-name", system_name])
+
+                    # scheduler.py target all 若指定區域也支援 --area
+                    if area_name != "全區":
+                        args.extend(["--area", area_name])
+
+                    add_log(f"外場排程執行：{selected_function} / {date_key} / {area_name}")
+                    results.append(run_script(script, args))
+
+            result = results
 
         else:
             add_log(f"{system_type} 尚未實作", "warning")
