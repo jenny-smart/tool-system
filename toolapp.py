@@ -536,46 +536,72 @@ def normalize_monthly_areas(system: dict) -> dict:
     return output
 
 
-def monthly_areas_to_text(system: dict) -> str:
+def monthly_areas_to_df(system: dict) -> pd.DataFrame:
     areas = normalize_monthly_areas(system)
 
-    if not areas:
-        return ""
+    rows = []
 
-    lines = []
     for area_name, info in areas.items():
-        enabled = "1" if info.get("enabled", True) else "0"
-        area_root = info.get("folder_id", "") or info.get("folder_name", "")
-        lines.append(f"{area_name}={area_root}={enabled}")
+        rows.append(
+            {
+                "地區": area_name,
+                "地區根目錄ID": info.get("folder_id", "") or info.get("folder_name", ""),
+                "啟用": bool(info.get("enabled", True)),
+            }
+        )
 
-    return "\n".join(lines)
+    return pd.DataFrame(rows, columns=["地區", "地區根目錄ID", "啟用"])
 
 
-def parse_monthly_areas_text(text_value: str) -> dict:
-    """每行格式：地區=地區根目錄ID=1/0。刪除地區＝刪掉該行。"""
+def default_monthly_areas_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"地區": "台北", "地區根目錄ID": "", "啟用": True},
+            {"地區": "台中", "地區根目錄ID": "", "啟用": True},
+            {"地區": "桃園", "地區根目錄ID": "", "啟用": True},
+            {"地區": "新竹", "地區根目錄ID": "", "啟用": True},
+            {"地區": "高雄", "地區根目錄ID": "", "啟用": True},
+        ],
+        columns=["地區", "地區根目錄ID", "啟用"],
+    )
+
+
+def monthly_areas_df_to_config(df) -> dict:
+    """把月排程地區表格轉回 systems.yaml 結構。
+
+    刪除地區：在表格刪除該列即可。
+    停用地區：取消「啟用」勾選即可。
+    """
     areas = {}
 
-    for raw_line in str(text_value or "").splitlines():
-        line = raw_line.strip()
+    if df is None:
+        return areas
 
-        if not line or line.startswith("#"):
+    for _, row in pd.DataFrame(df).iterrows():
+        area_name = str(row.get("地區", "") or "").strip()
+
+        if not area_name or area_name.lower() == "nan":
             continue
 
-        parts = [p.strip() for p in line.split("=")]
+        folder_id = str(row.get("地區根目錄ID", "") or "").strip()
 
-        area_name = parts[0] if parts else ""
-        area_root = parts[1] if len(parts) >= 2 else ""
-        enabled_raw = parts[2] if len(parts) >= 3 else "1"
+        if folder_id.lower() == "nan":
+            folder_id = ""
 
-        if not area_name:
-            continue
+        enabled_raw = row.get("啟用", True)
+
+        if isinstance(enabled_raw, str):
+            enabled = enabled_raw.strip().lower() not in ["0", "false", "停用", "disabled", "no"]
+        else:
+            enabled = bool(enabled_raw)
 
         areas[area_name] = {
-            "folder_id": area_root,
-            "enabled": enabled_raw not in ["0", "false", "False", "停用", "disabled"],
+            "folder_id": folder_id,
+            "enabled": enabled,
         }
 
     return areas
+
 
 def available_areas_for_system(system: dict) -> list[str]:
     system_type = system.get("type", "")
@@ -1709,15 +1735,22 @@ if can_access_page("settings"):
                 new_master_id = st.text_input("設定主控表 ID")
                 if new_type == "monthly_scheduler":
                     new_folder_id = st.text_input("月排程總根目錄 ID")
-                    st.caption("月排程地區設定：每行格式為 地區=地區根目錄ID=1；刪除地區＝刪掉該行；1=啟用、0=停用")
-                    new_monthly_areas_text = st.text_area(
-                        "月排程地區與地區根目錄",
-                        value="台北==1\n台中==1\n桃園==1\n新竹==1\n高雄==1",
-                        height=160,
+                    st.caption("月排程地區設定：可直接新增列、編輯地區、填寫地區根目錄 ID、勾選啟用；刪除地區＝刪除該列。")
+                    new_monthly_areas_df = st.data_editor(
+                        default_monthly_areas_df(),
+                        num_rows="dynamic",
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "地區": st.column_config.TextColumn("地區", required=True),
+                            "地區根目錄ID": st.column_config.TextColumn("地區根目錄 ID"),
+                            "啟用": st.column_config.CheckboxColumn("啟用"),
+                        },
+                        key="new_monthly_areas_editor",
                     )
                 else:
                     new_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID")
-                    new_monthly_areas_text = ""
+                    new_monthly_areas_df = None
                 new_enabled = st.checkbox("啟用", value=True)
 
                 f1, f2 = st.columns(2)
@@ -1743,7 +1776,7 @@ if can_access_page("settings"):
                         }
 
                         if new_type == "monthly_scheduler":
-                            new_system["areas"] = parse_monthly_areas_text(new_monthly_areas_text)
+                            new_system["areas"] = monthly_areas_df_to_config(new_monthly_areas_df)
 
                         if new_type == "field_daily_schedule":
                             new_system.update(
@@ -1802,15 +1835,22 @@ if can_access_page("settings"):
                     e_master_id = st.text_input("設定主控表 ID", value=master_id)
                     if e_type == "monthly_scheduler":
                         e_folder_id = st.text_input("月排程總根目錄 ID", value=folder_id)
-                        e_monthly_areas_text = st.text_area(
-                            "月排程地區與地區根目錄",
-                            value=monthly_areas_to_text(sys_cfg),
-                            height=170,
-                            help="每行格式：地區=地區根目錄ID=1/0；刪除地區＝刪掉該行；1=啟用、0=停用",
+                        st.caption("月排程地區設定：可直接新增列、編輯地區、填寫地區根目錄 ID、勾選啟用；刪除地區＝刪除該列。")
+                        e_monthly_areas_df = st.data_editor(
+                            monthly_areas_to_df(sys_cfg),
+                            num_rows="dynamic",
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "地區": st.column_config.TextColumn("地區", required=True),
+                                "地區根目錄ID": st.column_config.TextColumn("地區根目錄 ID"),
+                                "啟用": st.column_config.CheckboxColumn("啟用"),
+                            },
+                            key=f"edit_monthly_areas_editor_{i}",
                         )
                     else:
                         e_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID", value=folder_id)
-                        e_monthly_areas_text = ""
+                        e_monthly_areas_df = None
                     e_enabled = st.checkbox("啟用", value=enabled)
 
                     e1, e2 = st.columns(2)
@@ -1835,7 +1875,7 @@ if can_access_page("settings"):
                             )
 
                             if e_type == "monthly_scheduler":
-                                updated["areas"] = parse_monthly_areas_text(e_monthly_areas_text)
+                                updated["areas"] = monthly_areas_df_to_config(e_monthly_areas_df)
 
                             if e_type == "field_daily_schedule":
                                 updated.setdefault("folder_ids", {})
