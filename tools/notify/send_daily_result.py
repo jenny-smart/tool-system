@@ -18,6 +18,16 @@ JOB_LABELS = {
     "orders_report": "當月次月訂單",
     "staff_info": "專員個資",
     "performance_report": "業績報表",
+
+    # 外場日排程
+    "schedule_stats": "外場排班統計表",
+    "staff_schedule": "外場專員班表",
+    "orders": "外場訂單",
+    "staff_profile": "外場專員個資",
+
+    # 其他系統
+    "performance_report": "業績報表",
+    "send_daily_result": "通知信",
 }
 
 
