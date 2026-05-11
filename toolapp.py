@@ -484,16 +484,17 @@ def parse_date_range(start_date, end_date) -> list[str]:
 def normalize_monthly_areas(system: dict) -> dict:
     """月排程地區設定標準化。
 
-    支援兩種結構：
-    1. areas:
-         台北:
-           folder_name: 01.台北專員
-           enabled: true
-    2. areas:
-         - 台北
-         - 台中
-       folders:
-         台北: 01.台北專員
+    建議結構：
+    areas:
+      台北:
+        folder_id: "地區根目錄ID"
+        enabled: true
+
+    也兼容舊結構：
+    areas:
+      台北:
+        folder_name: "01.台北專員"
+        enabled: true
     """
     raw_areas = system.get("areas", {})
     raw_folders = system.get("folders", {}) or {}
@@ -501,21 +502,34 @@ def normalize_monthly_areas(system: dict) -> dict:
 
     if isinstance(raw_areas, dict):
         for area_name, info in raw_areas.items():
+            area_name = str(area_name)
+
             if isinstance(info, dict):
-                output[str(area_name)] = {
-                    "folder_name": str(info.get("folder_name", raw_folders.get(area_name, area_name)) or area_name),
+                folder_id = str(
+                    info.get("folder_id")
+                    or info.get("root_folder_id")
+                    or info.get("folder_name")
+                    or raw_folders.get(area_name, "")
+                    or ""
+                )
+                output[area_name] = {
+                    "folder_id": folder_id,
+                    "folder_name": str(info.get("folder_name", "")),
                     "enabled": bool(info.get("enabled", True)),
                 }
             else:
-                output[str(area_name)] = {
-                    "folder_name": str(raw_folders.get(area_name, area_name)),
+                output[area_name] = {
+                    "folder_id": str(raw_folders.get(area_name, "")),
+                    "folder_name": "",
                     "enabled": bool(info),
                 }
 
     elif isinstance(raw_areas, list):
         for area_name in raw_areas:
-            output[str(area_name)] = {
-                "folder_name": str(raw_folders.get(area_name, area_name)),
+            area_name = str(area_name)
+            output[area_name] = {
+                "folder_id": str(raw_folders.get(area_name, "")),
+                "folder_name": "",
                 "enabled": True,
             }
 
@@ -531,14 +545,14 @@ def monthly_areas_to_text(system: dict) -> str:
     lines = []
     for area_name, info in areas.items():
         enabled = "1" if info.get("enabled", True) else "0"
-        folder_name = info.get("folder_name", area_name)
-        lines.append(f"{area_name}={folder_name}={enabled}")
+        area_root = info.get("folder_id", "") or info.get("folder_name", "")
+        lines.append(f"{area_name}={area_root}={enabled}")
 
     return "\n".join(lines)
 
 
 def parse_monthly_areas_text(text_value: str) -> dict:
-    """每行格式：地區=資料夾名稱=1/0。刪除地區＝刪掉該行。"""
+    """每行格式：地區=地區根目錄ID=1/0。刪除地區＝刪掉該行。"""
     areas = {}
 
     for raw_line in str(text_value or "").splitlines():
@@ -550,19 +564,18 @@ def parse_monthly_areas_text(text_value: str) -> dict:
         parts = [p.strip() for p in line.split("=")]
 
         area_name = parts[0] if parts else ""
-        folder_name = parts[1] if len(parts) >= 2 and parts[1] else area_name
+        area_root = parts[1] if len(parts) >= 2 else ""
         enabled_raw = parts[2] if len(parts) >= 3 else "1"
 
         if not area_name:
             continue
 
         areas[area_name] = {
-            "folder_name": folder_name,
+            "folder_id": area_root,
             "enabled": enabled_raw not in ["0", "false", "False", "停用", "disabled"],
         }
 
     return areas
-
 
 def available_areas_for_system(system: dict) -> list[str]:
     system_type = system.get("type", "")
@@ -1694,15 +1707,17 @@ if can_access_page("settings"):
                     format_func=get_system_type_label,
                 )
                 new_master_id = st.text_input("設定主控表 ID")
-                new_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID")
-                new_monthly_areas_text = ""
                 if new_type == "monthly_scheduler":
-                    st.caption("月排程地區設定：每行格式為 地區=地區資料夾名稱=1；刪除地區＝刪掉該行")
+                    new_folder_id = st.text_input("月排程總根目錄 ID")
+                    st.caption("月排程地區設定：每行格式為 地區=地區根目錄ID=1；刪除地區＝刪掉該行；1=啟用、0=停用")
                     new_monthly_areas_text = st.text_area(
-                        "月排程地區設定",
-                        value="台北=01.台北專員=1\n台中=02.台中專員=1\n桃園=03.桃園專員=1\n新竹=04.新竹專員=1\n高雄=05.高雄專員=1",
-                        height=140,
+                        "月排程地區與地區根目錄",
+                        value="台北==1\n台中==1\n桃園==1\n新竹==1\n高雄==1",
+                        height=160,
                     )
+                else:
+                    new_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID")
+                    new_monthly_areas_text = ""
                 new_enabled = st.checkbox("啟用", value=True)
 
                 f1, f2 = st.columns(2)
@@ -1785,15 +1800,17 @@ if can_access_page("settings"):
                         format_func=get_system_type_label,
                     )
                     e_master_id = st.text_input("設定主控表 ID", value=master_id)
-                    e_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID", value=folder_id)
-                    e_monthly_areas_text = ""
                     if e_type == "monthly_scheduler":
-                        st.caption("月排程地區設定：每行格式為 地區=地區資料夾名稱=1/0；刪除地區＝刪掉該行")
+                        e_folder_id = st.text_input("月排程總根目錄 ID", value=folder_id)
                         e_monthly_areas_text = st.text_area(
-                            "月排程地區設定",
+                            "月排程地區與地區根目錄",
                             value=monthly_areas_to_text(sys_cfg),
-                            height=150,
+                            height=170,
+                            help="每行格式：地區=地區根目錄ID=1/0；刪除地區＝刪掉該行；1=啟用、0=停用",
                         )
+                    else:
+                        e_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID", value=folder_id)
+                        e_monthly_areas_text = ""
                     e_enabled = st.checkbox("啟用", value=enabled)
 
                     e1, e2 = st.columns(2)
@@ -1863,11 +1880,19 @@ if can_access_page("settings"):
                     ]
                     area_summary = "、".join(enabled_area_names) if enabled_area_names else "未設定"
                     disabled_summary = "、".join(disabled_area_names) if disabled_area_names else "無"
+                    area_root_lines = []
+                    for area_name, area_info in monthly_areas.items():
+                        status_text = "啟用" if area_info.get("enabled", True) else "停用"
+                        area_root_lines.append(
+                            f"{area_name}：{mask_id(area_info.get('folder_id', ''))}（{status_text}）"
+                        )
+                    area_root_summary = "<br>".join(html.escape(line) for line in area_root_lines) or "未設定"
 
                     extra_detail = f"""
-      <div class="detail-row"><strong>月排程根目錄 ID</strong>：{mask_id(folder_id)}</div>
+      <div class="detail-row"><strong>月排程總根目錄 ID</strong>：{mask_id(folder_id)}</div>
       <div class="detail-row"><strong>啟用地區</strong>：{html.escape(area_summary)}</div>
       <div class="detail-row"><strong>停用地區</strong>：{html.escape(disabled_summary)}</div>
+      <div class="detail-row"><strong>地區根目錄</strong>：<br>{area_root_summary}</div>
     """
                 else:
                     extra_detail = f"""
