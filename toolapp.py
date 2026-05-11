@@ -1167,13 +1167,19 @@ def render_log_page() -> None:
         cards.append(
             f"""
             <div class="status-card" style="--status-color:{row['color']};">
+
               <div class="status-head">
-                <div class="status-name">{html.escape(row['label'])}</div>
-                <div class="status-badge">{row['icon']} {html.escape(row['status_text'])}</div>
+
+                <div class="status-name">
+                  {html.escape(row['label'])}
+                </div>
+
+                <div class="status-badge">
+                  {row['icon']} {html.escape(row['status_text'])}
+                </div>
+
               </div>
-              <div class="status-summary">{html.escape(row['summary'])}</div>
-              <div class="status-meta">exit code: {html.escape(row['exit_code'])}</div>
-              {error_html}
+
             </div>
             """
         )
