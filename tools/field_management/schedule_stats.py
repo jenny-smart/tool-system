@@ -185,8 +185,11 @@ def read_file_values(drive, sheets, file: dict[str, Any]) -> list[list[Any]]:
     if name.endswith(".csv"):
         df = pd.read_csv(io.BytesIO(content), header=None)
     else:
-        df = pd.read_excel(io.BytesIO(content), header=None)
-    return df.fillna("").values.tolist()
+        from tools.field_management.google_sheet_reader import read_drive_spreadsheet_values
+
+
+def read_file_values(drive, sheets, file):
+    return read_drive_spreadsheet_values(drive, sheets, file)
 
 
 def ensure_rectangular(values: list[list[Any]], cols: int | None = None) -> list[list[Any]]:
