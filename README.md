@@ -1,20 +1,17 @@
-# 日排程完整更新
+# 日排程打卡 + 同名檔覆蓋 + 重複檔清除 更新包
 
-內容：
+請覆蓋：
+- toolapp.py
 - tools/scheduled_daily/scheduler.py
-  - 所有日排程都經 scheduler 執行
-  - 每個 job 打卡：執行中 / 成功 / 失敗
-  - 兼容 tools.common.log_to_sheet.write_job_log 或 log_to_sheet
+- tools/scheduled_daily/schedule_report.py
+- tools/scheduled_daily/orders_report.py
+- tools/scheduled_daily/staff_info.py
+- tools/scheduled_daily/staff_schedule.py
 
-- schedule_report.py / orders_report.py / staff_info.py / staff_schedule.py
-  - Google Drive 同資料夾同檔名會覆蓋舊檔
-  - 不再新增重複檔案
-
-ToolApp 要點：
-- 日排程個別功能也要呼叫 tools.scheduled_daily.scheduler.main(target=..., folder_id=...)
-- target 對應：
-  - 一鍵執行日排程 -> all
-  - 排班統計表 -> schedule_report
-  - 專員班表 -> staff_schedule
-  - 當月次月訂單 -> orders_report
-  - 專員個資 -> staff_info
+修正：
+1. ToolApp 的日排程個別功能全部先呼叫 scheduler.py
+2. scheduler.py 每個 job 打卡：執行中 / 成功 / 失敗
+3. 四支日排程下載程式上傳時：
+   - 同資料夾同檔名存在：更新最新一份
+   - 其他同名舊檔：移到垃圾桶
+   - 不存在：新增
