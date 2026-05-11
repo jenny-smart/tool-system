@@ -12,8 +12,15 @@ import yaml
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-from google_sheet_reader import read_drive_spreadsheet_values
-from logger import log
+try:
+    from .google_sheet_reader import read_drive_spreadsheet_values
+except ImportError:
+    from google_sheet_reader import read_drive_spreadsheet_values
+
+try:
+    from .logger import log
+except ImportError:
+    from logger import log
 
 
 SCOPES = [
@@ -235,13 +242,10 @@ def normalize_date_sort_value(value: Any) -> Any:
 
     date_part = text.split(" ")[0]
 
-    for pattern in ["%Y/%m/%d", "%Y/%m/%d"]:
-        try:
-            return datetime.strptime(date_part, pattern).timestamp()
-        except Exception:
-            pass
-
-    return 999999999999
+    try:
+        return datetime.strptime(date_part, "%Y/%m/%d").timestamp()
+    except Exception:
+        return 999999999999
 
 
 def sort_order_values(values: list[list[Any]]) -> list[list[Any]]:
@@ -338,9 +342,7 @@ def run_orders_for_area(
         values,
     )
 
-    log(
-        f"完成：{file.get('name')} → {target_range} / rows={len(values)}"
-    )
+    log(f"完成：{file.get('name')} → {target_range} / rows={len(values)}")
 
 
 def main(
