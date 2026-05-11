@@ -1,30 +1,37 @@
-import yaml
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+USERS_PATH = BASE_DIR / "config" / "users.yaml"
 
-def load_users():
 
-    path = BASE_DIR / "config" / "users.yaml"
+def load_users() -> dict[str, Any]:
+    if not USERS_PATH.exists():
+        return {}
 
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    data = yaml.safe_load(USERS_PATH.read_text(encoding="utf-8")) or {}
+    return data.get("users", {}) or {}
 
-    return data.get("users", {})
 
-def authenticate(username, password):
+def authenticate(username: str, password: str) -> dict[str, str] | None:
+    username = str(username or "").strip()
+    password = str(password or "")
 
     users = load_users()
 
     if username not in users:
         return None
 
-    user = users[username]
+    user = users.get(username, {})
 
-    if user["password"] != password:
+    if str(user.get("password", "")) != password:
         return None
 
     return {
         "username": username,
-        "role": user["role"]
+        "role": str(user.get("role", "")),
     }
