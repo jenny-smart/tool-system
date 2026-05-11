@@ -226,33 +226,92 @@ def get_or_create_child_folder(service, parent_id: str, folder_name: str):
     return create_child_folder(service, parent_id, folder_name)
 
 
+def find_files_in_folder(service, parent_id: str, filename: str):
+    q = (
+        f"'{q_escape(parent_id)}' in parents and "
+        f"name='{q_escape(filename)}' and "
+        f"trashed=false"
+    )
+
+    res = service.files().list(
+        q=q,
+        fields="files(id,name,webViewLink,modifiedTime)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+        pageSize=100,
+        orderBy="modifiedTime desc",
+    ).execute()
+
+    return res.get("files", [])
+
+
+def trash_duplicate_files(service, files: list[dict], keep_file_id: str) -> None:
+    for file in files:
+        file_id = file.get("id")
+        if not file_id or file_id == keep_file_id:
+            continue
+
+        try:
+            service.files().update(
+                fileId=file_id,
+                body={"trashed": True},
+                supportsAllDrives=True,
+            ).execute()
+            log(f"🗑️ 已移除重複舊檔：{file.get('name')} (file_id={file_id})")
+        except Exception as exc:
+            log(f"⚠️ 移除重複檔失敗：{file.get('name')} / {exc}")
+
+
 def upload_to_gdrive(local_path: str, folder_id: str):
     service = get_drive_service()
     filename = os.path.basename(local_path)
+
+    media = MediaFileUpload(
+        local_path,
+        resumable=True,
+    )
+
+    log(f"準備上傳到 Google Drive：{filename}")
+
+    existing_files = find_files_in_folder(service, folder_id, filename)
+
+    if existing_files:
+        keep = existing_files[0]
+
+        updated = service.files().update(
+            fileId=keep["id"],
+            media_body=media,
+            fields="id,name,webViewLink,modifiedTime",
+            supportsAllDrives=True,
+        ).execute()
+
+        trash_duplicate_files(service, existing_files, updated["id"])
+
+        log(
+            f"♻️ 已覆蓋同名檔：{updated['name']} "
+            f"(file_id={updated['id']}) "
+            f"{updated.get('webViewLink', keep.get('webViewLink', ''))}"
+        )
+        return updated["id"]
 
     file_metadata = {
         "name": filename,
         "parents": [folder_id],
     }
 
-    media = MediaFileUpload(
-        local_path,
-        mimetype="application/vnd.ms-excel",
-        resumable=True,
-    )
-
-    log(f"準備上傳到 Google Drive：{filename}")
-
     created = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields="id,name",
+        fields="id,name,webViewLink,modifiedTime",
         supportsAllDrives=True,
     ).execute()
 
-    log(f"☁️ 已上傳：{created['name']} (file_id={created['id']})")
+    log(
+        f"☁️ 已上傳新檔：{created['name']} "
+        f"(file_id={created['id']}) "
+        f"{created.get('webViewLink', '')}"
+    )
     return created["id"]
-
 
 def can_use_local_output_dir() -> bool:
     try:
