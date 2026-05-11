@@ -46,6 +46,7 @@ jobs:
       NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -66,7 +67,9 @@ jobs:
         run: |
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+
             TASK="${{ github.event.inputs.target }}"
+
           else
 
             HOUR=$(date -u +"%H")
@@ -98,6 +101,8 @@ jobs:
 
           echo "task=$TASK" >> "$GITHUB_OUTPUT"
 
+          echo "TASK=$TASK"
+
       - name: Run daily task
         shell: bash
         run: |
@@ -117,19 +122,21 @@ jobs:
             NAME="$1"
             CMD="$2"
 
-            START_TS=$(date +%s)
-            START_TEXT=$(TZ=Asia/Taipei date "+%Y-%m-%d %H:%M:%S")
-
             echo "===== $NAME ====="
-            echo "START: $START_TEXT"
-            echo "COMMAND: $CMD"
+
+            echo "Command: $CMD"
+
+            START_TS=$(date +%s)
+
+            START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
 
             bash -lc "$CMD" > "$LOG_DIR/$NAME.log" 2>&1
 
             EXIT_CODE=$?
 
             END_TS=$(date +%s)
-            END_TEXT=$(TZ=Asia/Taipei date "+%Y-%m-%d %H:%M:%S")
+
+            END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
 
             DURATION=$((END_TS - START_TS))
 
@@ -155,7 +162,7 @@ EOF
             cat "$LOG_DIR/$NAME.log"
 
             if [ "$EXIT_CODE" -ne 0 ]; then
-              echo "❌ $NAME failed"
+              echo "❌ $NAME failed with exit code $EXIT_CODE"
             else
               echo "✅ $NAME success"
             fi
@@ -168,9 +175,9 @@ EOF
             run_one \
               "schedule_stats" \
               "python -u tools/field_management/scheduler.py \
-              --target schedule_stats \
-              --date '$TODAY' \
-              --system-name '外場日排程系統'"
+                --target schedule_stats \
+                --date '$TODAY' \
+                --system-name '外場日排程系統'"
 
           fi
 
@@ -179,9 +186,9 @@ EOF
             run_one \
               "staff_schedule" \
               "python -u tools/field_management/scheduler.py \
-              --target staff_schedule \
-              --date '$TODAY' \
-              --system-name '外場日排程系統'"
+                --target staff_schedule \
+                --date '$TODAY' \
+                --system-name '外場日排程系統'"
 
           fi
 
@@ -190,9 +197,9 @@ EOF
             run_one \
               "orders" \
               "python -u tools/field_management/scheduler.py \
-              --target orders \
-              --date '$TODAY' \
-              --system-name '外場日排程系統'"
+                --target orders \
+                --date '$TODAY' \
+                --system-name '外場日排程系統'"
 
           fi
 
@@ -201,9 +208,9 @@ EOF
             run_one \
               "staff_profile" \
               "python -u tools/field_management/scheduler.py \
-              --target staff_profile \
-              --date '$TODAY' \
-              --system-name '外場日排程系統'"
+                --target staff_profile \
+                --date '$TODAY' \
+                --system-name '外場日排程系統'"
 
           fi
 
@@ -216,7 +223,9 @@ EOF
           fi
 
           if [ "$TASK" = "none" ]; then
+
             echo "No matching task."
+
           fi
 
       - name: Commit logs
@@ -225,11 +234,13 @@ EOF
         run: |
 
           git config user.name "github-actions[bot]"
+
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add -f logs
 
           if git diff --cached --quiet; then
+
             echo "No log changes"
 
           else
