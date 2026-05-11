@@ -2,10 +2,10 @@ name: Performance Report
 
 on:
   schedule:
-    - cron: "0 16 * * *"  # 台灣 00:00
-    - cron: "0 0 * * *"   # 台灣 08:00
-    - cron: "0 4 * * *"   # 台灣 12:00
-    - cron: "0 10 * * *"  # 台灣 18:00
+    - cron: "5 16 * * *"  # 台灣 00:00
+    - cron: "5 0 * * *"   # 台灣 08:00
+    - cron: "5 4 * * *"   # 台灣 12:00
+    - cron: "5 10 * * *"  # 台灣 18:00
 
   workflow_dispatch:
 
