@@ -4,9 +4,10 @@ on:
   schedule:
     - cron: "0 17 * * *"   # 台灣 01:00 排班統計表
     - cron: "10 17 * * *"  # 台灣 01:10 專員班表
-    - cron: "20 17 * * *"  # 台灣 01:20 當月次月訂單
-    - cron: "30 17 * * *"  # 台灣 01:30 專員個資
+    - cron: "20 17 * * *"  # 台灣 01:20 當月訂單資料
+    - cron: "30 17 * * *"  # 台灣 01:30 專員個資＋訂單截取
     - cron: "0 18 * * *"   # 台灣 02:00 寄通知
+    - cron: "0 21 * * *"   # 台灣 05:00 四個外場流程一次跑
 
   workflow_dispatch:
     inputs:
@@ -17,10 +18,10 @@ on:
         type: choice
         options:
           - all
-          - schedule_report
+          - schedule_stats
           - staff_schedule
-          - orders_report
-          - staff_info
+          - orders
+          - staff_profile
           - notify
 
 permissions:
@@ -69,15 +70,17 @@ jobs:
             MIN=$(date -u +"%M")
 
             if [ "$HOUR" = "17" ] && [ "$MIN" = "00" ]; then
-              TASK="schedule_report"
+              TASK="schedule_stats"
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "10" ]; then
               TASK="staff_schedule"
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "20" ]; then
-              TASK="orders_report"
+              TASK="orders"
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "30" ]; then
-              TASK="staff_info"
+              TASK="staff_profile"
             elif [ "$HOUR" = "18" ] && [ "$MIN" = "00" ]; then
               TASK="notify"
+            elif [ "$HOUR" = "21" ] && [ "$MIN" = "00" ]; then
+              TASK="all"
             else
               TASK="none"
             fi
@@ -120,24 +123,24 @@ jobs:
             return 0
           }
 
-          if [ "$TASK" = "schedule_report" ] || [ "$TASK" = "all" ]; then
-            run_one "schedule_report" "python tools/scheduled_daily/schedule_report.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+          if [ "$TASK" = "schedule_stats" ] || [ "$TASK" = "all" ]; then
+            run_one "schedule_stats" "python -u tools/field_management/scheduler.py --target schedule_stats --date '$TODAY' --system-name '外場日排程系統'"
           fi
 
           if [ "$TASK" = "staff_schedule" ] || [ "$TASK" = "all" ]; then
-            run_one "staff_schedule" "python tools/scheduled_daily/staff_schedule.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+            run_one "staff_schedule" "python -u tools/field_management/scheduler.py --target staff_schedule --date '$TODAY' --system-name '外場日排程系統'"
           fi
 
-          if [ "$TASK" = "orders_report" ] || [ "$TASK" = "all" ]; then
-            run_one "orders_report" "python tools/scheduled_daily/orders_report.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+          if [ "$TASK" = "orders" ] || [ "$TASK" = "all" ]; then
+            run_one "orders" "python -u tools/field_management/scheduler.py --target orders --date '$TODAY' --system-name '外場日排程系統'"
           fi
 
-          if [ "$TASK" = "staff_info" ] || [ "$TASK" = "all" ]; then
-            run_one "staff_info" "python tools/scheduled_daily/staff_info.py --folder-id '$DAILY_ROOT_FOLDER_ID'"
+          if [ "$TASK" = "staff_profile" ] || [ "$TASK" = "all" ]; then
+            run_one "staff_profile" "python -u tools/field_management/scheduler.py --target staff_profile --date '$TODAY' --system-name '外場日排程系統'"
           fi
 
           if [ "$TASK" = "notify" ] || [ "$TASK" = "all" ]; then
-            run_one "send_daily_result" "python tools/notify/send_daily_result.py"
+            run_one "send_daily_result" "python -u tools/notify/send_daily_result.py"
           fi
 
           if [ "$TASK" = "none" ]; then
