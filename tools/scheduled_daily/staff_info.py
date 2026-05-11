@@ -211,33 +211,71 @@ def get_or_create_child_folder(service, parent_id: str, folder_name: str):
     return create_child_folder(service, parent_id, folder_name)
 
 
+def find_file_in_folder(service, parent_id: str, filename: str):
+    q = (
+        f"'{q_escape(parent_id)}' in parents and "
+        f"name='{q_escape(filename)}' and "
+        f"trashed=false"
+    )
+
+    res = service.files().list(
+        q=q,
+        fields="files(id,name,webViewLink)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+        pageSize=10,
+    ).execute()
+
+    files = res.get("files", [])
+    return files[0] if files else None
+
+
 def upload_to_gdrive(local_path: str, folder_id: str):
     service = get_drive_service()
     filename = os.path.basename(local_path)
+
+    media = MediaFileUpload(
+        local_path,
+        resumable=True,
+    )
+
+    log(f"準備上傳到 Google Drive：{filename}")
+
+    existing = find_file_in_folder(service, folder_id, filename)
+
+    if existing:
+        updated = service.files().update(
+            fileId=existing["id"],
+            media_body=media,
+            fields="id,name,webViewLink",
+            supportsAllDrives=True,
+        ).execute()
+
+        log(
+            f"♻️ 已覆蓋舊檔：{updated['name']} "
+            f"(file_id={updated['id']}) "
+            f"{updated.get('webViewLink', existing.get('webViewLink', ''))}"
+        )
+        return updated["id"]
 
     file_metadata = {
         "name": filename,
         "parents": [folder_id],
     }
 
-    media = MediaFileUpload(
-        local_path,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        resumable=True,
-    )
-
-    log(f"準備上傳到 Google Drive：{filename}")
-
     created = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields="id,name",
+        fields="id,name,webViewLink",
         supportsAllDrives=True,
     ).execute()
 
-    log(f"☁️ 已上傳：{created['name']} (file_id={created['id']})")
+    log(
+        f"☁️ 已上傳新檔：{created['name']} "
+        f"(file_id={created['id']}) "
+        f"{created.get('webViewLink', '')}"
+    )
     return created["id"]
-
 
 def can_use_local_output_dir() -> bool:
     try:
