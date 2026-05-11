@@ -1236,7 +1236,7 @@ def render_log_page() -> None:
 
                 if row["exit_code"] == "0":
 
-                    st.success(f"{row['label']}：成功")
+                    st.info("執行成功")
 
                 elif row["exit_code"] == "missing":
 
