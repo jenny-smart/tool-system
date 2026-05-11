@@ -32,10 +32,13 @@ HEADERS = {
 TZ = timezone(timedelta(hours=8))
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-# fallback：若未傳 --folder-id，才使用這個預設總根目錄 ID
+# 若 ToolApp / GitHub Actions 沒有傳 --folder-id，才會使用這個預設值
 DEFAULT_ROOT_FOLDER_ID = "1VCb_y-zBA7tm9SF1s7GeixZVweWteWIc"
 
-DEFAULT_AREA_FOLDERS = {
+# 只需要設定「總根目錄 ID」。
+# 程式會自動在總根目錄底下建立：
+# 總根目錄 / 區域根目錄 / 期別
+AREA_FOLDER_NAMES = {
     "台北": "01.台北專員",
     "新北": "01.台北專員",
     "台中": "02.台中專員",
@@ -44,7 +47,7 @@ DEFAULT_AREA_FOLDERS = {
     "高雄": "05.高雄專員",
 }
 
-# 高雄帳號會抓「高雄＋台南」合併成高雄檔。
+# 高雄帳號會抓「高雄＋台南」並合併成高雄檔。
 KAOHSIUNG_MERGE_REGIONS = ["高雄", "台南"]
 
 
@@ -56,7 +59,6 @@ class RunArgs:
     end: str | None
     area: str
     folder_id: str
-    area_folder_id: str | None
     snapshot_dir: str
     skip_snapshot: bool
 
@@ -71,7 +73,7 @@ def tw_now() -> datetime:
 
 def normalize_area(area: str | None) -> str:
     value = str(area or "all").strip()
-    if value in ["", "全區", "全部", "ALL", "All"]:
+    if value in ["", "全區", "全部", "ALL", "All", "all"]:
         return "all"
     return value
 
@@ -93,13 +95,17 @@ def parse_args() -> RunArgs:
     parser.add_argument("--end", default="", help="日期區間結束，例如：2026-05-15")
     parser.add_argument("--area", default="all", help="地區，例如：台北 / 新北 / 台中 / all")
     parser.add_argument("--folder-id", default="", help="月排程總根目錄 ID")
-    parser.add_argument("--area-folder-id", default="", help="指定地區根目錄 ID；單區執行時可使用")
     parser.add_argument("--snapshot-dir", default="snapshots/monthly_orders")
     parser.add_argument("--skip-snapshot", action="store_true")
 
     args = parser.parse_args()
-
     half = args.half or args.legacy_half
+
+    root_folder_id = (
+        args.folder_id.strip()
+        or os.getenv("MONTHLY_ORDERS_ROOT_FOLDER_ID", "").strip()
+        or DEFAULT_ROOT_FOLDER_ID
+    )
 
     return RunArgs(
         half=half,
@@ -107,64 +113,59 @@ def parse_args() -> RunArgs:
         start=args.start.strip() or None,
         end=args.end.strip() or None,
         area=normalize_area(args.area),
-        folder_id=args.folder_id.strip() or os.getenv("MONTHLY_ORDERS_ROOT_FOLDER_ID", "").strip() or DEFAULT_ROOT_FOLDER_ID,
-        area_folder_id=args.area_folder_id.strip() or None,
+        folder_id=root_folder_id,
         snapshot_dir=args.snapshot_dir.strip() or "snapshots/monthly_orders",
         skip_snapshot=bool(args.skip_snapshot),
     )
 
 
+def secret_value(path: list[str], default: str = "") -> str:
+    try:
+        value: Any = st.secrets
+        for key in path:
+            value = value[key]
+        return str(value)
+    except Exception:
+        return default
+
+
+def env_value(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
 def load_accounts() -> dict[str, dict[str, str]]:
     """讀取各區帳號。
 
-    同時支援：
+    支援：
     1. Streamlit secrets accounts.*
-    2. GitHub/環境變數 TAIPEI_EMAIL / TAIPEI_PASSWORD 等
+    2. GitHub Actions secrets / env
     """
-
-    def from_secrets(path: list[str], default: str = "") -> str:
-        try:
-            value: Any = st.secrets
-            for key in path:
-                value = value[key]
-            return str(value)
-        except Exception:
-            return default
-
-    def env(name: str, default: str = "") -> str:
-        return os.getenv(name, default).strip()
 
     accounts = {
         "台北": {
-            "email": from_secrets(["accounts", "taipei", "email"], env("TAIPEI_EMAIL")),
-            "password": from_secrets(["accounts", "taipei", "password"], env("TAIPEI_PASSWORD")),
-            "folder": DEFAULT_AREA_FOLDERS["台北"],
+            "email": secret_value(["accounts", "taipei", "email"], env_value("TAIPEI_EMAIL")),
+            "password": secret_value(["accounts", "taipei", "password"], env_value("TAIPEI_PASSWORD")),
         },
         "新北": {
             # 新北若沒有獨立帳號，預設沿用台北帳號；可用 NEWTAIPEI_EMAIL / NEWTAIPEI_PASSWORD 覆蓋。
-            "email": from_secrets(["accounts", "newtaipei", "email"], env("NEWTAIPEI_EMAIL", env("TAIPEI_EMAIL"))),
-            "password": from_secrets(["accounts", "newtaipei", "password"], env("NEWTAIPEI_PASSWORD", env("TAIPEI_PASSWORD"))),
-            "folder": DEFAULT_AREA_FOLDERS["新北"],
+            "email": secret_value(["accounts", "newtaipei", "email"], env_value("NEWTAIPEI_EMAIL", env_value("TAIPEI_EMAIL"))),
+            "password": secret_value(["accounts", "newtaipei", "password"], env_value("NEWTAIPEI_PASSWORD", env_value("TAIPEI_PASSWORD"))),
         },
         "台中": {
-            "email": from_secrets(["accounts", "taichung", "email"], env("TAICHUNG_EMAIL")),
-            "password": from_secrets(["accounts", "taichung", "password"], env("TAICHUNG_PASSWORD")),
-            "folder": DEFAULT_AREA_FOLDERS["台中"],
+            "email": secret_value(["accounts", "taichung", "email"], env_value("TAICHUNG_EMAIL")),
+            "password": secret_value(["accounts", "taichung", "password"], env_value("TAICHUNG_PASSWORD")),
         },
         "桃園": {
-            "email": from_secrets(["accounts", "taoyuan", "email"], env("TAOYUAN_EMAIL")),
-            "password": from_secrets(["accounts", "taoyuan", "password"], env("TAOYUAN_PASSWORD")),
-            "folder": DEFAULT_AREA_FOLDERS["桃園"],
+            "email": secret_value(["accounts", "taoyuan", "email"], env_value("TAOYUAN_EMAIL")),
+            "password": secret_value(["accounts", "taoyuan", "password"], env_value("TAOYUAN_PASSWORD")),
         },
         "新竹": {
-            "email": from_secrets(["accounts", "hsinchu", "email"], env("HSINCHU_EMAIL")),
-            "password": from_secrets(["accounts", "hsinchu", "password"], env("HSINCHU_PASSWORD")),
-            "folder": DEFAULT_AREA_FOLDERS["新竹"],
+            "email": secret_value(["accounts", "hsinchu", "email"], env_value("HSINCHU_EMAIL")),
+            "password": secret_value(["accounts", "hsinchu", "password"], env_value("HSINCHU_PASSWORD")),
         },
         "高雄": {
-            "email": from_secrets(["accounts", "kaohsiung", "email"], env("KAOHSIUNG_EMAIL", env("HSINCHU_EMAIL"))),
-            "password": from_secrets(["accounts", "kaohsiung", "password"], env("KAOHSIUNG_PASSWORD", env("HSINCHU_PASSWORD"))),
-            "folder": DEFAULT_AREA_FOLDERS["高雄"],
+            "email": secret_value(["accounts", "kaohsiung", "email"], env_value("KAOHSIUNG_EMAIL", env_value("HSINCHU_EMAIL"))),
+            "password": secret_value(["accounts", "kaohsiung", "password"], env_value("KAOHSIUNG_PASSWORD", env_value("HSINCHU_PASSWORD"))),
         },
     }
 
@@ -256,9 +257,9 @@ def half_to_dates(half: str | None) -> tuple[str, str, str]:
 
 
 def date_range_to_tag(start: str, end: str) -> str:
-    s = datetime.strptime(start, "%Y-%m-%d")
-    e = datetime.strptime(end, "%Y-%m-%d")
-    return f"{s.strftime('%Y%m%d')}-{e.strftime('%Y%m%d')}"
+    start_date = datetime.strptime(start, "%Y-%m-%d")
+    end_date = datetime.strptime(end, "%Y-%m-%d")
+    return f"{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}"
 
 
 def resolve_dates(args: RunArgs) -> tuple[str, str, str]:
@@ -281,10 +282,6 @@ def build_export_url(start: str, end: str, keyword: str = "") -> str:
     }
     req = requests.Request("GET", EXPORT_URL, params=params).prepare()
     return req.url
-
-
-def read_excel_from_response(content: bytes) -> pd.DataFrame:
-    return pd.read_excel(BytesIO(content), engine="openpyxl")
 
 
 def assert_excel_content(content: bytes, content_type: str) -> None:
@@ -311,8 +308,16 @@ def download_single_export(session: requests.Session, start: str, end: str, keyw
     return res.content
 
 
+def read_excel_from_response(content: bytes) -> pd.DataFrame:
+    return pd.read_excel(BytesIO(content), engine="openpyxl")
+
+
+def escape_drive_query_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 def find_child_folder(service, parent_id: str, folder_name: str) -> str | None:
-    escaped_name = folder_name.replace("'", "\\'")
+    escaped_name = escape_drive_query_value(folder_name)
     q = (
         f"name='{escaped_name}' and "
         f"mimeType='application/vnd.google-apps.folder' and "
@@ -347,6 +352,13 @@ def get_or_create_child_folder(service, parent_id: str, folder_name: str) -> str
     if folder_id:
         return folder_id
     return create_child_folder(service, parent_id, folder_name)
+
+
+def resolve_area_folder(service, root_folder_id: str, city: str) -> str:
+    folder_name = AREA_FOLDER_NAMES.get(city, city)
+    folder_id = get_or_create_child_folder(service, root_folder_id, folder_name)
+    log(f"📁 區域資料夾：{folder_name} / {folder_id}")
+    return folder_id
 
 
 def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
@@ -411,17 +423,6 @@ def choose_keyword(city: str) -> str:
     return ""
 
 
-def resolve_area_folder_id(service, root_folder_id: str, account: dict[str, str], args: RunArgs) -> str:
-    if args.area_folder_id and args.area != "all":
-        log(f"📁 使用指定地區根目錄：{args.area_folder_id}")
-        return args.area_folder_id
-
-    area_folder_name = account.get("folder") or args.area
-    area_folder_id = get_or_create_child_folder(service, root_folder_id, area_folder_name)
-    log(f"📁 地區根目錄：{area_folder_name} / {area_folder_id}")
-    return area_folder_id
-
-
 def save_snapshot(local_path: str, snapshot_root: str, tag: str, city: str, meta: dict[str, Any]) -> None:
     snapshot_dir = Path(snapshot_root) / tag
     snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -430,8 +431,7 @@ def save_snapshot(local_path: str, snapshot_root: str, tag: str, city: str, meta
     target = snapshot_dir / src.name
     shutil.copy2(src, target)
 
-    meta_name = target.with_suffix(".json").name
-    meta_path = snapshot_dir / meta_name
+    meta_path = target.with_suffix(".json")
     meta_path.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -465,7 +465,8 @@ def process_city(
     log(f"\n=== 處理 {city} ===")
     login(session, acc["email"], acc["password"])
 
-    area_folder_id = resolve_area_folder_id(service, args.folder_id, acc, args)
+    # 路徑：總根目錄 / 區域資料夾 / 期別
+    area_folder_id = resolve_area_folder(service, args.folder_id, city)
     tag_folder_id = get_or_create_child_folder(service, area_folder_id, tag)
     log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
 
@@ -496,6 +497,7 @@ def process_city(
                     "start": start,
                     "end": end,
                     "uploaded_file_id": uploaded_id,
+                    "root_folder_id": args.folder_id,
                     "area_folder_id": area_folder_id,
                     "tag_folder_id": tag_folder_id,
                     "generated_at": tw_now().strftime("%Y-%m-%d %H:%M:%S"),
