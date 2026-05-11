@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
-from pathlib import Path
+import traceback
 from datetime import datetime
-
-from tools.shared.log_to_sheet import write_job_log
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+
+try:
+    from tools.common.log_to_sheet import log_to_sheet
+except Exception:
+    log_to_sheet = None
+
 
 JOBS = {
     "schedule_report": {
@@ -33,15 +39,51 @@ JOBS = {
 }
 
 
-def run_job(job_name: str, folder_id: str = "") -> dict:
+def format_dt(value: datetime) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S")
 
+
+def write_daily_log(
+    *,
+    label: str,
+    status: str,
+    started_at: datetime,
+    finished_at: datetime,
+    message: str = "",
+    traceback_text: str = "",
+) -> None:
+    if log_to_sheet is None:
+        print("⚠️ 找不到 tools.common.log_to_sheet，略過寫入打卡表", flush=True)
+        return
+
+    try:
+        log_to_sheet(
+            system="daily",
+            function=label,
+            run_type="手動",
+            area="全區",
+            period="",
+            date=datetime.now().strftime("%Y%m%d"),
+            target="",
+            source_file="",
+            status="成功" if status == "success" else "失敗",
+            message=(
+                f"開始時間：{format_dt(started_at)}｜"
+                f"完成時間：{format_dt(finished_at)}｜"
+                f"{message}"
+            ),
+            traceback_text=traceback_text,
+        )
+    except Exception as exc:
+        print(f"⚠️ 寫入日排程打卡表失敗：{exc}", flush=True)
+
+
+def run_job(job_name: str, folder_id: str = "") -> dict:
     if job_name not in JOBS:
         raise RuntimeError(f"未知 job：{job_name}")
 
     job = JOBS[job_name]
-
     label = job["label"]
-
     script = BASE_DIR / job["script"]
 
     if not script.exists():
@@ -50,17 +92,14 @@ def run_job(job_name: str, folder_id: str = "") -> dict:
     cmd = [sys.executable, "-u", str(script)]
 
     if job.get("needs_folder_id"):
-
         if not folder_id:
             raise RuntimeError(f"{label} 缺少 folder_id")
-
         cmd.extend(["--folder-id", folder_id])
 
     print(f"開始執行：{label}", flush=True)
-
     print("Command:", " ".join(cmd), flush=True)
 
-    start_time = datetime.now()
+    started_at = datetime.now()
 
     completed = subprocess.run(
         cmd,
@@ -69,10 +108,9 @@ def run_job(job_name: str, folder_id: str = "") -> dict:
         capture_output=True,
     )
 
-    finish_time = datetime.now()
+    finished_at = datetime.now()
 
     stdout_text = completed.stdout or ""
-
     stderr_text = completed.stderr or ""
 
     if stdout_text:
@@ -82,39 +120,30 @@ def run_job(job_name: str, folder_id: str = "") -> dict:
         print(stderr_text, flush=True)
 
     if completed.returncode != 0:
-
         error_message = (
             f"{label} 執行失敗，exit={completed.returncode}\n\n"
+            f"STDOUT:\n{stdout_text[:3000]}\n\n"
             f"STDERR:\n{stderr_text[:5000]}"
         )
 
-        # ========= 打卡失敗 =========
-        try:
-            write_job_log(
-                system_name="日排程系統",
-                job_name=label,
-                status="failed",
-                started_at=start_time,
-                finished_at=finish_time,
-                message=error_message,
-            )
-        except Exception as log_err:
-            print(f"寫入打卡表失敗：{log_err}", flush=True)
+        write_daily_log(
+            label=label,
+            status="failed",
+            started_at=started_at,
+            finished_at=finished_at,
+            message=error_message,
+            traceback_text=stderr_text or error_message,
+        )
 
         raise RuntimeError(error_message)
 
-    # ========= 打卡成功 =========
-    try:
-        write_job_log(
-            system_name="日排程系統",
-            job_name=label,
-            status="success",
-            started_at=start_time,
-            finished_at=finish_time,
-            message="完成",
-        )
-    except Exception as log_err:
-        print(f"寫入打卡表失敗：{log_err}", flush=True)
+    write_daily_log(
+        label=label,
+        status="success",
+        started_at=started_at,
+        finished_at=finished_at,
+        message="完成",
+    )
 
     print(f"完成執行：{label}", flush=True)
 
@@ -122,6 +151,8 @@ def run_job(job_name: str, folder_id: str = "") -> dict:
         "job": job_name,
         "label": label,
         "status": "success",
+        "started_at": format_dt(started_at),
+        "finished_at": format_dt(finished_at),
     }
 
 
@@ -129,19 +160,33 @@ def main(
     target: str = "all",
     folder_id: str = "",
 ) -> list[dict]:
-
     targets = list(JOBS.keys()) if target == "all" else [target]
 
     results = []
+    failed = []
 
     for job_name in targets:
-
-        results.append(
-            run_job(
-                job_name,
-                folder_id=folder_id,
+        try:
+            results.append(
+                run_job(
+                    job_name,
+                    folder_id=folder_id,
+                )
             )
-        )
+        except Exception as exc:
+            failed.append(
+                {
+                    "job": job_name,
+                    "status": "failed",
+                    "message": str(exc),
+                }
+            )
+
+            if target != "all":
+                raise
+
+    if failed:
+        raise RuntimeError(f"日排程有失敗項目：{failed}")
 
     print("scheduled_daily scheduler 全部完成", flush=True)
 
@@ -149,9 +194,6 @@ def main(
 
 
 if __name__ == "__main__":
-
-    import argparse
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
