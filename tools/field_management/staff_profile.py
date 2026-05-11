@@ -12,13 +12,15 @@ import yaml
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-from google_sheet_reader import read_drive_spreadsheet_values
-from logger import log
+try:
+    from .google_sheet_reader import read_drive_spreadsheet_values
+except ImportError:
+    from google_sheet_reader import read_drive_spreadsheet_values
 
 try:
-    from orders import sort_order_values
-except Exception:
-    from tools.field_management.orders import sort_order_values
+    from .logger import log
+except ImportError:
+    from logger import log
 
 
 SCOPES = [
@@ -26,11 +28,25 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
-TARGET_SHEET_NAME = "專員個人資料"
-
 
 def today_yyyymmdd() -> str:
     return datetime.now().strftime("%Y%m%d")
+
+
+def add_month_same_day_yyyymmdd(date_key: str, months: int = 1) -> str:
+    year = int(date_key[:4])
+    month = int(date_key[4:6]) + months
+    day = int(date_key[6:8])
+
+    while month > 12:
+        year += 1
+        month -= 12
+
+    while month < 1:
+        year -= 1
+        month += 12
+
+    return f"{year}{month:02d}{day:02d}"
 
 
 def normalize_file_name(name: str) -> str:
@@ -198,10 +214,6 @@ def find_file_by_possible_names(
     )
 
 
-def read_file_values(drive, sheets, file: dict[str, Any]) -> list[list[Any]]:
-    return read_drive_spreadsheet_values(drive, sheets, file)
-
-
 def ensure_rectangular(
     values: list[list[Any]],
     cols: int | None = None,
@@ -219,6 +231,10 @@ def ensure_rectangular(
         output.append(new_row)
 
     return output
+
+
+def read_file_values(drive, sheets, file: dict[str, Any]) -> list[list[Any]]:
+    return read_drive_spreadsheet_values(drive, sheets, file)
 
 
 def is_blank_row(row: list[Any]) -> bool:
@@ -258,6 +274,14 @@ def clear_and_write_values(
 ) -> None:
     clear_range(sheets, spreadsheet_id, range_name)
     write_values(sheets, spreadsheet_id, range_name, values)
+
+try:
+    from .orders import sort_order_values
+except ImportError:
+    from orders import sort_order_values
+
+
+TARGET_SHEET_NAME = "專員個人資料"
 
 
 def run_staff_profile_only(
@@ -322,9 +346,7 @@ def run_staff_profile_only(
         merged,
     )
 
-    log(
-        f"完成專員個資：{file.get('name')} → {target_range} / rows={len(merged)}"
-    )
+    log(f"完成專員個資：{file.get('name')} → {target_range} / rows={len(merged)}")
 
 
 def run_order_columns_to_staff_profile(
@@ -380,9 +402,7 @@ def run_order_columns_to_staff_profile(
         filtered,
     )
 
-    log(
-        f"完成訂單截取：{file.get('name')} → {target_range} / rows={len(filtered)}"
-    )
+    log(f"完成訂單截取：{file.get('name')} → {target_range} / rows={len(filtered)}")
 
 
 def run_staff_profile_for_area(

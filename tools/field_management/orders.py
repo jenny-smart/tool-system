@@ -28,11 +28,25 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
-TARGET_SHEET_NAME = "訂單資料"
-
 
 def today_yyyymmdd() -> str:
     return datetime.now().strftime("%Y%m%d")
+
+
+def add_month_same_day_yyyymmdd(date_key: str, months: int = 1) -> str:
+    year = int(date_key[:4])
+    month = int(date_key[4:6]) + months
+    day = int(date_key[6:8])
+
+    while month > 12:
+        year += 1
+        month -= 12
+
+    while month < 1:
+        year -= 1
+        month += 12
+
+    return f"{year}{month:02d}{day:02d}"
 
 
 def normalize_file_name(name: str) -> str:
@@ -223,6 +237,47 @@ def read_file_values(drive, sheets, file: dict[str, Any]) -> list[list[Any]]:
     return read_drive_spreadsheet_values(drive, sheets, file)
 
 
+def is_blank_row(row: list[Any]) -> bool:
+    return all(str(value).strip() == "" for value in row)
+
+
+def clear_range(sheets, spreadsheet_id: str, range_name: str) -> None:
+    sheets.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=range_name,
+        body={},
+    ).execute()
+
+
+def write_values(
+    sheets,
+    spreadsheet_id: str,
+    range_name: str,
+    values: list[list[Any]],
+) -> None:
+    if not values:
+        return
+
+    sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=range_name,
+        valueInputOption="USER_ENTERED",
+        body={"values": values},
+    ).execute()
+
+
+def clear_and_write_values(
+    sheets,
+    spreadsheet_id: str,
+    range_name: str,
+    values: list[list[Any]],
+) -> None:
+    clear_range(sheets, spreadsheet_id, range_name)
+    write_values(sheets, spreadsheet_id, range_name, values)
+
+TARGET_SHEET_NAME = "訂單資料"
+
+
 def normalize_date_sort_value(value: Any) -> Any:
     if value is None or str(value).strip() == "":
         return 999999999999
@@ -263,41 +318,6 @@ def sort_order_values(values: list[list[Any]]) -> list[list[Any]]:
     )
 
     return [header] + body
-
-
-def clear_range(sheets, spreadsheet_id: str, range_name: str) -> None:
-    sheets.spreadsheets().values().clear(
-        spreadsheetId=spreadsheet_id,
-        range=range_name,
-        body={},
-    ).execute()
-
-
-def write_values(
-    sheets,
-    spreadsheet_id: str,
-    range_name: str,
-    values: list[list[Any]],
-) -> None:
-    if not values:
-        return
-
-    sheets.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=range_name,
-        valueInputOption="USER_ENTERED",
-        body={"values": values},
-    ).execute()
-
-
-def clear_and_write_values(
-    sheets,
-    spreadsheet_id: str,
-    range_name: str,
-    values: list[list[Any]],
-) -> None:
-    clear_range(sheets, spreadsheet_id, range_name)
-    write_values(sheets, spreadsheet_id, range_name, values)
 
 
 def run_orders_for_area(

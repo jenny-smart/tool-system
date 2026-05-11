@@ -12,31 +12,21 @@ import yaml
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-from google_sheet_reader import read_drive_spreadsheet_values
-from logger import log
+try:
+    from .google_sheet_reader import read_drive_spreadsheet_values
+except ImportError:
+    from google_sheet_reader import read_drive_spreadsheet_values
+
+try:
+    from .logger import log
+except ImportError:
+    from logger import log
 
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
-
-PASTE_MAP = {
-    1: "R4",
-    2: "AD4",
-    3: "AP4",
-    4: "BB4",
-    5: "BN4",
-    6: "BZ4",
-    7: "CL4",
-    8: "CX4",
-    9: "DJ4",
-    10: "DV4",
-    11: "EH4",
-    12: "ET4",
-}
-
-TARGET_SHEET_NAME = "2026排班統計表"
 
 
 def today_yyyymmdd() -> str:
@@ -206,7 +196,7 @@ def find_file_by_possible_names(
     folder_id: str,
     possible_names: list[str],
 ) -> dict[str, Any]:
-    targets = [normalize_file_name(n) for n in possible_names]
+    targets = [normalize_file_name(name) for name in possible_names]
     candidates: list[str] = []
 
     for file in list_files_in_folder(drive, folder_id):
@@ -243,25 +233,12 @@ def ensure_rectangular(
     return output
 
 
+def read_file_values(drive, sheets, file: dict[str, Any]) -> list[list[Any]]:
+    return read_drive_spreadsheet_values(drive, sheets, file)
+
+
 def is_blank_row(row: list[Any]) -> bool:
     return all(str(value).strip() == "" for value in row)
-
-
-def filter_schedule_values(values: list[list[Any]]) -> list[list[Any]]:
-    output: list[list[Any]] = []
-
-    for row in values:
-        if is_blank_row(row):
-            continue
-
-        col_b = str(row[1]).strip() if len(row) > 1 else ""
-
-        if "檸檬人" in col_b:
-            continue
-
-        output.append(row)
-
-    return output
 
 
 def clear_range(sheets, spreadsheet_id: str, range_name: str) -> None:
@@ -298,9 +275,39 @@ def clear_and_write_values(
     clear_range(sheets, spreadsheet_id, range_name)
     write_values(sheets, spreadsheet_id, range_name, values)
 
+PASTE_MAP = {
+    1: "R4",
+    2: "AD4",
+    3: "AP4",
+    4: "BB4",
+    5: "BN4",
+    6: "BZ4",
+    7: "CL4",
+    8: "CX4",
+    9: "DJ4",
+    10: "DV4",
+    11: "EH4",
+    12: "ET4",
+}
 
-def read_file_values(drive, sheets, file: dict[str, Any]) -> list[list[Any]]:
-    return read_drive_spreadsheet_values(drive, sheets, file)
+TARGET_SHEET_NAME = "2026排班統計表"
+
+
+def filter_schedule_values(values: list[list[Any]]) -> list[list[Any]]:
+    output: list[list[Any]] = []
+
+    for row in values:
+        if is_blank_row(row):
+            continue
+
+        col_b = str(row[1]).strip() if len(row) > 1 else ""
+
+        if "檸檬人" in col_b:
+            continue
+
+        output.append(row)
+
+    return output
 
 
 def run_schedule_stats_for_area(
@@ -352,9 +359,7 @@ def run_schedule_stats_for_area(
             values,
         )
 
-        log(
-            f"完成：{file.get('name')} → {target_range} / rows={len(values)}"
-        )
+        log(f"完成：{file.get('name')} → {target_range} / rows={len(values)}")
 
 
 def main(
