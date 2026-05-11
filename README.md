@@ -1,95 +1,20 @@
-# Jenny Tools App - 儲值金管理（Google Sheet 版）
+# 日排程完整更新
 
-這版不是 Excel 上傳工具，而是 **Google Drive + Google Sheets + Streamlit** 的主控表驅動流程。
+內容：
+- tools/scheduled_daily/scheduler.py
+  - 所有日排程都經 scheduler 執行
+  - 每個 job 打卡：執行中 / 成功 / 失敗
+  - 兼容 tools.common.log_to_sheet.write_job_log 或 log_to_sheet
 
-## 核心流程
+- schedule_report.py / orders_report.py / staff_info.py / staff_schedule.py
+  - Google Drive 同資料夾同檔名會覆蓋舊檔
+  - 不再新增重複檔案
 
-每月輸入期別，例如 `202604`，一鍵執行：
-
-1. 複製前月彙整檔，建立當月彙整檔
-2. 掃描當月 Drive 期別資料夾
-3. 轉檔為 Google Sheet
-4. 整理新竹與高雄儲值金結算檔
-5. 搬運各區資料到當月彙整檔
-6. 從主控表讀取公式設定並套用
-7. 依主控表金額設定彙整總金額
-8. 回寫主控表，每月一欄打卡
-
-## 高雄/新竹整理規則
-
-來源：`期別儲值金結算-新竹`
-
-條件：H 欄為以下任一值：
-
-- 儲值金18900
-- 儲值金36000
-- 儲值金9900
-
-規則：新竹檔移除符合 H 欄指定方案的列；高雄檔只保留符合 H 欄指定方案的列。
-
-## 主控表建議工作表
-
-### 1. 月度作業紀錄
-
-A 欄為「項目」，每月一欄，例如：
-
-| 項目 | 202604 | 202605 |
-|---|---:|---:|
-| 彙整檔建立時間 | | |
-| 台北儲值金結算轉檔筆數 | | |
-| 台北儲值金結算轉檔時間 | | |
-| 台北儲值金結算搬運筆數 | | |
-| 台北儲值金結算搬運時間 | | |
-| 台北儲值金結算計算公式數 | | |
-| 台北儲值金結算計算時間 | | |
-| 台北儲值金結算總金額 | | |
-| 台北儲值金結算彙整金額時間 | | |
-
-程式會自動補缺少項目。
-
-### 2. 公式設定
-
-第一列請放欄名：
-
-| 啟用 | 類型 | 區域 | 目標頁籤 | 目標欄位 | 公式 | 套用起始列 | 最後套用期別 | 套用完成時間 | 套用筆數 | 備註 |
-|---|---|---|---|---|---|---:|---|---|---:|---|
-| TRUE | 儲值金結算 | 台北 | 台北儲值金結算 | U | =IF(A2="","",...) | 2 | | | | |
-
-每一條公式都會在主控表打卡。
-
-### 3. 金額統整設定
-
-第一列請放欄名：
-
-| 啟用 | 區域 | 類型 | 目標頁籤 | 金額欄位 | 備註 |
-|---|---|---|---|---|---|
-| TRUE | 台北 | 儲值金結算 | 台北儲值金結算 | X | |
-| TRUE | 台北 | 儲值金預收 | 台北儲值金預收 | BM | |
-
-`金額欄位` 由你在主控表設定，程式會加總該欄第 2 列以後的數字。
-
-## 安裝
-
-```bash
-pip install -r requirements.txt
-streamlit run toolsapp.py
-```
-
-## Google 權限設定
-
-1. 建立 Google Cloud Service Account
-2. 啟用 Google Sheets API 與 Google Drive API
-3. 把以下 Google Drive / Sheet 分享給 service account email，權限設為編輯：
-   - 主控 Google Sheet
-   - 每月資料夾根目錄
-4. 建立 `.streamlit/secrets.toml`
-
-請參考 `.streamlit/secrets.example.toml`。
-
-## Streamlit Cloud
-
-Main file path 請填：
-
-```text
-toolsapp.py
-```
+ToolApp 要點：
+- 日排程個別功能也要呼叫 tools.scheduled_daily.scheduler.main(target=..., folder_id=...)
+- target 對應：
+  - 一鍵執行日排程 -> all
+  - 排班統計表 -> schedule_report
+  - 專員班表 -> staff_schedule
+  - 當月次月訂單 -> orders_report
+  - 專員個資 -> staff_info
