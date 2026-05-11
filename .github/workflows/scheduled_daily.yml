@@ -148,16 +148,14 @@ jobs:
               STATUS="failed"
             fi
 
-            cat > "$LOG_DIR/$NAME.json" <<EOF
-            {
-             "job_name": "$NAME",
-             "status": "$STATUS",
-             "exit_code": $EXIT_CODE,
-             "started_at": "$START_TEXT",
-             "finished_at": "$END_TEXT",
-             "duration_seconds": $DURATION
-           }
-           EOF
+            echo "{
+              \"job_name\": \"$NAME\",
+              \"status\": \"$STATUS\",
+              \"exit_code\": $EXIT_CODE,
+              \"started_at\": \"$START_TEXT\",
+              \"finished_at\": \"$END_TEXT\",
+              \"duration_seconds\": $DURATION
+            }" > "$LOG_DIR/$NAME.json"
 
             cat "$LOG_DIR/$NAME.log"
 
