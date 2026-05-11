@@ -621,12 +621,19 @@ def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
 
 def run_script(script_path: str, args: list[str] | None = None) -> str:
     args = args or []
-    script = BASE_DIR / script_path
 
-    if not script.exists():
-        raise RuntimeError(f"找不到執行檔：{script_path}")
+    if script_path.startswith("module:"):
+        module_name = script_path.replace("module:", "", 1)
+        cmd = [sys.executable, "-m", module_name, *args]
+        display_name = module_name
+    else:
+        script = BASE_DIR / script_path
 
-    cmd = [sys.executable, str(script), *args]
+        if not script.exists():
+            raise RuntimeError(f"找不到執行檔：{script_path}")
+
+        cmd = [sys.executable, str(script), *args]
+        display_name = script_path
 
     completed = subprocess.run(
         cmd,
@@ -645,14 +652,13 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
 
     if completed.returncode != 0:
         raise RuntimeError(
-            f"執行失敗：{script_path}\n"
+            f"執行失敗：{display_name}\n"
             f"exit={completed.returncode}\n"
             f"STDOUT:\n{completed.stdout}\n"
             f"STDERR:\n{completed.stderr}"
         )
 
-    return f"{script_path} 執行完成"
-
+    return f"{display_name} 執行完成"
 
 def render_html_table(df: pd.DataFrame) -> None:
     if df.empty:
@@ -758,7 +764,7 @@ def render_report() -> None:
         if st.button("🔄 更新業績報表", use_container_width=True):
             try:
                 add_log("開始更新業績報表", "info")
-                run_script("tools/scheduled_daily/performance_report.py")
+                run_script("tools/scheduled_daily/performance_report.py", ["dashboard", "true"])
                 add_log("業績報表更新完成", "success")
                 st.rerun()
             except Exception as e:
@@ -1164,37 +1170,8 @@ def render_log_page() -> None:
         unsafe_allow_html=True,
     )
 
-    cards = ['<div class="status-grid">']
 
-    for row in rows:
-        error_html = ""
-        if row["exit_code"] not in ["0", "missing"]:
-            error_html = "<div class='error-box'>" + html.escape("\n".join(row["important"][:6])) + "</div>"
-
-        cards.append(
-            f"""
-            <div class="status-card" style="--status-color:{row['color']};">
-
-              <div class="status-head">
-
-                <div class="status-name">
-                  {html.escape(row['label'])}
-                </div>
-
-                <div class="status-badge">
-                  {row['icon']} {html.escape(row['status_text'])}
-                </div>
-
-              </div>
-
-            </div>
-            """
-        )
-
-    cards.append("</div>")
-    st.markdown("".join(cards), unsafe_allow_html=True)
-
-    with st.expander("🔎 查看詳細 log", expanded=failed_count > 0):
+    with st.expander("🔎 查看詳細 log", expanded=False):
 
         tabs = st.tabs([f"{row['icon']} {row['label']}" for row in rows])
 
@@ -1243,7 +1220,7 @@ def render_log_page() -> None:
 
                 if row["exit_code"] == "0":
 
-                    st.info("執行成功")
+                    st.success(f"{row['label']}：成功")
 
                 elif row["exit_code"] == "missing":
 
@@ -1326,7 +1303,11 @@ FIELD_SCRIPT_MAP = {
     "外場專員班表": ["tools/field_management/staff_schedule.py"],
     "外場當月次月訂單": ["tools/field_management/orders.py"],
     "外場專員個資": ["tools/field_management/staff_profile.py"],
-    "一鍵執行外場日排程": ["tools/field_management/scheduler.py", "--target", "all"],
+    "一鍵執行外場日排程": [
+        "module:tools.field_management.scheduler",
+        "--target",
+        "all",
+    ],
 }
 
 
@@ -1698,9 +1679,15 @@ if can_access_page("settings"):
                 extra_detail = ""
 
                 if current_type == "field_daily_schedule":
+                    folder_ids = mask_nested_ids(sys_cfg.get("folder_ids", {}))
+                    spreadsheet_ids = mask_nested_ids(sys_cfg.get("spreadsheet_ids", {}))
+
                     extra_detail = f"""
-      <div class="detail-row"><strong>資料夾設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("folder_ids", {}))))}</div>
-      <div class="detail-row"><strong>表單設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("spreadsheet_ids", {}))))}</div>
+      <div class="detail-row"><strong>排班統計資料夾</strong>：{html.escape(str(folder_ids.get("schedule_stats", "")))}</div>
+      <div class="detail-row"><strong>訂單資料夾</strong>：台北 / 台中 已設定</div>
+      <div class="detail-row"><strong>專員個資資料夾</strong>：台北 / 台中 已設定</div>
+      <div class="detail-row"><strong>專員班表資料夾</strong>：台北 / 台中 已設定</div>
+      <div class="detail-row"><strong>目標表單</strong>：名冊 / 薪資 / 辦公室 已設定</div>
     """
                 else:
                     extra_detail = f"""
