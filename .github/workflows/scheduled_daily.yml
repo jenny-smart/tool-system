@@ -28,11 +28,14 @@ permissions:
   contents: write
 
 jobs:
+
   run-daily-jobs:
+
     runs-on: ubuntu-latest
 
     env:
       DAILY_ROOT_FOLDER_ID: ${{ secrets.DAILY_ROOT_FOLDER_ID }}
+
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
@@ -76,25 +79,33 @@ jobs:
             MIN=$(date -u +"%M")
 
             if [ "$HOUR" = "17" ] && [ "$MIN" = "00" ]; then
+
               TASK="schedule_stats"
 
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "10" ]; then
+
               TASK="staff_schedule"
 
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "20" ]; then
+
               TASK="orders"
 
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "30" ]; then
+
               TASK="staff_profile"
 
             elif [ "$HOUR" = "18" ] && [ "$MIN" = "00" ]; then
+
               TASK="notify"
 
             elif [ "$HOUR" = "21" ] && [ "$MIN" = "00" ]; then
+
               TASK="all"
 
             else
+
               TASK="none"
+
             fi
 
           fi
@@ -172,7 +183,7 @@ jobs:
 
             run_one \
               "schedule_stats" \
-              "python -u tools/field_management/scheduler.py \
+              "python -u -m tools.field_management.scheduler \
                 --target schedule_stats \
                 --date '$TODAY' \
                 --system-name '外場日排程系統'"
@@ -183,7 +194,7 @@ jobs:
 
             run_one \
               "staff_schedule" \
-              "python -u tools/field_management/scheduler.py \
+              "python -u -m tools.field_management.scheduler \
                 --target staff_schedule \
                 --date '$TODAY' \
                 --system-name '外場日排程系統'"
@@ -194,7 +205,7 @@ jobs:
 
             run_one \
               "orders" \
-              "python -u tools/field_management/scheduler.py \
+              "python -u -m tools.field_management.scheduler \
                 --target orders \
                 --date '$TODAY' \
                 --system-name '外場日排程系統'"
@@ -205,7 +216,7 @@ jobs:
 
             run_one \
               "staff_profile" \
-              "python -u tools/field_management/scheduler.py \
+              "python -u -m tools.field_management.scheduler \
                 --target staff_profile \
                 --date '$TODAY' \
                 --system-name '外場日排程系統'"
