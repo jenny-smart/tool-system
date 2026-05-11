@@ -2,7 +2,7 @@
     "job_name": "field_orders",
     "status": "failed",
     "exit_code": 1,
-    "started_at": "2026-05-11 12:55:37",
-    "finished_at": "2026-05-11 12:55:37",
-    "duration_seconds": 0
+    "started_at": "2026-05-11 13:04:01",
+    "finished_at": "2026-05-11 13:04:03",
+    "duration_seconds": 2
   }
