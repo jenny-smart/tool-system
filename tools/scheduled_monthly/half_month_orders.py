@@ -21,6 +21,50 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+try:
+    from tools.common.log_to_sheet import log_to_sheet
+except Exception:
+    try:
+        from ..common.log_to_sheet import log_to_sheet
+    except Exception:
+        log_to_sheet = None
+
+
+# 可加在檔案任意位置
+
+def write_monthly_log(
+    *,
+    function_name: str,
+    area: str,
+    period: str,
+    date_text: str,
+    target: str = "",
+    source_file: str = "",
+    status: str,
+    message: str,
+    traceback_text: str = "",
+) -> None:
+    if log_to_sheet is None:
+        return
+
+    try:
+        log_to_sheet(
+            system="monthly",
+            function=function_name,
+            run_type="手動",
+            area=area,
+            period=period,
+            date=date_text,
+            target=target,
+            source_file=source_file,
+            status=status,
+            message=message,
+            traceback_text=traceback_text,
+        )
+    except Exception as exc:
+        print(f"⚠️ 寫入月排程 Log 失敗：{exc}", flush=True)
+
+
 LOGIN_URL = "https://backend.lemonclean.com.tw/login"
 EXPORT_URL = "https://backend.lemonclean.com.tw/purchase/export_order"
 
