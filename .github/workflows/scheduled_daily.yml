@@ -37,6 +37,7 @@ jobs:
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
+
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
 
@@ -63,59 +64,98 @@ jobs:
         id: decide
         shell: bash
         run: |
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TASK="${{ github.event.inputs.target }}"
           else
+
             HOUR=$(date -u +"%H")
             MIN=$(date -u +"%M")
 
             if [ "$HOUR" = "17" ] && [ "$MIN" = "00" ]; then
               TASK="schedule_stats"
+
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "10" ]; then
               TASK="staff_schedule"
+
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "20" ]; then
               TASK="orders"
+
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "30" ]; then
               TASK="staff_profile"
+
             elif [ "$HOUR" = "18" ] && [ "$MIN" = "00" ]; then
               TASK="notify"
+
             elif [ "$HOUR" = "21" ] && [ "$MIN" = "00" ]; then
               TASK="all"
+
             else
               TASK="none"
             fi
+
           fi
 
           echo "task=$TASK" >> "$GITHUB_OUTPUT"
-          echo "TASK=$TASK"
 
       - name: Run daily task
         shell: bash
         run: |
+
           set +e
 
           TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+
           LOG_DIR="logs/$TODAY"
+
           mkdir -p "$LOG_DIR"
 
           TASK="${{ steps.decide.outputs.task }}"
 
           run_one () {
+
             NAME="$1"
             CMD="$2"
 
+            START_TS=$(date +%s)
+            START_TEXT=$(TZ=Asia/Taipei date "+%Y-%m-%d %H:%M:%S")
+
             echo "===== $NAME ====="
-            echo "Command: $CMD"
+            echo "START: $START_TEXT"
+            echo "COMMAND: $CMD"
 
             bash -lc "$CMD" > "$LOG_DIR/$NAME.log" 2>&1
+
             EXIT_CODE=$?
 
+            END_TS=$(date +%s)
+            END_TEXT=$(TZ=Asia/Taipei date "+%Y-%m-%d %H:%M:%S")
+
+            DURATION=$((END_TS - START_TS))
+
             echo "$EXIT_CODE" > "$LOG_DIR/$NAME.exit"
+
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              STATUS="success"
+            else
+              STATUS="failed"
+            fi
+
+            cat > "$LOG_DIR/$NAME.json" <<EOF
+{
+  "job_name": "$NAME",
+  "status": "$STATUS",
+  "exit_code": $EXIT_CODE,
+  "started_at": "$START_TEXT",
+  "finished_at": "$END_TEXT",
+  "duration_seconds": $DURATION
+}
+EOF
 
             cat "$LOG_DIR/$NAME.log"
 
             if [ "$EXIT_CODE" -ne 0 ]; then
-              echo "❌ $NAME failed with exit code $EXIT_CODE"
+              echo "❌ $NAME failed"
             else
               echo "✅ $NAME success"
             fi
@@ -124,23 +164,55 @@ jobs:
           }
 
           if [ "$TASK" = "schedule_stats" ] || [ "$TASK" = "all" ]; then
-            run_one "schedule_stats" "python -u tools/field_management/scheduler.py --target schedule_stats --date '$TODAY' --system-name '外場日排程系統'"
+
+            run_one \
+              "schedule_stats" \
+              "python -u tools/field_management/scheduler.py \
+              --target schedule_stats \
+              --date '$TODAY' \
+              --system-name '外場日排程系統'"
+
           fi
 
           if [ "$TASK" = "staff_schedule" ] || [ "$TASK" = "all" ]; then
-            run_one "staff_schedule" "python -u tools/field_management/scheduler.py --target staff_schedule --date '$TODAY' --system-name '外場日排程系統'"
+
+            run_one \
+              "staff_schedule" \
+              "python -u tools/field_management/scheduler.py \
+              --target staff_schedule \
+              --date '$TODAY' \
+              --system-name '外場日排程系統'"
+
           fi
 
           if [ "$TASK" = "orders" ] || [ "$TASK" = "all" ]; then
-            run_one "orders" "python -u tools/field_management/scheduler.py --target orders --date '$TODAY' --system-name '外場日排程系統'"
+
+            run_one \
+              "orders" \
+              "python -u tools/field_management/scheduler.py \
+              --target orders \
+              --date '$TODAY' \
+              --system-name '外場日排程系統'"
+
           fi
 
           if [ "$TASK" = "staff_profile" ] || [ "$TASK" = "all" ]; then
-            run_one "staff_profile" "python -u tools/field_management/scheduler.py --target staff_profile --date '$TODAY' --system-name '外場日排程系統'"
+
+            run_one \
+              "staff_profile" \
+              "python -u tools/field_management/scheduler.py \
+              --target staff_profile \
+              --date '$TODAY' \
+              --system-name '外場日排程系統'"
+
           fi
 
           if [ "$TASK" = "notify" ] || [ "$TASK" = "all" ]; then
-            run_one "send_daily_result" "python -u tools/notify/send_daily_result.py"
+
+            run_one \
+              "send_daily_result" \
+              "python -u tools/notify/send_daily_result.py"
+
           fi
 
           if [ "$TASK" = "none" ]; then
@@ -151,6 +223,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
@@ -158,8 +231,13 @@ jobs:
 
           if git diff --cached --quiet; then
             echo "No log changes"
+
           else
+
             git commit -m "Update daily logs"
+
             git pull --rebase origin "${GITHUB_REF_NAME}"
+
             git push
+
           fi
