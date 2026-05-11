@@ -1,8 +1,8 @@
 users:
-  jenny:
-    password: "請改成你的密碼"
+  jenny@lemonclean.com.tw:
+    password: "jenny"
     role: "admin"
 
-  field_user:
-    password: "請改成外場密碼"
+  tpe@lemonclean.com.tw:
+    password: "LC42627791"
     role: "field_only"
