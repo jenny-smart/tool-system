@@ -12,6 +12,7 @@ def convert_excel_to_google_sheet(drive, file_id, file_name):
             "mimeType": GOOGLE_SHEET_MIME,
         },
         fields="id,name,mimeType",
+        supportsAllDrives=True,
     ).execute()
 
     return copied["id"]
@@ -46,7 +47,10 @@ def cleanup_temp_file(drive, file_id):
         return
 
     try:
-        drive.files().delete(fileId=file_id).execute()
+        drive.files().delete(
+            fileId=file_id,
+            supportsAllDrives=True,
+        ).execute()
     except Exception:
         pass
 
@@ -54,8 +58,10 @@ def cleanup_temp_file(drive, file_id):
 def read_drive_spreadsheet_values(drive, sheets, file):
     """
     統一讀取 Drive 上的試算表。
-    - Google Sheets：直接讀
-    - Excel xls/xlsx：先轉成 Google Sheets 再讀
+
+    支援：
+    1. Google Sheets：直接讀取
+    2. Excel xls/xlsx：先轉成 Google Sheets，再讀取 values
     """
     file_id = file["id"]
     file_name = file.get("name", "")
@@ -73,7 +79,10 @@ def read_drive_spreadsheet_values(drive, sheets, file):
             file_name,
         )
 
-        return read_google_sheet_values(sheets, temp_file_id)
+        return read_google_sheet_values(
+            sheets,
+            temp_file_id,
+        )
 
     finally:
         if temp_file_id:
