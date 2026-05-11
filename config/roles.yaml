@@ -1,0 +1,32 @@
+roles:
+
+  admin:
+
+    systems:
+      - daily_schedule
+      - monthly_schedule
+      - field_daily_schedule
+      - performance_report
+
+    pages:
+      - main
+      - report
+      - log
+      - settings
+
+    logs:
+      - daily_scheduler
+      - field_daily_schedule
+      - performance_report
+
+  field_only:
+
+    systems:
+      - field_daily_schedule
+
+    pages:
+      - main
+      - log
+
+    logs:
+      - field_daily_schedule
