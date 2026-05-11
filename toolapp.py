@@ -1420,15 +1420,6 @@ DAILY_SCRIPT_MAP = {
     "業績報表": "tools/scheduled_daily/performance_report.py",
 }
 
-MONTHLY_SCRIPT_MAP = {
-    "上半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "1"],
-    "下半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "2"],
-    "已退款": ["tools/scheduled_monthly/refund_report.py"],
-    "預收": ["tools/scheduled_monthly/prepaid_report.py"],
-    "儲值金結算": ["tools/scheduled_monthly/stored_value_settlement.py"],
-    "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
-}
-
 DAILY_TARGET_MAP = {
     "一鍵執行日排程": "all",
     "排班統計表": "schedule_report",
@@ -1437,6 +1428,15 @@ DAILY_TARGET_MAP = {
     "專員個資": "staff_info",
 }
 
+
+MONTHLY_SCRIPT_MAP = {
+    "上半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "1"],
+    "下半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "2"],
+    "已退款": ["tools/scheduled_monthly/refund_report.py"],
+    "預收": ["tools/scheduled_monthly/prepaid_report.py"],
+    "儲值金結算": ["tools/scheduled_monthly/stored_value_settlement.py"],
+    "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
+}
 
 FIELD_SCRIPT_MAP = {
     "外場排班統計表": ["tools/field_management/schedule_stats.py"],
@@ -2058,26 +2058,27 @@ if run_clicked:
                 add_log("尚未設定共用雲端資料夾 ID", "error")
                 st.rerun()
 
-            if selected_function == "一鍵執行日排程":
-                from tools.scheduled_daily.scheduler import main as run_daily_scheduler
-
-                daily_target = DAILY_TARGET_MAP.get(selected_function, "all")
-                result = run_daily_scheduler(
-                    target=daily_target,
-                    folder_id=folder_id,
-                )
-
-            else:
+            if selected_function == "業績報表":
                 script = DAILY_SCRIPT_MAP.get(selected_function)
 
                 if not script:
                     raise RuntimeError(f"找不到日排程功能：{selected_function}")
 
-                if selected_function == "業績報表":
-                    result = run_script(script)
-                    add_log("業績報表已更新，可點「📊 查看業績報表」開啟。", "success")
-                else:
-                    result = run_script(script, ["--folder-id", folder_id])
+                result = run_script(script)
+                add_log("業績報表已更新，可點「📊 查看業績報表」開啟。", "success")
+
+            else:
+                from tools.scheduled_daily.scheduler import main as run_daily_scheduler
+
+                daily_target = DAILY_TARGET_MAP.get(selected_function)
+
+                if not daily_target:
+                    raise RuntimeError(f"找不到日排程 target：{selected_function}")
+
+                result = run_daily_scheduler(
+                    target=daily_target,
+                    folder_id=folder_id,
+                )
 
         elif system_type == "monthly_scheduler":
             if not folder_id:
