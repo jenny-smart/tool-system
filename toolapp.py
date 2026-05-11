@@ -1182,18 +1182,75 @@ def render_log_page() -> None:
     st.markdown("".join(cards), unsafe_allow_html=True)
 
     with st.expander("🔎 查看詳細 log", expanded=failed_count > 0):
+
         tabs = st.tabs([f"{row['icon']} {row['label']}" for row in rows])
 
         for tab, row in zip(tabs, rows):
-            with tab:
-                if row["exit_code"] == "0":
-                    st.success(f"{row['label']}：成功")
-                elif row["exit_code"] == "missing":
-                    st.warning(f"{row['label']}：尚無 exit code")
-                else:
-                    st.error(f"{row['label']}：失敗 / exit code {row['exit_code']}")
 
-                st.code(row["content"] or "空 log", language="text")
+            with tab:
+
+                json_file = (
+                    Path("logs")
+                    / selected_day
+                    / f"{row['job_name']}.json"
+                )
+
+                meta = {}
+
+                if json_file.exists():
+                    try:
+                        meta = json.loads(
+                            json_file.read_text(
+                                encoding="utf-8"
+                            )
+                        )
+                    except Exception:
+                        meta = {}
+
+                started_at = meta.get("started_at", "-")
+                finished_at = meta.get("finished_at", "-")
+                duration = meta.get("duration_seconds", "-")
+                status = meta.get("status", "-")
+
+                c1, c2, c3 = st.columns(3)
+
+                with c1:
+                    st.caption("開始時間")
+                    st.write(started_at)
+
+                with c2:
+                    st.caption("完成時間")
+                    st.write(finished_at)
+
+                with c3:
+                    st.caption("耗時")
+                    st.write(f"{duration} 秒")
+
+                st.divider()
+
+                if row["exit_code"] == "0":
+
+                    st.success(f"{row['label']}：成功")
+
+                elif row["exit_code"] == "missing":
+
+                    st.warning(f"{row['label']}：尚無 exit code")
+
+                else:
+
+                    st.error(
+                        f"{row['label']}：失敗 / exit code {row['exit_code']}"
+                    )
+
+                    with st.expander(
+                        "查看錯誤詳細 log",
+                        expanded=False
+                    ):
+
+                        st.code(
+                            row["content"] or "空 log",
+                            language="text"
+                        )
 
 
 # ═══════════════════════════════════════════════════════════
