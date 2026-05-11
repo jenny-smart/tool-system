@@ -137,7 +137,7 @@ def parse_args() -> RunArgs:
     parser.add_argument("--period", default="", help="例如：202605-1 或 202605-2")
     parser.add_argument("--start", default="", help="日期區間開始，例如：2026-05-01")
     parser.add_argument("--end", default="", help="日期區間結束，例如：2026-05-15")
-    parser.add_argument("--area", default="all", help="地區，例如：台北 / 新北 / 台中 / all")
+    parser.add_argument("--area", default=os.getenv("TARGET_AREA", "all"), help="地區，例如：台北 / 新北 / 台中 / all")
     parser.add_argument("--folder-id", default="", help="月排程總根目錄 ID")
     parser.add_argument("--snapshot-dir", default="snapshots/monthly_orders")
     parser.add_argument("--skip-snapshot", action="store_true")
@@ -405,10 +405,49 @@ def resolve_area_folder(service, root_folder_id: str, city: str) -> str:
     return folder_id
 
 
-def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
-    filename = os.path.basename(local_path)
+def find_file_in_folder(service, parent_folder_id: str, filename: str) -> dict[str, Any] | None:
+    escaped_name = escape_drive_query_value(filename)
+    q = (
+        f"name='{escaped_name}' and "
+        f"'{parent_folder_id}' in parents and "
+        f"trashed=false"
+    )
 
+    res = service.files().list(
+        q=q,
+        fields="files(id,name,webViewLink,mimeType)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+        pageSize=10,
+    ).execute()
+
+    files = res.get("files", [])
+    return files[0] if files else None
+
+
+def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
+    """上傳檔案到 Google Drive。
+
+    若目標資料夾已有同名檔案，直接覆蓋該檔案內容；
+    若沒有同名檔案，才新增。
+    """
+    filename = os.path.basename(local_path)
     media = MediaFileUpload(local_path, resumable=True)
+
+    existing = find_file_in_folder(service, parent_folder_id, filename)
+
+    if existing:
+        updated = service.files().update(
+            fileId=existing["id"],
+            media_body=media,
+            fields="id,name,webViewLink",
+            supportsAllDrives=True,
+        ).execute()
+
+        link = updated.get("webViewLink", existing.get("webViewLink", ""))
+        log(f"♻️ 已覆蓋舊檔：{updated['name']} → folder_id={parent_folder_id} {link}".strip())
+        return updated["id"]
+
     body = {
         "name": filename,
         "parents": [parent_folder_id],
@@ -422,9 +461,8 @@ def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     ).execute()
 
     link = created.get("webViewLink", "")
-    log(f"☁️ 已上傳：{created['name']} → folder_id={parent_folder_id} {link}".strip())
+    log(f"☁️ 已上傳新檔：{created['name']} → folder_id={parent_folder_id} {link}".strip())
     return created["id"]
-
 
 def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: str, tag: str) -> str:
     df_list: list[pd.DataFrame] = []
@@ -481,7 +519,7 @@ def save_snapshot(local_path: str, snapshot_root: str, tag: str, city: str, meta
         encoding="utf-8",
     )
 
-    log(f"🧾 已存 GitHub snapshot：{target}")
+    log(f"🧾 已更新 GitHub snapshot：{target}")
 
 
 def resolve_cities(args: RunArgs, accounts: dict[str, dict[str, str]]) -> list[str]:
