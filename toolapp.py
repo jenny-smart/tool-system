@@ -481,8 +481,100 @@ def parse_date_range(start_date, end_date) -> list[str]:
     return days
 
 
+def normalize_monthly_areas(system: dict) -> dict:
+    """月排程地區設定標準化。
+
+    支援兩種結構：
+    1. areas:
+         台北:
+           folder_name: 01.台北專員
+           enabled: true
+    2. areas:
+         - 台北
+         - 台中
+       folders:
+         台北: 01.台北專員
+    """
+    raw_areas = system.get("areas", {})
+    raw_folders = system.get("folders", {}) or {}
+    output = {}
+
+    if isinstance(raw_areas, dict):
+        for area_name, info in raw_areas.items():
+            if isinstance(info, dict):
+                output[str(area_name)] = {
+                    "folder_name": str(info.get("folder_name", raw_folders.get(area_name, area_name)) or area_name),
+                    "enabled": bool(info.get("enabled", True)),
+                }
+            else:
+                output[str(area_name)] = {
+                    "folder_name": str(raw_folders.get(area_name, area_name)),
+                    "enabled": bool(info),
+                }
+
+    elif isinstance(raw_areas, list):
+        for area_name in raw_areas:
+            output[str(area_name)] = {
+                "folder_name": str(raw_folders.get(area_name, area_name)),
+                "enabled": True,
+            }
+
+    return output
+
+
+def monthly_areas_to_text(system: dict) -> str:
+    areas = normalize_monthly_areas(system)
+
+    if not areas:
+        return ""
+
+    lines = []
+    for area_name, info in areas.items():
+        enabled = "1" if info.get("enabled", True) else "0"
+        folder_name = info.get("folder_name", area_name)
+        lines.append(f"{area_name}={folder_name}={enabled}")
+
+    return "\n".join(lines)
+
+
+def parse_monthly_areas_text(text_value: str) -> dict:
+    """每行格式：地區=資料夾名稱=1/0。刪除地區＝刪掉該行。"""
+    areas = {}
+
+    for raw_line in str(text_value or "").splitlines():
+        line = raw_line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        parts = [p.strip() for p in line.split("=")]
+
+        area_name = parts[0] if parts else ""
+        folder_name = parts[1] if len(parts) >= 2 and parts[1] else area_name
+        enabled_raw = parts[2] if len(parts) >= 3 else "1"
+
+        if not area_name:
+            continue
+
+        areas[area_name] = {
+            "folder_name": folder_name,
+            "enabled": enabled_raw not in ["0", "false", "False", "停用", "disabled"],
+        }
+
+    return areas
+
+
 def available_areas_for_system(system: dict) -> list[str]:
     system_type = system.get("type", "")
+
+    if system_type == "monthly_scheduler":
+        areas = normalize_monthly_areas(system)
+        enabled_areas = [
+            area_name
+            for area_name, info in areas.items()
+            if info.get("enabled", True)
+        ]
+        return enabled_areas or ["全區"]
 
     if system_type == "field_daily_schedule":
         folder_ids = system.get("folder_ids", {}) or {}
@@ -1385,9 +1477,9 @@ with head_log:
     else:
         st.caption("無 Log 權限")
 
-c1, c2 = st.columns(2)
+sys_col, func_col = st.columns([1, 1])
 
-with c2:
+with sys_col:
     st.markdown(
         '<div class="field-label">🗂️ 執行系統</div>',
         unsafe_allow_html=True,
@@ -1410,8 +1502,70 @@ with c2:
 selected_system = get_system_by_name(config, system_name)
 system_type = selected_system.get("type", "vip")
 
-with c1:
-    if system_type in ["vip", "monthly_scheduler"]:
+with func_col:
+    st.markdown(
+        '<div class="field-label">🎯 執行功能</div>',
+        unsafe_allow_html=True,
+    )
+
+    selected_function = st.selectbox(
+        "執行功能",
+        functions_for_system(selected_system),
+        label_visibility="collapsed",
+        key="selected_function",
+    )
+
+monthly_order_functions = ["上半月訂單", "下半月訂單"]
+
+period = ""
+start_date_value = None
+end_date_value = None
+monthly_date_mode = "期別"
+
+date_col, area_col = st.columns([2, 1])
+
+with date_col:
+    if system_type == "monthly_scheduler" and selected_function in monthly_order_functions:
+        st.markdown(
+            '<div class="field-label">📆 執行方式</div>',
+            unsafe_allow_html=True,
+        )
+
+        monthly_date_mode = st.radio(
+            "執行方式",
+            ["期別", "日期區間"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="monthly_date_mode",
+        )
+
+        if monthly_date_mode == "期別":
+            period_default = tw_now_text("%Y%m") + ("-1" if selected_function == "上半月訂單" else "-2")
+            period = st.text_input(
+                "執行期別",
+                value=period_default,
+                placeholder="例如：202605-1 或 202605-2",
+                label_visibility="collapsed",
+                key="period_monthly_order",
+            )
+        else:
+            d1, d2 = st.columns(2)
+            today_date = datetime.now(TW_TZ).date()
+            with d1:
+                start_date_value = st.date_input(
+                    "開始日期",
+                    value=today_date,
+                    key="monthly_start_date",
+                )
+            with d2:
+                end_date_value = st.date_input(
+                    "結束日期",
+                    value=today_date,
+                    key="monthly_end_date",
+                )
+            period = start_date_value.strftime("%Y%m%d")
+
+    elif system_type in ["vip", "monthly_scheduler"]:
         st.markdown(
             '<div class="field-label">📆 執行期別</div>',
             unsafe_allow_html=True,
@@ -1423,8 +1577,7 @@ with c1:
             label_visibility="collapsed",
             key="period",
         )
-        start_date_value = None
-        end_date_value = None
+
     else:
         st.markdown(
             '<div class="field-label">📆 執行日期區間</div>',
@@ -1446,22 +1599,7 @@ with c1:
             )
         period = start_date_value.strftime("%Y%m%d")
 
-fcol, acol = st.columns([2, 1])
-
-with fcol:
-    st.markdown(
-        '<div class="field-label">🎯 執行功能</div>',
-        unsafe_allow_html=True,
-    )
-
-    selected_function = st.selectbox(
-        "執行功能",
-        functions_for_system(selected_system),
-        label_visibility="collapsed",
-        key="selected_function",
-    )
-
-with acol:
+with area_col:
     st.markdown(
         '<div class="field-label">📍 執行區域</div>',
         unsafe_allow_html=True,
@@ -1508,7 +1646,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════
-# UI — 日誌
+# UI — 日誌# UI — 日誌
 # ═══════════════════════════════════════════════════════════
 render_log()
 
@@ -1556,7 +1694,15 @@ if can_access_page("settings"):
                     format_func=get_system_type_label,
                 )
                 new_master_id = st.text_input("設定主控表 ID")
-                new_folder_id = st.text_input("設定共用雲端資料夾 ID")
+                new_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID")
+                new_monthly_areas_text = ""
+                if new_type == "monthly_scheduler":
+                    st.caption("月排程地區設定：每行格式為 地區=地區資料夾名稱=1；刪除地區＝刪掉該行")
+                    new_monthly_areas_text = st.text_area(
+                        "月排程地區設定",
+                        value="台北=01.台北專員=1\n台中=02.台中專員=1\n桃園=03.桃園專員=1\n新竹=04.新竹專員=1\n高雄=05.高雄專員=1",
+                        height=140,
+                    )
                 new_enabled = st.checkbox("啟用", value=True)
 
                 f1, f2 = st.columns(2)
@@ -1580,6 +1726,9 @@ if can_access_page("settings"):
                             "folder_id": new_folder_id,
                             "enabled": new_enabled,
                         }
+
+                        if new_type == "monthly_scheduler":
+                            new_system["areas"] = parse_monthly_areas_text(new_monthly_areas_text)
 
                         if new_type == "field_daily_schedule":
                             new_system.update(
@@ -1636,7 +1785,15 @@ if can_access_page("settings"):
                         format_func=get_system_type_label,
                     )
                     e_master_id = st.text_input("設定主控表 ID", value=master_id)
-                    e_folder_id = st.text_input("設定共用雲端資料夾 ID", value=folder_id)
+                    e_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID", value=folder_id)
+                    e_monthly_areas_text = ""
+                    if e_type == "monthly_scheduler":
+                        st.caption("月排程地區設定：每行格式為 地區=地區資料夾名稱=1/0；刪除地區＝刪掉該行")
+                        e_monthly_areas_text = st.text_area(
+                            "月排程地區設定",
+                            value=monthly_areas_to_text(sys_cfg),
+                            height=150,
+                        )
                     e_enabled = st.checkbox("啟用", value=enabled)
 
                     e1, e2 = st.columns(2)
@@ -1659,6 +1816,9 @@ if can_access_page("settings"):
                                     "enabled": e_enabled,
                                 }
                             )
+
+                            if e_type == "monthly_scheduler":
+                                updated["areas"] = parse_monthly_areas_text(e_monthly_areas_text)
 
                             if e_type == "field_daily_schedule":
                                 updated.setdefault("folder_ids", {})
@@ -1688,6 +1848,26 @@ if can_access_page("settings"):
       <div class="detail-row"><strong>專員個資資料夾</strong>：台北 / 台中 已設定</div>
       <div class="detail-row"><strong>專員班表資料夾</strong>：台北 / 台中 已設定</div>
       <div class="detail-row"><strong>目標表單</strong>：名冊 / 薪資 / 辦公室 已設定</div>
+    """
+                elif current_type == "monthly_scheduler":
+                    monthly_areas = normalize_monthly_areas(sys_cfg)
+                    enabled_area_names = [
+                        area_name
+                        for area_name, area_info in monthly_areas.items()
+                        if area_info.get("enabled", True)
+                    ]
+                    disabled_area_names = [
+                        area_name
+                        for area_name, area_info in monthly_areas.items()
+                        if not area_info.get("enabled", True)
+                    ]
+                    area_summary = "、".join(enabled_area_names) if enabled_area_names else "未設定"
+                    disabled_summary = "、".join(disabled_area_names) if disabled_area_names else "無"
+
+                    extra_detail = f"""
+      <div class="detail-row"><strong>月排程根目錄 ID</strong>：{mask_id(folder_id)}</div>
+      <div class="detail-row"><strong>啟用地區</strong>：{html.escape(area_summary)}</div>
+      <div class="detail-row"><strong>停用地區</strong>：{html.escape(disabled_summary)}</div>
     """
                 else:
                     extra_detail = f"""
@@ -1736,14 +1916,20 @@ if run_clicked:
     folder_id = selected_system.get("folder_id", "")
 
     if system_type in ["vip", "monthly_scheduler"] and not period:
-        add_log("請先輸入執行期別", "error")
-        st.rerun()
+        if not (system_type == "monthly_scheduler" and selected_function in ["上半月訂單", "下半月訂單"] and monthly_date_mode == "日期區間"):
+            add_log("請先輸入執行期別", "error")
+            st.rerun()
 
     if system_type in ["daily_scheduler", "field_daily_schedule"]:
         date_keys = parse_date_range(start_date_value, end_date_value)
         if not date_keys:
             add_log("請選擇執行日期區間", "error")
             st.rerun()
+    elif system_type == "monthly_scheduler" and selected_function in ["上半月訂單", "下半月訂單"] and monthly_date_mode == "日期區間":
+        date_keys = [
+            start_date_value.strftime("%Y%m%d"),
+            end_date_value.strftime("%Y%m%d"),
+        ]
     else:
         date_keys = [period]
 
@@ -1825,7 +2011,11 @@ if run_clicked:
 
         elif system_type == "monthly_scheduler":
             if not folder_id:
-                add_log("尚未設定共用雲端資料夾 ID", "error")
+                add_log("尚未設定月排程根目錄 ID", "error")
+                st.rerun()
+
+            if not selected_areas:
+                add_log("請至少選擇一個執行區域", "error")
                 st.rerun()
 
             if selected_function == "一鍵執行月排程":
@@ -1843,9 +2033,42 @@ if run_clicked:
                     raise RuntimeError(f"找不到月排程功能：{selected_function}")
 
                 script = cmd[0]
-                args = cmd[1:]
+                base_args = list(cmd[1:])
+                results = []
 
-                result = run_script(script, [*args, "--folder-id", folder_id])
+                if selected_function in ["上半月訂單", "下半月訂單"]:
+                    for area_name in selected_areas:
+                        args = []
+
+                        if monthly_date_mode == "日期區間":
+                            if not start_date_value or not end_date_value:
+                                raise RuntimeError("請選擇開始日期與結束日期")
+
+                            args.extend([
+                                "--start",
+                                start_date_value.strftime("%Y-%m-%d"),
+                                "--end",
+                                end_date_value.strftime("%Y-%m-%d"),
+                            ])
+                        else:
+                            # 舊版 half_month_orders.py 仍支援 positional half。
+                            args.extend(base_args)
+
+                            if period:
+                                args.extend(["--period", period])
+
+                        args.extend(["--folder-id", folder_id])
+
+                        if area_name != "全區":
+                            args.extend(["--area", area_name])
+
+                        add_log(f"月排程執行：{selected_function} / {period or '日期區間'} / {area_name}")
+                        results.append(run_script(script, args))
+
+                    result = results
+
+                else:
+                    result = run_script(script, [*base_args, "--folder-id", folder_id])
 
         elif system_type == "field_daily_schedule":
             cmd = FIELD_SCRIPT_MAP.get(selected_function)
