@@ -1,7 +1,7 @@
 {
-    "job_name": "send_daily_result",
-    "status": "success",
-    "exit_code": 0,
+    "job_name": "field_orders",
+    "status": "failed",
+    "exit_code": 1,
     "started_at": "2026-05-11 12:55:37",
     "finished_at": "2026-05-11 12:55:37",
     "duration_seconds": 0
