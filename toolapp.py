@@ -22,6 +22,13 @@ import pandas as pd
 import streamlit as st
 import yaml
 
+from utils.auth import authenticate
+from utils.permissions import (
+    can_access_page,
+    can_access_system,
+    get_allowed_log_jobs,
+)
+
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 BASE_DIR = Path(__file__).resolve().parent
@@ -365,6 +372,64 @@ if "editing_system" not in st.session_state:
 
 if "view" not in st.session_state:
     st.session_state.view = "main"
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "username" not in st.session_state:
+    st.session_state.username = ""
+
+if "role" not in st.session_state:
+    st.session_state.role = ""
+
+
+
+def render_login_page() -> None:
+    st.markdown(
+        """
+        <div style="background:white;border:1px solid #e2edf2;border-radius:24px;padding:28px;max-width:460px;margin:70px auto 0 auto;box-shadow:0 10px 30px rgba(0,32,48,0.08);">
+          <div style="font-size:1.8rem;font-weight:900;color:#0a4b6e;text-align:center;margin-bottom:8px;">🔐 Tools App 登入</div>
+          <div style="color:#7894a5;text-align:center;font-size:0.9rem;margin-bottom:22px;">請使用系統帳號登入後操作</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.form("login_form"):
+        username = st.text_input("帳號")
+        password = st.text_input("密碼", type="password")
+        submitted = st.form_submit_button("登入", use_container_width=True)
+
+    if submitted:
+        user = authenticate(username, password)
+
+        if user:
+            st.session_state.logged_in = True
+            st.session_state.username = user["username"]
+            st.session_state.role = user["role"]
+            st.rerun()
+
+        else:
+            st.error("帳號或密碼錯誤")
+
+
+def require_login() -> None:
+    if not st.session_state.get("logged_in"):
+        render_login_page()
+        st.stop()
+
+
+def logout_button() -> None:
+    with st.sidebar:
+        st.markdown("### 👤 使用者")
+        st.caption(f"帳號：{st.session_state.get('username', '-')}")
+        st.caption(f"角色：{st.session_state.get('role', '-')}")
+        if st.button("登出", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.session_state.role = ""
+            st.session_state.view = "main"
+            st.rerun()
 
 
 def set_view(view_name: str) -> None:
@@ -1135,20 +1200,33 @@ def functions_for_system(sys_cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 # Router
 # ═══════════════════════════════════════════════════════════
+require_login()
+logout_button()
+
 sync_view_from_query_params()
 
 config = merge_legacy_secrets(load_config())
-systems = get_enabled_systems(config)
+systems = [
+    s for s in get_enabled_systems(config)
+    if can_access_system(s.get("type", ""))
+]
 system_names = [s.get("name", "") for s in systems if s.get("name")]
 
 if not system_names:
-    system_names = ["儲值金管理"]
+    st.error("目前角色沒有可執行的系統權限，請聯絡管理員。")
+    st.stop()
 
 if st.session_state.view == "report":
+    if not can_access_page("report"):
+        st.error("你沒有權限查看業績報表")
+        st.stop()
     render_report()
     st.stop()
 
 if st.session_state.view == "log":
+    if not can_access_page("log"):
+        st.error("你沒有權限查看排程 Log")
+        st.stop()
     render_log_page()
     st.stop()
 
@@ -1173,14 +1251,20 @@ with head_left:
     st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
 
 with head_report:
-    if st.button("📊 查看業績報表", use_container_width=True):
-        set_view("report")
-        st.rerun()
+    if can_access_page("report"):
+        if st.button("📊 查看業績報表", use_container_width=True):
+            set_view("report")
+            st.rerun()
+    else:
+        st.caption("無業績報表權限")
 
 with head_log:
-    if st.button("📋 查看排程 Log", use_container_width=True):
-        set_view("log")
-        st.rerun()
+    if can_access_page("log"):
+        if st.button("📋 查看排程 Log", use_container_width=True):
+            set_view("log")
+            st.rerun()
+    else:
+        st.caption("無 Log 權限")
 
 c1, c2 = st.columns(2)
 
@@ -1264,199 +1348,199 @@ with clear_col:
 # ═══════════════════════════════════════════════════════════
 # UI — 設定檔管理
 # ═══════════════════════════════════════════════════════════
-with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expanded=False):
-    st.markdown(
-        """
-<div class="setting-note">
-可在這裡新增 / 編輯不同系統設定。<br>
-舊系統使用主控表 ID / 共用雲端資料夾 ID。<br>
-外場排程系統的 folder_ids / spreadsheet_ids 建議直接維護在 GitHub repo 的 <code>config/systems.yaml</code>。Streamlit Cloud 畫面上修改只會存在目前執行環境，重新部署或重啟後可能消失。
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+if can_access_page("settings"):
+    with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expanded=False):
+        st.markdown(
+            """
+    <div class="setting-note">
+    可在這裡新增 / 編輯不同系統設定。<br>
+    舊系統使用主控表 ID / 共用雲端資料夾 ID。<br>
+    外場排程系統的 folder_ids / spreadsheet_ids 建議直接維護在 GitHub repo 的 <code>config/systems.yaml</code>。Streamlit Cloud 畫面上修改只會存在目前執行環境，重新部署或重啟後可能消失。
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
 
-    add_col, _ = st.columns([1, 3])
-    with add_col:
-        if st.button("➕ 新增系統", use_container_width=True):
-            st.session_state.adding_system = True
-            st.session_state.editing_system = None
-            st.rerun()
+        add_col, _ = st.columns([1, 3])
+        with add_col:
+            if st.button("➕ 新增系統", use_container_width=True):
+                st.session_state.adding_system = True
+                st.session_state.editing_system = None
+                st.rerun()
 
-    system_type_options = ["vip", "daily_scheduler", "monthly_scheduler", "field_daily_schedule"]
+        system_type_options = ["vip", "daily_scheduler", "monthly_scheduler", "field_daily_schedule"]
 
-    if st.session_state.adding_system:
-        with st.form("add_system_form"):
-            st.markdown("**新增系統設定**")
+        if st.session_state.adding_system:
+            with st.form("add_system_form"):
+                st.markdown("**新增系統設定**")
 
-            new_name = st.text_input("設定系統名稱", placeholder="例如：外場日排程系統")
-            new_type = st.selectbox(
-                "設定系統類型",
-                system_type_options,
-                format_func=get_system_type_label,
-            )
-            new_master_id = st.text_input("設定主控表 ID")
-            new_folder_id = st.text_input("設定共用雲端資料夾 ID")
-            new_enabled = st.checkbox("啟用", value=True)
+                new_name = st.text_input("設定系統名稱", placeholder="例如：外場日排程系統")
+                new_type = st.selectbox(
+                    "設定系統類型",
+                    system_type_options,
+                    format_func=get_system_type_label,
+                )
+                new_master_id = st.text_input("設定主控表 ID")
+                new_folder_id = st.text_input("設定共用雲端資料夾 ID")
+                new_enabled = st.checkbox("啟用", value=True)
 
-            f1, f2 = st.columns(2)
-            with f1:
-                submit_add = st.form_submit_button("💾 儲存", use_container_width=True)
-            with f2:
-                cancel_add = st.form_submit_button("✕ 取消", use_container_width=True)
+                f1, f2 = st.columns(2)
+                with f1:
+                    submit_add = st.form_submit_button("💾 儲存", use_container_width=True)
+                with f2:
+                    cancel_add = st.form_submit_button("✕ 取消", use_container_width=True)
 
-            if submit_add:
-                systems_all = config.get("systems", [])
+                if submit_add:
+                    systems_all = config.get("systems", [])
 
-                if not new_name:
-                    st.error("請輸入系統名稱")
-                elif any(s.get("name") == new_name for s in systems_all):
-                    st.error(f"系統「{new_name}」已存在")
-                else:
-                    new_system = {
-                        "name": new_name,
-                        "type": new_type,
-                        "master_spreadsheet_id": new_master_id,
-                        "folder_id": new_folder_id,
-                        "enabled": new_enabled,
-                    }
+                    if not new_name:
+                        st.error("請輸入系統名稱")
+                    elif any(s.get("name") == new_name for s in systems_all):
+                        st.error(f"系統「{new_name}」已存在")
+                    else:
+                        new_system = {
+                            "name": new_name,
+                            "type": new_type,
+                            "master_spreadsheet_id": new_master_id,
+                            "folder_id": new_folder_id,
+                            "enabled": new_enabled,
+                        }
 
-                    if new_type == "field_daily_schedule":
-                        new_system.update(
-                            {
-                                "folder_ids": {
-                                    "schedule_stats": "",
-                                    "order": {"台北": "", "台中": ""},
-                                    "staff_profile": {"台北": "", "台中": ""},
-                                    "staff_schedule": {"台北": "", "台中": ""},
-                                },
-                                "spreadsheet_ids": {
-                                    "roster": {"台北": "", "台中": ""},
-                                    "salary": {"台北": "", "台中": ""},
-                                    "office": {"台北": "", "台中": ""},
-                                },
-                            }
-                        )
+                        if new_type == "field_daily_schedule":
+                            new_system.update(
+                                {
+                                    "folder_ids": {
+                                        "schedule_stats": "",
+                                        "order": {"台北": "", "台中": ""},
+                                        "staff_profile": {"台北": "", "台中": ""},
+                                        "staff_schedule": {"台北": "", "台中": ""},
+                                    },
+                                    "spreadsheet_ids": {
+                                        "roster": {"台北": "", "台中": ""},
+                                        "salary": {"台北": "", "台中": ""},
+                                        "office": {"台北": "", "台中": ""},
+                                    },
+                                }
+                            )
 
-                    systems_all.append(new_system)
-                    config["systems"] = systems_all
-                    save_config(config)
-                    add_log(f"新增系統設定：{new_name}", "success")
+                        systems_all.append(new_system)
+                        config["systems"] = systems_all
+                        save_config(config)
+                        add_log(f"新增系統設定：{new_name}", "success")
+                        st.session_state.adding_system = False
+                        st.rerun()
+
+                if cancel_add:
                     st.session_state.adding_system = False
                     st.rerun()
 
-            if cancel_add:
-                st.session_state.adding_system = False
-                st.rerun()
+        for i, sys_cfg in enumerate(config.get("systems", [])):
+            name = sys_cfg.get("name", f"系統{i + 1}")
+            current_type = sys_cfg.get("type", "vip")
+            master_id = sys_cfg.get("master_spreadsheet_id", "")
+            folder_id = sys_cfg.get("folder_id", "")
+            enabled = sys_cfg.get("enabled", True)
 
-    for i, sys_cfg in enumerate(config.get("systems", [])):
-        name = sys_cfg.get("name", f"系統{i + 1}")
-        current_type = sys_cfg.get("type", "vip")
-        master_id = sys_cfg.get("master_spreadsheet_id", "")
-        folder_id = sys_cfg.get("folder_id", "")
-        enabled = sys_cfg.get("enabled", True)
+            needs_ids = current_type == "vip"
+            complete = bool(name and (not needs_ids or (master_id and folder_id)))
+            badge = (
+                '<span class="badge-ok">已設定</span>'
+                if complete
+                else '<span class="badge-err">未完整</span>'
+            )
 
-        needs_ids = current_type == "vip"
-        complete = bool(name and (not needs_ids or (master_id and folder_id)))
-        badge = (
-            '<span class="badge-ok">已設定</span>'
-            if complete
-            else '<span class="badge-err">未完整</span>'
-        )
+            if st.session_state.editing_system == name:
+                with st.form(f"edit_system_{i}"):
+                    st.markdown(f"**編輯系統：{name}**")
 
-        if st.session_state.editing_system == name:
-            with st.form(f"edit_system_{i}"):
-                st.markdown(f"**編輯系統：{name}**")
+                    e_name = st.text_input("設定系統名稱", value=name)
+                    e_type = st.selectbox(
+                        "設定系統類型",
+                        system_type_options,
+                        index=system_type_options.index(current_type) if current_type in system_type_options else 0,
+                        format_func=get_system_type_label,
+                    )
+                    e_master_id = st.text_input("設定主控表 ID", value=master_id)
+                    e_folder_id = st.text_input("設定共用雲端資料夾 ID", value=folder_id)
+                    e_enabled = st.checkbox("啟用", value=enabled)
 
-                e_name = st.text_input("設定系統名稱", value=name)
-                e_type = st.selectbox(
-                    "設定系統類型",
-                    system_type_options,
-                    index=system_type_options.index(current_type) if current_type in system_type_options else 0,
-                    format_func=get_system_type_label,
-                )
-                e_master_id = st.text_input("設定主控表 ID", value=master_id)
-                e_folder_id = st.text_input("設定共用雲端資料夾 ID", value=folder_id)
-                e_enabled = st.checkbox("啟用", value=enabled)
+                    e1, e2 = st.columns(2)
+                    with e1:
+                        save_edit = st.form_submit_button("💾 儲存", use_container_width=True)
+                    with e2:
+                        cancel_edit = st.form_submit_button("✕ 取消", use_container_width=True)
 
-                e1, e2 = st.columns(2)
-                with e1:
-                    save_edit = st.form_submit_button("💾 儲存", use_container_width=True)
-                with e2:
-                    cancel_edit = st.form_submit_button("✕ 取消", use_container_width=True)
+                    if save_edit:
+                        if not e_name:
+                            st.error("請輸入系統名稱")
+                        else:
+                            updated = dict(config["systems"][i])
+                            updated.update(
+                                {
+                                    "name": e_name,
+                                    "type": e_type,
+                                    "master_spreadsheet_id": e_master_id,
+                                    "folder_id": e_folder_id,
+                                    "enabled": e_enabled,
+                                }
+                            )
 
-                if save_edit:
-                    if not e_name:
-                        st.error("請輸入系統名稱")
-                    else:
-                        updated = dict(config["systems"][i])
-                        updated.update(
-                            {
-                                "name": e_name,
-                                "type": e_type,
-                                "master_spreadsheet_id": e_master_id,
-                                "folder_id": e_folder_id,
-                                "enabled": e_enabled,
-                            }
-                        )
+                            if e_type == "field_daily_schedule":
+                                updated.setdefault("folder_ids", {})
+                                updated.setdefault("spreadsheet_ids", {})
 
-                        if e_type == "field_daily_schedule":
-                            updated.setdefault("folder_ids", {})
-                            updated.setdefault("spreadsheet_ids", {})
+                            config["systems"][i] = updated
+                            save_config(config)
+                            add_log(f"更新系統設定：{e_name}", "success")
+                            st.session_state.editing_system = None
+                            st.rerun()
 
-                        config["systems"][i] = updated
-                        save_config(config)
-                        add_log(f"更新系統設定：{e_name}", "success")
+                    if cancel_edit:
                         st.session_state.editing_system = None
                         st.rerun()
 
-                if cancel_edit:
-                    st.session_state.editing_system = None
-                    st.rerun()
-
-        else:
-            enabled_text = "✅ 啟用" if enabled else "⚠️ 停用"
-            extra_detail = ""
-
-            if current_type == "field_daily_schedule":
-                extra_detail = f"""
-  <div class="detail-row"><strong>資料夾設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("folder_ids", {}))))}</div>
-  <div class="detail-row"><strong>表單設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("spreadsheet_ids", {}))))}</div>
-"""
             else:
-                extra_detail = f"""
-  <div class="detail-row"><strong>主控表 ID</strong>：{mask_id(master_id)}</div>
-  <div class="detail-row"><strong>共用雲端資料夾 ID</strong>：{mask_id(folder_id)}</div>
-"""
+                enabled_text = "✅ 啟用" if enabled else "⚠️ 停用"
+                extra_detail = ""
 
-            st.markdown(
-                f"""
-<div class="system-card">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <strong style="color:#0a4b6e;">🗂️ {html.escape(name)}</strong>{badge}
-  </div>
-  <div class="detail-row"><strong>系統類型</strong>：{get_system_type_label(current_type)}</div>
-  <div class="detail-row"><strong>狀態</strong>：{enabled_text}</div>
-  {extra_detail}
-</div>
-""",
-                unsafe_allow_html=True,
-            )
+                if current_type == "field_daily_schedule":
+                    extra_detail = f"""
+      <div class="detail-row"><strong>資料夾設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("folder_ids", {}))))}</div>
+      <div class="detail-row"><strong>表單設定</strong>：{html.escape(str(mask_nested_ids(sys_cfg.get("spreadsheet_ids", {}))))}</div>
+    """
+                else:
+                    extra_detail = f"""
+      <div class="detail-row"><strong>主控表 ID</strong>：{mask_id(master_id)}</div>
+      <div class="detail-row"><strong>共用雲端資料夾 ID</strong>：{mask_id(folder_id)}</div>
+    """
 
-            _, b2, b3 = st.columns([2, 1, 1])
-            with b2:
-                if st.button("📝 編輯", key=f"edit_system_{i}", use_container_width=True):
-                    st.session_state.editing_system = name
-                    st.session_state.adding_system = False
-                    st.rerun()
+                st.markdown(
+                    f"""
+    <div class="system-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <strong style="color:#0a4b6e;">🗂️ {html.escape(name)}</strong>{badge}
+      </div>
+      <div class="detail-row"><strong>系統類型</strong>：{get_system_type_label(current_type)}</div>
+      <div class="detail-row"><strong>狀態</strong>：{enabled_text}</div>
+      {extra_detail}
+    </div>
+    """,
+                    unsafe_allow_html=True,
+                )
 
-            with b3:
-                if st.button("🗑️ 刪除", key=f"delete_system_{i}", use_container_width=True):
-                    config["systems"].pop(i)
-                    save_config(config)
-                    add_log(f"刪除系統設定：{name}", "warning")
-                    st.rerun()
+                _, b2, b3 = st.columns([2, 1, 1])
+                with b2:
+                    if st.button("📝 編輯", key=f"edit_system_{i}", use_container_width=True):
+                        st.session_state.editing_system = name
+                        st.session_state.adding_system = False
+                        st.rerun()
 
+                with b3:
+                    if st.button("🗑️ 刪除", key=f"delete_system_{i}", use_container_width=True):
+                        config["systems"].pop(i)
+                        save_config(config)
+                        add_log(f"刪除系統設定：{name}", "warning")
+                        st.rerun()
 
 # ═══════════════════════════════════════════════════════════
 # 執行邏輯
