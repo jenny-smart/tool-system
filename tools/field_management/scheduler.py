@@ -1,53 +1,142 @@
 from __future__ import annotations
 
 import argparse
-import traceback
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from tools.field_management.schedule_stats import main as run_schedule_stats, today_yyyymmdd, log
-from tools.field_management.staff_schedule import main as run_staff_schedule
-from tools.field_management.orders import main as run_orders
-from tools.field_management.staff_profile import main as run_staff_profile
+from tools.common.log_to_sheet import write_job_log
+
+TZ = timezone(timedelta(hours=8))
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 JOBS = {
-    "schedule_stats": run_schedule_stats,
-    "staff_schedule": run_staff_schedule,
-    "orders": run_orders,
-    "staff_profile": run_staff_profile,
+    "schedule_stats": {
+        "label": "外場排班統計表",
+        "module": "tools.field_management.schedule_stats",
+    },
+    "staff_schedule": {
+        "label": "外場專員班表",
+        "module": "tools.field_management.staff_schedule",
+    },
+    "orders": {
+        "label": "外場訂單",
+        "module": "tools.field_management.orders",
+    },
+    "staff_profile": {
+        "label": "外場專員個資",
+        "module": "tools.field_management.staff_profile",
+    },
 }
+
+
+def now_tw() -> datetime:
+    return datetime.now(TZ)
+
+
+def punch(label, status, started_at, finished_at=None, area="", date_key="", system_name="", message="", traceback_text=""):
+    try:
+        write_job_log(
+            system_name="外場排程系統",
+            job_name=label,
+            status=status,
+            started_at=started_at,
+            finished_at=finished_at or "",
+            message=message,
+            area=area or "全區",
+            period="",
+            date=date_key,
+            target=system_name,
+            source_file="",
+            run_type="排程" if os.getenv("GITHUB_ACTIONS") else "手動",
+            traceback_text=traceback_text,
+        )
+        print(f"📝 外場排程打卡：{label} / {status}", flush=True)
+    except Exception as exc:
+        print(f"⚠️ 外場排程打卡失敗：{exc}", flush=True)
 
 
 def run_job(job_name: str, date_key: str, area: str | None, system_name: str) -> dict:
     if job_name not in JOBS:
-        raise RuntimeError(f"未知 job：{job_name}")
+        raise RuntimeError(f"未知外場 job：{job_name}")
 
-    log(f"開始執行：{job_name}")
+    job = JOBS[job_name]
+    label = job["label"]
 
-    try:
-        JOBS[job_name](date_key=date_key, area=area, system_name=system_name)
-        log(f"完成執行：{job_name}")
-        return {"job": job_name, "status": "success", "message": "完成"}
-    except Exception as e:
-        log(f"執行失敗：{job_name} / {e}")
-        traceback.print_exc()
-        return {"job": job_name, "status": "failed", "message": str(e)}
+    cmd = [
+        sys.executable,
+        "-u",
+        "-m",
+        job["module"],
+        "--date",
+        date_key,
+        "--system-name",
+        system_name,
+    ]
+
+    if area:
+        cmd.extend(["--area", area])
+
+    started_at = now_tw()
+    punch(label, "running", started_at, area=area or "全區", date_key=date_key, system_name=system_name, message="開始執行")
+
+    print("Command:", " ".join(cmd), flush=True)
+
+    completed = subprocess.run(cmd, cwd=BASE_DIR, text=True, capture_output=True)
+    finished_at = now_tw()
+
+    stdout_text = completed.stdout or ""
+    stderr_text = completed.stderr or ""
+
+    if stdout_text:
+        print(stdout_text, flush=True)
+    if stderr_text:
+        print(stderr_text, flush=True)
+
+    if completed.returncode != 0:
+        message = f"{label} 執行失敗，exit={completed.returncode}\nSTDOUT:\n{stdout_text[-3000:]}\nSTDERR:\n{stderr_text[-5000:]}"
+        punch(label, "failed", started_at, finished_at, area=area or "全區", date_key=date_key, system_name=system_name, message=message, traceback_text=stderr_text or message)
+        raise RuntimeError(message)
+
+    punch(label, "success", started_at, finished_at, area=area or "全區", date_key=date_key, system_name=system_name, message="完成")
+
+    return {"job": job_name, "label": label, "status": "success"}
+
+
+def today_yyyymmdd() -> str:
+    return now_tw().strftime("%Y%m%d")
 
 
 def main(target: str = "all", date_key: str | None = None, area: str | None = None, system_name: str = "外場日排程系統") -> list[dict]:
     date_key = date_key or today_yyyymmdd()
-    targets = ["schedule_stats", "staff_schedule", "orders", "staff_profile"] if target == "all" else [target]
-    results = [run_job(job, date_key, area, system_name) for job in targets]
-    failed = [r for r in results if r["status"] != "success"]
+    targets = list(JOBS.keys()) if target == "all" else [target]
+
+    results = []
+    failed = []
+
+    for job_name in targets:
+        try:
+            results.append(run_job(job_name, date_key, area, system_name))
+        except Exception as exc:
+            failed.append({"job": job_name, "status": "failed", "message": str(exc)})
+            if target != "all":
+                raise
+
     if failed:
-        raise RuntimeError(f"外場日排程有失敗項目：{failed}")
-    log("scheduler.py 全部完成")
+        raise RuntimeError(f"外場排程有失敗項目：{failed}")
+
+    print("field_management scheduler 全部完成", flush=True)
     return results
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--target", default="all", choices=["all", "schedule_stats", "staff_schedule", "orders", "staff_profile"])
-    p.add_argument("--date", default=today_yyyymmdd())
-    p.add_argument("--area", default="")
-    p.add_argument("--system-name", default="外場日排程系統")
-    args = p.parse_args()
-    main(args.target, args.date, args.area or None, args.system_name)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target", default="all", choices=["all", *JOBS.keys()])
+    parser.add_argument("--date", default=today_yyyymmdd())
+    parser.add_argument("--area", default="")
+    parser.add_argument("--system-name", default="外場日排程系統")
+    args = parser.parse_args()
+
+    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
