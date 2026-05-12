@@ -261,7 +261,6 @@ def trash_duplicate_files(service, files: list[dict], keep_file_id: str) -> None
         file_id = file.get("id")
         if not file_id or file_id == keep_file_id:
             continue
-
         try:
             service.files().update(
                 fileId=file_id,
@@ -277,10 +276,7 @@ def upload_to_gdrive(local_path: str, folder_id: str):
     service = get_drive_service()
     filename = os.path.basename(local_path)
 
-    media = MediaFileUpload(
-        local_path,
-        resumable=True,
-    )
+    media = MediaFileUpload(local_path, resumable=True)
 
     log(f"準備上傳到 Google Drive：{filename}")
 
@@ -288,7 +284,6 @@ def upload_to_gdrive(local_path: str, folder_id: str):
 
     if existing_files:
         keep = existing_files[0]
-
         updated = service.files().update(
             fileId=keep["id"],
             media_body=media,
@@ -305,10 +300,7 @@ def upload_to_gdrive(local_path: str, folder_id: str):
         )
         return updated["id"]
 
-    file_metadata = {
-        "name": filename,
-        "parents": [folder_id],
-    }
+    file_metadata = {"name": filename, "parents": [folder_id]}
 
     created = service.files().create(
         body=file_metadata,
