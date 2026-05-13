@@ -750,90 +750,43 @@ def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
         )
 
 
-def run_script(script_path: str, args: list[str] | None = None, show_live: bool = True) -> str:
-    import os
-    import subprocess
-    import sys
-    import time
-
+def run_script(script_path: str, args: list[str] | None = None) -> str:
     args = args or []
 
     if script_path.startswith("module:"):
         module_name = script_path.replace("module:", "", 1)
-        cmd = [sys.executable, "-u", "-m", module_name, *args]
+        cmd = [sys.executable, "-m", module_name, *args]
         display_name = module_name
     else:
         script = BASE_DIR / script_path
+
         if not script.exists():
             raise RuntimeError(f"找不到執行檔：{script_path}")
-        cmd = [sys.executable, "-u", str(script), *args]
+
+        cmd = [sys.executable, str(script), *args]
         display_name = script_path
 
-    add_log(f"開始執行指令：{' '.join(cmd)}", "info")
-
-    process = subprocess.Popen(
+    completed = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1,
+        capture_output=True,
         cwd=BASE_DIR,
-        env=os.environ.copy(),
     )
 
-    output_lines: list[str] = []
-    live_box = st.empty() if show_live else None
+    if completed.stdout:
+        for line in completed.stdout.splitlines()[-120:]:
+            add_log(line, "info")
 
-    while True:
-        line = process.stdout.readline() if process.stdout else ""
+    if completed.stderr:
+        for line in completed.stderr.splitlines()[-120:]:
+            add_log(line, "error")
 
-        if line:
-            line = line.rstrip()
-            output_lines.append(line)
-
-            level = "error" if any(
-                key in line for key in ["Traceback", "ERROR", "Error", "Exception", "失敗"]
-            ) else "info"
-
-            # 業績報表頁不顯示執行過程，但仍保留系統 log 與錯誤訊息
-            if show_live:
-                add_log(line, level)
-
-                live_box.markdown(
-                    "<div class='log-box'>"
-                    "<div class='log-title'>📋 執行日誌 <span>台北時區 / 即時更新</span></div>"
-                    + "".join(
-                        f"<div class='log-entry {'error' if '❌' in e else 'success' if '✅' in e else 'warning' if '⚠️' in e else ''}'>{html.escape(e)}</div>"
-                        for e in reversed(st.session_state.logs[-80:])
-                    )
-                    + "</div>",
-                    unsafe_allow_html=True,
-                )
-
-        if process.poll() is not None:
-            break
-
-        time.sleep(0.05)
-
-    if process.stdout:
-        remaining = process.stdout.read()
-        if remaining:
-            for line in remaining.splitlines():
-                output_lines.append(line)
-                if show_live:
-                    level = "error" if any(
-                        key in line for key in ["Traceback", "ERROR", "Error", "Exception", "失敗"]
-                    ) else "info"
-                    add_log(line, level)
-
-    exit_code = process.returncode
-    output_text = "\n".join(output_lines)
-
-    if exit_code != 0:
+    if completed.returncode != 0:
         raise RuntimeError(
             f"執行失敗：{display_name}\n"
-            f"exit={exit_code}\n"
-            f"OUTPUT:\n{output_text}"
+            f"exit={completed.returncode}\n"
+            f"STDOUT:\n{completed.stdout}\n"
+            f"STDERR:\n{completed.stderr}"
         )
 
     return f"{display_name} 執行完成"
@@ -942,7 +895,7 @@ def render_report() -> None:
         if st.button("🔄 更新業績報表", use_container_width=True):
             try:
                 add_log("開始更新業績報表", "info")
-                run_script("tools/scheduled_daily/performance_report_runner.py", ["dashboard", "true"], show_live=False)
+                run_script("tools/scheduled_daily/performance_report.py", ["dashboard", "true"])
                 add_log("業績報表更新完成", "success")
                 st.rerun()
             except Exception as e:
@@ -1475,6 +1428,15 @@ MONTHLY_SCRIPT_MAP = {
     "儲值金結算": ["tools/scheduled_monthly/stored_value_settlement.py"],
     "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
 }
+
+DAILY_TARGET_MAP = {
+    "一鍵執行日排程": "all",
+    "排班統計表": "schedule_report",
+    "專員班表": "staff_schedule",
+    "當月次月訂單": "orders_report",
+    "專員個資": "staff_info",
+}
+
 
 FIELD_SCRIPT_MAP = {
     "外場排班統計表": ["tools/field_management/schedule_stats.py"],
@@ -2099,10 +2061,11 @@ if run_clicked:
             if selected_function == "一鍵執行日排程":
                 from tools.scheduled_daily.scheduler import main as run_daily_scheduler
 
-                try:
-                    result = run_daily_scheduler(folder_id=folder_id)
-                except TypeError:
-                    result = run_daily_scheduler()
+                daily_target = DAILY_TARGET_MAP.get(selected_function, "all")
+                result = run_daily_scheduler(
+                    target=daily_target,
+                    folder_id=folder_id,
+                )
 
             else:
                 script = DAILY_SCRIPT_MAP.get(selected_function)
