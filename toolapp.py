@@ -750,7 +750,7 @@ def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
         )
 
 
-def run_script(script_path: str, args: list[str] | None = None) -> str:
+def run_script(script_path: str, args: list[str] | None = None, show_live: bool = True) -> str:
     import os
     import subprocess
     import sys
@@ -782,7 +782,7 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
     )
 
     output_lines: list[str] = []
-    live_box = st.empty()
+    live_box = st.empty() if show_live else None
 
     while True:
         line = process.stdout.readline() if process.stdout else ""
@@ -795,18 +795,20 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
                 key in line for key in ["Traceback", "ERROR", "Error", "Exception", "失敗"]
             ) else "info"
 
-            add_log(line, level)
+            # 業績報表頁不顯示執行過程，但仍保留系統 log 與錯誤訊息
+            if show_live:
+                add_log(line, level)
 
-            live_box.markdown(
-                "<div class='log-box'>"
-                "<div class='log-title'>📋 執行日誌 <span>台北時區 / 即時更新</span></div>"
-                + "".join(
-                    f"<div class='log-entry {'error' if '❌' in e else 'success' if '✅' in e else 'warning' if '⚠️' in e else ''}'>{html.escape(e)}</div>"
-                    for e in reversed(st.session_state.logs[-80:])
+                live_box.markdown(
+                    "<div class='log-box'>"
+                    "<div class='log-title'>📋 執行日誌 <span>台北時區 / 即時更新</span></div>"
+                    + "".join(
+                        f"<div class='log-entry {'error' if '❌' in e else 'success' if '✅' in e else 'warning' if '⚠️' in e else ''}'>{html.escape(e)}</div>"
+                        for e in reversed(st.session_state.logs[-80:])
+                    )
+                    + "</div>",
+                    unsafe_allow_html=True,
                 )
-                + "</div>",
-                unsafe_allow_html=True,
-            )
 
         if process.poll() is not None:
             break
@@ -818,10 +820,11 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
         if remaining:
             for line in remaining.splitlines():
                 output_lines.append(line)
-                level = "error" if any(
-                    key in line for key in ["Traceback", "ERROR", "Error", "Exception", "失敗"]
-                ) else "info"
-                add_log(line, level)
+                if show_live:
+                    level = "error" if any(
+                        key in line for key in ["Traceback", "ERROR", "Error", "Exception", "失敗"]
+                    ) else "info"
+                    add_log(line, level)
 
     exit_code = process.returncode
     output_text = "\n".join(output_lines)
@@ -939,7 +942,7 @@ def render_report() -> None:
         if st.button("🔄 更新業績報表", use_container_width=True):
             try:
                 add_log("開始更新業績報表", "info")
-                run_script("tools/scheduled_daily/performance_report_runner.py", ["dashboard", "true"])
+                run_script("tools/scheduled_daily/performance_report_runner.py", ["dashboard", "true"], show_live=False)
                 add_log("業績報表更新完成", "success")
                 st.rerun()
             except Exception as e:
@@ -1463,15 +1466,6 @@ DAILY_SCRIPT_MAP = {
     "當月次月訂單": "tools/scheduled_daily/orders_report.py",
     "業績報表": "tools/scheduled_daily/performance_report.py",
 }
-
-DAILY_TARGET_MAP = {
-    "一鍵執行日排程": "all",
-    "排班統計表": "schedule_report",
-    "專員班表": "staff_schedule",
-    "當月次月訂單": "orders_report",
-    "專員個資": "staff_info",
-}
-
 
 MONTHLY_SCRIPT_MAP = {
     "上半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "1"],
@@ -2103,11 +2097,12 @@ if run_clicked:
                 st.rerun()
 
             if selected_function == "一鍵執行日排程":
-                daily_target = DAILY_TARGET_MAP.get(selected_function, "all")
-                result = run_script(
-                    "tools/scheduled_daily/scheduler.py",
-                    ["--target", daily_target, "--folder-id", folder_id],
-                )
+                from tools.scheduled_daily.scheduler import main as run_daily_scheduler
+
+                try:
+                    result = run_daily_scheduler(folder_id=folder_id)
+                except TypeError:
+                    result = run_daily_scheduler()
 
             else:
                 script = DAILY_SCRIPT_MAP.get(selected_function)
