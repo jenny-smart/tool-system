@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import traceback
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
+# 讓「python tools/scheduled_daily/performance_report_runner.py」也能 import tools.*
+BASE_DIR = Path(__file__).resolve().parents[2]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 from tools.scheduled_daily import performance_report
 
@@ -12,6 +19,7 @@ try:
     from tools.common.log_to_sheet import log_to_sheet
 except Exception:
     log_to_sheet = None
+
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -57,16 +65,33 @@ def write_log(status: str, message: str) -> None:
 
 def main(mode: str = "dashboard", auto_send: bool = False) -> dict[str, Any]:
     apply_email_fallback_env()
+
+    print(f"開始更新業績報表：mode={mode}, auto_send={auto_send}", flush=True)
     write_log("執行中", f"開始執行業績報表：mode={mode}, auto_send={auto_send}")
 
     try:
-        result = performance_report.main(mode=mode, auto_send=auto_send)
-        write_log("成功", f"業績報表完成；raw_rows={result.get('raw_rows')}; summary_rows={result.get('summary_rows')}")
+        result = performance_report.main(
+            mode=mode,
+            auto_send=auto_send,
+        )
+
+        write_log(
+            "成功",
+            f"業績報表完成；raw_rows={result.get('raw_rows')}; summary_rows={result.get('summary_rows')}",
+        )
+
+        print("業績報表更新完成", flush=True)
         return result
+
     except Exception as exc:
         tb = traceback.format_exc()
         print(tb, flush=True)
-        write_log("失敗", f"{exc}\n{tb[-3000:]}")
+
+        write_log(
+            "失敗",
+            f"{exc}\n{tb[-3000:]}",
+        )
+
         raise
 
 
@@ -75,4 +100,8 @@ if __name__ == "__main__":
     parser.add_argument("mode", nargs="?", default="dashboard")
     parser.add_argument("auto_send", nargs="?", default="false")
     args = parser.parse_args()
-    main(mode=args.mode, auto_send=parse_bool(args.auto_send))
+
+    main(
+        mode=args.mode,
+        auto_send=parse_bool(args.auto_send),
+    )
