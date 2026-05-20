@@ -1,12 +1,15 @@
 *.csv
 *.html
 *.json
+.DS_Store
+
 logs/*
 !logs/.gitkeep
 !logs/**/
 !logs/**/*.log
 !logs/**/*.exit
 !logs/**/*.json
+
 dashboard_data/*
 !dashboard_data/.gitkeep
 !dashboard_data/latest/
