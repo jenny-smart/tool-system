@@ -35,9 +35,9 @@ jobs:
       NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
       NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
       NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
-      REPORT_EMAIL_SENDER: ${{ secrets.REPORT_EMAIL_SENDER }}
-      REPORT_EMAIL_APP_PASSWORD: ${{ secrets.REPORT_EMAIL_APP_PASSWORD }}
-      REPORT_EMAIL_RECIPIENT: ${{ secrets.REPORT_EMAIL_RECIPIENT }}
+      REPORT_EMAIL_SENDER: ${{ secrets.REPORT_EMAIL_SENDER || secrets.NOTIFY_EMAIL }}
+      REPORT_EMAIL_APP_PASSWORD: ${{ secrets.REPORT_EMAIL_APP_PASSWORD || secrets.NOTIFY_PASSWORD }}
+      REPORT_EMAIL_RECIPIENT: ${{ secrets.REPORT_EMAIL_RECIPIENT || secrets.NOTIFY_TO }}
 
     steps:
       - name: Checkout
@@ -84,7 +84,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add -f dashboard_data/latest logs
+          if [ -d "dashboard_data/latest" ] && [ -n "$(find dashboard_data/latest -type f -print -quit)" ]; then
+            git add -f dashboard_data/latest
+          fi
+
+          if [ -d "logs" ] && [ -n "$(find logs -type f -print -quit)" ]; then
+            git add -f logs
+          fi
 
           if git diff --cached --quiet; then
             echo "No report or log changes"
