@@ -1267,11 +1267,13 @@ def main():
     if len(cleaned_args) >= 2:
         send_email = cleaned_args[1].lower() in ("1", "true", "yes", "y")
 
+    strict_accounts = os.getenv("PERFORMANCE_REPORT_STRICT_ACCOUNTS", "").lower() in ("1", "true", "yes", "y")
+
     result = generate_sales_report(
         send_email=send_email,
         persist_dashboard=True,
         trigger=trigger,
-        strict_accounts=(trigger == "schedule"),
+        strict_accounts=strict_accounts,
     )
 
     if result.get("error"):
