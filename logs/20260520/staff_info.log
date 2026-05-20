@@ -1,0 +1,45 @@
+[2026-05-20 12:53:09] ====================================================
+[2026-05-20 12:53:09] staff_info.py 開始執行
+[2026-05-20 12:53:09] GITHUB_ACTIONS = true
+[2026-05-20 12:53:09] PWD = /home/runner/work/tool-system/tool-system
+[2026-05-20 12:53:09] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員個資
+[2026-05-20 12:53:09] LOCAL_OUTPUT_DIR exists = False
+[2026-05-20 12:53:09] can_use_local_output_dir = False
+[2026-05-20 12:53:09] root folder_id = 0AK9RcXu_35GZUk9PVA
+[2026-05-20 12:53:09] ====================================================
+[2026-05-20 12:53:09] Google Drive 初始化成功
+[2026-05-20 12:53:10] 📁 使用既有資料夾：專員個資
+[2026-05-20 12:53:10] today_stamp = 20260520
+[2026-05-20 12:53:10] 專員個資 folder_id = 199wJef-ISEP5bsSWaSseCAHynoVRE26e
+[2026-05-20 12:53:10] 帳號數量 = 2
+[2026-05-20 12:53:10] 
+[2026-05-20 12:53:10] === 開始處理 台北 ===
+[2026-05-20 12:53:10] 開始登入：jenny@lemonclean.com.tw
+[2026-05-20 12:53:11] 登入成功：jenny@lemonclean.com.tw
+[2026-05-20 12:53:11] 開始下載：city=台北 / filename=20260520專員個資-台北.xlsx
+[2026-05-20 12:53:15] ✅ 已下載到暫存：/tmp/tmpx6ncenqb/20260520專員個資-台北.xlsx
+[2026-05-20 12:53:15] 📦 檔案大小：220160 bytes
+[2026-05-20 12:53:15] 📂 暫存目錄存在：True
+[2026-05-20 12:53:15] 📄 暫存檔案存在：True
+[2026-05-20 12:53:15] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-20 12:53:15] Google Drive 初始化成功
+[2026-05-20 12:53:15] 準備上傳到 Google Drive：20260520專員個資-台北.xlsx
+[2026-05-20 12:53:17] ☁️ 已上傳新檔：20260520專員個資-台北.xlsx (file_id=17BHeADb1U4CQzo4c0q1HkevtYAHTtUXN) https://docs.google.com/spreadsheets/d/17BHeADb1U4CQzo4c0q1HkevtYAHTtUXN/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-20 12:53:17] ✅ 完成處理：20260520專員個資-台北.xlsx
+[2026-05-20 12:53:17] ✅ 台北 全部完成
+[2026-05-20 12:53:17] 
+[2026-05-20 12:53:17] === 開始處理 台中 ===
+[2026-05-20 12:53:17] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-05-20 12:53:18] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-05-20 12:53:18] 開始下載：city=台中 / filename=20260520專員個資-台中.xlsx
+[2026-05-20 12:53:19] ✅ 已下載到暫存：/tmp/tmp262d8y0h/20260520專員個資-台中.xlsx
+[2026-05-20 12:53:19] 📦 檔案大小：59392 bytes
+[2026-05-20 12:53:19] 📂 暫存目錄存在：True
+[2026-05-20 12:53:19] 📄 暫存檔案存在：True
+[2026-05-20 12:53:19] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-20 12:53:19] Google Drive 初始化成功
+[2026-05-20 12:53:19] 準備上傳到 Google Drive：20260520專員個資-台中.xlsx
+[2026-05-20 12:53:21] ☁️ 已上傳新檔：20260520專員個資-台中.xlsx (file_id=1va91zdBSdmLj3Ol_OgIjssZAilUaWB9J) https://docs.google.com/spreadsheets/d/1va91zdBSdmLj3Ol_OgIjssZAilUaWB9J/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-20 12:53:21] ✅ 完成處理：20260520專員個資-台中.xlsx
+[2026-05-20 12:53:21] ✅ 台中 全部完成
+[2026-05-20 12:53:21] 🎉 staff_info.py 全部完成

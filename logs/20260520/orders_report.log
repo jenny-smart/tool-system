@@ -1,0 +1,46 @@
+[2026-05-20 12:52:43] ====================================================
+[2026-05-20 12:52:43] orders_report.py 開始執行
+[2026-05-20 12:52:43] GITHUB_ACTIONS = true
+[2026-05-20 12:52:43] PWD = /home/runner/work/tool-system/tool-system
+[2026-05-20 12:52:43] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/訂單資料
+[2026-05-20 12:52:43] LOCAL_OUTPUT_DIR exists = False
+[2026-05-20 12:52:43] can_use_local_output_dir = False
+[2026-05-20 12:52:43] root folder_id = 0AK9RcXu_35GZUk9PVA
+[2026-05-20 12:52:43] ====================================================
+[2026-05-20 12:52:43] Google Drive 初始化成功
+[2026-05-20 12:52:44] 📁 使用既有資料夾：訂單資料
+[2026-05-20 12:52:44] 服務日期：2026-05-01 ~ 2026-06-30
+[2026-05-20 12:52:44] file_date = 20260520
+[2026-05-20 12:52:44] 訂單資料 folder_id = 1QnOJzn-xmZ_oAMoiM6Qnfk3Y2CWuM1c4
+[2026-05-20 12:52:44] 帳號數量 = 2
+[2026-05-20 12:52:44] 
+[2026-05-20 12:52:44] === 開始處理 台北 ===
+[2026-05-20 12:52:44] 開始登入：jenny@lemonclean.com.tw
+[2026-05-20 12:52:46] 登入成功：jenny@lemonclean.com.tw
+[2026-05-20 12:52:46] 開始下載：city=台北 / export_url=https://backend.lemonclean.com.tw/purchase/export_order?clean_date_s=2026-05-01&clean_date_e=2026-06-30&purchase_status=1
+[2026-05-20 12:53:00] ✅ 已下載到暫存：/tmp/tmpcf5gqqw5/20260520訂單-台北.xls
+[2026-05-20 12:53:00] 📦 檔案大小：1771008 bytes
+[2026-05-20 12:53:00] 📂 暫存目錄存在：True
+[2026-05-20 12:53:00] 📄 暫存檔案存在：True
+[2026-05-20 12:53:00] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-20 12:53:00] Google Drive 初始化成功
+[2026-05-20 12:53:00] 準備上傳到 Google Drive：20260520訂單-台北.xls
+[2026-05-20 12:53:03] ♻️ 已覆蓋舊檔：20260520訂單-台北.xls (file_id=1JnRTDbje4f6sUN2PWSzHLt79MNTLckDC) https://docs.google.com/spreadsheets/d/1JnRTDbje4f6sUN2PWSzHLt79MNTLckDC/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-20 12:53:03] ✅ 完成處理：20260520訂單-台北.xls
+[2026-05-20 12:53:03] ✅ 台北 完成
+[2026-05-20 12:53:03] 
+[2026-05-20 12:53:03] === 開始處理 台中 ===
+[2026-05-20 12:53:03] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-05-20 12:53:04] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-05-20 12:53:04] 開始下載：city=台中 / export_url=https://backend.lemonclean.com.tw/purchase/export_order?clean_date_s=2026-05-01&clean_date_e=2026-06-30&purchase_status=1
+[2026-05-20 12:53:06] ✅ 已下載到暫存：/tmp/tmpnozh6uae/20260520訂單-台中.xls
+[2026-05-20 12:53:06] 📦 檔案大小：161280 bytes
+[2026-05-20 12:53:06] 📂 暫存目錄存在：True
+[2026-05-20 12:53:06] 📄 暫存檔案存在：True
+[2026-05-20 12:53:06] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-20 12:53:06] Google Drive 初始化成功
+[2026-05-20 12:53:06] 準備上傳到 Google Drive：20260520訂單-台中.xls
+[2026-05-20 12:53:09] ♻️ 已覆蓋舊檔：20260520訂單-台中.xls (file_id=1ADtVXaayzhqG2r68nwS-zhX-ktxkIZTH) https://docs.google.com/spreadsheets/d/1ADtVXaayzhqG2r68nwS-zhX-ktxkIZTH/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-20 12:53:09] ✅ 完成處理：20260520訂單-台中.xls
+[2026-05-20 12:53:09] ✅ 台中 完成
+[2026-05-20 12:53:09] 🎉 orders_report.py 全部完成
