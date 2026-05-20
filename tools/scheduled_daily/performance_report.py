@@ -22,7 +22,7 @@ except Exception:
     HAS_STREAMLIT = False
 
 
-def get_secret(path_list, env_name=None, required=False, default=None):
+def get_secret(path_list, env_name=None, required=False, default=None, fallback_env_names=None):
     if HAS_STREAMLIT:
         try:
             cur = st.secrets
@@ -35,6 +35,11 @@ def get_secret(path_list, env_name=None, required=False, default=None):
 
     if env_name:
         value = os.getenv(env_name)
+        if value not in (None, ""):
+            return value
+
+    for fallback_env_name in fallback_env_names or []:
+        value = os.getenv(fallback_env_name)
         if value not in (None, ""):
             return value
 
@@ -816,9 +821,25 @@ def split_email_recipients(raw: str) -> list[str]:
 
 
 def get_email_settings(default_recipient="jenny@lemonclean.com.tw"):
-    sender = get_secret(["email", "sender"], env_name="REPORT_EMAIL_SENDER", required=False)
-    password = get_secret(["email", "app_password"], env_name="REPORT_EMAIL_APP_PASSWORD", required=False)
-    recipient = get_secret(["email", "recipient"], env_name="REPORT_EMAIL_RECIPIENT", required=False, default=default_recipient)
+    sender = get_secret(
+        ["email", "sender"],
+        env_name="REPORT_EMAIL_SENDER",
+        fallback_env_names=["NOTIFY_EMAIL", "EMAIL_SENDER", "GMAIL_USER"],
+        required=False,
+    )
+    password = get_secret(
+        ["email", "app_password"],
+        env_name="REPORT_EMAIL_APP_PASSWORD",
+        fallback_env_names=["NOTIFY_PASSWORD", "EMAIL_APP_PASSWORD", "GMAIL_APP_PASSWORD"],
+        required=False,
+    )
+    recipient = get_secret(
+        ["email", "recipient"],
+        env_name="REPORT_EMAIL_RECIPIENT",
+        fallback_env_names=["NOTIFY_TO", "EMAIL_RECIPIENT"],
+        required=False,
+        default=default_recipient,
+    )
 
     return sender, password, split_email_recipients(recipient)
 
@@ -833,11 +854,11 @@ def send_region4_email(df4, recipient="jenny@lemonclean.com.tw", required=False)
 
     missing = []
     if not sender:
-        missing.append("REPORT_EMAIL_SENDER")
+        missing.append("REPORT_EMAIL_SENDER 或 NOTIFY_EMAIL")
     if not password:
-        missing.append("REPORT_EMAIL_APP_PASSWORD")
+        missing.append("REPORT_EMAIL_APP_PASSWORD 或 NOTIFY_PASSWORD")
     if not recipients:
-        missing.append("REPORT_EMAIL_RECIPIENT")
+        missing.append("REPORT_EMAIL_RECIPIENT 或 NOTIFY_TO")
 
     if missing:
         message = "缺少寄信設定：" + " / ".join(missing)
