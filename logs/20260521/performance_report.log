@@ -1,10 +1,10 @@
-[2026-05-21 01:36:58] 🔥 開始業績報表
-[2026-05-21 01:36:58] ⚠️ ACCOUNTS 缺少城市設定，已略過：桃園, 新竹, 高雄
+[2026-05-21 01:55:17] 🔥 開始業績報表
+[2026-05-21 01:55:17] ⚠️ ACCOUNTS 缺少城市設定，已略過：桃園, 新竹, 高雄
 
 Traceback (most recent call last):
-  File "/home/runner/work/tool-system/tool-system/tools/scheduled_daily/performance_report.py", line 1282, in <module>
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_daily/performance_report.py", line 1284, in <module>
     main()
-  File "/home/runner/work/tool-system/tool-system/tools/scheduled_daily/performance_report.py", line 1270, in main
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_daily/performance_report.py", line 1272, in main
     result = generate_sales_report(
              ^^^^^^^^^^^^^^^^^^^^^^
   File "/home/runner/work/tool-system/tool-system/tools/scheduled_daily/performance_report.py", line 1053, in generate_sales_report
