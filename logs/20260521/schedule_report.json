@@ -2,7 +2,7 @@
     "job_name": "schedule_report",
     "status": "success",
     "exit_code": 0,
-    "started_at": "2026-05-21 06:10:21",
-    "finished_at": "2026-05-21 06:10:41",
-    "duration_seconds": 20
+    "started_at": "2026-05-21 06:18:28",
+    "finished_at": "2026-05-21 06:18:45",
+    "duration_seconds": 17
   }

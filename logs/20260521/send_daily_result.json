@@ -2,7 +2,7 @@
     "job_name": "send_daily_result",
     "status": "success",
     "exit_code": 0,
-    "started_at": "2026-05-21 06:13:25",
-    "finished_at": "2026-05-21 06:13:26",
-    "duration_seconds": 1
+    "started_at": "2026-05-21 06:21:23",
+    "finished_at": "2026-05-21 06:21:25",
+    "duration_seconds": 2
   }
