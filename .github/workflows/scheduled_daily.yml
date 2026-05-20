@@ -6,8 +6,8 @@ on:
     - cron: "10 17 * * *"  # 台灣 01:10 日排程：專員班表
     - cron: "20 17 * * *"  # 台灣 01:20 日排程：當月次月訂單
     - cron: "30 17 * * *"  # 台灣 01:30 日排程：專員個資
+    - cron: "0 18 * * *"   # 台灣 02:00 寄通知
     - cron: "0 21 * * *"   # 台灣 05:00 外場排程：彙整資料
-    - cron: "30 22 * * *"  # 台灣 06:30 寄通知，等前面日排程與外場排程完成
 
   workflow_dispatch:
     inputs:
@@ -84,10 +84,10 @@ jobs:
               TASK="orders_report"
             elif [ "$HOUR" = "17" ] && [ "$MIN" = "30" ]; then
               TASK="staff_info"
+            elif [ "$HOUR" = "18" ] && [ "$MIN" = "00" ]; then
+              TASK="notify"
             elif [ "$HOUR" = "21" ] && [ "$MIN" = "00" ]; then
               TASK="field_all"
-            elif [ "$HOUR" = "22" ] && [ "$MIN" = "30" ]; then
-              TASK="notify"
             else
               TASK="none"
             fi
@@ -206,9 +206,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ -d "logs" ] && [ -n "$(find logs -type f -print -quit)" ]; then
-            git add -f logs
-          fi
+          git add -f logs
 
           if git diff --cached --quiet; then
             echo "No log changes"
