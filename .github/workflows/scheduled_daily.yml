@@ -195,7 +195,8 @@ jobs:
           fi
 
           if [ "$FAILED" -ne 0 ]; then
-            echo "One or more scheduled jobs failed; logs and notification were generated."
+            echo "One or more scheduled jobs failed."
+            exit 1
           fi
 
       - name: Commit logs
