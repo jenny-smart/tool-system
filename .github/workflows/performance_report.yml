@@ -18,8 +18,10 @@ jobs:
 
     env:
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID }}
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
       MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
+      STREAMLIT_SECRETS_TOML: ${{ secrets.STREAMLIT_SECRETS_TOML || secrets.STREAMLIT_SECRETS }}
+      PERFORMANCE_REPORT_STRICT_ACCOUNTS: "true"
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
@@ -49,6 +51,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Prepare Streamlit secrets
+        shell: bash
+        run: |
+          if [ -n "${STREAMLIT_SECRETS_TOML:-}" ]; then
+            mkdir -p .streamlit
+            printf '%s\n' "$STREAMLIT_SECRETS_TOML" > .streamlit/secrets.toml
+            chmod 600 .streamlit/secrets.toml
+            echo "Streamlit secrets file prepared"
+          else
+            echo "STREAMLIT_SECRETS_TOML is not set; using GitHub repository secrets only"
+          fi
 
       - name: Install packages
         run: |
