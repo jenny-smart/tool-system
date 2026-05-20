@@ -1,0 +1,62 @@
+⚠️ 外場排程打卡失敗：找不到主控 Log 試算表 ID，請設定 TOOLS_APP_LOG_SPREADSHEET_ID
+Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.staff_schedule --date 20260521 --system-name 外場排程系統
+[2026-05-21 01:39:01] 開始處理專員班表：20260521專員班表-台北
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 367, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 354, in main
+    run_staff_schedule_for_area(cfg, current_area, date_key)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 333, in run_staff_schedule_for_area
+    clear_and_write_values(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 275, in clear_and_write_values
+    clear_range(sheets, spreadsheet_id, range_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 249, in clear_range
+    ).execute()
+      ^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 400 when requesting https://sheets.googleapis.com/v4/spreadsheets/1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44/values/%E5%B0%88%E5%93%A1%E7%8F%AD%E8%A1%A8%E6%9F%A5%E8%A9%A2%E6%9C%AC%E6%9C%88_0521%21A%3AG:clear?alt=json returned "Unable to parse range: 專員班表查詢本月_0521!A:G". Details: "Unable to parse range: 專員班表查詢本月_0521!A:G">
+
+⚠️ 外場排程打卡失敗：找不到主控 Log 試算表 ID，請設定 TOOLS_APP_LOG_SPREADSHEET_ID
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 142, in <module>
+    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 121, in main
+    results.append(run_job(job_name, date_key, area, system_name))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 101, in run_job
+    raise RuntimeError(message)
+RuntimeError: 外場專員班表 執行失敗，exit=1
+STDOUT:
+[2026-05-21 01:39:01] 開始處理專員班表：20260521專員班表-台北
+
+STDERR:
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 367, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 354, in main
+    run_staff_schedule_for_area(cfg, current_area, date_key)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 333, in run_staff_schedule_for_area
+    clear_and_write_values(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 275, in clear_and_write_values
+    clear_range(sheets, spreadsheet_id, range_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 249, in clear_range
+    ).execute()
+      ^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 400 when requesting https://sheets.googleapis.com/v4/spreadsheets/1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44/values/%E5%B0%88%E5%93%A1%E7%8F%AD%E8%A1%A8%E6%9F%A5%E8%A9%A2%E6%9C%AC%E6%9C%88_0521%21A%3AG:clear?alt=json returned "Unable to parse range: 專員班表查詢本月_0521!A:G". Details: "Unable to parse range: 專員班表查詢本月_0521!A:G">
+
