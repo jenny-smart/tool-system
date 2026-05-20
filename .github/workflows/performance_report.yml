@@ -2,10 +2,10 @@ name: Performance Report
 
 on:
   schedule:
-    - cron: "5 16 * * *"  # 台灣 00:00
-    - cron: "5 0 * * *"   # 台灣 08:00
-    - cron: "5 4 * * *"   # 台灣 12:00
-    - cron: "5 10 * * *"  # 台灣 18:00
+    - cron: "0 16 * * *"  # 台灣 00:00
+    - cron: "0 0 * * *"   # 台灣 08:00
+    - cron: "0 4 * * *"   # 台灣 12:00
+    - cron: "0 10 * * *"  # 台灣 18:00
 
   workflow_dispatch:
 
@@ -18,15 +18,26 @@ jobs:
 
     env:
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID }}
+      MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
+      TAOYUAN_EMAIL: ${{ secrets.TAOYUAN_EMAIL }}
+      TAOYUAN_PASSWORD: ${{ secrets.TAOYUAN_PASSWORD }}
+      HSINCHU_EMAIL: ${{ secrets.HSINCHU_EMAIL }}
+      HSINCHU_PASSWORD: ${{ secrets.HSINCHU_PASSWORD }}
+      KAOHSIUNG_EMAIL: ${{ secrets.KAOHSIUNG_EMAIL }}
+      KAOHSIUNG_PASSWORD: ${{ secrets.KAOHSIUNG_PASSWORD }}
 
       NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
       NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
       NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+      REPORT_EMAIL_SENDER: ${{ secrets.REPORT_EMAIL_SENDER }}
+      REPORT_EMAIL_APP_PASSWORD: ${{ secrets.REPORT_EMAIL_APP_PASSWORD }}
+      REPORT_EMAIL_RECIPIENT: ${{ secrets.REPORT_EMAIL_RECIPIENT }}
 
     steps:
       - name: Checkout
@@ -52,12 +63,14 @@ jobs:
           LOG_DIR="logs/$TODAY"
           mkdir -p "$LOG_DIR"
 
-          python tools/scheduled_daily/performance_report.py schedule true > "$LOG_DIR/performance_report.log" 2>&1
+          python -u tools/scheduled_daily/performance_report_runner.py schedule true
           EXIT_CODE=$?
 
           echo "$EXIT_CODE" > "$LOG_DIR/performance_report.exit"
 
-          cat "$LOG_DIR/performance_report.log"
+          if [ -f "$LOG_DIR/performance_report.log" ]; then
+            cat "$LOG_DIR/performance_report.log"
+          fi
 
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo "❌ performance_report failed"
@@ -65,12 +78,13 @@ jobs:
           fi
 
       - name: Commit dashboard data and logs
+        if: always()
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add dashboard_data/latest logs
+          git add -f dashboard_data/latest logs
 
           if git diff --cached --quiet; then
             echo "No report or log changes"
