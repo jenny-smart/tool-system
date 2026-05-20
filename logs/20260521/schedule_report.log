@@ -1,74 +1,74 @@
 ⚠️ 找不到 tools.common.log_to_sheet，略過打卡
 開始執行：排班統計表
 Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u /home/runner/work/tool-system/tool-system/tools/scheduled_daily/schedule_report.py --folder-id 0AK9RcXu_35GZUk9PVA
-[2026-05-21 01:54:58] ====================================================
-[2026-05-21 01:54:58] schedule_report.py 開始執行
-[2026-05-21 01:54:58] GITHUB_ACTIONS = true
-[2026-05-21 01:54:58] PWD = /home/runner/work/tool-system/tool-system
-[2026-05-21 01:54:58] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/.shortcut-targets-by-id/1zbu45AG1adMzz24HPdi_tLfh2Tncw_Br/排班統計表
-[2026-05-21 01:54:58] LOCAL_OUTPUT_DIR exists = False
-[2026-05-21 01:54:58] can_use_local_output_dir = False
-[2026-05-21 01:54:58] root folder_id = 0AK9RcXu_35GZUk9PVA
-[2026-05-21 01:54:58] ====================================================
-[2026-05-21 01:54:58] Google Drive 初始化成功
-[2026-05-21 01:54:59] 📁 使用既有資料夾：排班統計表
-[2026-05-21 01:54:59] this_month = 2026-05
-[2026-05-21 01:54:59] next_month = 2026-06
-[2026-05-21 01:54:59] today_stamp = 20260521
-[2026-05-21 01:54:59] next_month_stamp = 20260621
-[2026-05-21 01:54:59] 排班統計表 folder_id = 1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv
-[2026-05-21 01:54:59] 帳號數量 = 2
-[2026-05-21 01:54:59] 
-[2026-05-21 01:54:59] === 開始處理 台北 ===
-[2026-05-21 01:54:59] 開始登入：jenny@lemonclean.com.tw
-[2026-05-21 01:55:00] 登入成功：jenny@lemonclean.com.tw
-[2026-05-21 01:55:00] 開始下載：month=2026-05 / filename=排班統計表20260521-台北.xlsx
-[2026-05-21 01:55:02] ✅ 已下載到暫存：/tmp/tmp57a4qzac/排班統計表20260521-台北.xlsx
-[2026-05-21 01:55:02] 📦 檔案大小：18432 bytes
-[2026-05-21 01:55:02] 📂 暫存目錄存在：True
-[2026-05-21 01:55:02] 📄 暫存檔案存在：True
-[2026-05-21 01:55:02] 目前不是 Jenny 本機環境，略過本機存檔
-[2026-05-21 01:55:02] Google Drive 初始化成功
-[2026-05-21 01:55:02] 準備上傳到 Google Drive：排班統計表20260521-台北.xlsx
-[2026-05-21 01:55:04] ♻️ 已覆蓋舊檔：排班統計表20260521-台北.xlsx (file_id=1RA2bPFKlmJVhv3rN5ybVLAh92QArx_kI) https://docs.google.com/spreadsheets/d/1RA2bPFKlmJVhv3rN5ybVLAh92QArx_kI/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
-[2026-05-21 01:55:04] ✅ 完成處理：排班統計表20260521-台北.xlsx
-[2026-05-21 01:55:04] 開始下載：month=2026-06 / filename=排班統計表20260621-台北.xlsx
-[2026-05-21 01:55:05] ✅ 已下載到暫存：/tmp/tmp0itfgudr/排班統計表20260621-台北.xlsx
-[2026-05-21 01:55:05] 📦 檔案大小：14336 bytes
-[2026-05-21 01:55:05] 📂 暫存目錄存在：True
-[2026-05-21 01:55:05] 📄 暫存檔案存在：True
-[2026-05-21 01:55:05] 目前不是 Jenny 本機環境，略過本機存檔
-[2026-05-21 01:55:05] Google Drive 初始化成功
-[2026-05-21 01:55:05] 準備上傳到 Google Drive：排班統計表20260621-台北.xlsx
-[2026-05-21 01:55:08] ♻️ 已覆蓋舊檔：排班統計表20260621-台北.xlsx (file_id=1JSlfOi__lp5o8C8PKGBTqQCxwOvhVppl) https://docs.google.com/spreadsheets/d/1JSlfOi__lp5o8C8PKGBTqQCxwOvhVppl/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
-[2026-05-21 01:55:08] ✅ 完成處理：排班統計表20260621-台北.xlsx
-[2026-05-21 01:55:08] ✅ 台北 全部完成
-[2026-05-21 01:55:08] 
-[2026-05-21 01:55:08] === 開始處理 台中 ===
-[2026-05-21 01:55:08] 開始登入：jenny.tc@lemonclean.com.tw
-[2026-05-21 01:55:09] 登入成功：jenny.tc@lemonclean.com.tw
-[2026-05-21 01:55:09] 開始下載：month=2026-05 / filename=排班統計表20260521-台中.xlsx
-[2026-05-21 01:55:10] ✅ 已下載到暫存：/tmp/tmpkv16d3x7/排班統計表20260521-台中.xlsx
-[2026-05-21 01:55:10] 📦 檔案大小：7168 bytes
-[2026-05-21 01:55:10] 📂 暫存目錄存在：True
-[2026-05-21 01:55:10] 📄 暫存檔案存在：True
-[2026-05-21 01:55:10] 目前不是 Jenny 本機環境，略過本機存檔
-[2026-05-21 01:55:10] Google Drive 初始化成功
-[2026-05-21 01:55:10] 準備上傳到 Google Drive：排班統計表20260521-台中.xlsx
-[2026-05-21 01:55:12] ♻️ 已覆蓋舊檔：排班統計表20260521-台中.xlsx (file_id=1gZrDiZqqe2p6IJFsktD3mLTLPgshHOWo) https://docs.google.com/spreadsheets/d/1gZrDiZqqe2p6IJFsktD3mLTLPgshHOWo/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
-[2026-05-21 01:55:12] ✅ 完成處理：排班統計表20260521-台中.xlsx
-[2026-05-21 01:55:12] 開始下載：month=2026-06 / filename=排班統計表20260621-台中.xlsx
-[2026-05-21 01:55:13] ✅ 已下載到暫存：/tmp/tmpvga1fak4/排班統計表20260621-台中.xlsx
-[2026-05-21 01:55:13] 📦 檔案大小：6144 bytes
-[2026-05-21 01:55:13] 📂 暫存目錄存在：True
-[2026-05-21 01:55:13] 📄 暫存檔案存在：True
-[2026-05-21 01:55:13] 目前不是 Jenny 本機環境，略過本機存檔
-[2026-05-21 01:55:13] Google Drive 初始化成功
-[2026-05-21 01:55:13] 準備上傳到 Google Drive：排班統計表20260621-台中.xlsx
-[2026-05-21 01:55:15] ♻️ 已覆蓋舊檔：排班統計表20260621-台中.xlsx (file_id=1rAZHfe-nG9WJVBEq-S70wGaxPRes0TJD) https://docs.google.com/spreadsheets/d/1rAZHfe-nG9WJVBEq-S70wGaxPRes0TJD/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
-[2026-05-21 01:55:15] ✅ 完成處理：排班統計表20260621-台中.xlsx
-[2026-05-21 01:55:15] ✅ 台中 全部完成
-[2026-05-21 01:55:15] 🎉 schedule_report.py 全部完成
+[2026-05-21 06:10:22] ====================================================
+[2026-05-21 06:10:22] schedule_report.py 開始執行
+[2026-05-21 06:10:22] GITHUB_ACTIONS = true
+[2026-05-21 06:10:22] PWD = /home/runner/work/tool-system/tool-system
+[2026-05-21 06:10:22] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/.shortcut-targets-by-id/1zbu45AG1adMzz24HPdi_tLfh2Tncw_Br/排班統計表
+[2026-05-21 06:10:22] LOCAL_OUTPUT_DIR exists = False
+[2026-05-21 06:10:22] can_use_local_output_dir = False
+[2026-05-21 06:10:22] root folder_id = 0AK9RcXu_35GZUk9PVA
+[2026-05-21 06:10:22] ====================================================
+[2026-05-21 06:10:22] Google Drive 初始化成功
+[2026-05-21 06:10:22] 📁 使用既有資料夾：排班統計表
+[2026-05-21 06:10:22] this_month = 2026-05
+[2026-05-21 06:10:22] next_month = 2026-06
+[2026-05-21 06:10:22] today_stamp = 20260521
+[2026-05-21 06:10:22] next_month_stamp = 20260621
+[2026-05-21 06:10:22] 排班統計表 folder_id = 1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv
+[2026-05-21 06:10:22] 帳號數量 = 2
+[2026-05-21 06:10:22] 
+[2026-05-21 06:10:22] === 開始處理 台北 ===
+[2026-05-21 06:10:22] 開始登入：jenny@lemonclean.com.tw
+[2026-05-21 06:10:26] 登入成功：jenny@lemonclean.com.tw
+[2026-05-21 06:10:26] 開始下載：month=2026-05 / filename=排班統計表20260521-台北.xlsx
+[2026-05-21 06:10:27] ✅ 已下載到暫存：/tmp/tmpe7gucv0t/排班統計表20260521-台北.xlsx
+[2026-05-21 06:10:27] 📦 檔案大小：18432 bytes
+[2026-05-21 06:10:27] 📂 暫存目錄存在：True
+[2026-05-21 06:10:27] 📄 暫存檔案存在：True
+[2026-05-21 06:10:27] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-21 06:10:27] Google Drive 初始化成功
+[2026-05-21 06:10:27] 準備上傳到 Google Drive：排班統計表20260521-台北.xlsx
+[2026-05-21 06:10:30] ♻️ 已覆蓋舊檔：排班統計表20260521-台北.xlsx (file_id=1P_4x-m8M-SaT3RqiJZd8Ku2_2idaINUX) https://docs.google.com/spreadsheets/d/1P_4x-m8M-SaT3RqiJZd8Ku2_2idaINUX/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-21 06:10:30] ✅ 完成處理：排班統計表20260521-台北.xlsx
+[2026-05-21 06:10:30] 開始下載：month=2026-06 / filename=排班統計表20260621-台北.xlsx
+[2026-05-21 06:10:31] ✅ 已下載到暫存：/tmp/tmph9l9kd5w/排班統計表20260621-台北.xlsx
+[2026-05-21 06:10:31] 📦 檔案大小：14336 bytes
+[2026-05-21 06:10:31] 📂 暫存目錄存在：True
+[2026-05-21 06:10:31] 📄 暫存檔案存在：True
+[2026-05-21 06:10:31] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-21 06:10:31] Google Drive 初始化成功
+[2026-05-21 06:10:31] 準備上傳到 Google Drive：排班統計表20260621-台北.xlsx
+[2026-05-21 06:10:33] ♻️ 已覆蓋舊檔：排班統計表20260621-台北.xlsx (file_id=1FdKbAP9p1q8CRVp8o6ztHTCjoq_YC56w) https://docs.google.com/spreadsheets/d/1FdKbAP9p1q8CRVp8o6ztHTCjoq_YC56w/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-21 06:10:33] ✅ 完成處理：排班統計表20260621-台北.xlsx
+[2026-05-21 06:10:33] ✅ 台北 全部完成
+[2026-05-21 06:10:33] 
+[2026-05-21 06:10:33] === 開始處理 台中 ===
+[2026-05-21 06:10:33] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-05-21 06:10:35] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-05-21 06:10:35] 開始下載：month=2026-05 / filename=排班統計表20260521-台中.xlsx
+[2026-05-21 06:10:35] ✅ 已下載到暫存：/tmp/tmp48xcafoc/排班統計表20260521-台中.xlsx
+[2026-05-21 06:10:35] 📦 檔案大小：7168 bytes
+[2026-05-21 06:10:35] 📂 暫存目錄存在：True
+[2026-05-21 06:10:35] 📄 暫存檔案存在：True
+[2026-05-21 06:10:35] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-21 06:10:35] Google Drive 初始化成功
+[2026-05-21 06:10:35] 準備上傳到 Google Drive：排班統計表20260521-台中.xlsx
+[2026-05-21 06:10:38] ♻️ 已覆蓋舊檔：排班統計表20260521-台中.xlsx (file_id=18En_sEYzuzrvc2DXHnbj0dQ6JjWgQzTP) https://docs.google.com/spreadsheets/d/18En_sEYzuzrvc2DXHnbj0dQ6JjWgQzTP/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-21 06:10:38] ✅ 完成處理：排班統計表20260521-台中.xlsx
+[2026-05-21 06:10:38] 開始下載：month=2026-06 / filename=排班統計表20260621-台中.xlsx
+[2026-05-21 06:10:38] ✅ 已下載到暫存：/tmp/tmppsf204gc/排班統計表20260621-台中.xlsx
+[2026-05-21 06:10:38] 📦 檔案大小：6144 bytes
+[2026-05-21 06:10:38] 📂 暫存目錄存在：True
+[2026-05-21 06:10:38] 📄 暫存檔案存在：True
+[2026-05-21 06:10:38] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-21 06:10:38] Google Drive 初始化成功
+[2026-05-21 06:10:38] 準備上傳到 Google Drive：排班統計表20260621-台中.xlsx
+[2026-05-21 06:10:41] ♻️ 已覆蓋舊檔：排班統計表20260621-台中.xlsx (file_id=1vW1kkrafeSHYAhHM-aL9jxhiKUxX-48m) https://docs.google.com/spreadsheets/d/1vW1kkrafeSHYAhHM-aL9jxhiKUxX-48m/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-21 06:10:41] ✅ 完成處理：排班統計表20260621-台中.xlsx
+[2026-05-21 06:10:41] ✅ 台中 全部完成
+[2026-05-21 06:10:41] 🎉 schedule_report.py 全部完成
 
 ⚠️ 找不到 tools.common.log_to_sheet，略過打卡
 完成執行：排班統計表

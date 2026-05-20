@@ -1,51 +1,51 @@
 ⚠️ 找不到 tools.common.log_to_sheet，略過打卡
 開始執行：專員個資
 Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u /home/runner/work/tool-system/tool-system/tools/scheduled_daily/staff_info.py --folder-id 0AK9RcXu_35GZUk9PVA
-[2026-05-21 01:56:07] ====================================================
-[2026-05-21 01:56:07] staff_info.py 開始執行
-[2026-05-21 01:56:07] GITHUB_ACTIONS = true
-[2026-05-21 01:56:07] PWD = /home/runner/work/tool-system/tool-system
-[2026-05-21 01:56:07] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員個資
-[2026-05-21 01:56:07] LOCAL_OUTPUT_DIR exists = False
-[2026-05-21 01:56:07] can_use_local_output_dir = False
-[2026-05-21 01:56:07] root folder_id = 0AK9RcXu_35GZUk9PVA
-[2026-05-21 01:56:07] ====================================================
-[2026-05-21 01:56:07] Google Drive 初始化成功
-[2026-05-21 01:56:08] 📁 使用既有資料夾：專員個資
-[2026-05-21 01:56:08] today_stamp = 20260521
-[2026-05-21 01:56:08] 專員個資 folder_id = 199wJef-ISEP5bsSWaSseCAHynoVRE26e
-[2026-05-21 01:56:08] 帳號數量 = 2
-[2026-05-21 01:56:08] 
-[2026-05-21 01:56:08] === 開始處理 台北 ===
-[2026-05-21 01:56:08] 開始登入：jenny@lemonclean.com.tw
-[2026-05-21 01:56:09] 登入成功：jenny@lemonclean.com.tw
-[2026-05-21 01:56:09] 開始下載：city=台北 / filename=20260521專員個資-台北.xlsx
-[2026-05-21 01:56:13] ✅ 已下載到暫存：/tmp/tmp9j75g2wz/20260521專員個資-台北.xlsx
-[2026-05-21 01:56:13] 📦 檔案大小：220160 bytes
-[2026-05-21 01:56:13] 📂 暫存目錄存在：True
-[2026-05-21 01:56:13] 📄 暫存檔案存在：True
-[2026-05-21 01:56:13] 目前不是 Jenny 本機環境，略過本機存檔
-[2026-05-21 01:56:13] Google Drive 初始化成功
-[2026-05-21 01:56:13] 準備上傳到 Google Drive：20260521專員個資-台北.xlsx
-[2026-05-21 01:56:15] ♻️ 已覆蓋舊檔：20260521專員個資-台北.xlsx (file_id=1wtXUQn66SVG99ENLtfqAPOKBZj1u2g1a) https://docs.google.com/spreadsheets/d/1wtXUQn66SVG99ENLtfqAPOKBZj1u2g1a/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
-[2026-05-21 01:56:15] ✅ 完成處理：20260521專員個資-台北.xlsx
-[2026-05-21 01:56:15] ✅ 台北 全部完成
-[2026-05-21 01:56:15] 
-[2026-05-21 01:56:15] === 開始處理 台中 ===
-[2026-05-21 01:56:15] 開始登入：jenny.tc@lemonclean.com.tw
-[2026-05-21 01:56:17] 登入成功：jenny.tc@lemonclean.com.tw
-[2026-05-21 01:56:17] 開始下載：city=台中 / filename=20260521專員個資-台中.xlsx
-[2026-05-21 01:56:17] ✅ 已下載到暫存：/tmp/tmp9i0nb26i/20260521專員個資-台中.xlsx
-[2026-05-21 01:56:17] 📦 檔案大小：59392 bytes
-[2026-05-21 01:56:17] 📂 暫存目錄存在：True
-[2026-05-21 01:56:17] 📄 暫存檔案存在：True
-[2026-05-21 01:56:17] 目前不是 Jenny 本機環境，略過本機存檔
-[2026-05-21 01:56:17] Google Drive 初始化成功
-[2026-05-21 01:56:17] 準備上傳到 Google Drive：20260521專員個資-台中.xlsx
-[2026-05-21 01:56:20] ♻️ 已覆蓋舊檔：20260521專員個資-台中.xlsx (file_id=1Jtg_R2AUXiaixLeSJWdAyJcyJKNjaQv1) https://docs.google.com/spreadsheets/d/1Jtg_R2AUXiaixLeSJWdAyJcyJKNjaQv1/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
-[2026-05-21 01:56:20] ✅ 完成處理：20260521專員個資-台中.xlsx
-[2026-05-21 01:56:20] ✅ 台中 全部完成
-[2026-05-21 01:56:20] 🎉 staff_info.py 全部完成
+[2026-05-21 06:11:30] ====================================================
+[2026-05-21 06:11:30] staff_info.py 開始執行
+[2026-05-21 06:11:30] GITHUB_ACTIONS = true
+[2026-05-21 06:11:30] PWD = /home/runner/work/tool-system/tool-system
+[2026-05-21 06:11:30] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員個資
+[2026-05-21 06:11:30] LOCAL_OUTPUT_DIR exists = False
+[2026-05-21 06:11:30] can_use_local_output_dir = False
+[2026-05-21 06:11:30] root folder_id = 0AK9RcXu_35GZUk9PVA
+[2026-05-21 06:11:30] ====================================================
+[2026-05-21 06:11:30] Google Drive 初始化成功
+[2026-05-21 06:11:31] 📁 使用既有資料夾：專員個資
+[2026-05-21 06:11:31] today_stamp = 20260521
+[2026-05-21 06:11:31] 專員個資 folder_id = 199wJef-ISEP5bsSWaSseCAHynoVRE26e
+[2026-05-21 06:11:31] 帳號數量 = 2
+[2026-05-21 06:11:31] 
+[2026-05-21 06:11:31] === 開始處理 台北 ===
+[2026-05-21 06:11:31] 開始登入：jenny@lemonclean.com.tw
+[2026-05-21 06:11:32] 登入成功：jenny@lemonclean.com.tw
+[2026-05-21 06:11:32] 開始下載：city=台北 / filename=20260521專員個資-台北.xlsx
+[2026-05-21 06:11:35] ✅ 已下載到暫存：/tmp/tmp92duf_4b/20260521專員個資-台北.xlsx
+[2026-05-21 06:11:35] 📦 檔案大小：220160 bytes
+[2026-05-21 06:11:35] 📂 暫存目錄存在：True
+[2026-05-21 06:11:35] 📄 暫存檔案存在：True
+[2026-05-21 06:11:35] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-21 06:11:35] Google Drive 初始化成功
+[2026-05-21 06:11:35] 準備上傳到 Google Drive：20260521專員個資-台北.xlsx
+[2026-05-21 06:11:38] ♻️ 已覆蓋舊檔：20260521專員個資-台北.xlsx (file_id=1wtXUQn66SVG99ENLtfqAPOKBZj1u2g1a) https://docs.google.com/spreadsheets/d/1wtXUQn66SVG99ENLtfqAPOKBZj1u2g1a/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-21 06:11:38] ✅ 完成處理：20260521專員個資-台北.xlsx
+[2026-05-21 06:11:38] ✅ 台北 全部完成
+[2026-05-21 06:11:38] 
+[2026-05-21 06:11:38] === 開始處理 台中 ===
+[2026-05-21 06:11:38] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-05-21 06:11:39] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-05-21 06:11:39] 開始下載：city=台中 / filename=20260521專員個資-台中.xlsx
+[2026-05-21 06:11:40] ✅ 已下載到暫存：/tmp/tmp15s8b3c3/20260521專員個資-台中.xlsx
+[2026-05-21 06:11:40] 📦 檔案大小：59392 bytes
+[2026-05-21 06:11:40] 📂 暫存目錄存在：True
+[2026-05-21 06:11:40] 📄 暫存檔案存在：True
+[2026-05-21 06:11:40] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-05-21 06:11:40] Google Drive 初始化成功
+[2026-05-21 06:11:40] 準備上傳到 Google Drive：20260521專員個資-台中.xlsx
+[2026-05-21 06:11:42] ♻️ 已覆蓋舊檔：20260521專員個資-台中.xlsx (file_id=1Jtg_R2AUXiaixLeSJWdAyJcyJKNjaQv1) https://docs.google.com/spreadsheets/d/1Jtg_R2AUXiaixLeSJWdAyJcyJKNjaQv1/edit?usp=drivesdk&ouid=110593598144549238039&rtpof=true&sd=true
+[2026-05-21 06:11:42] ✅ 完成處理：20260521專員個資-台中.xlsx
+[2026-05-21 06:11:42] ✅ 台中 全部完成
+[2026-05-21 06:11:42] 🎉 staff_info.py 全部完成
 
 ⚠️ 找不到 tools.common.log_to_sheet，略過打卡
 完成執行：專員個資
