@@ -140,7 +140,7 @@ def login(session, email, password):
 
 
 def get_ranges():
-    today = datetime.today()
+    today = now_dt()
     y, m = today.year, today.month
 
     this_start = f"{y}-{m:02d}-01"
@@ -269,11 +269,11 @@ def normalize_date_text(text: str) -> Optional[str]:
                 dt = datetime.strptime(raw, "%Y.%m.%d")
                 return dt.strftime("%Y-%m-%d")
             if re.fullmatch(r"\d{1,2}-\d{1,2}", raw):
-                today = datetime.today()
+                today = now_dt()
                 dt = datetime.strptime(f"{today.year}-{raw}", "%Y-%m-%d")
                 return dt.strftime("%Y-%m-%d")
             if re.fullmatch(r"\d{1,2}/\d{1,2}", raw):
-                today = datetime.today()
+                today = now_dt()
                 dt = datetime.strptime(f"{today.year}/{raw}", "%Y/%m/%d")
                 return dt.strftime("%Y-%m-%d")
         except Exception:
@@ -807,14 +807,44 @@ def build_region4_email_html(df4):
     """
 
 
-def send_region4_email(df4, recipient="jenny@lemonclean.com.tw"):
+def split_email_recipients(raw: str) -> list[str]:
+    return [
+        email.strip()
+        for email in str(raw or "").replace(";", ",").split(",")
+        if email.strip()
+    ]
+
+
+def get_email_settings(default_recipient="jenny@lemonclean.com.tw"):
     sender = get_secret(["email", "sender"], env_name="REPORT_EMAIL_SENDER", required=False)
     password = get_secret(["email", "app_password"], env_name="REPORT_EMAIL_APP_PASSWORD", required=False)
-    recipient = get_secret(["email", "recipient"], env_name="REPORT_EMAIL_RECIPIENT", required=False, default=recipient)
+    recipient = get_secret(["email", "recipient"], env_name="REPORT_EMAIL_RECIPIENT", required=False, default=default_recipient)
 
-    if not sender or not password or not recipient:
-        log("⚠️ 未設定 email.sender / email.app_password / email.recipient，略過寄信")
-        return
+    return sender, password, split_email_recipients(recipient)
+
+
+def email_settings_ready() -> bool:
+    sender, password, recipients = get_email_settings()
+    return bool(sender and password and recipients)
+
+
+def send_region4_email(df4, recipient="jenny@lemonclean.com.tw", required=False) -> bool:
+    sender, password, recipients = get_email_settings(recipient)
+
+    missing = []
+    if not sender:
+        missing.append("REPORT_EMAIL_SENDER")
+    if not password:
+        missing.append("REPORT_EMAIL_APP_PASSWORD")
+    if not recipients:
+        missing.append("REPORT_EMAIL_RECIPIENT")
+
+    if missing:
+        message = "缺少寄信設定：" + " / ".join(missing)
+        if required:
+            raise RuntimeError(message)
+        log(f"⚠️ {message}，略過寄信")
+        return False
 
     today_str = now_dt().strftime("%Y%m%d")
     subject = f"業績報表{today_str}"
@@ -823,13 +853,14 @@ def send_region4_email(df4, recipient="jenny@lemonclean.com.tw"):
     msg = MIMEText(html, "html", "utf-8")
     msg["Subject"] = subject
     msg["From"] = sender
-    msg["To"] = recipient
+    msg["To"] = ", ".join(recipients)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(sender, password)
-        server.sendmail(sender, [recipient], msg.as_string())
+        server.sendmail(sender, recipients, msg.as_string())
 
-    log(f"✅ 已寄出：{recipient}")
+    log(f"✅ 已寄出：{', '.join(recipients)}")
+    return True
 
 
 def load_execution_log_for_current_month() -> pd.DataFrame:
@@ -984,7 +1015,7 @@ def persist_dashboard_payload(
     append_output_file_log("業績報表", snap_html, trigger)
 
 
-def generate_sales_report(send_email=False, persist_dashboard=True, trigger="dashboard"):
+def generate_sales_report(send_email=False, persist_dashboard=True, trigger="dashboard", strict_accounts=False):
     log("🔥 開始業績報表")
 
     ensure_dirs()
@@ -997,6 +1028,8 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
 
     if missing_cities:
         log(f"⚠️ ACCOUNTS 缺少城市設定，已略過：{', '.join(missing_cities)}")
+        if strict_accounts:
+            raise RuntimeError("缺少城市帳號設定：" + "、".join(missing_cities))
 
     if not enabled_cities:
         error_msg = "ACCOUNTS 沒有任何可用城市設定"
@@ -1169,7 +1202,7 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
         persist_dashboard_payload(df4, daily_df, next_month_daily_df, month_end_df, email_html, error_msg, trigger=trigger)
 
     if send_email:
-        send_region4_email(df4)
+        send_region4_email(df4, required=True)
 
     return {
         "raw_df": raw_df,
@@ -1213,11 +1246,15 @@ def main():
     if len(cleaned_args) >= 2:
         send_email = cleaned_args[1].lower() in ("1", "true", "yes", "y")
 
-    generate_sales_report(
+    result = generate_sales_report(
         send_email=send_email,
         persist_dashboard=True,
         trigger=trigger,
+        strict_accounts=(trigger == "schedule"),
     )
+
+    if result.get("error"):
+        raise RuntimeError(str(result["error"]))
 
 
 if __name__ == "__main__":
