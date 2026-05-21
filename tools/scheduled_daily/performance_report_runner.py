@@ -18,14 +18,6 @@ TZ = timezone(timedelta(hours=8))
 def now_tw() -> datetime:
     return datetime.now(TZ)
 
-def apply_email_fallback_env() -> None:
-    if not os.getenv("REPORT_EMAIL_SENDER") and os.getenv("NOTIFY_EMAIL"):
-        os.environ["REPORT_EMAIL_SENDER"] = os.getenv("NOTIFY_EMAIL", "")
-    if not os.getenv("REPORT_EMAIL_APP_PASSWORD") and os.getenv("NOTIFY_PASSWORD"):
-        os.environ["REPORT_EMAIL_APP_PASSWORD"] = os.getenv("NOTIFY_PASSWORD", "")
-    if not os.getenv("REPORT_EMAIL_RECIPIENT") and os.getenv("NOTIFY_TO"):
-        os.environ["REPORT_EMAIL_RECIPIENT"] = os.getenv("NOTIFY_TO", "")
-
 def write_log(status: str, started_at: datetime, finished_at=None, message="", traceback_text=""):
     try:
         write_job_log(
@@ -49,7 +41,6 @@ def write_log(status: str, started_at: datetime, finished_at=None, message="", t
 
 def main(mode: str="schedule", send_email: str="true") -> None:
     started_at=now_tw()
-    apply_email_fallback_env()
     write_log("running",started_at,message="開始執行業績報表")
     cmd=[sys.executable,"-u",str(BASE_DIR/"tools/scheduled_daily/performance_report.py"),mode,send_email]
     print("Command:"," ".join(cmd),flush=True)
@@ -67,7 +58,7 @@ def main(mode: str="schedule", send_email: str="true") -> None:
         msg=f"業績報表執行失敗，exit={completed.returncode}\nSTDOUT:\n{stdout_text[-3000:]}\nSTDERR:\n{stderr_text[-5000:]}"
         write_log("failed",started_at,finished_at,msg,stderr_text or msg)
         raise RuntimeError(msg)
-    email_ready=bool(os.getenv("REPORT_EMAIL_SENDER") and os.getenv("REPORT_EMAIL_APP_PASSWORD") and os.getenv("REPORT_EMAIL_RECIPIENT"))
+    email_ready=bool(os.getenv("NOTIFY_EMAIL") and os.getenv("NOTIFY_PASSWORD") and os.getenv("NOTIFY_TO"))
     write_log("success",started_at,finished_at,f"完成；email設定={'已設定' if email_ready else '未設定'}")
     print("🎉 performance_report_runner.py 全部完成",flush=True)
 
