@@ -20,8 +20,8 @@ jobs:
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
       TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
       MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
-      STREAMLIT_SECRETS_TOML: ${{ secrets.STREAMLIT_SECRETS_TOML || secrets.STREAMLIT_SECRETS }}
       PERFORMANCE_REPORT_STRICT_ACCOUNTS: "true"
+      PERFORMANCE_REPORT_EMAIL_REQUIRED: "false"
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
@@ -37,9 +37,6 @@ jobs:
       NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
       NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
       NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
-      REPORT_EMAIL_SENDER: ${{ secrets.REPORT_EMAIL_SENDER || secrets.NOTIFY_EMAIL }}
-      REPORT_EMAIL_APP_PASSWORD: ${{ secrets.REPORT_EMAIL_APP_PASSWORD || secrets.NOTIFY_PASSWORD }}
-      REPORT_EMAIL_RECIPIENT: ${{ secrets.REPORT_EMAIL_RECIPIENT || secrets.NOTIFY_TO }}
 
     steps:
       - name: Checkout
@@ -51,18 +48,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Prepare Streamlit secrets
-        shell: bash
-        run: |
-          if [ -n "${STREAMLIT_SECRETS_TOML:-}" ]; then
-            mkdir -p .streamlit
-            printf '%s\n' "$STREAMLIT_SECRETS_TOML" > .streamlit/secrets.toml
-            chmod 600 .streamlit/secrets.toml
-            echo "Streamlit secrets file prepared"
-          else
-            echo "STREAMLIT_SECRETS_TOML is not set; using GitHub repository secrets only"
-          fi
 
       - name: Install packages
         run: |
