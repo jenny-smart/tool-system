@@ -23,16 +23,6 @@ except Exception:
 
 
 def get_secret(path_list, env_name=None, required=False, default=None, fallback_env_names=None):
-    if HAS_STREAMLIT:
-        try:
-            cur = st.secrets
-            for key in path_list:
-                cur = cur[key]
-            if cur is not None and str(cur) != "":
-                return cur
-        except Exception:
-            pass
-
     if env_name:
         value = os.getenv(env_name)
         if value not in (None, ""):
@@ -42,6 +32,16 @@ def get_secret(path_list, env_name=None, required=False, default=None, fallback_
         value = os.getenv(fallback_env_name)
         if value not in (None, ""):
             return value
+
+    if not os.getenv("GITHUB_ACTIONS") and HAS_STREAMLIT:
+        try:
+            cur = st.secrets
+            for key in path_list:
+                cur = cur[key]
+            if cur is not None and str(cur) != "":
+                return cur
+        except Exception:
+            pass
 
     if required:
         raise RuntimeError(f"讀不到設定值：{'/'.join(path_list)}")
@@ -823,20 +823,20 @@ def split_email_recipients(raw: str) -> list[str]:
 def get_email_settings(default_recipient="jenny@lemonclean.com.tw"):
     sender = get_secret(
         ["email", "sender"],
-        env_name="REPORT_EMAIL_SENDER",
-        fallback_env_names=["NOTIFY_EMAIL", "EMAIL_SENDER", "GMAIL_USER"],
+        env_name="NOTIFY_EMAIL",
+        fallback_env_names=["REPORT_EMAIL_SENDER", "EMAIL_SENDER", "GMAIL_USER"],
         required=False,
     )
     password = get_secret(
         ["email", "app_password"],
-        env_name="REPORT_EMAIL_APP_PASSWORD",
-        fallback_env_names=["NOTIFY_PASSWORD", "EMAIL_APP_PASSWORD", "GMAIL_APP_PASSWORD"],
+        env_name="NOTIFY_PASSWORD",
+        fallback_env_names=["REPORT_EMAIL_APP_PASSWORD", "EMAIL_APP_PASSWORD", "GMAIL_APP_PASSWORD"],
         required=False,
     )
     recipient = get_secret(
         ["email", "recipient"],
-        env_name="REPORT_EMAIL_RECIPIENT",
-        fallback_env_names=["NOTIFY_TO", "EMAIL_RECIPIENT"],
+        env_name="NOTIFY_TO",
+        fallback_env_names=["REPORT_EMAIL_RECIPIENT", "EMAIL_RECIPIENT"],
         required=False,
         default=default_recipient,
     )
@@ -876,9 +876,25 @@ def send_region4_email(df4, recipient="jenny@lemonclean.com.tw", required=False)
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(sender, password)
-        server.sendmail(sender, recipients, msg.as_string())
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, recipients, msg.as_string())
+    except smtplib.SMTPAuthenticationError as exc:
+        message = (
+            "Gmail 拒絕登入，請確認 email.sender / REPORT_EMAIL_SENDER 與 "
+            "email.app_password / REPORT_EMAIL_APP_PASSWORD 是同一個 Gmail 帳號的 app password"
+        )
+        if required:
+            raise RuntimeError(message) from exc
+        log(f"⚠️ {message}，本次略過寄信")
+        return False
+    except smtplib.SMTPException as exc:
+        message = f"SMTP 寄信失敗：{exc}"
+        if required:
+            raise RuntimeError(message) from exc
+        log(f"⚠️ {message}，本次略過寄信")
+        return False
 
     log(f"✅ 已寄出：{', '.join(recipients)}")
     return True
@@ -1223,7 +1239,8 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
         persist_dashboard_payload(df4, daily_df, next_month_daily_df, month_end_df, email_html, error_msg, trigger=trigger)
 
     if send_email:
-        send_region4_email(df4, required=True)
+        email_required = os.getenv("PERFORMANCE_REPORT_EMAIL_REQUIRED", "").lower() in ("1", "true", "yes", "y")
+        send_region4_email(df4, required=email_required)
 
     return {
         "raw_df": raw_df,
