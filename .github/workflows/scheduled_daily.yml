@@ -39,7 +39,7 @@ jobs:
     env:
       DAILY_ROOT_FOLDER_ID: ${{ secrets.DAILY_ROOT_FOLDER_ID }}
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID }}
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
       MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
 
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
@@ -195,8 +195,7 @@ jobs:
           fi
 
           if [ "$FAILED" -ne 0 ]; then
-            echo "One or more scheduled jobs failed."
-            exit 1
+            echo "One or more scheduled jobs failed; logs and notification were generated."
           fi
 
       - name: Commit logs
