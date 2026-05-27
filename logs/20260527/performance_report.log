@@ -1,84 +1,84 @@
-[2026-05-27 12:18:30] 🔥 開始業績報表
-[2026-05-27 12:18:30] ===== 台北 =====
-[2026-05-27 12:18:32] ✅ 登入成功：jenny@lemonclean.com.tw
-[2026-05-27 12:18:32] 抓取：city=台北 month=本月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:36] ✅ parse_html rows = 22
-[2026-05-27 12:18:36] 抓取：city=台北 month=本月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:36] ✅ parse_html rows = 22
-[2026-05-27 12:18:36] 抓取：city=台北 month=下月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:40] ✅ parse_html rows = 22
-[2026-05-27 12:18:40] 抓取：city=台北 month=下月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:40] ✅ parse_html rows = 22
-[2026-05-27 12:18:40] ===== 台中 =====
-[2026-05-27 12:18:42] ✅ 登入成功：jenny.tc@lemonclean.com.tw
-[2026-05-27 12:18:42] 抓取：city=台中 month=本月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:43] ✅ parse_html rows = 22
-[2026-05-27 12:18:43] 抓取：city=台中 month=本月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:43] ✅ parse_html rows = 22
-[2026-05-27 12:18:43] 抓取：city=台中 month=下月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:44] ✅ parse_html rows = 22
-[2026-05-27 12:18:44] 抓取：city=台中 month=下月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:44] ✅ parse_html rows = 22
-[2026-05-27 12:18:44] ===== 桃園 =====
-[2026-05-27 12:18:46] ✅ 登入成功：jenny.tyc@lemonclean.com.tw
-[2026-05-27 12:18:46] 抓取：city=桃園 month=本月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:48] ✅ parse_html rows = 22
-[2026-05-27 12:18:48] 抓取：city=桃園 month=本月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:48] ✅ parse_html rows = 22
-[2026-05-27 12:18:48] 抓取：city=桃園 month=下月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:50] ✅ parse_html rows = 22
-[2026-05-27 12:18:50] 抓取：city=桃園 month=下月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:50] ✅ parse_html rows = 22
-[2026-05-27 12:18:50] ===== 新竹 =====
-[2026-05-27 12:18:52] ✅ 登入成功：jenny.hc@lemonclean.com.tw
-[2026-05-27 12:18:52] 抓取：city=新竹 month=本月 status=1 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:53] ✅ parse_html rows = 22
-[2026-05-27 12:18:53] 抓取：city=新竹 month=本月 status=0 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:53] ✅ parse_html rows = 22
-[2026-05-27 12:18:53] 抓取：city=新竹 month=下月 status=1 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:54] ✅ parse_html rows = 22
-[2026-05-27 12:18:54] 抓取：city=新竹 month=下月 status=0 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:55] ✅ parse_html rows = 22
-[2026-05-27 12:18:55] ===== 高雄 =====
-[2026-05-27 12:18:56] ✅ 登入成功：jenny.hc@lemonclean.com.tw
-[2026-05-27 12:18:56] 抓取：city=高雄 month=本月 status=1 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:56] ✅ parse_html rows = 22
-[2026-05-27 12:18:56] 抓取：city=高雄 month=本月 status=1 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:56] ✅ parse_html rows = 22
-[2026-05-27 12:18:56] 抓取：city=高雄 month=本月 status=0 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:57] ✅ parse_html rows = 22
-[2026-05-27 12:18:57] 抓取：city=高雄 month=本月 status=0 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:57] ✅ parse_html rows = 22
-[2026-05-27 12:18:57] 抓取：city=高雄 month=下月 status=1 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:57] ✅ parse_html rows = 22
-[2026-05-27 12:18:57] 抓取：city=高雄 month=下月 status=1 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:57] ✅ parse_html rows = 22
-[2026-05-27 12:18:57] 抓取：city=高雄 month=下月 status=0 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:57] ✅ parse_html rows = 22
-[2026-05-27 12:18:57] 抓取：city=高雄 month=下月 status=0 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
-[2026-05-27 12:18:58] ✅ parse_html rows = 22
-[2026-05-27 12:18:58] ✅ 本月統計報表完成，筆數 = 28
-[2026-05-27 12:18:58] ✅ 次月統計報表完成，筆數 = 28
-[2026-05-27 12:18:58] raw_df columns = ['城市', '月份', '日期', '收入類型', '資料來源', '服務', '子項目', '已付款', '待付款']
-[2026-05-27 12:18:58] raw_df 前5筆 = [{'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '居家清潔', '子項目': '', '已付款': 1545200, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '辦公室清潔', '子項目': '', '已付款': 94350, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '裝修細清', '子項目': '', '已付款': 91000, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '搬入清潔', '子項目': '', '已付款': 109000, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '搬出清潔', '子項目': '', '已付款': 160200, '待付款': 0}]
-[2026-05-27 12:18:58] df1 rows = 90
-[2026-05-27 12:18:58] df2 rows = 60
-[2026-05-27 12:18:58] df3 rows = 85
-[2026-05-27 12:18:58] df4 rows = 6
-[2026-05-27 12:18:58] daily_df rows = 28
-[2026-05-27 12:18:58] next_month_daily_df rows = 28
-[2026-05-27 12:18:58] month_end_df rows = 0
-[2026-05-27 12:18:58] ===== 寫入 dashboard 檔案 =====
-[2026-05-27 12:18:58] LATEST_DIR = ./dashboard_data/latest
-[2026-05-27 12:18:58] latest_df4 = ./dashboard_data/latest/df4.csv
-[2026-05-27 12:18:58] latest_daily = ./dashboard_data/latest/daily_df.csv
-[2026-05-27 12:18:58] latest_next_daily = ./dashboard_data/latest/next_month_daily_df.csv
-[2026-05-27 12:18:58] latest_month_end = ./dashboard_data/latest/month_end_summary.csv
-[2026-05-27 12:18:58] latest_html = ./dashboard_data/latest/email_preview.html
-[2026-05-27 12:18:58] latest_meta = ./dashboard_data/latest/meta.json
-[2026-05-27 12:18:58] df4 rows = 6
-[2026-05-27 12:18:58] daily_df rows = 28
-[2026-05-27 12:18:58] next_month_daily_df rows = 28
-[2026-05-27 12:18:58] month_end_df rows = 0
-[2026-05-27 12:18:59] ✅ 已寄出：jenny@hers.com.tw
+[2026-05-27 16:05:28] 🔥 開始業績報表
+[2026-05-27 16:05:28] ===== 台北 =====
+[2026-05-27 16:05:30] ✅ 登入成功：jenny@lemonclean.com.tw
+[2026-05-27 16:05:30] 抓取：city=台北 month=本月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:31] ✅ parse_html rows = 22
+[2026-05-27 16:05:31] 抓取：city=台北 month=本月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:31] ✅ parse_html rows = 22
+[2026-05-27 16:05:31] 抓取：city=台北 month=下月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:32] ✅ parse_html rows = 22
+[2026-05-27 16:05:32] 抓取：city=台北 month=下月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:32] ✅ parse_html rows = 22
+[2026-05-27 16:05:32] ===== 台中 =====
+[2026-05-27 16:05:33] ✅ 登入成功：jenny.tc@lemonclean.com.tw
+[2026-05-27 16:05:33] 抓取：city=台中 month=本月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:34] ✅ parse_html rows = 22
+[2026-05-27 16:05:34] 抓取：city=台中 month=本月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:34] ✅ parse_html rows = 22
+[2026-05-27 16:05:34] 抓取：city=台中 month=下月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:35] ✅ parse_html rows = 22
+[2026-05-27 16:05:35] 抓取：city=台中 month=下月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:35] ✅ parse_html rows = 22
+[2026-05-27 16:05:35] ===== 桃園 =====
+[2026-05-27 16:05:37] ✅ 登入成功：jenny.tyc@lemonclean.com.tw
+[2026-05-27 16:05:37] 抓取：city=桃園 month=本月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:37] ✅ parse_html rows = 22
+[2026-05-27 16:05:37] 抓取：city=桃園 month=本月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:38] ✅ parse_html rows = 22
+[2026-05-27 16:05:38] 抓取：city=桃園 month=下月 status=1 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:38] ✅ parse_html rows = 22
+[2026-05-27 16:05:38] 抓取：city=桃園 month=下月 status=0 kw= url=https://backend.lemonclean.com.tw/purchase?keyword=&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:39] ✅ parse_html rows = 22
+[2026-05-27 16:05:39] ===== 新竹 =====
+[2026-05-27 16:05:40] ✅ 登入成功：jenny.hc@lemonclean.com.tw
+[2026-05-27 16:05:40] 抓取：city=新竹 month=本月 status=1 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:41] ✅ parse_html rows = 22
+[2026-05-27 16:05:41] 抓取：city=新竹 month=本月 status=0 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:41] ✅ parse_html rows = 22
+[2026-05-27 16:05:41] 抓取：city=新竹 month=下月 status=1 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:42] ✅ parse_html rows = 22
+[2026-05-27 16:05:42] 抓取：city=新竹 month=下月 status=0 kw=新竹 url=https://backend.lemonclean.com.tw/purchase?keyword=%E6%96%B0%E7%AB%B9&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:42] ✅ parse_html rows = 22
+[2026-05-27 16:05:42] ===== 高雄 =====
+[2026-05-27 16:05:44] ✅ 登入成功：jenny.hc@lemonclean.com.tw
+[2026-05-27 16:05:44] 抓取：city=高雄 month=本月 status=1 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:44] ✅ parse_html rows = 22
+[2026-05-27 16:05:44] 抓取：city=高雄 month=本月 status=1 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:44] ✅ parse_html rows = 22
+[2026-05-27 16:05:44] 抓取：city=高雄 month=本月 status=0 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:44] ✅ parse_html rows = 22
+[2026-05-27 16:05:44] 抓取：city=高雄 month=本月 status=0 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-05-01&clean_date_e=2026-05-31&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:45] ✅ parse_html rows = 22
+[2026-05-27 16:05:45] 抓取：city=高雄 month=下月 status=1 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:45] ✅ parse_html rows = 22
+[2026-05-27 16:05:45] 抓取：city=高雄 month=下月 status=1 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=1&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:45] ✅ parse_html rows = 22
+[2026-05-27 16:05:45] 抓取：city=高雄 month=下月 status=0 kw=高雄 url=https://backend.lemonclean.com.tw/purchase?keyword=%E9%AB%98%E9%9B%84&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:45] ✅ parse_html rows = 22
+[2026-05-27 16:05:45] 抓取：city=高雄 month=下月 status=0 kw=台南 url=https://backend.lemonclean.com.tw/purchase?keyword=%E5%8F%B0%E5%8D%97&name=&phone=&orderNo=&date_s=&date_e=&clean_date_s=2026-06-01&clean_date_e=2026-06-30&paid_at_s=&paid_at_e=&refundDateS=&refundDateE=&buy=&area_id=&isCharge=&isRefund=&p_board=on&payway=&purchase_status=0&progress_status=&invoiceStatus=&otherFee=&orderBy=
+[2026-05-27 16:05:46] ✅ parse_html rows = 22
+[2026-05-27 16:05:46] ✅ 本月統計報表完成，筆數 = 29
+[2026-05-27 16:05:46] ✅ 次月統計報表完成，筆數 = 29
+[2026-05-27 16:05:46] raw_df columns = ['城市', '月份', '日期', '收入類型', '資料來源', '服務', '子項目', '已付款', '待付款']
+[2026-05-27 16:05:46] raw_df 前5筆 = [{'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '居家清潔', '子項目': '', '已付款': 1545200, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '辦公室清潔', '子項目': '', '已付款': 94350, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '裝修細清', '子項目': '', '已付款': 91000, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '搬入清潔', '子項目': '', '已付款': 109000, '待付款': 0}, {'城市': '台北', '月份': '本月', '日期': None, '收入類型': '現金收入', '資料來源': '主表', '服務': '搬出清潔', '子項目': '', '已付款': 160200, '待付款': 0}]
+[2026-05-27 16:05:46] df1 rows = 90
+[2026-05-27 16:05:46] df2 rows = 60
+[2026-05-27 16:05:46] df3 rows = 85
+[2026-05-27 16:05:46] df4 rows = 6
+[2026-05-27 16:05:46] daily_df rows = 29
+[2026-05-27 16:05:46] next_month_daily_df rows = 29
+[2026-05-27 16:05:46] month_end_df rows = 0
+[2026-05-27 16:05:46] ===== 寫入 dashboard 檔案 =====
+[2026-05-27 16:05:46] LATEST_DIR = ./dashboard_data/latest
+[2026-05-27 16:05:46] latest_df4 = ./dashboard_data/latest/df4.csv
+[2026-05-27 16:05:46] latest_daily = ./dashboard_data/latest/daily_df.csv
+[2026-05-27 16:05:46] latest_next_daily = ./dashboard_data/latest/next_month_daily_df.csv
+[2026-05-27 16:05:46] latest_month_end = ./dashboard_data/latest/month_end_summary.csv
+[2026-05-27 16:05:46] latest_html = ./dashboard_data/latest/email_preview.html
+[2026-05-27 16:05:46] latest_meta = ./dashboard_data/latest/meta.json
+[2026-05-27 16:05:46] df4 rows = 6
+[2026-05-27 16:05:46] daily_df rows = 29
+[2026-05-27 16:05:46] next_month_daily_df rows = 29
+[2026-05-27 16:05:46] month_end_df rows = 0
+[2026-05-27 16:05:48] ✅ 已寄出：jenny@hers.com.tw
 
