@@ -13,3 +13,4 @@ PyYAML>=6.0.2
 requests>=2.32.0
 beautifulsoup4>=4.12.3
 xlrd>=2.0.1
+python-calamine
