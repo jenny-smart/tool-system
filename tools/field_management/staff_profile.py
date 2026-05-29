@@ -22,6 +22,14 @@ try:
 except ImportError:
     from logger import log
 
+try:
+    from .orders import sort_order_values
+except ImportError:
+    from orders import sort_order_values
+
+# ★ 新增
+from tools.common.log_to_sheet import write_target_log
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
@@ -275,11 +283,6 @@ def clear_and_write_values(
     clear_range(sheets, spreadsheet_id, range_name)
     write_values(sheets, spreadsheet_id, range_name, values)
 
-try:
-    from .orders import sort_order_values
-except ImportError:
-    from orders import sort_order_values
-
 
 TARGET_SHEET_NAME = "專員個人資料"
 
@@ -288,6 +291,7 @@ def run_staff_profile_only(
     cfg: dict[str, Any],
     area: str,
     date_key: str,
+    run_type: str = "手動",          # ★ 新增
 ) -> None:
     drive = get_drive_service()
     sheets = get_sheets_service()
@@ -297,62 +301,88 @@ def run_staff_profile_only(
 
     file_base_new = f"{date_key}專員個資-{area}"
     file_base_old = f"{date_key}專員系統個資-{area}"
+    source_file_name = ""                                            # ★
+    status = "失敗"                                                  # ★
+    message = ""                                                     # ★
+    target_location = f"{TARGET_SHEET_NAME}!A4:C"
 
-    log(f"開始處理專員個資：{file_base_new}")
+    try:
+        log(f"開始處理專員個資：{file_base_new}")
 
-    file = find_file_by_possible_names(
-        drive,
-        source_folder_id,
-        [
-            file_base_new,
-            f"{file_base_new}.xlsx",
-            f"{file_base_new}.xls",
-            file_base_old,
-            f"{file_base_old}.xlsx",
-            f"{file_base_old}.xls",
-        ],
-    )
+        file = find_file_by_possible_names(
+            drive,
+            source_folder_id,
+            [
+                file_base_new,
+                f"{file_base_new}.xlsx",
+                f"{file_base_new}.xls",
+                file_base_old,
+                f"{file_base_old}.xlsx",
+                f"{file_base_old}.xls",
+            ],
+        )
+        source_file_name = file.get("name", "")                     # ★
 
-    values = read_file_values(drive, sheets, file)
+        values = read_file_values(drive, sheets, file)
 
-    merged: list[list[Any]] = []
+        merged: list[list[Any]] = []
 
-    for row in values[1:]:
-        col_a = str(row[0]).strip() if len(row) > 0 else ""
-        col_e = row[4] if len(row) > 4 else ""
-        col_f = row[5] if len(row) > 5 else ""
-        col_n = str(row[13]).strip() if len(row) > 13 else ""
+        for row in values[1:]:
+            col_a = str(row[0]).strip() if len(row) > 0 else ""
+            col_e = row[4] if len(row) > 4 else ""
+            col_f = row[5] if len(row) > 5 else ""
+            col_n = str(row[13]).strip() if len(row) > 13 else ""
 
-        if not col_a:
-            continue
+            if not col_a:
+                continue
+            if "檸檬人" in col_a:
+                continue
+            if col_n == "停用":
+                continue
 
-        if "檸檬人" in col_a:
-            continue
+            merged.append([col_a, col_e, col_f])
 
-        if col_n == "停用":
-            continue
+        if not merged:
+            raise RuntimeError(f"專員個資整理後沒有可貼入資料：{source_file_name}")
 
-        merged.append([col_a, col_e, col_f])
+        clear_and_write_values(
+            sheets,
+            target_spreadsheet_id,
+            target_location,
+            merged,
+        )
 
-    if not merged:
-        raise RuntimeError(f"專員個資整理後沒有可貼入資料：{file.get('name')}")
+        status = "成功"                                              # ★
+        message = f"rows={len(merged)}"                            # ★
+        log(f"完成專員個資：{source_file_name} → {target_location} / {message}")
 
-    target_range = f"{TARGET_SHEET_NAME}!A4:C"
+    except Exception as e:
+        status = "失敗"                                             # ★
+        message = str(e)                                           # ★
+        log(f"失敗：{file_base_new} / {message}")
+        raise
 
-    clear_and_write_values(
-        sheets,
-        target_spreadsheet_id,
-        target_range,
-        merged,
-    )
-
-    log(f"完成專員個資：{file.get('name')} → {target_range} / rows={len(merged)}")
+    finally:
+        # ★ 目標執行檔打卡
+        write_target_log(
+            target_spreadsheet_id=target_spreadsheet_id,
+            system_name="外場排程系統",
+            function_name="外場專員個資",
+            run_type=run_type,
+            area=area,
+            date=date_key,
+            target_location=target_location,
+            source_file=source_file_name,
+            status=status,
+            message=message,
+        )
 
 
 def run_order_columns_to_staff_profile(
     cfg: dict[str, Any],
     area: str,
     date_key: str,
+    run_type: str = "手動",          # ★ 新增
 ) -> None:
     drive = get_drive_service()
     sheets = get_sheets_service()
@@ -361,63 +391,90 @@ def run_order_columns_to_staff_profile(
     target_spreadsheet_id = get_spreadsheet_id(cfg, "office", area)
 
     file_base = f"{date_key}訂單-{area}"
+    source_file_name = ""                                            # ★
+    status = "失敗"                                                  # ★
+    message = ""                                                     # ★
+    target_location = f"{TARGET_SHEET_NAME}!G1:N"
 
-    log(f"開始處理訂單截取：{file_base}")
+    try:
+        log(f"開始處理訂單截取：{file_base}")
 
-    file = find_file_by_possible_names(
-        drive,
-        source_folder_id,
-        [
-            file_base,
-            f"{file_base}.xlsx",
-            f"{file_base}.xls",
-            f"{file_base}.csv",
-        ],
-    )
+        file = find_file_by_possible_names(
+            drive,
+            source_folder_id,
+            [
+                file_base,
+                f"{file_base}.xlsx",
+                f"{file_base}.xls",
+                f"{file_base}.csv",
+            ],
+        )
+        source_file_name = file.get("name", "")                     # ★
 
-    values = sort_order_values(read_file_values(drive, sheets, file))
+        values = sort_order_values(read_file_values(drive, sheets, file))
 
-    filtered: list[list[Any]] = []
+        filtered: list[list[Any]] = []
 
-    for row in values:
-        sliced = list(row[7:15])
+        for row in values:
+            sliced = list(row[7:15])
+            while len(sliced) < 8:
+                sliced.append("")
+            if not is_blank_row(sliced):
+                filtered.append(sliced)
 
-        while len(sliced) < 8:
-            sliced.append("")
+        filtered = ensure_rectangular(filtered, 8)
 
-        if not is_blank_row(sliced):
-            filtered.append(sliced)
+        if not filtered:
+            raise RuntimeError(f"訂單 H:O 沒有資料：{file_base}")
 
-    filtered = ensure_rectangular(filtered, 8)
+        clear_and_write_values(
+            sheets,
+            target_spreadsheet_id,
+            target_location,
+            filtered,
+        )
 
-    if not filtered:
-        raise RuntimeError(f"訂單 H:O 沒有資料：{file_base}")
+        status = "成功"                                              # ★
+        message = f"rows={len(filtered)}"                          # ★
+        log(f"完成訂單截取：{source_file_name} → {target_location} / {message}")
 
-    target_range = f"{TARGET_SHEET_NAME}!G1:N"
+    except Exception as e:
+        status = "失敗"                                             # ★
+        message = str(e)                                           # ★
+        log(f"失敗：{file_base} / {message}")
+        raise
 
-    clear_and_write_values(
-        sheets,
-        target_spreadsheet_id,
-        target_range,
-        filtered,
-    )
-
-    log(f"完成訂單截取：{file.get('name')} → {target_range} / rows={len(filtered)}")
+    finally:
+        # ★ 目標執行檔打卡
+        write_target_log(
+            target_spreadsheet_id=target_spreadsheet_id,
+            system_name="外場排程系統",
+            function_name="外場訂單截取",
+            run_type=run_type,
+            area=area,
+            date=date_key,
+            target_location=target_location,
+            source_file=source_file_name,
+            status=status,
+            message=message,
+        )
 
 
 def run_staff_profile_for_area(
     cfg: dict[str, Any],
     area: str,
     date_key: str,
+    run_type: str = "手動",          # ★ 新增
 ) -> None:
-    run_staff_profile_only(cfg, area, date_key)
-    run_order_columns_to_staff_profile(cfg, area, date_key)
+    run_staff_profile_only(cfg, area, date_key, run_type)           # ★
+    run_order_columns_to_staff_profile(cfg, area, date_key, run_type)  # ★
 
 
 def main(
     date_key: str | None = None,
     area: str | None = None,
     system_name: str = "外場日排程系統",
+    run_type: str = "手動",          # ★ 新增
 ) -> None:
     cfg = load_system_config(system_name)
     date_key = date_key or today_yyyymmdd()
@@ -425,7 +482,7 @@ def main(
     areas = [area] if area else area_list_from_config(cfg)
 
     for current_area in areas:
-        run_staff_profile_for_area(cfg, current_area, date_key)
+        run_staff_profile_for_area(cfg, current_area, date_key, run_type)  # ★
 
     log("staff_profile.py 全部完成")
 
@@ -435,6 +492,7 @@ if __name__ == "__main__":
     parser.add_argument("--date", default=today_yyyymmdd())
     parser.add_argument("--area", default="")
     parser.add_argument("--system-name", default="外場日排程系統")
+    parser.add_argument("--run-type", default="手動")               # ★ 新增
 
     args = parser.parse_args()
 
@@ -442,4 +500,5 @@ if __name__ == "__main__":
         args.date,
         args.area or None,
         args.system_name,
+        args.run_type,                                              # ★
     )
