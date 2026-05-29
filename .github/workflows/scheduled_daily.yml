@@ -7,7 +7,6 @@ on:
     - cron: "20 17 * * *"  # 台灣 01:20 日排程：當月次月訂單
     - cron: "30 17 * * *"  # 台灣 01:30 日排程：專員個資
     - cron: "0 18 * * *"   # 台灣 02:00 寄通知
-    - cron: "0 21 * * *"   # 台灣 05:00 外場排程：彙整資料
 
   workflow_dispatch:
     inputs:
@@ -22,11 +21,6 @@ on:
           - staff_schedule
           - orders_report
           - staff_info
-          - field_all
-          - field_schedule_stats
-          - field_staff_schedule
-          - field_orders
-          - field_staff_profile
           - notify
 
 permissions:
@@ -86,8 +80,6 @@ jobs:
               TASK="staff_info"
             elif [ "$HOUR" = "18" ] && [ "$MIN" = "00" ]; then
               TASK="notify"
-            elif [ "$HOUR" = "21" ] && [ "$MIN" = "00" ]; then
-              TASK="field_all"
             else
               TASK="none"
             fi
@@ -170,22 +162,6 @@ jobs:
             run_one "staff_info" "python -u tools/scheduled_daily/scheduler.py --target staff_info --folder-id '$DAILY_ROOT_FOLDER_ID'"
           fi
 
-          if [ "$TASK" = "field_schedule_stats" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_schedule_stats" "python -u -m tools.field_management.scheduler --target schedule_stats --date '$TODAY' --system-name '外場排程系統'"
-          fi
-
-          if [ "$TASK" = "field_staff_schedule" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_staff_schedule" "python -u -m tools.field_management.scheduler --target staff_schedule --date '$TODAY' --system-name '外場排程系統'"
-          fi
-
-          if [ "$TASK" = "field_orders" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_orders" "python -u -m tools.field_management.scheduler --target orders --date '$TODAY' --system-name '外場排程系統'"
-          fi
-
-          if [ "$TASK" = "field_staff_profile" ] || [ "$TASK" = "field_all" ] || [ "$TASK" = "all" ]; then
-            run_one "field_staff_profile" "python -u -m tools.field_management.scheduler --target staff_profile --date '$TODAY' --system-name '外場排程系統'"
-          fi
-
           if [ "$TASK" = "notify" ] || [ "$TASK" = "all" ]; then
             run_one "send_daily_result" "python -u tools/notify/send_daily_result.py"
           fi
@@ -195,7 +171,7 @@ jobs:
           fi
 
           if [ "$FAILED" -ne 0 ]; then
-            echo "One or more scheduled jobs failed; logs and notification were generated."
+            echo "One or more scheduled jobs failed."
           fi
 
       - name: Commit logs
