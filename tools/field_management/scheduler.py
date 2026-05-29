@@ -7,6 +7,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
+
 from tools.common.log_to_sheet import write_job_log
 
 TZ = timezone(timedelta(hours=8))
@@ -34,6 +36,35 @@ JOBS = {
 
 def now_tw() -> datetime:
     return datetime.now(TZ)
+
+
+def load_log_spreadsheet_id(system_name: str) -> str:
+    """
+    從 config/systems.yaml 讀取外場排程系統的 log_spreadsheet_id，
+    並設進環境變數供 log_to_sheet.get_log_spreadsheet_id() 使用。
+    """
+    try:
+        config_path = BASE_DIR / "config" / "systems.yaml"
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+
+        for sys_cfg in data.get("systems", []):
+            if sys_cfg.get("name") == system_name:
+                log_id = str(sys_cfg.get("log_spreadsheet_id", "")).strip()
+
+                if log_id:
+                    os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = log_id
+                    print(f"📋 log_spreadsheet_id 已從設定檔載入", flush=True)
+                    return log_id
+                else:
+                    print(f"⚠️ systems.yaml 中 {system_name} 尚未設定 log_spreadsheet_id", flush=True)
+                    return ""
+
+        print(f"⚠️ systems.yaml 找不到系統：{system_name}", flush=True)
+        return ""
+
+    except Exception as e:
+        print(f"⚠️ 讀取 log_spreadsheet_id 失敗：{e}", flush=True)
+        return ""
 
 
 def punch(label, status, started_at, finished_at=None, area="", date_key="", system_name="", message="", traceback_text=""):
@@ -74,6 +105,8 @@ def run_job(job_name: str, date_key: str, area: str | None, system_name: str) ->
         date_key,
         "--system-name",
         system_name,
+        "--run-type",                                        # ★ 透傳 run_type
+        "排程" if os.getenv("GITHUB_ACTIONS") else "手動",
     ]
 
     if area:
@@ -111,6 +144,10 @@ def today_yyyymmdd() -> str:
 
 def main(target: str = "all", date_key: str | None = None, area: str | None = None, system_name: str = "外場日排程系統") -> list[dict]:
     date_key = date_key or today_yyyymmdd()
+
+    # ★ 從 systems.yaml 讀取 log_spreadsheet_id 並設進環境變數
+    load_log_spreadsheet_id(system_name)
+
     targets = list(JOBS.keys()) if target == "all" else [target]
 
     results = []
