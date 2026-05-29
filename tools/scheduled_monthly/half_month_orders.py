@@ -27,6 +27,9 @@ except Exception:
         from ..common.log_to_sheet import log_to_sheet
     except Exception:
         log_to_sheet = None
+# ★ 加在這裡（第 30 行之後）
+print(f"[debug] log_to_sheet = {log_to_sheet}", flush=True)
+print(f"[debug] TOOLS_APP_LOG_SPREADSHEET_ID = {os.getenv('TOOLS_APP_LOG_SPREADSHEET_ID', 'NOT SET')}", flush=True)
 
 
 def write_monthly_log(
