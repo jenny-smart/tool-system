@@ -5,7 +5,6 @@ import calendar
 import json
 import os
 import shutil
-import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -306,8 +305,14 @@ def build_export_url(start: str, end: str, keyword: str = "") -> str:
     return req.url
 
 
+# ★ 修改：同時支援 xlsx（PK）和 xls（D0 CF 11 E0）
 def assert_excel_content(content: bytes, content_type: str) -> None:
+    # xlsx magic bytes: PK
     if content[:2] == b"PK":
+        return
+
+    # xls magic bytes: Compound Document File (D0 CF 11 E0)
+    if content[:4] == b"\xd0\xcf\x11\xe0":
         return
 
     lower_type = (content_type or "").lower()
@@ -329,8 +334,20 @@ def download_single_export(session: requests.Session, start: str, end: str, keyw
     return res.content
 
 
+# ★ 修改：自動判斷 xlsx / xls 格式
 def read_excel_from_response(content: bytes) -> pd.DataFrame:
-    return pd.read_excel(BytesIO(content), engine="openpyxl")
+    bio = BytesIO(content)
+
+    # xlsx: PK header
+    if content[:2] == b"PK":
+        return pd.read_excel(bio, engine="openpyxl")
+
+    # xls: Compound Document File
+    if content[:4] == b"\xd0\xcf\x11\xe0":
+        return pd.read_excel(bio, engine="xlrd")
+
+    # fallback
+    return pd.read_excel(bio, engine="openpyxl")
 
 
 def escape_drive_query_value(value: str) -> str:
