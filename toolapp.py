@@ -1464,6 +1464,10 @@ require_login()
 sync_view_from_query_params()
 
 config = merge_legacy_secrets(load_config())
+_log_id = config.get("log_spreadsheet_id", "").strip()
+if _log_id and not os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID"):
+    os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = _log_id
+
 systems = [
     s for s in get_enabled_systems(config)
     if can_access_system(s.get("type", ""))
