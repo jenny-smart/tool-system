@@ -30,8 +30,6 @@ except Exception:
         log_to_sheet = None
 
 
-# 可加在檔案任意位置
-
 def write_monthly_log(
     *,
     function_name: str,
@@ -76,22 +74,16 @@ HEADERS = {
 TZ = timezone(timedelta(hours=8))
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-# 若 ToolApp / GitHub Actions 沒有傳 --folder-id，才會使用這個預設值
 DEFAULT_ROOT_FOLDER_ID = "1VCb_y-zBA7tm9SF1s7GeixZVweWteWIc"
 
-# 只需要設定「總根目錄 ID」。
-# 程式會自動在總根目錄底下建立：
-# 總根目錄 / 區域根目錄 / 期別
 AREA_FOLDER_NAMES = {
     "台北": "01.台北專員",
-    "新北": "01.台北專員",
     "台中": "02.台中專員",
     "桃園": "03.桃園專員",
     "新竹": "04.新竹專員",
     "高雄": "05.高雄專員",
 }
 
-# 高雄帳號會抓「高雄＋台南」並合併成高雄檔。
 KAOHSIUNG_MERGE_REGIONS = ["高雄", "台南"]
 
 
@@ -125,7 +117,6 @@ def normalize_area(area: str | None) -> str:
 def parse_args() -> RunArgs:
     parser = argparse.ArgumentParser(description="上下半月訂單下載與上傳")
 
-    # 舊版相容：python half_month_orders.py 1
     parser.add_argument(
         "legacy_half",
         nargs="?",
@@ -137,7 +128,7 @@ def parse_args() -> RunArgs:
     parser.add_argument("--period", default="", help="例如：202605-1 或 202605-2")
     parser.add_argument("--start", default="", help="日期區間開始，例如：2026-05-01")
     parser.add_argument("--end", default="", help="日期區間結束，例如：2026-05-15")
-    parser.add_argument("--area", default=os.getenv("TARGET_AREA", "all"), help="地區，例如：台北 / 新北 / 台中 / all")
+    parser.add_argument("--area", default=os.getenv("TARGET_AREA", "all"), help="地區，例如：台北 / 台中 / all")
     parser.add_argument("--folder-id", default="", help="月排程總根目錄 ID")
     parser.add_argument("--snapshot-dir", default="snapshots/monthly_orders")
     parser.add_argument("--skip-snapshot", action="store_true")
@@ -177,6 +168,7 @@ def env_value(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+# ★ 補丁三：移除新北
 def load_accounts() -> dict[str, dict[str, str]]:
     """讀取各區帳號。
 
@@ -184,17 +176,12 @@ def load_accounts() -> dict[str, dict[str, str]]:
     1. Streamlit secrets accounts.*
     2. GitHub Actions secrets / env
     """
-
     accounts = {
         "台北": {
             "email": secret_value(["accounts", "taipei", "email"], env_value("TAIPEI_EMAIL")),
             "password": secret_value(["accounts", "taipei", "password"], env_value("TAIPEI_PASSWORD")),
         },
-        "新北": {
-            # 新北若沒有獨立帳號，預設沿用台北帳號；可用 NEWTAIPEI_EMAIL / NEWTAIPEI_PASSWORD 覆蓋。
-            "email": secret_value(["accounts", "newtaipei", "email"], env_value("NEWTAIPEI_EMAIL", env_value("TAIPEI_EMAIL"))),
-            "password": secret_value(["accounts", "newtaipei", "password"], env_value("NEWTAIPEI_PASSWORD", env_value("TAIPEI_PASSWORD"))),
-        },
+        # 新北已移除，不再執行
         "台中": {
             "email": secret_value(["accounts", "taichung", "email"], env_value("TAICHUNG_EMAIL")),
             "password": secret_value(["accounts", "taichung", "password"], env_value("TAICHUNG_PASSWORD")),
@@ -212,7 +199,6 @@ def load_accounts() -> dict[str, dict[str, str]]:
             "password": secret_value(["accounts", "kaohsiung", "password"], env_value("KAOHSIUNG_PASSWORD", env_value("HSINCHU_PASSWORD"))),
         },
     }
-
     return accounts
 
 
@@ -274,7 +260,6 @@ def login(session: requests.Session, email: str, password: str) -> None:
 
 
 def period_to_dates(period: str) -> tuple[str, str, str]:
-    """202605-1 / 202605-2 -> start, end, tag"""
     if "-" not in period:
         raise RuntimeError("期別格式錯誤，應為 202605-1 或 202605-2")
 
@@ -329,7 +314,6 @@ def build_export_url(start: str, end: str, keyword: str = "") -> str:
 
 
 def assert_excel_content(content: bytes, content_type: str) -> None:
-    # xlsx zip header starts with PK
     if content[:2] == b"PK":
         return
 
@@ -426,11 +410,6 @@ def find_file_in_folder(service, parent_folder_id: str, filename: str) -> dict[s
 
 
 def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
-    """上傳檔案到 Google Drive。
-
-    若目標資料夾已有同名檔案，直接覆蓋該檔案內容；
-    若沒有同名檔案，才新增。
-    """
     filename = os.path.basename(local_path)
     media = MediaFileUpload(local_path, resumable=True)
 
@@ -464,7 +443,9 @@ def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     log(f"☁️ 已上傳新檔：{created['name']} → folder_id={parent_folder_id} {link}".strip())
     return created["id"]
 
-def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: str, tag: str) -> str:
+
+# ★ 補丁一：空資料跳過不報錯，回傳 None
+def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: str, tag: str) -> str | None:
     df_list: list[pd.DataFrame] = []
 
     for region in KAOHSIUNG_MERGE_REGIONS:
@@ -472,6 +453,11 @@ def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: 
             log(f"👉 抓 {region}")
             content = download_single_export(session, start, end, region)
             df = read_excel_from_response(content)
+
+            if df.empty:
+                log(f"⚠️ {region} 無資料（空表格），略過")
+                continue
+
             df_list.append(df)
 
             single_path = os.path.join(temp_dir, f"{tag}訂單-{region}.xlsx")
@@ -482,7 +468,8 @@ def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: 
             log(f"⚠️ {region} 失敗：{exc}")
 
     if not df_list:
-        raise RuntimeError("高雄 / 台南 都沒有資料")
+        log("ℹ️ 高雄 / 台南 本期無訂單，略過")
+        return None
 
     merged_df = pd.concat(df_list, ignore_index=True).drop_duplicates()
 
@@ -494,14 +481,8 @@ def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: 
 
 
 def choose_keyword(city: str) -> str:
-    # 舊邏輯保留：新竹帳號用 keyword=新竹。
     if city == "新竹":
         return "新竹"
-
-    # 新北若沿用台北帳號，需要用 keyword 篩新北。
-    if city == "新北":
-        return "新北"
-
     return ""
 
 
@@ -532,6 +513,7 @@ def resolve_cities(args: RunArgs, accounts: dict[str, dict[str, str]]) -> list[s
     return [args.area]
 
 
+# ★ 補丁二：高雄 final_path 為 None 時直接 return
 def process_city(
     city: str,
     args: RunArgs,
@@ -547,7 +529,6 @@ def process_city(
     log(f"\n=== 處理 {city} ===")
     login(session, acc["email"], acc["password"])
 
-    # 路徑：總根目錄 / 區域資料夾 / 期別
     area_folder_id = resolve_area_folder(service, args.folder_id, city)
     tag_folder_id = get_or_create_child_folder(service, area_folder_id, tag)
     log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
@@ -555,6 +536,11 @@ def process_city(
     with tempfile.TemporaryDirectory() as temp_dir:
         if city == "高雄":
             final_path = export_kaohsiung(session, start, end, temp_dir, tag)
+
+            # 無資料時直接結束，不上傳，不算失敗
+            if final_path is None:
+                return
+
         else:
             keyword = choose_keyword(city)
             content = download_single_export(session, start, end, keyword)
@@ -611,7 +597,6 @@ def main() -> None:
             log(f"❌ {city} 失敗：{exc}")
             failed.append((city, str(exc)))
 
-            # 單區執行時維持失敗退出；全區執行時繼續跑完其他區。
             if args.area != "all":
                 raise
 
@@ -628,140 +613,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
-# ═══════════════════════════════════════════════════════════
-# 補丁一：替換 export_kaohsiung()
-# 空資料跳過不報錯，有資料才合併上傳
-# ═══════════════════════════════════════════════════════════
-
-def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: str, tag: str) -> str | None:
-    df_list: list[pd.DataFrame] = []
-
-    for region in KAOHSIUNG_MERGE_REGIONS:
-        try:
-            log(f"👉 抓 {region}")
-            content = download_single_export(session, start, end, region)
-            df = read_excel_from_response(content)
-
-            if df.empty:
-                log(f"⚠️ {region} 無資料（空表格），略過")
-                continue
-
-            df_list.append(df)
-
-            single_path = os.path.join(temp_dir, f"{tag}訂單-{region}.xlsx")
-            df.to_excel(single_path, index=False)
-            log(f"✅ 已下載：{single_path}")
-
-        except Exception as exc:
-            log(f"⚠️ {region} 失敗：{exc}")
-            # 單一地區失敗不中斷，繼續抓下一個
-
-    if not df_list:
-        # 高雄和台南都沒資料，視為該區本期無訂單，回傳 None 不報錯
-        log("ℹ️ 高雄 / 台南 本期無訂單，略過")
-        return None
-
-    merged_df = pd.concat(df_list, ignore_index=True).drop_duplicates()
-
-    final_path = os.path.join(temp_dir, f"{tag}訂單-高雄.xlsx")
-    merged_df.to_excel(final_path, index=False)
-
-    log(f"✅ 高雄合併完成：{final_path}")
-    return final_path
-
-
-# ═══════════════════════════════════════════════════════════
-# 補丁二：替換 process_city() 裡高雄的處理段落
-# final_path 為 None 時直接 return，不上傳不報錯
-# ═══════════════════════════════════════════════════════════
-
-def process_city(
-    city: str,
-    args: RunArgs,
-    accounts: dict[str, dict[str, str]],
-    service,
-    start: str,
-    end: str,
-    tag: str,
-) -> None:
-    acc = accounts[city]
-    session = requests.Session()
-
-    log(f"\n=== 處理 {city} ===")
-    login(session, acc["email"], acc["password"])
-
-    area_folder_id = resolve_area_folder(service, args.folder_id, city)
-    tag_folder_id = get_or_create_child_folder(service, area_folder_id, tag)
-    log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        if city == "高雄":
-            final_path = export_kaohsiung(session, start, end, temp_dir, tag)
-
-            # ★ 無資料時直接結束，不上傳，不算失敗
-            if final_path is None:
-                return
-
-        else:
-            keyword = choose_keyword(city)
-            content = download_single_export(session, start, end, keyword)
-
-            final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
-            with open(final_path, "wb") as file:
-                file.write(content)
-
-            log(f"✅ 已下載：{final_path}")
-
-        uploaded_id = upload_to_gdrive(service, final_path, tag_folder_id)
-
-        if not args.skip_snapshot:
-            save_snapshot(
-                final_path,
-                args.snapshot_dir,
-                tag,
-                city,
-                {
-                    "city": city,
-                    "tag": tag,
-                    "start": start,
-                    "end": end,
-                    "uploaded_file_id": uploaded_id,
-                    "root_folder_id": args.folder_id,
-                    "area_folder_id": area_folder_id,
-                    "tag_folder_id": tag_folder_id,
-                    "generated_at": tw_now().strftime("%Y-%m-%d %H:%M:%S"),
-                },
-            )
-
-
-# ═══════════════════════════════════════════════════════════
-# 補丁三：load_accounts() 刪掉新北
-# 找到 load_accounts()，把新北那段直接刪掉
-# ═══════════════════════════════════════════════════════════
-
-def load_accounts() -> dict[str, dict[str, str]]:
-    accounts = {
-        "台北": {
-            "email": secret_value(["accounts", "taipei", "email"], env_value("TAIPEI_EMAIL")),
-            "password": secret_value(["accounts", "taipei", "password"], env_value("TAIPEI_PASSWORD")),
-        },
-        # ★ 新北已移除，不再執行
-        "台中": {
-            "email": secret_value(["accounts", "taichung", "email"], env_value("TAICHUNG_EMAIL")),
-            "password": secret_value(["accounts", "taichung", "password"], env_value("TAICHUNG_PASSWORD")),
-        },
-        "桃園": {
-            "email": secret_value(["accounts", "taoyuan", "email"], env_value("TAOYUAN_EMAIL")),
-            "password": secret_value(["accounts", "taoyuan", "password"], env_value("TAOYUAN_PASSWORD")),
-        },
-        "新竹": {
-            "email": secret_value(["accounts", "hsinchu", "email"], env_value("HSINCHU_EMAIL")),
-            "password": secret_value(["accounts", "hsinchu", "password"], env_value("HSINCHU_PASSWORD")),
-        },
-        "高雄": {
-            "email": secret_value(["accounts", "kaohsiung", "email"], env_value("KAOHSIUNG_EMAIL", env_value("HSINCHU_EMAIL"))),
-            "password": secret_value(["accounts", "kaohsiung", "password"], env_value("KAOHSIUNG_PASSWORD", env_value("HSINCHU_PASSWORD"))),
-        },
-    }
-    return accounts
