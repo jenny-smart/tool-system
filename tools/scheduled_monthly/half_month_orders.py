@@ -22,10 +22,12 @@ from googleapiclient.http import MediaFileUpload
 
 try:
     from tools.common.log_to_sheet import log_to_sheet
-except Exception:
+except Exception as e:
+    print(f"[debug] import error: {e}", flush=True)
     try:
         from ..common.log_to_sheet import log_to_sheet
-    except Exception:
+    except Exception as e2:
+        print(f"[debug] relative import error: {e2}", flush=True)
         log_to_sheet = None
 # ★ 加在這裡（第 30 行之後）
 print(f"[debug] log_to_sheet = {log_to_sheet}", flush=True)
