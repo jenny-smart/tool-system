@@ -1,3 +1,5 @@
+log_spreadsheet_id: "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
+
 systems:
   - name: 日排程系統
     type: daily_scheduler
