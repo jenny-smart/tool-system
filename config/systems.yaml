@@ -20,6 +20,7 @@ systems:
   - name: 外場排程系統
     type: field_daily_schedule
     enabled: true
+    log_spreadsheet_id: "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"  # ← 加這行
 
     folder_ids:
       schedule_stats: "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
