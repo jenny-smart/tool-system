@@ -2008,179 +2008,178 @@ if run_clicked:
 
     add_log(f"開始執行：{system_name} / {selected_function} / {date_keys[0]}~{date_keys[-1]} / 區域 {', '.join(selected_areas)}")
 
-    try:
-        result = None
+    with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):  # ★ 加這行
+        try:
+            result = None
 
-        if system_type == "vip":
-            if not master_id:
-                add_log("尚未設定主控表 ID", "error")
-                st.rerun()
+            if system_type == "vip":
+                if not master_id:
+                    add_log("尚未設定主控表 ID", "error")
+                    st.rerun()
 
-            if not folder_id:
-                add_log("尚未設定共用雲端資料夾 ID", "error")
-                st.rerun()
+                if not folder_id:
+                    add_log("尚未設定共用雲端資料夾 ID", "error")
+                    st.rerun()
 
-            workflow = build_vip_workflow(
-                master_id=master_id,
-                folder_id=folder_id,
-                system_name=system_name,
-            )
-
-            if selected_function == "建立當月彙整檔":
-                result = workflow.create_monthly_summary(period)
-
-            elif selected_function == "轉檔＋高雄/新竹彙整":
-                result = workflow.convert_files(period)
-
-            elif selected_function == "搬運":
-                result = workflow.move_files(period)
-
-            elif selected_function == "計算":
-                result = workflow.apply_formulas(period)
-
-            elif selected_function == "彙整金額":
-                result = workflow.summarize_amounts(period)
-
-            elif selected_function == "一鍵執行：建立＋轉檔＋搬運＋計算＋彙整金額":
-                result = [
-                    workflow.create_monthly_summary(period),
-                    workflow.convert_files(period),
-                    workflow.move_files(period),
-                    workflow.apply_formulas(period),
-                    workflow.summarize_amounts(period),
-                ]
-
-            else:
-                add_log(f"未知功能：{selected_function}", "warning")
-
-        elif system_type == "daily_scheduler":
-            if not folder_id:
-                add_log("尚未設定共用雲端資料夾 ID", "error")
-                st.rerun()
-
-            if selected_function == "一鍵執行日排程":
-                from tools.scheduled_daily.scheduler import main as run_daily_scheduler
-
-                daily_target = DAILY_TARGET_MAP.get(selected_function, "all")
-                result = run_daily_scheduler(
-                    target=daily_target,
+                workflow = build_vip_workflow(
+                    master_id=master_id,
                     folder_id=folder_id,
+                    system_name=system_name,
                 )
 
-            else:
-                script = DAILY_SCRIPT_MAP.get(selected_function)
+                if selected_function == "建立當月彙整檔":
+                    result = workflow.create_monthly_summary(period)
 
-                if not script:
-                    raise RuntimeError(f"找不到日排程功能：{selected_function}")
+                elif selected_function == "轉檔＋高雄/新竹彙整":
+                    result = workflow.convert_files(period)
 
-                if selected_function == "業績報表":
-                    result = run_script(script)
-                    add_log("業績報表已更新，可點「📊 查看業績報表」開啟。", "success")
+                elif selected_function == "搬運":
+                    result = workflow.move_files(period)
+
+                elif selected_function == "計算":
+                    result = workflow.apply_formulas(period)
+
+                elif selected_function == "彙整金額":
+                    result = workflow.summarize_amounts(period)
+
+                elif selected_function == "一鍵執行：建立＋轉檔＋搬運＋計算＋彙整金額":
+                    result = [
+                        workflow.create_monthly_summary(period),
+                        workflow.convert_files(period),
+                        workflow.move_files(period),
+                        workflow.apply_formulas(period),
+                        workflow.summarize_amounts(period),
+                    ]
+
                 else:
-                    result = run_script(script, ["--folder-id", folder_id])
+                    add_log(f"未知功能：{selected_function}", "warning")
 
-        elif system_type == "monthly_scheduler":
-            if not folder_id:
-                add_log("尚未設定月排程根目錄 ID", "error")
-                st.rerun()
+            elif system_type == "daily_scheduler":
+                if not folder_id:
+                    add_log("尚未設定共用雲端資料夾 ID", "error")
+                    st.rerun()
 
-            if not selected_areas:
-                add_log("請至少選擇一個執行區域", "error")
-                st.rerun()
+                if selected_function == "一鍵執行日排程":
+                    from tools.scheduled_daily.scheduler import main as run_daily_scheduler
 
-            if selected_function == "一鍵執行月排程":
-                from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
+                    daily_target = DAILY_TARGET_MAP.get(selected_function, "all")
+                    result = run_daily_scheduler(
+                        target=daily_target,
+                        folder_id=folder_id,
+                    )
 
-                try:
-                    result = run_monthly_scheduler(folder_id=folder_id)
-                except TypeError:
-                    result = run_monthly_scheduler()
+                else:
+                    script = DAILY_SCRIPT_MAP.get(selected_function)
 
-            else:
-                cmd = MONTHLY_SCRIPT_MAP.get(selected_function)
+                    if not script:
+                        raise RuntimeError(f"找不到日排程功能：{selected_function}")
+
+                    if selected_function == "業績報表":
+                        result = run_script(script)
+                        add_log("業績報表已更新，可點「📊 查看業績報表」開啟。", "success")
+                    else:
+                        result = run_script(script, ["--folder-id", folder_id])
+
+            elif system_type == "monthly_scheduler":
+                if not folder_id:
+                    add_log("尚未設定月排程根目錄 ID", "error")
+                    st.rerun()
+
+                if not selected_areas:
+                    add_log("請至少選擇一個執行區域", "error")
+                    st.rerun()
+
+                if selected_function == "一鍵執行月排程":
+                    from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
+
+                    try:
+                        result = run_monthly_scheduler(folder_id=folder_id)
+                    except TypeError:
+                        result = run_monthly_scheduler()
+
+                else:
+                    cmd = MONTHLY_SCRIPT_MAP.get(selected_function)
+
+                    if not cmd:
+                        raise RuntimeError(f"找不到月排程功能：{selected_function}")
+
+                    script = cmd[0]
+                    base_args = list(cmd[1:])
+                    results = []
+
+                    if selected_function in ["上半月訂單", "下半月訂單"]:
+                        for area_name in selected_areas:
+                            args = []
+
+                            if monthly_date_mode == "日期區間":
+                                if not start_date_value or not end_date_value:
+                                    raise RuntimeError("請選擇開始日期與結束日期")
+
+                                args.extend([
+                                    "--start",
+                                    start_date_value.strftime("%Y-%m-%d"),
+                                    "--end",
+                                    end_date_value.strftime("%Y-%m-%d"),
+                                ])
+                            else:
+                                args.extend(base_args)
+
+                                if period:
+                                    args.extend(["--period", period])
+
+                            args.extend(["--folder-id", folder_id])
+
+                            if area_name == "全區":
+                                args.extend(["--area", "all"])
+                            else:
+                                args.extend(["--area", area_name])
+
+                            add_log(f"月排程執行：{selected_function} / {period or '日期區間'} / {area_name}")
+                            results.append(run_script(script, args))
+
+                        result = results
+
+                    else:
+                        result = run_script(script, [*base_args, "--folder-id", folder_id])
+
+            elif system_type == "field_daily_schedule":
+                cmd = FIELD_SCRIPT_MAP.get(selected_function)
 
                 if not cmd:
-                    raise RuntimeError(f"找不到月排程功能：{selected_function}")
+                    raise RuntimeError(f"找不到外場日排程功能：{selected_function}")
 
                 script = cmd[0]
                 base_args = list(cmd[1:])
                 results = []
 
-                if selected_function in ["上半月訂單", "下半月訂單"]:
+                for date_key in date_keys:
                     for area_name in selected_areas:
-                        args = []
+                        args = list(base_args)
+                        args.extend(["--date", date_key])
+                        args.extend(["--system-name", system_name])
 
-                        if monthly_date_mode == "日期區間":
-                            if not start_date_value or not end_date_value:
-                                raise RuntimeError("請選擇開始日期與結束日期")
-
-                            args.extend([
-                                "--start",
-                                start_date_value.strftime("%Y-%m-%d"),
-                                "--end",
-                                end_date_value.strftime("%Y-%m-%d"),
-                            ])
-                        else:
-                            # 舊版 half_month_orders.py 仍支援 positional half。
-                            args.extend(base_args)
-
-                            if period:
-                                args.extend(["--period", period])
-
-                        args.extend(["--folder-id", folder_id])
-
-                        if area_name == "全區":
-                            args.extend(["--area", "all"])
-                        else:
+                        if area_name != "全區":
                             args.extend(["--area", area_name])
 
-                        add_log(f"月排程執行：{selected_function} / {period or '日期區間'} / {area_name}")
+                        add_log(f"外場排程執行：{selected_function} / {date_key} / {area_name}")
                         results.append(run_script(script, args))
 
-                    result = results
+                result = results
 
-                else:
-                    result = run_script(script, [*base_args, "--folder-id", folder_id])
+            else:
+                add_log(f"{system_type} 尚未實作", "warning")
 
-        elif system_type == "field_daily_schedule":
-            cmd = FIELD_SCRIPT_MAP.get(selected_function)
+            if isinstance(result, list):
+                for item in result:
+                    add_log(str(item), "success")
 
-            if not cmd:
-                raise RuntimeError(f"找不到外場日排程功能：{selected_function}")
+            elif result is not None:
+                add_log(str(result), "success")
 
-            script = cmd[0]
-            base_args = list(cmd[1:])
-            results = []
+            add_log("執行完成", "success")
 
-            for date_key in date_keys:
-                for area_name in selected_areas:
-                    args = list(base_args)
-                    args.extend(["--date", date_key])
-                    args.extend(["--system-name", system_name])
-
-                    # scheduler.py target all 若指定區域也支援 --area
-                    if area_name != "全區":
-                        args.extend(["--area", area_name])
-
-                    add_log(f"外場排程執行：{selected_function} / {date_key} / {area_name}")
-                    results.append(run_script(script, args))
-
-            result = results
-
-        else:
-            add_log(f"{system_type} 尚未實作", "warning")
-
-        if isinstance(result, list):
-            for item in result:
-                add_log(str(item), "success")
-
-        elif result is not None:
-            add_log(str(result), "success")
-
-        add_log("執行完成", "success")
-
-    except Exception as e:
-        add_log(f"執行失敗：{e}", "error")
-        add_log(traceback.format_exc(), "error")
+        except Exception as e:
+            add_log(f"執行失敗：{e}", "error")
+            add_log(traceback.format_exc(), "error")
 
     st.rerun()
