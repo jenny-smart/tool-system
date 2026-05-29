@@ -1598,7 +1598,7 @@ with date_col:
                 value=period_default,
                 placeholder="例如：202605-1 或 202605-2",
                 label_visibility="collapsed",
-                key="period_monthly_order",
+                key=f"period_monthly_order_{selected_function}",
             )
         else:
             d1, d2 = st.columns(2)
