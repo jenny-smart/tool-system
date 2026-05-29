@@ -46,10 +46,11 @@ def write_monthly_log(
         return
 
     try:
+        run_type = "排程" if os.getenv("GITHUB_ACTIONS") else "手動"
         log_to_sheet(
-            system="monthly",
+            system="月排程系統",
             function=function_name,
-            run_type="手動",
+            run_type=run_type,
             area=area,
             period=period,
             date=date_text,
@@ -168,20 +169,13 @@ def env_value(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
-# ★ 補丁三：移除新北
 def load_accounts() -> dict[str, dict[str, str]]:
-    """讀取各區帳號。
-
-    支援：
-    1. Streamlit secrets accounts.*
-    2. GitHub Actions secrets / env
-    """
-    accounts = {
+    """讀取各區帳號（新北已移除）"""
+    return {
         "台北": {
             "email": secret_value(["accounts", "taipei", "email"], env_value("TAIPEI_EMAIL")),
             "password": secret_value(["accounts", "taipei", "password"], env_value("TAIPEI_PASSWORD")),
         },
-        # 新北已移除，不再執行
         "台中": {
             "email": secret_value(["accounts", "taichung", "email"], env_value("TAICHUNG_EMAIL")),
             "password": secret_value(["accounts", "taichung", "password"], env_value("TAICHUNG_PASSWORD")),
@@ -199,7 +193,6 @@ def load_accounts() -> dict[str, dict[str, str]]:
             "password": secret_value(["accounts", "kaohsiung", "password"], env_value("KAOHSIUNG_PASSWORD", env_value("HSINCHU_PASSWORD"))),
         },
     }
-    return accounts
 
 
 def get_service_account_info() -> dict[str, Any]:
@@ -444,8 +437,19 @@ def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     return created["id"]
 
 
-# ★ 補丁一：空資料跳過不報錯，回傳 None
-def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: str, tag: str) -> str | None:
+def export_kaohsiung(
+    session: requests.Session,
+    start: str,
+    end: str,
+    temp_dir: str,
+    tag: str,
+) -> str | None:
+    """
+    高雄和台南各自用 keyword 篩選，邏輯和新竹相同：
+    - 有資料 → 納入合併
+    - 沒資料或失敗 → log 警告，pass，繼續下一個
+    - 全部都沒資料 → 回傳 None，不上傳，不報錯
+    """
     df_list: list[pd.DataFrame] = []
 
     for region in KAOHSIUNG_MERGE_REGIONS:
@@ -455,28 +459,23 @@ def export_kaohsiung(session: requests.Session, start: str, end: str, temp_dir: 
             df = read_excel_from_response(content)
 
             if df.empty:
-                log(f"⚠️ {region} 無資料（空表格），略過")
+                log(f"ℹ️ {region} 本期無資料，略過")
                 continue
 
             df_list.append(df)
-
-            single_path = os.path.join(temp_dir, f"{tag}訂單-{region}.xlsx")
-            df.to_excel(single_path, index=False)
-            log(f"✅ 已下載：{single_path}")
+            log(f"✅ {region} 抓到 {len(df)} 筆")
 
         except Exception as exc:
-            log(f"⚠️ {region} 失敗：{exc}")
+            log(f"⚠️ {region} 略過：{exc}")
 
     if not df_list:
-        log("ℹ️ 高雄 / 台南 本期無訂單，略過")
+        log("ℹ️ 高雄 / 台南 本期均無資料，略過上傳")
         return None
 
     merged_df = pd.concat(df_list, ignore_index=True).drop_duplicates()
-
     final_path = os.path.join(temp_dir, f"{tag}訂單-高雄.xlsx")
     merged_df.to_excel(final_path, index=False)
-
-    log(f"✅ 高雄合併完成：{final_path}")
+    log(f"✅ 高雄合併完成：{len(merged_df)} 筆 → {final_path}")
     return final_path
 
 
@@ -486,7 +485,13 @@ def choose_keyword(city: str) -> str:
     return ""
 
 
-def save_snapshot(local_path: str, snapshot_root: str, tag: str, city: str, meta: dict[str, Any]) -> None:
+def save_snapshot(
+    local_path: str,
+    snapshot_root: str,
+    tag: str,
+    city: str,
+    meta: dict[str, Any],
+) -> None:
     snapshot_dir = Path(snapshot_root) / tag
     snapshot_dir.mkdir(parents=True, exist_ok=True)
 
@@ -513,7 +518,6 @@ def resolve_cities(args: RunArgs, accounts: dict[str, dict[str, str]]) -> list[s
     return [args.area]
 
 
-# ★ 補丁二：高雄 final_path 為 None 時直接 return
 def process_city(
     city: str,
     args: RunArgs,
@@ -533,44 +537,66 @@ def process_city(
     tag_folder_id = get_or_create_child_folder(service, area_folder_id, tag)
     log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        if city == "高雄":
-            final_path = export_kaohsiung(session, start, end, temp_dir, tag)
+    status = "失敗"
+    message = ""
+    final_filename = ""
 
-            # 無資料時直接結束，不上傳，不算失敗
-            if final_path is None:
-                return
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            if city == "高雄":
+                final_path = export_kaohsiung(session, start, end, temp_dir, tag)
+                if final_path is None:
+                    status = "成功"
+                    message = "本期無資料，略過上傳"
+                    return
+            else:
+                keyword = choose_keyword(city)
+                content = download_single_export(session, start, end, keyword)
+                final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
+                with open(final_path, "wb") as f:
+                    f.write(content)
+                log(f"✅ 已下載：{final_path}")
 
-        else:
-            keyword = choose_keyword(city)
-            content = download_single_export(session, start, end, keyword)
+            final_filename = os.path.basename(final_path)
+            upload_to_gdrive(service, final_path, tag_folder_id)
 
-            final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
-            with open(final_path, "wb") as file:
-                file.write(content)
+            if not args.skip_snapshot:
+                save_snapshot(
+                    final_path,
+                    args.snapshot_dir,
+                    tag,
+                    city,
+                    {
+                        "city": city,
+                        "tag": tag,
+                        "start": start,
+                        "end": end,
+                        "root_folder_id": args.folder_id,
+                        "area_folder_id": area_folder_id,
+                        "tag_folder_id": tag_folder_id,
+                        "generated_at": tw_now().strftime("%Y-%m-%d %H:%M:%S"),
+                    },
+                )
 
-            log(f"✅ 已下載：{final_path}")
+            status = "成功"
+            message = f"已上傳：{final_filename}"
 
-        uploaded_id = upload_to_gdrive(service, final_path, tag_folder_id)
+    except Exception as exc:
+        status = "失敗"
+        message = str(exc)
+        raise
 
-        if not args.skip_snapshot:
-            save_snapshot(
-                final_path,
-                args.snapshot_dir,
-                tag,
-                city,
-                {
-                    "city": city,
-                    "tag": tag,
-                    "start": start,
-                    "end": end,
-                    "uploaded_file_id": uploaded_id,
-                    "root_folder_id": args.folder_id,
-                    "area_folder_id": area_folder_id,
-                    "tag_folder_id": tag_folder_id,
-                    "generated_at": tw_now().strftime("%Y-%m-%d %H:%M:%S"),
-                },
-            )
+    finally:
+        write_monthly_log(
+            function_name="上下半月訂單",
+            area=city,
+            period=tag,
+            date_text=f"{start} ~ {end}",
+            target=f"folder_id={tag_folder_id}",
+            source_file=final_filename,
+            status=status,
+            message=message,
+        )
 
 
 def main() -> None:
