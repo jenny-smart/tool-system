@@ -21,6 +21,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 import yaml
+print(f"[debug] log_to_sheet = {log_to_sheet}", flush=True)
+print(f"[debug] TOOLS_APP_LOG_SPREADSHEET_ID = {os.getenv('TOOLS_APP_LOG_SPREADSHEET_ID', 'NOT SET')}", flush=True)
 
 from utils.auth import authenticate
 from utils.permissions import (
