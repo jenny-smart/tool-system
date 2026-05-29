@@ -296,22 +296,39 @@ def resolve_dates(args: RunArgs) -> tuple[str, str, str]:
 def build_export_url(start: str, end: str, keyword: str = "") -> str:
     params = {
         "keyword": keyword,
+        "name": "",
+        "phone": "",
+        "orderNo": "",
+        "date_s": "",
+        "date_e": "",
         "clean_date_s": start,
         "clean_date_e": end,
-        "p_board": "on",
+        "paid_at_s": "",
+        "paid_at_e": "",
+        "refundDateS": "",
+        "refundDateE": "",
+        "buy": "",
+        "area_id": "",
+        "isCharge": "",
+        "isRefund": "",
+        "payway": "",
         "purchase_status": "1",
+        "progress_status": "",
+        "invoiceStatus": "",
+        "otherFee": "",
+        "orderBy": "",
+        "p_board": "on",
     }
     req = requests.Request("GET", EXPORT_URL, params=params).prepare()
     return req.url
 
 
-# ★ 修改：同時支援 xlsx（PK）和 xls（D0 CF 11 E0）
 def assert_excel_content(content: bytes, content_type: str) -> None:
-    # xlsx magic bytes: PK
+    # xlsx: PK header
     if content[:2] == b"PK":
         return
 
-    # xls magic bytes: Compound Document File (D0 CF 11 E0)
+    # xls: Compound Document File (D0 CF 11 E0)
     if content[:4] == b"\xd0\xcf\x11\xe0":
         return
 
@@ -334,17 +351,26 @@ def download_single_export(session: requests.Session, start: str, end: str, keyw
     return res.content
 
 
-# ★ 修改：自動判斷 xlsx / xls 格式
 def read_excel_from_response(content: bytes) -> pd.DataFrame:
+    """
+    自動判斷格式讀取 Excel：
+    - xlsx（PK header）→ openpyxl
+    - xls（D0 CF 11 E0）→ 先試 xlrd，失敗改用 calamine
+    - 其他 → openpyxl fallback
+    """
     bio = BytesIO(content)
 
-    # xlsx: PK header
+    # xlsx
     if content[:2] == b"PK":
         return pd.read_excel(bio, engine="openpyxl")
 
-    # xls: Compound Document File
+    # xls（含 Maatwebsite 產生的格式）
     if content[:4] == b"\xd0\xcf\x11\xe0":
-        return pd.read_excel(bio, engine="xlrd")
+        try:
+            return pd.read_excel(BytesIO(content), engine="xlrd")
+        except Exception:
+            # xlrd 讀不了某些 xls（如 Maatwebsite 產生），改用 calamine
+            return pd.read_excel(BytesIO(content), engine="calamine")
 
     # fallback
     return pd.read_excel(bio, engine="openpyxl")
@@ -462,7 +488,7 @@ def export_kaohsiung(
     tag: str,
 ) -> str | None:
     """
-    高雄和台南各自用 keyword 篩選，邏輯和新竹相同：
+    高雄和台南各自用 keyword 篩選：
     - 有資料 → 納入合併
     - 沒資料或失敗 → log 警告，pass，繼續下一個
     - 全部都沒資料 → 回傳 None，不上傳，不報錯
