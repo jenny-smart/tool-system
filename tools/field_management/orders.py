@@ -22,6 +22,9 @@ try:
 except ImportError:
     from logger import log
 
+# ★ 新增
+from tools.common.log_to_sheet import write_target_log
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
@@ -275,6 +278,7 @@ def clear_and_write_values(
     clear_range(sheets, spreadsheet_id, range_name)
     write_values(sheets, spreadsheet_id, range_name, values)
 
+
 TARGET_SHEET_NAME = "訂單資料"
 
 
@@ -324,51 +328,80 @@ def run_orders_for_area(
     cfg: dict[str, Any],
     area: str,
     date_key: str,
+    run_type: str = "手動",      # ★ 新增
 ) -> None:
     drive = get_drive_service()
     sheets = get_sheets_service()
 
     source_folder_id = get_folder_id(cfg, "order", area)
-    target_spreadsheet_id = get_spreadsheet_id(cfg, "salary", area)
+    target_spreadsheet_id = get_spreadsheet_id(cfg, "salary", area)  # ★ 先取出
 
     file_base = f"{date_key}訂單-{area}"
+    source_file_name = ""                                             # ★
+    status = "失敗"                                                   # ★
+    message = ""                                                      # ★
+    target_location = f"{TARGET_SHEET_NAME}!A:ZZ"
 
-    log(f"開始處理訂單資料：{file_base}")
+    try:
+        log(f"開始處理訂單資料：{file_base}")
 
-    file = find_file_by_possible_names(
-        drive,
-        source_folder_id,
-        [
-            file_base,
-            f"{file_base}.xlsx",
-            f"{file_base}.xls",
-            f"{file_base}.csv",
-        ],
-    )
+        file = find_file_by_possible_names(
+            drive,
+            source_folder_id,
+            [
+                file_base,
+                f"{file_base}.xlsx",
+                f"{file_base}.xls",
+                f"{file_base}.csv",
+            ],
+        )
+        source_file_name = file.get("name", "")                      # ★
 
-    raw_values = read_file_values(drive, sheets, file)
-    sorted_values = sort_order_values(raw_values)
-    values = ensure_rectangular(sorted_values)
+        raw_values = read_file_values(drive, sheets, file)
+        sorted_values = sort_order_values(raw_values)
+        values = ensure_rectangular(sorted_values)
 
-    if not values:
-        raise RuntimeError(f"訂單資料沒有內容：{file_base}")
+        if not values:
+            raise RuntimeError(f"訂單資料沒有內容：{file_base}")
 
-    target_range = f"{TARGET_SHEET_NAME}!A:ZZ"
+        clear_and_write_values(
+            sheets,
+            target_spreadsheet_id,
+            target_location,
+            values,
+        )
 
-    clear_and_write_values(
-        sheets,
-        target_spreadsheet_id,
-        target_range,
-        values,
-    )
+        status = "成功"                                               # ★
+        message = f"rows={len(values)}"                             # ★
+        log(f"完成：{source_file_name} → {target_location} / {message}")
 
-    log(f"完成：{file.get('name')} → {target_range} / rows={len(values)}")
+    except Exception as e:
+        status = "失敗"                                              # ★
+        message = str(e)                                            # ★
+        log(f"失敗：{file_base} / {message}")
+        raise
+
+    finally:
+        # ★ 目標執行檔打卡
+        write_target_log(
+            target_spreadsheet_id=target_spreadsheet_id,
+            system_name="外場排程系統",
+            function_name="外場訂單",
+            run_type=run_type,
+            area=area,
+            date=date_key,
+            target_location=target_location,
+            source_file=source_file_name,
+            status=status,
+            message=message,
+        )
 
 
 def main(
     date_key: str | None = None,
     area: str | None = None,
     system_name: str = "外場日排程系統",
+    run_type: str = "手動",      # ★ 新增
 ) -> None:
     cfg = load_system_config(system_name)
     date_key = date_key or today_yyyymmdd()
@@ -376,7 +409,7 @@ def main(
     areas = [area] if area else area_list_from_config(cfg)
 
     for current_area in areas:
-        run_orders_for_area(cfg, current_area, date_key)
+        run_orders_for_area(cfg, current_area, date_key, run_type)  # ★
 
     log("orders.py 全部完成")
 
@@ -386,6 +419,7 @@ if __name__ == "__main__":
     parser.add_argument("--date", default=today_yyyymmdd())
     parser.add_argument("--area", default="")
     parser.add_argument("--system-name", default="外場日排程系統")
+    parser.add_argument("--run-type", default="手動")               # ★ 新增
 
     args = parser.parse_args()
 
@@ -393,4 +427,5 @@ if __name__ == "__main__":
         args.date,
         args.area or None,
         args.system_name,
+        args.run_type,                                              # ★
     )
