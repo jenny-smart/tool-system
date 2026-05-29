@@ -408,3 +408,55 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# ═══════════════════════════════════════════════════════════
+# 以下貼到 tools/common/log_to_sheet.py 最後
+# ═══════════════════════════════════════════════════════════
+
+TARGET_LOG_SHEET = "外場排程系統執行Log"
+
+
+def write_target_log(
+    *,
+    target_spreadsheet_id: str,
+    system_name: str,
+    function_name: str,
+    run_type: str = "手動",
+    area: str = "",
+    date: str = "",
+    target_location: str = "",
+    source_file: str = "",
+    status: str,
+    message: str = "",
+) -> None:
+    """
+    Layer 2：目標執行檔打卡。
+    寫入各流程的目標試算表（roster / salary / office）
+    的「外場排程系統執行Log」工作表。
+    打卡失敗只印 warning，不中斷主流程。
+    """
+    if not target_spreadsheet_id:
+        return
+
+    try:
+        service = get_sheets_service()
+        ensure_sheet(service, target_spreadsheet_id, TARGET_LOG_SHEET, LOG_HEADERS)
+
+        status_text = normalize_status(status)
+        row = [
+            now_text(),
+            system_name,
+            function_name,
+            run_type,
+            area,
+            date,
+            target_location,
+            source_file,
+            status_text,
+            message,
+        ]
+
+        append_row(service, target_spreadsheet_id, TARGET_LOG_SHEET, row)
+
+    except Exception as e:
+        print(f"[write_target_log] 目標執行檔打卡失敗：{e}", flush=True)
