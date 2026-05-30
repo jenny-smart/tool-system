@@ -5,7 +5,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
+try:
+    import streamlit as st
+except Exception:
+    st = None
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -25,6 +29,15 @@ def get_service_account_info() -> dict[str, Any]:
     if path and Path(path).exists():
         return json.loads(Path(path).read_text(encoding="utf-8"))
 
+    if st is not None:
+        for key in ["GOOGLE_SERVICE_ACCOUNT", "gcp_service_account"]:
+            try:
+                info = dict(st.secrets[key])
+                if info:
+                    return info
+            except Exception:
+                pass
+
     raise RuntimeError("找不到 GOOGLE_SERVICE_ACCOUNT 設定")
 
 
@@ -43,10 +56,19 @@ def get_master_spreadsheet_id() -> str:
         or os.getenv("LOG_SPREADSHEET_ID", "").strip()
     )
 
-    if not spreadsheet_id:
-        raise RuntimeError("找不到主控試算表 ID，請設定 TOOLS_APP_LOG_SPREADSHEET_ID")
+    if spreadsheet_id:
+        return spreadsheet_id
 
-    return spreadsheet_id
+    if st is not None:
+        for key in ["TOOLS_APP_LOG_SPREADSHEET_ID", "MASTER_LOG_SPREADSHEET_ID", "LOG_SPREADSHEET_ID"]:
+            try:
+                value = str(st.secrets[key]).strip()
+                if value:
+                    return value
+            except Exception:
+                pass
+
+    raise RuntimeError("找不到主控試算表 ID，請設定 TOOLS_APP_LOG_SPREADSHEET_ID")
 
 
 def read_sheet(sheet_name: str, spreadsheet_id: str = "") -> list[list[str]]:
@@ -71,10 +93,10 @@ def read_sheet_records(sheet_name: str, spreadsheet_id: str = "") -> list[dict[s
     records: list[dict[str, str]] = []
 
     for row in rows[1:]:
-        item = {}
+        record: dict[str, str] = {}
         for i, header in enumerate(headers):
-            item[header] = str(row[i]).strip() if i < len(row) else ""
-        records.append(item)
+            record[header] = str(row[i]).strip() if i < len(row) else ""
+        records.append(record)
 
     return records
 
@@ -88,7 +110,11 @@ def get_system_config(system_name: str) -> dict[str, str]:
     records = read_sheet_records("系統設定")
 
     for record in records:
-        name = record.get("系統名稱", "").strip()
+        name = (
+            record.get("系統名稱", "")
+            or record.get("name", "")
+        ).strip()
+
         if name == system_name:
             return record
 
@@ -100,15 +126,16 @@ def load_monthly_config() -> dict[str, Any]:
 
     root_folder_id = (
         system.get("月排程總根目錄ID", "").strip()
+        or system.get("月排程根目錄 ID", "").strip()
+        or system.get("月排程根目錄ID", "").strip()
         or system.get("共用雲端資料夾ID / 根目錄ID", "").strip()
         or system.get("folder_id", "").strip()
     )
 
     if not root_folder_id:
-        raise RuntimeError("月排程系統缺少月排程總根目錄ID")
+        raise RuntimeError("月排程系統缺少月排程根目錄 ID")
 
     area_records = read_sheet_records("月排程地區設定")
-
     areas: dict[str, str] = {}
 
     for record in area_records:
