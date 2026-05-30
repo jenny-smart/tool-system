@@ -240,10 +240,6 @@ def github_run_url() -> str:
 
 
 def append_row(service, spreadsheet_id: str, sheet_name: str, values: list[Any]) -> None:
-    print(
-        f"[append_row] spreadsheet={spreadsheet_id} sheet={sheet_name} values={values}",
-        flush=True,
-    )
 
     result = service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
@@ -252,8 +248,6 @@ def append_row(service, spreadsheet_id: str, sheet_name: str, values: list[Any])
         insertDataOption="INSERT_ROWS",
         body={"values": [values]},
     ).execute()
-
-    print(f"[append_row] result={result}", flush=True)
 
 
 def normalize_status(status: str) -> str:
