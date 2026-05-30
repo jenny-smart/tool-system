@@ -54,21 +54,8 @@ def get_master_spreadsheet_id() -> str:
         os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
         or os.getenv("MASTER_LOG_SPREADSHEET_ID", "").strip()
         or os.getenv("LOG_SPREADSHEET_ID", "").strip()
+        or "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
     )
-
-    if spreadsheet_id:
-        return spreadsheet_id
-
-    if st is not None:
-        for key in ["TOOLS_APP_LOG_SPREADSHEET_ID", "MASTER_LOG_SPREADSHEET_ID", "LOG_SPREADSHEET_ID"]:
-            try:
-                value = str(st.secrets[key]).strip()
-                if value:
-                    return value
-            except Exception:
-                pass
-
-    raise RuntimeError("找不到主控試算表 ID，請設定 TOOLS_APP_LOG_SPREADSHEET_ID")
 
 
 def read_sheet(sheet_name: str, spreadsheet_id: str = "") -> list[list[str]]:
