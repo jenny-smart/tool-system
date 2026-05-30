@@ -74,12 +74,25 @@ def write_monthly_log(
     message: str,
     traceback_text: str = "",
 ) -> None:
+    print("[debug] write_monthly_log start", flush=True)
+    print(f"[debug] log_to_sheet={log_to_sheet}", flush=True)
+
     if log_to_sheet is None:
+        print("[debug] log_to_sheet is None, skip", flush=True)
         return
 
     try:
         _load_log_spreadsheet_id()
+
+        print(
+            f"[debug] TOOLS_APP_LOG_SPREADSHEET_ID={os.getenv('TOOLS_APP_LOG_SPREADSHEET_ID')}",
+            flush=True,
+        )
+
         run_type = "排程" if os.getenv("GITHUB_ACTIONS") else "手動"
+
+        print("[debug] before log_to_sheet", flush=True)
+
         log_to_sheet(
             system="月排程系統",
             function=function_name,
@@ -94,7 +107,11 @@ def write_monthly_log(
             traceback_text=traceback_text,
         )
 
+        print("[debug] after log_to_sheet", flush=True)
         print("✅ 已寫入月排程 Log", flush=True)
+
+    except Exception as exc:
+        print(f"⚠️ 寫入月排程 Log 失敗：{exc}", flush=True)
 
 
 LOGIN_URL = "https://backend.lemonclean.com.tw/login"
