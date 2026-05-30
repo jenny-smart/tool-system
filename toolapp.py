@@ -22,6 +22,8 @@ import pandas as pd
 import streamlit as st
 import yaml
 
+from tools.common.config_loader import get_sheets_service
+
 from utils.auth import authenticate
 from utils.permissions import (
     can_access_page,
@@ -43,7 +45,31 @@ st.set_page_config(
 # ═══════════════════════════════════════════════════════════
 # 設定檔讀寫
 # ═══════════════════════════════════════════════════════════
+# 舊版 systems.yaml 只保留為讀取 fallback。
+# 主要設定來源改為 Google Sheets 主控表。
 CONFIG_PATH = Path("config/systems.yaml")
+MASTER_CONFIG_SPREADSHEET_ID = "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
+
+SYSTEM_SETTING_SHEET = "系統設定"
+MONTHLY_AREA_SHEET = "月排程地區設定"
+
+SYSTEM_SETTING_HEADERS = [
+    "系統名稱",
+    "type",
+    "主控表ID",
+    "共用雲端資料夾ID / 根目錄ID",
+    "月排程根目錄 ID",
+    "啟用",
+    "設定JSON",
+]
+
+MONTHLY_AREA_HEADERS = [
+    "系統名稱",
+    "地區",
+    "地區根目錄ID",
+    "啟用",
+]
+
 
 DEFAULT_CONFIG = {
     "systems": [
@@ -67,6 +93,13 @@ DEFAULT_CONFIG = {
             "master_spreadsheet_id": "",
             "folder_id": "",
             "enabled": True,
+            "areas": {
+                "台北": {"folder_id": "", "enabled": True},
+                "台中": {"folder_id": "", "enabled": True},
+                "桃園": {"folder_id": "", "enabled": True},
+                "新竹": {"folder_id": "", "enabled": True},
+                "高雄": {"folder_id": "", "enabled": True},
+            },
         },
         {
             "name": "外場排程系統",
@@ -88,23 +121,290 @@ DEFAULT_CONFIG = {
 }
 
 
+def get_secret_text(key: str, default: str = "") -> str:
+    try:
+        return str(st.secrets.get(key, default))
+    except Exception:
+        return default
+
+
+def get_master_config_spreadsheet_id() -> str:
+    spreadsheet_id = (
+        os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+        or os.getenv("MASTER_LOG_SPREADSHEET_ID", "").strip()
+        or os.getenv("LOG_SPREADSHEET_ID", "").strip()
+        or get_secret_text("TOOLS_APP_LOG_SPREADSHEET_ID")
+        or get_secret_text("MASTER_LOG_SPREADSHEET_ID")
+        or get_secret_text("LOG_SPREADSHEET_ID")
+        or MASTER_CONFIG_SPREADSHEET_ID
+    ).strip()
+
+    if not spreadsheet_id:
+        raise RuntimeError("找不到主控試算表 ID")
+
+    # 讓 subprocess 執行 half_month_orders.py 時也能讀到同一份主控表。
+    os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = spreadsheet_id
+    return spreadsheet_id
+
+
+def _quote_sheet_name(sheet_name: str) -> str:
+    return "'" + sheet_name.replace("'", "''") + "'"
+
+
+def _get_sheet_id(service, spreadsheet_id: str, sheet_name: str) -> int | None:
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(sheetId,title))",
+    ).execute()
+
+    for sheet in meta.get("sheets", []):
+        props = sheet.get("properties", {})
+        if props.get("title") == sheet_name:
+            return int(props.get("sheetId"))
+
+    return None
+
+
+def _ensure_sheet(service, spreadsheet_id: str, sheet_name: str, headers: list[str]) -> None:
+    sheet_id = _get_sheet_id(service, spreadsheet_id, sheet_name)
+
+    if sheet_id is None:
+        res = service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={
+                "requests": [
+                    {
+                        "addSheet": {
+                            "properties": {
+                                "title": sheet_name,
+                                "gridProperties": {"frozenRowCount": 1},
+                            }
+                        }
+                    }
+                ]
+            },
+        ).execute()
+        sheet_id = int(res["replies"][0]["addSheet"]["properties"]["sheetId"])
+
+    current = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{_quote_sheet_name(sheet_name)}!A1:Z1",
+    ).execute().get("values", [])
+
+    if not current or current[0][: len(headers)] != headers:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"{_quote_sheet_name(sheet_name)}!A1",
+            valueInputOption="USER_ENTERED",
+            body={"values": [headers]},
+        ).execute()
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": sheet_id,
+                            "gridProperties": {"frozenRowCount": 1},
+                        },
+                        "fields": "gridProperties.frozenRowCount",
+                    }
+                },
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "textFormat": {"bold": True},
+                                "backgroundColor": {"red": 0.86, "green": 0.90, "blue": 0.98},
+                            }
+                        },
+                        "fields": "userEnteredFormat(textFormat,backgroundColor)",
+                    }
+                },
+            ]
+        },
+    ).execute()
+
+
+def _read_sheet_records(sheet_name: str) -> list[dict[str, str]]:
+    spreadsheet_id = get_master_config_spreadsheet_id()
+    service = get_sheets_service()
+    _ensure_sheet(
+        service,
+        spreadsheet_id,
+        sheet_name,
+        SYSTEM_SETTING_HEADERS if sheet_name == SYSTEM_SETTING_SHEET else MONTHLY_AREA_HEADERS,
+    )
+
+    rows = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{_quote_sheet_name(sheet_name)}!A:Z",
+    ).execute().get("values", [])
+
+    if not rows:
+        return []
+
+    headers = [str(h).strip() for h in rows[0]]
+    records: list[dict[str, str]] = []
+
+    for row in rows[1:]:
+        record = {}
+        for i, header in enumerate(headers):
+            record[header] = str(row[i]).strip() if i < len(row) else ""
+        records.append(record)
+
+    return records
+
+
+def _overwrite_sheet(sheet_name: str, headers: list[str], rows: list[list[object]]) -> None:
+    spreadsheet_id = get_master_config_spreadsheet_id()
+    service = get_sheets_service()
+    _ensure_sheet(service, spreadsheet_id, sheet_name, headers)
+
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"{_quote_sheet_name(sheet_name)}!A:Z",
+        body={},
+    ).execute()
+
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{_quote_sheet_name(sheet_name)}!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": [headers] + rows},
+    ).execute()
+
+
+def _bool_to_sheet(value) -> str:
+    return "TRUE" if bool(value) else "FALSE"
+
+
+def _sheet_to_bool(value, default: bool = True) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return default
+    return text in ["true", "1", "yes", "y", "啟用", "✅", "✅ 啟用"]
+
+
+def _system_to_row(sys_cfg: dict) -> list[object]:
+    system_type = sys_cfg.get("type", "")
+    folder_id = sys_cfg.get("folder_id", "")
+
+    return [
+        sys_cfg.get("name", ""),
+        system_type,
+        sys_cfg.get("master_spreadsheet_id", ""),
+        "" if system_type == "monthly_scheduler" else folder_id,
+        folder_id if system_type == "monthly_scheduler" else "",
+        _bool_to_sheet(sys_cfg.get("enabled", True)),
+        json.dumps(sys_cfg, ensure_ascii=False, sort_keys=False),
+    ]
+
+
+def _config_to_master_sheets(cfg: dict) -> None:
+    systems = cfg.get("systems", [])
+
+    system_rows = [_system_to_row(sys_cfg) for sys_cfg in systems]
+    monthly_rows: list[list[object]] = []
+
+    for sys_cfg in systems:
+        if sys_cfg.get("type") != "monthly_scheduler":
+            continue
+
+        system_name = sys_cfg.get("name", "月排程系統")
+        for area_name, area_info in normalize_monthly_areas(sys_cfg).items():
+            monthly_rows.append(
+                [
+                    system_name,
+                    area_name,
+                    area_info.get("folder_id", ""),
+                    _bool_to_sheet(area_info.get("enabled", True)),
+                ]
+            )
+
+    _overwrite_sheet(SYSTEM_SETTING_SHEET, SYSTEM_SETTING_HEADERS, system_rows)
+    _overwrite_sheet(MONTHLY_AREA_SHEET, MONTHLY_AREA_HEADERS, monthly_rows)
+
+
+def _load_config_from_master_sheets() -> dict:
+    system_records = _read_sheet_records(SYSTEM_SETTING_SHEET)
+
+    systems: list[dict] = []
+    for record in system_records:
+        name = record.get("系統名稱", "").strip()
+        if not name:
+            continue
+
+        raw_json = record.get("設定JSON", "").strip()
+        sys_cfg: dict = {}
+
+        if raw_json:
+            try:
+                sys_cfg = json.loads(raw_json)
+            except Exception:
+                sys_cfg = {}
+
+        sys_cfg["name"] = name
+        sys_cfg["type"] = record.get("type", sys_cfg.get("type", "")).strip()
+        sys_cfg["master_spreadsheet_id"] = record.get("主控表ID", sys_cfg.get("master_spreadsheet_id", "")).strip()
+
+        folder_id = (
+            record.get("月排程根目錄 ID", "").strip()
+            or record.get("共用雲端資料夾ID / 根目錄ID", "").strip()
+            or sys_cfg.get("folder_id", "")
+        )
+        sys_cfg["folder_id"] = folder_id
+        sys_cfg["enabled"] = _sheet_to_bool(record.get("啟用", ""), bool(sys_cfg.get("enabled", True)))
+
+        systems.append(sys_cfg)
+
+    monthly_records = _read_sheet_records(MONTHLY_AREA_SHEET)
+    monthly_by_system: dict[str, dict] = {}
+
+    for record in monthly_records:
+        system_name = record.get("系統名稱", "").strip() or "月排程系統"
+        area_name = record.get("地區", "").strip()
+        if not area_name:
+            continue
+
+        monthly_by_system.setdefault(system_name, {})[area_name] = {
+            "folder_id": record.get("地區根目錄ID", "").strip(),
+            "enabled": _sheet_to_bool(record.get("啟用", ""), True),
+        }
+
+    for sys_cfg in systems:
+        if sys_cfg.get("type") == "monthly_scheduler":
+            areas = monthly_by_system.get(sys_cfg.get("name", ""), {})
+            if areas:
+                sys_cfg["areas"] = areas
+
+    return merge_default_systems({"systems": systems})
+
+
 def save_config(cfg: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with CONFIG_PATH.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+    """儲存設定到主控試算表，不再寫入 GitHub systems.yaml。"""
+    _config_to_master_sheets(cfg)
     st.cache_data.clear()
 
 
 def ensure_config_file() -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not CONFIG_PATH.exists():
-        save_config(DEFAULT_CONFIG)
+    """舊名稱保留相容；現在會確保主控表分頁存在。"""
+    spreadsheet_id = get_master_config_spreadsheet_id()
+    service = get_sheets_service()
+    _ensure_sheet(service, spreadsheet_id, SYSTEM_SETTING_SHEET, SYSTEM_SETTING_HEADERS)
+    _ensure_sheet(service, spreadsheet_id, MONTHLY_AREA_SHEET, MONTHLY_AREA_HEADERS)
 
 
 def merge_default_systems(data: dict) -> dict:
     """
-    保留 GitHub / 現有 systems.yaml 內容，只補缺少的預設系統。
-    這樣重新部署時不會把日排程、月排程或外場排程弄不見。
+    保留現有設定，只補缺少的預設系統。
     """
     if "systems" not in data or not isinstance(data["systems"], list):
         data["systems"] = []
@@ -122,20 +422,31 @@ def merge_default_systems(data: dict) -> dict:
     return data
 
 
+def _load_config_from_yaml_fallback() -> dict:
+    if CONFIG_PATH.exists():
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return merge_default_systems(data)
+    return merge_default_systems(DEFAULT_CONFIG.copy())
+
+
 def load_config() -> dict:
-    ensure_config_file()
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-
-    data = merge_default_systems(data)
-    return data
-
-
-def get_secret_text(key: str, default: str = "") -> str:
+    """
+    優先讀主控試算表。
+    若主控表尚無資料，會用 systems.yaml 或 DEFAULT_CONFIG 初始化主控表。
+    """
     try:
-        return str(st.secrets.get(key, default))
-    except Exception:
-        return default
+        data = _load_config_from_master_sheets()
+        if data.get("systems"):
+            return merge_default_systems(data)
+
+        data = _load_config_from_yaml_fallback()
+        save_config(data)
+        return data
+
+    except Exception as exc:
+        st.warning(f"主控表設定讀取失敗，暫時使用本機 fallback：{exc}")
+        return _load_config_from_yaml_fallback()
 
 
 def merge_legacy_secrets(cfg: dict) -> dict:
