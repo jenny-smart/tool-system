@@ -446,11 +446,13 @@ def load_config() -> dict:
     """
     try:
         data = _load_config_from_master_sheets()
+
         if data.get("systems"):
             return merge_default_systems(data)
 
         data = _load_config_from_yaml_fallback()
         save_config(data)
+        st.info("已初始化主控表設定")
         return data
 
     except Exception as exc:
