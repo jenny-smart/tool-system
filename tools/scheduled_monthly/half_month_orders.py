@@ -23,6 +23,8 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+from tools.common.config_loader import load_monthly_config
+
 try:
     from tools.common.log_to_sheet import log_to_sheet
 except Exception as e:
@@ -33,34 +35,6 @@ except Exception as e:
         print(f"[debug] relative import error: {e2}", flush=True)
         log_to_sheet = None
 
-
-def _load_log_spreadsheet_id() -> None:
-    if os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID"):
-        return
-
-    try:
-        import yaml
-
-        candidates = [
-            Path(__file__).resolve().parents[2] / "config" / "systems.yaml",
-            Path(__file__).resolve().parents[2] / "systems.yaml",
-        ]
-
-        for cfg_path in candidates:
-            if not cfg_path.exists():
-                continue
-
-            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-
-            log_id = str(cfg.get("log_spreadsheet_id", "")).strip()
-
-            if log_id:
-                os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = log_id
-                print(f"[debug] loaded log_spreadsheet_id from {cfg_path}")
-                return
-
-    except Exception as e:
-        print(f"[debug] _load_log_spreadsheet_id error: {e}", flush=True)
 
 def write_monthly_log(
     *,
@@ -74,24 +48,11 @@ def write_monthly_log(
     message: str,
     traceback_text: str = "",
 ) -> None:
-    print("[debug] write_monthly_log start", flush=True)
-    print(f"[debug] log_to_sheet={log_to_sheet}", flush=True)
-
     if log_to_sheet is None:
-        print("[debug] log_to_sheet is None, skip", flush=True)
         return
 
     try:
-        _load_log_spreadsheet_id()
-
-        print(
-            f"[debug] TOOLS_APP_LOG_SPREADSHEET_ID={os.getenv('TOOLS_APP_LOG_SPREADSHEET_ID')}",
-            flush=True,
-        )
-
         run_type = "排程" if os.getenv("GITHUB_ACTIONS") else "手動"
-
-        print("[debug] before log_to_sheet", flush=True)
 
         log_to_sheet(
             system="月排程系統",
@@ -107,7 +68,6 @@ def write_monthly_log(
             traceback_text=traceback_text,
         )
 
-        print("[debug] after log_to_sheet", flush=True)
         print("✅ 已寫入月排程 Log", flush=True)
 
     except Exception as exc:
@@ -124,16 +84,6 @@ HEADERS = {
 
 TZ = timezone(timedelta(hours=8))
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-DEFAULT_ROOT_FOLDER_ID = "1VCb_y-zBA7tm9SF1s7GeixZVweWteWIc"
-
-AREA_FOLDER_NAMES = {
-    "台北": "01.台北專員",
-    "台中": "02.台中專員",
-    "桃園": "03.桃園專員",
-    "新竹": "04.新竹專員",
-    "高雄": "05.高雄專員",
-}
 
 KAOHSIUNG_MERGE_REGIONS = ["高雄", "台南"]
 
@@ -187,10 +137,11 @@ def parse_args() -> RunArgs:
     args = parser.parse_args()
     half = args.half or args.legacy_half
 
+    monthly_cfg = load_monthly_config()
+
     root_folder_id = (
         args.folder_id.strip()
-        or os.getenv("MONTHLY_ORDERS_ROOT_FOLDER_ID", "").strip()
-        or DEFAULT_ROOT_FOLDER_ID
+        or monthly_cfg["root_folder_id"]
     )
 
     return RunArgs(
@@ -220,7 +171,6 @@ def env_value(name: str, default: str = "") -> str:
 
 
 def load_accounts() -> dict[str, dict[str, str]]:
-    """讀取各區帳號（新北已移除）"""
     return {
         "台北": {
             "email": secret_value(["accounts", "taipei", "email"], env_value("TAIPEI_EMAIL")),
@@ -379,9 +329,11 @@ def assert_excel_content(content: bytes, content_type: str) -> None:
         return
     if content[:4] == b"\xd0\xcf\x11\xe0":
         return
+
     lower_type = (content_type or "").lower()
     if "excel" in lower_type or "spreadsheet" in lower_type or "octet-stream" in lower_type:
         return
+
     preview = content[:200].decode("utf-8", errors="ignore").replace("\n", " ")
     raise RuntimeError(f"不是 Excel，Content-Type={content_type}，內容預覽={preview}")
 
@@ -397,13 +349,16 @@ def download_single_export(session: requests.Session, start: str, end: str, keyw
 
 def read_excel_from_response(content: bytes) -> pd.DataFrame:
     bio = BytesIO(content)
+
     if content[:2] == b"PK":
         return pd.read_excel(bio, engine="openpyxl")
+
     if content[:4] == b"\xd0\xcf\x11\xe0":
         try:
             return pd.read_excel(BytesIO(content), engine="xlrd")
         except Exception:
             return pd.read_excel(BytesIO(content), engine="calamine")
+
     return pd.read_excel(bio, engine="openpyxl")
 
 
@@ -450,9 +405,13 @@ def get_or_create_child_folder(service, parent_id: str, folder_name: str) -> str
 
 
 def resolve_area_folder(service, root_folder_id: str, city: str) -> str:
-    folder_name = AREA_FOLDER_NAMES.get(city, city)
-    folder_id = get_or_create_child_folder(service, root_folder_id, folder_name)
-    log(f"📁 區域資料夾：{folder_name} / {folder_id}")
+    monthly_cfg = load_monthly_config()
+    folder_id = monthly_cfg["areas"].get(city)
+
+    if not folder_id:
+        raise RuntimeError(f"主控設定缺少月排程地區根目錄：{city}")
+
+    log(f"📁 區域資料夾：{city} / {folder_id}")
     return folder_id
 
 
@@ -566,9 +525,13 @@ def save_snapshot(
 
 def resolve_cities(args: RunArgs, accounts: dict[str, dict[str, str]]) -> list[str]:
     if args.area == "all":
-        return list(accounts.keys())
+        monthly_cfg = load_monthly_config()
+        enabled_areas = list(monthly_cfg["areas"].keys())
+        return [area for area in enabled_areas if area in accounts]
+
     if args.area not in accounts:
         raise RuntimeError(f"找不到地區帳號設定：{args.area}")
+
     return [args.area]
 
 
