@@ -93,8 +93,8 @@ def write_monthly_log(
             message=message,
             traceback_text=traceback_text,
         )
-    except Exception as exc:
-        print(f"⚠️ 寫入月排程 Log 失敗：{exc}", flush=True)
+
+        print("✅ 已寫入月排程 Log", flush=True)
 
 
 LOGIN_URL = "https://backend.lemonclean.com.tw/login"
