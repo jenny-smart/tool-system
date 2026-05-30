@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -12,7 +13,6 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -32,9 +32,22 @@ except Exception as e:
     except Exception as e2:
         print(f"[debug] relative import error: {e2}", flush=True)
         log_to_sheet = None
-# ★ 加在這裡（第 30 行之後）
-print(f"[debug] log_to_sheet = {log_to_sheet}", flush=True)
-print(f"[debug] TOOLS_APP_LOG_SPREADSHEET_ID = {os.getenv('TOOLS_APP_LOG_SPREADSHEET_ID', 'NOT SET')}", flush=True)
+
+
+def _load_log_spreadsheet_id() -> None:
+    """從 systems.yaml 讀取 log_spreadsheet_id 設進環境變數。"""
+    if os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID"):
+        return
+    try:
+        import yaml
+        cfg_path = Path(__file__).resolve().parents[2] / "config" / "systems.yaml"
+        if cfg_path.exists():
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            log_id = cfg.get("log_spreadsheet_id", "").strip()
+            if log_id:
+                os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = log_id
+    except Exception as e:
+        print(f"[debug] _load_log_spreadsheet_id error: {e}", flush=True)
 
 
 def write_monthly_log(
@@ -53,6 +66,7 @@ def write_monthly_log(
         return
 
     try:
+        _load_log_spreadsheet_id()
         run_type = "排程" if os.getenv("GITHUB_ACTIONS") else "手動"
         log_to_sheet(
             system="月排程系統",
@@ -332,18 +346,13 @@ def build_export_url(start: str, end: str, keyword: str = "") -> str:
 
 
 def assert_excel_content(content: bytes, content_type: str) -> None:
-    # xlsx: PK header
     if content[:2] == b"PK":
         return
-
-    # xls: Compound Document File (D0 CF 11 E0)
     if content[:4] == b"\xd0\xcf\x11\xe0":
         return
-
     lower_type = (content_type or "").lower()
     if "excel" in lower_type or "spreadsheet" in lower_type or "octet-stream" in lower_type:
         return
-
     preview = content[:200].decode("utf-8", errors="ignore").replace("\n", " ")
     raise RuntimeError(f"不是 Excel，Content-Type={content_type}，內容預覽={preview}")
 
@@ -352,35 +361,20 @@ def download_single_export(session: requests.Session, start: str, end: str, keyw
     export_url = build_export_url(start, end, keyword)
     res = session.get(export_url, headers=HEADERS, allow_redirects=True)
     res.raise_for_status()
-
     content_type = res.headers.get("Content-Type", "")
     assert_excel_content(res.content, content_type)
-
     return res.content
 
 
 def read_excel_from_response(content: bytes) -> pd.DataFrame:
-    """
-    自動判斷格式讀取 Excel：
-    - xlsx（PK header）→ openpyxl
-    - xls（D0 CF 11 E0）→ 先試 xlrd，失敗改用 calamine
-    - 其他 → openpyxl fallback
-    """
     bio = BytesIO(content)
-
-    # xlsx
     if content[:2] == b"PK":
         return pd.read_excel(bio, engine="openpyxl")
-
-    # xls（含 Maatwebsite 產生的格式）
     if content[:4] == b"\xd0\xcf\x11\xe0":
         try:
             return pd.read_excel(BytesIO(content), engine="xlrd")
         except Exception:
-            # xlrd 讀不了某些 xls（如 Maatwebsite 產生），改用 calamine
             return pd.read_excel(BytesIO(content), engine="calamine")
-
-    # fallback
     return pd.read_excel(bio, engine="openpyxl")
 
 
@@ -440,7 +434,6 @@ def find_file_in_folder(service, parent_folder_id: str, filename: str) -> dict[s
         f"'{parent_folder_id}' in parents and "
         f"trashed=false"
     )
-
     res = service.files().list(
         q=q,
         fields="files(id,name,webViewLink,mimeType)",
@@ -448,7 +441,6 @@ def find_file_in_folder(service, parent_folder_id: str, filename: str) -> dict[s
         includeItemsFromAllDrives=True,
         pageSize=10,
     ).execute()
-
     files = res.get("files", [])
     return files[0] if files else None
 
@@ -456,7 +448,6 @@ def find_file_in_folder(service, parent_folder_id: str, filename: str) -> dict[s
 def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     filename = os.path.basename(local_path)
     media = MediaFileUpload(local_path, resumable=True)
-
     existing = find_file_in_folder(service, parent_folder_id, filename)
 
     if existing:
@@ -466,7 +457,6 @@ def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
             fields="id,name,webViewLink",
             supportsAllDrives=True,
         ).execute()
-
         link = updated.get("webViewLink", existing.get("webViewLink", ""))
         log(f"♻️ 已覆蓋舊檔：{updated['name']} → folder_id={parent_folder_id} {link}".strip())
         return updated["id"]
@@ -475,14 +465,12 @@ def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
         "name": filename,
         "parents": [parent_folder_id],
     }
-
     created = service.files().create(
         body=body,
         media_body=media,
         fields="id,name,webViewLink",
         supportsAllDrives=True,
     ).execute()
-
     link = created.get("webViewLink", "")
     log(f"☁️ 已上傳新檔：{created['name']} → folder_id={parent_folder_id} {link}".strip())
     return created["id"]
@@ -495,12 +483,6 @@ def export_kaohsiung(
     temp_dir: str,
     tag: str,
 ) -> str | None:
-    """
-    高雄和台南各自用 keyword 篩選：
-    - 有資料 → 納入合併
-    - 沒資料或失敗 → log 警告，pass，繼續下一個
-    - 全部都沒資料 → 回傳 None，不上傳，不報錯
-    """
     df_list: list[pd.DataFrame] = []
 
     for region in KAOHSIUNG_MERGE_REGIONS:
@@ -508,14 +490,11 @@ def export_kaohsiung(
             log(f"👉 抓 {region}")
             content = download_single_export(session, start, end, region)
             df = read_excel_from_response(content)
-
             if df.empty:
                 log(f"ℹ️ {region} 本期無資料，略過")
                 continue
-
             df_list.append(df)
             log(f"✅ {region} 抓到 {len(df)} 筆")
-
         except Exception as exc:
             log(f"⚠️ {region} 略過：{exc}")
 
@@ -545,27 +524,22 @@ def save_snapshot(
 ) -> None:
     snapshot_dir = Path(snapshot_root) / tag
     snapshot_dir.mkdir(parents=True, exist_ok=True)
-
     src = Path(local_path)
     target = snapshot_dir / src.name
     shutil.copy2(src, target)
-
     meta_path = target.with_suffix(".json")
     meta_path.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-
     log(f"🧾 已更新 GitHub snapshot：{target}")
 
 
 def resolve_cities(args: RunArgs, accounts: dict[str, dict[str, str]]) -> list[str]:
     if args.area == "all":
         return list(accounts.keys())
-
     if args.area not in accounts:
         raise RuntimeError(f"找不到地區帳號設定：{args.area}")
-
     return [args.area]
 
 
@@ -673,7 +647,6 @@ def main() -> None:
         except Exception as exc:
             log(f"❌ {city} 失敗：{exc}")
             failed.append((city, str(exc)))
-
             if args.area != "all":
                 raise
 
