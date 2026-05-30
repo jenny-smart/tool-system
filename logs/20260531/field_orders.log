@@ -1,0 +1,11 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.orders --date 20260531 --system-name 外場排程系統 --run-type 排程
+[2026-05-31 05:47:55] 開始處理訂單資料：20260531訂單-台北
+[2026-05-31 05:48:05] 完成：20260531訂單-台北.xls → 訂單資料!A:ZZ / rows=1306
+[2026-05-31 05:48:06] 開始處理訂單資料：20260531訂單-台中
+[2026-05-31 05:48:14] 完成：20260531訂單-台中.xls → 訂單資料!A:ZZ / rows=123
+[2026-05-31 05:48:24] orders.py 全部完成
+
+📝 外場排程打卡：外場訂單 / success
+field_management scheduler 全部完成
