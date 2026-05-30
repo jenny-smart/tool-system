@@ -337,6 +337,7 @@ def _load_config_from_master_sheets() -> dict:
     system_records = _read_sheet_records(SYSTEM_SETTING_SHEET)
 
     systems: list[dict] = []
+
     for record in system_records:
         name = record.get("系統名稱", "").strip()
         if not name:
@@ -353,15 +354,22 @@ def _load_config_from_master_sheets() -> dict:
 
         sys_cfg["name"] = name
         sys_cfg["type"] = record.get("type", sys_cfg.get("type", "")).strip()
-        sys_cfg["master_spreadsheet_id"] = record.get("主控表ID", sys_cfg.get("master_spreadsheet_id", "")).strip()
+        sys_cfg["master_spreadsheet_id"] = record.get(
+            "主控表ID",
+            sys_cfg.get("master_spreadsheet_id", ""),
+        ).strip()
 
         folder_id = (
             record.get("月排程根目錄 ID", "").strip()
             or record.get("共用雲端資料夾ID / 根目錄ID", "").strip()
             or sys_cfg.get("folder_id", "")
         )
+
         sys_cfg["folder_id"] = folder_id
-        sys_cfg["enabled"] = _sheet_to_bool(record.get("啟用", ""), bool(sys_cfg.get("enabled", True)))
+        sys_cfg["enabled"] = _sheet_to_bool(
+            record.get("啟用", ""),
+            bool(sys_cfg.get("enabled", True)),
+        )
 
         systems.append(sys_cfg)
 
@@ -371,6 +379,7 @@ def _load_config_from_master_sheets() -> dict:
     for record in monthly_records:
         system_name = record.get("系統名稱", "").strip() or "月排程系統"
         area_name = record.get("地區", "").strip()
+
         if not area_name:
             continue
 
@@ -385,7 +394,7 @@ def _load_config_from_master_sheets() -> dict:
             if areas:
                 sys_cfg["areas"] = areas
 
-    return merge_default_systems({"systems": systems})
+    return {"systems": systems}
 
 
 def save_config(cfg: dict) -> None:
