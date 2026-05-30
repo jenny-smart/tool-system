@@ -35,17 +35,30 @@ except Exception as e:
 
 
 def _load_log_spreadsheet_id() -> None:
-    """從 systems.yaml 讀取 log_spreadsheet_id 設進環境變數。"""
     if os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID"):
         return
+
     try:
         import yaml
-        cfg_path = Path(__file__).resolve().parents[2] / "config" / "systems.yaml"
-        if cfg_path.exists():
+
+        candidates = [
+            Path(__file__).resolve().parents[2] / "config" / "systems.yaml",
+            Path(__file__).resolve().parents[2] / "systems.yaml",
+        ]
+
+        for cfg_path in candidates:
+            if not cfg_path.exists():
+                continue
+
             cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-            log_id = cfg.get("log_spreadsheet_id", "").strip()
+
+            log_id = str(cfg.get("log_spreadsheet_id", "")).strip()
+
             if log_id:
                 os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = log_id
+                print(f"[debug] loaded log_spreadsheet_id from {cfg_path}")
+                return
+
     except Exception as e:
         print(f"[debug] _load_log_spreadsheet_id error: {e}", flush=True)
 
