@@ -1,28 +1,57 @@
+import random
 import time
+
+from googleapiclient.errors import HttpError
 
 
 GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 
 
+def execute_with_retry(request, max_retries: int = 6):
+    for attempt in range(max_retries):
+        try:
+            return request.execute()
+        except HttpError as e:
+            status = getattr(e.resp, "status", None)
+
+            if status in [429, 500, 503]:
+                wait = min(60, (2 ** attempt) * 5) + random.uniform(0, 1.5)
+                print(
+                    f"⚠️ Google API 暫時限流/忙碌，等待 {wait:.1f} 秒後重試 "
+                    f"({attempt + 1}/{max_retries})",
+                    flush=True,
+                )
+                time.sleep(wait)
+                continue
+
+            raise
+
+    return request.execute()
+
+
 def convert_excel_to_google_sheet(drive, file_id, file_name):
-    copied = drive.files().copy(
-        fileId=file_id,
-        body={
-            "name": f"{file_name}_temp_{int(time.time())}",
-            "mimeType": GOOGLE_SHEET_MIME,
-        },
-        fields="id,name,mimeType",
-        supportsAllDrives=True,
-    ).execute()
+    copied = execute_with_retry(
+        drive.files().copy(
+            fileId=file_id,
+            body={
+                "name": f"{file_name}_temp_{int(time.time())}",
+                "mimeType": GOOGLE_SHEET_MIME,
+            },
+            fields="id,name,mimeType",
+            supportsAllDrives=True,
+        )
+    )
 
     return copied["id"]
 
 
 def get_first_sheet_name(sheets, spreadsheet_id):
-    meta = sheets.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields="sheets.properties.title",
-    ).execute()
+    meta = execute_with_retry(
+        sheets.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields="sheets.properties.title",
+        )
+    )
 
     sheet_list = meta.get("sheets", [])
     if not sheet_list:
@@ -34,10 +63,12 @@ def get_first_sheet_name(sheets, spreadsheet_id):
 def read_google_sheet_values(sheets, spreadsheet_id):
     sheet_name = get_first_sheet_name(sheets, spreadsheet_id)
 
-    result = sheets.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=sheet_name,
-    ).execute()
+    result = execute_with_retry(
+        sheets.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=sheet_name,
+        )
+    )
 
     return result.get("values", [])
 
@@ -47,10 +78,12 @@ def cleanup_temp_file(drive, file_id):
         return
 
     try:
-        drive.files().delete(
-            fileId=file_id,
-            supportsAllDrives=True,
-        ).execute()
+        execute_with_retry(
+            drive.files().delete(
+                fileId=file_id,
+                supportsAllDrives=True,
+            )
+        )
     except Exception:
         pass
 
