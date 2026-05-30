@@ -57,6 +57,13 @@ def get_master_spreadsheet_id() -> str:
         or "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
     )
 
+    print(
+        f"[config] spreadsheet_id={spreadsheet_id!r}",
+        flush=True,
+    )
+
+    return spreadsheet_id
+
 
 def read_sheet(sheet_name: str, spreadsheet_id: str = "") -> list[list[str]]:
     spreadsheet_id = spreadsheet_id or get_master_spreadsheet_id()
