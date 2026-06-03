@@ -155,6 +155,7 @@ def _build_subprocess_env() -> dict:
     建立子進程用的環境變數字典。
     Streamlit Cloud 的 secrets 只能透過 st.secrets 讀取，
     不會自動出現在 os.environ，需要手動注入給 subprocess。
+    子進程透過 STREAMLIT_SECRETS_TOML 環境變數自行解析所需 key。
     """
     env = os.environ.copy()
 
@@ -164,16 +165,24 @@ def _build_subprocess_env() -> dict:
     if base_str not in existing_pp:
         env["PYTHONPATH"] = base_str + (":" + existing_pp if existing_pp else "")
 
-    # 把 st.secrets 的所有 key 強制注入（覆蓋 os.environ 的空值）
+    # 把 st.secrets 的所有 key 嘗試注入（字串值直接注入，dict 轉 JSON）
+    # 同時確保 STREAMLIT_SECRETS_TOML 原始內容也被帶入子進程
+    try:
+        import toml as _toml
+        # 把整個 st.secrets 序列化成 TOML 字串帶給子進程
+        secrets_dict = {k: dict(v) if hasattr(v, "to_dict") else v for k, v in st.secrets.items()}
+        env["STREAMLIT_SECRETS_TOML"] = _toml.dumps(secrets_dict)
+    except Exception:
+        pass
+
+    # 直接注入每個 string secret 到 env（雙重保險）
     try:
         for key in st.secrets:
             try:
                 val = st.secrets[key]
                 if isinstance(val, str):
-                    # 直接覆蓋，確保 JSON 等長字串都注入
                     env[key] = val
                 elif isinstance(val, dict):
-                    # TOML section（如 [section]）展開成 JSON 字串注入
                     env[key] = json.dumps(val, ensure_ascii=False)
             except Exception:
                 pass
@@ -1135,12 +1144,19 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
         cmd = [sys.executable, str(script), *args]
         display_name = script_path
 
+    # 只需確保 PYTHONPATH 包含 BASE_DIR，其餘環境自然繼承（對齊外場/日排程做法）
+    env = os.environ.copy()
+    base_str = str(BASE_DIR)
+    existing_pp = env.get("PYTHONPATH", "")
+    if base_str not in existing_pp:
+        env["PYTHONPATH"] = base_str + (":" + existing_pp if existing_pp else "")
+
     completed = subprocess.run(
         cmd,
         text=True,
         capture_output=True,
         cwd=BASE_DIR,
-        env=_build_subprocess_env(),
+        env=env,
     )
 
     if completed.stdout:
@@ -2372,8 +2388,6 @@ if run_clicked:
             # ── ★ 客服排程系統執行邏輯 ────────────────────────────
             elif system_type == "service_schedule":
 
-                _svc_env = _build_subprocess_env()
-
                 # ── CRM 功能 ──────────────────────────────────
                 if selected_function in SERVICE_CRM_MAP:
                     step = SERVICE_CRM_MAP[selected_function]
@@ -2382,11 +2396,9 @@ if run_clicked:
                         "tools.service_management.crm_export",
                         "--step", step,
                     ]
-                    # 匯出 VIP 日曆加上日期參數
                     if step != "1" and start_date_value and end_date_value:
                         cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
                                 "--end",   end_date_value.strftime("%Y-%m-%d")]
-                    # 地區篩選
                     if selected_area_value and selected_area_value != "全區":
                         cmd += ["--area", selected_area_value]
                     add_log(f"CRM 執行：{selected_function}（step={step}）", "info")
@@ -2407,7 +2419,6 @@ if run_clicked:
                     text=True,
                     timeout=600,
                     cwd=BASE_DIR,
-                    env=_svc_env,
                 )
 
                 if completed.stdout:
