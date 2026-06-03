@@ -307,6 +307,9 @@ def find_schedule_files(base: datetime) -> dict[str, dict]:
         q=q, fields="files(id,name,mimeType,modifiedTime)", pageSize=100
     ).execute().get("files", [])
 
+    log.info("Drive 資料夾找到 %d 個檔案", len(files))
+    for f in files:
+        log.info("  找到檔案：%s (%s)", f.get("name"), f.get("mimeType"))
     buckets: dict[str, list] = {
         "taipei_current": [], "taipei_next": [],
         "taichung_current": [], "taichung_next": [],
