@@ -849,9 +849,20 @@ def main() -> None:
         "--step", type=int, choices=[0, 1, 2, 3], default=0,
         help="0=全部, 1=排班統計表, 2=每日回報, 3=前一天營業額",
     )
+    parser.add_argument(
+        "--date", type=str, default="",
+        help="執行日期 YYYY-MM-DD（預設今日台北時間）",
+    )
     args = parser.parse_args()
 
-    # 動態載入目標試算表 ID（Secret 或主控試算表）
+    # 執行日期
+    if args.date:
+        try:
+            run_dt = datetime.fromisoformat(args.date).replace(tzinfo=TZ_TAIPEI)
+        except ValueError:
+            sys.exit(f"❌ 日期格式錯誤：{args.date}，請用 YYYY-MM-DD")
+    else:
+        run_dt = now_tp()
     target_id = _load_target_file_id()
     if not target_id:
         sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
@@ -864,7 +875,6 @@ def main() -> None:
     )
 
     run_id = str(uuid.uuid4())[:8]
-    run_dt = now_tp()
     step   = args.step
 
     log.info("=== 客服排程系統 run_id=%s step=%s 台北時間=%s ===",
