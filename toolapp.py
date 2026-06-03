@@ -1858,10 +1858,11 @@ with date_col:
 
     # ── ★ 客服排程系統 ──────────────────────────────────────
     elif system_type == "service_schedule":
-        st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
-        # CRM 匯出 VIP 日曆需要選日期範圍
+        _today_date = datetime.now(TW_TZ).date()
+
         if selected_function in ("CRM：匯出定期VIP日曆", "CRM：全跑（抓儲值金＋匯出VIP）"):
-            _today_date = datetime.now(TW_TZ).date()
+            # CRM 匯出 VIP 日曆：選日期範圍
+            st.markdown('<div class="field-label">📆 匯出日期範圍</div>', unsafe_allow_html=True)
             _first_of_month = _today_date.replace(day=1)
             _d1, _d2 = st.columns(2)
             with _d1:
@@ -1872,10 +1873,21 @@ with date_col:
                 end_date_value = st.date_input(
                     "結束日期", value=_today_date, key="crm_end_date"
                 )
-        else:
-            st.info("自動使用今日（台北時間）", icon="📅")
+        elif selected_function == "CRM：抓儲值金":
+            # 抓儲值金不需要日期
+            st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
+            st.info("抓取當前儲值金資料，不需指定日期", icon="📅")
             start_date_value = None
             end_date_value   = None
+        else:
+            # 排班同步三步驟：選執行日期（預設今日）
+            st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
+            start_date_value = st.date_input(
+                "執行日期", value=_today_date, key="service_run_date",
+                label_visibility="collapsed"
+            )
+            st.caption(f"系統將處理 {start_date_value} 的排班及前一天的營業額")
+            end_date_value = None
 
     else:
         st.markdown('<div class="field-label">📆 執行日期區間</div>', unsafe_allow_html=True)
@@ -2442,6 +2454,9 @@ if run_clicked:
                         "tools.service_management.service_schedule",
                         "--step", step,
                     ]
+                    # 帶入使用者選擇的執行日期
+                    if start_date_value:
+                        cmd += ["--date", start_date_value.strftime("%Y-%m-%d")]
                     add_log(f"客服排程執行：{selected_function}（--step {step}）", "info")
 
                 completed = subprocess.run(
@@ -2457,12 +2472,24 @@ if run_clicked:
                     for line in completed.stdout.strip().splitlines()[-120:]:
                         add_log(line, "info")
 
+                if completed.stderr:
+                    for line in completed.stderr.strip().splitlines()[-20:]:
+                        add_log(line, "error")
+
+                # 解析各 Step 結果，顯示部分成功
+                stdout_text = completed.stdout or ""
+                success_steps = [l for l in stdout_text.splitlines() if "完成" in l and "ERROR" not in l and "失敗" not in l]
+                failed_steps  = [l for l in stdout_text.splitlines() if "失敗" in l and "[ERROR]" in l]
+
                 if completed.returncode == 0:
-                    result = f"{selected_function} 執行成功"
+                    result = f"✅ {selected_function} 全部成功"
+                elif success_steps and failed_steps:
+                    # 部分成功：不拋例外，顯示 warning
+                    result = f"⚠️ 部分完成：{len(success_steps)} 個步驟成功，{len(failed_steps)} 個步驟失敗"
+                    add_log(result, "warning")
+                    for fl in failed_steps[-5:]:
+                        add_log(fl.strip(), "error")
                 else:
-                    if completed.stderr:
-                        for line in completed.stderr.strip().splitlines()[-20:]:
-                            add_log(line, "error")
                     raise RuntimeError(
                         f"執行失敗（exit {completed.returncode}）：{selected_function}"
                     )
