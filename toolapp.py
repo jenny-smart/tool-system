@@ -2388,6 +2388,27 @@ if run_clicked:
             # ── ★ 客服排程系統執行邏輯 ────────────────────────────
             elif system_type == "service_schedule":
 
+                # 把 st.secrets 裡的所有字串值注入到子進程環境
+                # （Streamlit Cloud secrets 不在 os.environ，需手動注入）
+                _svc_env = os.environ.copy()
+                _base_str = str(BASE_DIR)
+                _existing_pp = _svc_env.get("PYTHONPATH", "")
+                if _base_str not in _existing_pp:
+                    _svc_env["PYTHONPATH"] = _base_str + (":" + _existing_pp if _existing_pp else "")
+                try:
+                    for _k in st.secrets:
+                        try:
+                            _v = st.secrets[_k]
+                            if isinstance(_v, str):
+                                _svc_env[_k] = _v
+                            elif isinstance(_v, dict):
+                                # section → JSON 字串
+                                _svc_env[_k] = json.dumps(dict(_v), ensure_ascii=False)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
                 # ── CRM 功能 ──────────────────────────────────
                 if selected_function in SERVICE_CRM_MAP:
                     step = SERVICE_CRM_MAP[selected_function]
@@ -2419,6 +2440,7 @@ if run_clicked:
                     text=True,
                     timeout=600,
                     cwd=BASE_DIR,
+                    env=_svc_env,
                 )
 
                 if completed.stdout:
