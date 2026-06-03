@@ -74,7 +74,7 @@ CONFIG: dict[str, Any] = {
     "master_log_sheet_name": "執行記錄",
 
     # 打卡 - 執行檔（同目標試算表）
-    "job_log_sheet_name": "_py_execution_log",
+    "job_log_sheet_name": "客服排程執行Log",
 
     # 系統名稱（打卡用）
     "system_name": "客服排程系統",
@@ -574,15 +574,59 @@ def _decode_subject(msg) -> str:
     return result
 
 
+def _strip_html(html_text: str) -> str:
+    """簡單移除 HTML 標籤，保留換行結構。"""
+    import html as html_module
+    text = re.sub(r"<br\s*/?>", "\n", html_text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>|</div>|</tr>|</li>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html_module.unescape(text)
+    text = re.sub(r"\r\n|\r", "\n", text)
+    text = re.sub(r" +", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _plain_body(msg) -> str:
+    """取郵件純文字內容，優先 text/plain，fallback 到 text/html。"""
+    plain = ""
+    html_body = ""
+
     if msg.is_multipart():
         for part in msg.walk():
-            if part.get_content_type() == "text/plain" and "attachment" not in str(part.get("Content-Disposition", "")):
-                charset = part.get_content_charset() or "utf-8"
-                return part.get_payload(decode=True).decode(charset, errors="replace")
-        return ""
-    charset = msg.get_content_charset() or "utf-8"
-    return msg.get_payload(decode=True).decode(charset, errors="replace")
+            ct = part.get_content_type()
+            cd = str(part.get("Content-Disposition", ""))
+            if "attachment" in cd:
+                continue
+            charset = part.get_content_charset() or "utf-8"
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                continue
+            decoded = payload.decode(charset, errors="replace")
+            if ct == "text/plain" and not plain:
+                plain = decoded
+            elif ct == "text/html" and not html_body:
+                html_body = decoded
+    else:
+        charset = msg.get_content_charset() or "utf-8"
+        payload = msg.get_payload(decode=True)
+        if payload:
+            decoded = payload.decode(charset, errors="replace")
+            if msg.get_content_type() == "text/html":
+                html_body = decoded
+            else:
+                plain = decoded
+
+    if plain.strip():
+        log.info("  [mail] 使用 text/plain（%d 字元）", len(plain))
+        return plain
+
+    if html_body.strip():
+        log.info("  [mail] text/plain 為空，fallback 到 text/html（%d 字元）", len(html_body))
+        return _strip_html(html_body)
+
+    log.warning("  [mail] 信件內容為空")
+    return ""
 
 
 def _pick_mail(subject: str, target_date: datetime) -> str:
