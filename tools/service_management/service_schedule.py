@@ -747,20 +747,19 @@ def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
 def _load_target_file_id() -> str:
     """
     依序嘗試取得目標試算表 ID：
-    1. GitHub Secret SERVICE_TARGET_SPREADSHEET_ID（已設定則優先）
-    2. 主控試算表「系統設定」工作表 → 客服排程系統 → 共用雲端資料夾ID / 根目錄ID 欄位
+    1. 環境變數 SERVICE_TARGET_SPREADSHEET_ID（由 toolapp.py 注入或 GitHub Secret）
+    2. 主控試算表「系統設定」→ 客服排程系統 → 共用雲端資料夾ID 欄位
     """
-    # 1. Secret 優先
+    # 1. 環境變數優先（toolapp.py 執行前已注入）
     val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
     if val:
-        log.info("目標試算表 ID 來源：Secret SERVICE_TARGET_SPREADSHEET_ID")
+        log.info("目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID")
         return val
 
-    # 2. 從主控試算表系統設定讀取
+    # 2. 從主控試算表讀取（429 時忽略）
     try:
         from tools.common.config_loader import get_system_config
         system_cfg = get_system_config("客服排程系統")
-        # 對應「設定共用雲端資料夾 ID / 根目錄 ID」欄位
         folder_id = (
             system_cfg.get("共用雲端資料夾ID / 根目錄ID", "").strip()
             or system_cfg.get("folder_id", "").strip()
@@ -772,6 +771,7 @@ def _load_target_file_id() -> str:
         log.warning("從主控試算表讀取目標 ID 失敗（非致命）：%s", e)
 
     return ""
+
 
 
 def main() -> None:
