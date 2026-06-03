@@ -61,11 +61,9 @@ CONFIG: dict[str, Any] = {
     # Drive 來源資料夾（放排班統計表 xlsx / Google Sheets）
     "source_folder_id": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
 
-    # 目標試算表：優先用 LEMON_TARGET_FILE_ID，沒有就用 TOOLS_APP_LOG_SPREADSHEET_ID
-    "target_file_id": (
-        os.environ.get("LEMON_TARGET_FILE_ID", "").strip()
-        or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
-    ),
+    # 目標試算表（台北台中排班統計表、每日回報所在）
+    # GitHub Secret：SERVICE_TARGET_SPREADSHEET_ID
+    "target_file_id": os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip(),
 
     # 工作表名稱
     "target_sheet_name": "台北台中排班統計表",
@@ -678,6 +676,36 @@ def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
 # 主程式
 # ──────────────────────────────────────────────────────────
 
+def _load_target_file_id() -> str:
+    """
+    依序嘗試取得目標試算表 ID：
+    1. GitHub Secret SERVICE_TARGET_SPREADSHEET_ID（已設定則優先）
+    2. 主控試算表「系統設定」工作表 → 客服排程系統 → 共用雲端資料夾ID / 根目錄ID 欄位
+    """
+    # 1. Secret 優先
+    val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
+    if val:
+        log.info("目標試算表 ID 來源：Secret SERVICE_TARGET_SPREADSHEET_ID")
+        return val
+
+    # 2. 從主控試算表系統設定讀取
+    try:
+        from tools.common.config_loader import get_system_config
+        system_cfg = get_system_config("客服排程系統")
+        # 對應「設定共用雲端資料夾 ID / 根目錄 ID」欄位
+        folder_id = (
+            system_cfg.get("共用雲端資料夾ID / 根目錄ID", "").strip()
+            or system_cfg.get("folder_id", "").strip()
+        )
+        if folder_id:
+            log.info("目標試算表 ID 來源：主控試算表系統設定")
+            return folder_id
+    except Exception as e:
+        log.warning("從主控試算表讀取目標 ID 失敗（非致命）：%s", e)
+
+    return ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事客服排程系統")
     parser.add_argument(
@@ -686,8 +714,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not CONFIG["target_file_id"]:
-        sys.exit("❌ 請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
+    # 動態載入目標試算表 ID（Secret 或主控試算表）
+    target_id = _load_target_file_id()
+    if not target_id:
+        sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
+    CONFIG["target_file_id"] = target_id
 
     run_id = str(uuid.uuid4())[:8]
     run_dt = now_tp()
