@@ -667,6 +667,10 @@ def _find_daily_value(lines: list[str], date_str: str) -> int:
     if idx == -1:
         raise ValueError("找不到【專業清潔】日營業額標題")
 
+    # debug：印出標題後 8 行的原始 repr，確認格式
+    for _di in range(idx + 1, min(idx + 9, len(lines))):
+        log.info("  [debug] 行%d repr=%r", _di, lines[_di])
+
     for i in range(idx + 1, len(lines)):
         raw = lines[i]
         compact = raw.replace(" ", "")
@@ -676,7 +680,6 @@ def _find_daily_value(lines: list[str], date_str: str) -> int:
         # 匹配格式：2026-06-03：112分 或 2026-06-03:112分 或無「分」字
         m = re.match(r"^(\d{4}[-/]\d{2}[-/]\d{2})[：:](\d+)分?$", compact)
         if m:
-            # 統一日期格式成 yyyy-mm-dd 比對
             raw_date = m.group(1).replace("/", "-")
             if raw_date == date_str:
                 return int(m.group(2))
