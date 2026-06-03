@@ -36,3 +36,44 @@ systems:
       office:
         台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
         台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
+
+
+  # ── 貼入 systems.yaml 的 systems: 清單 ────────────────────────────────────────
+
+- name: 客服排程系統
+  type: service_schedule
+  enabled: true
+  description: |
+    三步驟每日自動化（台北時間 06:00）：
+      1. 更新排班統計表（Drive 來源資料夾 → 台北台中排班統計表）
+      2. 更新每日回報（排班統計表 → 【空班】居家清潔(每日回報)）
+      3. 更新前一天營業分數及營業額（Gmail → 每日回報）
+    打卡：主控表（執行記錄）+ 執行檔（_py_execution_log）
+  workflow: .github/workflows/scheduled_service.yml
+  script: tools/service_management/lemon_schedule_sync.py
+
+  # Drive 來源資料夾（放排班統計表）
+  folder_ids:
+    schedule_stats: "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
+
+  # 目標試算表（由 Secret LEMON_TARGET_FILE_ID 注入）
+  spreadsheet_ids:
+    target: ""  # 填入 Spreadsheet ID 或留空用 Secret
+
+  # 工作表名稱
+  sheets:
+    schedule_stats: "台北台中排班統計表"
+    daily_report:   "【空班】居家清潔(每日回報)"
+    job_log:        "_py_execution_log"
+
+  # 打卡目標
+  log:
+    master_sheet:   "執行記錄"          # 寫到 TOOLS_APP_LOG_SPREADSHEET_ID
+    job_sheet:      "_py_execution_log" # 寫到 LEMON_TARGET_FILE_ID
+
+# ── 需要設定的 GitHub Repository Secrets ─────────────────────────────────────
+# LEMON_TARGET_FILE_ID          目標試算表 ID（台北台中排班統計表所在）
+# GMAIL_USER                    讀信 Gmail 帳號
+# GMAIL_APP_PASSWORD            Gmail App 密碼（帳號 → 2FA → App 密碼）
+# TOOLS_APP_LOG_SPREADSHEET_ID  主控表 ID（打卡用，已有則不用重設）
+# LOG_SPREADSHEET_ID            執行檔打卡 ID（選填，預設同 LEMON_TARGET_FILE_ID）
