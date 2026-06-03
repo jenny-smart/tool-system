@@ -61,8 +61,11 @@ CONFIG: dict[str, Any] = {
     # Drive 來源資料夾（放排班統計表 xlsx / Google Sheets）
     "source_folder_id": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
 
-    # 目標試算表（由 Secret 注入）
-    "target_file_id": os.environ.get("LEMON_TARGET_FILE_ID", ""),
+    # 目標試算表：優先用 LEMON_TARGET_FILE_ID，沒有就用 TOOLS_APP_LOG_SPREADSHEET_ID
+    "target_file_id": (
+        os.environ.get("LEMON_TARGET_FILE_ID", "").strip()
+        or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+    ),
 
     # 工作表名稱
     "target_sheet_name": "台北台中排班統計表",
@@ -679,7 +682,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not CONFIG["target_file_id"]:
-        sys.exit("❌ 環境變數 LEMON_TARGET_FILE_ID 未設定")
+        sys.exit("❌ 請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
 
     run_id = str(uuid.uuid4())[:8]
     run_dt = now_tp()
