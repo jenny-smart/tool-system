@@ -1675,6 +1675,7 @@ if _log_id and not os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID"):
 systems = [
     s for s in get_enabled_systems(config)
     if can_access_system(s.get("type", ""))
+    or s.get("type", "") not in ("vip", "daily_scheduler", "monthly_scheduler", "field_daily_schedule")
 ]
 system_names = [s.get("name", "") for s in systems if s.get("name")]
 
