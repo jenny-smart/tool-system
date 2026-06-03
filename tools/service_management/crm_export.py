@@ -101,14 +101,16 @@ SCOPES = [
 # ──────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────
-# Google 認證
+# Google 認證（使用 tools.common.config_loader，支援 st.secrets）
 # ──────────────────────────────────────────────────────────
 
 def _get_credentials() -> Credentials:
-    sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT", "")
-    if not sa_json:
-        raise EnvironmentError("環境變數 GOOGLE_SERVICE_ACCOUNT 未設定")
-    return Credentials.from_service_account_info(json.loads(sa_json), scopes=SCOPES)
+    try:
+        from tools.common.config_loader import get_service_account_info
+        info = get_service_account_info()
+    except Exception as e:
+        raise EnvironmentError(f"無法取得 GOOGLE_SERVICE_ACCOUNT：{e}")
+    return Credentials.from_service_account_info(info, scopes=SCOPES)
 
 def _gc() -> gspread.Client:
     return gspread.authorize(_get_credentials())
