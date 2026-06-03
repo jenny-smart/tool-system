@@ -1,2486 +1,842 @@
 """
-Tool App 主控入口
-多系統工具平台：
-- 儲值金管理
-- 日排程系統
-- 月排程系統
-- 外場日排程系統
-- 客服排程系統
+檸檬家事 客服排程系統
+tools/service_management/service_schedule.py
+
+三步驟：
+  Step 1. 更新排班統計表（Drive 來源資料夾 → 目標試算表）
+  Step 2. 更新每日回報（排班統計表 → 每日回報）
+  Step 3. 更新前一天營業分數及營業額（Gmail → 每日回報）
+
+打卡：
+  - 主控表  (TOOLS_APP_LOG_SPREADSHEET_ID) → 工作表「執行記錄」
+  - 執行檔  (LEMON_TARGET_FILE_ID)         → 工作表「_py_execution_log」
+
+執行方式：
+  python -u -m tools.service_management.service_schedule --step 0   # 全部
+  python -u -m tools.service_management.service_schedule --step 1
+  python -u -m tools.service_management.service_schedule --step 2
+  python -u -m tools.service_management.service_schedule --step 3
+
+必要 GitHub Secrets：
+  GOOGLE_SERVICE_ACCOUNT        Service Account JSON 字串
+  LEMON_TARGET_FILE_ID          目標試算表 ID
+  TOOLS_APP_LOG_SPREADSHEET_ID  主控表 ID（打卡用）
+  GMAIL_USER                    Gmail 帳號（讀信）
+  GMAIL_APP_PASSWORD            Gmail App 密碼
+
+選填：
+  LOG_SPREADSHEET_ID            執行檔試算表（預設同 LEMON_TARGET_FILE_ID）
+  NOTIFY_EMAIL / NOTIFY_PASSWORD / NOTIFY_TO
 """
 
 from __future__ import annotations
 
-import html
+import argparse
+import email
+import email.utils
+import imaplib
+import io
 import json
+import logging
 import os
-import subprocess
+import re
 import sys
-import traceback
-from datetime import datetime
-from pathlib import Path
-from zoneinfo import ZoneInfo
+import uuid
+from datetime import datetime, timedelta, timezone
+from email.header import decode_header
+from typing import Any
 
-import pandas as pd
-import streamlit as st
-import yaml
+import gspread
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
-from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
+# ──────────────────────────────────────────────────────────
+# 時區 & 基本設定
+# ──────────────────────────────────────────────────────────
 
-@st.cache_resource(show_spinner=False)
-def _get_sheets_service_cached():
-    """Service Account Sheets service — 整個 app 生命週期共用一個實例。"""
-    return _get_sheets_service_raw()
+TZ_TAIPEI = timezone(timedelta(hours=8))
 
-# 讓其他地方仍可直接呼叫 get_sheets_service()
-def get_sheets_service():  # noqa: F811
-    return _get_sheets_service_cached()
+CONFIG: dict[str, Any] = {
+    # Drive 來源資料夾（放排班統計表 xlsx / Google Sheets）
+    "source_folder_id": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
 
-from utils.auth import authenticate
-from utils.permissions import (
-    can_access_page,
-    can_access_system,
-    get_allowed_log_jobs,
-)
+    # 目標試算表（台北台中排班統計表、每日回報所在）
+    # 由 main() 動態載入（env SERVICE_TARGET_SPREADSHEET_ID 或主控試算表）
+    "target_file_id": "",
 
+    # 工作表名稱
+    "target_sheet_name": "台北台中排班統計表",
+    "report_sheet_name": "【空班】居家清潔(每日回報)",
 
-TW_TZ = ZoneInfo("Asia/Taipei")
-BASE_DIR = Path(__file__).resolve().parent
+    # 打卡 - 主控表（由 main() 動態載入）
+    "master_log_spreadsheet_id": "",
+    "master_log_sheet_name": "執行記錄",
 
-st.set_page_config(
-    page_title="Tools App",
-    page_icon="🧰",
-    layout="centered",
-)
+    # 打卡 - 執行檔（同目標試算表）
+    "job_log_sheet_name": "_py_execution_log",
 
+    # 系統名稱（打卡用）
+    "system_name": "客服排程系統",
 
-# ═══════════════════════════════════════════════════════════
-# 設定檔讀寫
-# ═══════════════════════════════════════════════════════════
-# 舊版 systems.yaml 只保留為讀取 fallback。
-# 主要設定來源改為 Google Sheets 主控表。
-CONFIG_PATH = Path("config/systems.yaml")
-MASTER_CONFIG_SPREADSHEET_ID = "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
+    # 排班匯入區塊設定
+    "import_config": {
+        "taipei_current":   {"source_skip_rows": 1, "target_range": "G3"},
+        "taipei_next":      {"source_skip_rows": 1, "target_range": "V3"},
+        "taichung_current": {"source_skip_rows": 1, "target_range": "CD3"},
+        "taichung_next":    {"source_skip_rows": 1, "target_range": "CS3"},
+    },
 
-SYSTEM_SETTING_SHEET = "系統設定"
-MONTHLY_AREA_SHEET = "月排程地區設定"
+    # 每日回報欄位對應
+    "report_mappings": [
+        {"source": "Q5:S5",   "target_col": 11},   # K:M
+        {"source": "AF5:AH5", "target_col": 15},   # O:Q
+        {"source": "CN5:CP5", "target_col": 101},  # CW:CY
+        {"source": "DC5:DE5", "target_col": 105},  # DA:DC
+    ],
 
-SYSTEM_SETTING_HEADERS = [
-    "系統名稱",
-    "type",
-    "主控表ID",
-    "共用雲端資料夾ID / 根目錄ID",
-    "月排程根目錄 ID",
-    "啟用",
-    "設定JSON",
-]
+    # Gmail
+    "mail_subjects": {
+        "taipei":   "近三日營業額-台北",
+        "taichung": "近三日營業額-台中",
+    },
+    "mail_target_hour":   17,
+    "mail_target_minute": 25,
 
-MONTHLY_AREA_HEADERS = [
-    "系統名稱",
-    "地區",
-    "地區根目錄ID",
-    "啟用",
-]
-
-
-DEFAULT_CONFIG = {
-    "systems": [
-        {
-            "name": "儲值金管理",
-            "type": "vip",
-            "master_spreadsheet_id": "",
-            "folder_id": "",
-            "enabled": True,
-        },
-        {
-            "name": "日排程系統",
-            "type": "daily_scheduler",
-            "master_spreadsheet_id": "",
-            "folder_id": "",
-            "enabled": True,
-        },
-        {
-            "name": "月排程系統",
-            "type": "monthly_scheduler",
-            "master_spreadsheet_id": "",
-            "folder_id": "",
-            "enabled": True,
-            "areas": {
-                "台北": {"folder_id": "", "enabled": True},
-                "台中": {"folder_id": "", "enabled": True},
-                "桃園": {"folder_id": "", "enabled": True},
-                "新竹": {"folder_id": "", "enabled": True},
-                "高雄": {"folder_id": "", "enabled": True},
-            },
-        },
-        {
-            "name": "外場排程系統",
-            "type": "field_daily_schedule",
-            "enabled": True,
-            "folder_ids": {
-                "schedule_stats": "",
-                "order": {"台北": "", "台中": ""},
-                "staff_profile": {"台北": "", "台中": ""},
-                "staff_schedule": {"台北": "", "台中": ""},
-            },
-            "spreadsheet_ids": {
-                "roster": {"台北": "", "台中": ""},
-                "salary": {"台北": "", "台中": ""},
-                "office": {"台北": "", "台中": ""},
-            },
-        },
-        # ── ★ 新增：客服排程系統 ─────────────────────────────
-        {
-            "name": "客服排程系統",
-            "type": "service_schedule",
-            "enabled": True,
-            "target_file_id": "",   # 由 Secret LEMON_TARGET_FILE_ID 注入
-            "folder_ids": {
-                "schedule_stats": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
-            },
-        },
-        # ─────────────────────────────────────────────────────
-    ]
+    # 每日回報：從哪一列開始搜尋日期欄
+    "report_date_start_row": 2000,
 }
 
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+]
 
-def get_secret_text(key: str, default: str = "") -> str:
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────────────────
+# Google 認證（使用 tools.common.config_loader，支援 st.secrets）
+# ──────────────────────────────────────────────────────────
+
+def _get_credentials() -> Credentials:
     try:
-        return str(st.secrets.get(key, default))
-    except Exception:
-        return default
+        from tools.common.config_loader import get_service_account_info
+        info = get_service_account_info()
+    except Exception as e:
+        raise EnvironmentError(f"無法取得 GOOGLE_SERVICE_ACCOUNT：{e}")
+    return Credentials.from_service_account_info(info, scopes=SCOPES)
+
+def _gc() -> gspread.Client:
+    return gspread.authorize(_get_credentials())
+
+def _drive():
+    return build("drive", "v3", credentials=_get_credentials())
+
+# ──────────────────────────────────────────────────────────
+# 時間工具
+# ──────────────────────────────────────────────────────────
+
+def now_tp() -> datetime:
+    return datetime.now(TZ_TAIPEI)
+
+def yesterday_tp() -> datetime:
+    return now_tp() - timedelta(days=1)
+
+def fmt(dt: datetime, f: str) -> str:
+    return dt.strftime(f)
 
 
-def _build_subprocess_env() -> dict:
-    """
-    建立子進程用的環境變數字典。
-    Streamlit Cloud 的 secrets 只能透過 st.secrets 讀取，
-    不會自動出現在 os.environ，需要手動注入給 subprocess。
-    子進程透過 STREAMLIT_SECRETS_TOML 環境變數自行解析所需 key。
-    """
-    env = os.environ.copy()
+# ──────────────────────────────────────────────────────────
+# 打卡工具
+# ──────────────────────────────────────────────────────────
+# process-level cache：同一次執行不重複呼叫 Sheets API 確認工作表
+_LOG_SHEET_CACHE: dict[str, gspread.Worksheet] = {}
 
-    # 注入 PYTHONPATH
-    base_str = str(BASE_DIR)
-    existing_pp = env.get("PYTHONPATH", "")
-    if base_str not in existing_pp:
-        env["PYTHONPATH"] = base_str + (":" + existing_pp if existing_pp else "")
-
-    # 把 st.secrets 的所有 key 嘗試注入（字串值直接注入，dict 轉 JSON）
-    # 同時確保 STREAMLIT_SECRETS_TOML 原始內容也被帶入子進程
+def _ensure_log_sheet(ss: gspread.Spreadsheet, sheet_name: str) -> gspread.Worksheet:
+    """確保 log 工作表存在，不存在就建立並加標題列。結果 cache 在 process 內。"""
+    cache_key = ss.id + ":" + sheet_name
+    if cache_key in _LOG_SHEET_CACHE:
+        return _LOG_SHEET_CACHE[cache_key]
     try:
-        import toml as _toml
-        # 把整個 st.secrets 序列化成 TOML 字串帶給子進程
-        secrets_dict = {k: dict(v) if hasattr(v, "to_dict") else v for k, v in st.secrets.items()}
-        env["STREAMLIT_SECRETS_TOML"] = _toml.dumps(secrets_dict)
-    except Exception:
-        pass
+        sh = ss.worksheet(sheet_name)
+    except gspread.WorksheetNotFound:
+        sh = ss.add_worksheet(title=sheet_name, rows=2000, cols=12)
+        sh.append_row(
+            ["run_id", "時間", "系統名稱", "任務", "步驟", "狀態", "說明", "耗時(秒)"],
+            value_input_option="USER_ENTERED",
+        )
+    _LOG_SHEET_CACHE[cache_key] = sh
+    return sh
 
-    # 直接注入每個 string secret 到 env（雙重保險）
+
+def checkin_master(
+    gc: gspread.Client,
+    run_id: str,
+    task: str,
+    step: str,
+    status: str,
+    note: str = "",
+    elapsed: float = 0.0,
+) -> None:
+    """打卡到主控表 - 用 write_job_log 對齊主控表欄位格式。"""
     try:
-        for key in st.secrets:
-            try:
-                val = st.secrets[key]
-                if isinstance(val, str):
-                    env[key] = val
-                elif isinstance(val, dict):
-                    env[key] = json.dumps(val, ensure_ascii=False)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    return env
-
-
-def get_master_config_spreadsheet_id() -> str:
-    spreadsheet_id = (
-        os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
-        or os.getenv("MASTER_LOG_SPREADSHEET_ID", "").strip()
-        or os.getenv("LOG_SPREADSHEET_ID", "").strip()
-        or get_secret_text("TOOLS_APP_LOG_SPREADSHEET_ID")
-        or get_secret_text("MASTER_LOG_SPREADSHEET_ID")
-        or get_secret_text("LOG_SPREADSHEET_ID")
-        or MASTER_CONFIG_SPREADSHEET_ID
-    ).strip()
-
-    if not spreadsheet_id:
-        raise RuntimeError("找不到主控試算表 ID")
-
-    # 讓 subprocess 執行 half_month_orders.py 時也能讀到同一份主控表。
-    os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = spreadsheet_id
-    return spreadsheet_id
+        from tools.common.log_to_sheet import write_job_log
+        write_job_log(
+            system_name=CONFIG["system_name"],
+            job_name=task,
+            status=status,
+            started_at=now_tp(),
+            finished_at=now_tp() if step == "DONE" else "",
+            message=note[:300],
+            area="全區",
+            period="",
+            date=fmt(now_tp(), "%Y%m%d"),
+            target="",
+            source_file="",
+            run_type="排程" if os.getenv("GITHUB_ACTIONS") else "手動",
+            traceback_text="",
+        )
+    except Exception as e:
+        log.warning("[主控表打卡失敗（非致命）] %s", e)
 
 
-def _quote_sheet_name(sheet_name: str) -> str:
-    return "'" + sheet_name.replace("'", "''") + "'"
+def checkin_job(
+    gc: gspread.Client,
+    run_id: str,
+    task: str,
+    step: str,
+    status: str,
+    note: str = "",
+    elapsed: float = 0.0,
+) -> None:
+    """打卡到執行檔（目標試算表）的 _py_execution_log 工作表。"""
+    target_id = (
+        CONFIG.get("target_file_id", "")
+        or os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "")
+    )
+    if not target_id:
+        return
+    try:
+        ss = gc.open_by_key(target_id)
+        sh = _ensure_log_sheet(ss, CONFIG["job_log_sheet_name"])
+        sh.append_row(
+            [
+                run_id,
+                fmt(now_tp(), "%Y/%m/%d %H:%M:%S"),
+                CONFIG["system_name"],
+                task,
+                step,
+                status,
+                note[:300],
+                round(elapsed, 1),
+            ],
+            value_input_option="USER_ENTERED",
+        )
+    except Exception as e:
+        log.warning("[執行檔打卡失敗（非致命）] %s", e)
 
 
-def _get_sheet_id(service, spreadsheet_id: str, sheet_name: str) -> int | None:
-    meta = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields="sheets(properties(sheetId,title))",
-    ).execute()
+def checkin_both(
+    gc: gspread.Client,
+    run_id: str,
+    task: str,
+    step: str,
+    status: str,
+    note: str = "",
+    elapsed: float = 0.0,
+) -> None:
+    """同時打卡到主控表 + 執行檔。"""
+    checkin_master(gc, run_id, task, step, status, note, elapsed)
+    checkin_job(gc, run_id, task, step, status, note, elapsed)
 
-    for sheet in meta.get("sheets", []):
-        props = sheet.get("properties", {})
-        if props.get("title") == sheet_name:
-            return int(props.get("sheetId"))
 
-    return None
+# ──────────────────────────────────────────────────────────
+# 找排班檔
+# ──────────────────────────────────────────────────────────
+
+def _build_next_month_day_str(base: datetime) -> str:
+    """年月+1，日不變（對應 GAS buildNextMonthSameDayString_）"""
+    y, m, d = base.year, base.month, base.strftime("%d")
+    nm = m + 1
+    ny = y
+    if nm > 12:
+        nm = 1
+        ny += 1
+    return f"{ny}{nm:02d}{d}"
 
 
-def _ensure_sheet(service, spreadsheet_id: str, sheet_name: str, headers: list[str]) -> None:
-    sheet_id = _get_sheet_id(service, spreadsheet_id, sheet_name)
+def _normalize_name(name: str) -> str:
+    name = re.sub(r"\.[^.]+$", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s+|_|-", "", name)
+    name = re.sub(r"schedule|lemon", "", name, flags=re.IGNORECASE)
+    return name
 
-    if sheet_id is None:
-        res = service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id,
+
+def _matches(normalized: str, date_str: str, city: str) -> bool:
+    return normalized == f"排班統計表{date_str}{city}"
+
+
+def _pick_best(files: list[dict]) -> dict | None:
+    if not files:
+        return None
+    sheets = [f for f in files if f["mimeType"] == "application/vnd.google-apps.spreadsheet"]
+    pool = sheets if sheets else files
+    pool.sort(key=lambda f: f.get("modifiedTime", ""), reverse=True)
+    return pool[0]
+
+
+def find_schedule_files(base: datetime) -> dict[str, dict]:
+    drive = _drive()
+    cur = fmt(base, "%Y%m%d")
+    nxt = _build_next_month_day_str(base)
+
+    q = (
+        f"'{CONFIG['source_folder_id']}' in parents and trashed=false and ("
+        "mimeType='application/vnd.google-apps.spreadsheet' or "
+        "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')"
+    )
+    files = drive.files().list(
+        q=q,
+        fields="files(id,name,mimeType,modifiedTime)",
+        pageSize=100,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute().get("files", [])
+
+    log.info("Drive 資料夾找到 %d 個檔案", len(files))
+    for f in files:
+        log.info("  找到檔案：%s (%s)", f.get("name"), f.get("mimeType"))
+    buckets: dict[str, list] = {
+        "taipei_current": [], "taipei_next": [],
+        "taichung_current": [], "taichung_next": [],
+    }
+    for f in files:
+        name = f.get("name", "").strip()
+        if "_temp_" in name:
+            continue
+        n = _normalize_name(name)
+        if   _matches(n, cur, "台北"): buckets["taipei_current"].append(f)
+        elif _matches(n, nxt, "台北"): buckets["taipei_next"].append(f)
+        elif _matches(n, cur, "台中"): buckets["taichung_current"].append(f)
+        elif _matches(n, nxt, "台中"): buckets["taichung_next"].append(f)
+
+    found = {k: _pick_best(v) for k, v in buckets.items()}
+
+    expected = {
+        "taipei_current":   f"排班統計表{cur}-台北",
+        "taipei_next":      f"排班統計表{nxt}-台北",
+        "taichung_current": f"排班統計表{cur}-台中",
+        "taichung_next":    f"排班統計表{nxt}-台中",
+    }
+    missing = [f"{k}：{expected[k]}" for k, v in found.items() if v is None]
+    if missing:
+        raise FileNotFoundError(
+            "找不到以下排班檔：\n  " + "\n  ".join(missing)
+        )
+
+    log.info("排班檔確認 OK：%s", {k: v["name"] for k, v in found.items()})
+    return found
+
+
+def _a1_start(a1: str) -> tuple[int, int]:
+    """把 'G3' 解成 (row=3, col=7)，忽略結尾的 :XX"""
+    cell = a1.split(":")[0]
+    m = re.match(r"^([A-Za-z]+)(\d+)$", cell)
+    if not m:
+        raise ValueError(f"無法解析 A1: {a1}")
+    col = sum((ord(c) - 64) * (26 ** i) for i, c in enumerate(reversed(m.group(1).upper())))
+    return int(m.group(2)), col
+
+
+def _import_block(
+    file_info: dict,
+    target_sheet: gspread.Worksheet,
+    cfg: dict,
+    drive,
+    gc: gspread.Client,
+) -> None:
+    fid  = file_info["id"]
+    mime = file_info["mimeType"]
+    name = file_info["name"]
+    log.info("  匯入：%s", name)
+
+    if mime == "application/vnd.google-apps.spreadsheet":
+        ss = gc.open_by_key(fid)
+        all_values = ss.get_worksheet(0).get_all_values()
+    else:
+        # xlsx 在共用雲端硬碟：轉成 Google Sheets 保留（新蓋舊），再讀取
+        gs_name = re.sub(r"\.xlsx$", "", name, flags=re.IGNORECASE)
+        log.info("  xlsx → Google Sheets：%s", gs_name)
+
+        # 先查並刪除資料夾內所有同名 Google Sheets（確保不留舊檔）
+        existing = drive.files().list(
+            q=(
+                f"'{CONFIG['source_folder_id']}' in parents"
+                f" and name = '{gs_name}'"
+                f" and mimeType = 'application/vnd.google-apps.spreadsheet'"
+                f" and trashed = false"
+            ),
+            fields="files(id,name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+
+        for old in existing:
+            drive.files().delete(
+                fileId=old["id"], supportsAllDrives=True
+            ).execute()
+            log.info("  已刪除舊版 Google Sheets：%s (%s)", old["name"], old["id"])
+
+        # 用 Drive v2 copy 轉換（v2 支援 mimeType 轉換）
+        from googleapiclient.discovery import build as _build
+        drive_v2 = _build("drive", "v2", credentials=_get_credentials())
+        copied = drive_v2.files().copy(
+            fileId=fid,
             body={
-                "requests": [
-                    {
-                        "addSheet": {
-                            "properties": {
-                                "title": sheet_name,
-                                "gridProperties": {"frozenRowCount": 1},
-                            }
-                        }
-                    }
-                ]
+                "title": gs_name,
+                "mimeType": "application/vnd.google-apps.spreadsheet",
+                "parents": [{"id": CONFIG["source_folder_id"]}],
             },
-        ).execute()
-        sheet_id = int(res["replies"][0]["addSheet"]["properties"]["sheetId"])
-
-    current = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"{_quote_sheet_name(sheet_name)}!A1:Z1",
-    ).execute().get("values", [])
-
-    if not current or current[0][: len(headers)] != headers:
-        service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"{_quote_sheet_name(sheet_name)}!A1",
-            valueInputOption="USER_ENTERED",
-            body={"values": [headers]},
+            supportsAllDrives=True,
         ).execute()
 
-    service.spreadsheets().batchUpdate(
-        spreadsheetId=spreadsheet_id,
-        body={
-            "requests": [
-                {
-                    "updateSheetProperties": {
-                        "properties": {
-                            "sheetId": sheet_id,
-                            "gridProperties": {"frozenRowCount": 1},
-                        },
-                        "fields": "gridProperties.frozenRowCount",
-                    }
-                },
-                {
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 0,
-                            "endRowIndex": 1,
-                        },
-                        "cell": {
-                            "userEnteredFormat": {
-                                "textFormat": {"bold": True},
-                                "backgroundColor": {"red": 0.86, "green": 0.90, "blue": 0.98},
-                            }
-                        },
-                        "fields": "userEnteredFormat(textFormat,backgroundColor)",
-                    }
-                },
-            ]
-        },
-    ).execute()
+        new_gs_id = copied["id"]
+        log.info("  轉換完成，新 Google Sheets ID：%s", new_gs_id)
 
+        gs_ss = gc.open_by_key(new_gs_id)
+        all_values = gs_ss.get_worksheet(0).get_all_values()
 
-def _read_sheet_records(sheet_name: str) -> list[dict[str, str]]:
-    spreadsheet_id = get_master_config_spreadsheet_id()
-    service = get_sheets_service()
-    _ensure_sheet(
-        service,
-        spreadsheet_id,
-        sheet_name,
-        SYSTEM_SETTING_HEADERS if sheet_name == SYSTEM_SETTING_SHEET else MONTHLY_AREA_HEADERS,
+    skip = cfg["source_skip_rows"]
+    values = [(r[:9] + [""] * 9)[:9] for r in all_values[skip:]]
+    values = [r for r in values if any(c.strip() for c in r)]
+
+    if not values:
+        log.warning("  來源無資料，略過：%s", name)
+        return
+
+    start_row, start_col = _a1_start(cfg["target_range"])
+    target_sheet.update(
+        values=values,
+        range_name=f"R{start_row}C{start_col}:R{start_row + len(values) - 1}C{start_col + 8}",
+        value_input_option="USER_ENTERED",
     )
-
-    rows = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"{_quote_sheet_name(sheet_name)}!A:Z",
-    ).execute().get("values", [])
-
-    if not rows:
-        return []
-
-    headers = [str(h).strip() for h in rows[0]]
-    records: list[dict[str, str]] = []
-
-    for row in rows[1:]:
-        record = {}
-        for i, header in enumerate(headers):
-            record[header] = str(row[i]).strip() if i < len(row) else ""
-        records.append(record)
-
-    return records
+    log.info("  → 寫入 %d 列（起始 R%dC%d）", len(values), start_row, start_col)
 
 
-def _overwrite_sheet(sheet_name: str, headers: list[str], rows: list[list[object]]) -> None:
-    spreadsheet_id = get_master_config_spreadsheet_id()
-    service = get_sheets_service()
-    _ensure_sheet(service, spreadsheet_id, sheet_name, headers)
+# ──────────────────────────────────────────────────────────
+# Step 1：更新排班統計表
+# ──────────────────────────────────────────────────────────
 
-    service.spreadsheets().values().clear(
-        spreadsheetId=spreadsheet_id,
-        range=f"{_quote_sheet_name(sheet_name)}!A:Z",
-        body={},
-    ).execute()
+def step1_update_schedule_stats(
+    run_dt: datetime, gc: gspread.Client, drive, run_id: str
+) -> dict:
+    task = "Step1_更新排班統計表"
+    t0 = now_tp()
+    checkin_both(gc, run_id, task, "START", "RUNNING")
 
-    service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=f"{_quote_sheet_name(sheet_name)}!A1",
-        valueInputOption="USER_ENTERED",
-        body={"values": [headers] + rows},
-    ).execute()
+    try:
+        found = find_schedule_files(run_dt)
+        target_ss = gc.open_by_key(CONFIG["target_file_id"])
+        target_sh = target_ss.worksheet(CONFIG["target_sheet_name"])
 
+        cfg = CONFIG["import_config"]
+        _import_block(found["taipei_current"],   target_sh, cfg["taipei_current"],   drive, gc)
+        _import_block(found["taipei_next"],      target_sh, cfg["taipei_next"],      drive, gc)
+        _import_block(found["taichung_current"], target_sh, cfg["taichung_current"], drive, gc)
+        _import_block(found["taichung_next"],    target_sh, cfg["taichung_next"],    drive, gc)
 
-def _bool_to_sheet(value) -> str:
-    return "TRUE" if bool(value) else "FALSE"
+        elapsed = (now_tp() - t0).total_seconds()
+        note = json.dumps({k: v["name"] for k, v in found.items()}, ensure_ascii=False)
+        checkin_both(gc, run_id, task, "DONE", "SUCCESS", note, elapsed)
+        log.info("Step 1 完成（%.1fs）", elapsed)
+        return {"ok": True, "files": {k: v["name"] for k, v in found.items()}}
 
-
-def _sheet_to_bool(value, default: bool = True) -> bool:
-    text = str(value or "").strip().lower()
-    if not text:
-        return default
-    return text in ["true", "1", "yes", "y", "啟用", "✅", "✅ 啟用"]
-
-
-def _system_to_row(sys_cfg: dict) -> list[object]:
-    system_type = sys_cfg.get("type", "")
-    folder_id = sys_cfg.get("folder_id", "")
-
-    return [
-        sys_cfg.get("name", ""),
-        system_type,
-        sys_cfg.get("master_spreadsheet_id", ""),
-        "" if system_type == "monthly_scheduler" else folder_id,
-        folder_id if system_type == "monthly_scheduler" else "",
-        _bool_to_sheet(sys_cfg.get("enabled", True)),
-        json.dumps(sys_cfg, ensure_ascii=False, sort_keys=False),
-    ]
+    except Exception as e:
+        elapsed = (now_tp() - t0).total_seconds()
+        checkin_both(gc, run_id, task, "DONE", "ERROR", str(e)[:300], elapsed)
+        raise
 
 
-def _config_to_master_sheets(cfg: dict) -> None:
-    systems = cfg.get("systems", [])
+# ──────────────────────────────────────────────────────────
+# Step 2：更新每日回報
+# ──────────────────────────────────────────────────────────
 
-    system_rows = [_system_to_row(sys_cfg) for sys_cfg in systems]
-    monthly_rows: list[list[object]] = []
-
-    for sys_cfg in systems:
-        if sys_cfg.get("type") != "monthly_scheduler":
+def _find_date_row(sheet: gspread.Worksheet, target_dt: datetime) -> int:
+    start = CONFIG["report_date_start_row"]
+    target_key = fmt(target_dt, "%Y%m%d")
+    col_a = sheet.col_values(1)  # 1-indexed list，col_a[0]=row1
+    for i in range(start - 1, len(col_a)):
+        cell = col_a[i]
+        if not cell:
             continue
+        m = re.match(r"^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})", str(cell).strip())
+        if m:
+            key = f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
+            if key == target_key:
+                return i + 1  # 1-based
+    return -1
 
-        system_name = sys_cfg.get("name", "月排程系統")
-        for area_name, area_info in normalize_monthly_areas(sys_cfg).items():
-            monthly_rows.append(
-                [
-                    system_name,
-                    area_name,
-                    area_info.get("folder_id", ""),
-                    _bool_to_sheet(area_info.get("enabled", True)),
-                ]
+
+def step2_write_daily_report(
+    run_dt: datetime, gc: gspread.Client, run_id: str
+) -> dict:
+    task = "Step2_更新每日回報"
+    t0 = now_tp()
+    checkin_both(gc, run_id, task, "START", "RUNNING")
+
+    try:
+        target_ss  = gc.open_by_key(CONFIG["target_file_id"])
+        stat_sh    = target_ss.worksheet(CONFIG["target_sheet_name"])
+        report_sh  = target_ss.worksheet(CONFIG["report_sheet_name"])
+
+        row = _find_date_row(report_sh, run_dt)
+        if row < 1:
+            raise ValueError(
+                f"找不到今天日期列：{fmt(run_dt, '%Y-%m-%d')}"
             )
 
-    _overwrite_sheet(SYSTEM_SETTING_SHEET, SYSTEM_SETTING_HEADERS, system_rows)
-    _overwrite_sheet(MONTHLY_AREA_SHEET, MONTHLY_AREA_HEADERS, monthly_rows)
+        for mp in CONFIG["report_mappings"]:
+            vals = stat_sh.get(mp["source"])
+            if not vals:
+                continue
+            tc = mp["target_col"]
+            report_sh.update(
+                values=vals,
+                range_name=gspread.utils.rowcol_to_a1(row, tc),
+                value_input_option="USER_ENTERED",
+            )
+
+        elapsed = (now_tp() - t0).total_seconds()
+        checkin_both(gc, run_id, task, "DONE", "SUCCESS", f"row={row}", elapsed)
+        log.info("Step 2 完成，row=%d（%.1fs）", row, elapsed)
+        return {"ok": True, "row": row}
+
+    except Exception as e:
+        elapsed = (now_tp() - t0).total_seconds()
+        checkin_both(gc, run_id, task, "DONE", "ERROR", str(e)[:300], elapsed)
+        raise
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_config_from_master_sheets() -> dict:
-    system_records = _read_sheet_records(SYSTEM_SETTING_SHEET)
+# ──────────────────────────────────────────────────────────
+# Step 3：從 Gmail 抓前一天營業額
+# ──────────────────────────────────────────────────────────
 
-    systems: list[dict] = []
-
-    for record in system_records:
-        name = record.get("系統名稱", "").strip()
-        if not name:
-            continue
-
-        raw_json = record.get("設定JSON", "").strip()
-        sys_cfg: dict = {}
-
-        if raw_json:
-            try:
-                sys_cfg = json.loads(raw_json)
-            except Exception:
-                sys_cfg = {}
-
-        sys_cfg["name"] = name
-        sys_cfg["type"] = record.get("type", sys_cfg.get("type", "")).strip()
-        sys_cfg["master_spreadsheet_id"] = record.get(
-            "主控表ID",
-            sys_cfg.get("master_spreadsheet_id", ""),
-        ).strip()
-
-        folder_id = (
-            record.get("月排程根目錄 ID", "").strip()
-            or record.get("共用雲端資料夾ID / 根目錄ID", "").strip()
-            or sys_cfg.get("folder_id", "")
-        )
-
-        sys_cfg["folder_id"] = folder_id
-        sys_cfg["enabled"] = _sheet_to_bool(
-            record.get("啟用", ""),
-            bool(sys_cfg.get("enabled", True)),
-        )
-
-        systems.append(sys_cfg)
-
-    monthly_records = _read_sheet_records(MONTHLY_AREA_SHEET)
-    monthly_by_system: dict[str, dict] = {}
-
-    for record in monthly_records:
-        system_name = record.get("系統名稱", "").strip() or "月排程系統"
-        area_name = record.get("地區", "").strip()
-
-        if not area_name:
-            continue
-
-        monthly_by_system.setdefault(system_name, {})[area_name] = {
-            "folder_id": record.get("地區根目錄ID", "").strip(),
-            "enabled": _sheet_to_bool(record.get("啟用", ""), True),
-        }
-
-    for sys_cfg in systems:
-        if sys_cfg.get("type") == "monthly_scheduler":
-            areas = monthly_by_system.get(sys_cfg.get("name", ""), {})
-            if areas:
-                sys_cfg["areas"] = areas
-
-    return {"systems": systems}
-
-
-def save_config(cfg: dict) -> None:
-    """儲存設定到主控試算表，不再寫入 GitHub systems.yaml。"""
-    _config_to_master_sheets(cfg)
-    # 清除 config cache，確保下次 load_config 讀到最新設定
-    _load_config_from_master_sheets.clear()
-    st.cache_data.clear()
-
-
-def ensure_config_file() -> None:
-    """舊名稱保留相容；現在會確保主控表分頁存在。"""
-    spreadsheet_id = get_master_config_spreadsheet_id()
-    service = get_sheets_service()
-    _ensure_sheet(service, spreadsheet_id, SYSTEM_SETTING_SHEET, SYSTEM_SETTING_HEADERS)
-    _ensure_sheet(service, spreadsheet_id, MONTHLY_AREA_SHEET, MONTHLY_AREA_HEADERS)
-
-
-def merge_default_systems(data: dict) -> dict:
+def _get_secret(key: str) -> str:
     """
-    保留現有設定，只補缺少的預設系統。
+    依序嘗試四個來源取得 secret（對齊 config_loader.get_service_account_info 邏輯）：
+    1. os.environ
+    2. os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]（只適用 SA，一般 key 不用）
+    3. st.secrets[key]
+    4. st.secrets["gcp_service_account"][key]（不適用一般 key）
     """
-    if "systems" not in data or not isinstance(data["systems"], list):
-        data["systems"] = []
+    # 1. 直接從 os.environ 讀
+    val = os.environ.get(key, "").strip()
+    if val:
+        return val
 
-    existing_names = {
-        str(system.get("name", "")).strip()
-        for system in data.get("systems", [])
-        if system.get("name")
-    }
-
-    for default_system in DEFAULT_CONFIG["systems"]:
-        if default_system["name"] not in existing_names:
-            data["systems"].append(default_system)
-
-    return data
-
-
-def _load_config_from_yaml_fallback() -> dict:
-    if CONFIG_PATH.exists():
-        with CONFIG_PATH.open("r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        return merge_default_systems(data)
-    return merge_default_systems(DEFAULT_CONFIG.copy())
-
-
-def load_config() -> dict:
-    """
-    優先讀主控試算表。
-    若主控表尚無資料，會用 systems.yaml 或 DEFAULT_CONFIG 初始化主控表。
-    新增系統請直接在主控試算表「系統設定」工作表手動新增一列。
-    """
+    # 2. 從 st.secrets 讀（子進程裡 Streamlit 仍可能有 secrets）
     try:
-        data = _load_config_from_master_sheets()
-
-        if data.get("systems"):
-            return merge_default_systems(data)
-
-        data = _load_config_from_yaml_fallback()
-        save_config(data)
-        st.info("已初始化主控表設定")
-        return data
-
-    except Exception as exc:
-        st.warning(f"主控表設定讀取失敗，暫時使用本機 fallback：{exc}")
-        return _load_config_from_yaml_fallback()
-
-
-def merge_legacy_secrets(cfg: dict) -> dict:
-    legacy_master = get_secret_text("MASTER_SPREADSHEET_ID")
-    legacy_folder = get_secret_text("ROOT_FOLDER_ID")
-
-    if not legacy_master and not legacy_folder:
-        return cfg
-
-    for sys_cfg in cfg.get("systems", []):
-        if sys_cfg.get("name") == "儲值金管理":
-            if legacy_master and not sys_cfg.get("master_spreadsheet_id"):
-                sys_cfg["master_spreadsheet_id"] = legacy_master
-            if legacy_folder and not sys_cfg.get("folder_id"):
-                sys_cfg["folder_id"] = legacy_folder
-            break
-
-    return cfg
-
-
-def get_enabled_systems(cfg: dict) -> list[dict]:
-    systems = cfg.get("systems", [])
-    enabled = [s for s in systems if s.get("enabled", True)]
-    return enabled or systems
-
-
-def get_system_by_name(cfg: dict, name: str) -> dict:
-    for s in cfg.get("systems", []):
-        if s.get("name") == name:
-            return s
-    return {}
-
-
-# ═══════════════════════════════════════════════════════════
-# UI 樣式
-# ═══════════════════════════════════════════════════════════
-st.markdown(
-    """
-<style>
-  .stApp { background: #f4f8fc; }
-  #MainMenu, footer, header { visibility: hidden; }
-
-  .app-title {
-    font-size: 1.45rem;
-    font-weight: 800;
-    color: #0a4b6e;
-    letter-spacing: 1px;
-    text-align: center;
-    margin-bottom: 16px;
-  }
-
-  .card {
-    background: white;
-    border-radius: 20px;
-    padding: 16px 20px;
-    margin-bottom: 14px;
-    box-shadow: 0 4px 12px rgba(0,32,48,0.06);
-    border: 1px solid #e2edf2;
-  }
-
-  .card-title {
-    font-size: 0.96rem;
-    font-weight: 800;
-    color: #164a5e;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1.5px solid #e7f0f5;
-  }
-
-  .field-label {
-    color: #2a5770;
-    font-weight: 700;
-    font-size: 0.76rem;
-    margin-bottom: 4px;
-  }
-
-  .stButton > button {
-    background: #1f6c9e !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 40px !important;
-    font-weight: 700 !important;
-    font-size: 0.9rem !important;
-  }
-
-  .stButton > button:hover {
-    background: #135b84 !important;
-  }
-
-  .log-box {
-    background: #0c2835;
-    color: #d7ecf5;
-    border-radius: 20px;
-    padding: 14px 16px;
-    margin-bottom: 14px;
-    font-family: 'Courier New', monospace;
-    border: 1px solid #254f60;
-  }
-
-  .log-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-    color: #b0d1dd;
-    font-size: 0.8rem;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #2c5a6a;
-  }
-
-  .log-scroll {
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  .log-entry {
-    padding: 4px 0;
-    border-bottom: 1px solid #1c4452;
-    font-size: 0.75rem;
-    color: #cde3ec;
-    line-height: 1.4;
-    white-space: pre-wrap;
-  }
-
-  .log-entry.success { color: #6ee7b7; }
-  .log-entry.error   { color: #fca5a5; }
-  .log-entry.warning { color: #fcd34d; }
-
-  .setting-note {
-    font-size: 0.75rem;
-    color: #497084;
-    line-height: 1.5;
-    margin-top: 6px;
-    margin-bottom: 10px;
-  }
-
-  .system-card {
-    background: #f8fcff;
-    border-radius: 16px;
-    padding: 12px 14px;
-    margin-bottom: 10px;
-    border: 1px solid #d9eaf2;
-  }
-
-  .badge-ok {
-    background: #2a8c5a;
-    color: white;
-    padding: 2px 8px;
-    border-radius: 20px;
-    font-size: 0.65rem;
-  }
-
-  .badge-err {
-    background: #dc2626;
-    color: white;
-    padding: 2px 8px;
-    border-radius: 20px;
-    font-size: 0.65rem;
-  }
-
-  .detail-row {
-    font-size: 0.75rem;
-    color: #3e6c87;
-    margin: 3px 0;
-  }
-
-  .report-table-wrap {
-    overflow-x:auto;
-    border:1px solid #e2e8f0;
-    border-radius:16px;
-    background:white;
-  }
-
-  table.report-table {
-    width:100%;
-    border-collapse:separate;
-    border-spacing:0;
-    font-size:0.95rem;
-  }
-
-  .report-table th {
-    background:#f8fafc;
-    color:#64748b;
-    font-weight:800;
-    text-align:center;
-    padding:13px 14px;
-    border-bottom:1px solid #e2e8f0;
-    border-right:1px solid #e2e8f0;
-    white-space:nowrap;
-  }
-
-  .report-table td {
-    padding:12px 14px;
-    border-bottom:1px solid #edf2f7;
-    border-right:1px solid #edf2f7;
-    color:#1e293b;
-    background:white;
-    white-space:nowrap;
-  }
-
-  .report-table td.num {
-    text-align:right !important;
-    font-variant-numeric:tabular-nums;
-  }
-
-  .report-table td.text { text-align:left; }
-
-  .report-table tr.total-row td {
-    background:#f8fafc;
-    font-weight:900;
-  }
-
-  .report-table tr:hover td { background:#f1f5f9; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# ═══════════════════════════════════════════════════════════
-# Session State
-# ═══════════════════════════════════════════════════════════
-if "logs" not in st.session_state:
-    st.session_state.logs = ["[--:--:--] 系統已就緒，請選擇作業..."]
-
-if "selected_system_name" not in st.session_state:
-    st.session_state.selected_system_name = "儲值金管理"
-
-if "adding_system" not in st.session_state:
-    st.session_state.adding_system = False
-
-if "editing_system" not in st.session_state:
-    st.session_state.editing_system = None
-
-if "view" not in st.session_state:
-    st.session_state.view = "main"
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if "username" not in st.session_state:
-    st.session_state.username = ""
-
-if "role" not in st.session_state:
-    st.session_state.role = ""
-
-
-
-def render_login_page() -> None:
-    st.markdown(
-        """
-        <div style="background:white;border:1px solid #e2edf2;border-radius:24px;padding:28px;max-width:460px;margin:70px auto 0 auto;box-shadow:0 10px 30px rgba(0,32,48,0.08);">
-          <div style="font-size:1.8rem;font-weight:900;color:#0a4b6e;text-align:center;margin-bottom:8px;">🔐 Tools App 登入</div>
-          <div style="color:#7894a5;text-align:center;font-size:0.9rem;margin-bottom:22px;">請使用系統帳號登入後操作</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.form("login_form"):
-        username = st.text_input("帳號")
-        password = st.text_input("密碼", type="password")
-        submitted = st.form_submit_button("登入", use_container_width=True)
-
-    if submitted:
-        user = authenticate(username, password)
-
-        if user:
-            st.session_state.logged_in = True
-            st.session_state.username = user["username"]
-            st.session_state.role = user["role"]
-            st.rerun()
-
-        else:
-            st.error("帳號或密碼錯誤")
-
-
-def require_login() -> None:
-    if not st.session_state.get("logged_in"):
-        render_login_page()
-        st.stop()
-
-
-def logout_button() -> None:
-    # 保留函式名稱，避免舊流程呼叫錯誤；實際顯示改到主畫面上方。
-    return
-
-
-def render_user_bar() -> None:
-    username = st.session_state.get("username", "-")
-    role = st.session_state.get("role", "-")
-
-    st.markdown(
-        f"""
-        <div style="
-          background:rgba(255,255,255,0.78);
-          border:1px solid #dbeaf2;
-          border-radius:999px;
-          padding:8px 14px;
-          margin:0 auto 14px auto;
-          max-width:760px;
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:10px;
-          box-shadow:0 4px 16px rgba(15,23,42,0.04);
-          font-size:0.82rem;
-          color:#4b6b7d;
-        ">
-          <div>👤 {html.escape(str(username))}</div>
-          <div>角色：<strong>{html.escape(str(role))}</strong></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    _, mid, _ = st.columns([3, 1, 3])
-    with mid:
-        if st.button("登出", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            st.session_state.role = ""
-            st.session_state.view = "main"
-            st.rerun()
-
-
-def parse_date_range(start_date, end_date) -> list[str]:
-    from datetime import timedelta
-
-    if not start_date or not end_date:
-        return []
-
-    if start_date > end_date:
-        start_date, end_date = end_date, start_date
-
-    days = []
-    current = start_date
-
-    while current <= end_date:
-        days.append(current.strftime("%Y%m%d"))
-        current += timedelta(days=1)
-
-    return days
-
-
-def normalize_monthly_areas(system: dict) -> dict:
-    """月排程地區設定標準化。"""
-    raw_areas = system.get("areas", {})
-    raw_folders = system.get("folders", {}) or {}
-    output = {}
-
-    if isinstance(raw_areas, dict):
-        for area_name, info in raw_areas.items():
-            area_name = str(area_name)
-
-            if isinstance(info, dict):
-                folder_id = str(
-                    info.get("folder_id")
-                    or info.get("root_folder_id")
-                    or info.get("folder_name")
-                    or raw_folders.get(area_name, "")
-                    or ""
-                )
-                output[area_name] = {
-                    "folder_id": folder_id,
-                    "folder_name": str(info.get("folder_name", "")),
-                    "enabled": bool(info.get("enabled", True)),
-                }
-            else:
-                output[area_name] = {
-                    "folder_id": str(raw_folders.get(area_name, "")),
-                    "folder_name": "",
-                    "enabled": bool(info),
-                }
-
-    elif isinstance(raw_areas, list):
-        for area_name in raw_areas:
-            area_name = str(area_name)
-            output[area_name] = {
-                "folder_id": str(raw_folders.get(area_name, "")),
-                "folder_name": "",
-                "enabled": True,
-            }
-
-    return output
-
-
-def monthly_areas_to_df(system: dict) -> pd.DataFrame:
-    areas = normalize_monthly_areas(system)
-
-    rows = []
-
-    for area_name, info in areas.items():
-        rows.append(
-            {
-                "地區": area_name,
-                "地區根目錄ID": info.get("folder_id", "") or info.get("folder_name", ""),
-                "啟用": bool(info.get("enabled", True)),
-            }
-        )
-
-    return pd.DataFrame(rows, columns=["地區", "地區根目錄ID", "啟用"])
-
-
-def default_monthly_areas_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {"地區": "台北", "地區根目錄ID": "", "啟用": True},
-            {"地區": "台中", "地區根目錄ID": "", "啟用": True},
-            {"地區": "桃園", "地區根目錄ID": "", "啟用": True},
-            {"地區": "新竹", "地區根目錄ID": "", "啟用": True},
-            {"地區": "高雄", "地區根目錄ID": "", "啟用": True},
-        ],
-        columns=["地區", "地區根目錄ID", "啟用"],
-    )
-
-
-def monthly_areas_df_to_config(df) -> dict:
-    areas = {}
-
-    if df is None:
-        return areas
-
-    for _, row in pd.DataFrame(df).iterrows():
-        area_name = str(row.get("地區", "") or "").strip()
-
-        if not area_name or area_name.lower() == "nan":
-            continue
-
-        folder_id = str(row.get("地區根目錄ID", "") or "").strip()
-
-        if folder_id.lower() == "nan":
-            folder_id = ""
-
-        enabled_raw = row.get("啟用", True)
-
-        if isinstance(enabled_raw, str):
-            enabled = enabled_raw.strip().lower() not in ["0", "false", "停用", "disabled", "no"]
-        else:
-            enabled = bool(enabled_raw)
-
-        areas[area_name] = {
-            "folder_id": folder_id,
-            "enabled": enabled,
-        }
-
-    return areas
-
-
-def available_areas_for_system(system: dict) -> list[str]:
-    system_type = system.get("type", "")
-
-    if system_type == "monthly_scheduler":
-        areas = normalize_monthly_areas(system)
-        enabled_areas = [
-            area_name
-            for area_name, info in areas.items()
-            if info.get("enabled", True)
-        ]
-        return enabled_areas or ["全區"]
-
-    if system_type == "field_daily_schedule":
-        folder_ids = system.get("folder_ids", {}) or {}
-        for key in ["order", "staff_profile", "staff_schedule"]:
-            value = folder_ids.get(key)
-            if isinstance(value, dict) and value:
-                return list(value.keys())
-        spreadsheet_ids = system.get("spreadsheet_ids", {}) or {}
-        for value in spreadsheet_ids.values():
-            if isinstance(value, dict) and value:
-                return list(value.keys())
-        return ["台北", "台中"]
-
-    # ── ★ 新增：客服排程系統固定全區 ──────────────────────
-    if system_type == "service_schedule":
-        return ["全區"]
-    # ────────────────────────────────────────────────────────
-
-    # 舊日排程目前腳本本身會跑全部區域，先提供全區。
-    return ["全區"]
-
-
-def set_view(view_name: str) -> None:
-    st.session_state.view = view_name
-    try:
-        if view_name == "main":
-            st.query_params.clear()
-        else:
-            st.query_params["view"] = view_name
+        import streamlit as st
+        val = str(st.secrets.get(key, "") or "").strip()
+        if val:
+            return val
     except Exception:
         pass
 
+    return ""
 
-def sync_view_from_query_params() -> None:
+
+def _imap_connect() -> imaplib.IMAP4_SSL:
+    user = _get_secret("GMAIL_USER")
+    pwd  = _get_secret("GMAIL_APP_PASSWORD")
+    if not user or not pwd:
+        raise EnvironmentError("需要 GMAIL_USER 和 GMAIL_APP_PASSWORD")
+    imap = imaplib.IMAP4_SSL("imap.gmail.com")
+    imap.login(user, pwd)
+    return imap
+
+
+def _decode_subject(msg) -> str:
+    parts = decode_header(msg.get("Subject", ""))
+    result = ""
+    for part, enc in parts:
+        if isinstance(part, bytes):
+            result += part.decode(enc or "utf-8", errors="replace")
+        else:
+            result += str(part)
+    return result
+
+
+def _plain_body(msg) -> str:
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain" and "attachment" not in str(part.get("Content-Disposition", "")):
+                charset = part.get_content_charset() or "utf-8"
+                return part.get_payload(decode=True).decode(charset, errors="replace")
+        return ""
+    charset = msg.get_content_charset() or "utf-8"
+    return msg.get_payload(decode=True).decode(charset, errors="replace")
+
+
+def _pick_mail(subject: str, target_date: datetime) -> str:
+    """抓 target_date 當天、主旨完全符合的信，取最接近 17:25 的那封。"""
+    target_time = target_date.replace(
+        hour=CONFIG["mail_target_hour"],
+        minute=CONFIG["mail_target_minute"],
+        second=0, microsecond=0,
+    )
+    imap_date = fmt(target_date, "%d-%b-%Y")
+    imap = _imap_connect()
+    imap.select("INBOX")
+    _, data = imap.search(None, f'(SUBJECT "{subject}" ON {imap_date})')
+    mail_ids = data[0].split()
+
+    if not mail_ids:
+        imap.logout()
+        raise RuntimeError(f"找不到主旨「{subject}」在 {fmt(target_date, '%Y-%m-%d')} 的信件")
+
+    candidates = []
+    for mid in mail_ids:
+        _, msg_data = imap.fetch(mid, "(RFC822)")
+        msg = email.message_from_bytes(msg_data[0][1])
+        if _decode_subject(msg).strip() != subject:
+            continue
+        date_tuple = email.utils.parsedate_tz(msg.get("Date", ""))
+        if not date_tuple:
+            continue
+        msg_dt = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple), tz=TZ_TAIPEI)
+        if msg_dt.date() != target_date.date():
+            continue
+        diff = abs((msg_dt - target_time).total_seconds())
+        candidates.append({"dt": msg_dt, "diff": diff, "body": _plain_body(msg)})
+
+    imap.logout()
+    if not candidates:
+        raise RuntimeError(f"找到信件但沒有主旨完全符合「{subject}」且日期符合的信")
+
+    candidates.sort(key=lambda x: x["diff"])
+    chosen = candidates[0]
+    log.info("  %s → 選中 %s（與17:25差%.0fs）", subject, fmt(chosen["dt"], "%H:%M:%S"), chosen["diff"])
+    return chosen["body"]
+
+
+def _normalize_lines(text: str) -> list[str]:
+    for ch in ["\r\n", "\r"]:
+        text = text.replace(ch, "\n")
+    for ch in ["\u00A0", "\u200B", "\u200C", "\u200D", "\uFEFF"]:
+        text = text.replace(ch, "")
+    text = text.replace("\u3000", " ").replace("﹕", "：")
+    return [l.strip() for l in text.split("\n") if l.strip()]
+
+
+def _find_daily_value(lines: list[str], date_str: str) -> int:
+    header = "【專業清潔】日營業額"
+    idx = -1
+    for i in range(len(lines) - 1, -1, -1):
+        if header in lines[i].replace(" ", ""):
+            idx = i
+            break
+    if idx == -1:
+        raise ValueError("找不到【專業清潔】日營業額標題")
+    for i in range(idx + 1, len(lines)):
+        compact = lines[i].replace(" ", "")
+        if compact != header and re.match(r"^【.+】日營業額$", compact):
+            break
+        m = re.match(r"^(\d{4}-\d{2}-\d{2})[：:](\d+)分?$", compact)
+        if m and m.group(1) == date_str:
+            return int(m.group(2))
+    raise ValueError(f"找到標題但找不到 {date_str} 的數值")
+
+
+def _find_monthly_total(lines: list[str], month_str: str) -> tuple[int, int]:
+    label = f"【{month_str}總營業額】"
+    amount, count = None, None
+    for i in range(len(lines) - 1, -1, -1):
+        compact = lines[i].replace(" ", "")
+        if label not in compact:
+            continue
+        if amount is None:
+            m = re.search(r"\$([\d,]+)", compact)
+            if m:
+                amount = int(m.group(1).replace(",", ""))
+        if count is None and "$" not in compact:
+            m = re.search(r"[：:](\d+)$", compact)
+            if m:
+                count = int(m.group(1))
+        if amount is not None and count is not None:
+            break
+    if amount is None:
+        raise ValueError(f"找不到【{month_str}總營業額】金額")
+    if count is None:
+        raise ValueError(f"找不到【{month_str}總營業額】筆數")
+    return amount, count
+
+
+def _parse_mail(body: str, month_str: str, date_str: str) -> dict:
+    lines = _normalize_lines(body)
+    daily = _find_daily_value(lines, date_str)
+    amount, count = _find_monthly_total(lines, month_str)
+    return {"daily_value": daily, "total_count": count, "total_amount": amount}
+
+
+def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
+    task = "Step3_更新前一天營業分數及營業額"
+    t0 = now_tp()
+    checkin_both(gc, run_id, task, "START", "RUNNING")
+
     try:
-        view = st.query_params.get("view")
-    except Exception:
-        view = None
+        yesterday  = yesterday_tp()
+        date_str   = fmt(yesterday, "%Y-%m-%d")
+        month_str  = fmt(yesterday, "%Y-%m")
 
-    if view in ["report", "log"]:
-        st.session_state.view = view
+        target_ss  = gc.open_by_key(CONFIG["target_file_id"])
+        report_sh  = target_ss.worksheet(CONFIG["report_sheet_name"])
 
+        row = _find_date_row(report_sh, yesterday)
+        if row < 1:
+            raise ValueError(f"找不到前一天日期列：{date_str}")
 
-# ═══════════════════════════════════════════════════════════
-# 工具函式
-# ═══════════════════════════════════════════════════════════
-def tw_now_text(fmt: str = "%H:%M:%S") -> str:
-    return datetime.now(TW_TZ).strftime(fmt)
+        taipei   = _parse_mail(_pick_mail(CONFIG["mail_subjects"]["taipei"],   yesterday), month_str, date_str)
+        taichung = _parse_mail(_pick_mail(CONFIG["mail_subjects"]["taichung"], yesterday), month_str, date_str)
 
+        log.info("  台北：%s", taipei)
+        log.info("  台中：%s", taichung)
 
-def add_log(message: str, level: str = "info") -> None:
-    now = tw_now_text("%H:%M:%S")
-    icons = {
-        "info": "🔵",
-        "success": "✅",
-        "error": "❌",
-        "warning": "⚠️",
-    }
-    icon = icons.get(level, "🔵")
-    st.session_state.logs.append(f"[{now}] {icon} {message}")
+        # 台北 → H/I/J（欄 8,9,10）
+        report_sh.update(
+            values=[[taipei["daily_value"], taipei["total_count"], taipei["total_amount"]]],
+            range_name=gspread.utils.rowcol_to_a1(row, 8),
+            value_input_option="USER_ENTERED",
+        )
+        # 台中 → CT/CU/CV（欄 98,99,100）
+        report_sh.update(
+            values=[[taichung["daily_value"], taichung["total_count"], taichung["total_amount"]]],
+            range_name=gspread.utils.rowcol_to_a1(row, 98),
+            value_input_option="USER_ENTERED",
+        )
 
-    if len(st.session_state.logs) > 200:
-        st.session_state.logs = st.session_state.logs[-200:]
+        elapsed = (now_tp() - t0).total_seconds()
+        note = json.dumps({"row": row, "taipei": taipei, "taichung": taichung}, ensure_ascii=False)
+        checkin_both(gc, run_id, task, "DONE", "SUCCESS", note[:300], elapsed)
+        log.info("Step 3 完成，row=%d（%.1fs）", row, elapsed)
+        return {"ok": True, "row": row, "taipei": taipei, "taichung": taichung}
 
-
-def render_log() -> None:
-    log_html = (
-        '<div class="log-box">'
-        '<div class="log-header">'
-        '<span>📋 執行日誌</span>'
-        '<span style="background:#1e4757;padding:3px 10px;border-radius:20px;font-size:0.75rem;">台北時區 / 即時更新</span>'
-        '</div><div class="log-scroll">'
-    )
-
-    for entry in reversed(st.session_state.logs):
-        css = "log-entry"
-
-        if "✅" in entry:
-            css += " success"
-        elif "❌" in entry:
-            css += " error"
-        elif "⚠️" in entry:
-            css += " warning"
-
-        log_html += f'<div class="{css}">{html.escape(entry)}</div>'
-
-    log_html += "</div></div>"
-    st.markdown(log_html, unsafe_allow_html=True)
+    except Exception as e:
+        elapsed = (now_tp() - t0).total_seconds()
+        checkin_both(gc, run_id, task, "DONE", "ERROR", str(e)[:300], elapsed)
+        raise
 
 
-def mask_id(value: str) -> str:
-    if not value:
-        return "❌ 未設定"
-    value = str(value)
-    if len(value) <= 14:
-        return value
-    return f"{value[:8]}...{value[-6:]}"
+# ──────────────────────────────────────────────────────────
+# 主程式
+# ──────────────────────────────────────────────────────────
 
+def _load_target_file_id() -> str:
+    """
+    依序嘗試取得目標試算表 ID：
+    1. 環境變數 SERVICE_TARGET_SPREADSHEET_ID（由 toolapp.py 注入或 GitHub Secret）
+    2. 主控試算表「系統設定」→ 客服排程系統 → 共用雲端資料夾ID 欄位
+    """
+    # 1. 環境變數優先（toolapp.py 執行前已注入）
+    val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
+    if val:
+        log.info("目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID")
+        return val
 
-def mask_nested_ids(value):
-    if isinstance(value, dict):
-        return {k: mask_nested_ids(v) for k, v in value.items()}
-    return mask_id(str(value or ""))
-
-
-def get_system_type_label(system_type: str) -> str:
-    mapping = {
-        "vip": "儲值金管理",
-        "daily_scheduler": "日排程系統",
-        "monthly_scheduler": "月排程系統",
-        "field_daily_schedule": "外場排程系統",
-        "service_schedule": "客服排程系統",   # ★ 新增
-    }
-    return mapping.get(system_type, system_type or "未設定")
-
-
-def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
-    from services.auth import get_gspread_client, get_drive_service
-    from services.google_drive import DriveService
-    from services.google_sheets import SheetsService
-    from services.vip_workflow import VipStoredValueWorkflow
-
-    sheets = SheetsService(get_gspread_client())
-    drive = DriveService(get_drive_service())
-
+    # 2. 從主控試算表讀取（429 時忽略）
     try:
-        return VipStoredValueWorkflow(
-            drive,
-            sheets,
-            master_id,
-            folder_id,
-            system_name,
+        from tools.common.config_loader import get_system_config
+        system_cfg = get_system_config("客服排程系統")
+        folder_id = (
+            system_cfg.get("共用雲端資料夾ID / 根目錄ID", "").strip()
+            or system_cfg.get("folder_id", "").strip()
         )
-    except TypeError:
-        return VipStoredValueWorkflow(
-            drive,
-            sheets,
-            master_id,
-            folder_id,
-        )
+        if folder_id:
+            log.info("目標試算表 ID 來源：主控試算表系統設定")
+            return folder_id
+    except Exception as e:
+        log.warning("從主控試算表讀取目標 ID 失敗（非致命）：%s", e)
+
+    return ""
 
 
-def run_script(script_path: str, args: list[str] | None = None) -> str:
-    args = args or []
 
-    if script_path.startswith("module:"):
-        module_name = script_path.replace("module:", "", 1)
-        cmd = [sys.executable, "-m", module_name, *args]
-        display_name = module_name
-    else:
-        script = BASE_DIR / script_path
+def main() -> None:
+    parser = argparse.ArgumentParser(description="檸檬家事客服排程系統")
+    parser.add_argument(
+        "--step", type=int, choices=[0, 1, 2, 3], default=0,
+        help="0=全部, 1=排班統計表, 2=每日回報, 3=前一天營業額",
+    )
+    args = parser.parse_args()
 
-        if not script.exists():
-            raise RuntimeError(f"找不到執行檔：{script_path}")
+    # 動態載入目標試算表 ID（Secret 或主控試算表）
+    target_id = _load_target_file_id()
+    if not target_id:
+        sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
+    CONFIG["target_file_id"] = target_id
 
-        cmd = [sys.executable, str(script), *args]
-        display_name = script_path
-
-    # 只需確保 PYTHONPATH 包含 BASE_DIR，其餘環境自然繼承（對齊外場/日排程做法）
-    env = os.environ.copy()
-    base_str = str(BASE_DIR)
-    existing_pp = env.get("PYTHONPATH", "")
-    if base_str not in existing_pp:
-        env["PYTHONPATH"] = base_str + (":" + existing_pp if existing_pp else "")
-
-    completed = subprocess.run(
-        cmd,
-        text=True,
-        capture_output=True,
-        cwd=BASE_DIR,
-        env=env,
+    # 主控表 ID（打卡用）
+    CONFIG["master_log_spreadsheet_id"] = (
+        os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+        or _get_secret("TOOLS_APP_LOG_SPREADSHEET_ID")
     )
 
-    if completed.stdout:
-        for line in completed.stdout.splitlines()[-120:]:
-            add_log(line, "info")
+    run_id = str(uuid.uuid4())[:8]
+    run_dt = now_tp()
+    step   = args.step
 
-    if completed.stderr:
-        for line in completed.stderr.splitlines()[-120:]:
-            add_log(line, "error")
+    log.info("=== 客服排程系統 run_id=%s step=%s 台北時間=%s ===",
+             run_id, step or "ALL", fmt(run_dt, "%Y-%m-%d %H:%M:%S"))
 
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"執行失敗：{display_name}\n"
-            f"exit={completed.returncode}\n"
-            f"STDOUT:\n{completed.stdout}\n"
-            f"STDERR:\n{completed.stderr}"
-        )
+    gc    = _gc()
+    drive = _drive()
 
-    return f"{display_name} 執行完成"
+    # 整體開始打卡
+    checkin_both(gc, run_id, "RUN", "START", "RUNNING",
+                 f"step={step}", 0)
 
-def render_html_table(df: pd.DataFrame) -> None:
-    if df.empty:
-        st.info("尚無資料")
-        return
+    t_total = now_tp()
+    errors  = []
 
-    show = df.copy()
-    numeric_cols = []
-
-    for col in show.columns:
-        col_text = str(col)
-        if "佔比" in col_text:
-            show[col] = (
-                pd.to_numeric(show[col], errors="coerce")
-                .fillna(0)
-                .map(lambda x: f"{x:.2%}")
-            )
-            numeric_cols.append(col)
-        elif any(x in col_text for x in ["業績", "加總", "家電", "儲值金", "金額", "總額"]):
-            show[col] = (
-                pd.to_numeric(show[col], errors="coerce")
-                .fillna(0)
-                .map(lambda x: f"{int(x):,}")
-            )
-            numeric_cols.append(col)
-
-    out = ['<div class="report-table-wrap"><table class="report-table"><thead><tr>']
-
-    for col in show.columns:
-        out.append(f"<th>{html.escape(str(col))}</th>")
-
-    out.append("</tr></thead><tbody>")
-
-    for _, row in show.iterrows():
-        is_total = str(row.get("城市", "")) == "加總"
-        cls = ' class="total-row"' if is_total else ""
-        out.append(f"<tr{cls}>")
-
-        for col in show.columns:
-            cell_cls = "num" if col in numeric_cols else "text"
-            out.append(f'<td class="{cell_cls}">{html.escape(str(row[col]))}</td>')
-
-        out.append("</tr>")
-
-    out.append("</tbody></table></div>")
-    st.markdown("".join(out), unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════
-# 業績報表
-# ═══════════════════════════════════════════════════════════
-def render_report() -> None:
-    latest_dir = Path("dashboard_data/latest")
-    df4_path = latest_dir / "df4.csv"
-    daily_path = latest_dir / "daily_df.csv"
-    next_path = latest_dir / "next_month_daily_df.csv"
-    month_end_path = latest_dir / "month_end_summary.csv"
-    meta_path = latest_dir / "meta.json"
-    html_path = latest_dir / "email_preview.html"
-
-    def load_csv(path: Path) -> pd.DataFrame:
-        if not path.exists():
-            return pd.DataFrame()
-        return pd.read_csv(path, encoding="utf-8-sig")
-
-    def money(value) -> str:
+    def run(step_num: int, fn, *a):
+        labels = {
+            1: "Step1_更新排班統計表",
+            2: "Step2_更新每日回報",
+            3: "Step3_更新前一天營業分數及營業額",
+        }
+        log.info("--- %s ---", labels[step_num])
         try:
-            return f"{int(float(str(value).replace(',', '').replace('%', ''))):,}"
-        except Exception:
-            return "0"
-
-    def get_total(df: pd.DataFrame, col: str) -> str:
-        if df.empty or col not in df.columns:
-            return "0"
-        total_row = df[df["城市"].astype(str) == "加總"] if "城市" in df.columns else pd.DataFrame()
-        if not total_row.empty:
-            return money(total_row.iloc[0][col])
-        return money(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
-
-    st.markdown(
-        """
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
-          <div>
-            <div style="font-size:2.2rem;font-weight:900;color:#0f172a;letter-spacing:1px;">
-              📊 業績報表
-            </div>
-            <div style="font-size:0.85rem;font-weight:800;color:#94a3b8;letter-spacing:5px;margin-top:4px;">
-              LATEST DATA · CURRENT / NEXT MONTH / SNAPSHOT
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    top_cols = st.columns([1, 1, 1, 1])
-    with top_cols[0]:
-        if st.button("← 返回主控台", use_container_width=True):
-            set_view("main")
-            st.rerun()
-
-    with top_cols[1]:
-        if st.button("🔄 更新業績報表", use_container_width=True):
-            try:
-                add_log("開始更新業績報表", "info")
-                run_script("tools/scheduled_daily/performance_report.py", ["dashboard", "true"])
-                add_log("業績報表更新完成", "success")
-                st.rerun()
-            except Exception as e:
-                add_log(f"業績報表更新失敗：{e}", "error")
-                st.error(f"業績報表更新失敗：{e}")
-
-    with top_cols[2]:
-        if st.button("📂 重新讀取資料", use_container_width=True):
-            st.rerun()
-
-    with top_cols[3]:
-        st.link_button("🔗 開啟獨立連結", "?view=report", use_container_width=True)
-
-    if not df4_path.exists():
-        st.info("尚未產生業績報表資料，請先在主控台執行「日排程系統 → 業績報表」。")
-        return
-
-    df4 = load_csv(df4_path)
-    daily_df = load_csv(daily_path)
-    next_df = load_csv(next_path)
-    month_end_df = load_csv(month_end_path)
-
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            st.info(f"📅 最新更新時間：{meta.get('updated_at', '-')}")
-            if meta.get("error"):
-                st.warning(meta.get("error"))
-        except Exception:
-            pass
-
-    if df4.empty:
-        st.warning("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
-        return
-
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        st.metric("本月加總", get_total(df4, "本月加總"))
-    with k2:
-        st.metric("次月加總", get_total(df4, "次月加總"))
-    with k3:
-        st.metric("本月家電加總", get_total(df4, "本月家電加總"))
-    with k4:
-        st.metric("儲值金", get_total(df4, "儲值金"))
-
-    st.markdown('<div class="card"><div class="card-title">📍 各區月度摘要</div>', unsafe_allow_html=True)
-    render_html_table(df4)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="card"><div class="card-title">📈 月度追蹤</div>', unsafe_allow_html=True)
-    tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
-
-    with tabs[0]:
-        render_html_table(daily_df)
-
-    with tabs[1]:
-        render_html_table(next_df)
-
-    with tabs[2]:
-        render_html_table(month_end_df)
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    with st.expander("📧 信件預覽", expanded=False):
-        if html_path.exists():
-            st.components.v1.html(html_path.read_text(encoding="utf-8"), height=600, scrolling=True)
-        else:
-            st.info("尚無 Email HTML")
-
-
-# ═══════════════════════════════════════════════════════════
-# 排程 Log 頁
-# ═══════════════════════════════════════════════════════════
-def render_log_page() -> None:
-    JOB_LABELS = {
-        # 日排程：撈資料
-        "schedule_report": "排班統計表",
-        "staff_schedule": "專員班表",
-        "orders_report": "當月次月訂單",
-        "staff_info": "專員個資",
-
-        # 業績報表
-        "performance_report": "業績報表",
-
-        # 外場排程：彙整資料
-        "field_schedule_stats": "外場排班統計表",
-        "field_staff_schedule": "外場專員班表",
-        "field_orders": "外場訂單",
-        "field_staff_profile": "外場專員個資",
-
-        # ★ 客服排程
-        "service_schedule_stats": "客服排班統計表",
-        "service_daily_report":   "客服每日回報",
-        "service_revenue":        "客服前日營業額",
-
-        # 通知
-        "send_daily_result": "通知信",
-    }
-
-    def today_key() -> str:
-        return datetime.now(TW_TZ).strftime("%Y%m%d")
-
-    def read_text_safe(path: Path, max_bytes: int = 2 * 1024 * 1024) -> str:
-        if not path.exists():
-            return ""
-        # 超過 2MB 只讀最後 2MB，避免大型 log 吃光記憶體
-        size = path.stat().st_size
-        if size > max_bytes:
-            with path.open("rb") as f:
-                f.seek(-max_bytes, 2)
-                return f.read().decode("utf-8", errors="replace")
-        return path.read_text(encoding="utf-8", errors="replace")
-
-    def status_for(exit_code: str) -> tuple[str, str, str]:
-        if exit_code == "0":
-            return "成功", "✅", "#16a34a"
-        if exit_code == "missing":
-            return "尚無紀錄", "⚪", "#64748b"
-        return "失敗", "❌", "#dc2626"
-
-    def important_lines(content: str, limit: int = 8) -> list[str]:
-        if not content:
-            return ["沒有 log 內容"]
-
-        lines = [line.strip() for line in content.splitlines() if line.strip()]
-        if not lines:
-            return ["沒有 log 內容"]
-
-        keywords = [
-            "Traceback", "RuntimeError", "ModuleNotFoundError",
-            "Error", "ERROR", "Exception", "SMTPAuthenticationError",
-            "HttpError", "failed", "Failed", "失敗", "錯誤", "找不到", "登入失敗",
-        ]
-
-        matched = [line for line in lines if any(k in line for k in keywords)]
-
-        if matched:
-            return matched[-limit:]
-
-        return lines[-min(limit, len(lines)):]
-
-    def summary_line(content: str, exit_code: str) -> str:
-        lines = [line.strip() for line in content.splitlines() if line.strip()]
-        if not lines:
-            return "沒有摘要"
-
-        if exit_code == "0":
-            success_keywords = ["全部完成", "執行完成", "已上傳", "完成"]
-            for keyword in success_keywords:
-                for line in reversed(lines):
-                    if keyword in line:
-                        return line[-130:]
-
-        return important_lines(content, limit=1)[-1][-130:]
-
-    st.markdown(
-        """
-        <style>
-          .log-title { font-size:2.2rem; font-weight:900; color:#0f172a; letter-spacing:1px; margin-bottom:4px; }
-          .log-subtitle { font-size:0.82rem; font-weight:800; color:#94a3b8; letter-spacing:4px; margin-top:6px; margin-bottom:22px; }
-          .log-top-card { background:linear-gradient(135deg,#ffffff,#f8fafc); border:1px solid #e2e8f0; border-radius:24px; padding:26px; margin:20px 0 26px 0; box-shadow:0 12px 30px rgba(15,23,42,0.07); }
-          .log-overall { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
-          .log-overall-title { font-size:1.55rem; font-weight:900; color:#0f172a; }
-          .log-overall-note { color:#64748b; margin-top:8px; font-size:0.98rem; }
-          .overall-status { font-size:1.55rem; font-weight:900; }
-          .result-strip { display:flex; gap:12px; flex-wrap:wrap; margin-top:18px; }
-          .result-pill { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:9px 14px; color:#334155; font-weight:900; font-size:0.93rem; }
-          .error-box { background:#fff1f2; border:1px solid #fecdd3; color:#991b1b; border-radius:14px; padding:12px 14px; margin-top:12px; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:0.84rem; line-height:1.55; white-space:pre-wrap; }
-        </style>
-        <div class="log-title">📋 今日排程狀態</div>
-        <div class="log-subtitle">DAILY SCHEDULE STATUS · ACTION LOGS</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    top_cols = st.columns([1, 1, 2])
-    with top_cols[0]:
-        if st.button("← 返回主控台", use_container_width=True):
-            set_view("main")
-            st.rerun()
-    with top_cols[1]:
-        if st.button("🔄 重新讀取", use_container_width=True):
-            st.rerun()
-
-    log_root = Path("logs")
-
-    if not log_root.exists():
-        st.info("目前沒有 logs/ 資料夾。請確認 GitHub Actions 已將 logs/ commit 回 repo。")
-        return
-
-    day_dirs = sorted([p for p in log_root.iterdir() if p.is_dir()], reverse=True)
-
-    if not day_dirs:
-        st.info("目前 logs/ 裡沒有日期資料夾。")
-        return
-
-    today = today_key()
-    day_options = [p.name for p in day_dirs]
-    default_index = day_options.index(today) if today in day_options else 0
-
-    selected_day = st.selectbox("選擇日期", day_options, index=default_index)
-
-    selected_dir = log_root / selected_day
-    log_files = sorted(selected_dir.glob("*.log"))
-
-    if not log_files:
-        st.info(f"{selected_day} 沒有 log 檔。")
-        return
-
-    rows = []
-
-    for log_file in log_files:
-        job_name = log_file.stem
-        exit_file = log_file.with_suffix(".exit")
-        exit_code = read_text_safe(exit_file).strip() if exit_file.exists() else "missing"
-        status_text, icon, color = status_for(exit_code)
-        content = read_text_safe(log_file)
-
-        rows.append(
-            {
-                "job_name": job_name,
-                "label": JOB_LABELS.get(job_name, job_name),
-                "content": content,
-                "exit_code": exit_code,
-                "status_text": status_text,
-                "icon": icon,
-                "color": color,
-                "summary": summary_line(content, exit_code),
-                "important": important_lines(content),
-            }
-        )
-
-    success_count = sum(1 for r in rows if r["exit_code"] == "0")
-    failed_rows = [r for r in rows if r["exit_code"] not in ["0", "missing"]]
-    failed_count = len(failed_rows)
-    missing_count = sum(1 for r in rows if r["exit_code"] == "missing")
-
-    if failed_count:
-        overall_text, overall_icon, overall_color = "有失敗項目", "❌", "#dc2626"
-    elif success_count:
-        overall_text, overall_icon, overall_color = "全部成功", "✅", "#16a34a"
-    else:
-        overall_text, overall_icon, overall_color = "尚無成功紀錄", "⚪", "#64748b"
-
-    failed_summary_html = ""
-    if failed_rows:
-        items = []
-        for r in failed_rows:
-            msg = "\n".join(r["important"][:5])
-            items.append(f"<div style='margin-top:10px;'><b>{html.escape(r['label'])}</b><br>{html.escape(msg)}</div>")
-        failed_summary_html = "<div class='error-box'><b>失敗項目與錯誤內容：</b>" + "".join(items) + "</div>"
-
-    st.markdown(
-        f"""
-        <div class="log-top-card">
-          <div class="log-overall">
-            <div>
-              <div class="log-overall-title">今日排程</div>
-              <div class="log-overall-note">日期：{html.escape(selected_day)}。以執行結果為主，失敗內容會優先顯示。</div>
-            </div>
-            <div class="overall-status" style="color:{overall_color};">{overall_icon} {overall_text}</div>
-          </div>
-          <div class="result-strip">
-            <div class="result-pill">✅ 成功：{success_count}</div>
-            <div class="result-pill">❌ 失敗：{failed_count}</div>
-            <div class="result-pill">⚪ 尚無紀錄：{missing_count}</div>
-            <div class="result-pill">📄 Log 檔：{len(log_files)}</div>
-          </div>
-          {failed_summary_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.expander("🔎 查看詳細 log", expanded=False):
-        tabs = st.tabs([f"{row['icon']} {row['label']}" for row in rows])
-
-        for tab, row in zip(tabs, rows):
-            with tab:
-                json_file = Path("logs") / selected_day / f"{row['job_name']}.json"
-                meta = {}
-                if json_file.exists():
-                    try:
-                        meta = json.loads(json_file.read_text(encoding="utf-8"))
-                    except Exception:
-                        meta = {}
-
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.caption("開始時間")
-                    st.write(meta.get("started_at", "-"))
-                with c2:
-                    st.caption("完成時間")
-                    st.write(meta.get("finished_at", "-"))
-                with c3:
-                    st.caption("耗時")
-                    st.write(f"{meta.get('duration_seconds', '-')} 秒")
-
-                st.divider()
-
-                if row["exit_code"] == "0":
-                    st.success(f"{row['label']}：成功")
-                elif row["exit_code"] == "missing":
-                    st.warning(f"{row['label']}：尚無 exit code")
-                else:
-                    st.error(f"{row['label']}：失敗 / exit code {row['exit_code']}")
-                    with st.expander("查看錯誤詳細 log", expanded=False):
-                        st.code(row["content"] or "空 log", language="text")
-
-
-# ═══════════════════════════════════════════════════════════
-# 系統 / 功能設定
-# ═══════════════════════════════════════════════════════════
-SYSTEM_FUNCTIONS_BY_TYPE = {
-    "vip": [
-        "建立當月彙整檔",
-        "轉檔＋高雄/新竹彙整",
-        "搬運",
-        "計算",
-        "彙整金額",
-        "一鍵執行：建立＋轉檔＋搬運＋計算＋彙整金額",
-    ],
-    "daily_scheduler": [
-        "排班統計表",
-        "專員班表",
-        "專員個資",
-        "當月次月訂單",
-        "業績報表",
-        "一鍵執行日排程",
-    ],
-    "monthly_scheduler": [
-        "上半月訂單",
-        "下半月訂單",
-        "已退款",
-        "預收",
-        "儲值金結算",
-        "儲值金預收",
-        "一鍵執行月排程",
-    ],
-    "field_daily_schedule": [
-        "外場排班統計表",
-        "外場專員班表",
-        "外場當月次月訂單",
-        "外場專員個資",
-        "一鍵執行外場日排程",
-    ],
-    # ── ★ 新增：客服排程系統功能清單 ────────────────────────
-    "service_schedule": [
-        # 排班同步
-        "更新排班統計表",
-        "更新每日回報",
-        "更新前一天營業分數及營業額",
-        "三步驟全部執行",
-        # CRM
-        "CRM：抓儲值金",
-        "CRM：匯出定期VIP日曆",
-        "CRM：全跑（抓儲值金＋匯出VIP）",
-    ],
-    # ────────────────────────────────────────────────────────
-}
-
-DAILY_SCRIPT_MAP = {
-    "排班統計表": "tools/scheduled_daily/schedule_report.py",
-    "專員班表": "tools/scheduled_daily/staff_schedule.py",
-    "專員個資": "tools/scheduled_daily/staff_info.py",
-    "當月次月訂單": "tools/scheduled_daily/orders_report.py",
-    "業績報表": "tools/scheduled_daily/performance_report.py",
-}
-
-MONTHLY_SCRIPT_MAP = {
-    "上半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "1"],
-    "下半月訂單": ["tools/scheduled_monthly/half_month_orders.py", "2"],
-    "已退款": ["tools/scheduled_monthly/refund_report.py"],
-    "預收": ["tools/scheduled_monthly/prepaid_report.py"],
-    "儲值金結算": ["tools/scheduled_monthly/stored_value_settlement.py"],
-    "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
-}
-
-DAILY_TARGET_MAP = {
-    "一鍵執行日排程": "all",
-    "排班統計表": "schedule_report",
-    "專員班表": "staff_schedule",
-    "當月次月訂單": "orders_report",
-    "專員個資": "staff_info",
-}
-
-FIELD_SCRIPT_MAP = {
-    "外場排班統計表": ["tools/field_management/schedule_stats.py"],
-    "外場專員班表": ["tools/field_management/staff_schedule.py"],
-    "外場當月次月訂單": ["tools/field_management/orders.py"],
-    "外場專員個資": ["tools/field_management/staff_profile.py"],
-    "一鍵執行外場日排程": [
-        "module:tools.field_management.scheduler",
-        "--target",
-        "all",
-    ],
-}
-
-# ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
-SERVICE_STEP_MAP = {
-    "更新排班統計表":           "1",
-    "更新每日回報":             "2",
-    "更新前一天營業分數及營業額": "3",
-    "三步驟全部執行":           "0",
-}
-
-# ── ★ CRM：功能 → crm_export.py --step 對應表 ───────────────
-SERVICE_CRM_MAP = {
-    "CRM：抓儲值金":                 "1",
-    "CRM：匯出定期VIP日曆":          "2",
-    "CRM：全跑（抓儲值金＋匯出VIP）": "0",
-}
-# ────────────────────────────────────────────────────────────
-
-
-def functions_for_system(sys_cfg: dict) -> list[str]:
-    system_type = sys_cfg.get("type", "vip")
-    return SYSTEM_FUNCTIONS_BY_TYPE.get(system_type, ["尚未設定功能"])
-
-
-# ═══════════════════════════════════════════════════════════
-# Router
-# ═══════════════════════════════════════════════════════════
-require_login()
-
-sync_view_from_query_params()
-
-config = merge_legacy_secrets(load_config())
-_log_id = config.get("log_spreadsheet_id", "").strip()
-if _log_id and not os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID"):
-    os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = _log_id
-
-systems = [
-    s for s in get_enabled_systems(config)
-    if can_access_system(s.get("type", ""))
-]
-system_names = [s.get("name", "") for s in systems if s.get("name")]
-
-if not system_names:
-    st.error("目前角色沒有可執行的系統權限，請聯絡管理員。")
-    st.stop()
-
-if st.session_state.view == "report":
-    if not can_access_page("report"):
-        st.error("你沒有權限查看業績報表")
-        st.stop()
-    render_report()
-    st.stop()
-
-if st.session_state.view == "log":
-    if not can_access_page("log"):
-        st.error("你沒有權限查看排程 Log")
-        st.stop()
-    render_log_page()
-    st.stop()
-
-
-# ═══════════════════════════════════════════════════════════
-# UI — 主標題
-# ═══════════════════════════════════════════════════════════
-st.markdown(
-    '<div class="app-title">🧰 Tools App 作業系統</div>',
-    unsafe_allow_html=True,
-)
-render_user_bar()
-
-
-# ═══════════════════════════════════════════════════════════
-# UI — 執行設定
-# ═══════════════════════════════════════════════════════════
-st.markdown('<div class="card">', unsafe_allow_html=True)
-
-head_left, head_report, head_log = st.columns([2.2, 1, 1])
-
-with head_left:
-    st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
-
-with head_report:
-    if can_access_page("report"):
-        if st.button("📊 查看業績報表", use_container_width=True):
-            set_view("report")
-            st.rerun()
-    else:
-        st.caption("無業績報表權限")
-
-with head_log:
-    if can_access_page("log"):
-        if st.button("📋 查看排程 Log", use_container_width=True):
-            set_view("log")
-            st.rerun()
-    else:
-        st.caption("無 Log 權限")
-
-sys_col, func_col = st.columns([1, 1])
-
-with sys_col:
-    st.markdown('<div class="field-label">🗂️ 執行系統</div>', unsafe_allow_html=True)
-
-    default_index = 0
-    if st.session_state.selected_system_name in system_names:
-        default_index = system_names.index(st.session_state.selected_system_name)
-
-    system_name = st.selectbox(
-        "執行系統",
-        system_names,
-        index=default_index,
-        label_visibility="collapsed",
-        key="system_name",
-    )
-
-    st.session_state.selected_system_name = system_name
-
-selected_system = get_system_by_name(config, system_name)
-system_type = selected_system.get("type", "vip")
-
-with func_col:
-    st.markdown('<div class="field-label">🎯 執行功能</div>', unsafe_allow_html=True)
-
-    selected_function = st.selectbox(
-        "執行功能",
-        functions_for_system(selected_system),
-        label_visibility="collapsed",
-        key="selected_function",
-    )
-
-monthly_order_functions = ["上半月訂單", "下半月訂單"]
-
-period = ""
-start_date_value = None
-end_date_value = None
-monthly_date_mode = "期別"
-
-date_col, area_col = st.columns([2, 1])
-
-with date_col:
-    if system_type == "monthly_scheduler" and selected_function in monthly_order_functions:
-        st.markdown('<div class="field-label">📆 執行方式</div>', unsafe_allow_html=True)
-
-        monthly_date_mode = st.radio(
-            "執行方式",
-            ["期別", "日期區間"],
-            horizontal=True,
-            label_visibility="collapsed",
-            key="monthly_date_mode",
-        )
-
-        if monthly_date_mode == "期別":
-            period_default = tw_now_text("%Y%m") + ("-1" if selected_function == "上半月訂單" else "-2")
-            period = st.text_input(
-                "執行期別",
-                value=period_default,
-                placeholder="例如：202605-1 或 202605-2",
-                label_visibility="collapsed",
-                key=f"period_monthly_order_{selected_function}",
-            )
-        else:
-            d1, d2 = st.columns(2)
-            today_date = datetime.now(TW_TZ).date()
-            with d1:
-                start_date_value = st.date_input("開始日期", value=today_date, key="monthly_start_date")
-            with d2:
-                end_date_value = st.date_input("結束日期", value=today_date, key="monthly_end_date")
-            period = start_date_value.strftime("%Y%m%d")
-
-    elif system_type in ["vip", "monthly_scheduler"]:
-        st.markdown('<div class="field-label">📆 執行期別</div>', unsafe_allow_html=True)
-        period = st.text_input(
-            "執行期別",
-            value=tw_now_text("%Y%m"),
-            placeholder="例如：202605",
-            label_visibility="collapsed",
-            key="period",
-        )
-
-    # ── ★ 客服排程系統 ──────────────────────────────────────
-    elif system_type == "service_schedule":
-        st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
-        # CRM 匯出 VIP 日曆需要選日期範圍
-        if selected_function in ("CRM：匯出定期VIP日曆", "CRM：全跑（抓儲值金＋匯出VIP）"):
-            _today_date = datetime.now(TW_TZ).date()
-            _first_of_month = _today_date.replace(day=1)
-            _d1, _d2 = st.columns(2)
-            with _d1:
-                start_date_value = st.date_input(
-                    "起始日期", value=_first_of_month, key="crm_start_date"
-                )
-            with _d2:
-                end_date_value = st.date_input(
-                    "結束日期", value=_today_date, key="crm_end_date"
-                )
-        else:
-            st.info("自動使用今日（台北時間）", icon="📅")
-            start_date_value = None
-            end_date_value   = None
-
-    else:
-        st.markdown('<div class="field-label">📆 執行日期區間</div>', unsafe_allow_html=True)
-        d1, d2 = st.columns(2)
-        today_date = datetime.now(TW_TZ).date()
-        with d1:
-            start_date_value = st.date_input("開始日期", value=today_date, key="start_date")
-        with d2:
-            end_date_value = st.date_input("結束日期", value=today_date, key="end_date")
-        period = start_date_value.strftime("%Y%m%d")
-
-with area_col:
-    st.markdown('<div class="field-label">📍 執行區域</div>', unsafe_allow_html=True)
-
-    area_options = available_areas_for_system(selected_system)
-
-    if system_type == "monthly_scheduler" and (not area_options or area_options == ["全區"]):
-        area_options = ["台北", "新北", "台中", "桃園", "新竹", "高雄"]
-
-    if not area_options:
-        area_options = ["全區"]
-
-    area_select_options = ["全區"] + [area for area in area_options if area != "全區"]
-
-    selected_area_value = st.selectbox(
-        "執行區域",
-        area_select_options,
-        index=0,
-        label_visibility="collapsed",
-        key=f"area_select_{system_name}_{selected_function}",
-    )
-
-    selected_areas = [selected_area_value]
-
-    if selected_area_value == "全區":
-        st.caption("將執行全部已啟用地區")
-    else:
-        st.caption(f"只執行：{selected_area_value}")
-
-run_clicked = st.button("▶ 執行", use_container_width=True)
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════
-# UI — 日誌
-# ═══════════════════════════════════════════════════════════
-render_log()
-
-clear_col, _ = st.columns([1, 3])
-
-with clear_col:
-    if st.button("🗑️ 清除日誌"):
-        st.session_state.logs = ["[--:--:--] 日誌已清除"]
-        st.rerun()
-
-
-# ═══════════════════════════════════════════════════════════
-# UI — 設定檔管理
-# ═══════════════════════════════════════════════════════════
-if can_access_page("settings"):
-    with st.expander("🗃️ 設定檔管理（新增 / 編輯 / 刪除）", expanded=False):
-        st.markdown(
-            """
-    <div class="setting-note">
-    可在這裡新增 / 編輯不同系統設定。<br>
-    舊系統使用主控表 ID / 共用雲端資料夾 ID。<br>
-    外場排程系統的 folder_ids / spreadsheet_ids 建議直接維護在 GitHub repo 的 <code>config/systems.yaml</code>。Streamlit Cloud 畫面上修改只會存在目前執行環境，重新部署或重啟後可能消失。
-    </div>
-    """,
-            unsafe_allow_html=True,
-        )
-
-        add_col, _ = st.columns([1, 3])
-        with add_col:
-            if st.button("➕ 新增系統", use_container_width=True):
-                st.session_state.adding_system = True
-                st.session_state.editing_system = None
-                st.rerun()
-
-        system_type_options = [
-            "vip", "daily_scheduler", "monthly_scheduler",
-            "field_daily_schedule", "service_schedule",   # ★ 新增
-        ]
-
-        if st.session_state.adding_system:
-            with st.form("add_system_form"):
-                st.markdown("**新增系統設定**")
-
-                new_name = st.text_input("設定系統名稱", placeholder="例如：客服排程系統")
-                new_type = st.selectbox(
-                    "設定系統類型",
-                    system_type_options,
-                    format_func=get_system_type_label,
-                )
-                new_master_id = st.text_input("設定主控表 ID")
-                if new_type == "monthly_scheduler":
-                    new_folder_id = st.text_input("月排程總根目錄 ID")
-                    st.caption("月排程地區設定：可直接新增列、編輯地區、填寫地區根目錄 ID、勾選啟用；刪除地區＝刪除該列。")
-                    new_monthly_areas_df = st.data_editor(
-                        default_monthly_areas_df(),
-                        num_rows="dynamic",
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "地區": st.column_config.TextColumn("地區", required=True),
-                            "地區根目錄ID": st.column_config.TextColumn("地區根目錄 ID"),
-                            "啟用": st.column_config.CheckboxColumn("啟用"),
-                        },
-                        key="new_monthly_areas_editor",
-                    )
-                else:
-                    new_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID")
-                    new_monthly_areas_df = None
-                new_enabled = st.checkbox("啟用", value=True)
-
-                f1, f2 = st.columns(2)
-                with f1:
-                    submit_add = st.form_submit_button("💾 儲存", use_container_width=True)
-                with f2:
-                    cancel_add = st.form_submit_button("✕ 取消", use_container_width=True)
-
-                if submit_add:
-                    systems_all = config.get("systems", [])
-
-                    if not new_name:
-                        st.error("請輸入系統名稱")
-                    elif any(s.get("name") == new_name for s in systems_all):
-                        st.error(f"系統「{new_name}」已存在")
-                    else:
-                        new_system = {
-                            "name": new_name,
-                            "type": new_type,
-                            "master_spreadsheet_id": new_master_id,
-                            "folder_id": new_folder_id,
-                            "enabled": new_enabled,
-                        }
-
-                        if new_type == "monthly_scheduler":
-                            new_system["areas"] = monthly_areas_df_to_config(new_monthly_areas_df)
-
-                        if new_type == "field_daily_schedule":
-                            new_system.update(
-                                {
-                                    "folder_ids": {
-                                        "schedule_stats": "",
-                                        "order": {"台北": "", "台中": ""},
-                                        "staff_profile": {"台北": "", "台中": ""},
-                                        "staff_schedule": {"台北": "", "台中": ""},
-                                    },
-                                    "spreadsheet_ids": {
-                                        "roster": {"台北": "", "台中": ""},
-                                        "salary": {"台北": "", "台中": ""},
-                                        "office": {"台北": "", "台中": ""},
-                                    },
-                                }
-                            )
-
-                        # ★ 客服排程系統預設結構
-                        if new_type == "service_schedule":
-                            new_system["target_file_id"] = ""
-                            new_system["folder_ids"] = {
-                                "schedule_stats": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
-                            }
-
-                        systems_all.append(new_system)
-                        config["systems"] = systems_all
-                        save_config(config)
-                        add_log(f"新增系統設定：{new_name}", "success")
-                        st.session_state.adding_system = False
-                        st.rerun()
-
-                if cancel_add:
-                    st.session_state.adding_system = False
-                    st.rerun()
-
-        for i, sys_cfg in enumerate(config.get("systems", [])):
-            name = sys_cfg.get("name", f"系統{i + 1}")
-            current_type = sys_cfg.get("type", "vip")
-            master_id = sys_cfg.get("master_spreadsheet_id", "")
-            folder_id = sys_cfg.get("folder_id", "")
-            enabled = sys_cfg.get("enabled", True)
-
-            needs_ids = current_type == "vip"
-            complete = bool(name and (not needs_ids or (master_id and folder_id)))
-            badge = (
-                '<span class="badge-ok">已設定</span>'
-                if complete
-                else '<span class="badge-err">未完整</span>'
-            )
-
-            if st.session_state.editing_system == name:
-                with st.form(f"edit_system_{i}"):
-                    st.markdown(f"**編輯系統：{name}**")
-
-                    e_name = st.text_input("設定系統名稱", value=name)
-                    e_type = st.selectbox(
-                        "設定系統類型",
-                        system_type_options,
-                        index=system_type_options.index(current_type) if current_type in system_type_options else 0,
-                        format_func=get_system_type_label,
-                    )
-                    e_master_id = st.text_input("設定主控表 ID", value=master_id)
-                    if e_type == "monthly_scheduler":
-                        e_folder_id = st.text_input("月排程總根目錄 ID", value=folder_id)
-                        st.caption("月排程地區設定：可直接新增列、編輯地區、填寫地區根目錄 ID、勾選啟用；刪除地區＝刪除該列。")
-                        e_monthly_areas_df = st.data_editor(
-                            monthly_areas_to_df(sys_cfg),
-                            num_rows="dynamic",
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "地區": st.column_config.TextColumn("地區", required=True),
-                                "地區根目錄ID": st.column_config.TextColumn("地區根目錄 ID"),
-                                "啟用": st.column_config.CheckboxColumn("啟用"),
-                            },
-                            key=f"edit_monthly_areas_editor_{i}",
-                        )
-                    else:
-                        e_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID", value=folder_id)
-                        e_monthly_areas_df = None
-                    e_enabled = st.checkbox("啟用", value=enabled)
-
-                    e1, e2 = st.columns(2)
-                    with e1:
-                        save_edit = st.form_submit_button("💾 儲存", use_container_width=True)
-                    with e2:
-                        cancel_edit = st.form_submit_button("✕ 取消", use_container_width=True)
-
-                    if save_edit:
-                        if not e_name:
-                            st.error("請輸入系統名稱")
-                        else:
-                            updated = dict(config["systems"][i])
-                            updated.update(
-                                {
-                                    "name": e_name,
-                                    "type": e_type,
-                                    "master_spreadsheet_id": e_master_id,
-                                    "folder_id": e_folder_id,
-                                    "enabled": e_enabled,
-                                }
-                            )
-
-                            if e_type == "monthly_scheduler":
-                                updated["areas"] = monthly_areas_df_to_config(e_monthly_areas_df)
-
-                            if e_type == "field_daily_schedule":
-                                updated.setdefault("folder_ids", {})
-                                updated.setdefault("spreadsheet_ids", {})
-
-                            config["systems"][i] = updated
-                            save_config(config)
-                            add_log(f"更新系統設定：{e_name}", "success")
-                            st.session_state.editing_system = None
-                            st.rerun()
-
-                    if cancel_edit:
-                        st.session_state.editing_system = None
-                        st.rerun()
-
-            else:
-                enabled_text = "✅ 啟用" if enabled else "⚠️ 停用"
-                extra_detail = ""
-
-                if current_type == "field_daily_schedule":
-                    folder_ids = mask_nested_ids(sys_cfg.get("folder_ids", {}))
-                    extra_detail = f"""
-      <div class="detail-row"><strong>排班統計資料夾</strong>：{html.escape(str(folder_ids.get("schedule_stats", "")))}</div>
-      <div class="detail-row"><strong>訂單/個資/班表資料夾</strong>：台北 / 台中 已設定</div>
-    """
-                elif current_type == "monthly_scheduler":
-                    monthly_areas = normalize_monthly_areas(sys_cfg)
-                    enabled_area_names = [k for k, v in monthly_areas.items() if v.get("enabled", True)]
-                    disabled_area_names = [k for k, v in monthly_areas.items() if not v.get("enabled", True)]
-                    area_root_lines = [
-                        f"{k}：{mask_id(v.get('folder_id', ''))}（{'啟用' if v.get('enabled', True) else '停用'}）"
-                        for k, v in monthly_areas.items()
-                    ]
-                    extra_detail = f"""
-      <div class="detail-row"><strong>月排程總根目錄 ID</strong>：{mask_id(folder_id)}</div>
-      <div class="detail-row"><strong>啟用地區</strong>：{html.escape("、".join(enabled_area_names) or "未設定")}</div>
-      <div class="detail-row"><strong>地區根目錄</strong>：<br>{"<br>".join(html.escape(l) for l in area_root_lines) or "未設定"}</div>
-    """
-                # ★ 客服排程系統顯示資訊
-                elif current_type == "service_schedule":
-                    target_id = sys_cfg.get("target_file_id", "")
-                    sched_folder = (sys_cfg.get("folder_ids") or {}).get("schedule_stats", "")
-                    extra_detail = f"""
-      <div class="detail-row"><strong>目標試算表 ID</strong>：{mask_id(target_id) if target_id else "由 Secret LEMON_TARGET_FILE_ID 注入"}</div>
-      <div class="detail-row"><strong>排班統計來源資料夾</strong>：{mask_id(sched_folder)}</div>
-      <div class="detail-row"><strong>打卡目標</strong>：主控表（執行記錄）+ 執行檔（_py_execution_log）</div>
-    """
-                else:
-                    extra_detail = f"""
-      <div class="detail-row"><strong>主控表 ID</strong>：{mask_id(master_id)}</div>
-      <div class="detail-row"><strong>共用雲端資料夾 ID</strong>：{mask_id(folder_id)}</div>
-    """
-
-                st.markdown(
-                    f"""
-    <div class="system-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <strong style="color:#0a4b6e;">🗂️ {html.escape(name)}</strong>{badge}
-      </div>
-      <div class="detail-row"><strong>系統類型</strong>：{get_system_type_label(current_type)}</div>
-      <div class="detail-row"><strong>狀態</strong>：{enabled_text}</div>
-      {extra_detail}
-    </div>
-    """,
-                    unsafe_allow_html=True,
-                )
-
-                _, b2, b3 = st.columns([2, 1, 1])
-                with b2:
-                    if st.button("📝 編輯", key=f"edit_system_{i}", use_container_width=True):
-                        st.session_state.editing_system = name
-                        st.session_state.adding_system = False
-                        st.rerun()
-
-                with b3:
-                    if st.button("🗑️ 刪除", key=f"delete_system_{i}", use_container_width=True):
-                        config["systems"].pop(i)
-                        save_config(config)
-                        add_log(f"刪除系統設定：{name}", "warning")
-                        st.rerun()
-
-# ═══════════════════════════════════════════════════════════
-# 執行邏輯
-# ═══════════════════════════════════════════════════════════
-if run_clicked:
-    if not selected_system:
-        add_log("請先新增或啟用系統設定", "error")
-        st.rerun()
-
-    system_type = selected_system.get("type", "vip")
-    master_id = selected_system.get("master_spreadsheet_id", "")
-    folder_id = selected_system.get("folder_id", "")
-
-    if system_type in ["vip", "monthly_scheduler"] and not period:
-        if not (system_type == "monthly_scheduler" and selected_function in ["上半月訂單", "下半月訂單"] and monthly_date_mode == "日期區間"):
-            add_log("請先輸入執行期別", "error")
-            st.rerun()
-
-    if system_type in ["daily_scheduler", "field_daily_schedule"]:
-        date_keys = parse_date_range(start_date_value, end_date_value)
-        if not date_keys:
-            add_log("請選擇執行日期區間", "error")
-            st.rerun()
-    elif system_type == "monthly_scheduler" and selected_function in ["上半月訂單", "下半月訂單"] and monthly_date_mode == "日期區間":
-        date_keys = [
-            start_date_value.strftime("%Y%m%d"),
-            end_date_value.strftime("%Y%m%d"),
-        ]
-    else:
-        date_keys = [period or tw_now_text("%Y%m%d")]
-
-    if system_type == "field_daily_schedule" and not selected_areas:
-        add_log("請至少選擇一個執行區域", "error")
-        st.rerun()
-
-    add_log(f"開始執行：{system_name} / {selected_function}")
-
-    with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
-        try:
-            result = None
-
-            if system_type == "vip":
-                if not master_id:
-                    add_log("尚未設定主控表 ID", "error")
-                    st.rerun()
-
-                if not folder_id:
-                    add_log("尚未設定共用雲端資料夾 ID", "error")
-                    st.rerun()
-
-                workflow = build_vip_workflow(
-                    master_id=master_id,
-                    folder_id=folder_id,
-                    system_name=system_name,
-                )
-
-                if selected_function == "建立當月彙整檔":
-                    result = workflow.create_monthly_summary(period)
-                elif selected_function == "轉檔＋高雄/新竹彙整":
-                    result = workflow.convert_files(period)
-                elif selected_function == "搬運":
-                    result = workflow.move_files(period)
-                elif selected_function == "計算":
-                    result = workflow.apply_formulas(period)
-                elif selected_function == "彙整金額":
-                    result = workflow.summarize_amounts(period)
-                elif selected_function == "一鍵執行：建立＋轉檔＋搬運＋計算＋彙整金額":
-                    result = [
-                        workflow.create_monthly_summary(period),
-                        workflow.convert_files(period),
-                        workflow.move_files(period),
-                        workflow.apply_formulas(period),
-                        workflow.summarize_amounts(period),
-                    ]
-                else:
-                    add_log(f"未知功能：{selected_function}", "warning")
-
-            elif system_type == "daily_scheduler":
-                if not folder_id:
-                    add_log("尚未設定共用雲端資料夾 ID", "error")
-                    st.rerun()
-
-                if selected_function == "一鍵執行日排程":
-                    from tools.scheduled_daily.scheduler import main as run_daily_scheduler
-
-                    daily_target = DAILY_TARGET_MAP.get(selected_function, "all")
-                    result = run_daily_scheduler(target=daily_target, folder_id=folder_id)
-
-                else:
-                    script = DAILY_SCRIPT_MAP.get(selected_function)
-
-                    if not script:
-                        raise RuntimeError(f"找不到日排程功能：{selected_function}")
-
-                    if selected_function == "業績報表":
-                        result = run_script(script)
-                        add_log("業績報表已更新，可點「📊 查看業績報表」開啟。", "success")
-                    else:
-                        result = run_script(script, ["--folder-id", folder_id])
-
-            elif system_type == "monthly_scheduler":
-                if not folder_id:
-                    add_log("尚未設定月排程根目錄 ID", "error")
-                    st.rerun()
-
-                if not selected_areas:
-                    add_log("請至少選擇一個執行區域", "error")
-                    st.rerun()
-
-                if selected_function == "一鍵執行月排程":
-                    from tools.scheduled_monthly.scheduler import main as run_monthly_scheduler
-
-                    try:
-                        result = run_monthly_scheduler(folder_id=folder_id)
-                    except TypeError:
-                        result = run_monthly_scheduler()
-
-                else:
-                    cmd = MONTHLY_SCRIPT_MAP.get(selected_function)
-
-                    if not cmd:
-                        raise RuntimeError(f"找不到月排程功能：{selected_function}")
-
-                    script = cmd[0]
-                    base_args = list(cmd[1:])
-                    results = []
-
-                    if selected_function in ["上半月訂單", "下半月訂單"]:
-                        for area_name in selected_areas:
-                            args = []
-
-                            if monthly_date_mode == "日期區間":
-                                if not start_date_value or not end_date_value:
-                                    raise RuntimeError("請選擇開始日期與結束日期")
-
-                                args.extend([
-                                    "--start", start_date_value.strftime("%Y-%m-%d"),
-                                    "--end", end_date_value.strftime("%Y-%m-%d"),
-                                ])
-                            else:
-                                args.extend(base_args)
-                                if period:
-                                    args.extend(["--period", period])
-
-                            args.extend(["--folder-id", folder_id])
-
-                            if area_name == "全區":
-                                args.extend(["--area", "all"])
-                            else:
-                                args.extend(["--area", area_name])
-
-                            add_log(f"月排程執行：{selected_function} / {period or '日期區間'} / {area_name}")
-                            results.append(run_script(script, args))
-
-                        result = results
-
-                    else:
-                        result = run_script(script, [*base_args, "--folder-id", folder_id])
-
-            elif system_type == "field_daily_schedule":
-                cmd = FIELD_SCRIPT_MAP.get(selected_function)
-
-                if not cmd:
-                    raise RuntimeError(f"找不到外場日排程功能：{selected_function}")
-
-                script = cmd[0]
-                base_args = list(cmd[1:])
-                results = []
-
-                for date_key in date_keys:
-                    for area_name in selected_areas:
-                        args = list(base_args)
-                        args.extend(["--date", date_key])
-                        args.extend(["--system-name", system_name])
-
-                        if area_name != "全區":
-                            args.extend(["--area", area_name])
-
-                        add_log(f"外場排程執行：{selected_function} / {date_key} / {area_name}")
-                        results.append(run_script(script, args))
-
-                result = results
-
-            # ── ★ 客服排程系統執行邏輯 ────────────────────────────
-            elif system_type == "service_schedule":
-
-                # 把 st.secrets 裡的所有字串值注入到子進程環境
-                # （Streamlit Cloud secrets 不在 os.environ，需手動注入）
-                _svc_env = os.environ.copy()
-                _base_str = str(BASE_DIR)
-                _existing_pp = _svc_env.get("PYTHONPATH", "")
-                if _base_str not in _existing_pp:
-                    _svc_env["PYTHONPATH"] = _base_str + (":" + _existing_pp if _existing_pp else "")
-                try:
-                    for _k in st.secrets:
-                        try:
-                            _v = st.secrets[_k]
-                            if isinstance(_v, str):
-                                _svc_env[_k] = _v
-                            elif isinstance(_v, dict):
-                                # section → 整體 JSON 注入
-                                _svc_env[_k] = json.dumps(dict(_v), ensure_ascii=False)
-                                # section 內每個 key 也展開注入（如 GMAIL_USER 在 section 裡）
-                                for _sk, _sv in _v.items():
-                                    if isinstance(_sv, str):
-                                        _svc_env[_sk] = _sv
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-                # 確保目標試算表 ID 有注入（從設定管理讀取）
-                if not _svc_env.get("SERVICE_TARGET_SPREADSHEET_ID"):
-                    _target_id = get_system_by_name(config, system_name).get("folder_id", "").strip()
-                    if _target_id:
-                        _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _target_id
-
-                # ── CRM 功能 ──────────────────────────────────
-                if selected_function in SERVICE_CRM_MAP:
-                    step = SERVICE_CRM_MAP[selected_function]
-                    cmd = [
-                        sys.executable, "-u", "-m",
-                        "tools.service_management.crm_export",
-                        "--step", step,
-                    ]
-                    if step != "1" and start_date_value and end_date_value:
-                        cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
-                                "--end",   end_date_value.strftime("%Y-%m-%d")]
-                    if selected_area_value and selected_area_value != "全區":
-                        cmd += ["--area", selected_area_value]
-                    add_log(f"CRM 執行：{selected_function}（step={step}）", "info")
-
-                # ── 排班同步功能 ──────────────────────────────
-                else:
-                    step = SERVICE_STEP_MAP.get(selected_function, "0")
-                    cmd = [
-                        sys.executable, "-u", "-m",
-                        "tools.service_management.service_schedule",
-                        "--step", step,
-                    ]
-                    add_log(f"客服排程執行：{selected_function}（--step {step}）", "info")
-
-                completed = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                    cwd=BASE_DIR,
-                    env=_svc_env,
-                )
-
-                if completed.stdout:
-                    for line in completed.stdout.strip().splitlines()[-120:]:
-                        add_log(line, "info")
-
-                if completed.returncode == 0:
-                    result = f"{selected_function} 執行成功"
-                else:
-                    if completed.stderr:
-                        for line in completed.stderr.strip().splitlines()[-20:]:
-                            add_log(line, "error")
-                    raise RuntimeError(
-                        f"執行失敗（exit {completed.returncode}）：{selected_function}"
-                    )
-            # ────────────────────────────────────────────────────────
-
-            else:
-                add_log(f"{system_type} 尚未實作", "warning")
-
-            if isinstance(result, list):
-                for item in result:
-                    add_log(str(item), "success")
-            elif result is not None:
-                add_log(str(result), "success")
-
-            add_log("執行完成", "success")
-
+            fn(*a)
         except Exception as e:
-            add_log(f"執行失敗：{e}", "error")
-            add_log(traceback.format_exc(), "error")
+            errors.append(f"Step {step_num}: {e}")
+            log.error("Step %d 失敗：%s", step_num, e)
 
-    st.rerun()
+    if step in (0, 1):
+        run(1, step1_update_schedule_stats, run_dt, gc, drive, run_id)
+    if step in (0, 2):
+        run(2, step2_write_daily_report, run_dt, gc, run_id)
+    if step in (0, 3):
+        run(3, step3_import_revenue, gc, run_id)
+
+    elapsed_total = (now_tp() - t_total).total_seconds()
+    final_status  = "ERROR" if errors else "SUCCESS"
+    final_note    = "; ".join(errors) if errors else "全部完成"
+
+    checkin_both(gc, run_id, "RUN", "DONE", final_status, final_note[:300], elapsed_total)
+
+    if errors:
+        log.error("執行結束（有失敗）：%s", errors)
+        sys.exit(1)
+
+    log.info("=== 全部完成 run_id=%s（%.1fs）===", run_id, elapsed_total)
+
+
+if __name__ == "__main__":
+    main()
