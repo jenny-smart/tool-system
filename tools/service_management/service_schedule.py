@@ -191,8 +191,8 @@ def checkin_master(
         write_job_log(
             system_name=CONFIG["system_name"],
             job_name=task,
-            status=status,
-            started_at=now_tp(),
+            status="成功" if status == "SUCCESS" else ("執行中" if status == "RUNNING" else "失敗"),
+            started_at=now_tp() if step == "START" else "",
             finished_at=now_tp() if step == "DONE" else "",
             message=note[:300],
             area="全區",
@@ -201,7 +201,7 @@ def checkin_master(
             target="",
             source_file="",
             run_type="排程" if os.getenv("GITHUB_ACTIONS") else "手動",
-            traceback_text="",
+            traceback_text=note[:300] if status == "ERROR" else "",
         )
     except Exception as e:
         log.warning("[主控表打卡失敗（非致命）] %s", e)
@@ -595,7 +595,20 @@ def _pick_mail(subject: str, target_date: datetime) -> str:
     imap_date = fmt(target_date, "%d-%b-%Y")
     imap = _imap_connect()
     imap.select("INBOX")
-    _, data = imap.search(None, f'(SUBJECT "{subject}" ON {imap_date})')
+
+    # 中文主旨需用 UTF-8 搜尋（IMAP 預設 ASCII 無法處理中文）
+    search_criteria = f'(SUBJECT "{subject}" ON {imap_date})'
+    try:
+        # 嘗試 UTF-8 搜尋
+        _, data = imap.search("UTF-8", search_criteria.encode("utf-8"))
+    except Exception:
+        # fallback：用 CHARSET 參數
+        try:
+            _, data = imap.uid("search", "CHARSET", "UTF-8",
+                               "SUBJECT", subject.encode("utf-8"),
+                               "ON", imap_date)
+        except Exception:
+            _, data = imap.search(None, f'(ON {imap_date})')
     mail_ids = data[0].split()
 
     if not mail_ids:
