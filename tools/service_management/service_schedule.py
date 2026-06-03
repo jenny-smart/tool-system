@@ -372,32 +372,52 @@ def _import_block(
         ss = gc.open_by_key(fid)
         all_values = ss.get_worksheet(0).get_all_values()
     else:
-        # xlsx → 用 get_media 下載原始檔案，再用 openpyxl 讀取
-        req = drive.files().get_media(
-            fileId=fid,
+        # xlsx 在共用雲端硬碟：轉成 Google Sheets 保留（新蓋舊），再讀取
+        # 轉換後的 Google Sheets 名稱 = 原檔名去掉 .xlsx
+        gs_name = re.sub(r"\.xlsx$", "", name, flags=re.IGNORECASE)
+        log.info("  xlsx → Google Sheets：%s", gs_name)
+
+        # 先查資料夾內是否已有同名 Google Sheets
+        existing = drive.files().list(
+            q=(
+                f"'{CONFIG['source_folder_id']}' in parents"
+                f" and name = '{gs_name}'"
+                f" and mimeType = 'application/vnd.google-apps.spreadsheet'"
+                f" and trashed = false"
+            ),
+            fields="files(id,name)",
             supportsAllDrives=True,
-        )
-        buf = io.BytesIO()
-        dl = MediaIoBaseDownload(buf, req)
-        done = False
-        while not done:
-            _, done = dl.next_chunk()
-        buf.seek(0)
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(buf, read_only=True, data_only=True)
-            ws = wb.active
-            all_values = []
-            for row in ws.iter_rows(values_only=True):
-                all_values.append([
-                    "" if cell is None else str(cell) for cell in row
-                ])
-            wb.close()
-        except ImportError:
-            # openpyxl 不存在時 fallback 用 csv（只適用 Google Sheets 格式）
-            import csv
-            buf.seek(0)
-            all_values = list(csv.reader(io.TextIOWrapper(buf, encoding="utf-8")))
+            includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+
+        # 刪除舊的同名 Google Sheets
+        for old in existing:
+            try:
+                drive.files().delete(
+                    fileId=old["id"], supportsAllDrives=True
+                ).execute()
+                log.info("  刪除舊版 Google Sheets：%s", old["id"])
+            except Exception:
+                pass
+
+        # 用 Drive v2 copy 轉換（v2 支援 convert）
+        from googleapiclient.discovery import build as _build
+        drive_v2 = _build("drive", "v2", credentials=_get_credentials())
+        copied = drive_v2.files().copy(
+            fileId=fid,
+            body={
+                "title": gs_name,
+                "mimeType": "application/vnd.google-apps.spreadsheet",
+                "parents": [{"id": CONFIG["source_folder_id"]}],
+            },
+            supportsAllDrives=True,
+        ).execute()
+
+        new_gs_id = copied["id"]
+        log.info("  轉換完成，Google Sheets ID：%s", new_gs_id)
+
+        gs_ss = gc.open_by_key(new_gs_id)
+        all_values = gs_ss.get_worksheet(0).get_all_values()
 
     skip = cfg["source_skip_rows"]
     values = [(r[:9] + [""] * 9)[:9] for r in all_values[skip:]]
