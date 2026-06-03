@@ -650,6 +650,14 @@ def _normalize_lines(text: str) -> list[str]:
 
 
 def _find_daily_value(lines: list[str], date_str: str) -> int:
+    """
+    從信件行列裡找【專業清潔】日營業額的指定日期數值。
+    信件格式：
+      【專業清潔】日營業額
+      2026-06-01：32分
+      2026-06-02：29分
+      2026-06-03：112分
+    """
     header = "【專業清潔】日營業額"
     idx = -1
     for i in range(len(lines) - 1, -1, -1):
@@ -658,13 +666,20 @@ def _find_daily_value(lines: list[str], date_str: str) -> int:
             break
     if idx == -1:
         raise ValueError("找不到【專業清潔】日營業額標題")
+
     for i in range(idx + 1, len(lines)):
-        compact = lines[i].replace(" ", "")
+        raw = lines[i]
+        compact = raw.replace(" ", "")
+        # 遇到下一個區段標題就停止
         if compact != header and re.match(r"^【.+】日營業額$", compact):
             break
-        m = re.match(r"^(\d{4}-\d{2}-\d{2})[：:](\d+)分?$", compact)
-        if m and m.group(1) == date_str:
-            return int(m.group(2))
+        # 匹配格式：2026-06-03：112分 或 2026-06-03:112分 或無「分」字
+        m = re.match(r"^(\d{4}[-/]\d{2}[-/]\d{2})[：:](\d+)分?$", compact)
+        if m:
+            # 統一日期格式成 yyyy-mm-dd 比對
+            raw_date = m.group(1).replace("/", "-")
+            if raw_date == date_str:
+                return int(m.group(2))
     raise ValueError(f"找到標題但找不到 {date_str} 的數值")
 
 
