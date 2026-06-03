@@ -2402,12 +2402,17 @@ if run_clicked:
                             if isinstance(_v, str):
                                 _svc_env[_k] = _v
                             elif isinstance(_v, dict):
-                                # section → JSON 字串
                                 _svc_env[_k] = json.dumps(dict(_v), ensure_ascii=False)
                         except Exception:
                             pass
                 except Exception:
                     pass
+
+                # 確保目標試算表 ID 有注入（從設定管理讀取）
+                if "SERVICE_TARGET_SPREADSHEET_ID" not in _svc_env or not _svc_env["SERVICE_TARGET_SPREADSHEET_ID"]:
+                    _target_id = get_system_by_name(config, system_name).get("folder_id", "").strip()
+                    if _target_id:
+                        _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _target_id
 
                 # ── CRM 功能 ──────────────────────────────────
                 if selected_function in SERVICE_CRM_MAP:
