@@ -758,8 +758,9 @@ def step2_export_vip_calendar(
 
 def _load_target_file_id() -> str:
     """依序從 Secret 或主控試算表系統設定取得目標試算表 ID。"""
-    val = _load_target_file_id()
+    val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
     if val:
+        log.info("目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID")
         return val
     try:
         from tools.common.config_loader import get_system_config
