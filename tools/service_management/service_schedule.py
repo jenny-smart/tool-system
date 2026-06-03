@@ -535,17 +535,27 @@ def step2_write_daily_report(
 # ──────────────────────────────────────────────────────────
 
 def _get_secret(key: str) -> str:
-    """從 os.environ 或 st.secrets 取得 secret 值。"""
+    """
+    依序嘗試四個來源取得 secret（對齊 config_loader.get_service_account_info 邏輯）：
+    1. os.environ
+    2. os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]（只適用 SA，一般 key 不用）
+    3. st.secrets[key]
+    4. st.secrets["gcp_service_account"][key]（不適用一般 key）
+    """
+    # 1. 直接從 os.environ 讀
     val = os.environ.get(key, "").strip()
     if val:
         return val
+
+    # 2. 從 st.secrets 讀（子進程裡 Streamlit 仍可能有 secrets）
     try:
         import streamlit as st
-        val = str(st.secrets.get(key, "")).strip()
+        val = str(st.secrets.get(key, "") or "").strip()
         if val:
             return val
     except Exception:
         pass
+
     return ""
 
 
