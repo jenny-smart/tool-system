@@ -372,16 +372,32 @@ def _import_block(
         ss = gc.open_by_key(fid)
         all_values = ss.get_worksheet(0).get_all_values()
     else:
-        # xlsx → export CSV
-        req = drive.files().export_media(fileId=fid, mimeType="text/csv")
+        # xlsx → 用 get_media 下載原始檔案，再用 openpyxl 讀取
+        req = drive.files().get_media(
+            fileId=fid,
+            supportsAllDrives=True,
+        )
         buf = io.BytesIO()
         dl = MediaIoBaseDownload(buf, req)
         done = False
         while not done:
             _, done = dl.next_chunk()
         buf.seek(0)
-        import csv
-        all_values = list(csv.reader(io.TextIOWrapper(buf, encoding="utf-8")))
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(buf, read_only=True, data_only=True)
+            ws = wb.active
+            all_values = []
+            for row in ws.iter_rows(values_only=True):
+                all_values.append([
+                    "" if cell is None else str(cell) for cell in row
+                ])
+            wb.close()
+        except ImportError:
+            # openpyxl 不存在時 fallback 用 csv（只適用 Google Sheets 格式）
+            import csv
+            buf.seek(0)
+            all_values = list(csv.reader(io.TextIOWrapper(buf, encoding="utf-8")))
 
     skip = cfg["source_skip_rows"]
     values = [(r[:9] + [""] * 9)[:9] for r in all_values[skip:]]
@@ -498,9 +514,24 @@ def step2_write_daily_report(
 # Step 3：從 Gmail 抓前一天營業額
 # ──────────────────────────────────────────────────────────
 
+def _get_secret(key: str) -> str:
+    """從 os.environ 或 st.secrets 取得 secret 值。"""
+    val = os.environ.get(key, "").strip()
+    if val:
+        return val
+    try:
+        import streamlit as st
+        val = str(st.secrets.get(key, "")).strip()
+        if val:
+            return val
+    except Exception:
+        pass
+    return ""
+
+
 def _imap_connect() -> imaplib.IMAP4_SSL:
-    user = os.environ.get("GMAIL_USER", "")
-    pwd  = os.environ.get("GMAIL_APP_PASSWORD", "")
+    user = _get_secret("GMAIL_USER")
+    pwd  = _get_secret("GMAIL_APP_PASSWORD")
     if not user or not pwd:
         raise EnvironmentError("需要 GMAIL_USER 和 GMAIL_APP_PASSWORD")
     imap = imaplib.IMAP4_SSL("imap.gmail.com")
