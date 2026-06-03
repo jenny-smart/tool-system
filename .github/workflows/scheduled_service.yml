@@ -122,19 +122,19 @@ jobs:
           # Step 1：更新排班統計表
           if [ "$TASK" = "service_schedule_stats" ] || [ "$TASK" = "service_all" ]; then
             run_one "service_schedule_stats" \
-              "python -u -m tools.service_management.lemon_schedule_sync --step 1"
+              "python -u -m tools.service_management.service_schedule --step 1"
           fi
 
           # Step 2：更新每日回報
           if [ "$TASK" = "service_daily_report" ] || [ "$TASK" = "service_all" ]; then
             run_one "service_daily_report" \
-              "python -u -m tools.service_management.lemon_schedule_sync --step 2"
+              "python -u -m tools.service_management.service_schedule --step 2"
           fi
 
           # Step 3：更新前一天營業分數及營業額
           if [ "$TASK" = "service_revenue" ] || [ "$TASK" = "service_all" ]; then
             run_one "service_revenue" \
-              "python -u -m tools.service_management.lemon_schedule_sync --step 3"
+              "python -u -m tools.service_management.service_schedule --step 3"
           fi
 
           if [ "$FAILED" -ne 0 ]; then
