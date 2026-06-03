@@ -169,7 +169,7 @@ def _checkin(gc: gspread.Client, spreadsheet_id: str, sheet_name: str,
 def checkin_both(gc: gspread.Client, run_id: str, task: str, step: str,
                  status: str, note: str = "", elapsed: float = 0.0) -> None:
     master_id = os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "")
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+    target_id = _load_target_file_id()
     _checkin(gc, master_id, "執行記錄",       run_id, task, step, status, note, elapsed)
     _checkin(gc, target_id, "_py_execution_log", run_id, task, step, status, note, elapsed)
 
@@ -334,9 +334,9 @@ def _write_stored_value_sheet(
     rows: list[list],
 ) -> gspread.Worksheet:
     """寫入目標試算表「儲值金表_{地區}」。"""
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+    target_id = _load_target_file_id()
     if not target_id:
-        raise EnvironmentError("請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
+        raise EnvironmentError("請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     ss = gc.open_by_key(target_id)
     sheet_name = f"儲值金表_{area_name}"
@@ -474,7 +474,7 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str) -> dict[str, dic
     從「儲值金表_{地區}」讀取姓名 → {totalBalance, lineValue}。
     對應 GAS 的 getStoredValueInfoByName()。
     """
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+    target_id = _load_target_file_id()
     if not target_id:
         return {}
     try:
@@ -648,9 +648,9 @@ def _write_vip_sheet(
     start_dt: datetime,
 ) -> str:
     """寫入「定期VIP_{地區}_{yyyyMMdd}」工作表，回傳工作表名稱。"""
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+    target_id = _load_target_file_id()
     if not target_id:
-        raise EnvironmentError("請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
+        raise EnvironmentError("請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     ss         = gc.open_by_key(target_id)
     sheet_name = f"定期VIP_{area_name}_{start_dt.strftime('%Y%m%d')}"
@@ -756,6 +756,26 @@ def step2_export_vip_calendar(
 # 主程式
 # ──────────────────────────────────────────────────────────
 
+def _load_target_file_id() -> str:
+    """依序從 Secret 或主控試算表系統設定取得目標試算表 ID。"""
+    val = _load_target_file_id()
+    if val:
+        return val
+    try:
+        from tools.common.config_loader import get_system_config
+        system_cfg = get_system_config("客服排程系統")
+        folder_id = (
+            system_cfg.get("共用雲端資料夾ID / 根目錄ID", "").strip()
+            or system_cfg.get("folder_id", "").strip()
+        )
+        if folder_id:
+            log.info("目標試算表 ID 來源：主控試算表系統設定")
+            return folder_id
+    except Exception as e:
+        log.warning("從主控試算表讀取目標 ID 失敗：%s", e)
+    return ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
     parser.add_argument("--step",  type=int, choices=[1, 2], default=0,
@@ -768,8 +788,8 @@ def main() -> None:
                         help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
     args = parser.parse_args()
 
-    if not (os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()):
-        sys.exit("❌ 請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
+    if not (_load_target_file_id()):
+        sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     # 日期範圍
     today = now_tp()
