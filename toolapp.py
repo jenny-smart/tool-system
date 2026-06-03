@@ -150,6 +150,39 @@ def get_secret_text(key: str, default: str = "") -> str:
         return default
 
 
+def _build_subprocess_env() -> dict:
+    """
+    建立子進程用的環境變數字典。
+    Streamlit Cloud 的 secrets 只能透過 st.secrets 讀取，
+    不會自動出現在 os.environ，需要手動注入給 subprocess。
+    """
+    env = os.environ.copy()
+
+    # 注入 PYTHONPATH
+    base_str = str(BASE_DIR)
+    existing_pp = env.get("PYTHONPATH", "")
+    if base_str not in existing_pp:
+        env["PYTHONPATH"] = base_str + (":" + existing_pp if existing_pp else "")
+
+    # 把 st.secrets 的所有 key 強制注入（覆蓋 os.environ 的空值）
+    try:
+        for key in st.secrets:
+            try:
+                val = st.secrets[key]
+                if isinstance(val, str):
+                    # 直接覆蓋，確保 JSON 等長字串都注入
+                    env[key] = val
+                elif isinstance(val, dict):
+                    # TOML section（如 [section]）展開成 JSON 字串注入
+                    env[key] = json.dumps(val, ensure_ascii=False)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return env
+
+
 def get_master_config_spreadsheet_id() -> str:
     spreadsheet_id = (
         os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
@@ -1102,19 +1135,12 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
         cmd = [sys.executable, str(script), *args]
         display_name = script_path
 
-    # 確保子進程能 import tools.common 等套件（Streamlit Cloud 需要明確設定）
-    env = os.environ.copy()
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    base_dir_str = str(BASE_DIR)
-    if base_dir_str not in existing_pythonpath:
-        env["PYTHONPATH"] = base_dir_str + (":" + existing_pythonpath if existing_pythonpath else "")
-
     completed = subprocess.run(
         cmd,
         text=True,
         capture_output=True,
         cwd=BASE_DIR,
-        env=env,
+        env=_build_subprocess_env(),
     )
 
     if completed.stdout:
@@ -2346,11 +2372,7 @@ if run_clicked:
             # ── ★ 客服排程系統執行邏輯 ────────────────────────────
             elif system_type == "service_schedule":
 
-                _svc_env = os.environ.copy()
-                _existing_pp = _svc_env.get("PYTHONPATH", "")
-                _base_str = str(BASE_DIR)
-                if _base_str not in _existing_pp:
-                    _svc_env["PYTHONPATH"] = _base_str + (":" + _existing_pp if _existing_pp else "")
+                _svc_env = _build_subprocess_env()
 
                 # ── CRM 功能 ──────────────────────────────────
                 if selected_function in SERVICE_CRM_MAP:
