@@ -304,7 +304,11 @@ def find_schedule_files(base: datetime) -> dict[str, dict]:
         "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')"
     )
     files = drive.files().list(
-        q=q, fields="files(id,name,mimeType,modifiedTime)", pageSize=100
+        q=q,
+        fields="files(id,name,mimeType,modifiedTime)",
+        pageSize=100,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
     ).execute().get("files", [])
 
     log.info("Drive 資料夾找到 %d 個檔案", len(files))
