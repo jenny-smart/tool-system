@@ -247,7 +247,7 @@ def _ensure_sheet(service, spreadsheet_id: str, sheet_name: str, headers: list[s
                                 "backgroundColor": {"red": 0.86, "green": 0.90, "blue": 0.98},
                             }
                         },
-                        "fields": "userEntiredFormat(textFormat,backgroundColor)",
+                        "fields": "userEnteredFormat(textFormat,backgroundColor)",
                     }
                 },
             ]
@@ -468,12 +468,21 @@ def load_config() -> dict:
     """
     優先讀主控試算表。
     若主控表尚無資料，會用 systems.yaml 或 DEFAULT_CONFIG 初始化主控表。
+    主控表有資料但缺少 DEFAULT_CONFIG 系統時，自動補齊並同步回主控表。
     """
     try:
         data = _load_config_from_master_sheets()
 
         if data.get("systems"):
-            return merge_default_systems(data)
+            merged = merge_default_systems(data)
+            # 如果 merge 後系統數量比主控表多，代表有新預設系統需要同步回去
+            if len(merged.get("systems", [])) > len(data.get("systems", [])):
+                try:
+                    save_config(merged)
+                    st.info("已自動同步新系統設定至主控表")
+                except Exception as sync_err:
+                    st.warning(f"同步新系統至主控表失敗（非致命）：{sync_err}")
+            return merged
 
         data = _load_config_from_yaml_fallback()
         save_config(data)
