@@ -221,8 +221,17 @@ def ensure_sheet(service, spreadsheet_id: str, sheet_name: str, headers: list[st
     ).execute()
 
 
+_INIT_DONE: set[str] = set()  # process-level cache，記錄已初始化的 spreadsheet_id
+
+
 def init_log_sheets(spreadsheet_id: str = "") -> None:
     spreadsheet_id = get_log_spreadsheet_id(spreadsheet_id)
+
+    # 同一進程同一試算表只初始化一次，避免大量重複讀取造成 429
+    if spreadsheet_id in _INIT_DONE:
+        return
+    _INIT_DONE.add(spreadsheet_id)
+
     service = get_sheets_service()
 
     for sheet_name in sorted(set(SHEET_BY_SYSTEM.values())):
