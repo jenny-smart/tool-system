@@ -161,18 +161,24 @@ def fmt(dt: datetime, f: str) -> str:
 # ──────────────────────────────────────────────────────────
 # 打卡工具
 # ──────────────────────────────────────────────────────────
+# process-level cache：同一次執行不重複呼叫 Sheets API 確認工作表
+_LOG_SHEET_CACHE: dict[str, gspread.Worksheet] = {}
 
 def _ensure_log_sheet(ss: gspread.Spreadsheet, sheet_name: str) -> gspread.Worksheet:
-    """確保 log 工作表存在，不存在就建立並加標題列。"""
+    """確保 log 工作表存在，不存在就建立並加標題列。結果 cache 在 process 內。"""
+    cache_key = ss.id + ":" + sheet_name
+    if cache_key in _LOG_SHEET_CACHE:
+        return _LOG_SHEET_CACHE[cache_key]
     try:
-        return ss.worksheet(sheet_name)
+        sh = ss.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
         sh = ss.add_worksheet(title=sheet_name, rows=2000, cols=12)
         sh.append_row(
             ["run_id", "時間", "系統名稱", "任務", "步驟", "狀態", "說明", "耗時(秒)"],
             value_input_option="USER_ENTERED",
         )
-        return sh
+    _LOG_SHEET_CACHE[cache_key] = sh
+    return sh
 
 
 def checkin_master(
