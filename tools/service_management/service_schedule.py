@@ -846,11 +846,19 @@ def main() -> None:
             errors.append(f"Step {step_num}: {e}")
             log.error("Step %d 失敗：%s", step_num, e)
 
+    import time
+
     if step in (0, 1):
         run(1, step1_update_schedule_stats, run_dt, gc, drive, run_id)
     if step in (0, 2):
+        if step == 0:
+            log.info("等待 5 秒讓 API rate limit 恢復...")
+            time.sleep(5)
         run(2, step2_write_daily_report, run_dt, gc, run_id)
     if step in (0, 3):
+        if step == 0:
+            log.info("等待 5 秒讓 API rate limit 恢復...")
+            time.sleep(5)
         run(3, step3_import_revenue, gc, run_id)
 
     elapsed_total = (now_tp() - t_total).total_seconds()
