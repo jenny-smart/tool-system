@@ -5,6 +5,7 @@ Tool App 主控入口
 - 日排程系統
 - 月排程系統
 - 外場日排程系統
+- 客服排程系統
 """
 
 from __future__ import annotations
@@ -23,7 +24,16 @@ import pandas as pd
 import streamlit as st
 import yaml
 
-from tools.common.config_loader import get_sheets_service
+from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
+
+@st.cache_resource(show_spinner=False)
+def _get_sheets_service_cached():
+    """Service Account Sheets service — 整個 app 生命週期共用一個實例。"""
+    return _get_sheets_service_raw()
+
+# 讓其他地方仍可直接呼叫 get_sheets_service()
+def get_sheets_service():  # noqa: F811
+    return _get_sheets_service_cached()
 
 from utils.auth import authenticate
 from utils.permissions import (
@@ -118,6 +128,17 @@ DEFAULT_CONFIG = {
                 "office": {"台北": "", "台中": ""},
             },
         },
+        # ── ★ 新增：客服排程系統 ─────────────────────────────
+        {
+            "name": "客服排程系統",
+            "type": "service_schedule",
+            "enabled": True,
+            "target_file_id": "",   # 由 Secret LEMON_TARGET_FILE_ID 注入
+            "folder_ids": {
+                "schedule_stats": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
+            },
+        },
+        # ─────────────────────────────────────────────────────
     ]
 }
 
@@ -226,7 +247,7 @@ def _ensure_sheet(service, spreadsheet_id: str, sheet_name: str, headers: list[s
                                 "backgroundColor": {"red": 0.86, "green": 0.90, "blue": 0.98},
                             }
                         },
-                        "fields": "userEnteredFormat(textFormat,backgroundColor)",
+                        "fields": "userEntiredFormat(textFormat,backgroundColor)",
                     }
                 },
             ]
@@ -334,6 +355,7 @@ def _config_to_master_sheets(cfg: dict) -> None:
     _overwrite_sheet(MONTHLY_AREA_SHEET, MONTHLY_AREA_HEADERS, monthly_rows)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def _load_config_from_master_sheets() -> dict:
     system_records = _read_sheet_records(SYSTEM_SETTING_SHEET)
 
@@ -401,6 +423,8 @@ def _load_config_from_master_sheets() -> dict:
 def save_config(cfg: dict) -> None:
     """儲存設定到主控試算表，不再寫入 GitHub systems.yaml。"""
     _config_to_master_sheets(cfg)
+    # 清除 config cache，確保下次 load_config 讀到最新設定
+    _load_config_from_master_sheets.clear()
     st.cache_data.clear()
 
 
@@ -805,20 +829,7 @@ def parse_date_range(start_date, end_date) -> list[str]:
 
 
 def normalize_monthly_areas(system: dict) -> dict:
-    """月排程地區設定標準化。
-
-    建議結構：
-    areas:
-      台北:
-        folder_id: "地區根目錄ID"
-        enabled: true
-
-    也兼容舊結構：
-    areas:
-      台北:
-        folder_name: "01.台北專員"
-        enabled: true
-    """
+    """月排程地區設定標準化。"""
     raw_areas = system.get("areas", {})
     raw_folders = system.get("folders", {}) or {}
     output = {}
@@ -890,11 +901,6 @@ def default_monthly_areas_df() -> pd.DataFrame:
 
 
 def monthly_areas_df_to_config(df) -> dict:
-    """把月排程地區表格轉回 systems.yaml 結構。
-
-    刪除地區：在表格刪除該列即可。
-    停用地區：取消「啟用」勾選即可。
-    """
     areas = {}
 
     if df is None:
@@ -950,6 +956,11 @@ def available_areas_for_system(system: dict) -> list[str]:
                 return list(value.keys())
         return ["台北", "台中"]
 
+    # ── ★ 新增：客服排程系統固定全區 ──────────────────────
+    if system_type == "service_schedule":
+        return ["全區"]
+    # ────────────────────────────────────────────────────────
+
     # 舊日排程目前腳本本身會跑全部區域，先提供全區。
     return ["全區"]
 
@@ -993,8 +1004,8 @@ def add_log(message: str, level: str = "info") -> None:
     icon = icons.get(level, "🔵")
     st.session_state.logs.append(f"[{now}] {icon} {message}")
 
-    if len(st.session_state.logs) > 500:
-        st.session_state.logs = st.session_state.logs[-500:]
+    if len(st.session_state.logs) > 200:
+        st.session_state.logs = st.session_state.logs[-200:]
 
 
 def render_log() -> None:
@@ -1043,6 +1054,7 @@ def get_system_type_label(system_type: str) -> str:
         "daily_scheduler": "日排程系統",
         "monthly_scheduler": "月排程系統",
         "field_daily_schedule": "外場排程系統",
+        "service_schedule": "客服排程系統",   # ★ 新增
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -1089,11 +1101,19 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
         cmd = [sys.executable, str(script), *args]
         display_name = script_path
 
+    # 確保子進程能 import tools.common 等套件（Streamlit Cloud 需要明確設定）
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    base_dir_str = str(BASE_DIR)
+    if base_dir_str not in existing_pythonpath:
+        env["PYTHONPATH"] = base_dir_str + (":" + existing_pythonpath if existing_pythonpath else "")
+
     completed = subprocess.run(
         cmd,
         text=True,
         capture_output=True,
         cwd=BASE_DIR,
+        env=env,
     )
 
     if completed.stdout:
@@ -1309,6 +1329,11 @@ def render_log_page() -> None:
         "field_orders": "外場訂單",
         "field_staff_profile": "外場專員個資",
 
+        # ★ 客服排程
+        "service_schedule_stats": "客服排班統計表",
+        "service_daily_report":   "客服每日回報",
+        "service_revenue":        "客服前日營業額",
+
         # 通知
         "send_daily_result": "通知信",
     }
@@ -1316,9 +1341,15 @@ def render_log_page() -> None:
     def today_key() -> str:
         return datetime.now(TW_TZ).strftime("%Y%m%d")
 
-    def read_text_safe(path: Path) -> str:
+    def read_text_safe(path: Path, max_bytes: int = 2 * 1024 * 1024) -> str:
         if not path.exists():
             return ""
+        # 超過 2MB 只讀最後 2MB，避免大型 log 吃光記憶體
+        size = path.stat().st_size
+        if size > max_bytes:
+            with path.open("rb") as f:
+                f.seek(-max_bytes, 2)
+                return f.read().decode("utf-8", errors="replace")
         return path.read_text(encoding="utf-8", errors="replace")
 
     def status_for(exit_code: str) -> tuple[str, str, str]:
@@ -1337,20 +1368,9 @@ def render_log_page() -> None:
             return ["沒有 log 內容"]
 
         keywords = [
-            "Traceback",
-            "RuntimeError",
-            "ModuleNotFoundError",
-            "Error",
-            "ERROR",
-            "Exception",
-            "SMTPAuthenticationError",
-            "HttpError",
-            "failed",
-            "Failed",
-            "失敗",
-            "錯誤",
-            "找不到",
-            "登入失敗",
+            "Traceback", "RuntimeError", "ModuleNotFoundError",
+            "Error", "ERROR", "Exception", "SMTPAuthenticationError",
+            "HttpError", "failed", "Failed", "失敗", "錯誤", "找不到", "登入失敗",
         ]
 
         matched = [line for line in lines if any(k in line for k in keywords)]
@@ -1377,130 +1397,16 @@ def render_log_page() -> None:
     st.markdown(
         """
         <style>
-          .log-title {
-            font-size:2.2rem;
-            font-weight:900;
-            color:#0f172a;
-            letter-spacing:1px;
-            margin-bottom:4px;
-          }
-          .log-subtitle {
-            font-size:0.82rem;
-            font-weight:800;
-            color:#94a3b8;
-            letter-spacing:4px;
-            margin-top:6px;
-            margin-bottom:22px;
-          }
-          .log-top-card {
-            background:linear-gradient(135deg,#ffffff,#f8fafc);
-            border:1px solid #e2e8f0;
-            border-radius:24px;
-            padding:26px;
-            margin:20px 0 26px 0;
-            box-shadow:0 12px 30px rgba(15,23,42,0.07);
-          }
-          .log-overall {
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:18px;
-            flex-wrap:wrap;
-          }
-          .log-overall-title {
-            font-size:1.55rem;
-            font-weight:900;
-            color:#0f172a;
-          }
-          .log-overall-note {
-            color:#64748b;
-            margin-top:8px;
-            font-size:0.98rem;
-          }
-          .overall-status {
-            font-size:1.55rem;
-            font-weight:900;
-          }
-          .result-strip {
-            display:flex;
-            gap:12px;
-            flex-wrap:wrap;
-            margin-top:18px;
-          }
-          .result-pill {
-            background:#f1f5f9;
-            border:1px solid #e2e8f0;
-            border-radius:999px;
-            padding:9px 14px;
-            color:#334155;
-            font-weight:900;
-            font-size:0.93rem;
-          }
-          .status-grid {
-            display:grid;
-            grid-template-columns:repeat(2,minmax(0,1fr));
-            gap:16px;
-            margin-top:16px;
-          }
-          .status-card {
-            background:white;
-            border:1px solid #e2e8f0;
-            border-left:8px solid var(--status-color);
-            border-radius:20px;
-            padding:20px;
-            box-shadow:0 5px 18px rgba(15,23,42,0.05);
-          }
-          .status-head {
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:12px;
-            margin-bottom:10px;
-          }
-          .status-name {
-            font-size:1.18rem;
-            font-weight:900;
-            color:#0f172a;
-          }
-          .status-badge {
-            display:inline-flex;
-            align-items:center;
-            gap:6px;
-            color:var(--status-color);
-            background:#f8fafc;
-            border:1px solid #e2e8f0;
-            border-radius:999px;
-            padding:6px 12px;
-            font-size:0.92rem;
-            font-weight:900;
-            white-space:nowrap;
-          }
-          .status-summary {
-            color:#475569;
-            font-size:0.93rem;
-            line-height:1.55;
-            margin:10px 0 12px 0;
-          }
-          .status-meta {
-            color:#94a3b8;
-            font-size:0.8rem;
-            font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-          }
-          .error-box {
-            background:#fff1f2;
-            border:1px solid #fecdd3;
-            color:#991b1b;
-            border-radius:14px;
-            padding:12px 14px;
-            margin-top:12px;
-            font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-            font-size:0.84rem;
-            line-height:1.55;
-            white-space:pre-wrap;
-          }
-          @media (max-width: 900px) {
-            .status-grid { grid-template-columns:1fr; }
-          }
+          .log-title { font-size:2.2rem; font-weight:900; color:#0f172a; letter-spacing:1px; margin-bottom:4px; }
+          .log-subtitle { font-size:0.82rem; font-weight:800; color:#94a3b8; letter-spacing:4px; margin-top:6px; margin-bottom:22px; }
+          .log-top-card { background:linear-gradient(135deg,#ffffff,#f8fafc); border:1px solid #e2e8f0; border-radius:24px; padding:26px; margin:20px 0 26px 0; box-shadow:0 12px 30px rgba(15,23,42,0.07); }
+          .log-overall { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; }
+          .log-overall-title { font-size:1.55rem; font-weight:900; color:#0f172a; }
+          .log-overall-note { color:#64748b; margin-top:8px; font-size:0.98rem; }
+          .overall-status { font-size:1.55rem; font-weight:900; }
+          .result-strip { display:flex; gap:12px; flex-wrap:wrap; margin-top:18px; }
+          .result-pill { background:#f1f5f9; border:1px solid #e2e8f0; border-radius:999px; padding:9px 14px; color:#334155; font-weight:900; font-size:0.93rem; }
+          .error-box { background:#fff1f2; border:1px solid #fecdd3; color:#991b1b; border-radius:14px; padding:12px 14px; margin-top:12px; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:0.84rem; line-height:1.55; white-space:pre-wrap; }
         </style>
         <div class="log-title">📋 今日排程狀態</div>
         <div class="log-subtitle">DAILY SCHEDULE STATUS · ACTION LOGS</div>
@@ -1533,11 +1439,7 @@ def render_log_page() -> None:
     day_options = [p.name for p in day_dirs]
     default_index = day_options.index(today) if today in day_options else 0
 
-    selected_day = st.selectbox(
-        "選擇日期",
-        day_options,
-        index=default_index,
-    )
+    selected_day = st.selectbox("選擇日期", day_options, index=default_index)
 
     selected_dir = log_root / selected_day
     log_files = sorted(selected_dir.glob("*.log"))
@@ -1575,32 +1477,19 @@ def render_log_page() -> None:
     missing_count = sum(1 for r in rows if r["exit_code"] == "missing")
 
     if failed_count:
-        overall_text = "有失敗項目"
-        overall_icon = "❌"
-        overall_color = "#dc2626"
+        overall_text, overall_icon, overall_color = "有失敗項目", "❌", "#dc2626"
     elif success_count:
-        overall_text = "全部成功"
-        overall_icon = "✅"
-        overall_color = "#16a34a"
+        overall_text, overall_icon, overall_color = "全部成功", "✅", "#16a34a"
     else:
-        overall_text = "尚無成功紀錄"
-        overall_icon = "⚪"
-        overall_color = "#64748b"
+        overall_text, overall_icon, overall_color = "尚無成功紀錄", "⚪", "#64748b"
 
     failed_summary_html = ""
     if failed_rows:
         items = []
         for r in failed_rows:
             msg = "\n".join(r["important"][:5])
-            items.append(
-                f"<div style='margin-top:10px;'><b>{html.escape(r['label'])}</b><br>{html.escape(msg)}</div>"
-            )
-        failed_summary_html = (
-            "<div class='error-box'>"
-            + "<b>失敗項目與錯誤內容：</b>"
-            + "".join(items)
-            + "</div>"
-        )
+            items.append(f"<div style='margin-top:10px;'><b>{html.escape(r['label'])}</b><br>{html.escape(msg)}</div>")
+        failed_summary_html = "<div class='error-box'><b>失敗項目與錯誤內容：</b>" + "".join(items) + "</div>"
 
     st.markdown(
         f"""
@@ -1624,77 +1513,40 @@ def render_log_page() -> None:
         unsafe_allow_html=True,
     )
 
-
     with st.expander("🔎 查看詳細 log", expanded=False):
-
         tabs = st.tabs([f"{row['icon']} {row['label']}" for row in rows])
 
         for tab, row in zip(tabs, rows):
-
             with tab:
-
-                json_file = (
-                    Path("logs")
-                    / selected_day
-                    / f"{row['job_name']}.json"
-                )
-
+                json_file = Path("logs") / selected_day / f"{row['job_name']}.json"
                 meta = {}
-
                 if json_file.exists():
                     try:
-                        meta = json.loads(
-                            json_file.read_text(
-                                encoding="utf-8"
-                            )
-                        )
+                        meta = json.loads(json_file.read_text(encoding="utf-8"))
                     except Exception:
                         meta = {}
 
-                started_at = meta.get("started_at", "-")
-                finished_at = meta.get("finished_at", "-")
-                duration = meta.get("duration_seconds", "-")
-                status = meta.get("status", "-")
-
                 c1, c2, c3 = st.columns(3)
-
                 with c1:
                     st.caption("開始時間")
-                    st.write(started_at)
-
+                    st.write(meta.get("started_at", "-"))
                 with c2:
                     st.caption("完成時間")
-                    st.write(finished_at)
-
+                    st.write(meta.get("finished_at", "-"))
                 with c3:
                     st.caption("耗時")
-                    st.write(f"{duration} 秒")
+                    st.write(f"{meta.get('duration_seconds', '-')} 秒")
 
                 st.divider()
 
                 if row["exit_code"] == "0":
-
                     st.success(f"{row['label']}：成功")
-
                 elif row["exit_code"] == "missing":
-
                     st.warning(f"{row['label']}：尚無 exit code")
-
                 else:
-
-                    st.error(
-                        f"{row['label']}：失敗 / exit code {row['exit_code']}"
-                    )
-
-                    with st.expander(
-                        "查看錯誤詳細 log",
-                        expanded=False
-                    ):
-
-                        st.code(
-                            row["content"] or "空 log",
-                            language="text"
-                        )
+                    st.error(f"{row['label']}：失敗 / exit code {row['exit_code']}")
+                    with st.expander("查看錯誤詳細 log", expanded=False):
+                        st.code(row["content"] or "空 log", language="text")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1733,6 +1585,19 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "外場專員個資",
         "一鍵執行外場日排程",
     ],
+    # ── ★ 新增：客服排程系統功能清單 ────────────────────────
+    "service_schedule": [
+        # 排班同步
+        "更新排班統計表",
+        "更新每日回報",
+        "更新前一天營業分數及營業額",
+        "三步驟全部執行",
+        # CRM
+        "CRM：抓儲值金",
+        "CRM：匯出定期VIP日曆",
+        "CRM：全跑（抓儲值金＋匯出VIP）",
+    ],
+    # ────────────────────────────────────────────────────────
 }
 
 DAILY_SCRIPT_MAP = {
@@ -1760,7 +1625,6 @@ DAILY_TARGET_MAP = {
     "專員個資": "staff_info",
 }
 
-
 FIELD_SCRIPT_MAP = {
     "外場排班統計表": ["tools/field_management/schedule_stats.py"],
     "外場專員班表": ["tools/field_management/staff_schedule.py"],
@@ -1772,6 +1636,22 @@ FIELD_SCRIPT_MAP = {
         "all",
     ],
 }
+
+# ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
+SERVICE_STEP_MAP = {
+    "更新排班統計表":           "1",
+    "更新每日回報":             "2",
+    "更新前一天營業分數及營業額": "3",
+    "三步驟全部執行":           "0",
+}
+
+# ── ★ CRM：功能 → crm_export.py --step 對應表 ───────────────
+SERVICE_CRM_MAP = {
+    "CRM：抓儲值金":                 "1",
+    "CRM：匯出定期VIP日曆":          "2",
+    "CRM：全跑（抓儲值金＋匯出VIP）": "0",
+}
+# ────────────────────────────────────────────────────────────
 
 
 def functions_for_system(sys_cfg: dict) -> list[str]:
@@ -1855,10 +1735,7 @@ with head_log:
 sys_col, func_col = st.columns([1, 1])
 
 with sys_col:
-    st.markdown(
-        '<div class="field-label">🗂️ 執行系統</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="field-label">🗂️ 執行系統</div>', unsafe_allow_html=True)
 
     default_index = 0
     if st.session_state.selected_system_name in system_names:
@@ -1878,10 +1755,7 @@ selected_system = get_system_by_name(config, system_name)
 system_type = selected_system.get("type", "vip")
 
 with func_col:
-    st.markdown(
-        '<div class="field-label">🎯 執行功能</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="field-label">🎯 執行功能</div>', unsafe_allow_html=True)
 
     selected_function = st.selectbox(
         "執行功能",
@@ -1901,10 +1775,7 @@ date_col, area_col = st.columns([2, 1])
 
 with date_col:
     if system_type == "monthly_scheduler" and selected_function in monthly_order_functions:
-        st.markdown(
-            '<div class="field-label">📆 執行方式</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="field-label">📆 執行方式</div>', unsafe_allow_html=True)
 
         monthly_date_mode = st.radio(
             "執行方式",
@@ -1927,24 +1798,13 @@ with date_col:
             d1, d2 = st.columns(2)
             today_date = datetime.now(TW_TZ).date()
             with d1:
-                start_date_value = st.date_input(
-                    "開始日期",
-                    value=today_date,
-                    key="monthly_start_date",
-                )
+                start_date_value = st.date_input("開始日期", value=today_date, key="monthly_start_date")
             with d2:
-                end_date_value = st.date_input(
-                    "結束日期",
-                    value=today_date,
-                    key="monthly_end_date",
-                )
+                end_date_value = st.date_input("結束日期", value=today_date, key="monthly_end_date")
             period = start_date_value.strftime("%Y%m%d")
 
     elif system_type in ["vip", "monthly_scheduler"]:
-        st.markdown(
-            '<div class="field-label">📆 執行期別</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="field-label">📆 執行期別</div>', unsafe_allow_html=True)
         period = st.text_input(
             "執行期別",
             value=tw_now_text("%Y%m"),
@@ -1953,37 +1813,42 @@ with date_col:
             key="period",
         )
 
+    # ── ★ 客服排程系統 ──────────────────────────────────────
+    elif system_type == "service_schedule":
+        st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
+        # CRM 匯出 VIP 日曆需要選日期範圍
+        if selected_function in ("CRM：匯出定期VIP日曆", "CRM：全跑（抓儲值金＋匯出VIP）"):
+            _today_date = datetime.now(TW_TZ).date()
+            _first_of_month = _today_date.replace(day=1)
+            _d1, _d2 = st.columns(2)
+            with _d1:
+                start_date_value = st.date_input(
+                    "起始日期", value=_first_of_month, key="crm_start_date"
+                )
+            with _d2:
+                end_date_value = st.date_input(
+                    "結束日期", value=_today_date, key="crm_end_date"
+                )
+        else:
+            st.info("自動使用今日（台北時間）", icon="📅")
+            start_date_value = None
+            end_date_value   = None
+
     else:
-        st.markdown(
-            '<div class="field-label">📆 執行日期區間</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="field-label">📆 執行日期區間</div>', unsafe_allow_html=True)
         d1, d2 = st.columns(2)
         today_date = datetime.now(TW_TZ).date()
         with d1:
-            start_date_value = st.date_input(
-                "開始日期",
-                value=today_date,
-                key="start_date",
-            )
+            start_date_value = st.date_input("開始日期", value=today_date, key="start_date")
         with d2:
-            end_date_value = st.date_input(
-                "結束日期",
-                value=today_date,
-                key="end_date",
-            )
+            end_date_value = st.date_input("結束日期", value=today_date, key="end_date")
         period = start_date_value.strftime("%Y%m%d")
 
 with area_col:
-    st.markdown(
-        '<div class="field-label">📍 執行區域</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="field-label">📍 執行區域</div>', unsafe_allow_html=True)
 
     area_options = available_areas_for_system(selected_system)
 
-    # 月排程如果設定檔還沒有 areas，就用預設地區。
-    # 這樣上下半月訂單一定可以選單一地區，不會被鎖住。
     if system_type == "monthly_scheduler" and (not area_options or area_options == ["全區"]):
         area_options = ["台北", "新北", "台中", "桃園", "新竹", "高雄"]
 
@@ -2000,9 +1865,6 @@ with area_col:
         key=f"area_select_{system_name}_{selected_function}",
     )
 
-    # selected_areas 一律只放使用者目前選到的值。
-    # 全區 -> 後面轉成 --area all
-    # 台北 -> 後面轉成 --area 台北
     selected_areas = [selected_area_value]
 
     if selected_area_value == "全區":
@@ -2016,7 +1878,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════
-# UI — 日誌# UI — 日誌
+# UI — 日誌
 # ═══════════════════════════════════════════════════════════
 render_log()
 
@@ -2051,13 +1913,16 @@ if can_access_page("settings"):
                 st.session_state.editing_system = None
                 st.rerun()
 
-        system_type_options = ["vip", "daily_scheduler", "monthly_scheduler", "field_daily_schedule"]
+        system_type_options = [
+            "vip", "daily_scheduler", "monthly_scheduler",
+            "field_daily_schedule", "service_schedule",   # ★ 新增
+        ]
 
         if st.session_state.adding_system:
             with st.form("add_system_form"):
                 st.markdown("**新增系統設定**")
 
-                new_name = st.text_input("設定系統名稱", placeholder="例如：外場日排程系統")
+                new_name = st.text_input("設定系統名稱", placeholder="例如：客服排程系統")
                 new_type = st.selectbox(
                     "設定系統類型",
                     system_type_options,
@@ -2125,6 +1990,13 @@ if can_access_page("settings"):
                                     },
                                 }
                             )
+
+                        # ★ 客服排程系統預設結構
+                        if new_type == "service_schedule":
+                            new_system["target_file_id"] = ""
+                            new_system["folder_ids"] = {
+                                "schedule_stats": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
+                            }
 
                         systems_all.append(new_system)
                         config["systems"] = systems_all
@@ -2228,42 +2100,31 @@ if can_access_page("settings"):
 
                 if current_type == "field_daily_schedule":
                     folder_ids = mask_nested_ids(sys_cfg.get("folder_ids", {}))
-                    spreadsheet_ids = mask_nested_ids(sys_cfg.get("spreadsheet_ids", {}))
-
                     extra_detail = f"""
       <div class="detail-row"><strong>排班統計資料夾</strong>：{html.escape(str(folder_ids.get("schedule_stats", "")))}</div>
-      <div class="detail-row"><strong>訂單資料夾</strong>：台北 / 台中 已設定</div>
-      <div class="detail-row"><strong>專員個資資料夾</strong>：台北 / 台中 已設定</div>
-      <div class="detail-row"><strong>專員班表資料夾</strong>：台北 / 台中 已設定</div>
-      <div class="detail-row"><strong>目標表單</strong>：名冊 / 薪資 / 辦公室 已設定</div>
+      <div class="detail-row"><strong>訂單/個資/班表資料夾</strong>：台北 / 台中 已設定</div>
     """
                 elif current_type == "monthly_scheduler":
                     monthly_areas = normalize_monthly_areas(sys_cfg)
-                    enabled_area_names = [
-                        area_name
-                        for area_name, area_info in monthly_areas.items()
-                        if area_info.get("enabled", True)
+                    enabled_area_names = [k for k, v in monthly_areas.items() if v.get("enabled", True)]
+                    disabled_area_names = [k for k, v in monthly_areas.items() if not v.get("enabled", True)]
+                    area_root_lines = [
+                        f"{k}：{mask_id(v.get('folder_id', ''))}（{'啟用' if v.get('enabled', True) else '停用'}）"
+                        for k, v in monthly_areas.items()
                     ]
-                    disabled_area_names = [
-                        area_name
-                        for area_name, area_info in monthly_areas.items()
-                        if not area_info.get("enabled", True)
-                    ]
-                    area_summary = "、".join(enabled_area_names) if enabled_area_names else "未設定"
-                    disabled_summary = "、".join(disabled_area_names) if disabled_area_names else "無"
-                    area_root_lines = []
-                    for area_name, area_info in monthly_areas.items():
-                        status_text = "啟用" if area_info.get("enabled", True) else "停用"
-                        area_root_lines.append(
-                            f"{area_name}：{mask_id(area_info.get('folder_id', ''))}（{status_text}）"
-                        )
-                    area_root_summary = "<br>".join(html.escape(line) for line in area_root_lines) or "未設定"
-
                     extra_detail = f"""
       <div class="detail-row"><strong>月排程總根目錄 ID</strong>：{mask_id(folder_id)}</div>
-      <div class="detail-row"><strong>啟用地區</strong>：{html.escape(area_summary)}</div>
-      <div class="detail-row"><strong>停用地區</strong>：{html.escape(disabled_summary)}</div>
-      <div class="detail-row"><strong>地區根目錄</strong>：<br>{area_root_summary}</div>
+      <div class="detail-row"><strong>啟用地區</strong>：{html.escape("、".join(enabled_area_names) or "未設定")}</div>
+      <div class="detail-row"><strong>地區根目錄</strong>：<br>{"<br>".join(html.escape(l) for l in area_root_lines) or "未設定"}</div>
+    """
+                # ★ 客服排程系統顯示資訊
+                elif current_type == "service_schedule":
+                    target_id = sys_cfg.get("target_file_id", "")
+                    sched_folder = (sys_cfg.get("folder_ids") or {}).get("schedule_stats", "")
+                    extra_detail = f"""
+      <div class="detail-row"><strong>目標試算表 ID</strong>：{mask_id(target_id) if target_id else "由 Secret LEMON_TARGET_FILE_ID 注入"}</div>
+      <div class="detail-row"><strong>排班統計來源資料夾</strong>：{mask_id(sched_folder)}</div>
+      <div class="detail-row"><strong>打卡目標</strong>：主控表（執行記錄）+ 執行檔（_py_execution_log）</div>
     """
                 else:
                     extra_detail = f"""
@@ -2327,15 +2188,15 @@ if run_clicked:
             end_date_value.strftime("%Y%m%d"),
         ]
     else:
-        date_keys = [period]
+        date_keys = [period or tw_now_text("%Y%m%d")]
 
     if system_type == "field_daily_schedule" and not selected_areas:
         add_log("請至少選擇一個執行區域", "error")
         st.rerun()
 
-    add_log(f"開始執行：{system_name} / {selected_function} / {date_keys[0]}~{date_keys[-1]} / 區域 {', '.join(selected_areas)}")
+    add_log(f"開始執行：{system_name} / {selected_function}")
 
-    with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):  # ★ 加這行
+    with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
         try:
             result = None
 
@@ -2356,19 +2217,14 @@ if run_clicked:
 
                 if selected_function == "建立當月彙整檔":
                     result = workflow.create_monthly_summary(period)
-
                 elif selected_function == "轉檔＋高雄/新竹彙整":
                     result = workflow.convert_files(period)
-
                 elif selected_function == "搬運":
                     result = workflow.move_files(period)
-
                 elif selected_function == "計算":
                     result = workflow.apply_formulas(period)
-
                 elif selected_function == "彙整金額":
                     result = workflow.summarize_amounts(period)
-
                 elif selected_function == "一鍵執行：建立＋轉檔＋搬運＋計算＋彙整金額":
                     result = [
                         workflow.create_monthly_summary(period),
@@ -2377,7 +2233,6 @@ if run_clicked:
                         workflow.apply_formulas(period),
                         workflow.summarize_amounts(period),
                     ]
-
                 else:
                     add_log(f"未知功能：{selected_function}", "warning")
 
@@ -2390,10 +2245,7 @@ if run_clicked:
                     from tools.scheduled_daily.scheduler import main as run_daily_scheduler
 
                     daily_target = DAILY_TARGET_MAP.get(selected_function, "all")
-                    result = run_daily_scheduler(
-                        target=daily_target,
-                        folder_id=folder_id,
-                    )
+                    result = run_daily_scheduler(target=daily_target, folder_id=folder_id)
 
                 else:
                     script = DAILY_SCRIPT_MAP.get(selected_function)
@@ -2443,14 +2295,11 @@ if run_clicked:
                                     raise RuntimeError("請選擇開始日期與結束日期")
 
                                 args.extend([
-                                    "--start",
-                                    start_date_value.strftime("%Y-%m-%d"),
-                                    "--end",
-                                    end_date_value.strftime("%Y-%m-%d"),
+                                    "--start", start_date_value.strftime("%Y-%m-%d"),
+                                    "--end", end_date_value.strftime("%Y-%m-%d"),
                                 ])
                             else:
                                 args.extend(base_args)
-
                                 if period:
                                     args.extend(["--period", period])
 
@@ -2493,13 +2342,72 @@ if run_clicked:
 
                 result = results
 
+            # ── ★ 客服排程系統執行邏輯 ────────────────────────────
+            elif system_type == "service_schedule":
+
+                _svc_env = os.environ.copy()
+                _existing_pp = _svc_env.get("PYTHONPATH", "")
+                _base_str = str(BASE_DIR)
+                if _base_str not in _existing_pp:
+                    _svc_env["PYTHONPATH"] = _base_str + (":" + _existing_pp if _existing_pp else "")
+
+                # ── CRM 功能 ──────────────────────────────────
+                if selected_function in SERVICE_CRM_MAP:
+                    step = SERVICE_CRM_MAP[selected_function]
+                    cmd = [
+                        sys.executable, "-u", "-m",
+                        "tools.service_management.crm_export",
+                        "--step", step,
+                    ]
+                    # 匯出 VIP 日曆加上日期參數
+                    if step != "1" and start_date_value and end_date_value:
+                        cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
+                                "--end",   end_date_value.strftime("%Y-%m-%d")]
+                    # 地區篩選
+                    if selected_area_value and selected_area_value != "全區":
+                        cmd += ["--area", selected_area_value]
+                    add_log(f"CRM 執行：{selected_function}（step={step}）", "info")
+
+                # ── 排班同步功能 ──────────────────────────────
+                else:
+                    step = SERVICE_STEP_MAP.get(selected_function, "0")
+                    cmd = [
+                        sys.executable, "-u", "-m",
+                        "tools.service_management.service_schedule",
+                        "--step", step,
+                    ]
+                    add_log(f"客服排程執行：{selected_function}（--step {step}）", "info")
+
+                completed = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    cwd=BASE_DIR,
+                    env=_svc_env,
+                )
+
+                if completed.stdout:
+                    for line in completed.stdout.strip().splitlines()[-120:]:
+                        add_log(line, "info")
+
+                if completed.returncode == 0:
+                    result = f"{selected_function} 執行成功"
+                else:
+                    if completed.stderr:
+                        for line in completed.stderr.strip().splitlines()[-20:]:
+                            add_log(line, "error")
+                    raise RuntimeError(
+                        f"執行失敗（exit {completed.returncode}）：{selected_function}"
+                    )
+            # ────────────────────────────────────────────────────────
+
             else:
                 add_log(f"{system_type} 尚未實作", "warning")
 
             if isinstance(result, list):
                 for item in result:
                     add_log(str(item), "success")
-
             elif result is not None:
                 add_log(str(result), "success")
 
