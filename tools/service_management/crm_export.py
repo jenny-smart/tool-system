@@ -157,7 +157,7 @@ def _checkin(gc: gspread.Client, spreadsheet_id: str, sheet_name: str,
 def checkin_both(gc: gspread.Client, run_id: str, task: str, step: str,
                  status: str, note: str = "", elapsed: float = 0.0) -> None:
     master_id = os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "")
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "")
+    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
     _checkin(gc, master_id, "執行記錄",       run_id, task, step, status, note, elapsed)
     _checkin(gc, target_id, "_py_execution_log", run_id, task, step, status, note, elapsed)
 
@@ -322,9 +322,9 @@ def _write_stored_value_sheet(
     rows: list[list],
 ) -> gspread.Worksheet:
     """寫入目標試算表「儲值金表_{地區}」。"""
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "")
+    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
     if not target_id:
-        raise EnvironmentError("LEMON_TARGET_FILE_ID 未設定")
+        raise EnvironmentError("請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
 
     ss = gc.open_by_key(target_id)
     sheet_name = f"儲值金表_{area_name}"
@@ -462,7 +462,7 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str) -> dict[str, dic
     從「儲值金表_{地區}」讀取姓名 → {totalBalance, lineValue}。
     對應 GAS 的 getStoredValueInfoByName()。
     """
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "")
+    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
     if not target_id:
         return {}
     try:
@@ -636,9 +636,9 @@ def _write_vip_sheet(
     start_dt: datetime,
 ) -> str:
     """寫入「定期VIP_{地區}_{yyyyMMdd}」工作表，回傳工作表名稱。"""
-    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "")
+    target_id = os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
     if not target_id:
-        raise EnvironmentError("LEMON_TARGET_FILE_ID 未設定")
+        raise EnvironmentError("請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
 
     ss         = gc.open_by_key(target_id)
     sheet_name = f"定期VIP_{area_name}_{start_dt.strftime('%Y%m%d')}"
@@ -756,8 +756,8 @@ def main() -> None:
                         help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
     args = parser.parse_args()
 
-    if not os.environ.get("LEMON_TARGET_FILE_ID"):
-        sys.exit("❌ 環境變數 LEMON_TARGET_FILE_ID 未設定")
+    if not (os.environ.get("LEMON_TARGET_FILE_ID", "").strip() or os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()):
+        sys.exit("❌ 請設定 LEMON_TARGET_FILE_ID 或 TOOLS_APP_LOG_SPREADSHEET_ID")
 
     # 日期範圍
     today = now_tp()
