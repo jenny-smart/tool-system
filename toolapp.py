@@ -1861,18 +1861,29 @@ with date_col:
         _today_date = datetime.now(TW_TZ).date()
 
         if selected_function in ("CRM：匯出定期VIP日曆", "CRM：全跑（抓儲值金＋匯出VIP）"):
-            # CRM 匯出 VIP 日曆：選日期範圍
-            st.markdown('<div class="field-label">📆 匯出日期範圍</div>', unsafe_allow_html=True)
-            _first_of_month = _today_date.replace(day=1)
-            _d1, _d2 = st.columns(2)
-            with _d1:
-                start_date_value = st.date_input(
-                    "起始日期", value=_first_of_month, key="crm_start_date"
-                )
-            with _d2:
-                end_date_value = st.date_input(
-                    "結束日期", value=_today_date, key="crm_end_date"
-                )
+            # CRM 匯出 VIP 日曆：輸入月份期別，自動轉換成日期範圍
+            st.markdown('<div class="field-label">📆 匯出月份</div>', unsafe_allow_html=True)
+            _default_month = datetime.now(TW_TZ).strftime("%Y%m")
+            _month_input = st.text_input(
+                "月份期別",
+                value=_default_month,
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="crm_month_period",
+            )
+            # 解析月份期別 → 起始/結束日期
+            import calendar as _calendar
+            try:
+                _y = int(_month_input[:4])
+                _m = int(_month_input[4:6])
+                _last_day = _calendar.monthrange(_y, _m)[1]
+                start_date_value = datetime(year=_y, month=_m, day=1, tzinfo=TW_TZ).date()
+                end_date_value   = datetime(year=_y, month=_m, day=_last_day, tzinfo=TW_TZ).date()
+                st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
+            except Exception:
+                st.error("月份格式錯誤，請輸入 yyyyMM，例如：202607")
+                start_date_value = None
+                end_date_value   = None
         elif selected_function == "CRM：抓儲值金":
             # 抓儲值金不需要日期
             st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
