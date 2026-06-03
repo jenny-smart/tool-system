@@ -69,7 +69,7 @@ MEMBER_PATH    = "/member"
 
 # 主控試算表地區設定工作表
 AREA_SHEET_NAME    = "客服地區設定"
-AREA_SHEET_HEADERS = ["地區名稱", "Calendar ID", "啟用"]
+AREA_SHEET_HEADERS = ["地區名稱", "Calendar ID", "目標試算表ID", "啟用"]
 
 # 地區名稱 → Secrets key 前綴對應
 AREA_TO_SECRET_PREFIX: dict[str, str] = {
@@ -180,7 +180,11 @@ def checkin_both(gc: gspread.Client, run_id: str, task: str, step: str,
 
 def _ensure_area_sheet(gc: gspread.Client) -> gspread.Worksheet:
     """確保主控試算表有「客服地區設定」工作表。"""
-    master_id = os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "")
+    from tools.common.config_loader import get_master_spreadsheet_id
+    master_id = (
+        os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+        or get_master_spreadsheet_id()
+    )
     if not master_id:
         raise EnvironmentError("TOOLS_APP_LOG_SPREADSHEET_ID 未設定")
     ss = gc.open_by_key(master_id)
@@ -189,12 +193,11 @@ def _ensure_area_sheet(gc: gspread.Client) -> gspread.Worksheet:
     except gspread.WorksheetNotFound:
         sh = ss.add_worksheet(title=AREA_SHEET_NAME, rows=50, cols=5)
         sh.append_row(AREA_SHEET_HEADERS)
-        # 寫入預設四個地區（Calendar ID 留空，讓使用者填）
         defaults = [
-            ["台北", "", "TRUE"],
-            ["台中", "", "TRUE"],
-            ["新竹", "", "TRUE"],
-            ["高雄", "", "TRUE"],
+            ["台北", "", "", "TRUE"],
+            ["台中", "", "", "TRUE"],
+            ["新竹", "", "", "TRUE"],
+            ["高雄", "", "", "TRUE"],
         ]
         for row in defaults:
             sh.append_row(row)
@@ -204,7 +207,7 @@ def _ensure_area_sheet(gc: gspread.Client) -> gspread.Worksheet:
 def load_area_config(gc: gspread.Client, filter_area: str | None = None) -> list[dict]:
     """
     從主控試算表讀取地區設定。
-    回傳 [{"name": "台北", "calendar_id": "...", "enabled": True}, ...]
+    回傳 [{"name": "台北", "calendar_id": "...", "target_spreadsheet_id": "...", "enabled": True}, ...]
     """
     sh = _ensure_area_sheet(gc)
     records = sh.get_all_records()
@@ -212,12 +215,18 @@ def load_area_config(gc: gspread.Client, filter_area: str | None = None) -> list
     for r in records:
         name       = str(r.get("地區名稱", "")).strip()
         cal_id     = str(r.get("Calendar ID", "")).strip()
-        enabled    = str(r.get("啟用", "TRUE")).strip().upper() not in ("FALSE", "0", "否", "停用")
+        target_id  = str(r.get("目標試算表ID", "")).strip()
+        enabled_v  = str(r.get("啟用", "TRUE")).strip().upper()
+        enabled    = enabled_v not in ("FALSE", "0", "否", "停用")
         if not name or not enabled:
             continue
         if filter_area and name != filter_area:
             continue
-        areas.append({"name": name, "calendar_id": cal_id})
+        areas.append({
+            "name":                name,
+            "calendar_id":         cal_id,
+            "target_spreadsheet_id": target_id,
+        })
     return areas
 
 def get_secret_prefix(area_name: str) -> str:
@@ -332,14 +341,15 @@ def _write_stored_value_sheet(
     area_name: str,
     headers: list[str],
     rows: list[list],
+    area_target_id: str = "",
 ) -> gspread.Worksheet:
-    """寫入目標試算表「儲值金表_{地區}」。"""
-    target_id = _load_target_file_id()
+    """寫入地區目標試算表「儲值金_{地區}」。"""
+    target_id = area_target_id or _load_target_file_id()
     if not target_id:
-        raise EnvironmentError("請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
+        raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
 
     ss = gc.open_by_key(target_id)
-    sheet_name = f"儲值金表_{area_name}"
+    sheet_name = f"儲值金_{area_name}"
 
     try:
         sh = ss.worksheet(sheet_name)
@@ -351,7 +361,7 @@ def _write_stored_value_sheet(
         sh.update(values=[headers] + rows, range_name="A1", value_input_option="USER_ENTERED")
         sh.freeze(rows=1)
 
-    log.info("[%s] 儲值金表寫入完成：%d 筆", area_name, len(rows))
+    log.info("[%s] 儲值金寫入完成：%d 筆 → 工作表「%s」", area_name, len(rows), sheet_name)
     return sh
 
 
@@ -378,7 +388,10 @@ def step1_fetch_stored_value(
             log.info("[%s] 取得 %d 筆會員資料", area_name, len(members))
 
             headers, rows = _members_to_rows(members)
-            _write_stored_value_sheet(gc, area_name, headers, rows)
+            _write_stored_value_sheet(
+                gc, area_name, headers, rows,
+                area_target_id=area.get("target_spreadsheet_id", ""),
+            )
 
             results[area_name] = {"count": len(members), "ok": True}
         except Exception as e:
@@ -469,20 +482,19 @@ def to_number_safe(value: Any) -> float:
 # Step 2：匯出定期VIP日曆
 # ──────────────────────────────────────────────────────────
 
-def _load_stored_value_info(gc: gspread.Client, area_name: str) -> dict[str, dict]:
+def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: str = "") -> dict[str, dict]:
     """
-    從「儲值金表_{地區}」讀取姓名 → {totalBalance, lineValue}。
-    對應 GAS 的 getStoredValueInfoByName()。
+    從「儲值金_{地區}」讀取姓名 → {totalBalance, lineValue}。
     """
-    target_id = _load_target_file_id()
+    target_id = area_target_id or _load_target_file_id()
     if not target_id:
         return {}
     try:
-        ss     = gc.open_by_key(target_id)
-        sh     = ss.worksheet(f"儲值金表_{area_name}")
+        ss      = gc.open_by_key(target_id)
+        sh      = ss.worksheet(f"儲值金_{area_name}")
         records = sh.get_all_records()
     except Exception as e:
-        log.warning("[%s] 讀取儲值金表失敗（非致命）：%s", area_name, e)
+        log.warning("[%s] 讀取儲值金資料失敗（非致命）：%s", area_name, e)
         return {}
 
     name_map: dict[str, dict] = {}
@@ -646,14 +658,15 @@ def _write_vip_sheet(
     area_name: str,
     rows: list[dict],
     start_dt: datetime,
+    area_target_id: str = "",
 ) -> str:
-    """寫入「定期VIP_{地區}_{yyyyMMdd}」工作表，回傳工作表名稱。"""
-    target_id = _load_target_file_id()
+    """寫入地區目標試算表「定期VIP_{地區}_{yyyyMM}」工作表，回傳工作表名稱。"""
+    target_id = area_target_id or _load_target_file_id()
     if not target_id:
-        raise EnvironmentError("請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
+        raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
 
     ss         = gc.open_by_key(target_id)
-    sheet_name = f"定期VIP_{area_name}_{start_dt.strftime('%Y%m%d')}"
+    sheet_name = f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}"
 
     try:
         sh = ss.worksheet(sheet_name)
@@ -729,11 +742,12 @@ def step2_export_vip_calendar(
             rows.sort(key=lambda r: (r["name"], r["start_dt"], r["start_str"]))
 
             # 帶入儲值金資料
-            stored_info = _load_stored_value_info(gc, area_name)
+            _area_target = area.get("target_spreadsheet_id", "")
+            stored_info = _load_stored_value_info(gc, area_name, area_target_id=_area_target)
             rows        = _enrich_with_stored_value(rows, stored_info)
 
             # 寫入工作表
-            sheet_name = _write_vip_sheet(gc, area_name, rows, start_dt)
+            sheet_name = _write_vip_sheet(gc, area_name, rows, start_dt, area_target_id=_area_target)
             results[area_name] = {"count": len(rows), "sheet": sheet_name, "ok": True}
 
         except Exception as e:
