@@ -130,14 +130,20 @@ def today_tp() -> date:
 # ──────────────────────────────────────────────────────────
 # 打卡工具（同 lemon_schedule_sync 模式）
 # ──────────────────────────────────────────────────────────
+# process-level cache：避免重複讀取工作表造成 429
+_LOG_SHEET_CACHE: dict[str, gspread.Worksheet] = {}
 
 def _ensure_log_sheet(ss: gspread.Spreadsheet, sheet_name: str) -> gspread.Worksheet:
+    cache_key = ss.id + ":" + sheet_name
+    if cache_key in _LOG_SHEET_CACHE:
+        return _LOG_SHEET_CACHE[cache_key]
     try:
-        return ss.worksheet(sheet_name)
+        sh = ss.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
         sh = ss.add_worksheet(title=sheet_name, rows=2000, cols=10)
         sh.append_row(["run_id", "時間", "系統名稱", "任務", "步驟", "狀態", "說明", "耗時(秒)"])
-        return sh
+    _LOG_SHEET_CACHE[cache_key] = sh
+    return sh
 
 def _checkin(gc: gspread.Client, spreadsheet_id: str, sheet_name: str,
              run_id: str, task: str, step: str, status: str,
