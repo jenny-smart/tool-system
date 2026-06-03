@@ -28,6 +28,9 @@ SHEET_BY_SYSTEM = {
     "外場日排程系統": "外場排程執行Log",
     "notify": "通知紀錄Log",
     "通知": "通知紀錄Log",
+    # ★ 客服排程系統
+    "service": "客服排程執行Log",
+    "客服排程系統": "客服排程執行Log",
 }
 
 ERROR_SHEET_NAME = "錯誤追蹤Log"
@@ -410,8 +413,9 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
+
 # ═══════════════════════════════════════════════════════════
-# 以下貼到 tools/common/log_to_sheet.py 最後
+# write_target_log：目標執行檔打卡
 # ═══════════════════════════════════════════════════════════
 
 TARGET_LOG_SHEET = "外場排程系統執行Log"
