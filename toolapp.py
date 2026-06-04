@@ -2511,8 +2511,16 @@ if run_clicked:
                         add_log(line, "info")
 
                 if completed.stderr:
-                    for line in completed.stderr.strip().splitlines()[-20:]:
-                        add_log(line, "error")
+                    for line in completed.stderr.strip().splitlines()[-60:]:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if "[ERROR]" in line or "[CRITICAL]" in line:
+                            add_log(line, "error")
+                        elif "[WARNING]" in line:
+                            add_log(line, "warning")
+                        else:
+                            add_log(line, "info")
 
                 # 解析各 Step 結果，顯示部分成功
                 stdout_text = completed.stdout or ""
