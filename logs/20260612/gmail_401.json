@@ -1,8 +1,8 @@
 {
   "job_name": "gmail_401",
-  "status": "failed",
-  "exit_code": 1,
-  "started_at": "2026-06-12 10:28:44",
-  "finished_at": "2026-06-12 10:32:28",
-  "duration_seconds": 224
+  "status": "success",
+  "exit_code": 0,
+  "started_at": "2026-06-12 10:54:17",
+  "finished_at": "2026-06-12 11:01:14",
+  "duration_seconds": 417
 }
