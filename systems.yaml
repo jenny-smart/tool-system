@@ -52,6 +52,29 @@ systems:
   workflow: .github/workflows/scheduled_service.yml
   script: tools/service_management/lemon_schedule_sync.py
 
+- name: Gmail401歸檔
+    type: gmail_401
+    enabled: true
+    search_query: 'HAS ATTACHMENT SUBJECT "401"'
+    regions:
+      台北:
+        keywords:
+          - 檸檬專業
+          - 檸檬台北
+        folder_id: "1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0"
+      台中:
+        keywords:
+          - 泳檬
+        folder_id: "1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv"
+      高雄:
+        keywords:
+          - 南檬
+        folder_id: "1xhJkFJABx_APgTKLHE3dCctJU63zZEEz"
+      新竹:
+        keywords:
+          - 竹盟
+        folder_id: "1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP"
+
   # Drive 來源資料夾（放排班統計表）
   folder_ids:
     schedule_stats: "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
