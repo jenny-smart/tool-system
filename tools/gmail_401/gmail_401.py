@@ -15,15 +15,14 @@ from google.oauth2 import service_account
 # ────────────────────────────────────────────────
 
 def load_config():
-    """從 systems.yaml 讀取 gmail_401 設定，
-    同時支援直接從 st.secrets 讀取（Streamlit Cloud）"""
-    try:
-        import yaml
-        with open("systems.yaml", "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)["gmail_401"]
-    except Exception:
-        # fallback：從 secrets 直接組出 config
-        return st.secrets.get("gmail_401", {})
+    """從 systems.yaml 的 systems 清單中找 type: gmail_401 的設定"""
+    import yaml
+    with open("systems.yaml", "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    for system in data.get("systems", []):
+        if system.get("type") == "gmail_401":
+            return system
+    raise ValueError("systems.yaml 找不到 type: gmail_401 的設定")
 
 
 # ────────────────────────────────────────────────
