@@ -27,15 +27,21 @@ Traceback (most recent call last):
   File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/composer.py", line 84, in compose_node
     node = self.compose_mapping_node(anchor)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/composer.py", line 127, in compose_mapping_node
-    while not self.check_event(MappingEndEvent):
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/composer.py", line 133, in compose_mapping_node
+    item_value = self.compose_node(node, item_key)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/composer.py", line 82, in compose_node
+    node = self.compose_sequence_node(anchor)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/composer.py", line 110, in compose_sequence_node
+    while not self.check_event(SequenceEndEvent):
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/parser.py", line 98, in check_event
     self.current_event = self.state()
                          ^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/parser.py", line 438, in parse_block_mapping_key
-    raise ParserError("while parsing a block mapping", self.marks[-1],
-yaml.parser.ParserError: while parsing a block mapping
-  in "/home/runner/work/tool-system/tool-system/systems.yaml", line 1, column 1
-expected <block end>, but found '-'
-  in "/home/runner/work/tool-system/tool-system/systems.yaml", line 43, column 1
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/yaml/parser.py", line 392, in parse_block_sequence_entry
+    raise ParserError("while parsing a block collection", self.marks[-1],
+yaml.parser.ParserError: while parsing a block collection
+  in "/home/runner/work/tool-system/tool-system/systems.yaml", line 3, column 3
+expected <block end>, but found '?'
+  in "/home/runner/work/tool-system/tool-system/systems.yaml", line 65, column 3
