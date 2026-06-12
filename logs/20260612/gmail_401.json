@@ -2,7 +2,7 @@
   "job_name": "gmail_401",
   "status": "failed",
   "exit_code": 1,
-  "started_at": "2026-06-12 09:16:17",
-  "finished_at": "2026-06-12 09:16:19",
-  "duration_seconds": 2
+  "started_at": "2026-06-12 10:17:10",
+  "finished_at": "2026-06-12 10:20:34",
+  "duration_seconds": 204
 }

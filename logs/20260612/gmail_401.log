@@ -1,18 +1,138 @@
-[2026-06-12 01:16:18] 連線 Gmail：jenny@lemonclean.com.tw
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/gmail_401/gmail_401_runner.py", line 271, in <module>
-    main()
-  File "/home/runner/work/tool-system/tool-system/tools/gmail_401/gmail_401_runner.py", line 189, in main
-    status, data = mail.uid("search", None, search_query.encode())
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/imaplib.py", line 899, in uid
-    typ, dat = self._simple_command(name, command, *args)
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/imaplib.py", line 1239, in _simple_command
-    return self._command_complete(name, self._command(name, *args))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/imaplib.py", line 1064, in _command_complete
-    raise self.error('%s command error: %s %s' % (name, typ, data))
-imaplib.IMAP4.error: UID command error: BAD [b'Could not parse command']
+[2026-06-12 02:17:10] 連線 Gmail：jenny@lemonclean.com.tw
+[2026-06-12 02:17:11] 找到 75 封待處理信件
+[2026-06-12 02:17:12] ⚠️ 無法判斷地區：友萌03-04營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:12] ⚠️ 無法解析年份：泳檬03-04營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:14] ⚠️ 無法解析年份：泳檬10911-12申報前401.pdf
+[2026-06-12 02:17:16] ⚠️ 無法判斷地區：16033檸檬清潔營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:16] ⚠️ 無法解析年份：19406泳檬營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:16] ⚠️ 無法解析年份：19406泳檬營業稅繳款書(401).pdf
+[2026-06-12 02:17:16] ⚠️ 無法判斷地區：16033檸檬清潔營業稅繳款書(401).pdf
+[2026-06-12 02:17:17] ⚠️ 無法判斷地區：16034檸盟401-05-06-110.pdf
+[2026-06-12 02:17:17] ⚠️ 無法判斷地區：16034檸盟營業稅繳款書(401)-05-06.pdf
+[2026-06-12 02:17:17] ⚠️ 無法解析年份：19005竹盟營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:17] ⚠️ 無法解析年份：19005竹盟營業稅繳款書(401).pdf
+[2026-06-12 02:17:24] ⚠️ 無法判斷地區：檸檬-營業稅繳款書(401)110年05-06月繳費收據.pdf
+[2026-06-12 02:17:24] ⚠️ 無法解析年份：泳檬-營業稅繳款書(401)110年05-06月繳費收據.pdf
+[2026-06-12 02:17:27] ⚠️ 無法解析年份：竹盟7-8月營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:27] ⚠️ 無法解析年份：竹盟7-8月營業稅繳款書(401).pdf
+[2026-06-12 02:17:27] ⚠️ 無法判斷地區：檸盟7-8月營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:28] ⚠️ 無法解析年份：泳檬7-8月營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:28] ⚠️ 無法判斷地區：檸檬清潔7-8月營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:29] ⚠️ 無法解析年份：竹盟營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:29] ⚠️ 無法解析年份：竹盟營業稅繳款書(401).pdf
+[2026-06-12 02:17:29] ⚠️ 無法判斷地區：檸盟營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:29] ⚠️ 無法判斷地區：檸盟營業稅繳款書(401).pdf
+[2026-06-12 02:17:30] ⚠️ 無法判斷地區：檸檬營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:30] ⚠️ 無法判斷地區：檸檬營業稅繳款書(401).pdf
+[2026-06-12 02:17:31] ⚠️ 無法解析年份：泳檬營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:31] ⚠️ 無法解析年份：泳檬營業稅繳款書(401).pdf
+[2026-06-12 02:17:32] ⚠️ 無法解析年份：竹盟營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:32] ⚠️ 無法解析年份：竹盟營業稅繳款書(401).pdf
+[2026-06-12 02:17:33] ⚠️ 無法判斷地區：檸盟營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:33] ⚠️ 無法判斷地區：檸盟營業稅繳款書(401).pdf
+[2026-06-12 02:17:34] ⚠️ 無法解析年份：泳檬-1.2月(401).pdf
+[2026-06-12 02:17:34] ⚠️ 無法判斷地區：檸檬01-02(401).pdf
+[2026-06-12 02:17:34] ⚠️ 無法判斷地區：檸檬01-02營業稅繳款書(401).pdf
+[2026-06-12 02:17:36] ⚠️ 無法判斷地區：檸盟1-2月401.pdf
+[2026-06-12 02:17:37] ❌ 失敗：竹盟-111.01-02-401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:17:39] ⚠️ 無法判斷地區：檸盟1-2月401.pdf
+[2026-06-12 02:17:40] ❌ 失敗：竹盟-111.01-02-401(更正後).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:17:45] ❌ 失敗：竹盟-111.05-06-401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:17:45] ⚠️ 無法判斷地區：檸盟5-6月401.pdf
+[2026-06-12 02:17:45] ⚠️ 無法判斷地區：檸檬05-06營業稅繳款書(401).pdf
+[2026-06-12 02:17:45] ⚠️ 無法判斷地區：檸檬05-06(401).pdf
+[2026-06-12 02:17:45] ⚠️ 無法解析年份：泳檬-5.6月(401).pdf
+[2026-06-12 02:17:46] ⚠️ 無法判斷地區：檸盟-營業稅繳款書(401).pdf
+[2026-06-12 02:17:46] ⚠️ 無法判斷地區：5-6營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:17:49] ⚠️ 無法判斷地區：檸檬07-08(401).pdf
+[2026-06-12 02:17:49] ⚠️ 無法判斷地區：檸檬07-08營業稅繳款書(401).pdf
+[2026-06-12 02:17:49] ⚠️ 無法判斷地區：檸盟7-8月401.pdf
+[2026-06-12 02:17:50] ❌ 失敗：竹盟-111.07-08-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:17:50] ⚠️ 無法解析年份：泳檬-7.8月(401).pdf
+[2026-06-12 02:17:52] ❌ 失敗：竹盟-111.09-10-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:17:52] ⚠️ 無法判斷地區：檸盟-111.09-10-401表.pdf
+[2026-06-12 02:17:52] ⚠️ 無法判斷地區：檸檬09-10(401).pdf
+[2026-06-12 02:17:52] ⚠️ 無法判斷地區：檸檬09-10營業稅繳款書(401).pdf
+[2026-06-12 02:17:52] ⚠️ 無法解析年份：泳檬-9.10月(401).pdf
+[2026-06-12 02:17:53] ⚠️ 無法解析年份：泳檬-11.12月(401).pdf
+[2026-06-12 02:17:54] ⚠️ 無法判斷地區：檸盟11-12月401.pdf
+[2026-06-12 02:17:54] ⚠️ 無法判斷地區：檸盟營業稅繳款書(401).pdf
+[2026-06-12 02:17:57] ❌ 失敗：竹盟-111.11-12-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:17:58] ⚠️ 無法判斷地區：檸檬11-12(401).pdf
+[2026-06-12 02:17:58] ⚠️ 無法判斷地區：檸檬11-12營業稅繳款書(401).pdf
+[2026-06-12 02:18:02] ❌ 失敗：竹盟-112.01-02-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:18:02] ⚠️ 無法判斷地區：檸檬01-02(401).pdf
+[2026-06-12 02:18:02] ⚠️ 無法判斷地區：檸檬01-02營業稅繳款書(401).pdf
+[2026-06-12 02:18:03] ⚠️ 無法解析年份：泳檬-1.2月(401).pdf
+[2026-06-12 02:18:04] ⚠️ 無法判斷地區：檸盟 01-02 營業稅繳款書(401).pdf
+[2026-06-12 02:18:04] ⚠️ 無法判斷地區：檸盟 01-02 401.pdf
+[2026-06-12 02:18:05] ⚠️ 無法解析年份：泳檬-3.4月(401).pdf
+[2026-06-12 02:18:10] ❌ 失敗：竹盟-112.03-04-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:18:36] ⚠️ 無法判斷地區：檸盟 03-04 401.pdf
+[2026-06-12 02:18:36] ⚠️ 無法判斷地區：檸盟 03-04 營業稅繳款書(401).pdf
+[2026-06-12 02:18:36] ⚠️ 無法判斷地區：112.03-04 401.pdf
+[2026-06-12 02:18:37] ⚠️ 無法判斷地區：檸檬03-04營業稅繳款書(401).pdf
+[2026-06-12 02:18:37] ⚠️ 無法判斷地區：檸檬03-04(401).pdf
+[2026-06-12 02:18:38] ⚠️ 無法解析年份：泳檬-5.6月(401)(新.pdf
+[2026-06-12 02:18:39] ⚠️ 無法判斷地區：檸檬7-8月營業人銷售額與稅額申報書清單(401)-v.20.pdf
+[2026-06-12 02:18:41] ❌ 失敗：竹盟-113.05-06-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:18:41] ⚠️ 無法判斷地區：檸檬5-6月營業人銷售額與稅額申報書清單(401).pdf
+[2026-06-12 02:18:41] ⚠️ 無法判斷地區：檸檬5-6月營業稅繳款書(401).pdf
+[2026-06-12 02:18:44] ❌ 失敗：泳檬113.05-06 401 申報書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:18:48] ❌ 失敗：竹盟-114.01-02-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:18:48] ⚠️ 無法判斷地區：1-2月營業人銷售額與稅額申報書清單(401)-檸檬.pdf
+[2026-06-12 02:18:48] ⚠️ 無法判斷地區：1-2月營業稅繳款書(401)-檸檬.pdf
+[2026-06-12 02:18:49] ❌ 失敗：泳檬114.01-02 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:18:52] ⚠️ 無法判斷地區：檸檬1-2月401收據.pdf
+[2026-06-12 02:18:55] ⚠️ 無法解析年份：竹盟1-2月401繳款收據.pdf
+[2026-06-12 02:18:58] ❌ 失敗：泳檬114.03-04 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:01] ❌ 失敗：檸檬專業114.03-04 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:04] ❌ 失敗：泳檬114.05-06 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:12] ❌ 失敗：檸檬專業114.05-06 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:21] ⚠️ 無法解析年份：泳檬-112.7-8月(401).pdf
+[2026-06-12 02:19:21] ⚠️ 無法解析年份：泳檬-112.5-6月(401).pdf
+[2026-06-12 02:19:21] ⚠️ 無法解析年份：泳檬-112.9-10月(401).pdf
+[2026-06-12 02:19:21] ⚠️ 無法解析年份：泳檬-112.1-2月(401).pdf
+[2026-06-12 02:19:22] ❌ 失敗：泳檬-112.11-12月(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:22] ⚠️ 無法解析年份：泳檬-112.3-4月(401).pdf
+[2026-06-12 02:19:23] ❌ 失敗：檸檬專業112.01-02(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:24] ❌ 失敗：檸檬專業112.09-10(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:24] ❌ 失敗：檸檬專業112.05-06(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:24] ❌ 失敗：檸檬專業112.07-08(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:25] ❌ 失敗：檸檬專業112.03-04(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:25] ❌ 失敗：檸檬專業112.11-12(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:32] ❌ 失敗：竹盟-112.01-02-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:32] ❌ 失敗：竹盟-112.03-04-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:33] ❌ 失敗：竹盟-112.05-06-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:33] ❌ 失敗：竹盟-112.07-08-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:33] ❌ 失敗：竹盟-112.09-10-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:34] ❌ 失敗：竹盟-112.11-12-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:41] ❌ 失敗：泳檬113.09-10 401 申報書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:42] ❌ 失敗：泳檬113.03-04 401 申報書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:42] ❌ 失敗：泳檬113.07-08 401 申報書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:42] ❌ 失敗：泳檬113.01-02 401 申報書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:43] ❌ 失敗：泳檬113.05-06 401 申報書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:43] ❌ 失敗：泳檬113.11-12 401 申報書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:56] ❌ 失敗：檸檬專業113.01-02(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:56] ❌ 失敗：檸檬專業113.09-10(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:57] ❌ 失敗：檸檬專業113.05-06(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:57] ❌ 失敗：檸檬專業113.03-04(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:57] ❌ 失敗：檸檬專業113.07-08(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:19:58] ❌ 失敗：檸檬專業113.11-12(401).pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:00] ❌ 失敗：竹盟-113.01-02-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:00] ❌ 失敗：竹盟-113.03-04-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:01] ❌ 失敗：竹盟-113.05-06-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:01] ❌ 失敗：竹盟-113.07-08-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:01] ❌ 失敗：竹盟-113.09-10-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:02] ❌ 失敗：竹盟-113.11-12-401表.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.". Details: "[{'message': 'File not found: 1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:10] ❌ 失敗：檸檬專業114.07-08 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:13] ❌ 失敗：泳檬114.07-08 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:15] ❌ 失敗：檸檬專業(檸檬台北)114.09-10 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:17] ❌ 失敗：泳檬114.09-10 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:23] ❌ 失敗：泳檬114.11-12 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:26] ❌ 失敗：泳檬115.01-02 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.". Details: "[{'message': 'File not found: 1_aHD37m4D9NNJv6XixIcr_sdVtcZuJBv.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:29] ❌ 失敗：檸檬專業(檸檬台北)115.01-02 401營業稅繳款書.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:30] ❌ 失敗：檸檬專業(檸檬台北)115.01-02 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.". Details: "[{'message': 'File not found: 1SZWR2d8XlpsF2_QkpYLmAY8Pur_cJLR0.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:32] ❌ 失敗：南檬115.03-04 401.pdf｜<HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?fields=id&supportsAllDrives=true&alt=json returned "File not found: 1xhJkFJABx_APgTKLHE3dCctJU63zZEEz.". Details: "[{'message': 'File not found: 1xhJkFJABx_APgTKLHE3dCctJU63zZEEz.', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+[2026-06-12 02:20:33] 完成｜成功 0，略過 78，失敗 56
+[2026-06-12 02:20:34] 已寫入主控表 Log
