@@ -206,6 +206,15 @@ def main():
         msg = email.message_from_bytes(msg_data[0][1])
         processed_any = False
 
+        # 從信件日期取得西元年（做為年份 fallback）
+        mail_date_str = msg.get("Date", "")
+        try:
+            from email.utils import parsedate_to_datetime
+            mail_dt = parsedate_to_datetime(mail_date_str)
+            mail_year_str = str(mail_dt.year)
+        except Exception:
+            mail_year_str = str(datetime.now().year)
+
         for part in msg.walk():
             if part.get_content_maintype() == "multipart":
                 continue
@@ -232,9 +241,9 @@ def main():
 
             year_str = parse_roc_year(filename)
             if not year_str:
-                log(f"⚠️ 無法解析年份：{filename}")
-                skipped += 1
-                continue
+                # 無法從檔名解析年份，改用信件收件年份
+                year_str = mail_year_str
+                log(f"ℹ️ 用信件年份 {year_str}：{filename}")
 
             try:
                 year_folder_id = get_or_create_year_folder(drive, folder_id, year_str)
