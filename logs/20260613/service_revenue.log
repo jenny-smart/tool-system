@@ -1,0 +1,11 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+2026-06-12 23:15:00 [INFO] 目標試算表 ID 來源：主控試算表系統設定
+2026-06-12 23:15:00 [INFO] === 客服排程系統 run_id=e465ce87 step=3 台北時間=2026-06-13 07:14:59 ===
+2026-06-12 23:15:00 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-12 23:15:03 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-06-12 23:15:03 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-06-12 23:15:03 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-06-12 23:15:04 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-06-12 23:15:04 [ERROR] Step 3 失敗：APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-06-12 23:15:04 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-06-12 23:15:04 [ERROR] 執行結束（有失敗）：["Step 3: APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'."]
