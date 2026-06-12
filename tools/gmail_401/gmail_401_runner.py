@@ -186,7 +186,7 @@ def main():
     mail.login(gmail_user, gmail_password)
     mail.select("inbox")
 
-    status, data = mail.uid("search", None, search_query.encode())
+    status, data = mail.uid("search", None, b'SUBJECT "401"')
     if status != "OK" or not data[0]:
         log("沒有找到待處理的信件")
         mail.logout()
