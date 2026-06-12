@@ -1,0 +1,92 @@
+name: Scheduled Gmail 401 Archive
+
+on:
+  schedule:
+    - cron: "0 16 20 * *"  # 台灣時間每月20日 00:00（UTC 16:00 前一天）
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-gmail-401:
+    runs-on: ubuntu-latest
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT:       ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
+      GMAIL_401_USER:               ${{ secrets.GMAIL_401_USER }}
+      GMAIL_401_APP_PASSWORD:       ${{ secrets.GMAIL_401_APP_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: pip install -r requirements.txt
+
+      - name: Run Gmail 401 archive
+        shell: bash
+        run: |
+          set +e
+
+          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+          LOG_DIR="logs/$TODAY"
+          mkdir -p "$LOG_DIR"
+
+          NAME="gmail_401"
+          START_TS=$(date +%s)
+          START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+
+          echo "===== Gmail 401 歸檔 ====="
+          python -u -m tools.gmail_401.gmail_401_runner > "$LOG_DIR/$NAME.log" 2>&1
+          EXIT_CODE=$?
+
+          END_TS=$(date +%s)
+          END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          DURATION=$((END_TS - START_TS))
+
+          echo "$EXIT_CODE" > "$LOG_DIR/$NAME.exit"
+
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            STATUS="success"
+            echo "✅ Gmail 401 歸檔成功"
+          else
+            STATUS="failed"
+            echo "❌ Gmail 401 歸檔失敗（exit $EXIT_CODE）"
+          fi
+
+          echo "{
+            \"job_name\": \"$NAME\",
+            \"status\": \"$STATUS\",
+            \"exit_code\": $EXIT_CODE,
+            \"started_at\": \"$START_TEXT\",
+            \"finished_at\": \"$END_TEXT\",
+            \"duration_seconds\": $DURATION
+          }" > "$LOG_DIR/$NAME.json"
+
+          cat "$LOG_DIR/$NAME.log"
+          exit $EXIT_CODE
+
+      - name: Commit logs
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f logs
+          if git diff --cached --quiet; then
+            echo "No log changes"
+          else
+            git commit -m "Update gmail_401 logs"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push
+          fi
