@@ -1,16 +1,13 @@
 log_spreadsheet_id: "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
-
 systems:
   - name: 日排程系統
     type: daily_scheduler
     folder_id: "0AK9RcXu_35GZUk9PVA"
     enabled: true
-
   - name: 月排程系統
     type: monthly_scheduler
     folder_id: "1h2qAz2G-b2aU6RG4TSKcIwsbSzXbDYwq"
     enabled: true
-
   - name: 外場排程系統
     type: field_daily_schedule
     enabled: true
@@ -36,23 +33,12 @@ systems:
       office:
         台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
         台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
-
-
-  # ── 貼入 systems.yaml 的 systems: 清單 ────────────────────────────────────────
-
-- name: 客服排程系統
-  type: service_schedule
-  enabled: true
-  description: |
-    三步驟每日自動化（台北時間 06:00）：
-      1. 更新排班統計表（Drive 來源資料夾 → 台北台中排班統計表）
-      2. 更新每日回報（排班統計表 → 【空班】居家清潔(每日回報)）
-      3. 更新前一天營業分數及營業額（Gmail → 每日回報）
-    打卡：主控表（執行記錄）+ 執行檔（_py_execution_log）
-  workflow: .github/workflows/scheduled_service.yml
-  script: tools/service_management/lemon_schedule_sync.py
-
-- name: Gmail401歸檔
+  - name: 客服排程系統
+    type: service_schedule
+    enabled: true
+    folder_ids:
+      schedule_stats: "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
+  - name: Gmail401歸檔
     type: gmail_401
     enabled: true
     search_query: 'HAS ATTACHMENT SUBJECT "401"'
