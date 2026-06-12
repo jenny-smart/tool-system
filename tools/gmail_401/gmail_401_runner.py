@@ -186,7 +186,10 @@ def main():
     mail.login(gmail_user, gmail_password)
     mail.select("inbox")
 
-    status, data = mail.uid("search", None, b'SUBJECT "401"')
+    from datetime import timedelta
+    since_date = (datetime.now() - timedelta(days=90)).strftime("%d-%b-%Y")
+    status, data = mail.uid("search", None, f'SINCE {since_date} SUBJECT "401"'.encode())
+ 
     if status != "OK" or not data[0]:
         log("沒有找到待處理的信件")
         mail.logout()
