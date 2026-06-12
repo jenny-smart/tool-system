@@ -1,11 +1,18 @@
-[2026-06-12 00:53:56] 連線 Gmail：jenny@lemonclean.com.tw
+[2026-06-12 01:16:18] 連線 Gmail：jenny@lemonclean.com.tw
 Traceback (most recent call last):
   File "<frozen runpy>", line 198, in _run_module_as_main
   File "<frozen runpy>", line 88, in _run_code
   File "/home/runner/work/tool-system/tool-system/tools/gmail_401/gmail_401_runner.py", line 271, in <module>
     main()
-  File "/home/runner/work/tool-system/tool-system/tools/gmail_401/gmail_401_runner.py", line 186, in main
-    mail.login(gmail_user, gmail_password)
-  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/imaplib.py", line 621, in login
-    raise self.error(dat[-1])
-imaplib.IMAP4.error: b'[AUTHENTICATIONFAILED] Invalid credentials (Failure)'
+  File "/home/runner/work/tool-system/tool-system/tools/gmail_401/gmail_401_runner.py", line 189, in main
+    status, data = mail.uid("search", None, search_query.encode())
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/imaplib.py", line 899, in uid
+    typ, dat = self._simple_command(name, command, *args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/imaplib.py", line 1239, in _simple_command
+    return self._command_complete(name, self._command(name, *args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/imaplib.py", line 1064, in _command_complete
+    raise self.error('%s command error: %s %s' % (name, typ, data))
+imaplib.IMAP4.error: UID command error: BAD [b'Could not parse command']
