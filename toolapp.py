@@ -1098,6 +1098,7 @@ def get_system_type_label(system_type: str) -> str:
         "monthly_scheduler": "月排程系統",
         "field_daily_schedule": "外場排程系統",
         "service_schedule": "客服排程系統",   # ★ 新增
+        "gmail_401": "Gmail 401歸檔",
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -1645,6 +1646,11 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【儲值】全跑（抓儲值金＋匯出VIP）",
     ],
     # ────────────────────────────────────────────────────────
+    # ── ★ 新增：gmail401 ────────────────────────
+    "gmail_401": [
+    "掃描並歸檔401附件",
+    ],
+    # ────────────────────────────────────────────────────────
 }
 
 DAILY_SCRIPT_MAP = {
@@ -1746,6 +1752,14 @@ if st.session_state.view == "log":
         st.stop()
     render_log_page()
     st.stop()
+
+# ── ★ Gmail 401歸檔 ──────────────────────────────────────
+selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
+if selected_system_cfg.get("type") == "gmail_401":
+    from tools.gmail_401.gmail_401 import run_gmail_401
+    run_gmail_401()
+    st.stop()
+# ────────────────────────────────────────────────────────
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2008,7 +2022,7 @@ if can_access_page("settings"):
 
         system_type_options = [
             "vip", "daily_scheduler", "monthly_scheduler",
-            "field_daily_schedule", "service_schedule",   # ★ 新增
+            "field_daily_schedule", "service_schedule", "gmail_401",
         ]
 
         if st.session_state.adding_system:
