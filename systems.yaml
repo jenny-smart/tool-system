@@ -60,29 +60,3 @@ systems:
         keywords:
           - 竹盟
         folder_id: "1adKOf8jtl_1xigKg6NSTsZEe7sckJXIP"
-
-  # Drive 來源資料夾（放排班統計表）
-  folder_ids:
-    schedule_stats: "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
-
-  # 目標試算表（由 Secret LEMON_TARGET_FILE_ID 注入）
-  spreadsheet_ids:
-    target: ""  # 填入 Spreadsheet ID 或留空用 Secret
-
-  # 工作表名稱
-  sheets:
-    schedule_stats: "台北台中排班統計表"
-    daily_report:   "【空班】居家清潔(每日回報)"
-    job_log:        "_py_execution_log"
-
-  # 打卡目標
-  log:
-    master_sheet:   "執行記錄"          # 寫到 TOOLS_APP_LOG_SPREADSHEET_ID
-    job_sheet:      "_py_execution_log" # 寫到 LEMON_TARGET_FILE_ID
-
-# ── 需要設定的 GitHub Repository Secrets ─────────────────────────────────────
-# LEMON_TARGET_FILE_ID          目標試算表 ID（台北台中排班統計表所在）
-# GMAIL_USER                    讀信 Gmail 帳號
-# GMAIL_APP_PASSWORD            Gmail App 密碼（帳號 → 2FA → App 密碼）
-# TOOLS_APP_LOG_SPREADSHEET_ID  主控表 ID（打卡用，已有則不用重設）
-# LOG_SPREADSHEET_ID            執行檔打卡 ID（選填，預設同 LEMON_TARGET_FILE_ID）
