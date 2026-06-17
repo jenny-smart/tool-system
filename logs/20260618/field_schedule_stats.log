@@ -1,0 +1,95 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.schedule_stats --date 20260618 --system-name 外場排程系統 --run-type 排程
+[2026-06-18 06:28:16] 開始處理排班統計表：排班統計表20260618-台北
+[2026-06-18 06:28:25] 完成：排班統計表20260618-台北.xlsx → 2026排班統計表!BZ4 / rows=81
+[2026-06-18 06:28:28] 開始處理排班統計表：排班統計表20260718-台北
+[2026-06-18 06:28:34] 完成：排班統計表20260718-台北.xlsx → 2026排班統計表!CL4 / rows=61
+[2026-06-18 06:28:35] 開始處理排班統計表：排班統計表20260618-台中
+[2026-06-18 06:28:44] 完成：排班統計表20260618-台中.xlsx → 2026排班統計表!BZ4 / rows=15
+[2026-06-18 06:28:54] 開始處理排班統計表：排班統計表20260718-台中
+[2026-06-18 06:28:59] 失敗：排班統計表20260718-台中 / <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1q5BTDatvhNhpyE1KncX1AoqC13QnXu2j/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "User rate limit exceeded.". Details: "[{'message': 'User rate limit exceeded.', 'domain': 'usageLimits', 'reason': 'userRateLimitExceeded'}]">
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 423, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 409, in main
+    run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 357, in run_schedule_stats_for_area
+    raw_values = read_file_values(drive, sheets, file)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 240, in read_file_values
+    return read_drive_spreadsheet_values(drive, sheets, file)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 109, in read_drive_spreadsheet_values
+    temp_file_id = convert_excel_to_google_sheet(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 33, in convert_excel_to_google_sheet
+    copied = execute_with_retry(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 13, in execute_with_retry
+    return request.execute()
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1q5BTDatvhNhpyE1KncX1AoqC13QnXu2j/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "User rate limit exceeded.". Details: "[{'message': 'User rate limit exceeded.', 'domain': 'usageLimits', 'reason': 'userRateLimitExceeded'}]">
+
+📝 外場排程打卡：外場排班統計表 / failed
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
+    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
+    results.append(run_job(job_name, date_key, area, system_name))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
+    raise RuntimeError(message)
+RuntimeError: 外場排班統計表 執行失敗，exit=1
+STDOUT:
+[2026-06-18 06:28:16] 開始處理排班統計表：排班統計表20260618-台北
+[2026-06-18 06:28:25] 完成：排班統計表20260618-台北.xlsx → 2026排班統計表!BZ4 / rows=81
+[2026-06-18 06:28:28] 開始處理排班統計表：排班統計表20260718-台北
+[2026-06-18 06:28:34] 完成：排班統計表20260718-台北.xlsx → 2026排班統計表!CL4 / rows=61
+[2026-06-18 06:28:35] 開始處理排班統計表：排班統計表20260618-台中
+[2026-06-18 06:28:44] 完成：排班統計表20260618-台中.xlsx → 2026排班統計表!BZ4 / rows=15
+[2026-06-18 06:28:54] 開始處理排班統計表：排班統計表20260718-台中
+[2026-06-18 06:28:59] 失敗：排班統計表20260718-台中 / <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1q5BTDatvhNhpyE1KncX1AoqC13QnXu2j/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "User rate limit exceeded.". Details: "[{'message': 'User rate limit exceeded.', 'domain': 'usageLimits', 'reason': 'userRateLimitExceeded'}]">
+
+STDERR:
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 423, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 409, in main
+    run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 357, in run_schedule_stats_for_area
+    raw_values = read_file_values(drive, sheets, file)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 240, in read_file_values
+    return read_drive_spreadsheet_values(drive, sheets, file)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 109, in read_drive_spreadsheet_values
+    temp_file_id = convert_excel_to_google_sheet(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 33, in convert_excel_to_google_sheet
+    copied = execute_with_retry(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 13, in execute_with_retry
+    return request.execute()
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1q5BTDatvhNhpyE1KncX1AoqC13QnXu2j/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "User rate limit exceeded.". Details: "[{'message': 'User rate limit exceeded.', 'domain': 'usageLimits', 'reason': 'userRateLimitExceeded'}]">
+
