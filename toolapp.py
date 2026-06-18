@@ -1333,26 +1333,26 @@ def render_report() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("🔎 Debug：查看 df2 / raw_df", expanded=False):
-    debug_dir = Path("dashboard_data/latest")
-    df2_path = debug_dir / "df2.csv"
-    raw_path = debug_dir / "raw_df.csv"
+        debug_dir = Path("dashboard_data/latest")
+        df2_path = debug_dir / "df2.csv"
+        raw_path = debug_dir / "raw_df.csv"
 
-    if df2_path.exists():
-        df2 = pd.read_csv(df2_path, encoding="utf-8-sig")
-        st.subheader("df2：分類後彙總")
-        st.dataframe(df2[df2["城市"].astype(str) == "台北"], use_container_width=True)
-    else:
-        st.warning("找不到 df2.csv")
+        if df2_path.exists():
+            df2 = pd.read_csv(df2_path, encoding="utf-8-sig")
+            st.subheader("df2：分類後彙總")
+            st.dataframe(df2[df2["城市"].astype(str) == "台北"], use_container_width=True)
+        else:
+            st.warning("找不到 df2.csv")
 
-    if raw_path.exists():
-        raw_df = pd.read_csv(raw_path, encoding="utf-8-sig")
-        st.subheader("raw_df：原始抓取資料")
-        st.dataframe(
-            raw_df[raw_df["城市"].astype(str) == "台北"],
-            use_container_width=True
-        )
-    else:
-        st.warning("找不到 raw_df.csv")
+        if raw_path.exists():
+            raw_df = pd.read_csv(raw_path, encoding="utf-8-sig")
+            st.subheader("raw_df：原始抓取資料")
+            st.dataframe(
+                raw_df[raw_df["城市"].astype(str) == "台北"],
+                use_container_width=True
+            )
+        else:
+            st.warning("找不到 raw_df.csv")
     
 
     st.markdown('<div class="card"><div class="card-title">📈 月度追蹤</div>', unsafe_allow_html=True)
