@@ -1360,20 +1360,6 @@ def render_report() -> None:
 
     with tabs[0]:
         render_html_table(daily_df)
-    with st.expander("🔎 Debug：台北 df2 / raw_df", expanded=False):
-        debug_dir = Path("dashboard_data/latest")
-        df2_path = debug_dir / "df2.csv"
-        raw_path = debug_dir / "raw_df.csv"
-
-    if df2_path.exists():
-        df2 = pd.read_csv(df2_path, encoding="utf-8-sig")
-        st.subheader("df2：台北分類後彙總")
-        st.dataframe(
-            df2[df2["城市"].astype(str) == "台北"],
-            use_container_width=True,
-        )
-    else:
-        st.warning("找不到 df2.csv，請先更新業績報表")
 
     if raw_path.exists():
         raw_df = pd.read_csv(raw_path, encoding="utf-8-sig")
