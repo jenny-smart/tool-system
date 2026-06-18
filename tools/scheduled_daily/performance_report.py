@@ -1201,6 +1201,11 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
     df3 = build_region3_df(df2)
     df4 = build_region4_df(df2)
 
+    raw_df.to_csv(os.path.join(LATEST_DIR, "raw_df.csv"), index=False, encoding="utf-8-sig")
+    df1.to_csv(os.path.join(LATEST_DIR, "df1.csv"), index=False, encoding="utf-8-sig")
+    df2.to_csv(os.path.join(LATEST_DIR, "df2.csv"), index=False, encoding="utf-8-sig")
+    df3.to_csv(os.path.join(LATEST_DIR, "df3.csv"), index=False, encoding="utf-8-sig")
+
     hour = now_dt().hour
 
     if trigger == "schedule":
