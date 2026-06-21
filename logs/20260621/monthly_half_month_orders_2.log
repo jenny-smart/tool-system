@@ -1,0 +1,16 @@
+📝 月排程打卡：下半月訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py --half 2 --folder-id 1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8 --area all
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+📌 期別：202606-2
+📌 日期：2026-06-16 ~ 2026-06-30
+📌 執行區域：all
+📌 月排程總根目錄：1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+
+✅ 成功地區：無
+🎉 half_month_orders.py 全部完成
+
+📝 月排程打卡：下半月訂單 / success
+scheduled_monthly scheduler 全部完成
