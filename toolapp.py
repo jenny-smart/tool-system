@@ -10,6 +10,17 @@ Tool App 主控入口
 
 from __future__ import annotations
 
+"""
+檔案：toolapp.py
+版本：0621_v1
+更新日期：2026-06-21
+更新內容：
+- 月排程執行區域固定顯示：台北、台中、桃園、新竹、高雄。
+- 不再從「月排程地區設定」或設定 JSON 的 areas 讀取 01.台北專員 等資料夾名稱作為執行區域。
+- 月排程仍只需要設定「月排程根目錄 ID」，實際地區資料夾由各月排程腳本依固定名稱尋找。
+"""
+
+
 import html
 import json
 import os
@@ -979,13 +990,9 @@ def available_areas_for_system(system: dict) -> list[str]:
     system_type = system.get("type", "")
 
     if system_type == "monthly_scheduler":
-        areas = normalize_monthly_areas(system)
-        enabled_areas = [
-            area_name
-            for area_name, info in areas.items()
-            if info.get("enabled", True)
-        ]
-        return enabled_areas or ["全區"]
+        # 月排程不再讓主控表的「地區根目錄 ID」決定執行區域。
+        # 執行區域固定使用帳號地區名稱；實際 Drive 資料夾由腳本在月排程根目錄下自動尋找。
+        return ["台北", "台中", "桃園", "新竹", "高雄"]
 
     if system_type == "field_daily_schedule":
         folder_ids = system.get("folder_ids", {}) or {}
