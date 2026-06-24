@@ -1,0 +1,7 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+2026-06-24 23:02:09 [INFO] 目標試算表 ID 來源：主控試算表系統設定
+2026-06-24 23:02:09 [INFO] === 客服排程系統 run_id=10e2eb6c step=2 台北時間=2026-06-25 07:02:09 ===
+2026-06-24 23:02:09 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-24 23:02:15 [INFO] --- Step2_更新每日回報 ---
+2026-06-24 23:02:19 [INFO] Step 2 完成，row=2322（3.3s）
+2026-06-24 23:02:19 [INFO] === 全部完成 run_id=10e2eb6c（4.0s）===
