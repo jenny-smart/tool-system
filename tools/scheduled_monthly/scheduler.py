@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+"""
+檔案：tools/scheduled_monthly/scheduler.py
+版本：0621_v1
+更新日期：2026-06-21
+更新內容：
+- 月排程一鍵執行維持 6 個 job：上半月訂單、下半月訂單、已退款、預收、儲值金結算、儲值金預收。
+- 相容舊地區參數：01.台北專員、02.台中專員、03.桃園專員、04.新竹專員、05.高雄專員。
+- 不新增「已退款待加收」。
+"""
+
 import argparse
 import os
 import subprocess
@@ -11,6 +21,14 @@ from tools.common.log_to_sheet import write_job_log
 
 TZ = timezone(timedelta(hours=8))
 BASE_DIR = Path(__file__).resolve().parents[2]
+
+AREA_ALIASES = {
+    "01.台北專員": "台北",
+    "02.台中專員": "台中",
+    "03.桃園專員": "桃園",
+    "04.新竹專員": "新竹",
+    "05.高雄專員": "高雄",
+}
 
 JOBS = {
     "half_month_orders_1": {
@@ -56,7 +74,24 @@ def now_tw() -> datetime:
     return datetime.now(TZ)
 
 
-def punch(label, status, started_at, finished_at=None, area="", period="", target="", message="", traceback_text=""):
+def normalize_area_arg(area: str = "all") -> str:
+    value = str(area or "all").strip()
+    if value in ["", "全區", "全部", "ALL", "All", "all"]:
+        return "all"
+    return AREA_ALIASES.get(value, value)
+
+
+def punch(
+    label,
+    status,
+    started_at,
+    finished_at=None,
+    area="",
+    period="",
+    target="",
+    message="",
+    traceback_text="",
+):
     try:
         write_job_log(
             system_name="月排程系統",
@@ -78,10 +113,18 @@ def punch(label, status, started_at, finished_at=None, area="", period="", targe
         print(f"⚠️ 月排程打卡失敗：{exc}", flush=True)
 
 
-def run_job(job_name: str, folder_id: str = "", area: str = "all", period: str = "", start: str = "", end: str = "") -> dict:
+def run_job(
+    job_name: str,
+    folder_id: str = "",
+    area: str = "all",
+    period: str = "",
+    start: str = "",
+    end: str = "",
+) -> dict:
     if job_name not in JOBS:
         raise RuntimeError(f"未知月排程 job：{job_name}")
 
+    area = normalize_area_arg(area)
     job = JOBS[job_name]
     label = job["label"]
     script = BASE_DIR / job["script"]
@@ -105,12 +148,27 @@ def run_job(job_name: str, folder_id: str = "", area: str = "all", period: str =
     if start and end:
         cmd.extend(["--start", start, "--end", end])
 
+    period_text = period or f"{start}~{end}".strip("~")
+
     started_at = now_tw()
-    punch(label, "running", started_at, area=area, period=period or f"{start}~{end}", target=folder_id, message="開始執行")
+    punch(
+        label,
+        "running",
+        started_at,
+        area=area,
+        period=period_text,
+        target=folder_id,
+        message="開始執行",
+    )
 
     print("Command:", " ".join(cmd), flush=True)
 
-    completed = subprocess.run(cmd, cwd=BASE_DIR, text=True, capture_output=True)
+    completed = subprocess.run(
+        cmd,
+        cwd=BASE_DIR,
+        text=True,
+        capture_output=True,
+    )
     finished_at = now_tw()
 
     stdout_text = completed.stdout or ""
@@ -122,22 +180,61 @@ def run_job(job_name: str, folder_id: str = "", area: str = "all", period: str =
         print(stderr_text, flush=True)
 
     if completed.returncode != 0:
-        message = f"{label} 執行失敗，exit={completed.returncode}\nSTDOUT:\n{stdout_text[-3000:]}\nSTDERR:\n{stderr_text[-5000:]}"
-        punch(label, "failed", started_at, finished_at, area=area, period=period or f"{start}~{end}", target=folder_id, message=message, traceback_text=stderr_text or message)
+        message = (
+            f"{label} 執行失敗，exit={completed.returncode}\n"
+            f"STDOUT:\n{stdout_text[-3000:]}\n"
+            f"STDERR:\n{stderr_text[-5000:]}"
+        )
+        punch(
+            label,
+            "failed",
+            started_at,
+            finished_at,
+            area=area,
+            period=period_text,
+            target=folder_id,
+            message=message,
+            traceback_text=stderr_text or message,
+        )
         raise RuntimeError(message)
 
-    punch(label, "success", started_at, finished_at, area=area, period=period or f"{start}~{end}", target=folder_id, message="完成")
+    punch(
+        label,
+        "success",
+        started_at,
+        finished_at,
+        area=area,
+        period=period_text,
+        target=folder_id,
+        message="完成",
+    )
     return {"job": job_name, "label": label, "status": "success"}
 
 
-def main(target: str = "half_month_orders_1", folder_id: str = "", area: str = "all", period: str = "", start: str = "", end: str = "") -> list[dict]:
+def main(
+    target: str = "half_month_orders_1",
+    folder_id: str = "",
+    area: str = "all",
+    period: str = "",
+    start: str = "",
+    end: str = "",
+) -> list[dict]:
     targets = list(JOBS.keys()) if target == "all" else [target]
     results = []
     failed = []
 
     for job_name in targets:
         try:
-            results.append(run_job(job_name, folder_id=folder_id, area=area, period=period, start=start, end=end))
+            results.append(
+                run_job(
+                    job_name,
+                    folder_id=folder_id,
+                    area=area,
+                    period=period,
+                    start=start,
+                    end=end,
+                )
+            )
         except Exception as exc:
             failed.append({"job": job_name, "status": "failed", "message": str(exc)})
             if target != "all":
@@ -160,4 +257,11 @@ if __name__ == "__main__":
     parser.add_argument("--end", default="")
     args = parser.parse_args()
 
-    main(target=args.target, folder_id=args.folder_id, area=args.area, period=args.period, start=args.start, end=args.end)
+    main(
+        target=args.target,
+        folder_id=args.folder_id,
+        area=args.area,
+        period=args.period,
+        start=args.start,
+        end=args.end,
+    )
