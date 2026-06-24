@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+"""
+檔案：tools/scheduled_monthly/half_month_orders.py
+版本：0621_v1
+更新日期：2026-06-21
+更新內容：
+- 月排程不再需要逐區設定 Folder ID。
+- 執行區域一律使用：台北、台中、桃園、新竹、高雄。
+- 依月排程總根目錄，自動尋找 01.台北專員、02.台中專員、03.桃園專員、04.新竹專員、05.高雄專員。
+- 相容舊選單值：01.台北專員、02.台中專員、03.桃園專員、04.新竹專員、05.高雄專員。
+"""
+
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -87,6 +99,22 @@ GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 KAOHSIUNG_MERGE_REGIONS = ["高雄", "台南"]
 
+AREA_FOLDER_NAMES = {
+    "台北": "01.台北專員",
+    "台中": "02.台中專員",
+    "桃園": "03.桃園專員",
+    "新竹": "04.新竹專員",
+    "高雄": "05.高雄專員",
+}
+
+AREA_ALIASES = {
+    "01.台北專員": "台北",
+    "02.台中專員": "台中",
+    "03.桃園專員": "桃園",
+    "04.新竹專員": "新竹",
+    "05.高雄專員": "高雄",
+}
+
 
 @dataclass
 class RunArgs:
@@ -110,9 +138,11 @@ def tw_now() -> datetime:
 
 def normalize_area(area: str | None) -> str:
     value = str(area or "all").strip()
+
     if value in ["", "全區", "全部", "ALL", "All", "all"]:
         return "all"
-    return value
+
+    return AREA_ALIASES.get(value, value)
 
 
 def parse_args() -> RunArgs:
@@ -405,13 +435,17 @@ def get_or_create_child_folder(service, parent_id: str, folder_name: str) -> str
 
 
 def resolve_area_folder(service, root_folder_id: str, city: str) -> str:
-    monthly_cfg = load_monthly_config()
-    folder_id = monthly_cfg["areas"].get(city)
+    folder_name = AREA_FOLDER_NAMES.get(city)
+
+    if not folder_name:
+        raise RuntimeError(f"找不到地區資料夾名稱設定：{city}")
+
+    folder_id = find_child_folder(service, root_folder_id, folder_name)
 
     if not folder_id:
-        raise RuntimeError(f"主控設定缺少月排程地區根目錄：{city}")
+        raise RuntimeError(f"月排程根目錄下找不到資料夾：{folder_name}")
 
-    log(f"📁 區域資料夾：{city} / {folder_id}")
+    log(f"📁 區域資料夾：{city} / {folder_name} / {folder_id}")
     return folder_id
 
 
@@ -525,9 +559,8 @@ def save_snapshot(
 
 def resolve_cities(args: RunArgs, accounts: dict[str, dict[str, str]]) -> list[str]:
     if args.area == "all":
-        monthly_cfg = load_monthly_config()
-        enabled_areas = list(monthly_cfg["areas"].keys())
-        return [area for area in enabled_areas if area in accounts]
+        preferred_order = ["台北", "台中", "桃園", "新竹", "高雄"]
+        return [city for city in preferred_order if city in accounts]
 
     if args.area not in accounts:
         raise RuntimeError(f"找不到地區帳號設定：{args.area}")
