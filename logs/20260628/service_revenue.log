@@ -1,0 +1,31 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+2026-06-27 23:00:22 [INFO] 目標試算表 ID 來源：主控試算表系統設定
+2026-06-27 23:00:22 [INFO] === 客服排程系統 run_id=d45cf422 step=3 台北時間=2026-06-28 07:00:22 ===
+2026-06-27 23:00:22 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-27 23:00:26 [WARNING] [主控表打卡失敗（非致命）] <HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_unit': '1/min/{project}/{user}', 'consumer': 'projects/1042663213860', 'service': 'sheets.googleapis.com', 'quota_location': 'global', 'quota_limit_value': '60', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+2026-06-27 23:00:27 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-06-27 23:00:38 [INFO]   [mail] text/plain 為空，fallback 到 text/html（3791 字元）
+2026-06-27 23:00:45 [INFO]   近三日營業額-台北 → 選中 17:25:04（與17:25差4s）
+2026-06-27 23:00:45 [INFO]   [debug] 行67 repr='2026-06-25：37分'
+2026-06-27 23:00:45 [INFO]   [debug] 行68 repr='2026-06-26：62分'
+2026-06-27 23:00:45 [INFO]   [debug] 行69 repr='2026-06-27：6分'
+2026-06-27 23:00:45 [INFO]   [debug] 行70 repr='【家電清潔】日營業額'
+2026-06-27 23:00:45 [INFO]   [debug] 行71 repr='2026-06-25：0分'
+2026-06-27 23:00:45 [INFO]   [debug] 行72 repr='2026-06-26：0分'
+2026-06-27 23:00:45 [INFO]   [debug] 行73 repr='2026-06-27：0分'
+2026-06-27 23:00:45 [INFO]   [debug] 行74 repr='【儲值金】日營業額'
+2026-06-27 23:00:51 [INFO]   [mail] text/plain 為空，fallback 到 text/html（944 字元）
+2026-06-27 23:00:53 [INFO]   近三日營業額-台中 → 選中 17:25:08（與17:25差8s）
+2026-06-27 23:00:53 [INFO]   [debug] 行22 repr='2026-06-25：2分'
+2026-06-27 23:00:53 [INFO]   [debug] 行23 repr='2026-06-26：0分'
+2026-06-27 23:00:53 [INFO]   [debug] 行24 repr='2026-06-27：0分'
+2026-06-27 23:00:53 [INFO]   [debug] 行25 repr='【家電清潔】日營業額'
+2026-06-27 23:00:53 [INFO]   [debug] 行26 repr='2026-06-25：0分'
+2026-06-27 23:00:53 [INFO]   [debug] 行27 repr='2026-06-26：0分'
+2026-06-27 23:00:53 [INFO]   [debug] 行28 repr='2026-06-27：0分'
+2026-06-27 23:00:53 [INFO]   [debug] 行29 repr='【儲值金】日營業額'
+2026-06-27 23:00:53 [INFO]   台北：{'daily_value': 6, 'total_count': 1634, 'total_amount': 3267320}
+2026-06-27 23:00:53 [INFO]   台中：{'daily_value': 0, 'total_count': 165, 'total_amount': 329800}
+2026-06-27 23:00:54 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-06-27 23:00:54 [INFO] Step 3 完成，row=2324（26.4s）
+2026-06-27 23:00:55 [INFO] === 全部完成 run_id=d45cf422（27.0s）===
