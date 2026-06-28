@@ -1,0 +1,8 @@
+{
+    "job_name": "field_schedule_stats",
+    "status": "failed",
+    "exit_code": 1,
+    "started_at": "2026-06-29 05:50:54",
+    "finished_at": "2026-06-29 05:51:20",
+    "duration_seconds": 26
+  }

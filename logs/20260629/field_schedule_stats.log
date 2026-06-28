@@ -1,0 +1,83 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.schedule_stats --date 20260629 --system-name 外場排程系統 --run-type 排程
+[2026-06-29 05:51:04] 開始處理排班統計表：排班統計表20260629-台北
+[2026-06-29 05:51:06] 失敗：排班統計表20260629-台北 / <HttpError 400 when requesting https://www.googleapis.com/drive/v3/files/12-FKMANm74e26d0iPHytr3RCMnwNqNzi/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "Conversion of the uploaded content to the requested output type is not supported.". Details: "[{'message': 'Conversion of the uploaded content to the requested output type is not supported.', 'domain': 'global', 'reason': 'conversionUnsupportedConversionPath'}]">
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 423, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 409, in main
+    run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 357, in run_schedule_stats_for_area
+    raw_values = read_file_values(drive, sheets, file)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 240, in read_file_values
+    return read_drive_spreadsheet_values(drive, sheets, file)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 109, in read_drive_spreadsheet_values
+    temp_file_id = convert_excel_to_google_sheet(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 33, in convert_excel_to_google_sheet
+    copied = execute_with_retry(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 13, in execute_with_retry
+    return request.execute()
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 400 when requesting https://www.googleapis.com/drive/v3/files/12-FKMANm74e26d0iPHytr3RCMnwNqNzi/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "Conversion of the uploaded content to the requested output type is not supported.". Details: "[{'message': 'Conversion of the uploaded content to the requested output type is not supported.', 'domain': 'global', 'reason': 'conversionUnsupportedConversionPath'}]">
+
+📝 外場排程打卡：外場排班統計表 / failed
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
+    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
+    results.append(run_job(job_name, date_key, area, system_name))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
+    raise RuntimeError(message)
+RuntimeError: 外場排班統計表 執行失敗，exit=1
+STDOUT:
+[2026-06-29 05:51:04] 開始處理排班統計表：排班統計表20260629-台北
+[2026-06-29 05:51:06] 失敗：排班統計表20260629-台北 / <HttpError 400 when requesting https://www.googleapis.com/drive/v3/files/12-FKMANm74e26d0iPHytr3RCMnwNqNzi/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "Conversion of the uploaded content to the requested output type is not supported.". Details: "[{'message': 'Conversion of the uploaded content to the requested output type is not supported.', 'domain': 'global', 'reason': 'conversionUnsupportedConversionPath'}]">
+
+STDERR:
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 423, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 409, in main
+    run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 357, in run_schedule_stats_for_area
+    raw_values = read_file_values(drive, sheets, file)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 240, in read_file_values
+    return read_drive_spreadsheet_values(drive, sheets, file)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 109, in read_drive_spreadsheet_values
+    temp_file_id = convert_excel_to_google_sheet(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 33, in convert_excel_to_google_sheet
+    copied = execute_with_retry(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 13, in execute_with_retry
+    return request.execute()
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 400 when requesting https://www.googleapis.com/drive/v3/files/12-FKMANm74e26d0iPHytr3RCMnwNqNzi/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "Conversion of the uploaded content to the requested output type is not supported.". Details: "[{'message': 'Conversion of the uploaded content to the requested output type is not supported.', 'domain': 'global', 'reason': 'conversionUnsupportedConversionPath'}]">
+
