@@ -1,0 +1,130 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+2026-06-29 22:53:19 [INFO] 目標試算表 ID 來源：主控試算表系統設定
+2026-06-29 22:53:19 [INFO] === 客服排程系統 run_id=d80a56e9 step=1 台北時間=2026-06-30 06:53:17 ===
+2026-06-29 22:53:19 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-29 22:53:28 [INFO] --- Step1_更新排班統計表 ---
+2026-06-29 22:53:30 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-29 22:53:31 [INFO] Drive 資料夾找到 100 個檔案
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260730-台中.xlsx_temp_1782770546 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260630-台中.xlsx_temp_1782770537 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260730-台北.xlsx_temp_1782770531 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260630-台北.xlsx_temp_1782770513 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260730-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260630-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260730-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260630-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260729-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260629-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260729-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260629-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260728-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260628-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260728-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260628-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260728-台中.xlsx_temp_1782597060 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260628-台中.xlsx_temp_1782597052 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260728-台北.xlsx_temp_1782597045 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260628-台北.xlsx_temp_1782597026 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260728-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260628-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260728-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260628-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260727-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260627-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260727-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260627-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260727-台中.xlsx_temp_1782511167 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260627-台中.xlsx_temp_1782511158 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260727-台北.xlsx_temp_1782511149 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260627-台北.xlsx_temp_1782511140 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260727-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260627-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260727-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260627-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260726-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260626-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260726-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260626-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260726-台中.xlsx_temp_1782425638 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260626-台中.xlsx_temp_1782425630 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260726-台北.xlsx_temp_1782425623 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260626-台北.xlsx_temp_1782425615 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260726-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260626-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260726-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260626-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260725-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260625-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260725-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260625-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260725-台中.xlsx_temp_1782338729 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260625-台中.xlsx_temp_1782338711 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260725-台北.xlsx_temp_1782338704 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260625-台北.xlsx_temp_1782338687 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260725-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260625-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260725-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260625-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260724-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260624-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260724-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260624-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260724-台中.xlsx_temp_1782252415 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260624-台中.xlsx_temp_1782252407 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260724-台北.xlsx_temp_1782252397 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260624-台北.xlsx_temp_1782252386 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260724-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260624-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260724-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260624-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260723-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260623-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260723-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260623-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260723-台中.xlsx_temp_1782167357 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260623-台中.xlsx_temp_1782167350 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260723-台北.xlsx_temp_1782167342 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260623-台北.xlsx_temp_1782167323 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260723-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260623-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260723-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260623-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260722-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260622-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260722-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260622-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260722-台中.xlsx_temp_1782079603 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260622-台中.xlsx_temp_1782079592 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260722-台北.xlsx_temp_1782079585 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260622-台北.xlsx_temp_1782079576 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260722-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260622-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260722-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260622-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260721-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260621-台中 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260721-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO]   找到檔案：排班統計表20260621-台北 (application/vnd.google-apps.spreadsheet)
+2026-06-29 22:53:31 [INFO] 排班檔確認 OK：{'taipei_current': '排班統計表20260630-台北.xlsx', 'taipei_next': '排班統計表20260730-台北.xlsx', 'taichung_current': '排班統計表20260630-台中.xlsx', 'taichung_next': '排班統計表20260730-台中.xlsx'}
+2026-06-29 22:53:31 [INFO]   匯入：排班統計表20260630-台北.xlsx
+2026-06-29 22:53:31 [INFO]   xlsx → Google Sheets：排班統計表20260630-台北
+2026-06-29 22:53:32 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-29 22:53:36 [INFO]   轉換完成，新 Google Sheets ID：1YXjLhAAfkZw2UX2As_-MlUI1XID4Iz7oqK9myPb4VB4
+2026-06-29 22:53:38 [INFO]   → 寫入 85 列（起始 R3C7）
+2026-06-29 22:53:38 [INFO]   匯入：排班統計表20260730-台北.xlsx
+2026-06-29 22:53:38 [INFO]   xlsx → Google Sheets：排班統計表20260730-台北
+2026-06-29 22:53:38 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-29 22:53:42 [INFO]   轉換完成，新 Google Sheets ID：1XGAGtkj2alSUz4ZKxN9TnpKc-x0Vjv2bBIYPZqEETPw
+2026-06-29 22:53:44 [INFO]   → 寫入 82 列（起始 R3C22）
+2026-06-29 22:53:44 [INFO]   匯入：排班統計表20260630-台中.xlsx
+2026-06-29 22:53:44 [INFO]   xlsx → Google Sheets：排班統計表20260630-台中
+2026-06-29 22:53:44 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-29 22:53:49 [INFO]   轉換完成，新 Google Sheets ID：1skVVbamviqqwBYru8iRa1BeJxzTeBuOdA4q62-YELig
+2026-06-29 22:53:50 [INFO]   → 寫入 19 列（起始 R3C82）
+2026-06-29 22:53:50 [INFO]   匯入：排班統計表20260730-台中.xlsx
+2026-06-29 22:53:50 [INFO]   xlsx → Google Sheets：排班統計表20260730-台中
+2026-06-29 22:53:50 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-06-29 22:53:54 [INFO]   轉換完成，新 Google Sheets ID：1Z4TvPKeYr18T1yHQL9nlREK6TP-SN_Ymf6P9NRn5ipo
+2026-06-29 22:53:56 [INFO]   → 寫入 12 列（起始 R3C97）
+2026-06-29 22:53:57 [INFO] Step 1 完成（27.7s）
+2026-06-29 22:53:58 [INFO] === 全部完成 run_id=d80a56e9（29.3s）===
