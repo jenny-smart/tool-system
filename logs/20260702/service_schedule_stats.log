@@ -1,0 +1,46 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+2026-07-01 23:10:25 [INFO] 目標試算表 ID 來源：主控試算表系統設定
+2026-07-01 23:10:25 [INFO] === 客服排程系統 run_id=1600c2db step=1 台北時間=2026-07-02 07:10:24 ===
+2026-07-01 23:10:25 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-01 23:10:36 [INFO] --- Step1_更新排班統計表 ---
+2026-07-01 23:10:37 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-01 23:10:38 [INFO] Drive 資料夾找到 16 個檔案
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260802-台中.xlsx_temp_1782943857 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260702-台中.xlsx_temp_1782943849 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260802-台北.xlsx_temp_1782943842 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260702-台北.xlsx_temp_1782943823 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260802-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260702-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260802-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260702-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260801-台中.xlsx_temp_1782857199 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260701-台中.xlsx_temp_1782857192 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260801-台北.xlsx_temp_1782857183 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260701-台北.xlsx_temp_1782857164 (application/vnd.google-apps.spreadsheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260801-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260701-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260801-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO]   找到檔案：排班統計表20260701-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-07-01 23:10:38 [INFO] 排班檔確認 OK：{'taipei_current': '排班統計表20260702-台北.xlsx', 'taipei_next': '排班統計表20260802-台北.xlsx', 'taichung_current': '排班統計表20260702-台中.xlsx', 'taichung_next': '排班統計表20260802-台中.xlsx'}
+2026-07-01 23:10:38 [INFO]   匯入：排班統計表20260702-台北.xlsx
+2026-07-01 23:10:38 [INFO]   xlsx → Google Sheets：排班統計表20260702-台北
+2026-07-01 23:10:39 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-01 23:10:42 [INFO]   轉換完成，新 Google Sheets ID：1Ip_nhzHvUImznpEckRlRtAKBXn7kcw3siBbzNIlDATM
+2026-07-01 23:10:42 [INFO]   → 寫入 86 列（起始 R3C7）
+2026-07-01 23:10:42 [INFO]   匯入：排班統計表20260802-台北.xlsx
+2026-07-01 23:10:42 [INFO]   xlsx → Google Sheets：排班統計表20260802-台北
+2026-07-01 23:10:43 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-01 23:10:48 [INFO]   轉換完成，新 Google Sheets ID：1YH486cFA7kpXe7aPyoYgNTj6ravpe2HQ4tGtafq05JI
+2026-07-01 23:10:48 [INFO]   → 寫入 13 列（起始 R3C22）
+2026-07-01 23:10:48 [INFO]   匯入：排班統計表20260702-台中.xlsx
+2026-07-01 23:10:48 [INFO]   xlsx → Google Sheets：排班統計表20260702-台中
+2026-07-01 23:10:49 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-01 23:10:53 [INFO]   轉換完成，新 Google Sheets ID：1iSA0DDT31L3u5g-GseR3ZVF6cUeAIo0AazJb8zF7Zbc
+2026-07-01 23:10:53 [INFO]   → 寫入 14 列（起始 R3C82）
+2026-07-01 23:10:53 [INFO]   匯入：排班統計表20260802-台中.xlsx
+2026-07-01 23:10:53 [INFO]   xlsx → Google Sheets：排班統計表20260802-台中
+2026-07-01 23:10:54 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-01 23:10:58 [INFO]   轉換完成，新 Google Sheets ID：1GpA-1q8yqdzBGYK_Zqg3-ZE8R1eA1MfDoUfv4c7bB8E
+2026-07-01 23:10:59 [INFO]   → 寫入 1 列（起始 R3C97）
+2026-07-01 23:11:00 [INFO] Step 1 完成（23.7s）
+2026-07-01 23:11:01 [INFO] === 全部完成 run_id=1600c2db（24.5s）===
