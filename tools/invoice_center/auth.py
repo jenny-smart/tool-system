@@ -24,7 +24,12 @@ def build_login_payload(
     return payload
 
 
-def login(client: Any, *, captcha: str | None = None, captcha_field: str = "captcha"):
+def login(
+    client: Any,
+    *,
+    captcha: str | None = None,
+    captcha_field: str = "capchacode",
+):
     """Login through an EIInvoiceClient.
 
     Captcha is intentionally accepted from the caller and never solved here.
