@@ -8,6 +8,7 @@ import streamlit as st
 from .bridge import create_invoice_from_payload, fetch_backend_order_invoice_payload
 from .config import get_area_options, get_area_status
 from .invoice import build_invoice_payload
+from .lemon_invoice_api import INVOICE_TYPE_OPTIONS, make_invoice
 from .models import InvoiceLineItem, to_decimal
 from .query import query_invoice_by_order_id
 
@@ -39,6 +40,19 @@ def _as_date(value: Any) -> date:
 def _set_default(key: str, value: Any) -> None:
     if key not in st.session_state:
         st.session_state[key] = value
+
+
+def _order_extra_value(order: dict[str, Any], *keys: str) -> str:
+    extra = order.get("extra") or {}
+    for key in keys:
+        value = order.get(key)
+        if value not in (None, ""):
+            return str(value)
+        if isinstance(extra, dict):
+            value = extra.get(key)
+            if value not in (None, ""):
+                return str(value)
+    return ""
 
 
 def _apply_payload_to_state(payload: Any) -> None:
@@ -88,12 +102,25 @@ def _bootstrap_invoice_state() -> None:
         "invoice_center_quantity": 1,
         "invoice_center_unitprice": 0,
         "invoice_center_fremark": "",
+        "invoice_center_invoice_type": "一般發票",
     }
     for key, value in defaults.items():
         _set_default(key, value)
 
 
-def _render_backend_order_summary() -> None:
+def _load_backend_order(area: str, order_no: str, suffix: str) -> dict[str, Any]:
+    backend_order, loaded_payload = fetch_backend_order_invoice_payload(
+        area,
+        order_no,
+        suffix=suffix,
+    )
+    order_dict = backend_order.to_dict()
+    st.session_state["invoice_center_backend_order"] = order_dict
+    _apply_payload_to_state(loaded_payload)
+    return order_dict
+
+
+def _render_backend_order_summary(invoice_type: str) -> None:
     order = st.session_state.get("invoice_center_backend_order")
     if not order:
         return
@@ -101,14 +128,15 @@ def _render_backend_order_summary() -> None:
     st.dataframe(
         [
             {
-                "訂單號": order.get("order_no", ""),
-                "姓名": order.get("customer_name", ""),
-                "電話": order.get("phone", ""),
-                "金額": order.get("amount", ""),
-                "付款方式": order.get("payway", ""),
+                "訂單編號": order.get("order_no", ""),
+                "purchase_id": order.get("purchase_id", ""),
                 "付款狀態": order.get("paid_status", ""),
-                "服務日期": order.get("service_date", ""),
                 "發票號碼": order.get("invoice_no", ""),
+                "發票類型": invoice_type,
+                "載具類型": _order_extra_value(order, "carrier_type", "carriertype"),
+                "載具號碼": _order_extra_value(order, "carrier_no", "carrierid1", "carrierid2"),
+                "統一編號": _order_extra_value(order, "buyer_identifier", "invoice_identifier", "tax_id"),
+                "抬頭": _order_extra_value(order, "buyer_name", "invoice_title", "company_title"),
             }
         ],
         use_container_width=True,
@@ -116,6 +144,36 @@ def _render_backend_order_summary() -> None:
     )
     if order.get("items"):
         st.caption("服務項目：" + "、".join(order.get("items", [])))
+
+
+def _render_lemon_invoice_action(area: str, order_no: str, suffix: str, invoice_type: str) -> None:
+    order = st.session_state.get("invoice_center_backend_order")
+    if not order:
+        return
+
+    purchase_id = str(order.get("purchase_id") or "").strip()
+    invoice_no = str(order.get("invoice_no") or "").strip()
+
+    if invoice_no:
+        st.success(f"此訂單已開立發票：{invoice_no}")
+        return
+
+    if not purchase_id:
+        st.warning("此訂單沒有 purchase_id，無法呼叫 Lemon 開票 API。")
+        return
+
+    if st.button("開立發票", type="primary", use_container_width=True):
+        try:
+            make_invoice(purchase_id, invoice_type=invoice_type)
+            st.info("已送出開立請求")
+            refreshed_order = _load_backend_order(area, order_no, suffix)
+            refreshed_invoice_no = str(refreshed_order.get("invoice_no") or "").strip()
+            if refreshed_invoice_no:
+                st.success(f"開立成功：{refreshed_invoice_no}")
+            else:
+                st.warning("已送出，但尚未查到發票號碼，請稍後重新查詢。")
+        except Exception as exc:
+            st.error(str(exc))
 
 
 def _render_invoice_create_tab() -> None:
@@ -130,20 +188,21 @@ def _render_invoice_create_tab() -> None:
     with col_suffix:
         suffix = st.text_input("EI orderid suffix", value="-1")
 
+    invoice_type = st.selectbox(
+        "發票類型",
+        list(INVOICE_TYPE_OPTIONS.keys()),
+        key="invoice_center_invoice_type",
+    )
+
     if st.button("查詢 Lemon 訂單並帶入", type="primary", use_container_width=True):
         try:
-            backend_order, loaded_payload = fetch_backend_order_invoice_payload(
-                area,
-                order_no,
-                suffix=suffix,
-            )
-            st.session_state["invoice_center_backend_order"] = backend_order.to_dict()
-            _apply_payload_to_state(loaded_payload)
+            _load_backend_order(area, order_no, suffix)
         except Exception as exc:
             st.session_state.pop("invoice_center_backend_order", None)
             st.error(f"Lemon 訂單查詢失敗：{exc}")
 
-    _render_backend_order_summary()
+    _render_backend_order_summary(invoice_type)
+    _render_lemon_invoice_action(area, order_no, suffix, invoice_type)
 
     col_date, col_amount, col_payway = st.columns([1, 1, 1])
     with col_date:
@@ -222,28 +281,9 @@ def _render_invoice_create_tab() -> None:
         ],
     )
 
-    preview_col, submit_col = st.columns([1, 1])
-    with preview_col:
-        if st.button("Preview payload", use_container_width=True):
-            result = create_invoice_from_payload(payload, dry_run=True)
-            st.session_state["invoice_center_preview"] = result.payload
-    with submit_col:
-        allow_submit = st.checkbox("允許正式送出", value=False)
-        captcha = st.text_input("Captcha", value="", type="password")
-        if st.button("送出 EI", use_container_width=True, disabled=not allow_submit):
-            try:
-                result = create_invoice_from_payload(
-                    payload,
-                    dry_run=False,
-                    captcha=captcha or None,
-                )
-                if result.success:
-                    st.success(result.message)
-                else:
-                    st.error(result.error or result.message)
-                st.session_state["invoice_center_preview"] = result.payload
-            except Exception as exc:
-                st.error(f"送出失敗：{exc}")
+    if st.button("Preview payload", use_container_width=True):
+        result = create_invoice_from_payload(payload, dry_run=True)
+        st.session_state["invoice_center_preview"] = result.payload
 
     preview = st.session_state.get("invoice_center_preview")
     if preview:
