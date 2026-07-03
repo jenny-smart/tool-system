@@ -25,8 +25,11 @@ class BackendOrder:
     address: str = ""
     amount: str = ""
     payway: str = ""
+    order_status: str = ""
     paid_status: str = ""
     invoice_no: str = ""
+    buyer_identifier: str = ""
+    buyer_name: str = ""
     service_date: str = ""
     service_time: str = ""
     items: list[str] = field(default_factory=list)
@@ -46,8 +49,11 @@ class BackendOrder:
             "address": self.address,
             "amount": self.amount,
             "payway": self.payway,
+            "order_status": self.order_status,
             "paid_status": self.paid_status,
             "invoice_no": self.invoice_no,
+            "buyer_identifier": self.buyer_identifier,
+            "buyer_name": self.buyer_name,
             "service_date": self.service_date,
             "service_time": self.service_time,
             "items": self.items,
