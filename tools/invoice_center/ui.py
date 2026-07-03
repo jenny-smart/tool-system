@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 import streamlit as st
 
-from .bridge import create_invoice_from_payload
+from .bridge import create_invoice_from_payload, fetch_backend_order_invoice_payload
 from .config import get_area_options, get_area_status
 from .invoice import build_invoice_payload
-from .models import InvoiceLineItem
+from .models import InvoiceLineItem, to_decimal
 from .query import query_invoice_by_order_id
 
 
@@ -18,8 +19,108 @@ def _area_select(label: str = "地區") -> str:
     return dict((display, key) for key, display in options)[selected]
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(to_decimal(value))
+    except Exception:
+        return default
+
+
+def _as_date(value: Any) -> date:
+    text = str(value or "").strip()
+    if not text:
+        return date.today()
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return date.today()
+
+
+def _set_default(key: str, value: Any) -> None:
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
+def _apply_payload_to_state(payload: Any) -> None:
+    item = payload.items[0] if payload.items else InvoiceLineItem(
+        goodcode="CLEAN",
+        goodname="清潔服務",
+        unit="式",
+        quantity="1",
+        unitprice="0",
+        amount="0",
+    )
+    st.session_state.update(
+        {
+            "invoice_center_orderdate": _as_date(payload.orderdate),
+            "invoice_center_saleamount": _as_int(payload.saleamount),
+            "invoice_center_payway": payload.payway or "",
+            "invoice_center_buyer_identifier": payload.buyer_identifier or "",
+            "invoice_center_buyer_name": payload.buyer_name or "",
+            "invoice_center_buyer_phone": payload.buyer_phone or "",
+            "invoice_center_buyer_emailaddress": payload.buyer_emailaddress or "",
+            "invoice_center_buyer_address": payload.buyer_address or "",
+            "invoice_center_mainremark": payload.mainremark or "",
+            "invoice_center_goodcode": item.goodcode or "CLEAN",
+            "invoice_center_goodname": item.goodname or "清潔服務",
+            "invoice_center_unit": item.unit or "式",
+            "invoice_center_quantity": max(_as_int(item.quantity, 1), 1),
+            "invoice_center_unitprice": _as_int(item.unitprice),
+            "invoice_center_fremark": item.fremark or "",
+        }
+    )
+
+
+def _bootstrap_invoice_state() -> None:
+    defaults = {
+        "invoice_center_orderdate": date.today(),
+        "invoice_center_saleamount": 0,
+        "invoice_center_payway": "",
+        "invoice_center_buyer_identifier": "",
+        "invoice_center_buyer_name": "",
+        "invoice_center_buyer_phone": "",
+        "invoice_center_buyer_emailaddress": "",
+        "invoice_center_buyer_address": "",
+        "invoice_center_mainremark": "",
+        "invoice_center_goodcode": "CLEAN",
+        "invoice_center_goodname": "清潔服務",
+        "invoice_center_unit": "式",
+        "invoice_center_quantity": 1,
+        "invoice_center_unitprice": 0,
+        "invoice_center_fremark": "",
+    }
+    for key, value in defaults.items():
+        _set_default(key, value)
+
+
+def _render_backend_order_summary() -> None:
+    order = st.session_state.get("invoice_center_backend_order")
+    if not order:
+        return
+    st.success(f"已帶入 Lemon 訂單：{order.get('order_no', '')}")
+    st.dataframe(
+        [
+            {
+                "訂單號": order.get("order_no", ""),
+                "姓名": order.get("customer_name", ""),
+                "電話": order.get("phone", ""),
+                "金額": order.get("amount", ""),
+                "付款方式": order.get("payway", ""),
+                "付款狀態": order.get("paid_status", ""),
+                "服務日期": order.get("service_date", ""),
+                "發票號碼": order.get("invoice_no", ""),
+            }
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+    if order.get("items"):
+        st.caption("服務項目：" + "、".join(order.get("items", [])))
+
+
 def _render_invoice_create_tab() -> None:
     st.subheader("發票開立")
+    _bootstrap_invoice_state()
 
     col_area, col_order, col_suffix = st.columns([1, 2, 1])
     with col_area:
@@ -29,40 +130,70 @@ def _render_invoice_create_tab() -> None:
     with col_suffix:
         suffix = st.text_input("EI orderid suffix", value="-1")
 
+    if st.button("查詢 Lemon 訂單並帶入", type="primary", use_container_width=True):
+        try:
+            backend_order, loaded_payload = fetch_backend_order_invoice_payload(
+                area,
+                order_no,
+                suffix=suffix,
+            )
+            st.session_state["invoice_center_backend_order"] = backend_order.to_dict()
+            _apply_payload_to_state(loaded_payload)
+        except Exception as exc:
+            st.session_state.pop("invoice_center_backend_order", None)
+            st.error(f"Lemon 訂單查詢失敗：{exc}")
+
+    _render_backend_order_summary()
+
     col_date, col_amount, col_payway = st.columns([1, 1, 1])
     with col_date:
-        orderdate = st.date_input("訂單日期", value=date.today())
+        orderdate = st.date_input("訂單日期", key="invoice_center_orderdate")
     with col_amount:
-        saleamount = st.number_input("銷售額", min_value=0, step=1, value=0)
+        saleamount = st.number_input(
+            "銷售額",
+            min_value=0,
+            step=1,
+            key="invoice_center_saleamount",
+        )
     with col_payway:
-        payway = st.text_input("付款方式", value="")
+        payway = st.text_input("付款方式", key="invoice_center_payway")
 
     st.divider()
     st.subheader("買受人")
     buyer_cols = st.columns(2)
     with buyer_cols[0]:
-        buyer_identifier = st.text_input("統一編號", value="")
-        buyer_name = st.text_input("買受人名稱", value="")
-        buyer_phone = st.text_input("電話", value="")
+        buyer_identifier = st.text_input("統一編號", key="invoice_center_buyer_identifier")
+        buyer_name = st.text_input("買受人名稱", key="invoice_center_buyer_name")
+        buyer_phone = st.text_input("電話", key="invoice_center_buyer_phone")
     with buyer_cols[1]:
-        buyer_emailaddress = st.text_input("Email", value="")
-        buyer_address = st.text_input("地址", value="")
-        mainremark = st.text_input("備註", value="")
+        buyer_emailaddress = st.text_input("Email", key="invoice_center_buyer_emailaddress")
+        buyer_address = st.text_input("地址", key="invoice_center_buyer_address")
+        mainremark = st.text_input("備註", key="invoice_center_mainremark")
 
     st.divider()
     st.subheader("明細")
     item_cols = st.columns([1, 2, 1, 1, 1])
     with item_cols[0]:
-        goodcode = st.text_input("品號", value="CLEAN")
+        goodcode = st.text_input("品號", key="invoice_center_goodcode")
     with item_cols[1]:
-        goodname = st.text_input("品名", value="清潔服務")
+        goodname = st.text_input("品名", key="invoice_center_goodname")
     with item_cols[2]:
-        unit = st.text_input("單位", value="式")
+        unit = st.text_input("單位", key="invoice_center_unit")
     with item_cols[3]:
-        quantity = st.number_input("數量", min_value=1, step=1, value=1)
+        quantity = st.number_input(
+            "數量",
+            min_value=1,
+            step=1,
+            key="invoice_center_quantity",
+        )
     with item_cols[4]:
-        unitprice = st.number_input("單價", min_value=0, step=1, value=saleamount)
-    fremark = st.text_input("明細備註", value="")
+        unitprice = st.number_input(
+            "單價",
+            min_value=0,
+            step=1,
+            key="invoice_center_unitprice",
+        )
+    fremark = st.text_input("明細備註", key="invoice_center_fremark")
 
     item_amount = unitprice * quantity
     payload = build_invoice_payload(
@@ -93,7 +224,7 @@ def _render_invoice_create_tab() -> None:
 
     preview_col, submit_col = st.columns([1, 1])
     with preview_col:
-        if st.button("Preview payload", type="primary", use_container_width=True):
+        if st.button("Preview payload", use_container_width=True):
             result = create_invoice_from_payload(payload, dry_run=True)
             st.session_state["invoice_center_preview"] = result.payload
     with submit_col:
