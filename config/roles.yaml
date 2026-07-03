@@ -5,7 +5,8 @@ roles:
       - daily_scheduler
       - monthly_scheduler
       - field_daily_schedule
-      - service_schedule        # ★ 新增
+      - service_schedule
+      - invoice_center
     pages:
       - report
       - log
@@ -14,27 +15,21 @@ roles:
       - daily_scheduler
       - field_daily_schedule
       - performance_report
-      - service_schedule        # ★ 新增
-
+      - service_schedule
 
   field_only:
     systems:
       - field_daily_schedule
-
     pages:
       - main
       - log
-
-
-  
-  # 如果有其他角色（manager、staff 等），在下方依需求加入 service_schedule
-  # manager:
-  #   systems:
-  #     - service_schedule
-  #   pages:
-  #     - log
-  #   logs:
-  #     - service_schedule
-
     logs:
       - field_daily_schedule
+
+  # 如果有其他角色（manager、staff 等），在下方依需求加入 invoice_center
+  # manager:
+  #   systems:
+  #     - invoice_center
+  #   pages:
+  #     - log
+  #   logs: []
