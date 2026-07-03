@@ -10,13 +10,13 @@ def build_login_payload(
     hidden_fields: Mapping[str, Any] | None = None,
     *,
     captcha: str | None = None,
-    captcha_field: str = "captcha",
+    captcha_field: str = "capchacode",
 ) -> dict[str, Any]:
     payload = dict(hidden_fields or {})
     payload.update(
         {
             "userid": credentials.userid,
-            "password": credentials.password,
+            "passwd": credentials.password,
         }
     )
     if captcha:
@@ -24,7 +24,12 @@ def build_login_payload(
     return payload
 
 
-def login(client: Any, *, captcha: str | None = None, captcha_field: str = "captcha"):
+def login(
+    client: Any,
+    *,
+    captcha: str | None = None,
+    captcha_field: str = "capchacode",
+):
     """Login through an EIInvoiceClient.
 
     Captcha is intentionally accepted from the caller and never solved here.

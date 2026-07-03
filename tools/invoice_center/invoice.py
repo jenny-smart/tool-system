@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import date
 from decimal import Decimal
-from typing import Any, Iterable
+from typing import Iterable, Any
 
 from .models import (
     InvoiceLineItem,
