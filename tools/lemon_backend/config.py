@@ -85,13 +85,50 @@ class BackendCredentials:
         return f"{head[:2]}***@{domain}"
 
 
+def _secret_value(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 def _streamlit_secret(name: str) -> str:
     if st is None:
         return ""
     try:
-        return str(st.secrets.get(name, "")).strip()
+        return _secret_value(st.secrets.get(name, ""))
     except Exception:
         return ""
+
+
+def _mapping_get(mapping: Any, key: str) -> Any:
+    if mapping is None:
+        return None
+    try:
+        if hasattr(mapping, "get"):
+            return mapping.get(key)
+        return mapping[key]
+    except Exception:
+        return None
+
+
+def _streamlit_account_secret(area: str, field: str) -> str:
+    """Read existing Streamlit secrets: accounts.<area>.email/password."""
+    if st is None:
+        return ""
+    area_key = normalize_area(area)
+    label = AREA_ENV[area_key][0]
+    candidate_area_keys = [area_key, label]
+
+    try:
+        accounts = _mapping_get(st.secrets, "accounts")
+        for candidate in candidate_area_keys:
+            area_config = _mapping_get(accounts, candidate)
+            value = _mapping_get(area_config, field)
+            if _secret_value(value):
+                return _secret_value(value)
+    except Exception:
+        return ""
+    return ""
 
 
 def get_secret(name: str) -> str:
@@ -107,15 +144,22 @@ def normalize_area(area: str) -> str:
     return normalized
 
 
+def get_account_secret(area: str, field: str, fallback_env: str) -> str:
+    """Read Lemon Backend credentials from accounts.<area> first, then flat env/secrets."""
+    return _streamlit_account_secret(area, field) or get_secret(fallback_env)
+
+
 def get_credentials(area: str, required: bool = True) -> BackendCredentials | None:
     key = normalize_area(area)
     label, email_env, password_env = AREA_ENV[key]
-    email = get_secret(email_env)
-    password = get_secret(password_env)
+    email = get_account_secret(key, "email", email_env)
+    password = get_account_secret(key, "password", password_env)
     if email and password:
         return BackendCredentials(key, label, email, password)
     if required:
-        raise RuntimeError(f"{label} 後台帳密未設定：{email_env} / {password_env}")
+        raise RuntimeError(
+            f"{label} 後台帳密未設定：accounts.{key}.email/password 或 {email_env} / {password_env}"
+        )
     return None
 
 
@@ -130,14 +174,15 @@ def get_base_url(env_name: str | None = None) -> str:
 def get_area_status() -> list[dict[str, Any]]:
     rows = []
     for key, (label, email_env, password_env) in AREA_ENV.items():
-        has_email = bool(get_secret(email_env))
-        has_password = bool(get_secret(password_env))
+        has_email = bool(get_account_secret(key, "email", email_env))
+        has_password = bool(get_account_secret(key, "password", password_env))
         rows.append(
             {
                 "area": key,
                 "label": label,
                 "email_env": email_env,
                 "password_env": password_env,
+                "account_secret_path": f"accounts.{key}.email/password",
                 "has_email": has_email,
                 "has_password": has_password,
                 "configured": has_email and has_password,
