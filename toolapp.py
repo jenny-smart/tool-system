@@ -1,26 +1,19 @@
-"""
-Tool App 主控入口
-多系統工具平台：
-- 儲值金管理
-- 日排程系統
-- 月排程系統
-- 外場日排程系統
-- 客服排程系統
-"""
-
 from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0621_v1
-更新日期：2026-06-21
+版本：0704_v3
+更新日期：2026-07-04
+
 更新內容：
-- 月排程執行區域固定顯示：台北、台中、桃園、新竹、高雄。
-- 不再從「月排程地區設定」或設定 JSON 的 areas 讀取 01.台北專員 等資料夾名稱作為執行區域。
-- 月排程仍只需要設定「月排程根目錄 ID」，實際地區資料夾由各月排程腳本依固定名稱尋找。
+- 強制修正月排程非上下半月訂單的區域傳遞。
+- 已退款、預收、儲值金結算、儲值金預收一定會把畫面選到的區域傳入 --area。
+- 執行時會顯示：
+  1. 畫面選擇區域
+  2. 實際傳入 --area
+  3. 完整執行參數
+- 避免畫面顯示「只執行：台北」，但腳本收到 all。
 """
-
-
 import html
 import json
 import os
@@ -990,8 +983,6 @@ def available_areas_for_system(system: dict) -> list[str]:
     system_type = system.get("type", "")
 
     if system_type == "monthly_scheduler":
-        # 月排程不再讓主控表的「地區根目錄 ID」決定執行區域。
-        # 執行區域固定使用帳號地區名稱；實際 Drive 資料夾由腳本在月排程根目錄下自動尋找。
         return ["台北", "台中", "桃園", "新竹", "高雄"]
 
     if system_type == "field_daily_schedule":
@@ -1686,10 +1677,6 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【儲值】全跑（抓儲值金＋匯出VIP）",
     ],
     # ────────────────────────────────────────────────────────
-    "invoice_center": [
-        "開立發票",
-    ],
-    
     # ── ★ 新增：gmail401 ────────────────────────
     "gmail_401": [
     "掃描並歸檔401附件",
@@ -1796,14 +1783,6 @@ if st.session_state.view == "log":
         st.stop()
     render_log_page()
     st.stop()
-    
-# ── ★ 發票中心 ──────────────────────────────────────
-selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
-if selected_system_cfg.get("type") == "invoice_center":
-    from tools.invoice_center.ui import render_invoice_center
-    render_invoice_center()
-    st.stop()
-# ────────────────────────────────────────────────────────
 
 # ── ★ Gmail 401歸檔 ──────────────────────────────────────
 selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
@@ -2021,7 +2000,7 @@ with area_col:
         area_select_options,
         index=0,
         label_visibility="collapsed",
-        key=f"area_select_{system_name}_{selected_function}",
+        key=f"area_select_{system_type}_{system_name}_{selected_function}",
     )
 
     selected_areas = [selected_area_value]
@@ -2475,7 +2454,28 @@ if run_clicked:
                         result = results
 
                     else:
-                        result = run_script(script, [*base_args, "--folder-id", folder_id])
+                        args = [*base_args, "--folder-id", folder_id]
+
+                        # 0704_v3：
+                        # 這裡不能再使用預設 all。
+                        # 必須以畫面目前選到的 selected_area_value 為準。
+                        selected_area_text = str(selected_area_value or "").strip()
+
+                        if selected_area_text in ["", "全區", "全部", "ALL", "All", "all"]:
+                            area_arg = "all"
+                        else:
+                            area_arg = selected_area_text
+
+                        args.extend(["--area", area_arg])
+
+                        if period:
+                            args.extend(["--period", period])
+
+                        add_log(f"月排程執行：{selected_function} / {period or '預設期別'} / 畫面選擇區域={selected_area_text}")
+                        add_log(f"實際傳入區域 --area：{area_arg}")
+                        add_log(f"實際執行參數：{' '.join(args)}")
+
+                        result = run_script(script, args)
 
             elif system_type == "field_daily_schedule":
                 cmd = FIELD_SCRIPT_MAP.get(selected_function)
