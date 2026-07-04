@@ -2,17 +2,17 @@ from __future__ import annotations
 
 """
 檔案：tools/scheduled_monthly/refund_report.py
-版本：0704_v2
+版本：0704_v3
 更新日期：2026-07-04
 
 功能：
 - 月排程：已退款
-- 修正今天為 0704 時，預設期別應抓上個月，而不是 202607。
-- 修正單選區域仍執行 all 的問題，需搭配 toolapp_0704_v2.py。
-- 修正 Google Drive 舊檔 404 時略過，不中斷作業。
+- 修正：上傳時不再「每次新增一個同名檔案」。
+- 上傳規則改為：先尋找同名檔案，能更新就更新既有檔案；若有多個可處理同名檔，保留一個並刪除其他重複檔。
+- 若舊檔 ID 已失效或無權限，會略過該舊項目，不讓刪除失敗中斷；但不再因此一直新增重複檔。
+- 搭配 toolapp_0704_v3.py，可確認畫面選台北時實際傳入 --area 台北。
 - 若期別資料夾已存在，直接使用既有資料夾。
-- 若期別資料夾內已有同名檔案，先刪除舊檔，再重新上傳新檔。
-- 同一地區、同一期別、同一檔名只會保留一個檔案。
+- 同一地區、同一期別、同一檔名原則上只保留一個可處理檔案。
 
 存取期間說明：
 - 預設不帶 --period / --start / --end：以今天所在月份的「上個月」為作業月份。
@@ -299,31 +299,84 @@ def list_files_in_folder(service, parent_folder_id: str, filename: str) -> list[
     return res.get("files", [])
 
 
-def delete_existing_files(service, parent_folder_id: str, filename: str) -> int:
-    existing_files = list_files_in_folder(service, parent_folder_id, filename)
+def file_is_accessible(service, file_id: str) -> bool:
+    try:
+        service.files().get(
+            fileId=file_id,
+            fields="id,name",
+            supportsAllDrives=True,
+        ).execute()
+        return True
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            return False
+        raise
 
-    for file_info in existing_files:
-        delete_drive_file(
-            service,
-            file_info["id"],
-            file_info.get("name", filename),
-        )
 
-    return len(existing_files)
+def safe_delete_drive_file(service, file_id: str, name: str = "") -> bool:
+    try:
+        service.files().delete(
+            fileId=file_id,
+            supportsAllDrives=True,
+        ).execute()
+        log(f"🗑️ 已刪除重複舊檔：{name or file_id}")
+        return True
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            log(f"⚠️ 舊項目不存在或無法存取，略過：{name or file_id}")
+            return False
+        raise
 
 
 def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     filename = os.path.basename(local_path)
-    deleted_count = delete_existing_files(service, parent_folder_id, filename)
+    existing_files = list_files_in_folder(service, parent_folder_id, filename)
 
-    if deleted_count:
-        log(f"🧹 已刪除同名舊檔 {deleted_count} 個：{filename}")
+    accessible_files = []
+    inaccessible_files = []
+
+    for file_info in existing_files:
+        if file_is_accessible(service, file_info["id"]):
+            accessible_files.append(file_info)
+        else:
+            inaccessible_files.append(file_info)
+
+    for file_info in inaccessible_files:
+        log(f"⚠️ 找到同名舊項目但無法存取，略過：{file_info.get('name', filename)} / {file_info['id']}")
 
     media = MediaFileUpload(local_path, resumable=True)
+
+    if accessible_files:
+        keep = accessible_files[0]
+
+        updated = service.files().update(
+            fileId=keep["id"],
+            media_body=media,
+            fields="id,name,webViewLink",
+            supportsAllDrives=True,
+        ).execute()
+
+        for duplicate in accessible_files[1:]:
+            safe_delete_drive_file(
+                service,
+                duplicate["id"],
+                duplicate.get("name", filename),
+            )
+
+        link = updated.get("webViewLink", keep.get("webViewLink", ""))
+        log(f"♻️ 已更新既有檔案：{updated['name']} → folder_id={parent_folder_id} {link}".strip())
+
+        remaining = list_files_in_folder(service, parent_folder_id, filename)
+        log(f"📌 同名檔檢查：{filename} / Drive 查詢筆數={len(remaining)}")
+        return updated["id"]
+
     body = {
         "name": filename,
         "parents": [parent_folder_id],
     }
+
     created = service.files().create(
         body=body,
         media_body=media,
@@ -648,7 +701,7 @@ def main() -> None:
     rng = resolve_refund_ranges(args)
 
     log(f"📌 功能：{FUNCTION_NAME}")
-    log("📌 版本：0704_v2")
+    log("📌 版本：0704_v3")
     log(f"📌 期別：{rng['folder_tag']}")
     log(f"📌 存取期間：{rng['date_text']}")
     log(f"📌 執行區域：{args.area}")
