@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 from typing import Any
 
@@ -10,7 +12,7 @@ from .config import get_area_options, get_area_status
 from .invoice import build_invoice_payload
 from .lemon_invoice_api import INVOICE_TYPE_OPTIONS, make_invoice
 from .models import InvoiceLineItem, to_decimal
-from .query import query_invoice_by_order_id
+from .query import query_invoice_by_order_id, query_invoices_by_period
 
 DEFAULT_PRODUCTS = [
     {"品號": "CLEAN-2P-WD", "品名": "清潔服務 平日(2人)", "單位": "1小時", "單價": 1200, "稅率": "5%", "狀態": "啟用"},
@@ -151,6 +153,18 @@ def _apply_payload_to_state(payload: Any) -> None:
     st.session_state["invoice_center_buyer_emailaddress"] = payload.buyer_emailaddress or ""
     st.session_state["invoice_center_buyer_address"] = payload.buyer_address or ""
     st.session_state["invoice_center_mainremark"] = payload.mainremark or ""
+    if payload.buyer_identifier:
+        st.session_state["invoice_center_buyer_type"] = "公司"
+        st.session_state["invoice_center_company_title"] = payload.buyer_name or ""
+    if payload.donate == "1":
+        st.session_state["invoice_center_delivery_method"] = "捐贈"
+        st.session_state["invoice_center_donate_code"] = payload.donatevat or ""
+    elif payload.carriertype == "3J0002" or str(payload.carrierid1 or "").startswith("/"):
+        st.session_state["invoice_center_delivery_method"] = "手機載具"
+        st.session_state["invoice_center_mobile_barcode"] = payload.carrierid1 or ""
+    elif payload.carrierid1:
+        st.session_state["invoice_center_delivery_method"] = "會員載具"
+        st.session_state["invoice_center_member_carrier"] = payload.carrierid1 or ""
     if payload.items:
         st.session_state["invoice_center_line_items"] = _normalize_line_items(
             [
@@ -207,6 +221,7 @@ def _load_backend_order(area: str, order_no: str, suffix: str) -> dict[str, Any]
 
 
 def _render_top_query() -> tuple[str, str, str, str]:
+    suffix = str(st.session_state.get("invoice_center_order_suffix", "-1") or "-1")
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">查詢 Lemon 訂單</div>', unsafe_allow_html=True)
         cols = st.columns([1, 2.2, 1.2, 1])
@@ -221,13 +236,13 @@ def _render_top_query() -> tuple[str, str, str, str]:
             st.write("")
             if st.button("🔍 查詢", type="primary", use_container_width=True):
                 try:
-                    _load_backend_order(area, order_no, "-1")
+                    _load_backend_order(area, order_no, suffix)
                     st.success("已查詢並帶入訂單資料")
                 except Exception as exc:
                     st.session_state.pop("invoice_center_backend_order", None)
                     st.error(f"查詢失敗：{exc}")
         with st.expander("進階設定", expanded=False):
-            suffix = st.text_input("EI orderid suffix", value="-1", help="一般使用不需調整")
+            suffix = st.text_input("EI orderid suffix", value=suffix, key="invoice_center_order_suffix", help="一般使用不需調整")
     return area, order_no, suffix, invoice_type
 
 
@@ -413,20 +428,58 @@ def _build_payload(area: str, order_no: str, suffix: str, rows: list[dict[str, A
         for row in rows
         if row.get("商品名稱")
     ]
+    buyer_type = st.session_state.get("invoice_center_buyer_type", "自然人")
+    buyer_identifier = st.session_state.get("invoice_center_buyer_identifier", "").strip() if buyer_type == "公司" else ""
+    buyer_name = (
+        st.session_state.get("invoice_center_company_title", "").strip()
+        if buyer_identifier
+        else st.session_state.get("invoice_center_buyer_name", "").strip()
+    )
+    delivery = st.session_state.get("invoice_center_delivery_method", "會員載具")
+    member_carrier = st.session_state.get("invoice_center_member_carrier", "").strip() or st.session_state.get("invoice_center_buyer_emailaddress", "").strip()
+    mobile_barcode = st.session_state.get("invoice_center_mobile_barcode", "").strip().upper()
+    citizen_cert = st.session_state.get("invoice_center_citizen_cert", "").strip()
+    donate_code = st.session_state.get("invoice_center_donate_code", "").strip()
+    tax_status = st.session_state.get("invoice_center_tax_status", "應稅")
+
+    extra: dict[str, Any] = {
+        "taxtype": "1",
+        "taxamount": "0" if not buyer_identifier else str(totals["tax"]),
+        "totalamount": str(totals["total"]),
+        "saleamount": str(totals["total"] if not buyer_identifier else totals["net"]),
+    }
+    if tax_status == "零稅率":
+        extra.update({"taxtype": "2", "taxamount": "0", "totalamount": str(totals["total"])})
+    elif tax_status == "免稅":
+        extra.update({"taxtype": "3", "taxamount": "0", "totalamount": str(totals["total"])})
+
+    if buyer_identifier:
+        extra.update({"carriertype": "", "carrierid1": "", "carrierid2": "", "donate": "0", "donatevat": ""})
+    elif delivery == "手機載具":
+        extra.update({"carriertype": "3J0002", "carrierid1": mobile_barcode, "carrierid2": mobile_barcode, "donate": "0", "donatevat": ""})
+    elif delivery == "自然人憑證":
+        extra.update({"carriertype": "CQ0001", "carrierid1": citizen_cert, "carrierid2": citizen_cert, "donate": "0", "donatevat": ""})
+    elif delivery == "捐贈":
+        extra.update({"carriertype": "", "carrierid1": "", "carrierid2": "", "donate": "1", "donatevat": donate_code})
+    elif delivery == "紙本":
+        extra.update({"carriertype": "", "carrierid1": "", "carrierid2": "", "donate": "0", "donatevat": ""})
+    else:
+        extra.update({"carriertype": "EJ0011", "carrierid1": member_carrier, "carrierid2": member_carrier, "donate": "0", "donatevat": ""})
+
     return build_invoice_payload(
         area=area,
         order_no=order_no,
         suffix=suffix,
         orderdate=st.session_state["invoice_center_orderdate"].isoformat(),
-        saleamount=str(totals["total"]),
-        buyer_identifier=st.session_state.get("invoice_center_buyer_identifier", ""),
-        buyer_name=st.session_state.get("invoice_center_buyer_name", ""),
+        buyer_identifier=buyer_identifier,
+        buyer_name=buyer_name,
         buyer_address=st.session_state.get("invoice_center_buyer_address", ""),
         buyer_emailaddress=st.session_state.get("invoice_center_buyer_emailaddress", ""),
         buyer_phone=st.session_state.get("invoice_center_buyer_phone", ""),
         payway=st.session_state.get("invoice_center_payway", ""),
         mainremark=st.session_state.get("invoice_center_mainremark", ""),
         items=invoice_items,
+        **extra,
     )
 
 
@@ -456,7 +509,12 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">操作</div>', unsafe_allow_html=True)
         payload = _build_payload(area, order_no, suffix, rows, totals)
-        if st.button("🧾 開立發票", type="primary", use_container_width=True):
+        if st.button("🔍 預覽 Payload", use_container_width=True):
+            result = create_invoice_from_payload(payload, dry_run=True)
+            st.session_state["invoice_center_preview"] = result.payload
+
+        confirm_live = st.checkbox("確認正式呼叫 Lemon 發票 API", key="invoice_center_confirm_live")
+        if st.button("🧾 正式開立發票", type="primary", use_container_width=True, disabled=not confirm_live):
             try:
                 purchase_id = str(order.get("purchase_id") or "").strip()
                 if not purchase_id:
@@ -478,9 +536,6 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
                 st.rerun()
             except Exception as exc:
                 st.error(f"重新查詢失敗：{exc}")
-        if st.button("🔍 預覽 Payload", use_container_width=True):
-            result = create_invoice_from_payload(payload, dry_run=True)
-            st.session_state["invoice_center_preview"] = result.payload
         if st.button("🧹 清除畫面", use_container_width=True):
             for key in list(st.session_state.keys()):
                 if key.startswith("invoice_center_"):
@@ -533,6 +588,21 @@ def _render_allowance_tab() -> None:
     st.info("折讓 API 尚待補齊；目前先保留輸入骨架。")
 
 
+def _rows_to_csv(rows: list[dict[str, Any]]) -> bytes:
+    if not rows:
+        return b""
+    headers: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in headers:
+                headers.append(key)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=headers)
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8-sig")
+
+
 def _render_download_tab() -> None:
     st.subheader("發票下載")
     col1, col2, col3, col4 = st.columns([1, 2, 1, 1])
@@ -544,17 +614,52 @@ def _render_download_tab() -> None:
         date1 = st.date_input("起日", value=date.today().replace(day=1))
     with col4:
         date2 = st.date_input("迄日", value=date.today())
+    paper_only = st.checkbox("只看紙本 / 三聯資料")
     captcha = st.text_input("Captcha", value="", type="password", key="invoice_query_captcha")
-    if st.button("查詢發票號碼", use_container_width=True):
+    col_a, col_b = st.columns(2)
+    with col_a:
+        query_order = st.button("查詢指定 orderid", use_container_width=True)
+    with col_b:
+        query_period = st.button("查詢期間全部發票", use_container_width=True)
+
+    if query_order or query_period:
         try:
-            rows = query_invoice_by_order_id(order_id, date1.isoformat(), date2.isoformat(), area=area, captcha=captcha or None)
+            if query_order and order_id.strip():
+                rows = query_invoice_by_order_id(order_id, date1.isoformat(), date2.isoformat(), area=area, captcha=captcha or None)
+                if paper_only:
+                    rows = [row for row in rows if row.get("paper_invoice") == "是"]
+            else:
+                rows = query_invoices_by_period(
+                    date1.isoformat(),
+                    date2.isoformat(),
+                    area=area,
+                    order_id=order_id.strip(),
+                    paper_only=paper_only,
+                    captcha=captcha or None,
+                )
+            st.session_state["invoice_center_download_rows"] = rows
             if rows:
                 st.dataframe(rows, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "下載查詢結果 CSV",
+                    data=_rows_to_csv(rows),
+                    file_name=f"invoices_{area}_{date1.isoformat()}_{date2.isoformat()}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
             else:
                 st.info("查無資料")
         except Exception as exc:
             st.error(f"查詢失敗：{exc}")
-    st.info("PDF/XML 下載 API 尚待補齊。")
+
+    cached_rows = st.session_state.get("invoice_center_download_rows") or []
+    if cached_rows:
+        with st.expander("下載連結", expanded=False):
+            for row in cached_rows:
+                links = str(row.get("download_links") or "").strip()
+                if links:
+                    st.text(links)
+    st.info("目前會列出 EI 查詢頁可解析到的下載連結，並可下載 CSV；若 EI 另有批次 PDF/XML 匯出 endpoint，待實測後再補成一鍵批次下載。")
 
 
 def _render_settings_tab() -> None:

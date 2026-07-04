@@ -38,11 +38,62 @@ def _build_backend_remark(order: Any) -> str:
     return "；".join(parts)
 
 
+def _order_value(order: Any, key: str, default: str = "") -> str:
+    value = getattr(order, key, "")
+    if value not in (None, ""):
+        return _clean(value)
+    extra = getattr(order, "extra", {}) or {}
+    if isinstance(extra, Mapping):
+        return _clean(extra.get(key, default))
+    return default
+
+
+def _invoice_overrides_from_order(order: Any) -> dict[str, str]:
+    buyer_identifier = _order_value(order, "buyer_identifier")
+    carrier_type = _order_value(order, "carrier_type")
+    carrier_no = _order_value(order, "carrier_no")
+    donate_code = _order_value(order, "donate_code")
+    email = _order_value(order, "email")
+
+    if buyer_identifier:
+        return {
+            "carriertype": "",
+            "carrierid1": "",
+            "carrierid2": "",
+            "donate": "0",
+            "donatevat": "",
+        }
+    if donate_code or "捐贈" in carrier_type:
+        return {
+            "carriertype": "",
+            "carrierid1": "",
+            "carrierid2": "",
+            "donate": "1",
+            "donatevat": donate_code,
+        }
+    if "手機" in carrier_type or carrier_no.startswith("/"):
+        return {
+            "carriertype": "3J0002",
+            "carrierid1": carrier_no,
+            "carrierid2": carrier_no,
+            "donate": "0",
+            "donatevat": "",
+        }
+    return {
+        "carriertype": "EJ0011",
+        "carrierid1": carrier_no or email,
+        "carrierid2": carrier_no or email,
+        "donate": "0",
+        "donatevat": "",
+    }
+
+
 def build_invoice_payload_from_backend_order(
     area: str,
     order: Any,
     *,
     suffix: str = "-1",
+    overrides: Mapping[str, Any] | None = None,
 ) -> InvoicePayload:
     """Build an EI invoice payload from a lemon_backend BackendOrder-like object."""
     amount = _money_or_zero(getattr(order, "amount", "0"))
@@ -50,6 +101,10 @@ def build_invoice_payload_from_backend_order(
     goodname = _clean(items[0]) if items else "清潔服務"
     service_remark = _build_backend_remark(order)
     orderdate = _clean(getattr(order, "service_date", "")) or date.today().isoformat()
+    buyer_identifier = _order_value(order, "buyer_identifier")
+    buyer_name = _order_value(order, "buyer_name") if buyer_identifier else _order_value(order, "customer_name")
+    invoice_overrides = _invoice_overrides_from_order(order)
+    invoice_overrides.update(dict(overrides or {}))
 
     return build_invoice_payload(
         area=area,
@@ -57,7 +112,8 @@ def build_invoice_payload_from_backend_order(
         suffix=suffix,
         orderdate=orderdate,
         saleamount=amount,
-        buyer_name=_clean(getattr(order, "customer_name", "")),
+        buyer_identifier=buyer_identifier,
+        buyer_name=buyer_name,
         buyer_address=_clean(getattr(order, "address", "")),
         buyer_emailaddress=_clean(getattr(order, "email", "")),
         buyer_phone=_clean(getattr(order, "phone", "")),
@@ -74,6 +130,7 @@ def build_invoice_payload_from_backend_order(
                 fremark=service_remark,
             )
         ],
+        **invoice_overrides,
     )
 
 
@@ -130,7 +187,7 @@ def create_invoice_from_payload(
     *,
     client: Any | None = None,
     captcha: str | None = None,
-    captcha_field: str = "captcha",
+    captcha_field: str = "capchacode",
 ) -> InvoiceResult:
     invoice_payload = _coerce_payload(payload)
     data = build_add_invoice_payload(invoice_payload)
