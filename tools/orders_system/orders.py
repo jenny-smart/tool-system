@@ -1,10 +1,34 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.07
+# 版本：v2026.07.10
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
-# 最後更新：2026-07-07
+# 最後更新：2026-07-10
 #
 # Change Log
+# v2026.07.10
+# - 修正批次建單同樣的規則漏洞：run_process_web 之前只檢查「時段存不存在」
+#   （slot_ok），沒有檢查「人數夠不夠」，導致時段有排班、但排的人數不夠這張
+#   單需要的人數時，還是照樣送出建單。現在時段存在但人數不足時，一併視同
+#   「無班表」處理（併入 no_slot_dates，reason 顯示「無班表」/staff 顯示
+#   「無人力」），不會再送出人力不足的訂單。跟 quick_order.py v8.31 的
+#   舊客/新客建單修正保持一致的規則：不論服務日期遠近，人數不夠一律不能
+#   成單，若客服有勾選「查無班表時自動補檸檬人」，會先嘗試補到足夠人數，
+#   補不到才擋單。
+# v2026.07.09
+# - 修正 run_standalone_consistency_check 方向二的邏輯漏洞：舊版是拿工作表
+#   裡已出現的電話去查後台，如果某張後台訂單的客人電話整筆漏登記進工作表，
+#   從一開始就不會被拿去查，等於查不出「後台有、工作表完全沒有」的情況。
+#   新增 _fetch_all_purchase_blocks_by_date_range（處理分頁），改成直接掃過
+#   date_range_start ~ date_range_end 這段期間後台「全部」已付款訂單，逐筆
+#   核對訂單編號有沒有出現在工作表任何一列，才是真正回答得了「後台這段
+#   期間的訂單是否都在 Google Sheet 裡」這個問題。有給日期區間才會執行這段
+#   加強版方向二；沒給的話退回舊版（以電話為主）的方向二。
+# v2026.07.08
+# - 新增 run_standalone_consistency_check：獨立版的雙向訂單一致性檢查，
+#   不用依附在批次建單流程裡，可以直接針對任一份已經有「訂單編號」欄位的
+#   工作表重新跑一次雙向比對（不限定是不是這次批次剛跑過的列）。內部沿用
+#   既有的 verify_batch_order_consistency 核心比對邏輯，只是改成讀取整份
+#   工作表目前的狀態，而不是只看某次批次執行過的 target_rows。
 # v2026.07.07
 # - 修正 ORDER_NO_REGEX 只認得 LC/TT 開頭的訂單編號，導致這次發現的「儲值金
 #   購買」訂單（KK 開頭，例如 KK00212122）完全沒被辨識成一張訂單卡片的起點，
@@ -71,8 +95,8 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .accounts import ACCOUNTS
-from .env import (
+from accounts import ACCOUNTS
+from env import (
     ENV,
     BASE_URL_DEV,
     BASE_URL_PROD,
@@ -2460,6 +2484,17 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         detail["section_cleaners"] = cleaners
         detail["section_staff"] = format_staff_from_cleaners(cleaners, people=people)
 
+        # v2026.07.09：光是「時段存在」還不夠，人數要真的足夠才能送出建單。
+        # 之前只檢查 slot_ok（時段存不存在），沒檢查人數，導致時段有排班、
+        # 但排的人數不夠這張單需要的人數時，還是照樣送出建單，等於人力不足
+        # 的訂單也會成單，不符合「人數不夠一律不能成單」的規則。
+        try:
+            _people_needed = int(people)
+        except Exception:
+            _people_needed = 0
+        if slot_ok and _people_needed and len(cleaners) < _people_needed:
+            slot_ok = False
+
         print("[DEBUG] section match =", {
             "slot": detail["slot"],
             "matched": slot_ok,
@@ -2959,6 +2994,139 @@ def run_process_web(env_name, region, backend_email, backend_password, sheet_nam
         "total_processed": len(all_row_results),
         "failed_records": failed_records,
     }
+
+
+def _fetch_all_purchase_blocks_by_date_range(session, date_s, date_e, purchase_status="1", max_pages=80):
+    """
+    v2026.07.09：依服務日期區間（clean_date_s ~ clean_date_e）查詢後台「全部」
+    訂單，處理分頁（後台一頁固定 20 筆，用回傳筆數 < 20 判斷已經是最後一頁）。
+    purchase_status="1" 代表只抓已付款訂單；傳 None 或空字串則不篩付款狀態。
+    回傳所有訂單卡片 list（跟 extract_order_cards_from_purchase_html 格式相同）。
+    """
+    all_blocks = []
+    for page in range(1, max_pages + 1):
+        params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
+        params["clean_date_s"] = date_s
+        params["clean_date_e"] = date_e
+        if purchase_status:
+            params["purchase_status"] = purchase_status
+        params["page"] = str(page)
+        try:
+            resp = session.get(PURCHASE_URL, params=params, headers=HEADERS, allow_redirects=True)
+        except Exception:
+            break
+        if resp.status_code != 200:
+            break
+        blocks = extract_order_cards_from_purchase_html(resp.text)
+        if not blocks:
+            break
+        all_blocks.extend(blocks)
+        if len(blocks) < 20:
+            break
+    return all_blocks
+
+
+def run_standalone_consistency_check(env_name, backend_email, backend_password, sheet_name, region=None,
+                                       date_range_start=None, date_range_end=None):
+    """
+    v2026.07.09：獨立的「雙向訂單一致性檢查」工具，不依附在批次建單流程裡
+    （批次建單裡的一致性檢查只能核對「這次批次剛執行過的列」，沒辦法單獨
+    針對一個既有的成單工作表重新查一次）。
+
+    這裡直接讀取指定工作表目前的全部內容（不限定是不是這次批次跑過的列），
+    只要工作表裡已經有「訂單編號」欄位（不管是這次還是很久以前寫入的），
+    就能重新對這整份工作表跑一次雙向比對：
+
+    方向一：工作表寫的訂單編號，回查後台是否真的存在，電話/地址/日期/時段
+            是否跟這一列相符。
+
+    方向二（v2026.07.09 修正邏輯漏洞）：
+        舊版方向二是「拿工作表裡已經出現的電話」去後台查該電話的訂單，這樣
+        如果某張後台訂單的客人電話「根本沒被登記進工作表」（例如整筆漏登記），
+        從一開始就不會被查到，等於查不出「後台有、工作表完全沒有」這種情況。
+        修正後改成：直接用 date_range_start ~ date_range_end 這段日期區間，
+        查後台在這段期間「全部」的已付款訂單（不透過電話清單、會處理分頁），
+        逐筆核對每一筆訂單編號有沒有出現在工作表任何一列的「訂單編號」欄位裡，
+        沒出現就代表工作表完全沒有記錄到這筆訂單。
+        有給 date_range_start/date_range_end 才會執行這段加強版方向二；不給的話
+        只會執行方向一 + 舊版（以電話為主）的方向二。
+
+    region：可選，若有指定則只檢查該區域的列（用地址判斷區域）；不指定則
+    檢查整份工作表所有列。
+
+    回傳 list of dict：[{row_num, order_no, issue}, ...]，沒有問題則回傳空 list。
+    """
+    global BASE_URL, ORDER_PREFIX
+    if env_name == "dev":
+        BASE_URL = BASE_URL_DEV
+        ORDER_PREFIX = ORDER_PREFIX_DEV
+    else:
+        BASE_URL = BASE_URL_PROD
+        ORDER_PREFIX = ORDER_PREFIX_PROD
+
+    global LOGIN_URL, BOOKING_URL, PURCHASE_URL, GET_MEMBER_URL
+    global CHECK_CONTAIN_URL, CALCULATE_HOUR_URL, GET_SECTION_URL, MAIL_SUCCESS_URL
+
+    LOGIN_URL = f"{BASE_URL}/login"
+    BOOKING_URL = f"{BASE_URL}/booking/stored_value_routine"
+    PURCHASE_URL = f"{BASE_URL}/purchase"
+    GET_MEMBER_URL = f"{BASE_URL}/ajax/get_member"
+    CHECK_CONTAIN_URL = f"{BASE_URL}/ajax/check_contain"
+    CALCULATE_HOUR_URL = f"{BASE_URL}/ajax/calculate_hour"
+    GET_SECTION_URL = f"{BASE_URL}/ajax/get_section"
+    MAIL_SUCCESS_URL = f"{BASE_URL}/purchase/mail_success/{{order_no}}"
+
+    ws, df = load_worksheet(sheet_name)
+    required_cols = ["電話", "地址", "日期", "開始時間", "結束時間", "訂單編號"]
+    for col in required_cols:
+        if col not in df.columns:
+            raise Exception(f"工作表缺少必要欄位: {col}")
+
+    # 只檢查有填日期/電話的列，避免整份工作表裡的空白列造成一堆無意義的解析錯誤
+    df_for_check = df[(df["電話"].astype(str).str.strip() != "") & (df["日期"].astype(str).str.strip() != "")]
+
+    if region and not df_for_check.empty:
+        df_for_check = df_for_check[df_for_check.apply(lambda row: get_region_by_address(str(row["地址"]), ACCOUNTS) == region, axis=1)]
+
+    session = requests.Session()
+    if not login(session, backend_email, backend_password):
+        raise Exception("後台登入失敗，請確認帳號密碼")
+
+    problems = []
+
+    if not df_for_check.empty:
+        all_row_results = {}
+        for _, row in df_for_check.iterrows():
+            row_num = int(row["__sheet_row__"])
+            all_row_results[row_num] = {"訂單編號": str(row.get("訂單編號", "") or "").strip()}
+        problems.extend(verify_batch_order_consistency(session, df_for_check, all_row_results))
+
+    # ---------- 方向二（加強版）：直接掃過整段日期範圍的後台訂單 ----------
+    if date_range_start and date_range_end:
+        # 用「整份工作表」（不限 region 篩選過的 df_for_check）裡出現過的訂單編號
+        # 當作已知清單，只要工作表任何一列有寫到這個訂單編號就算有記錄。
+        known_order_nos = {
+            str(x).strip() for x in df["訂單編號"].tolist() if str(x).strip()
+        }
+        backend_blocks = _fetch_all_purchase_blocks_by_date_range(session, date_range_start, date_range_end)
+        for block in backend_blocks:
+            order_no = str(block.get("order_no", "") or "").strip()
+            if not order_no or order_no in known_order_nos:
+                continue
+            joined = "\n".join(block.get("lines", []))
+            phone_m = re.search(r"(09\d{8})", joined)
+            phone_disp = phone_m.group(1) if phone_m else "（電話不明）"
+            problems.append({
+                "row_num": None,
+                "order_no": order_no,
+                "issue": (
+                    f"後台訂單 {order_no}（電話 {phone_disp}，服務日期落在 "
+                    f"{date_range_start}~{date_range_end} 範圍內）在工作表「{sheet_name}」"
+                    f"裡完全查不到這個訂單編號，請確認是否漏登記。"
+                ),
+            })
+
+    return problems
 
 
 def run_batch_consistency_check(env_name, region, backend_email, backend_password, sheet_name, target_rows, logger=print):
