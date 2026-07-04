@@ -491,15 +491,16 @@ def render_orders_system(forced_mode=None, shared_backend_email=None, shared_bac
     # 主畫面
     # =========================================================
 
-    st.markdown("""
-    <div class="hero">
-      <div class="hero-emoji">🧹</div>
-      <div>
-        <div class="hero-title">服務訂單系統</div>
-        <div class="hero-sub">支援批次建單、舊客快速建單、新客資料拆解、LINE 通知、確認信與 Google 日曆同步。</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    if shared_backend_email is None:
+        st.markdown("""
+        <div class="hero">
+          <div class="hero-emoji">🧹</div>
+          <div>
+            <div class="hero-title">服務訂單系統</div>
+            <div class="hero-sub">支援批次建單、舊客快速建單、新客資料拆解、LINE 通知、確認信與 Google 日曆同步。</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     if shared_backend_email is not None:
         # 由整合頁面（pages/訂單系統.py）統一提供帳密/環境，這裡不再重複顯示登入欄位。
