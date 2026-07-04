@@ -28,8 +28,12 @@ class BackendOrder:
     order_status: str = ""
     paid_status: str = ""
     invoice_no: str = ""
+    invoice_type: str = ""
     buyer_identifier: str = ""
     buyer_name: str = ""
+    carrier_type: str = ""
+    carrier_no: str = ""
+    donate_code: str = ""
     service_date: str = ""
     service_time: str = ""
     items: list[str] = field(default_factory=list)
@@ -52,8 +56,12 @@ class BackendOrder:
             "order_status": self.order_status,
             "paid_status": self.paid_status,
             "invoice_no": self.invoice_no,
+            "invoice_type": self.invoice_type,
             "buyer_identifier": self.buyer_identifier,
             "buyer_name": self.buyer_name,
+            "carrier_type": self.carrier_type,
+            "carrier_no": self.carrier_no,
+            "donate_code": self.donate_code,
             "service_date": self.service_date,
             "service_time": self.service_time,
             "items": self.items,

@@ -42,10 +42,11 @@ order = client.get_order("LC00212058")
 ## 搬移範圍
 
 - 從 `orders-system` 搬入後台登入、purchase list 查詢、訂單卡片解析、付款/發票/金額/服務日期等解析邏輯。
+- 訂單解析會盡量帶出發票類型、統編/公司抬頭、會員載具、手機載具與捐贈碼，供發票中心使用。
 - 從 `memo-system` 搬入需要登入後台的 memo/address search 架構。
 - 評估文字工具不需要登入後台，不放進 `lemon_backend`。
 
 ## 後續
 
-- `invoice_center` 之後應改用 `BackendClient.get_order()` 取得 Lemon 訂單資料後再建 EI 發票 payload。
+- `invoice_center` 使用 `BackendClient.get_order()` 取得 Lemon 訂單資料後再建 EI 發票 payload。
 - 需要實測後台 edit form 後，再補 `update_invoice_no()` 與 `update_allowance_no()` 的正式送出流程。

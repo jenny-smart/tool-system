@@ -12,6 +12,9 @@ from .session import LemonBackendSession
 
 ORDER_NO_RE = re.compile(r"\b(?:LC|TT)\d+\b")
 INVOICE_NO_RE = re.compile(r"\b[A-Z]{2}\d{8}\b")
+EMAIL_RE = re.compile(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})")
+MOBILE_BARCODE_RE = re.compile(r"(/[0-9A-Z.+-]{7})", re.IGNORECASE)
+TAX_ID_RE = re.compile(r"(?<!\d)(\d{8})(?!\d)")
 
 
 def normalize_phone(value: str) -> str:
@@ -126,6 +129,18 @@ def _first_match(pattern: str, text: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def _clean_invoice_value(value: str) -> str:
+    text = re.split(r"\s{2,}|\||　", str(value or "").strip(), maxsplit=1)[0]
+    return text.strip("：:;；,， ")
+
+
+def _label_value(text: str, labels: list[str], max_length: int = 80) -> str:
+    joined = "|".join(re.escape(label) for label in labels)
+    pattern = rf"(?:{joined})\s*[：:]?\s*([^\n]{{1,{max_length}}})"
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    return _clean_invoice_value(match.group(1)) if match else ""
+
+
 def _extract_name(text: str) -> str:
     for line in [line.strip() for line in text.splitlines() if line.strip()]:
         if re.fullmatch(r"[\u4e00-\u9fff]{2,4}", line):
@@ -178,6 +193,100 @@ def _extract_invoice_no(text: str, order_no: str) -> str:
     return match.group(0) if match else ""
 
 
+def _extract_tax_id(text: str) -> str:
+    labeled = _label_value(text, ["統一編號", "統編", "公司統編", "買受人統編", "tax_id", "buyer_identifier"], 30)
+    match = TAX_ID_RE.search(labeled) if labeled else None
+    if match:
+        return match.group(1)
+
+    for line in text.splitlines():
+        if any(label in line for label in ["統一編號", "統編", "公司統編", "買受人統編"]):
+            match = TAX_ID_RE.search(line)
+            if match:
+                return match.group(1)
+    return ""
+
+
+def _extract_company_title(text: str) -> str:
+    value = _label_value(text, ["公司抬頭", "發票抬頭", "買受人", "公司名稱", "buyer_name"], 120)
+    if not value:
+        return ""
+    value = re.sub(r"(統一編號|統編|公司統編|買受人統編).*", "", value).strip()
+    return value
+
+
+def _extract_mobile_carrier(text: str) -> str:
+    labeled = _label_value(text, ["手機載具", "手機條碼", "手機載具條碼"], 40)
+    match = MOBILE_BARCODE_RE.search(labeled) if labeled else None
+    if match:
+        return match.group(1).upper()
+
+    for line in text.splitlines():
+        if "手機" in line and ("載具" in line or "條碼" in line):
+            match = MOBILE_BARCODE_RE.search(line)
+            if match:
+                return match.group(1).upper()
+    return ""
+
+
+def _extract_member_carrier(text: str, email: str) -> str:
+    value = _label_value(text, ["會員載具", "Email載具", "電子信箱載具", "載具信箱"], 80)
+    if value and not value.startswith("/"):
+        email_match = EMAIL_RE.search(value)
+        return email_match.group(1) if email_match else value
+    return email
+
+
+def _extract_donate_code(text: str) -> str:
+    value = _label_value(text, ["愛心碼", "捐贈碼", "donatevat"], 30)
+    match = re.search(r"\d{3,7}", value)
+    return match.group(0) if match else ""
+
+
+def _extract_invoice_fields(text: str, email: str) -> dict[str, str]:
+    tax_id = _extract_tax_id(text)
+    company_title = _extract_company_title(text)
+    mobile_carrier = _extract_mobile_carrier(text)
+    donate_code = _extract_donate_code(text)
+    member_carrier = _extract_member_carrier(text, email)
+
+    if tax_id:
+        return {
+            "invoice_type": "三聯式",
+            "buyer_identifier": tax_id,
+            "buyer_name": company_title,
+            "carrier_type": "紙本",
+            "carrier_no": "",
+            "donate_code": "",
+        }
+    if donate_code:
+        return {
+            "invoice_type": "二聯式",
+            "buyer_identifier": "",
+            "buyer_name": "",
+            "carrier_type": "捐贈",
+            "carrier_no": "",
+            "donate_code": donate_code,
+        }
+    if mobile_carrier:
+        return {
+            "invoice_type": "二聯式",
+            "buyer_identifier": "",
+            "buyer_name": "",
+            "carrier_type": "手機載具",
+            "carrier_no": mobile_carrier,
+            "donate_code": "",
+        }
+    return {
+        "invoice_type": "二聯式",
+        "buyer_identifier": "",
+        "buyer_name": "",
+        "carrier_type": "會員載具",
+        "carrier_no": member_carrier,
+        "donate_code": "",
+    }
+
+
 def _extract_service_date_time(text: str) -> tuple[str, str]:
     date_match = re.search(r"服務日期[\s\S]{0,80}?(\d{4}-\d{2}-\d{2})", text)
     if not date_match:
@@ -202,7 +311,8 @@ def parse_order_block(block: PurchaseBlock) -> BackendOrder:
     text = block.raw_text
     service_date, service_time = _extract_service_date_time(text)
     phone = _first_match(r"((?:\+?886[-\s]?)?0?9[\d\-\s]{8,12})", text)
-    email = _first_match(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", text)
+    email = _first_match(EMAIL_RE.pattern, text)
+    invoice_fields = _extract_invoice_fields(text, email)
     return BackendOrder(
         order_no=block.order_no,
         customer_name=_extract_name(text),
@@ -213,6 +323,12 @@ def parse_order_block(block: PurchaseBlock) -> BackendOrder:
         payway=_extract_payway(text),
         paid_status=_extract_paid_status(text),
         invoice_no=_extract_invoice_no(text, block.order_no),
+        invoice_type=invoice_fields["invoice_type"],
+        buyer_identifier=invoice_fields["buyer_identifier"],
+        buyer_name=invoice_fields["buyer_name"],
+        carrier_type=invoice_fields["carrier_type"],
+        carrier_no=invoice_fields["carrier_no"],
+        donate_code=invoice_fields["donate_code"],
         service_date=service_date,
         service_time=service_time,
         items=_extract_items(block.lines),
