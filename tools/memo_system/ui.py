@@ -504,15 +504,16 @@ def render_memo_system(forced_main_section=None, shared_backend_email=None, shar
     # Hero
     # ============================================================
 
-    st.markdown("""
-    <div class="hero">
-      <div class="hero-emoji">🍋</div>
-      <div>
-        <div class="hero-title">檸檬營運自動化工具</div>
-        <div class="hero-sub">客服・排班・財務・服務異動作業平台</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    if shared_backend_email is None:
+        st.markdown("""
+        <div class="hero">
+          <div class="hero-emoji">🍋</div>
+          <div>
+            <div class="hero-title">檸檬營運自動化工具</div>
+            <div class="hero-sub">客服・排班・財務・服務異動作業平台</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ============================================================
     # Step 1：登入
