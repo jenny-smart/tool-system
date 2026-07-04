@@ -143,6 +143,12 @@ DEFAULT_CONFIG = {
             },
         },
         # ─────────────────────────────────────────────────────
+        {
+            "name": "發票中心",
+            "type": "invoice_center",
+            "enabled": True,
+            "regions": ["台北", "台中", "桃園", "新竹", "高雄"],
+        },
     ]
 }
 
@@ -1002,6 +1008,9 @@ def available_areas_for_system(system: dict) -> list[str]:
         return ["全區"]
     # ────────────────────────────────────────────────────────
 
+    if system_type == "invoice_center":
+        return ["台北", "台中", "桃園", "新竹", "高雄"]
+
     # 舊日排程目前腳本本身會跑全部區域，先提供全區。
     return ["全區"]
 
@@ -1097,6 +1106,7 @@ def get_system_type_label(system_type: str) -> str:
         "field_daily_schedule": "外場排程系統",
         "service_schedule": "客服排程系統",   # ★ 新增
         "gmail_401": "Gmail 401歸檔",
+        "invoice_center": "發票中心",
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -1682,6 +1692,12 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
     "掃描並歸檔401附件",
     ],
     # ────────────────────────────────────────────────────────
+    "invoice_center": [
+        "發票開立",
+        "折讓單",
+        "發票下載",
+        "設定",
+    ],
 }
 
 DAILY_SCRIPT_MAP = {
@@ -1792,6 +1808,12 @@ if selected_system_cfg.get("type") == "gmail_401":
     st.stop()
 # ────────────────────────────────────────────────────────
 
+if selected_system_cfg.get("type") == "invoice_center":
+    from tools.invoice_center.ui import render_invoice_center
+
+    render_invoice_center()
+    st.stop()
+
 
 # ═══════════════════════════════════════════════════════════
 # UI — 主標題
@@ -1850,6 +1872,13 @@ with sys_col:
 
 selected_system = get_system_by_name(config, system_name)
 system_type = selected_system.get("type", "vip")
+
+if system_type == "invoice_center":
+    st.markdown("</div>", unsafe_allow_html=True)
+    from tools.invoice_center.ui import render_invoice_center
+
+    render_invoice_center()
+    st.stop()
 
 with func_col:
     st.markdown('<div class="field-label">🎯 執行功能</div>', unsafe_allow_html=True)
@@ -2053,7 +2082,7 @@ if can_access_page("settings"):
 
         system_type_options = [
             "vip", "daily_scheduler", "monthly_scheduler",
-            "field_daily_schedule", "service_schedule", "gmail_401",
+            "field_daily_schedule", "service_schedule", "gmail_401", "invoice_center",
         ]
 
         if st.session_state.adding_system:
