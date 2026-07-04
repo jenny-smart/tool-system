@@ -39,6 +39,13 @@ def _as_date(value: Any) -> date:
         return date.today()
 
 
+def _first_value(*values: Any) -> str:
+    for value in values:
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
 def _area_select(label: str = "地區") -> str:
     options = get_area_options()
     labels = [item[1] for item in options]
@@ -46,21 +53,34 @@ def _area_select(label: str = "地區") -> str:
     return dict((display, key) for key, display in options)[selected]
 
 
+def _select_state(label: str, options: list[str], key: str, *, horizontal_hint: bool = False) -> str:
+    current = st.session_state.get(key)
+    if current not in options:
+        st.session_state[key] = options[0]
+    if horizontal_hint:
+        return st.selectbox(label, options, key=key, help="使用下拉選單避免 Streamlit Radio chunk 載入錯誤")
+    return st.selectbox(label, options, key=key)
+
+
 def _order_extra_value(order: dict[str, Any], *keys: str) -> str:
     extra = order.get("extra") or {}
     for key in keys:
         value = order.get(key)
         if value not in (None, ""):
-            return str(value)
+            return str(value).strip()
         if isinstance(extra, dict):
             value = extra.get(key)
             if value not in (None, ""):
-                return str(value)
+                return str(value).strip()
     return ""
 
 
 def _line_amount(row: dict[str, Any]) -> int:
     return max(_as_int(row.get("數量"), 1), 1) * max(_as_int(row.get("單價"), 0), 0)
+
+
+def _blank_line_item() -> dict[str, Any]:
+    return {"商品代碼": "", "商品名稱": "", "單位": "1", "數量": 1, "單價": 0, "金額": 0, "備註": ""}
 
 
 def _normalize_line_items(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -77,7 +97,7 @@ def _normalize_line_items(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         item["金額"] = _line_amount(item)
         if any([item["商品代碼"], item["商品名稱"], item["單價"], item["備註"]]):
             result.append(item)
-    return result or [{"商品代碼": "", "商品名稱": "", "單位": "1", "數量": 1, "單價": 0, "金額": 0, "備註": ""}]
+    return result or [_blank_line_item()]
 
 
 def _set_default(key: str, value: Any) -> None:
@@ -111,10 +131,7 @@ def _bootstrap_invoice_state() -> None:
     for key, value in defaults.items():
         _set_default(key, value)
     _set_default("invoice_center_product_catalog", [dict(item) for item in DEFAULT_PRODUCTS])
-    _set_default(
-        "invoice_center_line_items",
-        [{"商品代碼": "CLEAN-2P-WD", "商品名稱": "清潔服務 平日(2人)", "單位": "1小時", "數量": 4, "單價": 1200, "金額": 4800, "備註": ""}],
-    )
+    _set_default("invoice_center_line_items", [_blank_line_item()])
 
 
 def _render_css() -> None:
@@ -124,25 +141,22 @@ def _render_css() -> None:
         .block-container {max-width: 1280px; padding-top: 1.1rem;}
         [data-testid="stHeader"] {background: rgba(255,255,255,0.72);}
         [data-testid="stMetricValue"] {font-size: 1.25rem;}
-        .ic-hero {
-            border: 1px solid #d8e5ff; border-radius: 24px; padding: 20px 24px;
-            background: linear-gradient(135deg, #f7fbff 0%, #ffffff 55%, #eef6ff 100%);
-            box-shadow: 0 12px 30px rgba(20, 72, 140, 0.08); margin-bottom: 16px;
-        }
-        .ic-hero h1 {font-size: 30px; margin: 0 0 6px 0; color: #102a56;}
-        .ic-hero p {margin: 0; color: #667085;}
-        .ic-chip {display:inline-block; margin: 8px 6px 0 0; padding: 5px 11px; border-radius:999px; background:#edf5ff; color:#1557ad; border:1px solid #c9dcff; font-size:12px; font-weight:700;}
-        .ic-section-title {font-weight: 800; font-size: 18px; color:#1f2937; margin-bottom: 4px;}
-        .ic-subtle {color:#667085; font-size: 13px;}
+        .ic-hero {border:1px solid #d8e5ff; border-radius:24px; padding:20px 24px; background:linear-gradient(135deg,#f7fbff 0%,#ffffff 55%,#eef6ff 100%); box-shadow:0 12px 30px rgba(20,72,140,.08); margin-bottom:16px;}
+        .ic-hero h1 {font-size:30px; margin:0 0 6px 0; color:#102a56;}
+        .ic-hero p {margin:0; color:#667085;}
+        .ic-chip {display:inline-block; margin:8px 6px 0 0; padding:5px 11px; border-radius:999px; background:#edf5ff; color:#1557ad; border:1px solid #c9dcff; font-size:12px; font-weight:700;}
+        .ic-section-title {font-weight:800; font-size:18px; color:#1f2937; margin-bottom:4px;}
+        .ic-subtle {color:#667085; font-size:13px;}
         .ic-status-open {color:#b54708; font-weight:800;}
         .ic-status-done {color:#16824b; font-weight:800;}
+        .ic-warning {background:#fff7ed; border:1px solid #fed7aa; padding:10px 12px; border-radius:12px; color:#9a3412;}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-def _apply_payload_to_state(payload: Any) -> None:
+def _apply_payload_to_state(payload: Any, *, include_items: bool = False) -> None:
     st.session_state["invoice_center_orderdate"] = _as_date(payload.orderdate)
     st.session_state["invoice_center_payway"] = payload.payway or st.session_state.get("invoice_center_payway", "現金")
     st.session_state["invoice_center_buyer_identifier"] = payload.buyer_identifier or ""
@@ -151,7 +165,7 @@ def _apply_payload_to_state(payload: Any) -> None:
     st.session_state["invoice_center_buyer_emailaddress"] = payload.buyer_emailaddress or ""
     st.session_state["invoice_center_buyer_address"] = payload.buyer_address or ""
     st.session_state["invoice_center_mainremark"] = payload.mainremark or ""
-    if payload.items:
+    if include_items and payload.items:
         st.session_state["invoice_center_line_items"] = _normalize_line_items(
             [
                 {
@@ -168,41 +182,61 @@ def _apply_payload_to_state(payload: Any) -> None:
 
 
 def _apply_order_defaults(order: dict[str, Any]) -> None:
-    buyer_identifier = _order_extra_value(order, "buyer_identifier", "invoice_identifier", "tax_id", "company_no") or str(order.get("buyer_identifier") or "")
-    company_title = _order_extra_value(order, "buyer_name", "invoice_title", "company_title") or str(order.get("buyer_name") or "")
-    carrier_no = _order_extra_value(order, "carrier_no", "carrierid1", "carrierid2", "carrier_info")
+    buyer_identifier = _order_extra_value(order, "buyer_identifier", "invoice_identifier", "tax_id", "company_no", "identifier")
+    company_title = _order_extra_value(order, "invoice_title", "company_title", "company_name", "buyer_company")
+    customer_name = _first_value(order.get("customer_name"), order.get("name"), order.get("buyer_name"))
+    phone = _first_value(_order_extra_value(order, "phone", "customer_phone", "tel"), order.get("phone"))
+    email = _first_value(_order_extra_value(order, "email", "customer_email"), order.get("email"))
+    address = _first_value(_order_extra_value(order, "address", "service_address", "customer_address"), order.get("address"))
+    carrier_no = _order_extra_value(order, "member_carrier", "carrier_no", "carrierid1", "carrierid2", "carrier_info")
+    mobile_barcode = _order_extra_value(order, "mobile_barcode", "phone_barcode", "mobile_carrier")
+    citizen_cert = _order_extra_value(order, "citizen_cert", "citizen_certificate")
+    donate_code = _order_extra_value(order, "donate_code", "love_code", "npoban", "donatevat")
     carrier_type = _order_extra_value(order, "carrier_type", "carriertype", "carrier_label")
-    donate_code = _order_extra_value(order, "donate_code", "love_code", "npoban")
 
     if buyer_identifier:
         st.session_state["invoice_center_buyer_type"] = "公司"
         st.session_state["invoice_center_buyer_identifier"] = buyer_identifier
-        if company_title:
-            st.session_state["invoice_center_company_title"] = company_title
-            st.session_state["invoice_center_buyer_name"] = company_title
+        st.session_state["invoice_center_company_title"] = company_title or customer_name
+        st.session_state["invoice_center_buyer_name"] = company_title or customer_name
+        st.session_state["invoice_center_delivery_method"] = "紙本"
     else:
         st.session_state["invoice_center_buyer_type"] = "自然人"
+        st.session_state["invoice_center_buyer_name"] = customer_name
 
+    st.session_state["invoice_center_buyer_phone"] = phone
+    st.session_state["invoice_center_buyer_emailaddress"] = email
+    st.session_state["invoice_center_buyer_address"] = address
+
+    if carrier_no:
+        st.session_state["invoice_center_member_carrier"] = carrier_no
+    if mobile_barcode or carrier_no.startswith("/"):
+        st.session_state["invoice_center_mobile_barcode"] = mobile_barcode or carrier_no
+    if citizen_cert:
+        st.session_state["invoice_center_citizen_cert"] = citizen_cert
     if donate_code:
-        st.session_state["invoice_center_delivery_method"] = "捐贈"
         st.session_state["invoice_center_donate_code"] = donate_code
-    elif "自然人" in carrier_type:
-        st.session_state["invoice_center_delivery_method"] = "自然人憑證"
-        st.session_state["invoice_center_citizen_cert"] = carrier_no
-    elif "手機" in carrier_type or carrier_no.startswith("/"):
-        st.session_state["invoice_center_delivery_method"] = "手機載具"
-        st.session_state["invoice_center_mobile_barcode"] = carrier_no
-    elif "會員" in carrier_type or carrier_no:
-        st.session_state["invoice_center_delivery_method"] = "會員載具"
-        st.session_state["invoice_center_member_carrier"] = carrier_no or str(order.get("email") or "")
+
+    if st.session_state.get("invoice_center_buyer_type") == "自然人":
+        if donate_code:
+            st.session_state["invoice_center_delivery_method"] = "捐贈"
+        elif citizen_cert or "自然人" in carrier_type:
+            st.session_state["invoice_center_delivery_method"] = "自然人憑證"
+        elif mobile_barcode or "手機" in carrier_type:
+            st.session_state["invoice_center_delivery_method"] = "手機載具"
+        elif carrier_no or "會員" in carrier_type:
+            st.session_state["invoice_center_delivery_method"] = "會員載具"
+        else:
+            st.session_state["invoice_center_delivery_method"] = "紙本"
 
 
 def _load_backend_order(area: str, order_no: str, suffix: str) -> dict[str, Any]:
     backend_order, payload = fetch_backend_order_invoice_payload(area, order_no, suffix=suffix)
     order = backend_order.to_dict()
     st.session_state["invoice_center_backend_order"] = order
-    _apply_payload_to_state(payload)
+    _apply_payload_to_state(payload, include_items=False)
     _apply_order_defaults(order)
+    st.session_state["invoice_center_line_items"] = [_blank_line_item()]
     return order
 
 
@@ -215,19 +249,20 @@ def _render_top_query() -> tuple[str, str, str, str]:
         with cols[1]:
             order_no = st.text_input("Lemon 訂單號", placeholder="輸入 LC 訂單號，例如 LC00212058")
         with cols[2]:
-            invoice_type = st.selectbox("API 開立類型", list(INVOICE_TYPE_OPTIONS.keys()), key="invoice_center_invoice_type")
+            invoice_type = st.selectbox("Lemon API", list(INVOICE_TYPE_OPTIONS.keys()), key="invoice_center_invoice_type")
         with cols[3]:
             st.write("")
             st.write("")
             if st.button("🔍 查詢", type="primary", use_container_width=True):
                 try:
                     _load_backend_order(area, order_no, "-1")
-                    st.success("已查詢並帶入訂單資料")
+                    st.success("已帶入買受人資料；商品明細請重新填寫。")
                 except Exception as exc:
                     st.session_state.pop("invoice_center_backend_order", None)
                     st.error(f"查詢失敗：{exc}")
         with st.expander("進階設定", expanded=False):
-            suffix = st.text_input("EI orderid suffix", value="-1", help="一般使用不需調整")
+            suffix = st.text_input("orderid suffix", value="-1", help="通常使用 -1")
+            st.caption("已淘汰 Cetustek / EI 登入；開立只呼叫 Lemon API /make_invoice。")
     return area, order_no, suffix, invoice_type
 
 
@@ -252,21 +287,21 @@ def _render_order_card() -> None:
 
 def _render_buyer_card() -> None:
     with st.container(border=True):
-        st.markdown('<div class="ic-section-title">2. 買受人資料</div>', unsafe_allow_html=True)
-        buyer_type = st.radio("買受人類型", ["自然人", "公司"], horizontal=True, key="invoice_center_buyer_type")
+        st.markdown('<div class="ic-section-title">2. 買受人</div>', unsafe_allow_html=True)
+        buyer_type = _select_state("買受人類型", ["自然人", "公司"], "invoice_center_buyer_type", horizontal_hint=True)
         invoice_kind = "三聯式" if buyer_type == "公司" else "二聯式"
-        st.info(f"目前發票種類：{invoice_kind}（公司對應三聯；自然人對應二聯）")
+        st.info(f"自動判定：{invoice_kind}")
 
         if buyer_type == "公司":
             c1, c2 = st.columns([2, 1])
             with c1:
-                title = st.text_input("公司抬頭 / 買受人名稱 *", key="invoice_center_company_title")
+                title = st.text_input("公司抬頭 *", key="invoice_center_company_title")
                 if title:
                     st.session_state["invoice_center_buyer_name"] = title
             with c2:
                 st.text_input("統一編號 *", key="invoice_center_buyer_identifier")
         else:
-            st.text_input("會員姓名 / 買受人名稱 *", key="invoice_center_buyer_name")
+            st.text_input("姓名 *", key="invoice_center_buyer_name")
 
         c1, c2 = st.columns([1, 1])
         with c1:
@@ -281,21 +316,22 @@ def _render_invoice_settings_card() -> None:
         st.markdown('<div class="ic-section-title">3. 發票設定</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            st.radio("含稅 / 未稅", ["單價含稅", "單價未稅"], horizontal=True, key="invoice_center_tax_mode")
+            _select_state("含稅 / 未稅", ["單價含稅", "單價未稅"], "invoice_center_tax_mode", horizontal_hint=True)
         with c2:
             st.selectbox("課稅別", ["應稅", "零稅率", "免稅"], key="invoice_center_tax_status")
         with c3:
             st.number_input("稅率", min_value=0.0, max_value=1.0, value=float(st.session_state.get("invoice_center_tax_rate", 0.05)), step=0.01, format="%.2f", key="invoice_center_tax_rate")
 
-        options = ["會員載具", "手機載具", "自然人憑證", "紙本", "捐贈"]
         if st.session_state.get("invoice_center_buyer_type") == "公司":
-            options = ["紙本", "會員載具", "手機載具", "自然人憑證"]
-        st.radio("交付方式 / 載具", options, horizontal=True, key="invoice_center_delivery_method")
+            delivery_options = ["紙本", "會員載具", "手機載具", "自然人憑證"]
+        else:
+            delivery_options = ["會員載具", "手機載具", "紙本", "自然人憑證", "捐贈"]
+        _select_state("交付方式 / 載具", delivery_options, "invoice_center_delivery_method", horizontal_hint=True)
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.text_input("會員載具", key="invoice_center_member_carrier")
         with c2:
-            st.text_input("手機條碼", key="invoice_center_mobile_barcode", placeholder="/ABC1234")
+            st.text_input("手機載具", key="invoice_center_mobile_barcode", placeholder="/ABC1234")
         with c3:
             st.text_input("自然人憑證", key="invoice_center_citizen_cert")
         with c4:
@@ -306,20 +342,24 @@ def _product_rows() -> list[dict[str, Any]]:
     return [p for p in st.session_state.get("invoice_center_product_catalog", []) if p.get("狀態") == "啟用"]
 
 
+def _append_product(product: dict[str, Any]) -> None:
+    rows = _normalize_line_items(st.session_state.get("invoice_center_line_items", []))
+    if len(rows) == 1 and not rows[0].get("商品名稱"):
+        rows = []
+    rows.append({"商品代碼": product["品號"], "商品名稱": product["品名"], "單位": product["單位"], "數量": 1, "單價": product["單價"], "備註": ""})
+    st.session_state["invoice_center_line_items"] = _normalize_line_items(rows)
+
+
 def _render_product_tools() -> None:
     products = _product_rows()
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">4. 商品明細</div>', unsafe_allow_html=True)
-        st.markdown('<span class="ic-subtle">常用商品可直接加入，商品管理維持小區塊，不另開頁。</span>', unsafe_allow_html=True)
+        st.markdown('<span class="ic-subtle">查詢 Lemon 訂單只帶入買受人；商品完全以此畫面為準，不合併原發票品名。</span>', unsafe_allow_html=True)
         quick = st.columns(4)
         for idx, product in enumerate(products[:4]):
             with quick[idx]:
                 if st.button(f"⭐ {product['品名']}", use_container_width=True, key=f"quick_product_{idx}"):
-                    rows = _normalize_line_items(st.session_state.get("invoice_center_line_items", []))
-                    if len(rows) == 1 and not rows[0].get("商品名稱"):
-                        rows = []
-                    rows.append({"商品代碼": product["品號"], "商品名稱": product["品名"], "單位": product["單位"], "數量": 1, "單價": product["單價"], "備註": ""})
-                    st.session_state["invoice_center_line_items"] = _normalize_line_items(rows)
+                    _append_product(product)
                     st.rerun()
 
         c1, c2, c3 = st.columns([1.2, 2.6, 0.9])
@@ -337,11 +377,7 @@ def _render_product_tools() -> None:
             st.write("")
             if st.button("＋加入", use_container_width=True, disabled=not filtered):
                 product = filtered[labels.index(selected)]
-                rows = _normalize_line_items(st.session_state.get("invoice_center_line_items", []))
-                if len(rows) == 1 and not rows[0].get("商品名稱"):
-                    rows = []
-                rows.append({"商品代碼": product["品號"], "商品名稱": product["品名"], "單位": product["單位"], "數量": 1, "單價": product["單價"], "備註": ""})
-                st.session_state["invoice_center_line_items"] = _normalize_line_items(rows)
+                _append_product(product)
                 st.rerun()
 
         edited = st.data_editor(
@@ -363,6 +399,7 @@ def _render_product_tools() -> None:
         st.session_state["invoice_center_line_items"] = _normalize_line_items(edited)
 
         with st.expander("⚙ 商品管理", expanded=False):
+            st.caption("支援新增、修改、停用、刪除；狀態選『刪除』後按套用即移除。")
             edited_products = st.data_editor(
                 st.session_state["invoice_center_product_catalog"],
                 use_container_width=True,
@@ -399,6 +436,26 @@ def _calculate_totals(rows: list[dict[str, Any]]) -> dict[str, int]:
     return {"net": subtotal, "tax": tax, "total": subtotal + tax}
 
 
+def _invoice_kind() -> str:
+    return "三聯式" if st.session_state.get("invoice_center_buyer_type") == "公司" else "二聯式"
+
+
+def _delivery_payload_fields() -> dict[str, str]:
+    delivery = st.session_state.get("invoice_center_delivery_method", "會員載具")
+    if delivery == "捐贈":
+        return {"donate": "1", "donatevat": st.session_state.get("invoice_center_donate_code", ""), "carriertype": "", "carrierid1": "", "carrierid2": ""}
+    if delivery == "手機載具":
+        code = st.session_state.get("invoice_center_mobile_barcode", "")
+        return {"donate": "0", "carriertype": "3J0002", "carrierid1": code, "carrierid2": code, "donatevat": ""}
+    if delivery == "自然人憑證":
+        code = st.session_state.get("invoice_center_citizen_cert", "")
+        return {"donate": "0", "carriertype": "CQ0001", "carrierid1": code, "carrierid2": code, "donatevat": ""}
+    if delivery == "會員載具":
+        code = st.session_state.get("invoice_center_member_carrier", "")
+        return {"donate": "0", "carriertype": "EJ0011", "carrierid1": code, "carrierid2": code, "donatevat": ""}
+    return {"donate": "0", "carriertype": "", "carrierid1": "", "carrierid2": "", "donatevat": ""}
+
+
 def _build_payload(area: str, order_no: str, suffix: str, rows: list[dict[str, Any]], totals: dict[str, int]) -> Any:
     invoice_items = [
         InvoiceLineItem(
@@ -413,20 +470,27 @@ def _build_payload(area: str, order_no: str, suffix: str, rows: list[dict[str, A
         for row in rows
         if row.get("商品名稱")
     ]
+    buyer_name = st.session_state.get("invoice_center_company_title", "") if st.session_state.get("invoice_center_buyer_type") == "公司" else st.session_state.get("invoice_center_buyer_name", "")
     return build_invoice_payload(
         area=area,
         order_no=order_no,
         suffix=suffix,
         orderdate=st.session_state["invoice_center_orderdate"].isoformat(),
-        saleamount=str(totals["total"]),
+        saleamount=str(totals["net"]),
+        taxamount=str(totals["tax"]),
+        totalamount=str(totals["total"]),
         buyer_identifier=st.session_state.get("invoice_center_buyer_identifier", ""),
-        buyer_name=st.session_state.get("invoice_center_buyer_name", ""),
+        buyer_name=buyer_name,
         buyer_address=st.session_state.get("invoice_center_buyer_address", ""),
         buyer_emailaddress=st.session_state.get("invoice_center_buyer_emailaddress", ""),
         buyer_phone=st.session_state.get("invoice_center_buyer_phone", ""),
         payway=st.session_state.get("invoice_center_payway", ""),
         mainremark=st.session_state.get("invoice_center_mainremark", ""),
         items=invoice_items,
+        invoicetype="07" if st.session_state.get("invoice_center_buyer_type") == "公司" else "07",
+        hastax="2" if st.session_state.get("invoice_center_tax_mode") == "單價含稅" else "1",
+        rate=str(st.session_state.get("invoice_center_tax_rate", 0.05)),
+        **_delivery_payload_fields(),
     )
 
 
@@ -434,24 +498,18 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
     order = st.session_state.get("invoice_center_backend_order") or {}
     rows = _normalize_line_items(st.session_state.get("invoice_center_line_items", []))
     totals = _calculate_totals(rows)
-    invoice_kind = "三聯式" if st.session_state.get("invoice_center_buyer_type") == "公司" else "二聯式"
     status = "已開立" if order.get("invoice_no") else "未開立"
 
     with st.container(border=True):
-        st.markdown('<div class="ic-section-title">發票摘要</div>', unsafe_allow_html=True)
-        st.metric("未稅金額", f"{totals['net']:,}")
+        st.markdown('<div class="ic-section-title">摘要</div>', unsafe_allow_html=True)
+        st.metric("未稅", f"{totals['net']:,}")
         st.metric("稅額", f"{totals['tax']:,}")
-        st.metric("含稅總額", f"{totals['total']:,}")
+        st.metric("含稅", f"{totals['total']:,}")
         st.divider()
-        st.write("發票種類：", invoice_kind)
-        st.write("計價方式：", st.session_state.get("invoice_center_tax_mode"))
+        st.write("發票種類：", _invoice_kind())
         st.write("交付方式：", st.session_state.get("invoice_center_delivery_method"))
-
-    with st.container(border=True):
-        st.markdown('<div class="ic-section-title">發票狀態</div>', unsafe_allow_html=True)
-        st.markdown(f"<div class=\"{'ic-status-done' if status == '已開立' else 'ic-status-open'}\">{status}</div>", unsafe_allow_html=True)
+        st.write("發票狀態：", status)
         st.write("發票號碼：", order.get("invoice_no") or "-")
-        st.write("purchase_id：", order.get("purchase_id") or "-")
 
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">操作</div>', unsafe_allow_html=True)
@@ -461,6 +519,8 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
                 purchase_id = str(order.get("purchase_id") or "").strip()
                 if not purchase_id:
                     st.warning("請先查詢 Lemon 訂單，取得 purchase_id。")
+                elif not [row for row in rows if row.get("商品名稱")]:
+                    st.warning("請先填寫商品明細。")
                 elif order.get("invoice_no"):
                     st.success(f"此訂單已開立發票：{order.get('invoice_no')}")
                 else:
@@ -469,7 +529,7 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
                     if refreshed.get("invoice_no"):
                         st.success(f"開立成功：{refreshed.get('invoice_no')}")
                     else:
-                        st.warning("已送出，但尚未查到發票號碼，請稍後重新查詢。")
+                        st.warning("已送出 make_invoice，但尚未查到發票號碼。")
             except Exception as exc:
                 st.error(str(exc))
         if st.button("🔄 重新查詢", use_container_width=True):
@@ -495,11 +555,11 @@ def _render_invoice_create_tab() -> None:
         """
         <div class="ic-hero">
           <h1>🧾 發票中心 v2</h1>
-          <p>輸入 Lemon 訂單號後帶入資料；公司對應三聯式，自然人對應二聯式，預設單價含稅。</p>
+          <p>Lemon 訂單只帶入買受人；商品明細重新填寫後，透過 Lemon API 開立新發票。</p>
           <span class="ic-chip">公司＝三聯式</span>
-          <span class="ic-chip">二聯＝會員/手機/紙本</span>
+          <span class="ic-chip">自然人＝二聯式</span>
           <span class="ic-chip">預設含稅</span>
-          <span class="ic-chip">Lemon API</span>
+          <span class="ic-chip">/make_invoice</span>
         </div>
         """,
         unsafe_allow_html=True,
