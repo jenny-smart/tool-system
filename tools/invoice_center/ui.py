@@ -230,13 +230,14 @@ def _apply_order_defaults(order: dict[str, Any]) -> None:
             st.session_state["invoice_center_delivery_method"] = "紙本"
 
 
-def _load_backend_order(area: str, order_no: str, suffix: str) -> dict[str, Any]:
+def _load_backend_order(area: str, order_no: str, suffix: str, *, keep_items: bool = False) -> dict[str, Any]:
     backend_order, payload = fetch_backend_order_invoice_payload(area, order_no, suffix=suffix)
     order = backend_order.to_dict()
     st.session_state["invoice_center_backend_order"] = order
     _apply_payload_to_state(payload, include_items=False)
     _apply_order_defaults(order)
-    st.session_state["invoice_center_line_items"] = [_blank_line_item()]
+    if not keep_items:
+        st.session_state["invoice_center_line_items"] = [_blank_line_item()]
     return order
 
 
@@ -274,8 +275,8 @@ def _render_order_card() -> None:
         cols[0].metric("訂單號", order.get("order_no", "-") or "-")
         cols[1].metric("purchase_id", order.get("purchase_id", "-") or "-")
         cols[2].metric("付款狀態", order.get("paid_status", "-") or "-")
-        cols[3].metric("發票狀態", "已開立" if order.get("invoice_no") else "未開立")
-        cols[4].metric("發票號碼", order.get("invoice_no", "-") or "-")
+        cols[3].metric("主發票狀態", "已開立" if order.get("invoice_no") else "未開立")
+        cols[4].metric("主發票號碼", order.get("invoice_no", "-") or "-")
         c1, c2, c3 = st.columns(3)
         with c1:
             st.date_input("訂單 / 發票日期", key="invoice_center_orderdate")
@@ -498,7 +499,7 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
     order = st.session_state.get("invoice_center_backend_order") or {}
     rows = _normalize_line_items(st.session_state.get("invoice_center_line_items", []))
     totals = _calculate_totals(rows)
-    status = "已開立" if order.get("invoice_no") else "未開立"
+    status = "已開立主發票" if order.get("invoice_no") else "未開立"
 
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">摘要</div>', unsafe_allow_html=True)
@@ -509,32 +510,33 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
         st.write("發票種類：", _invoice_kind())
         st.write("交付方式：", st.session_state.get("invoice_center_delivery_method"))
         st.write("發票狀態：", status)
-        st.write("發票號碼：", order.get("invoice_no") or "-")
+        st.write("主發票號碼：", order.get("invoice_no") or "-")
+        if order.get("invoice_no"):
+            st.info("此訂單已有主發票；仍可依目前商品明細補開新的子發票。")
 
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">操作</div>', unsafe_allow_html=True)
         payload = _build_payload(area, order_no, suffix, rows, totals)
-        if st.button("🧾 開立發票", type="primary", use_container_width=True):
+        if st.button("🧾 開立子發票 / 補開發票", type="primary", use_container_width=True):
             try:
                 purchase_id = str(order.get("purchase_id") or "").strip()
                 if not purchase_id:
                     st.warning("請先查詢 Lemon 訂單，取得 purchase_id。")
                 elif not [row for row in rows if row.get("商品名稱")]:
                     st.warning("請先填寫商品明細。")
-                elif order.get("invoice_no"):
-                    st.success(f"此訂單已開立發票：{order.get('invoice_no')}")
                 else:
                     make_invoice(purchase_id, invoice_type=invoice_type)
-                    refreshed = _load_backend_order(area, order_no, suffix)
-                    if refreshed.get("invoice_no"):
-                        st.success(f"開立成功：{refreshed.get('invoice_no')}")
+                    refreshed = _load_backend_order(area, order_no, suffix, keep_items=True)
+                    new_invoice_no = refreshed.get("invoice_no") or order.get("invoice_no")
+                    if new_invoice_no:
+                        st.success(f"API 已送出開立發票；目前查到發票號碼：{new_invoice_no}")
                     else:
                         st.warning("已送出 make_invoice，但尚未查到發票號碼。")
             except Exception as exc:
                 st.error(str(exc))
         if st.button("🔄 重新查詢", use_container_width=True):
             try:
-                _load_backend_order(area, order_no, suffix)
+                _load_backend_order(area, order_no, suffix, keep_items=True)
                 st.rerun()
             except Exception as exc:
                 st.error(f"重新查詢失敗：{exc}")
@@ -555,7 +557,7 @@ def _render_invoice_create_tab() -> None:
         """
         <div class="ic-hero">
           <h1>🧾 發票中心 v2</h1>
-          <p>Lemon 訂單只帶入買受人；商品明細重新填寫後，透過 Lemon API 開立新發票。</p>
+          <p>Lemon 訂單只帶入買受人；商品明細重新填寫後，透過 Lemon API 開立新發票或子發票。</p>
           <span class="ic-chip">公司＝三聯式</span>
           <span class="ic-chip">自然人＝二聯式</span>
           <span class="ic-chip">預設含稅</span>
