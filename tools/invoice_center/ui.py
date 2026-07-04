@@ -127,6 +127,9 @@ def _bootstrap_invoice_state() -> None:
         "invoice_center_mainremark": "",
         "invoice_center_invoice_note": "",
         "invoice_center_invoice_type": "一般發票",
+        "invoice_center_last_invoice_no": "",
+        "invoice_center_last_invoice_id": "",
+        "invoice_center_last_invoice_date": "",
     }
     for key, value in defaults.items():
         _set_default(key, value)
@@ -147,8 +150,6 @@ def _render_css() -> None:
         .ic-chip {display:inline-block; margin:8px 6px 0 0; padding:5px 11px; border-radius:999px; background:#edf5ff; color:#1557ad; border:1px solid #c9dcff; font-size:12px; font-weight:700;}
         .ic-section-title {font-weight:800; font-size:18px; color:#1f2937; margin-bottom:4px;}
         .ic-subtle {color:#667085; font-size:13px;}
-        .ic-status-open {color:#b54708; font-weight:800;}
-        .ic-status-done {color:#16824b; font-weight:800;}
         .ic-warning {background:#fff7ed; border:1px solid #fed7aa; padding:10px 12px; border-radius:12px; color:#9a3412;}
         </style>
         """,
@@ -488,11 +489,19 @@ def _build_payload(area: str, order_no: str, suffix: str, rows: list[dict[str, A
         payway=st.session_state.get("invoice_center_payway", ""),
         mainremark=st.session_state.get("invoice_center_mainremark", ""),
         items=invoice_items,
-        invoicetype="07" if st.session_state.get("invoice_center_buyer_type") == "公司" else "07",
+        invoicetype="07",
         hastax="2" if st.session_state.get("invoice_center_tax_mode") == "單價含稅" else "1",
         rate=str(st.session_state.get("invoice_center_tax_rate", 0.05)),
         **_delivery_payload_fields(),
     )
+
+
+def _render_invoice_number_summary(order: dict[str, Any]) -> None:
+    st.write("主發票：", order.get("invoice_no") or "-")
+    st.write("────────────")
+    st.write("本次發票：", st.session_state.get("invoice_center_last_invoice_no") or "-")
+    if order.get("invoice_no"):
+        st.info("此訂單已有主發票；仍可依目前商品明細補開新的子發票。")
 
 
 def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type: str) -> None:
@@ -510,9 +519,7 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
         st.write("發票種類：", _invoice_kind())
         st.write("交付方式：", st.session_state.get("invoice_center_delivery_method"))
         st.write("發票狀態：", status)
-        st.write("主發票號碼：", order.get("invoice_no") or "-")
-        if order.get("invoice_no"):
-            st.info("此訂單已有主發票；仍可依目前商品明細補開新的子發票。")
+        _render_invoice_number_summary(order)
 
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">操作</div>', unsafe_allow_html=True)
@@ -525,13 +532,20 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
                 elif not [row for row in rows if row.get("商品名稱")]:
                     st.warning("請先填寫商品明細。")
                 else:
-                    make_invoice(purchase_id, invoice_type=invoice_type)
+                    result = make_invoice(
+                        purchase_id=purchase_id,
+                        invoice_type=invoice_type,
+                        payload=payload,
+                    )
+                    st.session_state["invoice_center_last_invoice_no"] = result.invoice_no
+                    st.session_state["invoice_center_last_invoice_id"] = result.invoice_id
+                    st.session_state["invoice_center_last_invoice_date"] = result.invoice_date
                     refreshed = _load_backend_order(area, order_no, suffix, keep_items=True)
-                    new_invoice_no = refreshed.get("invoice_no") or order.get("invoice_no")
+                    new_invoice_no = result.invoice_no or refreshed.get("invoice_no") or order.get("invoice_no")
                     if new_invoice_no:
-                        st.success(f"API 已送出開立發票；目前查到發票號碼：{new_invoice_no}")
+                        st.success(f"API 已送出開立發票；本次發票號碼：{new_invoice_no}")
                     else:
-                        st.warning("已送出 make_invoice，但尚未查到發票號碼。")
+                        st.warning("已送出 make_invoice，但 API 尚未回傳或查到發票號碼。")
             except Exception as exc:
                 st.error(str(exc))
         if st.button("🔄 重新查詢", use_container_width=True):
