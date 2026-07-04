@@ -3,7 +3,7 @@
 # 說明：整併進 tool-system，包成 render_memo_system() 供
 #       pages/訂單系統.py 呼叫。
 # ============================================================
-def render_memo_system():
+def render_memo_system(forced_main_section=None, shared_backend_email=None, shared_backend_password=None, shared_env=None):
     # memoapp.py
     # -*- coding: utf-8 -*-
     import streamlit as st
@@ -518,78 +518,94 @@ def render_memo_system():
     # Step 1：登入
     # ============================================================
 
-    step("1", "登入與環境設定")
-    login_expanded = not st.session_state.is_logged_in
-
-    with st.expander(
-        f"✅ 已登入：{st.session_state.login_identity}" if st.session_state.is_logged_in else "🔐 尚未登入，請輸入帳密",
-        expanded=login_expanded,
-    ):
-        col_e, col_p, col_env = st.columns([2.4, 2.4, 1.2])
-        with col_e:
-            email = st.text_input("後台帳號", placeholder="jenny@lemonclean.com.tw", key="login_email")
-        with col_p:
-            password = st.text_input("後台密碼", type="password", key="login_password")
-        with col_env:
-            env_option = st.selectbox("環境", ["prod", "dev"], index=0, key="login_env")
-
+    if shared_backend_email is not None:
+        # 由整合頁面（pages/訂單系統.py）統一提供帳密/環境，這裡不再重複顯示登入欄位。
+        email, password, env_option = shared_backend_email, shared_backend_password, shared_env
         memo.set_env(env_option)
         memo.set_runtime_credentials(email, password)
-        st.session_state.credentials_ready = bool(email.strip()) and bool(password.strip())
-
-        if st.button("解除鎖定 / 重新登入", use_container_width=True):
-            st.session_state.is_running = False
-            st.session_state.logs = []
-            st.session_state.auth_session = None
-            st.session_state.is_logged_in = False
-            st.success("已解除鎖定，下次執行任何功能時會自動重新登入。")
-            st.rerun()
+        st.session_state.credentials_ready = bool((email or "").strip()) and bool((password or "").strip())
 
         if (st.session_state.is_logged_in
                 and st.session_state.auth_env
                 and st.session_state.auth_env != env_option):
             st.session_state.auth_session = None
             st.session_state.is_logged_in = False
-            st.warning("環境已切換，下次執行功能時會自動重新登入。")
+    else:
+        step("1", "登入與環境設定")
+        login_expanded = not st.session_state.is_logged_in
 
-    if not st.session_state.credentials_ready:
-        st.markdown(
-            '<div class="info-strip"><b>開始前</b><ul>'
-            '<li>請先輸入後台帳號與密碼</li>'
-            '<li>執行功能時會自動登入，不用另外按 Login</li>'
-            '<li>評估文字工具不需登入，可直接使用</li>'
-            '</ul></div>',
-            unsafe_allow_html=True
-        )
-    elif not st.session_state.is_logged_in:
-        st.markdown(
-            '<div class="info-strip"><b>帳密已就緒</b><ul>'
-            '<li>第一次執行功能時會自動登入</li>'
-            '<li>登入後各功能共用同一組 Session</li>'
-            '</ul></div>',
-            unsafe_allow_html=True
-        )
+        with st.expander(
+            f"✅ 已登入：{st.session_state.login_identity}" if st.session_state.is_logged_in else "🔐 尚未登入，請輸入帳密",
+            expanded=login_expanded,
+        ):
+            col_e, col_p, col_env = st.columns([2.4, 2.4, 1.2])
+            with col_e:
+                email = st.text_input("後台帳號", placeholder="jenny@lemonclean.com.tw", key="login_email")
+            with col_p:
+                password = st.text_input("後台密碼", type="password", key="login_password")
+            with col_env:
+                env_option = st.selectbox("環境", ["prod", "dev"], index=0, key="login_env")
 
-    st.markdown("---")
+            memo.set_env(env_option)
+            memo.set_runtime_credentials(email, password)
+            st.session_state.credentials_ready = bool(email.strip()) and bool(password.strip())
+
+            if st.button("解除鎖定 / 重新登入", use_container_width=True):
+                st.session_state.is_running = False
+                st.session_state.logs = []
+                st.session_state.auth_session = None
+                st.session_state.is_logged_in = False
+                st.success("已解除鎖定，下次執行任何功能時會自動重新登入。")
+                st.rerun()
+
+            if (st.session_state.is_logged_in
+                    and st.session_state.auth_env
+                    and st.session_state.auth_env != env_option):
+                st.session_state.auth_session = None
+                st.session_state.is_logged_in = False
+                st.warning("環境已切換，下次執行功能時會自動重新登入。")
+
+        if not st.session_state.credentials_ready:
+            st.markdown(
+                '<div class="info-strip"><b>開始前</b><ul>'
+                '<li>請先輸入後台帳號與密碼</li>'
+                '<li>執行功能時會自動登入，不用另外按 Login</li>'
+                '<li>評估文字工具不需登入，可直接使用</li>'
+                '</ul></div>',
+                unsafe_allow_html=True
+            )
+        elif not st.session_state.is_logged_in:
+            st.markdown(
+                '<div class="info-strip"><b>帳密已就緒</b><ul>'
+                '<li>第一次執行功能時會自動登入</li>'
+                '<li>登入後各功能共用同一組 Session</li>'
+                '</ul></div>',
+                unsafe_allow_html=True
+            )
+
+        st.markdown("---")
 
     # ============================================================
     # Step 2：選擇功能
     # ============================================================
 
-    step("2", "選擇功能")
+    if forced_main_section is not None:
+        main_section = forced_main_section
+    else:
+        step("2", "選擇功能")
 
-    main_section = st.selectbox(
-        "功能",
-        [
-            "📋 客服作業",
-            "📅 排班管理",
-            "💰 財務對帳",
-            "🔄 服務異動",
-            "📐 評估文字工具",
-        ],
-        label_visibility="collapsed",
-        key="main_section",
-    )
+        main_section = st.selectbox(
+            "功能",
+            [
+                "📋 客服作業",
+                "📅 排班管理",
+                "💰 財務對帳",
+                "🔄 服務異動",
+                "📐 評估文字工具",
+            ],
+            label_visibility="collapsed",
+            key="main_section",
+        )
 
     MAIN_SECTION_HELP = {
         "📋 客服作業": """

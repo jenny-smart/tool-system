@@ -3,7 +3,7 @@
 # 說明：整併進 tool-system，包成 render_orders_system() 供
 #       pages/訂單系統.py 呼叫。原始 changelog 保留在函式內部註解。
 # ============================================================
-def render_orders_system():
+def render_orders_system(forced_mode=None, shared_backend_email=None, shared_backend_password=None, shared_env=None):
     # ============================================================
     # 檔名：ordersapp.py
     # 版本：v8.25
@@ -501,36 +501,46 @@ def render_orders_system():
     </div>
     """, unsafe_allow_html=True)
 
-    step("1", "登入與環境設定")
-    col_e, col_p, col_env = st.columns([3.2, 3.2, 1.2])
-    with col_e:
-        backend_email = st.text_input("後台帳號")
-    with col_p:
-        backend_password = st.text_input("後台密碼", type="password")
-    with col_env:
-        env = st.selectbox("環境", ["prod", "dev"], index=0)
+    if shared_backend_email is not None:
+        # 由整合頁面（pages/訂單系統.py）統一提供帳密/環境，這裡不再重複顯示登入欄位。
+        backend_email = shared_backend_email
+        backend_password = shared_backend_password
+        env = shared_env
+    else:
+        step("1", "登入與環境設定")
+        col_e, col_p, col_env = st.columns([3.2, 3.2, 1.2])
+        with col_e:
+            backend_email = st.text_input("後台帳號")
+        with col_p:
+            backend_password = st.text_input("後台密碼", type="password")
+        with col_env:
+            env = st.selectbox("環境", ["prod", "dev"], index=0)
 
-    st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown("<hr>", unsafe_allow_html=True)
 
-    step("2", "功能選單")
-    info_panel(
-        "功能說明",
-        [
-            "批次建單：從 Google Sheet 逐列建立訂單、寄確認信、同步 Google 日曆。",
-            "舊客快速建單：用電話查會員，帶入歷史已付款服務資料後建單；需求搜尋整合在此流程內。",
-            "新客資料拆解：貼上客人提供的制式文字，系統拆成欄位供客服修改與複製，不直接送單。",
-            "LINE 通知產生器：用已成立訂單編號補產生通知訊息，支援多筆同時產生。",
-            "訂單轉換：原單A → 多筆新單B1/B2/B3，每筆各建折價券，混合配班（一般專員優先）。",
-            "儲值金補價差：兩段式流程，先建儲值金清零單，再建客付補差價單。",
-            "儲值金購買：客人自己買/儲值一筆金額，付款方式/發票自動沿用會員最近一次 VIP 或"
-            "儲值金購買訂單的設定，都找不到才用最近一次一般服務訂單的設定。",
-        ],
-    )
-    mode = st.radio(
-        "功能選單",
-        ["批次建單（Google Sheet）", "舊客快速建單", "新客資料拆解", "LINE 通知產生器", "訂單轉換", "儲值金補價差", "儲值金購買"],
-        horizontal=True,
-    )
+    if forced_mode is not None:
+        # 由整合頁面直接指定要執行哪個功能，不再重複顯示功能選單。
+        mode = forced_mode
+    else:
+        step("2", "功能選單")
+        info_panel(
+            "功能說明",
+            [
+                "批次建單：從 Google Sheet 逐列建立訂單、寄確認信、同步 Google 日曆。",
+                "舊客快速建單：用電話查會員，帶入歷史已付款服務資料後建單；需求搜尋整合在此流程內。",
+                "新客資料拆解：貼上客人提供的制式文字，系統拆成欄位供客服修改與複製，不直接送單。",
+                "LINE 通知產生器：用已成立訂單編號補產生通知訊息，支援多筆同時產生。",
+                "訂單轉換：原單A → 多筆新單B1/B2/B3，每筆各建折價券，混合配班（一般專員優先）。",
+                "儲值金補價差：兩段式流程，先建儲值金清零單，再建客付補差價單。",
+                "儲值金購買：客人自己買/儲值一筆金額，付款方式/發票自動沿用會員最近一次 VIP 或"
+                "儲值金購買訂單的設定，都找不到才用最近一次一般服務訂單的設定。",
+            ],
+        )
+        mode = st.radio(
+            "功能選單",
+            ["批次建單（Google Sheet）", "舊客快速建單", "新客資料拆解", "LINE 通知產生器", "訂單轉換", "儲值金補價差", "儲值金購買"],
+            horizontal=True,
+        )
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
