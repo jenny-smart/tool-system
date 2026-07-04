@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 """
-檔案：tools/scheduled_monthly/stored_value_settlement.py
-版本：0704_v2
+檔案：tools/scheduled_monthly/stored_value_prepaid.py
+版本：0704_v3
 更新日期：2026-07-04
 
 功能：
-- 月排程：儲值金結算
-- 修正今天為 0704 時，預設期別應抓上個月，而不是 202607。
-- 修正單選區域仍執行 all 的問題，需搭配 toolapp_0704_v2.py。
-- 修正 Google Drive 舊檔 404 時略過，不中斷作業。
+- 月排程：儲值金預收
+- 修正：上傳時不再「每次新增一個同名檔案」。
+- 上傳規則改為：先尋找同名檔案，能更新就更新既有檔案；若有多個可處理同名檔，保留一個並刪除其他重複檔。
+- 若舊檔 ID 已失效或無權限，會略過該舊項目，不讓刪除失敗中斷；但不再因此一直新增重複檔。
+- 搭配 toolapp_0704_v3.py，可確認畫面選台北時實際傳入 --area 台北。
 - 若期別資料夾已存在，直接使用既有資料夾。
-- 若期別資料夾內已有同名檔案，先刪除舊檔，再重新上傳新檔。
-- 同一地區、同一期別、同一檔名只會保留一個檔案。
+- 同一地區、同一期別、同一檔名原則上只保留一個可處理檔案。
 
 存取期間說明：
-- 預設不帶 --period：以今天所在月份的「上個月」為作業月份。
-  例如今天是 2026-07-04，預設期別為 202606。
-- 帶 --period 202606：存入 202606 期別資料夾。
-- 後台匯出網址 /member/export_stored_value 本身沒有日期參數，資料內容仍為後台匯出當下內容。
+- 預設不帶 --period / --start / --end：以今天所在月份的「上個月」為作業月份。
+  例如今天是 2026-07-04，預設期別為 202606，預收/服務日期為 2026-07-01 ~ 2026-10-30。
+- 帶 --period 202606：預收/服務日期為 2026-07-01 ~ 2026-10-30，存入 202606。
+- 帶 --start / --end：預收/服務日期使用指定區間，期別以 --period 為主。
 """
 
 import argparse
@@ -299,31 +299,84 @@ def list_files_in_folder(service, parent_folder_id: str, filename: str) -> list[
     return res.get("files", [])
 
 
-def delete_existing_files(service, parent_folder_id: str, filename: str) -> int:
-    existing_files = list_files_in_folder(service, parent_folder_id, filename)
+def file_is_accessible(service, file_id: str) -> bool:
+    try:
+        service.files().get(
+            fileId=file_id,
+            fields="id,name",
+            supportsAllDrives=True,
+        ).execute()
+        return True
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            return False
+        raise
 
-    for file_info in existing_files:
-        delete_drive_file(
-            service,
-            file_info["id"],
-            file_info.get("name", filename),
-        )
 
-    return len(existing_files)
+def safe_delete_drive_file(service, file_id: str, name: str = "") -> bool:
+    try:
+        service.files().delete(
+            fileId=file_id,
+            supportsAllDrives=True,
+        ).execute()
+        log(f"🗑️ 已刪除重複舊檔：{name or file_id}")
+        return True
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            log(f"⚠️ 舊項目不存在或無法存取，略過：{name or file_id}")
+            return False
+        raise
 
 
 def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     filename = os.path.basename(local_path)
-    deleted_count = delete_existing_files(service, parent_folder_id, filename)
+    existing_files = list_files_in_folder(service, parent_folder_id, filename)
 
-    if deleted_count:
-        log(f"🧹 已刪除同名舊檔 {deleted_count} 個：{filename}")
+    accessible_files = []
+    inaccessible_files = []
+
+    for file_info in existing_files:
+        if file_is_accessible(service, file_info["id"]):
+            accessible_files.append(file_info)
+        else:
+            inaccessible_files.append(file_info)
+
+    for file_info in inaccessible_files:
+        log(f"⚠️ 找到同名舊項目但無法存取，略過：{file_info.get('name', filename)} / {file_info['id']}")
 
     media = MediaFileUpload(local_path, resumable=True)
+
+    if accessible_files:
+        keep = accessible_files[0]
+
+        updated = service.files().update(
+            fileId=keep["id"],
+            media_body=media,
+            fields="id,name,webViewLink",
+            supportsAllDrives=True,
+        ).execute()
+
+        for duplicate in accessible_files[1:]:
+            safe_delete_drive_file(
+                service,
+                duplicate["id"],
+                duplicate.get("name", filename),
+            )
+
+        link = updated.get("webViewLink", keep.get("webViewLink", ""))
+        log(f"♻️ 已更新既有檔案：{updated['name']} → folder_id={parent_folder_id} {link}".strip())
+
+        remaining = list_files_in_folder(service, parent_folder_id, filename)
+        log(f"📌 同名檔檢查：{filename} / Drive 查詢筆數={len(remaining)}")
+        return updated["id"]
+
     body = {
         "name": filename,
         "parents": [parent_folder_id],
     }
+
     created = service.files().create(
         body=body,
         media_body=media,
@@ -477,34 +530,63 @@ def parse_common_args(description: str) -> RunArgs:
     )
 
 
-EXPORT_URL = "https://backend.lemonclean.com.tw/member/export_stored_value"
-FUNCTION_NAME = "儲值金結算"
+EXPORT_URL = "https://backend.lemonclean.com.tw/purchase/export_order"
+FUNCTION_NAME = "儲值金預收"
 
 
-def resolve_settlement_ranges(args: RunArgs) -> dict[str, str]:
+def resolve_ranges(args: RunArgs) -> dict[str, str]:
     if args.period:
-        tag = args.period
+        year, month = period_month(args.period)
+        folder_tag = args.period
     else:
         now = tw_now()
         year, month = previous_month(now.year, now.month)
-        tag = f"{year}{month:02d}"
+        folder_tag = f"{year}{month:02d}"
 
-    if args.start and args.end:
-        date_text = f"使用者指定期間：{args.start} ~ {args.end}；後台匯出網址本身無日期參數，實際為執行當下資料"
-    else:
-        date_text = f"期別：{tag}；後台匯出網址本身無日期參數；實際為執行當下資料：{tw_now().strftime('%Y-%m-%d %H:%M:%S')}"
+    service_year, service_month = add_months(year, month, 1)
+    default_start = f"{service_year}-{service_month:02d}-01"
+
+    end_year, end_month = add_months(year, month, 4)
+    default_end = f"{end_year}-{end_month:02d}-30"
+
+    clean_start = args.start or default_start
+    clean_end = args.end or default_end
 
     return {
-        "folder_tag": tag,
-        "date_text": date_text,
+        "folder_tag": folder_tag,
+        "paid_at_s": "",
+        "paid_at_e": "",
+        "clean_date_s": clean_start,
+        "clean_date_e": clean_end,
+        "date_text": f"預收/服務：{clean_start} ~ {clean_end}",
     }
 
 
-def download_export(session: requests.Session) -> bytes:
-    res = session.get(EXPORT_URL, headers=HEADERS, allow_redirects=True)
+def build_url(keyword: str, rng: dict[str, str]) -> str:
+    params = {
+        "keyword": keyword,
+        "paid_at_s": rng["paid_at_s"],
+        "paid_at_e": rng["paid_at_e"],
+        "clean_date_s": rng["clean_date_s"],
+        "clean_date_e": rng["clean_date_e"],
+        "purchase_status": "1",
+        "payway": "4",
+        "p_board": "on",
+    }
+    return requests.Request("GET", EXPORT_URL, params=params).prepare().url
+
+
+def download_export(session: requests.Session, keyword: str, rng: dict[str, str]) -> bytes:
+    url = build_url(keyword, rng)
+    log(f"🔄 下載 {keyword or '全部'}")
+    res = session.get(url, headers=HEADERS, allow_redirects=True)
     res.raise_for_status()
     assert_download_file(res.content, res.headers.get("Content-Type", ""))
     return res.content
+
+
+def choose_keyword(city: str) -> str:
+    return "新竹" if city == "新竹" else ""
 
 
 def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], service, rng: dict[str, str]) -> None:
@@ -525,9 +607,10 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
         tag_folder_id = get_or_create_single_child_folder(service, area_folder_id, tag)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            filename = f"{tag}儲值金結算-{city}.xlsx"
+            keyword = choose_keyword(city)
+            filename = f"{tag}儲值金預收-{city}.xlsx"
             path = os.path.join(temp_dir, filename)
-            content = download_export(session)
+            content = download_export(session, keyword, rng)
             with open(path, "wb") as f:
                 f.write(content)
 
@@ -554,11 +637,11 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
 
 
 def main() -> None:
-    args = parse_common_args("月排程：儲值金結算")
-    rng = resolve_settlement_ranges(args)
+    args = parse_common_args("月排程：儲值金預收")
+    rng = resolve_ranges(args)
 
     log(f"📌 功能：{FUNCTION_NAME}")
-    log("📌 版本：0704_v2")
+    log("📌 版本：0704_v3")
     log(f"📌 期別：{rng['folder_tag']}")
     log(f"📌 存取期間：{rng['date_text']}")
     log(f"📌 執行區域：{args.area}")
