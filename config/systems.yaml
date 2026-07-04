@@ -49,3 +49,13 @@ systems:
       office:
         台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
         台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
+
+  - name: 發票中心
+    type: invoice_center
+    enabled: true
+    regions:
+      - 台北
+      - 台中
+      - 桃園
+      - 新竹
+      - 高雄
