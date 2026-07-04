@@ -2,26 +2,25 @@ from __future__ import annotations
 
 """
 檔案：tools/scheduled_monthly/refund_report.py
-版本：0625_v4
-更新日期：2026-06-25
+版本：0704_v1
+更新日期：2026-07-04
 
 功能：
 - 月排程：已退款
 - 支援主控台傳入 --folder-id、--area、--period、--start、--end。
+- 修正主控台選擇單一地區時，非上下半月訂單仍執行 all 的問題。
+- 修正舊檔已不存在時，刪除 Google Drive 舊檔發生 404 會中斷的問題。
 - 不再需要逐區設定 Folder ID，只需設定月排程總根目錄 ID。
 - 程式會在月排程總根目錄下自動尋找：
   01.台北專員、02.台中專員、03.桃園專員、04.新竹專員、05.高雄專員。
-- 相容舊選單值：01.台北專員、02.台中專員、03.桃園專員、04.新竹專員、05.高雄專員。
 - 若期別資料夾已存在，直接使用既有資料夾。
-- 若同一期別資料夾有重複，保留第一個，刪除其他重複資料夾。
 - 若期別資料夾內已有同名檔案，先刪除舊檔，再重新上傳新檔。
 - 同一地區、同一期別、同一檔名只會保留一個檔案。
 
 存取期間說明：
 - 預設不帶 --period / --start / --end：抓本月 1 日至本月月底的退款 / 加收資料，存入本月 -2 期別。
-- 帶 --period 202606-2：抓 2026-06-01 ~ 2026-06-30 的退款 / 加收資料，存入 202606-2。
+- 帶 --period 202607-2：抓 2026-07-01 ~ 2026-07-31 的退款 / 加收資料，存入 202607-2。
 - 帶 --start / --end：抓指定 refundDateS / refundDateE 區間，期別以 --period 為主。
-- 若同時帶 --period 與 --start / --end：檔案存入 --period 指定期別，資料抓 --start / --end 指定區間。
 """
 
 import argparse
@@ -42,6 +41,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 try:
@@ -102,6 +102,17 @@ def normalize_area(area: str | None) -> str:
     if value in ["", "全區", "全部", "ALL", "All", "all"]:
         return "all"
     return AREA_ALIASES.get(value, value)
+
+
+def normalize_period(period: str | None) -> str | None:
+    value = str(period or "").strip()
+    if not value:
+        return None
+    if "-" in value:
+        return value
+    if len(value) == 6 and value.isdigit():
+        return f"{value}-2"
+    return value
 
 
 def secret_value(path: list[str], default: str = "") -> str:
@@ -218,12 +229,20 @@ def list_child_folders(service, parent_id: str, folder_name: str) -> list[dict[s
     return res.get("files", [])
 
 
-def delete_drive_file(service, file_id: str, name: str = "") -> None:
-    service.files().delete(
-        fileId=file_id,
-        supportsAllDrives=True,
-    ).execute()
-    log(f"🗑️ 已刪除舊項目：{name or file_id}")
+def delete_drive_file(service, file_id: str, name: str = "") -> bool:
+    try:
+        service.files().delete(
+            fileId=file_id,
+            supportsAllDrives=True,
+        ).execute()
+        log(f"🗑️ 已刪除舊項目：{name or file_id}")
+        return True
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            log(f"⚠️ 舊項目不存在，略過刪除：{name or file_id}")
+            return False
+        raise
 
 
 def get_or_create_single_child_folder(service, parent_id: str, folder_name: str) -> str:
@@ -442,10 +461,10 @@ def parse_common_args(description: str) -> RunArgs:
 
     args = parser.parse_args()
 
-    period = args.period.strip()
+    period = normalize_period(args.period.strip())
     if not period and args.legacy_month.strip():
         legacy = args.legacy_month.strip()
-        period = legacy if "-" in legacy else f"{legacy}-2"
+        period = normalize_period(legacy)
 
     root_folder_id = root_folder_from_args_or_config(args.folder_id.strip())
     if not root_folder_id:
@@ -631,7 +650,7 @@ def main() -> None:
     rng = resolve_refund_ranges(args)
 
     log(f"📌 功能：{FUNCTION_NAME}")
-    log("📌 版本：0625_v4")
+    log("📌 版本：0704_v1")
     log(f"📌 期別：{rng['folder_tag']}")
     log(f"📌 存取期間：{rng['date_text']}")
     log(f"📌 執行區域：{args.area}")
