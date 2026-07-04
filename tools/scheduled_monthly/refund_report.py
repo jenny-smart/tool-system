@@ -2,24 +2,22 @@ from __future__ import annotations
 
 """
 檔案：tools/scheduled_monthly/refund_report.py
-版本：0704_v1
+版本：0704_v2
 更新日期：2026-07-04
 
 功能：
 - 月排程：已退款
-- 支援主控台傳入 --folder-id、--area、--period、--start、--end。
-- 修正主控台選擇單一地區時，非上下半月訂單仍執行 all 的問題。
-- 修正舊檔已不存在時，刪除 Google Drive 舊檔發生 404 會中斷的問題。
-- 不再需要逐區設定 Folder ID，只需設定月排程總根目錄 ID。
-- 程式會在月排程總根目錄下自動尋找：
-  01.台北專員、02.台中專員、03.桃園專員、04.新竹專員、05.高雄專員。
+- 修正今天為 0704 時，預設期別應抓上個月，而不是 202607。
+- 修正單選區域仍執行 all 的問題，需搭配 toolapp_0704_v2.py。
+- 修正 Google Drive 舊檔 404 時略過，不中斷作業。
 - 若期別資料夾已存在，直接使用既有資料夾。
 - 若期別資料夾內已有同名檔案，先刪除舊檔，再重新上傳新檔。
 - 同一地區、同一期別、同一檔名只會保留一個檔案。
 
 存取期間說明：
-- 預設不帶 --period / --start / --end：抓本月 1 日至本月月底的退款 / 加收資料，存入本月 -2 期別。
-- 帶 --period 202607-2：抓 2026-07-01 ~ 2026-07-31 的退款 / 加收資料，存入 202607-2。
+- 預設不帶 --period / --start / --end：以今天所在月份的「上個月」為作業月份。
+  例如今天是 2026-07-04，預設期別為 202606-2，退款/加收日期為 2026-06-01 ~ 2026-06-30。
+- 帶 --period 202606-2：抓 2026-06-01 ~ 2026-06-30 的退款 / 加收資料，存入 202606-2。
 - 帶 --start / --end：抓指定 refundDateS / refundDateE 區間，期別以 --period 為主。
 """
 
@@ -489,7 +487,7 @@ def resolve_refund_ranges(args: RunArgs) -> dict[str, str]:
         folder_tag = args.period
     else:
         now = tw_now()
-        year, month = now.year, now.month
+        year, month = previous_month(now.year, now.month)
         folder_tag = f"{year}{month:02d}-2"
 
     start = args.start or f"{year}-{month:02d}-01"
@@ -650,7 +648,7 @@ def main() -> None:
     rng = resolve_refund_ranges(args)
 
     log(f"📌 功能：{FUNCTION_NAME}")
-    log("📌 版本：0704_v1")
+    log("📌 版本：0704_v2")
     log(f"📌 期別：{rng['folder_tag']}")
     log(f"📌 存取期間：{rng['date_text']}")
     log(f"📌 執行區域：{args.area}")
