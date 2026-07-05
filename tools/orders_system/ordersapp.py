@@ -1,10 +1,12 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.43
+# 版本：v8.44
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-13
 #
 # Change Log
+# v8.44
+# - 儲值獎金備註的付款狀態下拉選單新增「待付款＋已付款」組合選項。
 # v8.43
 # - 配合 orders.py v2026.07.13：儲值獎金備註畫面新增「付款狀態」篩選
 #   下拉選單，移除原本寫死的處理狀態篩選；搜尋結果表格新增「付款狀態」
@@ -246,7 +248,7 @@
 # v7.7 - 儲值金補價差拆兩段按鈕
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.43"
+__version__ = "8.44"
 
 import html
 import re
@@ -957,7 +959,11 @@ elif mode == "儲值獎金備註":
     with bn_col4:
         bn_paid_e = st.date_input("付款日期-迄", value=None, key="bn_paid_e")
 
-    bn_status_map = {"不拘": None, "待付款": "0", "已付款": "1", "取消訂單": "2", "已退款": "3"}
+    bn_status_map = {
+        "不拘": None, "待付款": "0", "已付款": "1",
+        "待付款＋已付款": ["0", "1"],
+        "取消訂單": "2", "已退款": "3",
+    }
     bn_status_label = st.selectbox("付款狀態", list(bn_status_map.keys()), key="bn_status")
 
     if st.button("🔍 ① 開始搜尋", use_container_width=True, key="bn_search_btn", type="primary"):

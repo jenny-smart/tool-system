@@ -1,10 +1,17 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.13
+# 版本：v2026.07.13-2
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
 # 最後更新：2026-07-13
 #
 # Change Log
+# v2026.07.13-2
+# - find_pending_stored_value_orders 的 purchase_status 參數新增支援傳入
+#   list/tuple（例如 ["0","1"] 代表「待付款＋已付款」的組合篩選）。因為
+#   後台的付款狀態欄位只吃單一值，傳清單時不會送給後台篩選，改成抓回來
+#   的訂單全部掃過一輪，自己比對「付款狀態」這行文字是不是屬於清單裡任一
+#   種，在 Python 這邊做篩選。已用假資料測試過，確認「待付款＋已付款」
+#   組合能正確排除「取消訂單」等其他狀態。
 # v2026.07.13
 # - 儲值獎金備註功能依客服需求調整：
 #   1. 搜尋條件改成訂購日期／付款日期／付款狀態（可選：不拘/待付款/已付款/
@@ -3288,12 +3295,18 @@ def find_pending_stored_value_orders(
     max_pages=80,
 ):
     """
-    v2026.07.13：獨立工具——搜尋「購買項目：儲值金」且「客服備註是空白」的
+    v2026.07.13-2：獨立工具——搜尋「購買項目：儲值金」且「客服備註是空白」的
     訂單，列出客戶姓名/電話/訂單編號/付款狀態，用來配合客服在 LINE 群組裡
     回報的介紹獎金名單，之後用 add_bonus_note_to_order 依姓名把「獎金：
     名字1X名字2X名字3...」寫進客服備註（同時會把服務狀態改為已處理）。
 
     可用訂購日期/付款日期兩種區間、以及付款狀態分別篩選（都可留空/不拘）。
+    purchase_status 可以是單一值字串（"0"/"1"/"2"/"3"），也可以是
+    list/tuple（例如 ["0", "1"] 代表「待付款＋已付款」的組合篩選）。
+    傳清單的情況因為後台的付款狀態欄位只吃單一值，這裡不會送給後台篩選，
+    改成抓回來的訂單全部掃過一輪，自己比對「付款狀態」這行文字是不是屬於
+    清單裡任一種，在 Python 這邊做篩選。
+
     日期篩選沿用 find_orders_without_line_link 同一套「後台粗篩 + Python
     自己解析日期精確比對」的作法，避免後台日期篩選本身不準確的問題。
     「客服備註是否為空白」用 _extract_notice_map_from_raw_html 從原始
@@ -3312,9 +3325,17 @@ def find_pending_stored_value_orders(
     if not login(session, backend_email, backend_password):
         raise Exception("後台登入失敗，請確認帳號密碼")
 
+    _PURCHASE_STATUS_TEXT = {"0": "待付款", "1": "已付款", "2": "取消訂單", "3": "已退款"}
+
+    is_multi_status = isinstance(purchase_status, (list, tuple, set))
+    allowed_status_texts = None
+    if is_multi_status:
+        allowed_status_texts = {_PURCHASE_STATUS_TEXT.get(str(s), "") for s in purchase_status}
+        allowed_status_texts.discard("")
+
     _far_past, _far_future = "2000-01-01", "2099-12-31"
     pre_filter = {"buy": "5"}
-    if purchase_status:
+    if purchase_status and not is_multi_status:
         pre_filter["purchase_status"] = purchase_status
     if date_s or date_e:
         pre_filter["date_s"] = date_s or _far_past
@@ -3341,8 +3362,6 @@ def find_pending_stored_value_orders(
         if len(blocks) < 20:
             break
 
-    _PURCHASE_STATUS_TEXT = {"0": "待付款", "1": "已付款", "2": "取消訂單", "3": "已退款"}
-
     results = []
     for block in all_blocks:
         lines = block.get("lines", [])
@@ -3367,6 +3386,9 @@ def find_pending_stored_value_orders(
         status_m = re.search(r"付款狀態[：:]\s*([^\n]+)", joined)
         if status_m:
             status_text = status_m.group(1).strip()
+
+        if is_multi_status and allowed_status_texts and status_text not in allowed_status_texts:
+            continue
 
         phone = ""
         name = ""
