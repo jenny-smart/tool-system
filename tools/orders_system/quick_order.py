@@ -276,9 +276,7 @@ __version__ = "8.39"
 
 import time
 import re
-import html
 from datetime import date, datetime, timedelta
-from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -777,7 +775,7 @@ def _service_amount_from_block(joined_text, fare):
     try:
         total_num = int(round(float(str(total).replace(",", ""))))
         fare_num = int(round(float(str(fare or "0").replace(",", ""))))
-        amount = max(total_num - fare_num, 0)
+        amount = total_num - fare_num if fare_num and total_num > fare_num else total_num
         return str(amount)
     except Exception:
         return total
@@ -1395,17 +1393,6 @@ def quick_create_order(
         price_with_tax = int(round(float(price_no_tax) * TAX_RATE))
     except Exception:
         price_with_tax = price_no_tax
-    backend_actual_amount = None
-    backend_actual_fare = base_data["fare"]
-    try:
-        _verify_block = _fetch_purchase_block_for_order_no(session, order_no)
-        _verify_joined = "\n".join(_verify_block.get("lines", []))
-        backend_actual_fare = _extract_fare_line(_verify_joined) or backend_actual_fare or "0"
-        _verify_amount = _service_amount_from_block(_verify_joined, backend_actual_fare)
-        if _verify_amount:
-            backend_actual_amount = int(round(float(str(_verify_amount).replace(",", ""))))
-    except Exception:
-        pass
     # v8.13：建單成功後檢查此訂單編號是否重複對應到多張訂單卡片
     _is_dup, _dup_count = _check_order_no_duplicate(session, order_no)
     _dup_warning = (
@@ -1416,12 +1403,8 @@ def quick_create_order(
     return {
         "order_no": order_no, "address": selected_address, "date": date_s,
         "period": display_period, "period_s": period_s, "person": str(person),
-        "price": price_no_tax,
-        "price_with_tax": backend_actual_amount if backend_actual_amount is not None else price_with_tax,
-        "service_amount": backend_actual_amount if backend_actual_amount is not None else price_with_tax,
-        "formula_price_with_tax": price_with_tax,
-        "backend_actual_amount": backend_actual_amount,
-        "fare": backend_actual_fare, "payway": payway, "region": region,
+        "price": price_no_tax, "price_with_tax": price_with_tax, "service_amount": price_with_tax,
+        "fare": base_data["fare"], "payway": payway, "region": region,
         "staff": meta.get("服務人員") or staff_display, "service_status": meta.get("服務狀態", "未處理"),
         "order_no_duplicated": _is_dup, "order_no_duplicate_count": _dup_count,
         "duplicate_order_warning": _dup_warning,
@@ -1556,31 +1539,6 @@ def _fetch_order_edit_id(session, order_no):
     return m.group(1) if m else None
 
 
-def _extract_form_payload(form):
-    payload = {}
-    for inp in form.find_all("input"):
-        name = inp.get("name")
-        if not name:
-            continue
-        typ = (inp.get("type") or "text").lower()
-        if typ in ("submit", "button", "file", "image"):
-            continue
-        if typ in ("checkbox", "radio") and not inp.has_attr("checked"):
-            continue
-        payload[name] = inp.get("value", "")
-    for ta in form.find_all("textarea"):
-        name = ta.get("name")
-        if name:
-            payload[name] = ta.text or ""
-    for sel in form.find_all("select"):
-        name = sel.get("name")
-        if not name:
-            continue
-        opt = sel.find("option", selected=True) or sel.find("option")
-        payload[name] = opt.get("value", "") if opt else ""
-    return payload
-
-
 def _update_order_invoice_no_text(session, base_url, order_no, invoice_no_text):
     """
     v2026.07.10：把訂單編輯頁（/purchase/edit/{id}）的「發票號碼」欄位改成
@@ -1594,39 +1552,24 @@ def _update_order_invoice_no_text(session, base_url, order_no, invoice_no_text):
         edit_id = _fetch_order_edit_id(session, order_no)
         if not edit_id:
             return False, f"找不到訂單 {order_no} 的編輯 ID"
-        phone = ""
-        try:
-            block = _fetch_purchase_block_for_order_no(session, order_no)
-            phone = _extract_phone_from_block_lines(block.get("lines", []))
-        except Exception:
-            phone = ""
         edit_url = f"{base_url}/purchase/edit/{edit_id}"
-        params = {"phone": phone} if phone else None
-        get_resp = session.get(edit_url, params=params, headers=HEADERS, allow_redirects=True)
+        get_resp = session.get(edit_url, headers=HEADERS, allow_redirects=True)
         if get_resp.status_code != 200:
             return False, f"無法開啟編輯頁面：HTTP {get_resp.status_code}"
-        soup = BeautifulSoup(get_resp.text, "html.parser")
-        form = soup.find("form")
-        if not form:
-            return False, "找不到訂單編輯表單"
-        existing = _extract_form_payload(form)
         token_m = re.search(r'<meta name="csrf-token" content="([^"]+)"', get_resp.text)
-        if "_token" not in existing and token_m:
-            existing["_token"] = token_m.group(1)
+        csrf = token_m.group(1) if token_m else ""
+        if not csrf:
+            return False, "無法取得 CSRF token"
+        existing = {}
+        for m2 in re.finditer(r'<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*>', get_resp.text):
+            existing[m2.group(1)] = m2.group(2)
+        for m2 in re.finditer(r'<textarea[^>]+name="([^"]+)"[^>]*>([^<]*)</textarea>', get_resp.text):
+            existing[m2.group(1)] = m2.group(2).strip()
+        existing["_token"] = csrf
+        existing.pop("_method", None)
         existing["invoice_no"] = invoice_no_text
-        action = html.unescape(form.get("action") or get_resp.url)
-        post_url = urljoin(get_resp.url, action)
-        method = (form.get("method") or "post").lower()
-        sender = session.get if method == "get" else session.post
-        post_resp = sender(post_url, data=existing, headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded"}, allow_redirects=True)
+        post_resp = session.post(edit_url, data=existing, headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded"}, allow_redirects=True)
         success = post_resp.status_code in (200, 302)
-        if success:
-            try:
-                verify_block = _fetch_purchase_block_for_order_no(session, order_no)
-                if invoice_no_text in "\n".join(verify_block.get("lines", [])):
-                    return True, "已標註不開立發票"
-            except Exception:
-                pass
         return success, f"HTTP {post_resp.status_code}"
     except Exception as e:
         return False, str(e)
@@ -2608,14 +2551,7 @@ def build_line_message(order_result):
         actual_period = str(order_result.get("actual_period", "") or "")
         person_cnt = str(order_result.get("person", "") or "")
         period = _format_period_display(period_raw, person_cnt, display_override=actual_period)
-    price = (
-        order_result.get("line_amount")
-        or order_result.get("payment_amount")
-        or order_result.get("backend_actual_amount")
-        or order_result.get("price_with_tax")
-        or order_result.get("service_amount")
-        or order_result.get("price")
-    )
+    price = order_result.get("service_amount") or order_result.get("price_with_tax", order_result.get("price"))
     fare = order_result["fare"]
     address = order_result["address"]
     order_no = order_result["order_no"]
@@ -3597,22 +3533,11 @@ def stored_value_makeup_create_paid_order(
     pair = f"儲值折抵單 {stored_order_no} + 客付補價差單 {paid_order['order_no']}" if stored_order_no else f"客付補價差單 {paid_order['order_no']}"
     note = f"儲值金補價差第二段：{pair}，客付單使用優惠券B折抵原儲值金餘額 {ctx['balance']} 元。"
     _update_order_note(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], note)
-    payable_amount = paid_order.get("backend_actual_amount")
-    if payable_amount in (None, ""):
-        payable_amount = paid_order.get("service_amount") or paid_order.get("price_with_tax") or paid_order.get("price") or 0
-    try:
-        payable_amount_num = int(round(float(str(payable_amount).replace(",", ""))))
-    except Exception:
-        payable_amount_num = 0
-    auto_settle_zero_amount = payable_amount_num == 0
-    if auto_settle_zero_amount:
-        mark_paid_ok, mark_paid_msg = _mark_order_as_paid(paid_order["session"], _configure_environment(env_name), paid_order["order_no"])
-        invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], "不開立發票")
-    else:
-        mark_paid_ok, mark_paid_msg = False, f"服務金額（總金額扣除車馬費）為 {payable_amount_num} 元，需付款，不自動標記已付款"
-        invoice_note_ok, invoice_note_msg = False, f"服務金額（總金額扣除車馬費）為 {payable_amount_num} 元，需開立發票，不自動標註不開立發票"
-    paid_order["service_amount"] = str(payable_amount_num)
-    paid_order["price_with_tax"] = str(payable_amount_num)
+    # v2026.07.10：客付補價差單全額用優惠券折抵，客人沒有實際付款：
+    # 1. 標記為已付款，不能讓它卡在待付款狀態。
+    # 2. 發票號碼欄位標註「不用開發票」，避免財務誤以為漏開發票。
+    mark_paid_ok, mark_paid_msg = _mark_order_as_paid(paid_order["session"], _configure_environment(env_name), paid_order["order_no"])
+    invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], "不開立發票")
 
     # v2026.07.10：LINE 訊息改成「儲值金歸零訂單＋補價差訂單 合併訂單」的
     # 格式，另起一行顯示補價差訂單真正的服務時間；服務金額這行要顯示（跟
@@ -3623,10 +3548,8 @@ def stored_value_makeup_create_paid_order(
             f"服務時間 : {stored_order_no}＋{paid_order['order_no']}  合併訂單\n"
             f"                      實際服務時間：{str(service_date).replace('-', '/')} {_new_period_disp}"
         )
-    if auto_settle_zero_amount:
-        paid_order["custom_amount_line"] = f"服務金額：{payable_amount_num}（含稅，已扣除儲值金餘額${ctx['balance']}）"
-    else:
-        paid_order["custom_amount_line"] = f"服務金額：{payable_amount_num}（含稅）"
+    _paid_amount = paid_order.get("service_amount") or paid_order.get("price_with_tax") or paid_order.get("price")
+    paid_order["custom_amount_line"] = f"服務金額：{_paid_amount}（含稅，已扣除儲值金餘額${ctx['balance']}）"
     paid_order["hide_amount_line"] = False
 
     return {
@@ -3634,8 +3557,6 @@ def stored_value_makeup_create_paid_order(
         "coupon_b": coupon_b, "paid_order": paid_order, "note": note,
         "line_message": build_line_message(paid_order), "address": ctx["address"], "region": ctx["region"],
         "stored_order_no": stored_order_no,
-        "auto_settle_zero_amount": auto_settle_zero_amount,
-        "payable_amount_after_fare": payable_amount_num,
         "mark_paid_ok": mark_paid_ok, "mark_paid_msg": mark_paid_msg,
         "invoice_note_ok": invoice_note_ok, "invoice_note_msg": invoice_note_msg,
     }
@@ -4280,14 +4201,12 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     # 查詢失敗不影響建單結果，只是無法附上警示。
     price_mismatch_warning = ""
     backend_actual_amount = None
-    backend_actual_fare = "0"
     address_mismatch_warning = ""
     backend_actual_address = ""
     try:
         _verify_block = _fetch_purchase_block_for_order_no(session, order_no)
         _verify_joined = "\n".join(_verify_block.get("lines", []))
         _verify_fare = _extract_fare_line(_verify_joined) or "0"
-        backend_actual_fare = _verify_fare
         _verify_amount = _service_amount_from_block(_verify_joined, _verify_fare)
         if _verify_amount:
             backend_actual_amount = int(round(float(str(_verify_amount).replace(",", ""))))
@@ -4342,16 +4261,15 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "hour": hour,
         "person": person,
         "staff": staff_display,
-        "price_with_tax": backend_actual_amount if backend_actual_amount is not None else price_with_tax,
-        "service_amount": backend_actual_amount if backend_actual_amount is not None else price_with_tax,
-        "formula_price_with_tax": price_with_tax,
+        "price_with_tax": price_with_tax,
+        "service_amount": price_with_tax,
         "backend_actual_amount": backend_actual_amount,
         "price_mismatch_warning": price_mismatch_warning,
         "backend_actual_address": backend_actual_address,
         "address_mismatch_warning": address_mismatch_warning,
         "order_no_duplicated": _is_dup, "order_no_duplicate_count": _dup_count,
         "duplicate_order_warning": _dup_warning,
-        "fare": backend_actual_fare,
+        "fare": "0",
         "payway": payway,
         "region": _region_computed,
         "day_type": day_type,

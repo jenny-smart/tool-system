@@ -1,10 +1,47 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.10
+# 版本：v2026.07.11-4
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
-# 最後更新：2026-07-10
+# 最後更新：2026-07-11
 #
 # Change Log
+# v2026.07.11-4
+# - find_orders_without_line_link 第四次修正漏單問題：v2026.07.11-3 遇到
+#   區間只填一邊時，選擇整個放棄該區間、改成完全不篩選、直接掃描前 80 頁。
+#   但實測發現這樣還是抓不到 LC00212069 這種很新的訂單——研判是後台在
+#   完全沒有篩選條件時的預設排序並不是「新到舊」（很可能是依 ID 由舊到
+#   新），導致掃描前 80 頁只掃得到很久以前的舊訂單，新訂單永遠輪不到。
+#   改成：不管只填了起或迄的哪一邊，都自動幫忙補上另一邊寬鬆的日期
+#   （很早的 2000-01-01 或很晚的 2099-12-31），確保送給後台的一定是
+#   「起訖都有值」的完整區間，不會再整個放棄篩選條件。用假 session 驗證過
+#   實際送出的查詢參數確實是完整區間，也確認能正確抓到 LC00212069。
+# v2026.07.11-3
+# - find_orders_without_line_link 再次修正漏單問題：實測發現不管是「三種
+#   區間同時送」還是「每種區間分開各送一次」，只要區間裡有任何一邊留空
+#   （例如只填起始日、沒填結束日——這剛好是最常見的用法），後台的日期
+#   篩選就整個不準，導致明明符合條件的訂單被漏掉（用真實訂單 LC00212069、
+#   LC00212115、LC00138514 等大量驗證過）。
+#   改成完全不依賴後台日期篩選的準確性：只用「起訖都有填」的其中一種區間
+#   （優先順序：服務日期 > 訂購日期 > 付款日期）當後台粗篩，抓到候選訂單
+#   後，新增 _extract_order_dates_from_block_lines 自己解析每張卡片實際的
+#   訂購日期／服務日期／付款日期，三種區間都在 Python 這邊自己比對篩選。
+#   已用真實訂單卡片文字驗證過解析結果完全正確，並用「只填起始日」這種
+#   使用者實際會用的輸入模式模擬過完整流程，確認能正確抓到 LC00212069。
+# v2026.07.11-2
+# - 修正 find_orders_without_line_link 重大漏單問題：實測發現把訂購日期／
+#   付款日期／服務日期三種區間「同時」塞進同一次查詢請求，後台會漏掉一大堆
+#   明明符合條件的訂單（用真實訂單編號 LC00212069、LC00212115 等驗證過）。
+#   改成「每一種有填的日期區間分別各自查一次」，結果依訂單編號合併去重，
+#   不管後台能不能正確同時處理多重日期篩選都不會漏單。新增輔助函式
+#   _fetch_all_purchase_blocks_with_filters，並用假 session 驗證過分開查詢
+#   各自能正確撈到不同訂單。
+# v2026.07.11
+# - 新增 find_orders_without_line_link：獨立工具，搜尋「訂購資訊」欄位裡
+#   沒有 LINE 連結的訂單，列出訂單編號/姓名/電話，可用訂購日期/付款日期/
+#   服務日期三種區間分別篩選（都可留空）。用實際頁面結構驗證過：判斷方式
+#   是看訂單卡片解析出來的 lines 裡有沒有出現純文字「LINE」這一行（對應
+#   <a href="https://chat.line.biz/...">LINE</a> 這個連結的顯示文字），
+#   沒有這一行代表這張訂單沒有綁 LINE。
 # v2026.07.10
 # - 修正批次建單同樣的規則漏洞：run_process_web 之前只檢查「時段存不存在」
 #   （slot_ok），沒有檢查「人數夠不夠」，導致時段有排班、但排的人數不夠這張
@@ -3024,6 +3061,152 @@ def _fetch_all_purchase_blocks_by_date_range(session, date_s, date_e, purchase_s
         if len(blocks) < 20:
             break
     return all_blocks
+
+
+def _extract_order_dates_from_block_lines(lines):
+    """
+    v2026.07.11-3：從一張訂單卡片的 lines 裡，解析出三種日期（都只取日期，
+    不含時間）：
+    - 訂購日期（建立時間）：格式「YYYY-MM-DD HH:MM:SS」單獨一行。
+    - 服務日期：緊接在訂購日期之後、開頭是「YYYY-MM-DD」的那一行（後面可能
+      黏著星期幾，例如「2026-07-26                    (日)」，中間有很多
+      空白是 get_text() 解析時殘留的，不影響開頭的日期字串）。
+    - 付款日期：格式「付款日期：YYYY-MM-DD HH:MM:SS」。
+    用實際訂單卡片文字驗證過這個解析方式完全正確。
+    """
+    created_at = None
+    service_date = None
+    paid_date = None
+    for ln in lines:
+        m_paid = re.search(r"付款日期[：:]\s*(\d{4}-\d{2}-\d{2})", ln)
+        if m_paid:
+            paid_date = m_paid.group(1)
+            continue
+        m_full = re.fullmatch(r"(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2}", ln)
+        if m_full and created_at is None:
+            created_at = m_full.group(1)
+            continue
+        m_start = re.match(r"^(\d{4}-\d{2}-\d{2})", ln)
+        if m_start and created_at is not None and service_date is None:
+            service_date = m_start.group(1)
+    return created_at, service_date, paid_date
+
+
+def _fetch_all_purchase_blocks_with_filters(session, extra_params, max_pages=80):
+    """依給定的篩選參數（會疊加在 PURCHASE_FILTER_PARAMS_TEMPLATE 上）撈出全部
+    分頁的訂單卡片。"""
+    all_blocks = []
+    for page in range(1, max_pages + 1):
+        params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
+        params.update(extra_params)
+        params["page"] = str(page)
+        resp = session.get(PURCHASE_URL, params=params, headers=HEADERS, allow_redirects=True)
+        if resp.status_code != 200:
+            break
+        blocks = extract_order_cards_from_purchase_html(resp.text)
+        if not blocks:
+            break
+        all_blocks.extend(blocks)
+        if len(blocks) < 20:
+            break
+    return all_blocks
+
+
+def find_orders_without_line_link(
+    env_name, backend_email, backend_password,
+    date_s=None, date_e=None,
+    paid_at_s=None, paid_at_e=None,
+    clean_date_s=None, clean_date_e=None,
+    max_pages=80,
+):
+    """
+    v2026.07.11-3：獨立工具——搜尋「訂購資訊」欄位裡沒有 LINE 連結的訂單，
+    列出訂單編號/姓名/電話。可用訂購日期/付款日期/服務日期三種區間分別
+    篩選（每種都可留空不篩）。
+
+    v2026.07.11-3 修正重大漏單問題：實測發現不管是「三種區間同時送」還是
+    「每種區間分開各送一次」，只要區間裡有任何一邊留空（例如只填起始日、
+    沒填結束日），後台的日期篩選就會整個不準，導致明明符合條件的訂單被
+    漏掉（用真實訂單 LC00212069、LC00212115、LC00138514 等大量驗證過）。
+
+    改成完全不依賴後台的日期篩選是否準確：先用「服務日期」（如果起訖都有
+    填）當唯一的後台篩選條件抓一批候選訂單（沒填就依序改用訂購日期、付款
+    日期，都沒填或只填一邊就直接抓最近的訂單，用 max_pages 限制掃描範圍），
+    接著針對每一張抓到的訂單卡片，自己解析出訂購日期／服務日期／付款日期
+    三個實際日期（_extract_order_dates_from_block_lines），三種區間都在
+    我們自己這邊用 Python 比對篩選，不管後台的日期篩選本身準不準都不影響
+    最終結果的正確性。
+
+    判斷有沒有 LINE 連結的方式：後台訂單卡片裡，有綁 LINE 的客人會多一行
+    純文字「LINE」（連結文字，來自 <a href="https://chat.line.biz/...">LINE
+    </a>，這裡用 extract_order_cards_from_purchase_html 解析後只留得下
+    "LINE" 這個文字），沒有 LINE 的客人這一行整個不會出現。
+    """
+    global BASE_URL, ORDER_PREFIX, PURCHASE_URL
+    if env_name == "dev":
+        BASE_URL = BASE_URL_DEV
+        ORDER_PREFIX = ORDER_PREFIX_DEV
+    else:
+        BASE_URL = BASE_URL_PROD
+        ORDER_PREFIX = ORDER_PREFIX_PROD
+    PURCHASE_URL = f"{BASE_URL}/purchase"
+
+    session = requests.Session()
+    if not login(session, backend_email, backend_password):
+        raise Exception("後台登入失敗，請確認帳號密碼")
+
+    # 只用「其中一種」區間當後台端的粗篩，優先順序：服務日期 > 訂購日期 > 付款日期。
+    # v2026.07.11-4：不管使用者只填了起或迄的哪一邊，都自動補上一個寬鬆的
+    # 另一邊（很早的日期 / 很晚的日期），確保送給後台的一定是「起訖都有值」
+    # 的完整區間。這是因為實測發現只要區間有一邊是空的，後台就會整個放棄
+    # 這個篩選條件，退回某種不可控的預設排序（很可能是依 ID 由舊到新），
+    # 導致像 LC00212069 這種很新的訂單，掃描 80 頁都排不到、永遠掃不到。
+    _far_past, _far_future = "2000-01-01", "2099-12-31"
+    pre_filter = {}
+    if clean_date_s or clean_date_e:
+        pre_filter = {"clean_date_s": clean_date_s or _far_past, "clean_date_e": clean_date_e or _far_future}
+    elif date_s or date_e:
+        pre_filter = {"date_s": date_s or _far_past, "date_e": date_e or _far_future}
+    elif paid_at_s or paid_at_e:
+        pre_filter = {"paid_at_s": paid_at_s or _far_past, "paid_at_e": paid_at_e or _far_future}
+
+    all_blocks = _fetch_all_purchase_blocks_with_filters(session, pre_filter, max_pages=max_pages)
+
+    results = []
+    for block in all_blocks:
+        lines = block.get("lines", [])
+        order_no = block.get("order_no", "")
+
+        created_at, service_date, paid_date = _extract_order_dates_from_block_lines(lines)
+
+        # Python 端自己比對三種日期區間（只要有填就一定要符合，留空的維度不篩）
+        if date_s and (not created_at or created_at < date_s):
+            continue
+        if date_e and (not created_at or created_at > date_e):
+            continue
+        if clean_date_s and (not service_date or service_date < clean_date_s):
+            continue
+        if clean_date_e and (not service_date or service_date > clean_date_e):
+            continue
+        if paid_at_s and (not paid_date or paid_date < paid_at_s):
+            continue
+        if paid_at_e and (not paid_date or paid_date > paid_at_e):
+            continue
+
+        if "LINE" in lines:
+            continue
+
+        phone = ""
+        name = ""
+        for idx, ln in enumerate(lines):
+            if re.fullmatch(r"09\d{8}", ln):
+                phone = ln
+                if idx > 0:
+                    name = lines[idx - 1]
+                break
+        results.append({"order_no": order_no, "name": name, "phone": phone})
+
+    return results
 
 
 def run_standalone_consistency_check(env_name, backend_email, backend_password, sheet_name, region=None,
