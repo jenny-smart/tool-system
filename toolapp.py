@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 """
-檔案：toolapp.py
-版本：0704_v3
-更新日期：2026-07-04
+檔案：toolapp.py 版本：0704_v3 更新日期：2026-07-04
 
 更新內容：
 - 強制修正月排程非上下半月訂單的區域傳遞。
@@ -132,17 +130,15 @@ DEFAULT_CONFIG = {
                 "office": {"台北": "", "台中": ""},
             },
         },
-        # ── ★ 新增：客服排程系統 ─────────────────────────────
         {
             "name": "客服排程系統",
             "type": "service_schedule",
             "enabled": True,
-            "target_file_id": "",   # 由 Secret LEMON_TARGET_FILE_ID 注入
+            "target_file_id": "",
             "folder_ids": {
                 "schedule_stats": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
             },
         },
-        # ─────────────────────────────────────────────────────
         {
             "name": "發票中心",
             "type": "invoice_center",
@@ -161,31 +157,19 @@ def get_secret_text(key: str, default: str = "") -> str:
 
 
 def _build_subprocess_env() -> dict:
-    """
-    建立子進程用的環境變數字典。
-    Streamlit Cloud 的 secrets 只能透過 st.secrets 讀取，
-    不會自動出現在 os.environ，需要手動注入給 subprocess。
-    子進程透過 STREAMLIT_SECRETS_TOML 環境變數自行解析所需 key。
-    """
     env = os.environ.copy()
-
-    # 注入 PYTHONPATH
     base_str = str(BASE_DIR)
     existing_pp = env.get("PYTHONPATH", "")
     if base_str not in existing_pp:
         env["PYTHONPATH"] = base_str + (":" + existing_pp if existing_pp else "")
 
-    # 把 st.secrets 的所有 key 嘗試注入（字串值直接注入，dict 轉 JSON）
-    # 同時確保 STREAMLIT_SECRETS_TOML 原始內容也被帶入子進程
     try:
         import toml as _toml
-        # 把整個 st.secrets 序列化成 TOML 字串帶給子進程
         secrets_dict = {k: dict(v) if hasattr(v, "to_dict") else v for k, v in st.secrets.items()}
         env["STREAMLIT_SECRETS_TOML"] = _toml.dumps(secrets_dict)
     except Exception:
         pass
 
-    # 直接注入每個 string secret 到 env（雙重保險）
     try:
         for key in st.secrets:
             try:
@@ -216,7 +200,6 @@ def get_master_config_spreadsheet_id() -> str:
     if not spreadsheet_id:
         raise RuntimeError("找不到主控試算表 ID")
 
-    # 讓 subprocess 執行 half_month_orders.py 時也能讀到同一份主控表。
     os.environ["TOOLS_APP_LOG_SPREADSHEET_ID"] = spreadsheet_id
     return spreadsheet_id
 
@@ -473,15 +456,12 @@ def _load_config_from_master_sheets() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    """儲存設定到主控試算表，不再寫入 GitHub systems.yaml。"""
     _config_to_master_sheets(cfg)
-    # 清除 config cache，確保下次 load_config 讀到最新設定
     _load_config_from_master_sheets.clear()
     st.cache_data.clear()
 
 
 def ensure_config_file() -> None:
-    """舊名稱保留相容；現在會確保主控表分頁存在。"""
     spreadsheet_id = get_master_config_spreadsheet_id()
     service = get_sheets_service()
     _ensure_sheet(service, spreadsheet_id, SYSTEM_SETTING_SHEET, SYSTEM_SETTING_HEADERS)
@@ -489,9 +469,6 @@ def ensure_config_file() -> None:
 
 
 def merge_default_systems(data: dict) -> dict:
-    """
-    保留現有設定，只補缺少的預設系統。
-    """
     if "systems" not in data or not isinstance(data["systems"], list):
         data["systems"] = []
 
@@ -517,11 +494,6 @@ def _load_config_from_yaml_fallback() -> dict:
 
 
 def load_config() -> dict:
-    """
-    優先讀主控試算表。
-    若主控表尚無資料，會用 systems.yaml 或 DEFAULT_CONFIG 初始化主控表。
-    新增系統請直接在主控試算表「系統設定」工作表手動新增一列。
-    """
     try:
         data = _load_config_from_master_sheets()
 
@@ -702,6 +674,15 @@ st.markdown(
     margin: 3px 0;
   }
 
+  .home-nav-card {
+    background: white;
+    border-radius: 18px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+    border: 1.5px solid #e2edf2;
+    box-shadow: 0 4px 12px rgba(0,32,48,0.05);
+  }
+
   .report-table-wrap {
     overflow-x:auto;
     border:1px solid #e2e8f0;
@@ -783,7 +764,6 @@ if "role" not in st.session_state:
     st.session_state.role = ""
 
 
-
 def render_login_page() -> None:
     st.markdown(
         """
@@ -820,7 +800,6 @@ def require_login() -> None:
 
 
 def logout_button() -> None:
-    # 保留函式名稱，避免舊流程呼叫錯誤；實際顯示改到主畫面上方。
     return
 
 
@@ -862,6 +841,25 @@ def render_user_bar() -> None:
             st.rerun()
 
 
+def render_home_nav() -> None:
+    """
+    ★ 新增：主頁導覽卡片。
+    取代原本只能靠左側自動選單切換「發票中心／訂單系統」的方式，
+    改成主頁面上兩張大按鈕卡片，點了直接用 st.page_link 導頁。
+    如果想把 Streamlit 預設側邊欄選單也隱藏，另外在
+    .streamlit/config.toml 加上：
+        [client]
+        showSidebarNavigation = false
+    """
+    st.markdown('<div class="card"><div class="card-title">🧭 快速前往</div>', unsafe_allow_html=True)
+    nav_col1, nav_col2 = st.columns(2)
+    with nav_col1:
+        st.page_link("pages/發票中心.py", label="📄 發票中心", use_container_width=True)
+    with nav_col2:
+        st.page_link("pages/訂單系統.py", label="📋 訂單系統", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def parse_date_range(start_date, end_date) -> list[str]:
     from datetime import timedelta
 
@@ -882,7 +880,6 @@ def parse_date_range(start_date, end_date) -> list[str]:
 
 
 def normalize_monthly_areas(system: dict) -> dict:
-    """月排程地區設定標準化。"""
     raw_areas = system.get("areas", {})
     raw_folders = system.get("folders", {}) or {}
     output = {}
@@ -1003,15 +1000,12 @@ def available_areas_for_system(system: dict) -> list[str]:
                 return list(value.keys())
         return ["台北", "台中"]
 
-    # ── ★ 新增：客服排程系統固定全區 ──────────────────────
     if system_type == "service_schedule":
         return ["全區"]
-    # ────────────────────────────────────────────────────────
 
     if system_type == "invoice_center":
         return ["台北", "台中", "桃園", "新竹", "高雄"]
 
-    # 舊日排程目前腳本本身會跑全部區域，先提供全區。
     return ["全區"]
 
 
@@ -1104,7 +1098,7 @@ def get_system_type_label(system_type: str) -> str:
         "daily_scheduler": "日排程系統",
         "monthly_scheduler": "月排程系統",
         "field_daily_schedule": "外場排程系統",
-        "service_schedule": "客服排程系統",   # ★ 新增
+        "service_schedule": "客服排程系統",
         "gmail_401": "Gmail 401歸檔",
         "invoice_center": "發票中心",
     }
@@ -1153,7 +1147,6 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
         cmd = [sys.executable, str(script), *args]
         display_name = script_path
 
-    # 只需確保 PYTHONPATH 包含 BASE_DIR，其餘環境自然繼承（對齊外場/日排程做法）
     env = os.environ.copy()
     base_str = str(BASE_DIR)
     existing_pp = env.get("PYTHONPATH", "")
@@ -1361,7 +1354,6 @@ def render_report() -> None:
             )
         else:
             st.warning("找不到 raw_df.csv")
-    
 
     st.markdown('<div class="card"><div class="card-title">📈 月度追蹤</div>', unsafe_allow_html=True)
     tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
@@ -1399,27 +1391,18 @@ def render_report() -> None:
 # ═══════════════════════════════════════════════════════════
 def render_log_page() -> None:
     JOB_LABELS = {
-        # 日排程：撈資料
         "schedule_report": "排班統計表",
         "staff_schedule": "專員班表",
         "orders_report": "當月次月訂單",
         "staff_info": "專員個資",
-
-        # 業績報表
         "performance_report": "業績報表",
-
-        # 外場排程：彙整資料
         "field_schedule_stats": "外場排班統計表",
         "field_staff_schedule": "外場專員班表",
         "field_orders": "外場訂單",
         "field_staff_profile": "外場專員個資",
-
-        # ★ 客服排程
         "service_schedule_stats": "客服排班統計表",
         "service_daily_report":   "客服每日回報",
         "service_revenue":        "客服前日營業額",
-
-        # 通知
         "send_daily_result": "通知信",
     }
 
@@ -1429,7 +1412,6 @@ def render_log_page() -> None:
     def read_text_safe(path: Path, max_bytes: int = 2 * 1024 * 1024) -> str:
         if not path.exists():
             return ""
-        # 超過 2MB 只讀最後 2MB，避免大型 log 吃光記憶體
         size = path.stat().st_size
         if size > max_bytes:
             with path.open("rb") as f:
@@ -1670,28 +1652,21 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "外場專員個資",
         "一鍵執行外場日排程",
     ],
-    # ── ★ 新增：客服排程系統功能清單 ────────────────────────
     "service_schedule": [
-        # 每日排班管理
         "【排班】更新排班統計表",
         "【排班】更新每日回報",
         "【排班】更新前一天營業分數及營業額",
         "【排班】三步驟全部執行",
-        # CRM 排程管理
         "【CRM】更新排程決策報表",
         "【CRM】更新三個月未排名單",
         "【CRM】重新排序Raw",
-        # 儲值金服務排程管理
         "【儲值】抓儲值金",
         "【儲值】匯出VIP日曆對帳",
         "【儲值】全跑（抓儲值金＋匯出VIP）",
     ],
-    # ────────────────────────────────────────────────────────
-    # ── ★ 新增：gmail401 ────────────────────────
     "gmail_401": [
-    "掃描並歸檔401附件",
+        "掃描並歸檔401附件",
     ],
-    # ────────────────────────────────────────────────────────
     "invoice_center": [
         "發票開立",
         "折讓單",
@@ -1737,7 +1712,6 @@ FIELD_SCRIPT_MAP = {
     ],
 }
 
-# ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
 SERVICE_STEP_MAP = {
     "【排班】更新排班統計表":           "1",
     "【排班】更新每日回報":             "2",
@@ -1745,18 +1719,14 @@ SERVICE_STEP_MAP = {
     "【排班】三步驟全部執行":           "0",
 }
 
-# ── ★ CRM：功能 → crm_export.py --step 對應表 ───────────────
 SERVICE_CRM_MAP = {
-    # 儲值金服務排程管理
     "【儲值】抓儲值金":                  "1",
     "【儲值】匯出VIP日曆對帳":           "2",
     "【儲值】全跑（抓儲值金＋匯出VIP）":  "0",
-    # CRM 排程管理
     "【CRM】更新排程決策報表":           "4",
     "【CRM】更新三個月未排名單":         "5",
     "【CRM】重新排序Raw":               "6",
 }
-# ────────────────────────────────────────────────────────────
 
 
 def functions_for_system(sys_cfg: dict) -> list[str]:
@@ -1800,13 +1770,11 @@ if st.session_state.view == "log":
     render_log_page()
     st.stop()
 
-# ── ★ Gmail 401歸檔 ──────────────────────────────────────
 selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
 if selected_system_cfg.get("type") == "gmail_401":
     from tools.gmail_401.gmail_401 import run_gmail_401
     run_gmail_401()
     st.stop()
-# ────────────────────────────────────────────────────────
 
 if selected_system_cfg.get("type") == "invoice_center":
     from tools.invoice_center.ui import render_invoice_center
@@ -1823,6 +1791,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 render_user_bar()
+
+# ★ 主頁導覽卡片：發票中心／訂單系統改成主頁按鈕，不用只靠左側選單切換。
+render_home_nav()
+
+# ★ 版本/更新紀錄改成收合區塊，預設不展開，主頁畫面不會直接看到更新內容。
+with st.expander("ℹ️ 版本資訊", expanded=False):
+    st.caption("toolapp.py　版本：0704_v3　更新日期：2026-07-04")
+    st.markdown(
+        """
+- 強制修正月排程非上下半月訂單的區域傳遞。
+- 已退款、預收、儲值金結算、儲值金預收一定會把畫面選到的區域傳入 `--area`。
+- 執行時會顯示：① 畫面選擇區域 ② 實際傳入 `--area` ③ 完整執行參數。
+- 避免畫面顯示「只執行：台北」，但腳本收到 `all`。
+        """
+    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1939,7 +1922,6 @@ with date_col:
             key="period",
         )
 
-    # ── ★ 客服排程系統 ──────────────────────────────────────
     elif system_type == "service_schedule":
         _today_date = datetime.now(TW_TZ).date()
 
@@ -1992,7 +1974,6 @@ with date_col:
             start_date_value = end_date_value = None
 
         else:
-            # 排班管理三步驟：選執行日期
             st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
             start_date_value = st.date_input(
                 "執行日期", value=_today_date, key="service_run_date",
@@ -2158,7 +2139,6 @@ if can_access_page("settings"):
                                 }
                             )
 
-                        # ★ 客服排程系統預設結構
                         if new_type == "service_schedule":
                             new_system["target_file_id"] = ""
                             new_system["folder_ids"] = {
@@ -2284,7 +2264,6 @@ if can_access_page("settings"):
       <div class="detail-row"><strong>啟用地區</strong>：{html.escape("、".join(enabled_area_names) or "未設定")}</div>
       <div class="detail-row"><strong>地區根目錄</strong>：<br>{"<br>".join(html.escape(l) for l in area_root_lines) or "未設定"}</div>
     """
-                # ★ 客服排程系統顯示資訊
                 elif current_type == "service_schedule":
                     target_id = sys_cfg.get("target_file_id", "")
                     sched_folder = (sys_cfg.get("folder_ids") or {}).get("schedule_stats", "")
@@ -2485,9 +2464,6 @@ if run_clicked:
                     else:
                         args = [*base_args, "--folder-id", folder_id]
 
-                        # 0704_v3：
-                        # 這裡不能再使用預設 all。
-                        # 必須以畫面目前選到的 selected_area_value 為準。
                         selected_area_text = str(selected_area_value or "").strip()
 
                         if selected_area_text in ["", "全區", "全部", "ALL", "All", "all"]:
@@ -2530,11 +2506,8 @@ if run_clicked:
 
                 result = results
 
-            # ── ★ 客服排程系統執行邏輯 ────────────────────────────
             elif system_type == "service_schedule":
 
-                # 把 st.secrets 裡的所有字串值注入到子進程環境
-                # （Streamlit Cloud secrets 不在 os.environ，需手動注入）
                 _svc_env = os.environ.copy()
                 _base_str = str(BASE_DIR)
                 _existing_pp = _svc_env.get("PYTHONPATH", "")
@@ -2547,9 +2520,7 @@ if run_clicked:
                             if isinstance(_v, str):
                                 _svc_env[_k] = _v
                             elif isinstance(_v, dict):
-                                # section → 整體 JSON 注入
                                 _svc_env[_k] = json.dumps(dict(_v), ensure_ascii=False)
-                                # section 內每個 key 也展開注入（如 GMAIL_USER 在 section 裡）
                                 for _sk, _sv in _v.items():
                                     if isinstance(_sv, str):
                                         _svc_env[_sk] = _sv
@@ -2558,13 +2529,11 @@ if run_clicked:
                 except Exception:
                     pass
 
-                # 確保目標試算表 ID 有注入（從設定管理讀取）
                 if not _svc_env.get("SERVICE_TARGET_SPREADSHEET_ID"):
                     _target_id = get_system_by_name(config, system_name).get("folder_id", "").strip()
                     if _target_id:
                         _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _target_id
 
-                # ── CRM 功能 ──────────────────────────────────
                 if selected_function in SERVICE_CRM_MAP:
                     step = SERVICE_CRM_MAP[selected_function]
                     cmd = [
@@ -2579,7 +2548,6 @@ if run_clicked:
                         cmd += ["--area", selected_area_value]
                     add_log(f"CRM 執行：{selected_function}（step={step}）", "info")
 
-                # ── 排班同步功能 ──────────────────────────────
                 else:
                     step = SERVICE_STEP_MAP.get(selected_function, "0")
                     cmd = [
@@ -2587,7 +2555,6 @@ if run_clicked:
                         "tools.service_management.service_schedule",
                         "--step", step,
                     ]
-                    # 帶入使用者選擇的執行日期
                     if start_date_value:
                         cmd += ["--date", start_date_value.strftime("%Y-%m-%d")]
                     add_log(f"客服排程執行：{selected_function}（--step {step}）", "info")
@@ -2617,7 +2584,6 @@ if run_clicked:
                         else:
                             add_log(line, "info")
 
-                # 解析各 Step 結果，顯示部分成功
                 stdout_text = completed.stdout or ""
                 success_steps = [l for l in stdout_text.splitlines() if "完成" in l and "ERROR" not in l and "失敗" not in l]
                 failed_steps  = [l for l in stdout_text.splitlines() if "失敗" in l and "[ERROR]" in l]
@@ -2625,7 +2591,6 @@ if run_clicked:
                 if completed.returncode == 0:
                     result = f"✅ {selected_function} 全部成功"
                 elif success_steps and failed_steps:
-                    # 部分成功：不拋例外，顯示 warning
                     result = f"⚠️ 部分完成：{len(success_steps)} 個步驟成功，{len(failed_steps)} 個步驟失敗"
                     add_log(result, "warning")
                     for fl in failed_steps[-5:]:
@@ -2634,7 +2599,6 @@ if run_clicked:
                     raise RuntimeError(
                         f"執行失敗（exit {completed.returncode}）：{selected_function}"
                     )
-            # ────────────────────────────────────────────────────────
 
             else:
                 add_log(f"{system_type} 尚未實作", "warning")
