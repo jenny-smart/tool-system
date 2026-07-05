@@ -20,6 +20,7 @@ ATM 對帳自動化模組
   現在只有「取得憑證」這步會 fallback，open_by_key 的錯誤會直接拋出。
 """
 import json
+import os
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -131,22 +132,42 @@ def _copy_data_validation(ws, source_row: int, target_row: int, columns: List[in
 # -----------------------------------------------------------------------------
 def _get_gspread_client():
     """
-    取得授權過的 gspread client，邏輯與 memo.get_spreadsheet() 完全一致：
-    先試 st.secrets，取不到才 fallback 到本機 JSON 檔案。
+    取得授權過的 gspread client。
+
+    v2026.07.11：修正憑證讀取邏輯——原本只檢查 st.secrets["GOOGLE_SERVICE_
+    ACCOUNT"]（大寫），但實際部署的 Streamlit secrets 是用小寫的
+    "gcp_service_account" 這個 key，導致這裡一直取不到、默默失敗
+    （except Exception: pass），接著 fallback 到根本不存在的本機檔案
+    google_service_account.json，最後報出「[Errno 2] No such file or
+    directory」這種看起來像是缺檔案、實際上是憑證 key 名稱查錯的誤導性
+    錯誤訊息。
+    改成跟 orders.py 的 get_service_account_info() 一致：依序檢查
+    gcp_service_account（小寫）→ GOOGLE_SERVICE_ACCOUNT（大寫）→
+    GOOGLE_SERVICE_ACCOUNT_JSON 環境變數 → 本機檔案，任何一種有設定
+    都能正確讀到。
     """
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
+    service_account_info = None
     try:
         import streamlit as _st
-        creds = Credentials.from_service_account_info(
-            dict(_st.secrets["GOOGLE_SERVICE_ACCOUNT"]),
-            scopes=scopes,
-        )
-        return gspread.authorize(creds)
+        if "gcp_service_account" in _st.secrets:
+            service_account_info = dict(_st.secrets["gcp_service_account"])
+        elif "GOOGLE_SERVICE_ACCOUNT" in _st.secrets:
+            service_account_info = dict(_st.secrets["GOOGLE_SERVICE_ACCOUNT"])
     except Exception:
         pass
+
+    if service_account_info is None:
+        raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        if raw_json:
+            service_account_info = json.loads(raw_json)
+
+    if service_account_info is not None:
+        creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+        return gspread.authorize(creds)
 
     creds = Credentials.from_service_account_file(
         memo.GOOGLE_SERVICE_ACCOUNT_FILE,

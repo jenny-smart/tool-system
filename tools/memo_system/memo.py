@@ -269,25 +269,38 @@ def item_service_date_obj(item: Dict):
 
 
 def get_spreadsheet():
+    """
+    v2026.07.11：修正憑證讀取邏輯——原本只檢查 st.secrets["GOOGLE_SERVICE_
+    ACCOUNT"]（大寫），但實際部署的 Streamlit secrets 是用小寫的
+    "gcp_service_account" 這個 key，導致這裡一直取不到、默默失敗
+    （except Exception: pass），接著 fallback 到根本不存在的本機檔案，
+    報出誤導性的 FileNotFoundError。且原本的 try/except 範圍太大，連
+    open_by_key 的權限錯誤也會被吞掉一起 fallback。
+    改成：依序檢查 gcp_service_account（小寫）→ GOOGLE_SERVICE_ACCOUNT
+    （大寫）→ 本機檔案，只有「取得憑證」這步會 fallback，open_by_key
+    的錯誤會直接拋出。
+    """
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
+    service_account_info = None
     if st is not None:
         try:
-            creds = Credentials.from_service_account_info(
-                dict(st.secrets["GOOGLE_SERVICE_ACCOUNT"]),
-                scopes=scopes,
-            )
-            gc = gspread.authorize(creds)
-            return gc.open_by_key(SHEET_ID)
+            if "gcp_service_account" in st.secrets:
+                service_account_info = dict(st.secrets["gcp_service_account"])
+            elif "GOOGLE_SERVICE_ACCOUNT" in st.secrets:
+                service_account_info = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT"])
         except Exception:
             pass
 
-    creds = Credentials.from_service_account_file(
-        GOOGLE_SERVICE_ACCOUNT_FILE,
-        scopes=scopes,
-    )
+    if service_account_info is not None:
+        creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+    else:
+        creds = Credentials.from_service_account_file(
+            GOOGLE_SERVICE_ACCOUNT_FILE,
+            scopes=scopes,
+        )
     gc = gspread.authorize(creds)
     return gc.open_by_key(SHEET_ID)
 
