@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.48
+# 版本：v8.49
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.49
+# - 新增「會員喜好設定」分頁：輸入電話查會員，設定喜愛專員性別，並列出近N次
+#   有排班的服務紀錄（日期＋專員姓名），可逐一勾選設為喜愛/不喜愛專員，更新
+#   時只改動性別/喜好，不動其他會員資料欄位。
 # v8.48
 # - 批次建單「執行過程」的日誌顯示改用 st.text() 取代 st.code()，拿掉每行
 #   日誌的黑底樣式。
@@ -276,7 +280,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta
 
-from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet
+from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet, fetch_member_edit_page, submit_member_preferences, fetch_recent_service_records
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
 try:
@@ -696,6 +700,9 @@ FUNCTION_OPTIONS = [
     ("儲值獎金備註：搜尋購買項目儲值金、客服備註為空白的訂單並列出客戶姓名/電話/付款狀態名單，"
      "依姓名把「獎金：名字1X名字2」加進客服備註（並改為已處理）。",
      "orders", "儲值獎金備註"),
+    ("會員喜好設定：輸入電話查會員，設定喜愛專員性別，並列出近N次服務日期/專員，"
+     "逐一勾選設為喜愛/不喜愛專員。",
+     "orders", "會員喜好設定"),
 ]
 
 selected_label = st.selectbox(
@@ -2225,6 +2232,113 @@ else:
             else:
                 st.error(f"❌ 建立失敗：{sv2_result.get('message', '未知錯誤')}")
 
+    elif single_feature == "會員喜好設定":
+        info_panel("使用說明", [
+            "輸入電話查詢會員，會列出目前設定的喜愛專員性別。",
+            "下方會列出近 N 次「有排班」的服務紀錄（日期＋專員姓名），可針對每位出現過的專員勾選「喜愛」或「不喜愛」。",
+            "按下「更新會員喜好設定」才會真的送出，其餘會員資料（姓名/電話/備註等）不會被更動。",
+        ])
+        mp_phone = st.text_input("客人電話", key="mp_phone")
+        mp_n = st.number_input("列出近幾次服務紀錄", min_value=1, max_value=20, value=5, key="mp_n")
+        if st.button("🔍 查詢會員", key="mp_lookup_btn"):
+            if not mp_phone.strip():
+                st.error("請輸入電話")
+            elif not backend_email.strip() or not backend_password.strip():
+                st.error("請先在上方輸入後台帳號密碼")
+            else:
+                try:
+                    with st.spinner("查詢會員中…"):
+                        lookup = qo.quick_lookup_member(
+                            env_name=env, backend_email=backend_email.strip(),
+                            backend_password=backend_password.strip(),
+                            phone=mp_phone.strip(),
+                        )
+                        if not lookup.get("member_payload"):
+                            st.error("查無此會員")
+                            st.session_state.mp_data = None
+                        else:
+                            member = lookup["member_payload"]["member"]
+                            member_id = member["member_id"]
+                            edit_page = fetch_member_edit_page(lookup["session"], member_id)
+                            records = fetch_recent_service_records(
+                                lookup["session"], mp_phone.strip(), member.get("name", ""), n=int(mp_n),
+                            )
+                            st.session_state.mp_data = {
+                                "session": lookup["session"], "member_id": member_id,
+                                "member_name": member.get("name", ""), "edit_page": edit_page,
+                                "records": records,
+                            }
+                except Exception as e:
+                    st.error(f"查詢失敗：{e}")
+                    st.session_state.mp_data = None
+
+        mp_data = st.session_state.get("mp_data")
+        if mp_data:
+            st.success(f"✅ 會員：{mp_data['member_name']}")
+            gender_labels = ["不限", "限女", "1女", "限男", "1男", "1男1女"]
+            current_gender = int(mp_data["edit_page"]["fields"].get("preferredGender") or "0")
+            mp_gender_choice = st.radio(
+                "喜愛專員性別", gender_labels, index=current_gender, key="mp_gender", horizontal=True,
+            )
+
+            roster = mp_data["edit_page"]["roster"]
+            # 依姓名建立 name -> cleaner_id 對照（同名時取第一個符合的，並在畫面上提醒可能有同名狀況）
+            name_to_ids = {}
+            for cid, info in roster.items():
+                name_to_ids.setdefault(info["name"], []).append(cid)
+
+            if not mp_data["records"]:
+                st.info("查無近期有排班的服務紀錄。")
+            else:
+                st.markdown("**近期服務紀錄：**")
+                unique_names = []
+                for rec in mp_data["records"]:
+                    date_part = f"{rec['date_clean']}（{rec['order_no']}）" if rec["order_no"] else rec["date_clean"]
+                    st.caption(f"{date_part}：{' X '.join(rec['cleaner_names']) or '（無資料）'}")
+                    for cn in rec["cleaner_names"]:
+                        if cn not in unique_names:
+                            unique_names.append(cn)
+
+                st.markdown("**設定喜愛/不喜愛專員：**")
+                pref_choices = {}
+                for cn in unique_names:
+                    ids = name_to_ids.get(cn, [])
+                    if not ids:
+                        st.warning(f"⚠️「{cn}」在會員編輯頁的專員名單裡找不到對應資料，無法設定（可能是離職或名字打法不同）。")
+                        continue
+                    if len(ids) > 1:
+                        st.caption(f"（注意：「{cn}」有 {len(ids)} 位同名專員，將套用到第一位，麻煩人工確認是否正確）")
+                    cid = ids[0]
+                    existing = "喜愛" if roster[cid]["liked"] else ("不喜愛" if roster[cid]["disliked"] else "不變")
+                    choice = st.radio(
+                        cn, ["不變", "喜愛", "不喜愛"],
+                        index=["不變", "喜愛", "不喜愛"].index(existing),
+                        key=f"mp_pref_{cid}", horizontal=True,
+                    )
+                    pref_choices[cid] = choice
+
+                if st.button("✅ 更新會員喜好設定", key="mp_submit_btn", type="primary"):
+                    try:
+                        liked_ids = {cid for cid, info in roster.items() if info["liked"]}
+                        disliked_ids = {cid for cid, info in roster.items() if info["disliked"]}
+                        for cid, choice in pref_choices.items():
+                            liked_ids.discard(cid)
+                            disliked_ids.discard(cid)
+                            if choice == "喜愛":
+                                liked_ids.add(cid)
+                            elif choice == "不喜愛":
+                                disliked_ids.add(cid)
+                        with st.spinner("更新中…"):
+                            submit_member_preferences(
+                                mp_data["session"], mp_data["member_id"], mp_data["edit_page"],
+                                preferred_gender=gender_labels.index(mp_gender_choice),
+                                liked_ids=liked_ids, disliked_ids=disliked_ids,
+                            )
+                        st.success("✅ 已更新會員喜好設定。")
+                        st.session_state.mp_data = None
+                    except Exception as e:
+                        st.error(f"更新失敗：{e}")
+
     # --------------------------------------------------
     # 舊客快速建單：建單後結果顯示
     # v8.8：限定只在「舊客快速建單」分頁顯示，避免切到其他分頁後，
@@ -2269,4 +2383,4 @@ else:
             copy_button("複製 LINE 訊息", line_message, "copy-line-message")
         with col_memo:
             st.text_area("N-J Memo", NJ_MEMO, height=200, label_visibility="collapsed", key="nj_memo_order_result")
-            copy_button("複製 N-J Memo", NJ_MEMO, "copy-nj-memo-order-result")
+            copy_button("複製 N-J Memo", NJ_MEMO, "copy-nj-memo-order-result"
