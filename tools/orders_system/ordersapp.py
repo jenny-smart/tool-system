@@ -1,10 +1,16 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.51
+# 版本：v8.53
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.53
+# - 「整理預約下次服務」結果表格的姓名改成可點擊連到客人 LINE 聊天視窗
+#   （改用 markdown 表格呈現，姓名欄是 [姓名](LINE網址) 超連結）。
+# v8.52
+# - 「整理預約下次服務」新增一個 Tab 分隔版本的複製按鈕，貼到 Google Sheets
+#   時會自動分欄（原本斜線分隔的版本貼上去整行只會在同一格，不會分欄）。
 # v8.51
 # - 會員喜好設定：把每位專員的「不變/喜愛/不喜愛」單選按鈕改成姓名前面
 #   兩個獨立勾選框（喜愛專員／不喜愛專員）；同時勾選兩者時擋下送出按鈕
@@ -2276,13 +2282,42 @@ else:
                 st.info("這個區間內沒有預約下次服務的評價紀錄。")
             else:
                 st.success(f"✅ 找到 {len(rn_results)} 筆預約下次服務的紀錄：")
-                st.dataframe(rn_results, use_container_width=True, hide_index=True)
+                # v2026.07.07 新增：姓名可以直接點擊連到客人的 LINE 聊天視窗。
+                # st.dataframe 的 LinkColumn 沒辦法讓儲存格顯示「姓名文字」但連到
+                # 「另一個網址」（display_text 只能重新格式化網址本身的文字），
+                # 所以改用 markdown 表格，姓名欄直接用 [姓名](LINE網址) 的超連結。
+                _rn_headers = ["評價日期", "姓名", "電話", "地址", "預約下次日期", "預約下次時間", "服務日期及時間", "服務人數"]
+                _rn_md_lines = [
+                    "| " + " | ".join(_rn_headers) + " |",
+                    "|" + "|".join(["---"] * len(_rn_headers)) + "|",
+                ]
+                for r in rn_results:
+                    name_cell = f"[{r['姓名']}]({r['LINE']})" if r.get("LINE") else r["姓名"]
+                    _rn_md_lines.append(
+                        "| " + " | ".join([
+                            r["評價日期"], name_cell, r["電話"], r["地址"],
+                            r["預約下次日期"], r["預約下次時間"], r["服務日期及時間"], r["服務人數"],
+                        ]) + " |"
+                    )
+                st.markdown("\n".join(_rn_md_lines))
                 rn_text = "\n".join(
                     f"{r['評價日期']}/ {r['姓名']}/ {r['電話']} /{r['地址']}/{r['預約下次日期']} "
                     f"/{r['預約下次時間']}/{r['服務日期及時間']} {r['服務人數']}"
                     for r in rn_results
                 )
-                copy_button("複製整理結果", rn_text, "copy_rn_results")
+                # v2026.07.07 新增：Google Sheets 貼上時要能自動分欄，必須是用
+                # Tab 字元分隔（貼上純文字時瀏覽器複製到剪貼簿只會是斜線分隔的
+                # 一整行文字，Sheets 不會自動拆欄）。這裡另外組一份 Tab 分隔版本，
+                # 供貼到 Google Sheets 專用。
+                rn_tsv = "\n".join(
+                    "\t".join([
+                        r["評價日期"], r["姓名"], r["電話"], r["地址"],
+                        r["預約下次日期"], r["預約下次時間"], r["服務日期及時間"], r["服務人數"],
+                    ])
+                    for r in rn_results
+                )
+                copy_button("複製整理結果（文字訊息用）", rn_text, "copy_rn_results")
+                copy_button("複製整理結果（貼到 Google Sheets 用，會自動分欄）", rn_tsv, "copy_rn_results_tsv")
 
     elif single_feature == "會員喜好設定":
         info_panel("使用說明", [
