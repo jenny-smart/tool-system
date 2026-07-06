@@ -1,9 +1,18 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.40
+# 版本：v8.42
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.42
+# - 新功能：整理預約下次服務。新增 fetch_rating_next_appointments，搜尋
+#   /rating 評價日期區間內有勾選預約下次服務的評價，回頭查每筆訂單抓出
+#   電話/地址/服務日期時數/人數，組成「評價日期／姓名／電話／地址／
+#   預約下次日期／預約下次時間／服務日期及時間／服務人數」的整理名單。
+# v8.41
+# - 「查無班表或人數不足」的擋單訊息加上除錯資訊（area_id/company_id/
+#   get_section 原始回應前300字），方便比對排班頁畫面看到的人力跟系統
+#   查詢班表時用的區域是否一致。
 # v8.40
 # - 新客建單時查到電話其實已是舊客會員，新增 existing_member_warning 提醒
 #   （不再默默沿用舊會員資料，完全不告知客服）。
@@ -1328,6 +1337,8 @@ def quick_create_order(
         raise Exception(
             f"查無班表或人數不足（需要 {_need} 人，目前排班頁只有 {len(cleaners)} 人可指派），"
             f"依規定人數不足不能成單，請先確認/補足班表後再建單。"
+            f"\n🔧 除錯：area_id={best_addr.get('area_id')}　company_id={best_addr.get('company_id')}"
+            f"\nget_section 原始回應前300字：{str(raw_section)[:300]}"
         )
     # v2026.07.10：修正重大 bug——前面 check_contain 若失敗，可能借用過
     # /booking/single 頁面的 token（見上面 v8.5 的備援邏輯），並把 token
@@ -3219,6 +3230,101 @@ def create_stored_value_purchase_order(
     }
 
 
+_WEEKDAY_ZH = ["一", "二", "三", "四", "五", "六", "日"]
+
+
+def fetch_rating_next_appointments(env_name, backend_email, backend_password, date_s, date_e, max_pages=30):
+    """
+    v2026.07.07 新功能：整理「預約下次服務」名單。
+    查詢 /rating（評價管理）在指定評價日期區間內、有勾選「預約下次服務」的評價，
+    針對每一筆有填「預約下一次服務時間」的評價，再回頭查詢被評價的那筆訂單本身
+    （訂單編號），抓出電話/地址/服務日期時間/服務人數，組出：
+    評價日期／姓名／電話／地址／預約下次日期／預約下次時間／服務日期及時間／服務人數
+    這一整排資訊，供客服彙整「下次要主動聯繫/確認」的名單。
+    """
+    base_url = _configure_environment(env_name)
+    session = requests.Session()
+    if not login(session, backend_email, backend_password):
+        raise Exception("後台登入失敗，請確認帳號密碼")
+
+    rows = []
+    for page in range(1, max_pages + 1):
+        resp = session.get(
+            f"{base_url}/rating",
+            params={"date_s": date_s or "", "date_e": date_e or "", "next_time": "on", "page": page},
+            headers=HEADERS, allow_redirects=True,
+        )
+        if resp.status_code != 200:
+            break
+        soup = BeautifulSoup(resp.text, "html.parser")
+        table = soup.find("table")
+        if not table:
+            break
+        trs = table.find("tbody").find_all("tr") if table.find("tbody") else []
+        if not trs:
+            break
+        for tr in trs:
+            cells = tr.find_all("td")
+            if len(cells) < 3:
+                continue
+            name_cell, content_cell, date_cell = cells[0], cells[1], cells[2]
+            name_link = name_cell.find("a", href=re.compile(r"/member\?keyword="))
+            order_link = name_cell.find("a", href=re.compile(r"/purchase\?keyword="))
+            name = name_link.get_text(strip=True) if name_link else ""
+            order_no = order_link.get_text(strip=True) if order_link else ""
+            rating_date_text = date_cell.get_text(strip=True)
+            rating_date = rating_date_text.split(" ")[0] if rating_date_text else ""
+
+            content_text = content_cell.get_text(" ", strip=True)
+            m = re.search(r"預約下一次服務時間[：:]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}-\d{2}:\d{2})", content_text)
+            if not m or not order_no:
+                continue
+            next_date, next_time = m.group(1), m.group(2)
+            rows.append({
+                "rating_date": rating_date, "name": name, "order_no": order_no,
+                "next_date": next_date, "next_time": next_time,
+            })
+        if len(trs) < 15:
+            break
+
+    results = []
+    for row in rows:
+        try:
+            block = _fetch_purchase_block_for_order_no(session, row["order_no"])
+            lines = block.get("lines", [])
+            joined = "\n".join(lines)
+            address = _extract_address_line(lines)
+            phone = _extract_phone_from_block_lines(lines)
+            service_date, service_time = _parse_service_date_time_loose(joined)
+            person, _ = _extract_person_hour_line(joined)
+            if not person:
+                person = _count_staff_from_lines(lines)
+            weekday = ""
+            if service_date:
+                try:
+                    y, mo, d = [int(x) for x in service_date.split("-")]
+                    weekday = _WEEKDAY_ZH[date(y, mo, d).weekday()]
+                except Exception:
+                    weekday = ""
+            service_dt_display = (
+                f"{service_date} ({weekday}) {service_time}" if service_date else "（查無服務日期）"
+            )
+            results.append({
+                "評價日期": row["rating_date"], "姓名": row["name"], "電話": phone,
+                "地址": address, "預約下次日期": row["next_date"], "預約下次時間": row["next_time"],
+                "服務日期及時間": service_dt_display, "服務人數": f"{person}人" if person else "",
+                "訂單編號": row["order_no"],
+            })
+        except Exception as e:
+            results.append({
+                "評價日期": row["rating_date"], "姓名": row["name"], "電話": "",
+                "地址": "", "預約下次日期": row["next_date"], "預約下次時間": row["next_time"],
+                "服務日期及時間": f"⚠️ 查詢訂單失敗：{e}", "服務人數": "",
+                "訂單編號": row["order_no"],
+            })
+    return results
+
+
 def build_line_message_from_order_no(env_name, backend_email, backend_password, order_no, fallback_region="台北"):
     base_url = _configure_environment(env_name)
     session = requests.Session()
@@ -4181,9 +4287,16 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         _cleaners = extract_cleaners_from_section_response(_raw_section, _slot) if _slot_found else []
 
     if not _slot_found or len(_cleaners) < _need:
+        # v2026.07.07：加上診斷資訊——地址審核期間解析出的 area_id/company_id，
+        # 以及 get_section 實際回傳內容的前 300 字。之前只顯示「0人可指派」，
+        # 但排班頁明明看得到人，無法判斷是查詢班表時用錯了 area_id/company_id
+        # （查到别的區域去了），還是 get_section 回傳格式跟解析邏輯對不上，
+        # 這樣至少能比對排班頁畫面上顯示的區域是否跟這裡解析出來的一致。
         raise Exception(
             f"查無班表或人數不足（需要 {_need} 人，目前排班頁只有 {len(_cleaners)} 人可指派），"
             f"依規定人數不足不能成單，請先確認/補足班表後再建單。"
+            f"\n🔧 除錯：area_id={area_id}　company_id={company_id}　country_id={country_id}"
+            f"\nget_section 原始回應前300字：{str(_raw_section)[:300]}"
         )
 
     # Step 5: POST /booking/single
