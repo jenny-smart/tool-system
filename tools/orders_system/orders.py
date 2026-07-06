@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.07-4
+# 版本：v2026.07.07-5
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
 # 最後更新：2026-07-07
 #
 # Change Log
+# v2026.07.07-5
+# - 修正 fetch_recent_service_records 抓專員姓名時，把連結內附帶的「(評分
+#   數字)」也一起抓進來的 bug（例如「嚴慶隆(3)」而不是「嚴慶隆」），改成
+#   抓完後把結尾的 (數字) 去掉，只留姓名本身。
 # v2026.07.07-4
 # - 新功能：會員喜好設定。新增 fetch_member_edit_page（讀取/解析會員編輯頁，
 #   含完整喜愛/不喜愛專員名單與目前勾選狀態）、submit_member_preferences
@@ -1122,7 +1126,16 @@ def fetch_recent_service_records(session, phone, name, n=5):
         shift_links = date_cell.find_all("a", href=re.compile(r"/schedule/edit\?"))
         if not shift_links:
             continue
-        cleaner_names = [a.get_text(strip=True) for a in shift_links if a.get_text(strip=True)]
+        # v2026.07.07 修正：<a> 連結內除了專員姓名（包在 <span> 裡）之外，
+        # 後面還接著純文字的「(n)」評分數字，get_text() 會把整個 <a> 裡的文字
+        # 全部串在一起，導致抓到「嚴慶隆(3)」而不是單純的「嚴慶隆」。這裡改成
+        # 抓到文字後，把結尾的 (數字) 去掉，只保留姓名本身。
+        cleaner_names = []
+        for a in shift_links:
+            raw_name = a.get_text(strip=True)
+            clean_name = re.sub(r"\(\d+\)\s*$", "", raw_name).strip()
+            if clean_name:
+                cleaner_names.append(clean_name)
         date_text = date_cell.get_text(" ", strip=True)
         m = re.search(r"(\d{4}-\d{2}-\d{2})", date_text)
         date_clean = m.group(1) if m else ""
