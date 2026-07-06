@@ -1,11 +1,36 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.13-2
+# 版本：v2026.07.07-3
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
-# 最後更新：2026-07-13
+# 最後更新：2026-07-07
 #
 # Change Log
-# v2026.07.13-2
+# v2026.07.07-3
+# - 修正批次建單「查詢地址/地區失敗」誤擋單的重大邏輯錯誤：手動在後台操作
+#   證實，選擇會員「已存在的下拉地址」時，畫面本來就是直接沿用會員資料裡
+#   存好的 areaId/lat/lng，check_contain 失敗也照樣送得出訂單（check_contain
+#   只是順便再確認，不是必要條件）。之前的程式碼把 check_contain 當成每次
+#   都要成功的硬性條件，導致已知、能正常服務的地址也被誤擋下來。現在改成
+#   只有在 best_addr 本身完全沒有 area_id 時才需要 check_contain 成功。
+# v2026.07.07-2
+# - 批次建單「查詢地址/地區失敗」加上除錯資訊（HTTP狀態碼、lat/lng、回應
+#   內容前300字）。check_contain 只有 HTTP 層級失敗（非200或非合法JSON）
+#   才會走到這個錯誤，不是地址真的判斷不出區域（那種情況會直接沿用既有
+#   area_id/company_id 不會擋單），所以需要實際狀態碼才能判斷根因
+#   （常見原因：token過期、或這筆地址沒有已存的經緯度、又剛好 Google Maps
+#   金鑰沒設定，導致 lat/lng 送空值給後台）。
+# v2026.07.07-1
+# - 修正 add_bonus_note_to_order 找不到編輯ID的 bug：原本只靠線上搜尋拿
+#   編輯ID，找不到就直接失敗；現在加上跟其他函式一致的 fallback，改用
+#   訂單編號直接算編輯ID（_purchase_edit_id_from_order_no）。
+# - find_orders_without_line_link / find_pending_stored_value_orders 新增
+#   return_debug 參數，回傳候選訂單數/是否撞到頁數上限等除錯資訊。
+# - 修正 LOGIN_URL 沒有跟著 env_name 切換環境的 bug（3處：
+#   find_orders_without_line_link、find_pending_stored_value_orders、
+#   apply_bonus_notes）：原本只切換 BASE_URL/PURCHASE_URL，LOGIN_URL 卻
+#   永遠停在模組載入當下 env.py 的 ENV 對應網域，導致選 prod 時其實是
+#   登入 dev、卻拿 dev 的 session cookie 去查 prod，永遠查不到資料。
+# 舊版：v2026.07.13-2（此日期為先前誤植，今天實際日期為 2026-07-07）
 # - find_pending_stored_value_orders 的 purchase_status 參數新增支援傳入
 #   list/tuple（例如 ["0","1"] 代表「待付款＋已付款」的組合篩選）。因為
 #   後台的付款狀態欄位只吃單一值，傳清單時不會送給後台篩選，改成抓回來
@@ -2313,8 +2338,36 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         token,
         clean_type_id,
     )
-    if not addr_check:
-        raise Exception(f"查詢地址/地區失敗：{selected_address}")
+    if not addr_check and not str(best_addr.get("area_id", "")).strip():
+        # v2026.07.07 修正重大邏輯錯誤：這裡原本只要 check_contain 失敗就直接
+        # 擋單，但手動在後台操作證實——選「已存在的下拉地址」時，畫面本來就
+        # 是直接沿用會員資料裡存好的 areaId/lat/lng（changeMemberAddress），
+        # 就算後續 check_contain 沒成功也照樣送得出訂單，因為 area_id 早就從
+        # 下拉選單帶進來了，check_contain 只是順便再確認一次、不是必要條件。
+        # 之前的程式碼把 check_contain 當成每次都要成功的硬性條件，導致明明
+        # 是已知、能正常服務的地址，也會被誤擋下來。現在改成：只有在
+        # best_addr 本身完全沒有 area_id（代表這筆地址真的資料不全，不是已知
+        # 下拉地址）時，才需要 check_contain 成功；已知地址則不因
+        # check_contain 失敗而擋單，直接沿用 best_addr 原本的資料繼續。
+        _debug_resp = session.post(
+            CHECK_CONTAIN_URL,
+            data={
+                "memberId": member.get("member_id", ""),
+                "cleanTypeId": clean_type_id,
+                "address": selected_address,
+                "lat": best_addr.get("lat", "") or "",
+                "lng": best_addr.get("lng", "") or "",
+                "_token": token,
+            },
+            headers=HEADERS,
+            allow_redirects=True,
+        )
+        raise Exception(
+            f"查詢地址/地區失敗：{selected_address}"
+            f"\n🔧 除錯：HTTP狀態碼={_debug_resp.status_code}　"
+            f"lat={best_addr.get('lat', '')}　lng={best_addr.get('lng', '')}"
+            f"\n回應內容前300字：{_debug_resp.text[:300]}"
+        )
 
     # 確認是否真的有模擬按下「查詢地址」
     print("[DEBUG] check_contain raw =", addr_check)
@@ -2324,8 +2377,8 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
     except Exception:
         pass
 
-    area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
-    purchase_info = addr_check.get("purchase") if isinstance(addr_check.get("purchase"), dict) else {}
+    area_info = addr_check.get("area") if isinstance(addr_check, dict) and isinstance(addr_check.get("area"), dict) else {}
+    purchase_info = addr_check.get("purchase") if isinstance(addr_check, dict) and isinstance(addr_check.get("purchase"), dict) else {}
 
     if area_info:
         best_addr["area_id"] = area_info.get("area_id", best_addr.get("area_id"))
@@ -3170,6 +3223,7 @@ def find_orders_without_line_link(
     paid_at_s=None, paid_at_e=None,
     clean_date_s=None, clean_date_e=None,
     max_pages=80,
+    return_debug=False,
 ):
     """
     v2026.07.11-3：獨立工具——搜尋「訂購資訊」欄位裡沒有 LINE 連結的訂單，
@@ -3194,7 +3248,7 @@ def find_orders_without_line_link(
     </a>，這裡用 extract_order_cards_from_purchase_html 解析後只留得下
     "LINE" 這個文字），沒有 LINE 的客人這一行整個不會出現。
     """
-    global BASE_URL, ORDER_PREFIX, PURCHASE_URL
+    global BASE_URL, ORDER_PREFIX, PURCHASE_URL, LOGIN_URL
     if env_name == "dev":
         BASE_URL = BASE_URL_DEV
         ORDER_PREFIX = ORDER_PREFIX_DEV
@@ -3202,6 +3256,10 @@ def find_orders_without_line_link(
         BASE_URL = BASE_URL_PROD
         ORDER_PREFIX = ORDER_PREFIX_PROD
     PURCHASE_URL = f"{BASE_URL}/purchase"
+    LOGIN_URL = f"{BASE_URL}/login"  # v2026.07.06 修正：原本這裡漏了同步更新 LOGIN_URL，
+    # 導致不管選哪個環境，login() 永遠登入模組載入當下 env.py 的 ENV 對應網域
+    # （目前是 dev），session cookie 只在該網域有效，選 prod 時後續查詢就會
+    # 因為帶著錯網域的 cookie 被當成未登入，掃到 0 筆候選訂單。
 
     session = requests.Session()
     if not login(session, backend_email, backend_password):
@@ -3222,7 +3280,26 @@ def find_orders_without_line_link(
     elif paid_at_s or paid_at_e:
         pre_filter = {"paid_at_s": paid_at_s or _far_past, "paid_at_e": paid_at_e or _far_future}
 
-    all_blocks = _fetch_all_purchase_blocks_with_filters(session, pre_filter, max_pages=max_pages)
+    all_blocks = []
+    edit_id_map = {}
+    hit_page_limit = True
+    for page in range(1, max_pages + 1):
+        params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
+        params.update(pre_filter)
+        params["page"] = str(page)
+        resp = session.get(PURCHASE_URL, params=params, headers=HEADERS, allow_redirects=True)
+        if resp.status_code != 200:
+            hit_page_limit = False
+            break
+        blocks = extract_order_cards_from_purchase_html(resp.text)
+        if not blocks:
+            hit_page_limit = False
+            break
+        all_blocks.extend(blocks)
+        edit_id_map.update(_extract_edit_id_map_from_raw_html(resp.text))
+        if len(blocks) < 20:
+            hit_page_limit = False
+            break
 
     results = []
     for block in all_blocks:
@@ -3245,7 +3322,10 @@ def find_orders_without_line_link(
         if paid_at_e and (not paid_date or paid_date > paid_at_e):
             continue
 
-        if "LINE" in lines:
+        line_blank = _order_edit_line_url_is_blank(session, order_no, edit_id_map.get(order_no))
+        if line_blank is False:
+            continue
+        if line_blank is None and "LINE" in lines:
             continue
 
         phone = ""
@@ -3256,8 +3336,23 @@ def find_orders_without_line_link(
                 if idx > 0:
                     name = lines[idx - 1]
                 break
+        if "檸檬" in name or "保留" in name:
+            continue
         results.append({"order_no": order_no, "name": name, "phone": phone})
 
+    if return_debug:
+        # v2026.07.06：診斷用資訊，方便分辨「prod 找不到資料」到底是卡在
+        # 哪一關——是後台列表頁根本抓不到候選訂單（scanned_candidates 是
+        # 0，代表登入/篩選參數/分頁在該環境有問題），還是候選訂單有抓到、
+        # 只是逐筆判斷後真的都有 LINE 連結。
+        debug = {
+            "env": env_name,
+            "base_url": BASE_URL,
+            "scanned_candidates": len(all_blocks),
+            "matched_without_line": len(results),
+            "hit_page_limit": hit_page_limit,
+        }
+        return results, debug
     return results
 
 
@@ -3287,12 +3382,26 @@ def _extract_notice_map_from_raw_html(html):
     return notice_map
 
 
+def _extract_edit_id_map_from_raw_html(html):
+    order_no_positions = [(m.start(), m.group(0)) for m in re.finditer(ORDER_NO_REGEX, html)]
+    edit_id_map = {}
+    for i, (pos, order_no) in enumerate(order_no_positions):
+        end = order_no_positions[i + 1][0] if i + 1 < len(order_no_positions) else len(html)
+        segment = html[pos:end]
+        m = re.search(r"/purchase/edit/(\d+)", segment)
+        if m:
+            edit_id_map[order_no] = m.group(1)
+    return edit_id_map
+
+
 def find_pending_stored_value_orders(
     env_name, backend_email, backend_password,
     date_s=None, date_e=None,
     paid_at_s=None, paid_at_e=None,
     purchase_status=None,
+    notice_status="blank",
     max_pages=80,
+    return_debug=False,
 ):
     """
     v2026.07.13-2：獨立工具——搜尋「購買項目：儲值金」且「客服備註是空白」的
@@ -3312,7 +3421,7 @@ def find_pending_stored_value_orders(
     「客服備註是否為空白」用 _extract_notice_map_from_raw_html 從原始
     HTML 判斷（get_text() 純文字解析看不到這個資訊）。
     """
-    global BASE_URL, ORDER_PREFIX, PURCHASE_URL
+    global BASE_URL, ORDER_PREFIX, PURCHASE_URL, LOGIN_URL
     if env_name == "dev":
         BASE_URL = BASE_URL_DEV
         ORDER_PREFIX = ORDER_PREFIX_DEV
@@ -3320,6 +3429,10 @@ def find_pending_stored_value_orders(
         BASE_URL = BASE_URL_PROD
         ORDER_PREFIX = ORDER_PREFIX_PROD
     PURCHASE_URL = f"{BASE_URL}/purchase"
+    LOGIN_URL = f"{BASE_URL}/login"  # v2026.07.06 修正：原本這裡漏了同步更新 LOGIN_URL，
+    # 導致不管選哪個環境，login() 永遠登入模組載入當下 env.py 的 ENV 對應網域
+    # （目前是 dev），session cookie 只在該網域有效，選 prod 時後續查詢就會
+    # 因為帶著錯網域的 cookie 被當成未登入，掃到 0 筆候選訂單。
 
     session = requests.Session()
     if not login(session, backend_email, backend_password):
@@ -3329,8 +3442,9 @@ def find_pending_stored_value_orders(
 
     is_multi_status = isinstance(purchase_status, (list, tuple, set))
     allowed_status_texts = None
-    if is_multi_status:
-        allowed_status_texts = {_PURCHASE_STATUS_TEXT.get(str(s), "") for s in purchase_status}
+    if purchase_status:
+        status_values = purchase_status if is_multi_status else [purchase_status]
+        allowed_status_texts = {_PURCHASE_STATUS_TEXT.get(str(s), "") for s in status_values}
         allowed_status_texts.discard("")
 
     _far_past, _far_future = "2000-01-01", "2099-12-31"
@@ -3347,28 +3461,31 @@ def find_pending_stored_value_orders(
     # 分頁抓取時，順便把每一頁的原始 HTML 留著，才能判斷客服備註是否為空白
     all_blocks = []
     notice_map = {}
+    edit_id_map = {}
+    hit_page_limit = True
     for page in range(1, max_pages + 1):
         params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
         params.update(pre_filter)
         params["page"] = str(page)
         resp = session.get(PURCHASE_URL, params=params, headers=HEADERS, allow_redirects=True)
         if resp.status_code != 200:
+            hit_page_limit = False
             break
         blocks = extract_order_cards_from_purchase_html(resp.text)
         if not blocks:
+            hit_page_limit = False
             break
         all_blocks.extend(blocks)
         notice_map.update(_extract_notice_map_from_raw_html(resp.text))
+        edit_id_map.update(_extract_edit_id_map_from_raw_html(resp.text))
         if len(blocks) < 20:
+            hit_page_limit = False
             break
 
     results = []
     for block in all_blocks:
         lines = block.get("lines", [])
         order_no = block.get("order_no", "")
-
-        if notice_map.get(order_no):
-            continue  # 客服備註已有內容，跳過
 
         created_at, service_date, paid_date = _extract_order_dates_from_block_lines(lines)
 
@@ -3387,7 +3504,15 @@ def find_pending_stored_value_orders(
         if status_m:
             status_text = status_m.group(1).strip()
 
-        if is_multi_status and allowed_status_texts and status_text not in allowed_status_texts:
+        if allowed_status_texts and status_text not in allowed_status_texts:
+            continue
+        notice_text = _fetch_order_edit_notice(session, order_no, edit_id_map.get(order_no))
+        if notice_text is None:
+            notice_text = "（列表顯示有客服備註）" if notice_map.get(order_no) else ""
+        has_notice = bool(str(notice_text).strip())
+        if notice_status == "blank" and has_notice:
+            continue
+        if notice_status == "nonblank" and not has_notice:
             continue
 
         phone = ""
@@ -3398,9 +3523,59 @@ def find_pending_stored_value_orders(
                 if idx > 0:
                     name = lines[idx - 1]
                 break
-        results.append({"order_no": order_no, "name": name, "phone": phone, "purchase_status": status_text})
+        results.append({
+            "order_no": order_no,
+            "name": name,
+            "phone": phone,
+            "purchase_status": status_text,
+            "paid_date": paid_date or "",
+            "notice": notice_text,
+        })
 
+    if return_debug:
+        debug = {
+            "env": env_name,
+            "base_url": BASE_URL,
+            "scanned_candidates": len(all_blocks),
+            "matched": len(results),
+            "hit_page_limit": hit_page_limit,
+        }
+        return results, debug
     return results
+
+
+def _purchase_edit_id_from_order_no(order_no):
+    digits = re.sub(r"\D", "", str(order_no or ""))
+    return str(int(digits)) if digits else ""
+
+
+def _order_edit_line_url_is_blank(session, order_no, edit_id=None):
+    edit_id = edit_id or _fetch_order_edit_id(session, order_no) or _purchase_edit_id_from_order_no(order_no)
+    if not edit_id:
+        return None
+    resp = session.get(f"{BASE_URL}/purchase/edit/{edit_id}", headers=HEADERS, allow_redirects=True)
+    if resp.status_code != 200:
+        return None
+    soup = BeautifulSoup(resp.text, "html.parser")
+    line_input = soup.find("input", attrs={"name": "line"})
+    if line_input is None:
+        return None
+    return not str(line_input.get("value") or "").strip()
+
+
+def _fetch_order_edit_notice(session, order_no, edit_id=None):
+    edit_id = edit_id or _fetch_order_edit_id(session, order_no) or _purchase_edit_id_from_order_no(order_no)
+    if not edit_id:
+        return None
+    resp = session.get(f"{BASE_URL}/purchase/edit/{edit_id}", headers=HEADERS, allow_redirects=True)
+    if resp.status_code != 200:
+        return None
+    soup = BeautifulSoup(resp.text, "html.parser")
+    notice = soup.find("textarea", attrs={"name": "notice"}) or soup.find("input", attrs={"name": "notice"})
+    if notice is None:
+        return None
+    value = notice.get("value") if notice.name == "input" else notice.get_text()
+    return str(value or "").strip()
 
 
 def _fetch_order_edit_id(session, order_no):
@@ -3435,7 +3610,15 @@ def add_bonus_note_to_order(session, base_url, order_no, bonus_names):
     解析。改成優先從這包 JSON 讀出這些欄位的真實值，蓋掉靜態 HTML 解析
     可能抓錯的部分，只有「notice」這個欄位是我們自己要更新的。
     """
-    edit_id = _fetch_order_edit_id(session, order_no)
+    # v2026.07.06 修正：跟 _order_edit_line_url_is_blank / _fetch_order_edit_notice
+    # 用同一套「先試線上搜尋，找不到再退而求其次用訂單編號直接算」的邏輯。
+    # 原本這裡只呼叫 _fetch_order_edit_id（用 orderNo 參數送一次 PURCHASE_URL
+    # 查詢），如果那次查詢因為任何原因沒抓到（分頁、篩選參數、prod 資料量
+    # 較大等），就直接判定「找不到編輯 ID」而失敗，即使訂單編號本身其實
+    # 就能算出正確的編輯 ID（LC00212093 → 212093，跟後台編輯頁網址
+    # /purchase/edit/212093 一致）。加上這個 fallback 之後，就算線上搜尋
+    # 失敗，也能用訂單編號直接算出編輯 ID 繼續執行。
+    edit_id = _fetch_order_edit_id(session, order_no) or _purchase_edit_id_from_order_no(order_no)
     if not edit_id:
         return False, f"找不到訂單 {order_no} 的編輯 ID"
     edit_url = f"{base_url}/purchase/edit/{edit_id}"
@@ -3503,7 +3686,7 @@ def apply_bonus_notes(env_name, backend_email, backend_password, mapping):
     [{"order_no": ..., "cust_name": ..., "bonus_names": [...]}]
     這裡統一登入一次後，逐筆呼叫 add_bonus_note_to_order。
     """
-    global BASE_URL, ORDER_PREFIX, PURCHASE_URL
+    global BASE_URL, ORDER_PREFIX, PURCHASE_URL, LOGIN_URL
     if env_name == "dev":
         BASE_URL = BASE_URL_DEV
         ORDER_PREFIX = ORDER_PREFIX_DEV
@@ -3511,6 +3694,10 @@ def apply_bonus_notes(env_name, backend_email, backend_password, mapping):
         BASE_URL = BASE_URL_PROD
         ORDER_PREFIX = ORDER_PREFIX_PROD
     PURCHASE_URL = f"{BASE_URL}/purchase"
+    LOGIN_URL = f"{BASE_URL}/login"  # v2026.07.06 修正：原本這裡漏了同步更新 LOGIN_URL，
+    # 導致不管選哪個環境，login() 永遠登入模組載入當下 env.py 的 ENV 對應網域
+    # （目前是 dev），session cookie 只在該網域有效，選 prod 時後續查詢就會
+    # 因為帶著錯網域的 cookie 被當成未登入，掃到 0 筆候選訂單。
 
     session = requests.Session()
     if not login(session, backend_email, backend_password):
