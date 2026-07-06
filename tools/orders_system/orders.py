@@ -1,24 +1,10 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.07-3
+# 版本：v2026.07.07-1
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
 # 最後更新：2026-07-07
 #
 # Change Log
-# v2026.07.07-3
-# - 修正批次建單「查詢地址/地區失敗」誤擋單的重大邏輯錯誤：手動在後台操作
-#   證實，選擇會員「已存在的下拉地址」時，畫面本來就是直接沿用會員資料裡
-#   存好的 areaId/lat/lng，check_contain 失敗也照樣送得出訂單（check_contain
-#   只是順便再確認，不是必要條件）。之前的程式碼把 check_contain 當成每次
-#   都要成功的硬性條件，導致已知、能正常服務的地址也被誤擋下來。現在改成
-#   只有在 best_addr 本身完全沒有 area_id 時才需要 check_contain 成功。
-# v2026.07.07-2
-# - 批次建單「查詢地址/地區失敗」加上除錯資訊（HTTP狀態碼、lat/lng、回應
-#   內容前300字）。check_contain 只有 HTTP 層級失敗（非200或非合法JSON）
-#   才會走到這個錯誤，不是地址真的判斷不出區域（那種情況會直接沿用既有
-#   area_id/company_id 不會擋單），所以需要實際狀態碼才能判斷根因
-#   （常見原因：token過期、或這筆地址沒有已存的經緯度、又剛好 Google Maps
-#   金鑰沒設定，導致 lat/lng 送空值給後台）。
 # v2026.07.07-1
 # - 修正 add_bonus_note_to_order 找不到編輯ID的 bug：原本只靠線上搜尋拿
 #   編輯ID，找不到就直接失敗；現在加上跟其他函式一致的 fallback，改用
@@ -2338,36 +2324,8 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         token,
         clean_type_id,
     )
-    if not addr_check and not str(best_addr.get("area_id", "")).strip():
-        # v2026.07.07 修正重大邏輯錯誤：這裡原本只要 check_contain 失敗就直接
-        # 擋單，但手動在後台操作證實——選「已存在的下拉地址」時，畫面本來就
-        # 是直接沿用會員資料裡存好的 areaId/lat/lng（changeMemberAddress），
-        # 就算後續 check_contain 沒成功也照樣送得出訂單，因為 area_id 早就從
-        # 下拉選單帶進來了，check_contain 只是順便再確認一次、不是必要條件。
-        # 之前的程式碼把 check_contain 當成每次都要成功的硬性條件，導致明明
-        # 是已知、能正常服務的地址，也會被誤擋下來。現在改成：只有在
-        # best_addr 本身完全沒有 area_id（代表這筆地址真的資料不全，不是已知
-        # 下拉地址）時，才需要 check_contain 成功；已知地址則不因
-        # check_contain 失敗而擋單，直接沿用 best_addr 原本的資料繼續。
-        _debug_resp = session.post(
-            CHECK_CONTAIN_URL,
-            data={
-                "memberId": member.get("member_id", ""),
-                "cleanTypeId": clean_type_id,
-                "address": selected_address,
-                "lat": best_addr.get("lat", "") or "",
-                "lng": best_addr.get("lng", "") or "",
-                "_token": token,
-            },
-            headers=HEADERS,
-            allow_redirects=True,
-        )
-        raise Exception(
-            f"查詢地址/地區失敗：{selected_address}"
-            f"\n🔧 除錯：HTTP狀態碼={_debug_resp.status_code}　"
-            f"lat={best_addr.get('lat', '')}　lng={best_addr.get('lng', '')}"
-            f"\n回應內容前300字：{_debug_resp.text[:300]}"
-        )
+    if not addr_check:
+        raise Exception(f"查詢地址/地區失敗：{selected_address}")
 
     # 確認是否真的有模擬按下「查詢地址」
     print("[DEBUG] check_contain raw =", addr_check)
@@ -2377,8 +2335,8 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
     except Exception:
         pass
 
-    area_info = addr_check.get("area") if isinstance(addr_check, dict) and isinstance(addr_check.get("area"), dict) else {}
-    purchase_info = addr_check.get("purchase") if isinstance(addr_check, dict) and isinstance(addr_check.get("purchase"), dict) else {}
+    area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
+    purchase_info = addr_check.get("purchase") if isinstance(addr_check.get("purchase"), dict) else {}
 
     if area_info:
         best_addr["area_id"] = area_info.get("area_id", best_addr.get("area_id"))
