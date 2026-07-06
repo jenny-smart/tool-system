@@ -1,19 +1,10 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.47
+# 版本：v8.45
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
-# v8.47
-# - 「新客資料拆解」拿掉手動查詢會員的按鈕，改成按「建立新客訂單」時自動
-#   先查電話是否為既有會員。是既有會員的話不繼續走新客流程，改成在按鈕
-#   下方顯示提醒＋一個「➡️ 用舊客身份送出此預約」按鈕，把已收集到的電話/
-#   地址/人時/付款/發票資訊直接帶進舊客建單流程送出，不用客服重填。
-# v8.46
-# - 「新客資料拆解」（貼上整段文字建單）加上明確的電話查會員步驟：解析出
-#   電話後可按鈕查詢是否已是既有會員，是的話直接告知（含既有地址），
-#   不用等建單失敗/成功才知道，跟「舊客快速建單」一樣先查電話再繼續。
 # v8.45
 # - 顯示新客建單流程回傳的 existing_member_warning（電話其實已是舊客會員
 #   時的提醒）。
@@ -1549,7 +1540,6 @@ else:
             # （包含成功訊息、LINE 訊息），避免這次失敗/拆解失敗時，
             # 舊的成功結果還留在畫面上跟新的錯誤訊息重疊混淆。
             st.session_state.nc_result = {}
-            st.session_state.nc_pending_old = None
             if not nc_raw.strip():
                 st.error("請貼上客人資料")
             elif not backend_email.strip() or not backend_password.strip():
@@ -1578,137 +1568,54 @@ else:
                 elif _missing:
                     st.error(f"資料拆解失敗，請確認以下欄位：{'、'.join(_missing)}\n\n拆解結果：{_parsed}")
                 else:
-                    # v2026.07.07：送出前先查這支電話是不是既有會員，不再需要另外手動查詢。
-                    # 是既有會員的話，不繼續走新客建立流程（避免漏看歷史訂單/地址），
-                    # 改成把已收集到的電話/地址/人時/付款/發票資訊存起來，讓客服按下面
-                    # 的按鈕直接用舊客身份送出這筆預約。
                     try:
-                        with st.spinner("查詢電話是否為既有會員…"):
-                            _nc_lookup = qo.quick_lookup_member(
-                                env_name=env, backend_email=backend_email.strip(),
+                        with st.spinner(f"建立會員 → 查詢地址 → 建單（{nc_date} {nc_period} {nc_person}人{nc_hour}小時）…"):
+                            nc_result = qo.quick_create_new_customer_order(
+                                env_name=env,
+                                backend_email=backend_email.strip(),
                                 backend_password=backend_password.strip(),
-                                phone=_nc_phone.strip(),
-                                clean_type_id=CLEAN_TYPE_ID_MAP[nc_clean_type],
+                                allow_auto_lemon_shift=nc_d_allow_auto_lemon,
+                                customer={
+                                    "name": _nc_name, "phone": _nc_phone,
+                                    "email": _nc_email, "address": _nc_address,
+                                    "ping": _nc_ping, "payway": _nc_payway,
+                                    "clean_type_id": CLEAN_TYPE_ID_MAP[nc_clean_type],
+                                    "service_type": nc_service_type,
+                                    "room": str(nc_room), "bathroom": str(nc_bathroom),
+                                    "balcony": str(nc_balcony), "livingroom": str(nc_livingroom),
+                                    "kitchen": str(nc_kitchen), "window": nc_window,
+                                    "shutter": nc_shutter, "clothes": nc_clothes,
+                                    "dyson": nc_dyson, "refrigerator": nc_refrigerator,
+                                    "disinfection": nc_disinfection, "go_abord": nc_go_abroad,
+                                    "home_move": nc_home_move, "storage": nc_storage,
+                                    "cabinet": nc_cabinet, "quintuple": nc_quintuple,
+                                    "date_s": nc_date.strftime("%Y-%m-%d"),
+                                    "period_s": nc_period,
+                                    "hour": str(nc_hour),
+                                    "person": str(int(nc_person)),
+                                    "carrier": _nc_carrier,
+                                    "company_title": _nc_company_title,
+                                    "company_no": _nc_company_no,
+                                    "memo": nc_memo,
+                                    "notice": nc_notice,
+                                    "actual_time": nc_actual_time,
+                                }
                             )
-                    except Exception as e:
-                        st.error(f"查詢會員失敗：{e}")
-                        _nc_lookup = None
-
-                    if _nc_lookup is not None and _nc_lookup.get("member_payload"):
-                        _m_existing = _nc_lookup["member_payload"].get("member", {})
-                        _addrs_existing = [a.get("address", "") for a in _nc_lookup["member_payload"].get("member", {}).get("memberAddressList", []) if a.get("address")]
-                        st.session_state.nc_pending_old = {
-                            "lookup": _nc_lookup,
-                            "member_name": _m_existing.get("name", ""),
-                            "existing_addresses": _addrs_existing,
-                            "phone": _nc_phone.strip(),
-                            "address": _nc_address.strip(),
-                            "clean_type_id": CLEAN_TYPE_ID_MAP[nc_clean_type],
-                            "date_s": nc_date.strftime("%Y-%m-%d"),
-                            "period_s": nc_period,
-                            "hour": str(nc_hour),
-                            "person": str(int(nc_person)),
-                            "payway": _nc_payway,
-                            "carrier": _nc_carrier,
-                            "company_title": _nc_company_title,
-                            "company_no": _nc_company_no,
-                            "member_email": _m_existing.get("email", ""),
-                            "allow_auto_lemon_shift": nc_d_allow_auto_lemon,
-                        }
+                            # 不立即發確認信，等 user 確認後再發
+                            nc_result["mail_sent"] = False
+                            nc_result["mail_msg"] = "尚未發送"
+                            # v8.6：quick_create_new_customer_order 已回傳 build_line_message
+                            # 所需的完整欄位（date/period/region/fare 等），這裡直接組出 LINE 訊息，
+                            # 修正原本此流程從未產生 line_message、畫面永遠不顯示的問題。
+                            try:
+                                nc_result["line_message"] = build_line_message(nc_result)
+                            except Exception as _e_line_nc:
+                                nc_result["line_message"] = ""
+                                st.warning(f"LINE 訊息組裝失敗：{_e_line_nc}")
+                        st.session_state.nc_result = nc_result
                         st.rerun()
-                    elif _nc_lookup is not None:
-                        try:
-                            with st.spinner(f"建立會員 → 查詢地址 → 建單（{nc_date} {nc_period} {nc_person}人{nc_hour}小時）…"):
-                                nc_result = qo.quick_create_new_customer_order(
-                                    env_name=env,
-                                    backend_email=backend_email.strip(),
-                                    backend_password=backend_password.strip(),
-                                    allow_auto_lemon_shift=nc_d_allow_auto_lemon,
-                                    customer={
-                                        "name": _nc_name, "phone": _nc_phone,
-                                        "email": _nc_email, "address": _nc_address,
-                                        "ping": _nc_ping, "payway": _nc_payway,
-                                        "clean_type_id": CLEAN_TYPE_ID_MAP[nc_clean_type],
-                                        "service_type": nc_service_type,
-                                        "room": str(nc_room), "bathroom": str(nc_bathroom),
-                                        "balcony": str(nc_balcony), "livingroom": str(nc_livingroom),
-                                        "kitchen": str(nc_kitchen), "window": nc_window,
-                                        "shutter": nc_shutter, "clothes": nc_clothes,
-                                        "dyson": nc_dyson, "refrigerator": nc_refrigerator,
-                                        "disinfection": nc_disinfection, "go_abord": nc_go_abroad,
-                                        "home_move": nc_home_move, "storage": nc_storage,
-                                        "cabinet": nc_cabinet, "quintuple": nc_quintuple,
-                                        "date_s": nc_date.strftime("%Y-%m-%d"),
-                                        "period_s": nc_period,
-                                        "hour": str(nc_hour),
-                                        "person": str(int(nc_person)),
-                                        "carrier": _nc_carrier,
-                                        "company_title": _nc_company_title,
-                                        "company_no": _nc_company_no,
-                                        "memo": nc_memo,
-                                        "notice": nc_notice,
-                                        "actual_time": nc_actual_time,
-                                    }
-                                )
-                                # 不立即發確認信，等 user 確認後再發
-                                nc_result["mail_sent"] = False
-                                nc_result["mail_msg"] = "尚未發送"
-                                # v8.6：quick_create_new_customer_order 已回傳 build_line_message
-                                # 所需的完整欄位（date/period/region/fare 等），這裡直接組出 LINE 訊息，
-                                # 修正原本此流程從未產生 line_message、畫面永遠不顯示的問題。
-                                try:
-                                    nc_result["line_message"] = build_line_message(nc_result)
-                                except Exception as _e_line_nc:
-                                    nc_result["line_message"] = ""
-                                    st.warning(f"LINE 訊息組裝失敗：{_e_line_nc}")
-                            st.session_state.nc_result = nc_result
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"建單失敗：{e}")
-
-        # v2026.07.07：查到既有會員時，顯示在「建立新客訂單」按鈕下方，
-        # 提供一個按鈕直接改用舊客身份、帶著已收集的電話/地址/人時/付款/
-        # 發票資訊送出這筆預約，不用客服重新輸入一次。
-        _nc_pending = st.session_state.get("nc_pending_old")
-        if _nc_pending:
-            st.warning(
-                f"⚠️ 這支電話（{_nc_pending['phone']}）其實已經是舊客會員"
-                f"（姓名：{_nc_pending['member_name']}），不是新客！"
-                + (f" 既有地址：{'、'.join(_nc_pending['existing_addresses'])}" if _nc_pending['existing_addresses'] else "")
-            )
-            if st.button("➡️ 用舊客身份送出此預約", use_container_width=True, key="nc_to_old_submit_btn", type="primary"):
-                try:
-                    with st.spinner("以舊客身份建立訂單…"):
-                        _invoice = qo._invoice_payload(
-                            "三聯式" if (_nc_pending["company_title"] and _nc_pending["company_no"]) else ("手機載具" if _nc_pending["carrier"] else "會員載具"),
-                            member_email=_nc_pending["member_email"] or "",
-                            mobile_carrier=_nc_pending["carrier"],
-                            company_title=_nc_pending["company_title"],
-                            company_no=_nc_pending["company_no"],
-                        )
-                        _region_pending = get_region_by_address(_nc_pending["address"], ACCOUNTS) or "台北"
-                        old_result = qo.quick_create_order(
-                            env_name=env, payway=_nc_pending["payway"], region=_region_pending,
-                            lookup_result=_nc_pending["lookup"], address=_nc_pending["address"],
-                            clean_type_id=_nc_pending["clean_type_id"],
-                            date_s=_nc_pending["date_s"], period_s=_nc_pending["period_s"],
-                            hour=_nc_pending["hour"], person=_nc_pending["person"],
-                            carrier_info=_invoice["carrier_info"], company_no=_invoice["company_no"],
-                            company_title=_invoice["company_title"],
-                            invoice_type_override=_invoice["invoice_type_override"],
-                            carrier_type_id_override=_invoice["carrier_type_id_override"],
-                            allow_auto_lemon_shift=_nc_pending["allow_auto_lemon_shift"],
-                        )
-                        old_result["mail_sent"] = False
-                        try:
-                            old_result["line_message"] = build_line_message(old_result)
-                        except Exception as _e_line_old:
-                            old_result["line_message"] = ""
-                    st.session_state.nc_result = old_result
-                    st.session_state.nc_pending_old = None
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"以舊客身份建單失敗：{e}")
+                    except Exception as e:
+                        st.error(f"建單失敗：{e}")
 
         # 顯示建單結果
         _r = st.session_state.get("nc_result", {})
