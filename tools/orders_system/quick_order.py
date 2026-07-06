@@ -1,9 +1,19 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.42
+# 版本：v8.44
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.44
+# - 新增 _fetch_line_url_for_order_no：直接在原始 HTML 裡找對應訂單編號的
+#   <tr>，抓出裡面 chat.line.biz 的連結網址（extract_order_cards_from_purchase_html
+#   把 HTML 轉純文字時會把 href 弄丟，只剩下顯示文字「LINE」，所以需要另外
+#   抓）。fetch_rating_next_appointments 現在每筆都會多帶一個 LINE 網址欄位。
+# v8.43
+# - 修正 fetch_rating_next_appointments 漏抓迄日當天資料的 bug：後台
+#   /rating 的 date_e 篩選似乎是用「當天00:00:00」比對評價的完整時間戳記，
+#   導致迄日當天稍晚時間的評價被排除。改成送給後台的 date_e 多加一天當
+#   緩衝，抓回資料後再用本地解析出的實際評價日期重新過濾回正確區間。
 # v8.42
 # - 新功能：整理預約下次服務。新增 fetch_rating_next_appointments，搜尋
 #   /rating 評價日期區間內有勾選預約下次服務的評價，回頭查每筆訂單抓出
@@ -585,6 +595,28 @@ def _fetch_purchase_blocks_for_phone(session, phone, name="", purchase_status=""
 def list_order_numbers_for_phone(session, phone, name=""):
     blocks = _fetch_purchase_blocks_for_phone(session, phone, name=name)
     return {block["order_no"] for block in blocks if block.get("order_no")}
+
+
+def _fetch_line_url_for_order_no(session, order_no):
+    """
+    v2026.07.07 新功能：抓某張訂單卡片裡的 LINE 聊天連結網址。
+    extract_order_cards_from_purchase_html 把 HTML 轉成純文字，LINE 連結的
+    網址（href）會被丟掉，只留下顯示文字「LINE」，所以這裡改成直接在原始
+    HTML 裡找到對應訂單編號所在的那個 <tr>，再從裡面找 chat.line.biz 的連結。
+    """
+    params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
+    params["orderNo"] = str(order_no or "").strip()
+    resp = session.get(orders.PURCHASE_URL, params=params, headers=HEADERS, allow_redirects=True)
+    if resp.status_code != 200:
+        return ""
+    soup = BeautifulSoup(resp.text, "html.parser")
+    target = str(order_no or "").strip()
+    for tr in soup.find_all("tr"):
+        if target in tr.get_text():
+            line_a = tr.find("a", href=re.compile(r"chat\.line\.biz"))
+            if line_a:
+                return str(line_a.get("href", "")).strip()
+    return ""
 
 
 def _fetch_purchase_block_for_order_no(session, order_no):
@@ -3247,11 +3279,25 @@ def fetch_rating_next_appointments(env_name, backend_email, backend_password, da
     if not login(session, backend_email, backend_password):
         raise Exception("後台登入失敗，請確認帳號密碼")
 
+    # v2026.07.07 修正：後台 /rating 的 date_e 篩選似乎是用「當天 00:00:00」
+    # 去比對評價的完整時間戳記，導致迄日當天稍晚時間評價的紀錄（例如
+    # 2026-07-06 09:44:14）被排除在外，等於實際上少抓了迄日當天的資料。
+    # 這裡改成送給後台的 date_e 多加一天當緩衝，抓到的資料再用本地端解析
+    # 出來的實際評價日期，重新過濾回使用者真正要的日期區間，避免因為這個
+    # 緩衝多抓到超出範圍的資料。
+    _query_date_e = date_e
+    if date_e:
+        try:
+            _y, _m, _d = [int(x) for x in date_e.split("-")]
+            _query_date_e = (date(_y, _m, _d) + timedelta(days=1)).strftime("%Y-%m-%d")
+        except Exception:
+            _query_date_e = date_e
+
     rows = []
     for page in range(1, max_pages + 1):
         resp = session.get(
             f"{base_url}/rating",
-            params={"date_s": date_s or "", "date_e": date_e or "", "next_time": "on", "page": page},
+            params={"date_s": date_s or "", "date_e": _query_date_e or "", "next_time": "on", "page": page},
             headers=HEADERS, allow_redirects=True,
         )
         if resp.status_code != 200:
@@ -3274,6 +3320,13 @@ def fetch_rating_next_appointments(env_name, backend_email, backend_password, da
             order_no = order_link.get_text(strip=True) if order_link else ""
             rating_date_text = date_cell.get_text(strip=True)
             rating_date = rating_date_text.split(" ")[0] if rating_date_text else ""
+
+            # 因為送給後台的 date_e 多加了一天緩衝，這裡要用實際評價日期
+            # 把超出使用者原本要求範圍的紀錄擋掉，避免多抓到隔天的資料。
+            if date_s and rating_date and rating_date < date_s:
+                continue
+            if date_e and rating_date and rating_date > date_e:
+                continue
 
             content_text = content_cell.get_text(" ", strip=True)
             m = re.search(r"預約下一次服務時間[：:]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}-\d{2}:\d{2})", content_text)
@@ -3309,18 +3362,22 @@ def fetch_rating_next_appointments(env_name, backend_email, backend_password, da
             service_dt_display = (
                 f"{service_date} ({weekday}) {service_time}" if service_date else "（查無服務日期）"
             )
+            try:
+                line_url = _fetch_line_url_for_order_no(session, row["order_no"])
+            except Exception:
+                line_url = ""
             results.append({
                 "評價日期": row["rating_date"], "姓名": row["name"], "電話": phone,
                 "地址": address, "預約下次日期": row["next_date"], "預約下次時間": row["next_time"],
                 "服務日期及時間": service_dt_display, "服務人數": f"{person}人" if person else "",
-                "訂單編號": row["order_no"],
+                "訂單編號": row["order_no"], "LINE": line_url,
             })
         except Exception as e:
             results.append({
                 "評價日期": row["rating_date"], "姓名": row["name"], "電話": "",
                 "地址": "", "預約下次日期": row["next_date"], "預約下次時間": row["next_time"],
                 "服務日期及時間": f"⚠️ 查詢訂單失敗：{e}", "服務人數": "",
-                "訂單編號": row["order_no"],
+                "訂單編號": row["order_no"], "LINE": "",
             })
     return results
 
