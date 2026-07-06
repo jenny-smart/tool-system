@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.50
+# 版本：v8.51
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.51
+# - 會員喜好設定：把每位專員的「不變/喜愛/不喜愛」單選按鈕改成姓名前面
+#   兩個獨立勾選框（喜愛專員／不喜愛專員）；同時勾選兩者時擋下送出按鈕
+#   並提示衝突。
 # v8.50
 # - 新增「整理預約下次服務」分頁：搜尋評價日期區間，列出有預約下次服務的
 #   客人清單（評價日期/姓名/電話/地址/預約下次日期時間/服務日期時數人數），
@@ -2347,8 +2351,9 @@ else:
                         if cn not in unique_names:
                             unique_names.append(cn)
 
-                st.markdown("**設定喜愛/不喜愛專員：**")
+                st.markdown("**設定喜愛/不喜愛專員：**（同一位不能同時勾選兩個，若都勾了送出前會被擋下並提示）")
                 pref_choices = {}
+                has_conflict = False
                 for cn in unique_names:
                     ids = name_to_ids.get(cn, [])
                     if not ids:
@@ -2357,15 +2362,24 @@ else:
                     if len(ids) > 1:
                         st.caption(f"（注意：「{cn}」有 {len(ids)} 位同名專員，將套用到第一位，麻煩人工確認是否正確）")
                     cid = ids[0]
-                    existing = "喜愛" if roster[cid]["liked"] else ("不喜愛" if roster[cid]["disliked"] else "不變")
-                    choice = st.radio(
-                        cn, ["不變", "喜愛", "不喜愛"],
-                        index=["不變", "喜愛", "不喜愛"].index(existing),
-                        key=f"mp_pref_{cid}", horizontal=True,
-                    )
-                    pref_choices[cid] = choice
 
-                if st.button("✅ 更新會員喜好設定", key="mp_submit_btn", type="primary"):
+                    # v2026.07.07 修正：改成兩個獨立的勾選框放在姓名前面
+                    # （喜愛專員／不喜愛專員），取代原本的單選按鈕。
+                    col_like, col_dislike, col_name = st.columns([1, 1.3, 3])
+                    with col_like:
+                        is_liked = st.checkbox("喜愛專員", value=roster[cid]["liked"], key=f"mp_like_{cid}")
+                    with col_dislike:
+                        is_disliked = st.checkbox("不喜愛專員", value=roster[cid]["disliked"], key=f"mp_dislike_{cid}")
+                    with col_name:
+                        st.markdown(f"　{cn}")
+
+                    if is_liked and is_disliked:
+                        st.error(f"「{cn}」不能同時勾選喜愛和不喜愛，請取消其中一個。")
+                        has_conflict = True
+
+                    pref_choices[cid] = "喜愛" if is_liked else ("不喜愛" if is_disliked else "不變")
+
+                if st.button("✅ 更新會員喜好設定", key="mp_submit_btn", type="primary", disabled=has_conflict):
                     try:
                         liked_ids = {cid for cid, info in roster.items() if info["liked"]}
                         disliked_ids = {cid for cid, info in roster.items() if info["disliked"]}
