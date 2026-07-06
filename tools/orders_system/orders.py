@@ -1,10 +1,16 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.07-3
+# 版本：v2026.07.07-4
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
 # 最後更新：2026-07-07
 #
 # Change Log
+# v2026.07.07-4
+# - 新功能：會員喜好設定。新增 fetch_member_edit_page（讀取/解析會員編輯頁，
+#   含完整喜愛/不喜愛專員名單與目前勾選狀態）、submit_member_preferences
+#   （送出更新，沿用其他既有欄位避免被清空）、fetch_recent_service_records
+#   （查詢近N筆有排班的服務紀錄，含日期與專員姓名），供 ordersapp.py 新增的
+#   「會員喜好設定」分頁使用。
 # v2026.07.07-3
 # - 修正批次建單「查詢地址/地區失敗」誤擋單的重大邏輯錯誤：手動在後台操作
 #   證實，選擇會員「已存在的下拉地址」時，畫面本來就是直接沿用會員資料裡
@@ -954,6 +960,181 @@ def get_member(session, phone, token, clean_type_id):
         return None
 
     return result if isinstance(result, dict) and result.get("return_code") == "0000" and result.get("member") else None
+
+
+def _extract_cleaner_roster_from_member_edit_html(soup):
+    """
+    v2026.07.07 新功能：從會員編輯頁（/member/edit/{id}）解析「喜愛專員」
+    /「不喜愛專員」兩區塊的完整專員名單，回傳 {cleaner_id: {"name":..., "liked":bool, "disliked":bool}}。
+    這兩區塊列的是同一份完整專員名單，一份用 name="cleaner[]"（喜愛，checked=目前已設為喜愛），
+    一份用 name="no_cleaner[]"（不喜愛）。用這份名單可以把「近期服務專員姓名」對應回專員 id，
+    才能在送出表單時正確勾選/取消勾選對應的 checkbox。
+    """
+    roster = {}
+    for input_tag in soup.find_all("input", attrs={"name": "cleaner[]"}):
+        cid = str(input_tag.get("value", "")).strip()
+        if not cid:
+            continue
+        label = soup.find("label", attrs={"for": input_tag.get("id", "")})
+        name = re.sub(r"\[\d+\]\s*$", "", label.get_text(strip=True)) if label else ""
+        roster.setdefault(cid, {"name": name, "liked": False, "disliked": False})
+        roster[cid]["name"] = name or roster[cid]["name"]
+        roster[cid]["liked"] = bool(input_tag.has_attr("checked"))
+    for input_tag in soup.find_all("input", attrs={"name": "no_cleaner[]"}):
+        cid = str(input_tag.get("value", "")).strip()
+        if not cid:
+            continue
+        label = soup.find("label", attrs={"for": input_tag.get("id", "")})
+        name = re.sub(r"\[\d+\]\s*$", "", label.get_text(strip=True)) if label else ""
+        roster.setdefault(cid, {"name": name, "liked": False, "disliked": False})
+        roster[cid]["name"] = name or roster[cid]["name"]
+        roster[cid]["disliked"] = bool(input_tag.has_attr("checked"))
+    return roster
+
+
+def fetch_member_edit_page(session, member_id):
+    """
+    v2026.07.07 新功能：讀取會員編輯頁（/member/edit/{member_id}），解析出：
+    - token：這頁的 _token（跟登入 session 共用的 _token 不同，每頁可能不一樣）
+    - fields：其他要一起送出、不能遺漏的既有欄位值（姓名/電話/Email/備註等），
+      避免更新喜好時把這些欄位意外清空
+    - roster：完整專員名單，含目前的喜愛/不喜愛勾選狀態
+    """
+    resp = session.get(f"{BASE_URL}/member/edit/{member_id}", headers=HEADERS, allow_redirects=True)
+    if resp.status_code != 200:
+        raise Exception(f"讀取會員編輯頁失敗（HTTP {resp.status_code}），member_id={member_id}")
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    def _val(name):
+        tag = soup.find(attrs={"name": name})
+        return str(tag.get("value", "")).strip() if tag else ""
+
+    def _textarea(name):
+        tag = soup.find("textarea", attrs={"name": name})
+        return tag.get_text() if tag else ""
+
+    def _selected(name):
+        sel = soup.find("select", attrs={"name": name})
+        if not sel:
+            return ""
+        opt = sel.find("option", attrs={"selected": True})
+        return str(opt.get("value", "")).strip() if opt else ""
+
+    def _checked_radio(name):
+        tag = soup.find("input", attrs={"name": name, "checked": True})
+        return str(tag.get("value", "")).strip() if tag else ""
+
+    token_tag = soup.find("input", attrs={"name": "_token"})
+    fields = {
+        "member_level_id": _selected("member_level_id"),
+        "price_vvip": _val("price_vvip"),
+        "name": _val("name"),
+        "phone": _val("phone"),
+        "tel": _val("tel"),
+        "email": _val("email"),
+        "fbName": _val("fbName"),
+        "fb": _val("fb"),
+        "line": _val("line"),
+        "memoProcess": _textarea("memoProcess"),
+        "memoFinance": _textarea("memoFinance"),
+        "flag": _checked_radio("flag") or "1",
+        "id": _selected("id"),
+        "frequency_id": _selected("frequency_id"),
+        "notice": _textarea("notice"),
+        "preferredGender": _checked_radio("preferredGender") or "0",
+    }
+    return {
+        "token": str(token_tag.get("value", "")).strip() if token_tag else "",
+        "fields": fields,
+        "roster": _extract_cleaner_roster_from_member_edit_html(soup),
+    }
+
+
+def submit_member_preferences(session, member_id, edit_page, preferred_gender, liked_ids, disliked_ids):
+    """
+    v2026.07.07 新功能：把更新後的「喜愛/不喜愛專員」跟「喜愛專員性別」送回
+    /member/edit/{member_id}。liked_ids／disliked_ids 是完整的最終勾選清單
+    （呼叫端已經處理好「互斥」——同一個專員不能同時喜愛又不喜愛），這裡只負責
+    組表單送出，並沿用 fetch_member_edit_page 抓到的其他欄位，避免把姓名/
+    電話/備註等既有資料意外清空。
+    """
+    fields = edit_page["fields"]
+    data = {
+        "member_level_id": fields["member_level_id"],
+        "price_vvip": fields["price_vvip"],
+        "pass": "",
+        "name": fields["name"],
+        "phone": fields["phone"],
+        "tel": fields["tel"],
+        "email": fields["email"],
+        "fbName": fields["fbName"],
+        "fb": fields["fb"],
+        "line": fields["line"],
+        "memoProcess": fields["memoProcess"],
+        "memoFinance": fields["memoFinance"],
+        "flag": fields["flag"],
+        "id": fields["id"],
+        "frequency_id": fields["frequency_id"],
+        "notice": fields["notice"],
+        "preferredGender": str(preferred_gender),
+        "_token": edit_page["token"],
+    }
+    form_data = list(data.items())
+    for cid in liked_ids:
+        form_data.append(("cleaner[]", str(cid)))
+    for cid in disliked_ids:
+        form_data.append(("no_cleaner[]", str(cid)))
+
+    resp = session.post(
+        f"{BASE_URL}/member/edit/{member_id}",
+        data=form_data,
+        headers=HEADERS,
+        allow_redirects=True,
+    )
+    if resp.status_code != 200:
+        raise Exception(f"更新會員喜好失敗（HTTP {resp.status_code}）")
+    return True
+
+
+def fetch_recent_service_records(session, phone, name, n=5):
+    """
+    v2026.07.07 新功能：查詢某會員近 N 筆「有實際排班」的服務紀錄
+    （服務日期＋專員姓名），用於畫面上讓客服勾選要設定喜愛/不喜愛的專員。
+    只抓有 shift（schedule/edit 連結）的訂單，儲值金購買/尚未排班的訂單
+    沒有專員資訊，直接跳過。
+    """
+    resp = session.get(
+        f"{BASE_URL}/purchase",
+        params={"phone": phone, "name": name},
+        headers=HEADERS,
+        allow_redirects=True,
+    )
+    if resp.status_code != 200:
+        raise Exception(f"查詢服務紀錄失敗（HTTP {resp.status_code}）")
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    records = []
+    for row in soup.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 3:
+            continue
+        date_cell = cells[2]
+        shift_links = date_cell.find_all("a", href=re.compile(r"/schedule/edit\?"))
+        if not shift_links:
+            continue
+        cleaner_names = [a.get_text(strip=True) for a in shift_links if a.get_text(strip=True)]
+        date_text = date_cell.get_text(" ", strip=True)
+        m = re.search(r"(\d{4}-\d{2}-\d{2})", date_text)
+        date_clean = m.group(1) if m else ""
+        order_no_tag = row.find("td")
+        order_no_m = re.search(r"(LC|TT)\d+", order_no_tag.get_text() if order_no_tag else "")
+        records.append({
+            "date_clean": date_clean,
+            "cleaner_names": cleaner_names,
+            "order_no": order_no_m.group(0) if order_no_m else "",
+        })
+    records.sort(key=lambda r: r["date_clean"], reverse=True)
+    return records[:n]
 
 
 def pick_best_address_info(member_payload, target_address):
