@@ -2383,4 +2383,4 @@ else:
             copy_button("複製 LINE 訊息", line_message, "copy-line-message")
         with col_memo:
             st.text_area("N-J Memo", NJ_MEMO, height=200, label_visibility="collapsed", key="nj_memo_order_result")
-            copy_button("複製 N-J Memo", NJ_MEMO, "copy-nj-memo-order-result"
+            copy_button("複製 N-J Memo", NJ_MEMO, "copy-nj-memo-order-result")
