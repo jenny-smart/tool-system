@@ -18,6 +18,14 @@ roles:
       - performance_report
       - service_schedule
 
+  cs:
+    systems:
+      - orders_memo_system
+      - service_schedule
+    pages: []
+    logs:
+      - service_schedule
+
   field_only:
     systems:
       - field_daily_schedule
@@ -27,10 +35,8 @@ roles:
     logs:
       - field_daily_schedule
 
-  # 如果有其他角色（manager、staff 等），在下方依需求加入 invoice_center
-  # manager:
-  #   systems:
-  #     - invoice_center
-  #   pages:
-  #     - log
-  #   logs: []
+# 如果有其他角色（manager、staff 等），在下方依需求加入 invoice_center
+# manager:
+#   systems:
+#     - invoice_center
+#   pages:
