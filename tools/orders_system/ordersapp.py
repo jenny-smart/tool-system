@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.49
+# 版本：v8.50
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.50
+# - 新增「整理預約下次服務」分頁：搜尋評價日期區間，列出有預約下次服務的
+#   客人清單（評價日期/姓名/電話/地址/預約下次日期時間/服務日期時數人數），
+#   可複製整理結果。
 # v8.49
 # - 新增「會員喜好設定」分頁：輸入電話查會員，設定喜愛專員性別，並列出近N次
 #   有排班的服務紀錄（日期＋專員姓名），可逐一勾選設為喜愛/不喜愛專員，更新
@@ -703,6 +707,9 @@ FUNCTION_OPTIONS = [
     ("會員喜好設定：輸入電話查會員，設定喜愛專員性別，並列出近N次服務日期/專員，"
      "逐一勾選設為喜愛/不喜愛專員。",
      "orders", "會員喜好設定"),
+    ("整理預約下次服務：搜尋評價日期區間內有填「預約下次服務」的評價，"
+     "回查每筆訂單的電話/地址/服務日期時數/人數，整理成一份名單。",
+     "orders", "整理預約下次服務"),
 ]
 
 selected_label = st.selectbox(
@@ -2231,6 +2238,47 @@ else:
                     st.info("此地區/付款方式組合目前沒有現成 LINE 通知文案，請至「LINE 通知產生器」用訂單編號查詢並人工確認內容。")
             else:
                 st.error(f"❌ 建立失敗：{sv2_result.get('message', '未知錯誤')}")
+
+    elif single_feature == "整理預約下次服務":
+        info_panel("使用說明", [
+            "搜尋「評價日期」區間內、有勾選預約下次服務的評價紀錄。",
+            "每一筆會回頭查詢被評價的訂單本身，抓出電話/地址/服務日期時數/人數。",
+            "查詢筆數多時（例如整月）會需要一點時間，請耐心等候。",
+        ])
+        rn_col1, rn_col2 = st.columns(2)
+        with rn_col1:
+            rn_date_s = st.date_input("評價日期-起", value=None, key="rn_date_s")
+        with rn_col2:
+            rn_date_e = st.date_input("評價日期-迄", value=None, key="rn_date_e")
+        if st.button("🔍 開始搜尋", key="rn_search_btn", use_container_width=True):
+            if not backend_email.strip() or not backend_password.strip():
+                st.error("請先在上方輸入後台帳號密碼")
+            else:
+                try:
+                    with st.spinner("查詢評價與訂單中，可能需要一點時間…"):
+                        rn_results = qo.fetch_rating_next_appointments(
+                            env_name=env, backend_email=backend_email.strip(),
+                            backend_password=backend_password.strip(),
+                            date_s=rn_date_s.strftime("%Y-%m-%d") if rn_date_s else "",
+                            date_e=rn_date_e.strftime("%Y-%m-%d") if rn_date_e else "",
+                        )
+                    st.session_state.rn_results = rn_results
+                except Exception as e:
+                    st.error(f"搜尋失敗：{e}")
+
+        rn_results = st.session_state.get("rn_results")
+        if rn_results is not None:
+            if not rn_results:
+                st.info("這個區間內沒有預約下次服務的評價紀錄。")
+            else:
+                st.success(f"✅ 找到 {len(rn_results)} 筆預約下次服務的紀錄：")
+                st.dataframe(rn_results, use_container_width=True, hide_index=True)
+                rn_text = "\n".join(
+                    f"{r['評價日期']}/ {r['姓名']}/ {r['電話']} /{r['地址']}/{r['預約下次日期']} "
+                    f"/{r['預約下次時間']}/{r['服務日期及時間']} {r['服務人數']}"
+                    for r in rn_results
+                )
+                copy_button("複製整理結果", rn_text, "copy_rn_results")
 
     elif single_feature == "會員喜好設定":
         info_panel("使用說明", [
