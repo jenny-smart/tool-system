@@ -1,10 +1,13 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.47
+# 版本：v8.48
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.48
+# - 批次建單「執行過程」的日誌顯示改用 st.text() 取代 st.code()，拿掉每行
+#   日誌的黑底樣式。
 # v8.47
 # - 「新客資料拆解」拿掉手動查詢會員的按鈕，改成按「建立新客訂單」時自動
 #   先查電話是否為既有會員。是既有會員的話不繼續走新客流程，改成在按鈕
@@ -751,7 +754,7 @@ if mode == "批次建單（Google Sheet）":
     run_clicked = st.button("🚀  開始執行", use_container_width=True)
     with st.expander("📄  執行過程", expanded=True):
         log_box = st.empty()
-        log_box.code("尚未執行")
+        log_box.text("尚未執行")
     result_container = st.container()
     if run_clicked:
         if not backend_email.strip():
@@ -782,7 +785,7 @@ if mode == "批次建單（Google Sheet）":
         def ui_log(msg):
             logs.append(format_log_message(msg))
             display_text = "\n\n".join(logs[-120:])
-            log_box.code(display_text)
+            log_box.text(display_text)
         total_success = 0
         total_fail = 0
         total_processed = 0
