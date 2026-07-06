@@ -6,3 +6,7 @@ users:
   tpe@lemonclean.com.tw:
     password: "LC42627791"
     role: "field_only"
+
+  taipei@lemonclean.com.tw:
+    password: "LC42627791"
+    role: "field_only"
