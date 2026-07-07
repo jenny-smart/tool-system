@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.58
+# 版本：v8.59
 # 模組：服務訂單系統主畫面
-# 最後更新：2026-07-07
+# 最後更新：2026-07-08
 #
 # Change Log
+# v8.59
+# - 批次建單保留原本「自動篩選：狀態未安排＋訂單編號空白＋無班表」，
+#   另外新增「自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號」。
+#   兩個篩選可單獨使用，也可同時勾選；同時勾選時會合併列號並去除重複。
 # v8.58
 # - 「儲值獎金備註」改回完全自己獨立運作，不再依賴「儲值金搜尋」的結果。
 #   日期區間欄位直接放在同一個畫面，貼上獎金名單後按「查詢並套用獎金備註」
@@ -659,6 +663,22 @@ def find_no_slot_rows(sheet_name, region, candidate_rows=None):
     return rows
 
 
+def find_missing_order_in_o_rows(sheet_name, region, candidate_rows=None):
+    _, df = load_worksheet(sheet_name)
+    candidate_set = set(candidate_rows or [])
+    if candidate_set:
+        df = df[df["__sheet_row__"].isin(candidate_set)]
+    rows = []
+    for _, row in df.iterrows():
+        status = str(row.get("狀態", "")).strip()
+        order_no = str(row.get("訂單編號", "")).strip()
+        o_text = str(row.iloc[14] if len(row) > 14 else "")
+        if status == "未安排" and not order_no and not re.search(r"(LC|TT|KK)\d+", o_text):
+            if get_region_by_address(str(row.get("地址", "")), ACCOUNTS) == region:
+                rows.append(int(row["__sheet_row__"]))
+    return rows
+
+
 def format_log_message(msg):
     text = str(msg)
     text = text.replace("\\n", "\n")
@@ -783,7 +803,7 @@ if mode == "批次建單（Google Sheet）":
     info_panel("功能說明", [
         "適合已將多筆訂單整理在 Google Sheet 的批次處理情境。",
         "可依列號建立訂單、寄確認信、改 Google 日曆，並回填結果。",
-        "勾自動篩選時，會在輸入的列號範圍內篩出「未安排、訂單編號空白、無班表」的列。",
+        "勾自動篩選時，可在輸入的列號範圍內篩出「未安排、訂單編號空白、無班表」或「O欄找不到訂單編號」的列。",
     ])
     info_panel("使用說明", ["先選擇執行區域與工作表名稱。", "輸入要執行的列號，例如 2、2,3,5 或 5-10。", "勾選要執行的項目後按開始執行。"])
     step("4", "執行設定")
@@ -804,6 +824,7 @@ if mode == "批次建單（Google Sheet）":
     # 與舊客快速建單、新客資料拆解、訂單轉換三個流程行為一致。
     batch_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人排班", value=False, key="batch_allow_auto_lemon")
     auto_no_slot_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="auto_no_slot_rows")
+    auto_missing_o_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="auto_missing_o_rows")
     st.markdown("<hr>", unsafe_allow_html=True)
     run_clicked = st.button("🚀  開始執行", use_container_width=True)
     with st.expander("📄  執行過程", expanded=True):
@@ -819,17 +840,22 @@ if mode == "批次建單（Google Sheet）":
             st.error("請輸入工作表名稱"); st.stop()
         if not selected_actions:
             st.error("請至少選擇一個執行項目"); st.stop()
-        if auto_no_slot_rows:
+        if auto_no_slot_rows or auto_missing_o_rows:
             try:
                 candidate_rows = parse_row_input(row_input) if row_input.strip() else []
             except Exception as e:
                 st.error(f"列號格式錯誤：{e}"); st.stop()
             try:
-                target_rows = find_no_slot_rows(sheet_name.strip(), region, candidate_rows)
+                target_set = set()
+                if auto_no_slot_rows:
+                    target_set.update(find_no_slot_rows(sheet_name.strip(), region, candidate_rows))
+                if auto_missing_o_rows:
+                    target_set.update(find_missing_order_in_o_rows(sheet_name.strip(), region, candidate_rows))
+                target_rows = sorted(target_set)
             except Exception as e:
                 st.error(f"自動篩選列號失敗：{e}"); st.stop()
             if not target_rows:
-                st.info("沒有符合「未安排＋訂單編號空白＋無班表」的列。"); st.stop()
+                st.info("沒有符合自動篩選條件的列。"); st.stop()
         else:
             try:
                 target_rows = parse_row_input(row_input)
