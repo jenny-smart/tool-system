@@ -5,6 +5,11 @@
 # 最後更新：2026-07-07
 #
 # Change Log
+# v2026.07.08-1
+# - 儲值獎金備註效能優化：find_pending_stored_value_orders 搜尋時一併回傳
+#   edit_id，apply_bonus_notes / add_bonus_note_to_order 可直接使用這個 edit_id
+#   開啟訂單編輯頁，套用備註時不再每筆都重新用訂單編號搜尋 /purchase。
+#   這樣同一頁流程可做到「搜尋一次 → 確認名單 → 直接套用」，減少等待時間。
 # v2026.07.07-5
 # - 修正 fetch_recent_service_records 抓專員姓名時，把連結內附帶的「(評分
 #   數字)」也一起抓進來的 bug（例如「嚴慶隆(3)」而不是「嚴慶隆」），改成
@@ -3719,6 +3724,7 @@ def find_pending_stored_value_orders(
                 break
         results.append({
             "order_no": order_no,
+            "edit_id": edit_id_map.get(order_no, ""),
             "name": name,
             "phone": phone,
             "purchase_status": status_text,
@@ -3784,7 +3790,7 @@ def _fetch_order_edit_id(session, order_no):
     return m.group(1) if m else None
 
 
-def add_bonus_note_to_order(session, base_url, order_no, bonus_names):
+def add_bonus_note_to_order(session, base_url, order_no, bonus_names, edit_id=None):
     """
     v2026.07.12（v2：修正欄位覆蓋 bug）：把「獎金：名字1X名字2X名字3...」這行
     文字加進訂單編輯頁的「客服備註」（notice 欄位），保留原本客服備註內容
@@ -3812,7 +3818,7 @@ def add_bonus_note_to_order(session, base_url, order_no, bonus_names):
     # 就能算出正確的編輯 ID（LC00212093 → 212093，跟後台編輯頁網址
     # /purchase/edit/212093 一致）。加上這個 fallback 之後，就算線上搜尋
     # 失敗，也能用訂單編號直接算出編輯 ID 繼續執行。
-    edit_id = _fetch_order_edit_id(session, order_no) or _purchase_edit_id_from_order_no(order_no)
+    edit_id = edit_id or _fetch_order_edit_id(session, order_no) or _purchase_edit_id_from_order_no(order_no)
     if not edit_id:
         return False, f"找不到訂單 {order_no} 的編輯 ID"
     edit_url = f"{base_url}/purchase/edit/{edit_id}"
@@ -3899,7 +3905,13 @@ def apply_bonus_notes(env_name, backend_email, backend_password, mapping):
 
     results = []
     for item in mapping:
-        ok, msg = add_bonus_note_to_order(session, BASE_URL, item["order_no"], item["bonus_names"])
+        ok, msg = add_bonus_note_to_order(
+            session,
+            BASE_URL,
+            item["order_no"],
+            item["bonus_names"],
+            edit_id=item.get("edit_id"),
+        )
         results.append({**item, "ok": ok, "msg": msg})
     return results
 
