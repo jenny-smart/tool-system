@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.56
+# 版本：v8.57
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.57
+# - 「儲值獎金備註」拿掉重複的搜尋步驟，改成直接沿用「儲值金搜尋」的結果
+#   （session_state.bs_results），畫面上只剩貼獎金名單＋套用；沒有先去
+#   「儲值金搜尋」查過就會顯示提示，不會誤導成可以直接用。
 # v8.56
 # - 把「15.儲值獎金備註」拆成兩個獨立功能：新增「儲值金搜尋」（只查詢、
 #   列出名單，不寫入任何東西），原本的「儲值獎金備註」維持完整流程
@@ -1077,136 +1081,76 @@ elif mode == "儲值金搜尋":
 elif mode == "儲值獎金備註":
     step("3", "儲值獎金備註")
     info_panel("功能說明", [
-        "① 先搜尋「購買項目：儲值金」且「客服備註目前是空白」的訂單，列出客戶姓名/電話/付款狀態名單"
-        "（客服備註已經有內容的訂單不會出現，避免重複回填）。",
-        "② 拿名單去對照 LINE 群組裡回報的介紹獎金名單，把「客戶姓名：獎金人員1X獎金人員2」貼進下面的輸入框，一行一筆。",
-        "③ 按下套用，會依姓名比對剛剛搜尋到的訂單，把「獎金：獎金人員1X獎金人員2」加進該筆訂單的客服備註"
+        "請先到「儲值金搜尋」搜尋出要處理的儲值金訂單名單（這裡不再重複搜尋）。",
+        "拿名單去對照 LINE 群組裡回報的介紹獎金名單，把「客戶姓名：獎金人員1X獎金人員2」貼進下面的輸入框，一行一筆。",
+        "按下套用，會依姓名比對「儲值金搜尋」抓到的訂單，把「獎金：獎金人員1X獎金人員2」加進該筆訂單的客服備註"
         "（保留原本備註內容，不會覆蓋），並把服務狀態一併改為「已處理」。",
     ])
 
-    st.markdown("**訂購日期區間**")
-    bn_col1, bn_col2 = st.columns(2)
-    with bn_col1:
-        bn_date_s = st.date_input("訂購日期-起", value=None, key="bn_date_s")
-    with bn_col2:
-        bn_date_e = st.date_input("訂購日期-迄", value=None, key="bn_date_e")
-
-    st.markdown("**付款日期區間**")
-    bn_col3, bn_col4 = st.columns(2)
-    with bn_col3:
-        bn_paid_s = st.date_input("付款日期-起", value=None, key="bn_paid_s")
-    with bn_col4:
-        bn_paid_e = st.date_input("付款日期-迄", value=None, key="bn_paid_e")
-
-    bn_status_map = {
-        "待付款": "0", "已付款": "1",
-        "待付款＋已付款": ["0", "1"],
-    }
-    bn_status_label = st.selectbox("付款狀態", list(bn_status_map.keys()), key="bn_status")
-    bn_notice_map = {"空白": "blank", "非空白": "nonblank", "空白＋非空白": "all"}
-    bn_notice_label = st.selectbox("客服備註", list(bn_notice_map.keys()), key="bn_notice_status")
-
-    if st.button("🔍 ① 開始搜尋", use_container_width=True, key="bn_search_btn", type="primary"):
-        if not backend_email.strip() or not backend_password.strip():
-            st.error("請先在上方輸入後台帳號密碼")
-        else:
-            try:
-                with st.spinner("登入後台 → 搜尋儲值金待處理訂單中…"):
-                    bn_results, bn_debug = find_pending_stored_value_orders(
-                        env_name=env,
-                        backend_email=backend_email.strip(),
-                        backend_password=backend_password.strip(),
-                        date_s=bn_date_s.strftime("%Y-%m-%d") if bn_date_s else None,
-                        date_e=bn_date_e.strftime("%Y-%m-%d") if bn_date_e else None,
-                        paid_at_s=bn_paid_s.strftime("%Y-%m-%d") if bn_paid_s else None,
-                        paid_at_e=bn_paid_e.strftime("%Y-%m-%d") if bn_paid_e else None,
-                        purchase_status=bn_status_map[bn_status_label],
-                        notice_status=bn_notice_map[bn_notice_label],
-                        return_debug=True,
-                    )
-                st.session_state.bn_results = bn_results
-                st.session_state.bn_debug = bn_debug
-                st.session_state.bn_apply_results = None
-            except Exception as e:
-                st.error(f"搜尋失敗：{e}")
-
-    bn_results = st.session_state.get("bn_results")
-    bn_debug = st.session_state.get("bn_debug")
-    if bn_debug is not None:
-        st.caption(
-            f"🔧 除錯資訊：環境＝{bn_debug['env']}，實際連線＝{bn_debug['base_url']}，"
-            f"後台掃描到候選訂單 {bn_debug['scanned_candidates']} 筆，符合條件 {bn_debug['matched']} 筆。"
-            "（如果候選訂單是 0 筆，代表問題出在登入/篩選這一關）"
+    bn_results = st.session_state.get("bs_results")
+    if not bn_results:
+        st.warning("⚠️ 還沒有搜尋結果可以用。請先切到「儲值金搜尋」功能，搜尋出要處理的訂單名單，再回來這裡貼獎金名單。")
+    else:
+        st.success(f"✅ 沿用「儲值金搜尋」的結果，共 {len(bn_results)} 筆：")
+        st.dataframe(
+            [{"訂單編號": r["order_no"], "客戶姓名": r["name"], "付款狀態": r.get("purchase_status", ""), "客服備註": r.get("notice", "")} for r in bn_results],
+            use_container_width=True, hide_index=True,
         )
-        if bn_debug.get("hit_page_limit"):
-            st.warning(
-                f"⚠️ 掃描撞到頁數上限（80 頁）就停了，結果可能不完整。"
-                "建議縮小日期範圍，或請 Claude 調高 max_pages。"
-            )
-    if bn_results is not None:
-        if bn_results:
-            st.success(f"✅ 找到 {len(bn_results)} 筆符合條件的儲值金訂單：")
-            st.dataframe(
-                [{"訂單編號": r["order_no"], "客戶姓名": r["name"], "付款狀態": r.get("purchase_status", ""), "客服備註": r.get("notice", "")} for r in bn_results],
-                use_container_width=True, hide_index=True,
-            )
 
-            st.markdown("**② 貼上獎金名單**（格式：客戶姓名：獎金人員1X獎金人員2，一行一筆）")
-            bn_mapping_text = st.text_area(
-                "獎金名單", height=150, key="bn_mapping_text",
-                placeholder="李怡萱：李佩蓉X宋品鈞\n王小明：陳大文X林小華",
-            )
+        st.markdown("**貼上獎金名單**（格式：客戶姓名：獎金人員1X獎金人員2，一行一筆）")
+        bn_mapping_text = st.text_area(
+            "獎金名單", height=150, key="bn_mapping_text",
+            placeholder="李怡萱：李佩蓉X宋品鈞\n王小明：陳大文X林小華",
+        )
 
-            if st.button("✅ ③ 套用獎金備註", use_container_width=True, key="bn_apply_btn"):
-                if not bn_mapping_text.strip():
-                    st.error("請先貼上獎金名單")
-                elif not backend_email.strip() or not backend_password.strip():
-                    st.error("請先在上方輸入後台帳號密碼")
+        if st.button("✅ 套用獎金備註", use_container_width=True, key="bn_apply_btn"):
+            if not bn_mapping_text.strip():
+                st.error("請先貼上獎金名單")
+            elif not backend_email.strip() or not backend_password.strip():
+                st.error("請先在上方輸入後台帳號密碼")
+            else:
+                name_to_order = {r["name"]: r for r in bn_results if r.get("name")}
+                mapping = []
+                parse_errors = []
+                for line in bn_mapping_text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    sep = "：" if "：" in line else (":" if ":" in line else None)
+                    if not sep:
+                        parse_errors.append(f"❌ {line}：格式錯誤，找不到「：」分隔")
+                        continue
+                    cust_name, bonus_part = line.split(sep, 1)
+                    cust_name = cust_name.strip()
+                    bonus_names = [n.strip() for n in re.split(r"[XxＸ]", bonus_part.strip()) if n.strip()]
+                    matched = name_to_order.get(cust_name)
+                    if not matched:
+                        parse_errors.append(f"❌ {line}：名單裡找不到客戶「{cust_name}」")
+                        continue
+                    if not bonus_names:
+                        parse_errors.append(f"❌ {line}：沒有解析到獎金人員名字")
+                        continue
+                    mapping.append({"order_no": matched["order_no"], "cust_name": cust_name, "bonus_names": bonus_names})
+
+                apply_results = []
+                if mapping:
+                    try:
+                        with st.spinner("寫入客服備註中…"):
+                            apply_results = apply_bonus_notes(env, backend_email.strip(), backend_password.strip(), mapping)
+                    except Exception as e:
+                        st.error(f"套用失敗：{e}")
+                st.session_state.bn_apply_results = apply_results
+                st.session_state.bn_parse_errors = parse_errors
+
+        for err in st.session_state.get("bn_parse_errors", []) or []:
+            st.error(err)
+        bn_apply_results = st.session_state.get("bn_apply_results")
+        if bn_apply_results:
+            for r in bn_apply_results:
+                if r["ok"]:
+                    st.success(f"✅ {r['order_no']}（{r['cust_name']}）：已寫入「獎金：{'X'.join(r['bonus_names'])}」，服務狀態已改為已處理")
                 else:
-                    name_to_order = {r["name"]: r for r in bn_results if r.get("name")}
-                    mapping = []
-                    parse_errors = []
-                    for line in bn_mapping_text.splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        sep = "：" if "：" in line else (":" if ":" in line else None)
-                        if not sep:
-                            parse_errors.append(f"❌ {line}：格式錯誤，找不到「：」分隔")
-                            continue
-                        cust_name, bonus_part = line.split(sep, 1)
-                        cust_name = cust_name.strip()
-                        bonus_names = [n.strip() for n in re.split(r"[XxＸ]", bonus_part.strip()) if n.strip()]
-                        matched = name_to_order.get(cust_name)
-                        if not matched:
-                            parse_errors.append(f"❌ {line}：名單裡找不到客戶「{cust_name}」")
-                            continue
-                        if not bonus_names:
-                            parse_errors.append(f"❌ {line}：沒有解析到獎金人員名字")
-                            continue
-                        mapping.append({"order_no": matched["order_no"], "cust_name": cust_name, "bonus_names": bonus_names})
-
-                    apply_results = []
-                    if mapping:
-                        try:
-                            with st.spinner("寫入客服備註中…"):
-                                apply_results = apply_bonus_notes(env, backend_email.strip(), backend_password.strip(), mapping)
-                        except Exception as e:
-                            st.error(f"套用失敗：{e}")
-                    st.session_state.bn_apply_results = apply_results
-                    st.session_state.bn_parse_errors = parse_errors
-
-            for err in st.session_state.get("bn_parse_errors", []) or []:
-                st.error(err)
-            bn_apply_results = st.session_state.get("bn_apply_results")
-            if bn_apply_results:
-                for r in bn_apply_results:
-                    if r["ok"]:
-                        st.success(f"✅ {r['order_no']}（{r['cust_name']}）：已寫入「獎金：{'X'.join(r['bonus_names'])}」，服務狀態已改為已處理")
-                    else:
-                        st.error(f"❌ {r['order_no']}（{r['cust_name']}）：{r['msg']}")
-        else:
-            st.info("這個篩選範圍內沒有客服備註空白的儲值金訂單。")
+                    st.error(f"❌ {r['order_no']}（{r['cust_name']}）：{r['msg']}")
 
 # =========================================================
 # 其他功能
