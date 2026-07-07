@@ -1,10 +1,22 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.53
+# 版本：v8.55
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.55
+# - 新增「建立筆數」：舊客快速建單（已知日期模式）與新客資料拆解，都可以
+#   設定 1~10 筆，各自獨立選日期/時段/人數，一次送出建立多筆訂單（同一個
+#   客人/地址，付款方式與發票設定共用）。多筆時畫面下方會列出每一筆的
+#   成功/失敗狀態，各自可複製 LINE 訊息。
+#   目前只涵蓋「已知日期」模式；「依需求搜尋可服務日期」模式，以及舊客
+#   快速建單裡「電話查無會員→直接建新客」那個內嵌子流程，還是只能建一筆。
+# v8.54
+# - 「整理預約下次服務」表格/複製結果補上遺漏的「訂單編號」欄；貼到 Google
+#   Sheets 用的 Tab 分隔版本另外補上 LINE 網址欄（原本只有給網頁表格的姓名
+#   超連結用，貼到 Sheets 後 LINE 連結會不見）；排序改成評價日期愈新愈下方
+#   （實際排序邏輯在 quick_order.py）。
 # v8.53
 # - 「整理預約下次服務」結果表格的姓名改成可點擊連到客人 LINE 聊天視窗
 #   （改用 markdown 表格呈現，姓名欄是 [姓名](LINE網址) 超連結）。
@@ -1377,17 +1389,30 @@ else:
                             st.markdown(f'<div class="history-order"><div class="history-order-main">{idx}. {h(order.get("order_no"))}　{h(order.get("date"))} {h(order.get("time"), "")}</div><div class="history-order-meta"><div>地址：{h(address_text)}</div><div>類別：{h(order.get("clean_type"))}</div><div>服務人員：{h(staff_text)}</div><div>人時：{h(ph_text)}{h(fare_text, "")}</div><div>{h(payment_text)}</div></div></div>', unsafe_allow_html=True)
                     date_mode = st.radio("日期/班表查詢方式", ["已知日期", "依需求搜尋可服務日期"], horizontal=True, key="old_date_mode")
                     if date_mode == "已知日期":
-                        info_panel("已知日期使用說明", ["客人已指定某一天時使用。", "此模式才需要選服務日期與時段。", "若客人只說平日、週末、不限或幾小時，請改選『依需求搜尋可服務日期』。"])
-                        d1, d2, d3, d4 = st.columns(4)
-                        with d1:
-                            q_date = st.date_input("服務日期", value=date.today(), key="old_known_date")
-                        with d2:
-                            q_period = st.selectbox("時段", PERIOD_OPTIONS, key="old_known_period")
-                        with d3:
-                            q_person = st.number_input("人數", min_value=1, max_value=8, value=default_person, key="old_known_person")
-                        with d4:
-                            q_hour = PERIOD_HOUR_MAP.get(q_period, 3)
-                            st.markdown(f'<br><b>{q_hour} 小時</b>（依時段自動帶出）<br><span style="color:#8E8E93;font-size:13px;">人時：{int(q_person) * int(q_hour)}</span>', unsafe_allow_html=True)
+                        info_panel("已知日期使用說明", ["客人已指定某一天時使用。", "此模式才需要選服務日期與時段。", "若客人只說平日、週末、不限或幾小時，請改選『依需求搜尋可服務日期』。", "同一個客人/地址要一次約多筆（例如每週固定服務），可以調整下面的「建立筆數」，各自設定日期/時段/人數。"])
+                        old_n_orders = st.number_input("建立筆數", min_value=1, max_value=10, value=1, key="old_n_orders")
+                        old_entries = []
+                        for _i in range(int(old_n_orders)):
+                            if int(old_n_orders) > 1:
+                                st.markdown(f"**第 {_i + 1} 筆**")
+                            d1, d2, d3, d4 = st.columns(4)
+                            with d1:
+                                _q_date = st.date_input("服務日期", value=date.today(), key=f"old_known_date_{_i}")
+                            with d2:
+                                _q_period = st.selectbox("時段", PERIOD_OPTIONS, key=f"old_known_period_{_i}")
+                            with d3:
+                                _q_person = st.number_input("人數", min_value=1, max_value=8, value=default_person, key=f"old_known_person_{_i}")
+                            with d4:
+                                _q_hour = PERIOD_HOUR_MAP.get(_q_period, 3)
+                                st.markdown(f'<br><b>{_q_hour} 小時</b>（依時段自動帶出）<br><span style="color:#8E8E93;font-size:13px;">人時：{int(_q_person) * int(_q_hour)}</span>', unsafe_allow_html=True)
+                            old_entries.append({"date": _q_date, "period": _q_period, "person": _q_person, "hour": _q_hour})
+                        # v2026.07.07：多筆時沿用第一筆的設定去查班表預覽，實際各筆送單時
+                        # 各自帶自己的日期/時段/人數；查班表這裡只是先讓客服有個底，
+                        # 真正是否可排班仍以送單當下的實際結果為準。
+                        q_date, q_period, q_person, q_hour = (
+                            old_entries[0]["date"], old_entries[0]["period"],
+                            old_entries[0]["person"], old_entries[0]["hour"],
+                        )
                         if st.button("🔎 查詢該日班表", use_container_width=True, key="old_check_known"):
                             try:
                                 with st.spinner("查詢班表中…"):
@@ -1405,18 +1430,30 @@ else:
                                 st.warning("此日期/時段目前無可安排班表。")
                         # v8.13：查無班表時是否自動補檸檬人，預設不勾選，需客服明確開啟
                         old_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人排班", value=False, key="old_allow_auto_lemon")
-                        if st.button("🚀 建立訂單", use_container_width=True, key="old_create_known"):
+                        _old_create_label = "🚀 建立訂單" if int(old_n_orders) == 1 else f"🚀 建立 {int(old_n_orders)} 筆訂單"
+                        if st.button(_old_create_label, use_container_width=True, key="old_create_known"):
                             # v8.15：開始新的一次建單嘗試前，先清空上一次殘留的舊結果。
                             st.session_state.q_order_result = {}
-                            try:
-                                with st.spinner("建單中，請稍候…"):
-                                    result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=q_date.strftime("%Y-%m-%d"), period_s=q_period, hour=q_hour, person=q_person, allow_auto_lemon_shift=old_allow_auto_lemon)
-                                    # 不立即發確認信，等 user 確認後再發
-                                    result["mail_sent"] = False
-                                    result["mail_msg"] = "尚未發送"
-                                st.session_state.q_order_result = result
-                            except Exception as e:
-                                st.error(f"建單失敗：{e}")
+                            st.session_state.old_results_multi = []
+                            _multi_results = []
+                            for _i, entry in enumerate(old_entries, start=1):
+                                try:
+                                    with st.spinner(f"建單中（第 {_i}/{len(old_entries)} 筆），請稍候…"):
+                                        result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=entry["date"].strftime("%Y-%m-%d"), period_s=entry["period"], hour=entry["hour"], person=entry["person"], allow_auto_lemon_shift=old_allow_auto_lemon)
+                                        # 不立即發確認信，等 user 確認後再發
+                                        result["mail_sent"] = False
+                                        result["mail_msg"] = "尚未發送"
+                                        try:
+                                            result["line_message"] = build_line_message(result)
+                                        except Exception:
+                                            result["line_message"] = ""
+                                    _multi_results.append({"ok": True, "result": result})
+                                except Exception as e:
+                                    _multi_results.append({"ok": False, "error": str(e), "date": entry["date"].strftime("%Y-%m-%d"), "period": entry["period"]})
+                            st.session_state.old_results_multi = _multi_results
+                            if len(_multi_results) == 1 and _multi_results[0]["ok"]:
+                                # 只有 1 筆時，沿用原本單筆的詳細結果卡呈現方式
+                                st.session_state.q_order_result = _multi_results[0]["result"]
                     else:
                         info_panel("依需求搜尋使用說明", ["客人尚未指定日期時使用。", "可選平日 / 週末 / 不限，也可選上午 / 下午 / 不限。"])
                         a1, a2, a3, a4 = st.columns(4)
@@ -1544,20 +1581,30 @@ else:
                 nc_quintuple = "1" if st.checkbox("五倍券", key="nc_quintuple_d") else "0"
 
         step("3", "日期與人時")
-        sd1, sd2, sd3, sd4 = st.columns(4)
-        with sd1:
-            nc_date = st.date_input("服務日期", value=date.today() + timedelta(days=1), key="nc_date_d")
-        with sd2:
-            nc_period = st.selectbox("時段", PERIOD_OPTIONS, key="nc_period_d")
-        with sd3:
-            nc_person = st.number_input("人數", min_value=1, max_value=8, value=2, key="nc_person_d")
-        with sd4:
-            nc_hour = PERIOD_HOUR_MAP.get(nc_period, 3)
-            _day_type_nc = "週末" if nc_date.weekday() >= 5 else "平日"
-            _unit_nc = 700 if _day_type_nc == "週末" else 600
-            _total_nc = int(nc_person) * nc_hour * _unit_nc
-            st.markdown(f"**{nc_hour}小時 / {_day_type_nc}**")
-            st.markdown(f"預估：**{_total_nc:,}元**")
+        nc_n_orders = st.number_input("建立筆數", min_value=1, max_value=10, value=1, key="nc_n_orders_d")
+        nc_entries = []
+        for _i in range(int(nc_n_orders)):
+            if int(nc_n_orders) > 1:
+                st.markdown(f"**第 {_i + 1} 筆**")
+            sd1, sd2, sd3, sd4 = st.columns(4)
+            with sd1:
+                _nc_date = st.date_input("服務日期", value=date.today() + timedelta(days=1), key=f"nc_date_d_{_i}")
+            with sd2:
+                _nc_period = st.selectbox("時段", PERIOD_OPTIONS, key=f"nc_period_d_{_i}")
+            with sd3:
+                _nc_person = st.number_input("人數", min_value=1, max_value=8, value=2, key=f"nc_person_d_{_i}")
+            with sd4:
+                _nc_hour = PERIOD_HOUR_MAP.get(_nc_period, 3)
+                _day_type_nc = "週末" if _nc_date.weekday() >= 5 else "平日"
+                _unit_nc = 700 if _day_type_nc == "週末" else 600
+                _total_nc = int(_nc_person) * _nc_hour * _unit_nc
+                st.markdown(f"**{_nc_hour}小時 / {_day_type_nc}**")
+                st.markdown(f"預估：**{_total_nc:,}元**")
+            nc_entries.append({"date": _nc_date, "period": _nc_period, "person": _nc_person, "hour": _nc_hour})
+        # 沿用第一筆設定作為備註/發票等共用欄位的預設情境（人時試算已在上面各自顯示）
+        nc_date, nc_period, nc_person, nc_hour = (
+            nc_entries[0]["date"], nc_entries[0]["period"], nc_entries[0]["person"], nc_entries[0]["hour"],
+        )
 
         step("4", "備註欄位（選填）")
         nb1, nb2, nb3 = st.columns(3)
@@ -1576,6 +1623,7 @@ else:
             # （包含成功訊息、LINE 訊息），避免這次失敗/拆解失敗時，
             # 舊的成功結果還留在畫面上跟新的錯誤訊息重疊混淆。
             st.session_state.nc_result = {}
+            st.session_state.nc_results_multi = []
             st.session_state.nc_pending_old = None
             if not nc_raw.strip():
                 st.error("請貼上客人資料")
@@ -1645,50 +1693,59 @@ else:
                         st.rerun()
                     elif _nc_lookup is not None:
                         try:
-                            with st.spinner(f"建立會員 → 查詢地址 → 建單（{nc_date} {nc_period} {nc_person}人{nc_hour}小時）…"):
-                                nc_result = qo.quick_create_new_customer_order(
-                                    env_name=env,
-                                    backend_email=backend_email.strip(),
-                                    backend_password=backend_password.strip(),
-                                    allow_auto_lemon_shift=nc_d_allow_auto_lemon,
-                                    customer={
-                                        "name": _nc_name, "phone": _nc_phone,
-                                        "email": _nc_email, "address": _nc_address,
-                                        "ping": _nc_ping, "payway": _nc_payway,
-                                        "clean_type_id": CLEAN_TYPE_ID_MAP[nc_clean_type],
-                                        "service_type": nc_service_type,
-                                        "room": str(nc_room), "bathroom": str(nc_bathroom),
-                                        "balcony": str(nc_balcony), "livingroom": str(nc_livingroom),
-                                        "kitchen": str(nc_kitchen), "window": nc_window,
-                                        "shutter": nc_shutter, "clothes": nc_clothes,
-                                        "dyson": nc_dyson, "refrigerator": nc_refrigerator,
-                                        "disinfection": nc_disinfection, "go_abord": nc_go_abroad,
-                                        "home_move": nc_home_move, "storage": nc_storage,
-                                        "cabinet": nc_cabinet, "quintuple": nc_quintuple,
-                                        "date_s": nc_date.strftime("%Y-%m-%d"),
-                                        "period_s": nc_period,
-                                        "hour": str(nc_hour),
-                                        "person": str(int(nc_person)),
-                                        "carrier": _nc_carrier,
-                                        "company_title": _nc_company_title,
-                                        "company_no": _nc_company_no,
-                                        "memo": nc_memo,
-                                        "notice": nc_notice,
-                                        "actual_time": nc_actual_time,
-                                    }
-                                )
-                                # 不立即發確認信，等 user 確認後再發
-                                nc_result["mail_sent"] = False
-                                nc_result["mail_msg"] = "尚未發送"
-                                # v8.6：quick_create_new_customer_order 已回傳 build_line_message
-                                # 所需的完整欄位（date/period/region/fare 等），這裡直接組出 LINE 訊息，
-                                # 修正原本此流程從未產生 line_message、畫面永遠不顯示的問題。
-                                try:
-                                    nc_result["line_message"] = build_line_message(nc_result)
-                                except Exception as _e_line_nc:
-                                    nc_result["line_message"] = ""
-                                    st.warning(f"LINE 訊息組裝失敗：{_e_line_nc}")
-                            st.session_state.nc_result = nc_result
+                            st.session_state.nc_results_multi = []
+                            _nc_multi_results = []
+                            for _ei, _entry in enumerate(nc_entries, start=1):
+                                with st.spinner(f"建立會員 → 查詢地址 → 建單（第 {_ei}/{len(nc_entries)} 筆：{_entry['date']} {_entry['period']} {_entry['person']}人{_entry['hour']}小時）…"):
+                                    try:
+                                        nc_result = qo.quick_create_new_customer_order(
+                                            env_name=env,
+                                            backend_email=backend_email.strip(),
+                                            backend_password=backend_password.strip(),
+                                            allow_auto_lemon_shift=nc_d_allow_auto_lemon,
+                                            customer={
+                                                "name": _nc_name, "phone": _nc_phone,
+                                                "email": _nc_email, "address": _nc_address,
+                                                "ping": _nc_ping, "payway": _nc_payway,
+                                                "clean_type_id": CLEAN_TYPE_ID_MAP[nc_clean_type],
+                                                "service_type": nc_service_type,
+                                                "room": str(nc_room), "bathroom": str(nc_bathroom),
+                                                "balcony": str(nc_balcony), "livingroom": str(nc_livingroom),
+                                                "kitchen": str(nc_kitchen), "window": nc_window,
+                                                "shutter": nc_shutter, "clothes": nc_clothes,
+                                                "dyson": nc_dyson, "refrigerator": nc_refrigerator,
+                                                "disinfection": nc_disinfection, "go_abord": nc_go_abroad,
+                                                "home_move": nc_home_move, "storage": nc_storage,
+                                                "cabinet": nc_cabinet, "quintuple": nc_quintuple,
+                                                "date_s": _entry["date"].strftime("%Y-%m-%d"),
+                                                "period_s": _entry["period"],
+                                                "hour": str(_entry["hour"]),
+                                                "person": str(int(_entry["person"])),
+                                                "carrier": _nc_carrier,
+                                                "company_title": _nc_company_title,
+                                                "company_no": _nc_company_no,
+                                                "memo": nc_memo,
+                                                "notice": nc_notice,
+                                                "actual_time": nc_actual_time,
+                                            }
+                                        )
+                                        # 不立即發確認信，等 user 確認後再發
+                                        nc_result["mail_sent"] = False
+                                        nc_result["mail_msg"] = "尚未發送"
+                                        # v8.6：quick_create_new_customer_order 已回傳 build_line_message
+                                        # 所需的完整欄位（date/period/region/fare 等），這裡直接組出 LINE 訊息，
+                                        # 修正原本此流程從未產生 line_message、畫面永遠不顯示的問題。
+                                        try:
+                                            nc_result["line_message"] = build_line_message(nc_result)
+                                        except Exception:
+                                            nc_result["line_message"] = ""
+                                        _nc_multi_results.append({"ok": True, "result": nc_result})
+                                    except Exception as _e_entry:
+                                        _nc_multi_results.append({"ok": False, "error": str(_e_entry), "date": _entry["date"].strftime("%Y-%m-%d"), "period": _entry["period"]})
+                            st.session_state.nc_results_multi = _nc_multi_results
+                            if len(_nc_multi_results) == 1 and _nc_multi_results[0]["ok"]:
+                                # 只有 1 筆時，沿用原本單筆的詳細結果卡呈現方式
+                                st.session_state.nc_result = _nc_multi_results[0]["result"]
                             st.rerun()
                         except Exception as e:
                             st.error(f"建單失敗：{e}")
@@ -1736,6 +1793,25 @@ else:
                     st.rerun()
                 except Exception as e:
                     st.error(f"以舊客身份建單失敗：{e}")
+
+        # v2026.07.07：多筆訂單結果顯示（建立筆數 > 1，或有任何一筆失敗時）
+        _nc_multi = st.session_state.get("nc_results_multi") or []
+        if _nc_multi and not (len(_nc_multi) == 1 and _nc_multi[0]["ok"]):
+            st.markdown("<hr>", unsafe_allow_html=True)
+            _nc_ok_count = sum(1 for r in _nc_multi if r["ok"])
+            st.info(f"共 {len(_nc_multi)} 筆，成功 {_nc_ok_count} 筆，失敗 {len(_nc_multi) - _nc_ok_count} 筆。")
+            for _i, r in enumerate(_nc_multi, start=1):
+                if r["ok"]:
+                    res = r["result"]
+                    st.success(f"✅ 第{_i}筆：{res.get('order_no')}　{res.get('date_s')} {res.get('period_s')}")
+                    if res.get("existing_member_warning"):
+                        st.warning(res["existing_member_warning"])
+                    if res.get("address_mismatch_warning"):
+                        st.warning(res["address_mismatch_warning"])
+                    if res.get("line_message"):
+                        copy_button(f"複製第{_i}筆 LINE 訊息", res["line_message"], f"copy_nc_multi_line_{_i}")
+                else:
+                    st.error(f"❌ 第{_i}筆（{r.get('date')} {r.get('period')}）失敗：{r.get('error')}")
 
         # 顯示建單結果
         _r = st.session_state.get("nc_result", {})
@@ -2286,7 +2362,7 @@ else:
                 # st.dataframe 的 LinkColumn 沒辦法讓儲存格顯示「姓名文字」但連到
                 # 「另一個網址」（display_text 只能重新格式化網址本身的文字），
                 # 所以改用 markdown 表格，姓名欄直接用 [姓名](LINE網址) 的超連結。
-                _rn_headers = ["評價日期", "姓名", "電話", "地址", "預約下次日期", "預約下次時間", "服務日期及時間", "服務人數"]
+                _rn_headers = ["評價日期", "姓名", "電話", "地址", "預約下次日期", "預約下次時間", "服務日期及時間", "服務人數", "訂單編號"]
                 _rn_md_lines = [
                     "| " + " | ".join(_rn_headers) + " |",
                     "|" + "|".join(["---"] * len(_rn_headers)) + "|",
@@ -2297,12 +2373,13 @@ else:
                         "| " + " | ".join([
                             r["評價日期"], name_cell, r["電話"], r["地址"],
                             r["預約下次日期"], r["預約下次時間"], r["服務日期及時間"], r["服務人數"],
+                            r["訂單編號"],
                         ]) + " |"
                     )
                 st.markdown("\n".join(_rn_md_lines))
                 rn_text = "\n".join(
                     f"{r['評價日期']}/ {r['姓名']}/ {r['電話']} /{r['地址']}/{r['預約下次日期']} "
-                    f"/{r['預約下次時間']}/{r['服務日期及時間']} {r['服務人數']}"
+                    f"/{r['預約下次時間']}/{r['服務日期及時間']} {r['服務人數']}/{r['訂單編號']}"
                     for r in rn_results
                 )
                 # v2026.07.07 新增：Google Sheets 貼上時要能自動分欄，必須是用
@@ -2310,14 +2387,18 @@ else:
                 # 一整行文字，Sheets 不會自動拆欄）。這裡另外組一份 Tab 分隔版本，
                 # 供貼到 Google Sheets 專用。
                 rn_tsv = "\n".join(
-                    "\t".join([
-                        r["評價日期"], r["姓名"], r["電話"], r["地址"],
-                        r["預約下次日期"], r["預約下次時間"], r["服務日期及時間"], r["服務人數"],
-                    ])
-                    for r in rn_results
+                    ["\t".join(_rn_headers + ["LINE"])] +
+                    [
+                        "\t".join([
+                            r["評價日期"], r["姓名"], r["電話"], r["地址"],
+                            r["預約下次日期"], r["預約下次時間"], r["服務日期及時間"], r["服務人數"],
+                            r["訂單編號"], r.get("LINE") or "",
+                        ])
+                        for r in rn_results
+                    ]
                 )
                 copy_button("複製整理結果（文字訊息用）", rn_text, "copy_rn_results")
-                copy_button("複製整理結果（貼到 Google Sheets 用，會自動分欄）", rn_tsv, "copy_rn_results_tsv")
+                copy_button("複製整理結果（貼到 Google Sheets 用，會自動分欄，含 LINE 網址）", rn_tsv, "copy_rn_results_tsv")
 
     elif single_feature == "會員喜好設定":
         info_panel("使用說明", [
@@ -2435,6 +2516,26 @@ else:
                         st.session_state.mp_data = None
                     except Exception as e:
                         st.error(f"更新失敗：{e}")
+
+    # --------------------------------------------------
+    # 舊客快速建單：多筆訂單結果顯示（建立筆數 > 1，或有任何一筆失敗時）
+    # --------------------------------------------------
+    old_results_multi = st.session_state.get("old_results_multi") if single_feature == "舊客快速建單" else None
+    if old_results_multi and not (len(old_results_multi) == 1 and old_results_multi[0]["ok"]):
+        st.markdown("<hr>", unsafe_allow_html=True)
+        step("5", "執行結果（多筆）")
+        _ok_count = sum(1 for r in old_results_multi if r["ok"])
+        st.info(f"共 {len(old_results_multi)} 筆，成功 {_ok_count} 筆，失敗 {len(old_results_multi) - _ok_count} 筆。")
+        for _i, r in enumerate(old_results_multi, start=1):
+            if r["ok"]:
+                res = r["result"]
+                st.success(f"✅ 第{_i}筆：{res['order_no']}　{res.get('date')} {res.get('period')}　專員：{res.get('staff') or '（無班表資料）'}")
+                if res.get("address_mismatch_warning"):
+                    st.warning(res["address_mismatch_warning"])
+                if res.get("line_message"):
+                    copy_button(f"複製第{_i}筆 LINE 訊息", res["line_message"], f"copy_old_multi_line_{_i}")
+            else:
+                st.error(f"❌ 第{_i}筆（{r.get('date')} {r.get('period')}）失敗：{r.get('error')}")
 
     # --------------------------------------------------
     # 舊客快速建單：建單後結果顯示
