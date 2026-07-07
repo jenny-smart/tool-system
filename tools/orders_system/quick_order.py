@@ -1,9 +1,14 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.45
-# 最後更新：2026-07-07
+# 版本：v8.46
+# 最後更新：2026-07-08
 #
 # Change Log
+# v8.46
+# - 訂單轉換與儲值金補價差建立新單後，會先回查後台訂單卡片，以「總金額
+#   扣除車馬費」判斷實際服務待收金額；只有等於 0 時才自動標記已付款並在
+#   發票號碼欄標註「不開立發票」。若不為 0，保留待付款與正常發票狀態，
+#   避免仍有客付差額時被誤標成已付款/不開發票。
 # v8.45
 # - fetch_rating_next_appointments 改成用完整評價時間戳記（含時分秒）由舊到
 #   新排序，符合畫面「評價日期愈新在愈下方」的要求（原本沿用後台頁面本身
@@ -1639,6 +1644,17 @@ def _mark_order_as_paid(session, base_url, order_no):
         return False, f"標記已付款失敗：{e}"
 
 
+def _service_due_after_fare(session, order_no):
+    block = _fetch_purchase_block_for_order_no(session, order_no)
+    joined = "\n".join(block.get("lines", []))
+    fare = _extract_fare_line(joined) or "0"
+    service_amount = _service_amount_from_block(joined, fare)
+    try:
+        return int(float(str(service_amount or "0").replace(",", "")))
+    except Exception:
+        return None
+
+
 def _fetch_order_edit_id(session, order_no):
     params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
     params["orderNo"] = str(order_no).strip()
@@ -2470,11 +2486,13 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
             )
             new_order_nos.append(order_result["order_no"])
 
-            # v2026.07.10：新訂單用優惠券折抵成 0，客人沒有實際再付款，
-            # 跟儲值金補價差第二段一致：標記為已付款、發票號碼標註「不開立
-            # 發票」，不能讓它卡在待付款、也不能讓財務誤以為漏開發票。
-            mark_paid_ok, mark_paid_msg = _mark_order_as_paid(session, base_url, order_result["order_no"])
-            invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(session, base_url, order_result["order_no"], "不開立發票")
+            service_due = _service_due_after_fare(session, order_result["order_no"])
+            if service_due == 0:
+                mark_paid_ok, mark_paid_msg = _mark_order_as_paid(session, base_url, order_result["order_no"])
+                invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(session, base_url, order_result["order_no"], "不開立發票")
+            else:
+                mark_paid_ok, mark_paid_msg = False, f"服務金額未歸零（總金額扣車馬費={service_due}），不自動標記已付款"
+                invoice_note_ok, invoice_note_msg = False, "服務金額未歸零，不自動標註不開立發票"
 
             # v2026.07.10：訂單轉換的 LINE 訊息改成「原訂單A＋新訂單B 合併
             # 訂單」的格式，另起一行顯示新訂單真正的服務時間，且不顯示
@@ -3800,11 +3818,13 @@ def stored_value_makeup_create_paid_order(
     pair = f"儲值折抵單 {stored_order_no} + 客付補價差單 {paid_order['order_no']}" if stored_order_no else f"客付補價差單 {paid_order['order_no']}"
     note = f"儲值金補價差第二段：{pair}，客付單使用優惠券B折抵原儲值金餘額 {ctx['balance']} 元。"
     _update_order_note(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], note)
-    # v2026.07.10：客付補價差單全額用優惠券折抵，客人沒有實際付款：
-    # 1. 標記為已付款，不能讓它卡在待付款狀態。
-    # 2. 發票號碼欄位標註「不用開發票」，避免財務誤以為漏開發票。
-    mark_paid_ok, mark_paid_msg = _mark_order_as_paid(paid_order["session"], _configure_environment(env_name), paid_order["order_no"])
-    invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], "不開立發票")
+    service_due = _service_due_after_fare(paid_order["session"], paid_order["order_no"])
+    if service_due == 0:
+        mark_paid_ok, mark_paid_msg = _mark_order_as_paid(paid_order["session"], _configure_environment(env_name), paid_order["order_no"])
+        invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], "不開立發票")
+    else:
+        mark_paid_ok, mark_paid_msg = False, f"服務金額未歸零（總金額扣車馬費={service_due}），不自動標記已付款"
+        invoice_note_ok, invoice_note_msg = False, "服務金額未歸零，不自動標註不開立發票"
 
     # v2026.07.10：LINE 訊息改成「儲值金歸零訂單＋補價差訂單 合併訂單」的
     # 格式，另起一行顯示補價差訂單真正的服務時間；服務金額這行要顯示（跟
