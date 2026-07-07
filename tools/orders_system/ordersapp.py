@@ -1,10 +1,15 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.55
+# 版本：v8.56
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-07
 #
 # Change Log
+# v8.56
+# - 把「15.儲值獎金備註」拆成兩個獨立功能：新增「儲值金搜尋」（只查詢、
+#   列出名單，不寫入任何東西），原本的「儲值獎金備註」維持完整流程
+#   （搜尋＋貼獎金名單＋套用寫入客服備註）。兩者各自獨立的搜尋條件與
+#   session_state（bs_ 開頭 vs bn_ 開頭），互不影響。
 # v8.55
 # - 新增「建立筆數」：舊客快速建單（已知日期模式）與新客資料拆解，都可以
 #   設定 1~10 筆，各自獨立選日期/時段/人數，一次送出建立多筆訂單（同一個
@@ -723,7 +728,10 @@ FUNCTION_OPTIONS = [
     ("查詢無LINE連結訂單：搜尋訂購資訊裡沒有LINE連結的訂單，列出訂單編號/姓名/電話，"
      "可用訂購日期/付款日期/服務日期分別篩選。",
      "orders", "查詢無LINE連結訂單"),
-    ("儲值獎金備註：搜尋購買項目儲值金、客服備註為空白的訂單並列出客戶姓名/電話/付款狀態名單，"
+    ("儲值金搜尋：搜尋購買項目儲值金、客服備註為空白（或指定狀態）的訂單，"
+     "單純列出客戶姓名/電話/付款狀態名單，不做任何寫入動作。",
+     "orders", "儲值金搜尋"),
+    ("儲值金備註：搜尋購買項目儲值金、客服備註為空白的訂單並列出客戶姓名/電話/付款狀態名單，"
      "依姓名把「獎金：名字1X名字2」加進客服備註（並改為已處理）。",
      "orders", "儲值獎金備註"),
     ("會員喜好設定：輸入電話查會員，設定喜愛專員性別，並列出近N次服務日期/專員，"
@@ -993,6 +1001,78 @@ elif mode == "查詢無LINE連結訂單":
             )
         else:
             st.success("✅ 這個篩選範圍內的訂單都有LINE連結。")
+
+elif mode == "儲值金搜尋":
+    step("3", "儲值金搜尋")
+    info_panel("功能說明", [
+        "單純搜尋「購買項目：儲值金」的訂單，列出客戶姓名/電話/付款狀態名單。",
+        "只查詢、不寫入任何東西——要把「獎金：名字1X名字2」寫進客服備註，"
+        "請用「儲值金備註」那個功能。",
+    ])
+
+    st.markdown("**訂購日期區間**")
+    bs_col1, bs_col2 = st.columns(2)
+    with bs_col1:
+        bs_date_s = st.date_input("訂購日期-起", value=None, key="bs_date_s")
+    with bs_col2:
+        bs_date_e = st.date_input("訂購日期-迄", value=None, key="bs_date_e")
+
+    st.markdown("**付款日期區間**")
+    bs_col3, bs_col4 = st.columns(2)
+    with bs_col3:
+        bs_paid_s = st.date_input("付款日期-起", value=None, key="bs_paid_s")
+    with bs_col4:
+        bs_paid_e = st.date_input("付款日期-迄", value=None, key="bs_paid_e")
+
+    bs_status_map = {
+        "待付款": "0", "已付款": "1",
+        "待付款＋已付款": ["0", "1"],
+    }
+    bs_status_label = st.selectbox("付款狀態", list(bs_status_map.keys()), key="bs_status")
+    bs_notice_map = {"空白": "blank", "非空白": "nonblank", "空白＋非空白": "all"}
+    bs_notice_label = st.selectbox("客服備註", list(bs_notice_map.keys()), key="bs_notice_status")
+
+    if st.button("🔍 開始搜尋", use_container_width=True, key="bs_search_btn", type="primary"):
+        if not backend_email.strip() or not backend_password.strip():
+            st.error("請先在上方輸入後台帳號密碼")
+        else:
+            try:
+                with st.spinner("登入後台 → 搜尋儲值金訂單中…"):
+                    bs_results, bs_debug = find_pending_stored_value_orders(
+                        env_name=env,
+                        backend_email=backend_email.strip(),
+                        backend_password=backend_password.strip(),
+                        date_s=bs_date_s.strftime("%Y-%m-%d") if bs_date_s else None,
+                        date_e=bs_date_e.strftime("%Y-%m-%d") if bs_date_e else None,
+                        paid_at_s=bs_paid_s.strftime("%Y-%m-%d") if bs_paid_s else None,
+                        paid_at_e=bs_paid_e.strftime("%Y-%m-%d") if bs_paid_e else None,
+                        purchase_status=bs_status_map[bs_status_label],
+                        notice_status=bs_notice_map[bs_notice_label],
+                        return_debug=True,
+                    )
+                st.session_state.bs_results = bs_results
+                st.session_state.bs_debug = bs_debug
+            except Exception as e:
+                st.error(f"搜尋失敗：{e}")
+
+    bs_results = st.session_state.get("bs_results")
+    bs_debug = st.session_state.get("bs_debug")
+    if bs_debug is not None:
+        st.caption(
+            f"🔧 除錯資訊：環境＝{bs_debug['env']}，實際連線＝{bs_debug['base_url']}，"
+            f"後台掃描到候選訂單 {bs_debug['scanned_candidates']} 筆，符合條件 {bs_debug['matched']} 筆。"
+        )
+        if bs_debug.get("hit_page_limit"):
+            st.warning("⚠️ 掃描撞到頁數上限（80 頁）就停了，結果可能不完整。建議縮小日期範圍。")
+    if bs_results is not None:
+        if bs_results:
+            st.success(f"✅ 找到 {len(bs_results)} 筆符合條件的儲值金訂單：")
+            st.dataframe(
+                [{"訂單編號": r["order_no"], "客戶姓名": r["name"], "付款狀態": r.get("purchase_status", ""), "客服備註": r.get("notice", "")} for r in bs_results],
+                use_container_width=True, hide_index=True,
+            )
+        else:
+            st.info("這個篩選範圍內沒有符合條件的儲值金訂單。")
 
 elif mode == "儲值獎金備註":
     step("3", "儲值獎金備註")
