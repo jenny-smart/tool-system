@@ -1,0 +1,8 @@
+{
+    "job_name": "service_daily_report",
+    "status": "success",
+    "exit_code": 0,
+    "started_at": "2026-07-09 07:02:54",
+    "finished_at": "2026-07-09 07:03:04",
+    "duration_seconds": 10
+  }
