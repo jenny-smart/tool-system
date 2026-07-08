@@ -29,7 +29,6 @@ roles:
   field_only:
     systems:
       - field_daily_schedule
-      - orders_memo_system
     pages:
       - main
       - log
