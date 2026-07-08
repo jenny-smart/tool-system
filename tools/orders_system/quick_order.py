@@ -827,6 +827,37 @@ def _extract_district_from_address(address):
     return district_m.group("district") if district_m else ""
 
 
+def _validate_area_not_known_bad(address, area_info, context=""):
+    area_id = str((area_info or {}).get("area_id") or (area_info or {}).get("areaId") or "").strip()
+    if area_id != "25":
+        return
+    district = _extract_district_from_address(address)
+    if district and district != "大安區":
+        prefix = f"{context}：" if context else ""
+        raise Exception(
+            f"{prefix}查詢地址區域疑似錯誤：地址寫的是「{district}」，"
+            "但後台回傳 area_id=25（大安區）。已停止成單，避免地址被加成台北市大安區。"
+        )
+
+
+def _validate_address_before_submit(address, area_id, context=""):
+    if re.search(r"[^市縣區鄉鎮]{1,6}[市縣].+[^市縣區鄉鎮]{1,6}[市縣]", str(address or "")):
+        prefix = f"{context}：" if context else ""
+        raise Exception(
+            f"{prefix}送出前地址格式異常：地址內出現兩個縣市「{address}」。"
+            "已停止成單，避免沿用後台錯誤加上的市/區前綴。"
+        )
+    if str(area_id or "").strip() == "25":
+        _validate_area_not_known_bad(address, {"area_id": "25"}, context=context)
+    fixed = _fix_address_district_order(address, fallback_district="")
+    if normalize_addr_for_match(fixed) != normalize_addr_for_match(address):
+        prefix = f"{context}：" if context else ""
+        raise Exception(
+            f"{prefix}送出前地址格式異常：目前地址是「{address}」，"
+            f"整理後會變成「{fixed}」。已停止成單，請確認不要沿用後台錯誤地址。"
+        )
+
+
 def _extract_address_line(lines):
     for line in lines:
         text = str(line or "").strip()
@@ -1303,6 +1334,7 @@ def quick_create_order(
         if not area_info.get("area_id"):
             route = BOOKING_ENDPOINT_MAP.get(payway, "/booking/single")
             raise Exception(f"地址缺少已存區域，且查詢地址/地區失敗（{payway}：{route}）：{selected_address}，請先到會員地址或後台手動確認區域")
+        _validate_area_not_known_bad(selected_address, area_info, context="舊客新地址")
         input_district = _extract_district_from_address(selected_address)
         returned_area_name = str(
             area_info.get("area_name")
@@ -1395,6 +1427,7 @@ def quick_create_order(
             f"地址「{selected_address}」缺少明確 area_id/company_id，已停止成單，"
             "請先在會員地址或後台手動確認區域，避免系統誤判成大安區。"
         )
+    _validate_address_before_submit(selected_address, base_data.get("area_id"), context="舊客建單")
 
     calc_result = calculate_hour(session, base_data, token)
     if not calc_result:
@@ -4508,6 +4541,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         area_id = str(area_info.get("area_id") or "")
         company_id = str(area_info.get("company_id") or "")
         country_id = str(area_info.get("country_id") or "12")
+        _validate_area_not_known_bad(address, area_info, context="新客地址")
         input_district = _extract_district_from_address(address)
         returned_area_name = str(
             area_info.get("area_name")
@@ -4558,6 +4592,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
             f"地址「{address}」缺少明確 area_id/company_id，已停止成單，"
             "請先到後台手動確認區域，避免系統誤判成大安區。"
         )
+    _validate_address_before_submit(address, area_id, context="新客建單")
 
     _slot = f"{date_s}_{period_s}"
     _raw_section = get_section_raw(session, _base_data_check, token_for_section, _slot)
