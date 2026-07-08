@@ -4,6 +4,15 @@
 # 最後更新：2026-07-08
 #
 # Change Log
+# v8.48
+# - 移除新單成單時可能把地址誤判成大安區的區域查詢/預設 fallback：
+#   不再用 geocode 猜行政區、不再用 area_id=25/company_id=1 當預設值；
+#   舊客既有地址優先使用會員地址已存的 area_id/company_id，新地址若後台
+#   check_contain 查不到明確區域就直接擋下，不靜默套用大安區。
+# v8.47
+# - 訂單轉換與儲值金補價差建立新單後，若「總金額扣除車馬費」等於 0，
+#   僅在訂單修改頁的發票號碼欄註記「不開立發票」，不再呼叫 set_success
+#   改付款狀態，也不動加收/待退等其他欄位。若仍大於 0，付款與發票皆不動。
 # v8.46
 # - 訂單轉換與儲值金補價差建立新單後，會先回查後台訂單卡片，以「總金額
 #   扣除車馬費」判斷實際服務待收金額；只有等於 0 時才自動標記已付款並在
@@ -321,6 +330,7 @@ __version__ = "8.39"
 
 import time
 import re
+import json
 from datetime import date, datetime, timedelta
 
 import requests
@@ -1205,8 +1215,8 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
         "carrier_info": str(member.get("email") or ""),
         "company_title": "", "company_no": "", "donate_code": "8585", "is_backend": "477",
         "member_id": str(member.get("member_id") or ""),
-        "company_id": str(best_addr.get("company_id") or pick("company_id", "1")),
-        "area_id": str(best_addr.get("area_id") or pick("area_id", "25")),
+        "company_id": str(best_addr.get("company_id") or best_addr.get("companyId") or pick("company_id", "")),
+        "area_id": str(best_addr.get("area_id") or best_addr.get("areaId") or pick("area_id", "")),
         "lat": str(best_addr.get("lat") or pick("lat", "")),
         "lng": str(best_addr.get("lng") or pick("lng", "")),
     }
@@ -1257,25 +1267,36 @@ def quick_create_order(
     if geo_lat and geo_lng:
         best_addr["lat"] = geo_lat
         best_addr["lng"] = geo_lng
-    addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
-    if not addr_check and lookup_result.get("token") and lookup_result.get("token") != token:
-        addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
-    if not addr_check and payway == "儲值金":
-        # v8.5：stored_value_routine 頁面的 token 有時無法用於 check_contain，
-        # 改向 /booking/single 借一個可靠的 token 重試
-        _fallback_token = _fetch_csrf_from_url(session, f"{base_url}/booking/single")
-        if _fallback_token and _fallback_token != token and _fallback_token != lookup_result.get("token"):
-            addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
-            if addr_check:
-                token = _fallback_token
-    if not addr_check:
-        route = BOOKING_ENDPOINT_MAP.get(payway, "/booking/single")
-        raise Exception(f"查詢地址/地區失敗（{payway}：{route}）：{selected_address}")
-    area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
-    if area_info:
-        best_addr["area_id"] = area_info.get("area_id", best_addr.get("area_id"))
+    # 2026-07-08：避免新單成單時被 check_contain 誤判成大安區。
+    # 若會員既有地址已經有 area_id/company_id，就直接用既有資料，不再重新查詢區域覆蓋。
+    # 只有在既有地址完全沒有 area_id 時，才呼叫後台 check_contain；查不到就擋下，不套預設大安區。
+    addr_check = {}
+    if not str(best_addr.get("area_id") or best_addr.get("areaId") or "").strip():
+        addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
+        if not addr_check and lookup_result.get("token") and lookup_result.get("token") != token:
+            addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
+        if not addr_check and payway == "儲值金":
+            _fallback_token = _fetch_csrf_from_url(session, f"{base_url}/booking/single")
+            if _fallback_token and _fallback_token != token and _fallback_token != lookup_result.get("token"):
+                addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
+                if addr_check:
+                    token = _fallback_token
+        area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
+        if not area_info.get("area_id"):
+            route = BOOKING_ENDPOINT_MAP.get(payway, "/booking/single")
+            raise Exception(f"地址缺少已存區域，且查詢地址/地區失敗（{payway}：{route}）：{selected_address}，請先到會員地址或後台手動確認區域")
+        best_addr["area_id"] = area_info.get("area_id")
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
         best_addr["country_id"] = area_info.get("country_id", best_addr.get("country_id"))
+    else:
+        if best_addr.get("areaId") and not best_addr.get("area_id"):
+            best_addr["area_id"] = best_addr.get("areaId")
+        if best_addr.get("companyId") and not best_addr.get("company_id"):
+            best_addr["company_id"] = best_addr.get("companyId")
+        if best_addr.get("countryId") and not best_addr.get("country_id"):
+            best_addr["country_id"] = best_addr.get("countryId")
+
+    area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
     purchase_info = addr_check.get("purchase") if isinstance(addr_check.get("purchase"), dict) else {}
     fare_from_check = first_nonzero(
         purchase_info.get("fare") if purchase_info else "",
@@ -1329,13 +1350,21 @@ def quick_create_order(
         "carrier_info": carrier_info, "company_title": company_title,
         "company_no": company_no, "donate_code": donate_code, "is_backend": "477",
         "member_id": str(member.get("member_id") or ""),
-        "company_id": str(best_addr.get("company_id") or pick("company_id", "1")),
-        "area_id": str(best_addr.get("area_id") or pick("area_id", "25")),
+        "company_id": str(best_addr.get("company_id") or best_addr.get("companyId") or pick("company_id", "")),
+        "area_id": str(best_addr.get("area_id") or best_addr.get("areaId") or pick("area_id", "")),
         "lat": str(best_addr.get("lat") or pick("lat", "")),
         "lng": str(best_addr.get("lng") or pick("lng", "")),
     }
     if extra_fields:
         base_data.update(extra_fields)
+
+    # 不再用 area_id=25/company_id=1 當預設值；缺少區域就擋下，避免誤成大安區。
+    if not str(base_data.get("area_id") or "").strip() or not str(base_data.get("company_id") or "").strip():
+        raise Exception(
+            f"地址「{selected_address}」缺少明確 area_id/company_id，已停止成單，"
+            "請先在會員地址或後台手動確認區域，避免系統誤判成大安區。"
+        )
+
     calc_result = calculate_hour(session, base_data, token)
     if not calc_result:
         raise Exception("計算時數失敗")
@@ -1665,14 +1694,118 @@ def _fetch_order_edit_id(session, order_no):
     return m.group(1) if m else None
 
 
+def _extract_purchase_json_from_edit_html(html_text):
+    """
+    從訂單修改頁 Vue data() 裡的 purchase JSON 取出真實目前值。
+    訂單修改頁有些欄位是 Vue 動態渲染，靜態 HTML 會看到樣板字串或未 checked
+    的 radio；更新發票號碼時必須優先用這份 purchase JSON，避免誤改其他欄位。
+    """
+    marker = "purchase:"
+    idx = str(html_text or "").find(marker)
+    if idx < 0:
+        return {}
+    start = idx + len(marker)
+    while start < len(html_text) and html_text[start].isspace():
+        start += 1
+    if start >= len(html_text) or html_text[start] != "{":
+        return {}
+    decoder = json.JSONDecoder()
+    try:
+        obj, _end = decoder.raw_decode(html_text[start:])
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _build_purchase_edit_payload_from_page(html_text, csrf, overrides=None):
+    """
+    組訂單修改頁 POST payload。
+    只覆蓋 overrides 指定欄位，其餘欄位用頁面內 Vue purchase JSON 的真實值保留。
+    """
+    overrides = overrides or {}
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    existing = {}
+
+    # 先用靜態表單建立基本 payload
+    for tag in soup.find_all(["input", "textarea", "select"]):
+        name = tag.get("name")
+        if not name:
+            continue
+        if name == "_method":
+            continue
+
+        if tag.name == "textarea":
+            value = tag.text or ""
+        elif tag.name == "select":
+            selected = tag.find("option", selected=True)
+            value = selected.get("value", "") if selected else ""
+        elif tag.get("type") in ("radio", "checkbox"):
+            if tag.has_attr("checked"):
+                value = tag.get("value", "")
+            else:
+                continue
+        else:
+            value = tag.get("value", "")
+
+        existing[name] = value
+
+    purchase = _extract_purchase_json_from_edit_html(html_text)
+
+    # Vue purchase JSON key -> 後台表單 name
+    vue_to_form = {
+        "line": "line",
+        "fbName": "fbName",
+        "fb": "fb",
+        "memoProcess": "memoProcess",
+        "memoFinance": "memoFinance",
+        "address": "address",
+        "areaId": "area_id",
+        "lat": "lat",
+        "lng": "lng",
+        "progress": "progress",
+        "email": "email",
+        "phone": "phone",
+        "period": "period",
+        "invoiceNo": "invoice_no",
+        "isTransfer": "is_transfer",
+        "memo": "memo",
+        "notice": "notice",
+        "isCharge": "isCharge",
+        "chargeDate": "chargeDate",
+        "chargePayment": "chargePayment",
+        "chargeInvoiceDate": "chargeInvoiceDate",
+        "chargeAmount": "chargeAmount",
+        "chargeInvoice": "chargeInvoice",
+        "chargeNote": "chargeNote",
+        "isRefund": "isRefund",
+        "refundDate": "refundDate",
+        "refundPayment": "refundPayment",
+        "refundAmount": "refundAmount",
+        "refundNumber": "refundNumber",
+        "refundInvoiceDate": "refundInvoiceDate",
+        "refundInvoiceAmount": "refundInvoiceAmount",
+        "refundInvoice": "refundInvoice",
+        "refundNote": "refundNote",
+    }
+    for vue_key, form_key in vue_to_form.items():
+        if vue_key in purchase:
+            val = purchase.get(vue_key)
+            existing[form_key] = "" if val is None else str(val)
+
+    existing["_token"] = csrf
+    existing["_method"] = "PUT"
+
+    for k, v in overrides.items():
+        existing[k] = "" if v is None else str(v)
+
+    return existing
+
+
 def _update_order_invoice_no_text(session, base_url, order_no, invoice_no_text):
     """
-    v2026.07.10：把訂單編輯頁（/purchase/edit/{id}）的「發票號碼」欄位改成
-    指定文字（例如「不用開發票」）。用於儲值金補價差第二段：這張客付補價差
-    單全額用優惠券折抵，客人沒有實際付款，不需要真的開立發票，用這個欄位
-    標註清楚，避免財務誤以為漏開發票。
-    寫法沿用既有的 _update_order_note：先 GET 編輯頁抓出目前所有欄位值，
-    只覆蓋 invoice_no 這一個欄位，其餘欄位原封不動 PUT 回去。
+    只更新訂單修改頁的 invoice_no 欄位。
+    其他欄位以 Vue purchase JSON 的真實值保留，避免靜態 HTML 的 radio/textarea
+    樣板值造成加收、待退、服務狀態等欄位被誤改。
     """
     try:
         edit_id = _fetch_order_edit_id(session, order_no)
@@ -1685,16 +1818,22 @@ def _update_order_invoice_no_text(session, base_url, order_no, invoice_no_text):
         token_m = re.search(r'<meta name="csrf-token" content="([^"]+)"', get_resp.text)
         csrf = token_m.group(1) if token_m else ""
         if not csrf:
+            token_m2 = re.search(r'name="_token"[^>]*value="([^"]+)"', get_resp.text)
+            csrf = token_m2.group(1) if token_m2 else ""
+        if not csrf:
             return False, "無法取得 CSRF token"
-        existing = {}
-        for m2 in re.finditer(r'<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*>', get_resp.text):
-            existing[m2.group(1)] = m2.group(2)
-        for m2 in re.finditer(r'<textarea[^>]+name="([^"]+)"[^>]*>([^<]*)</textarea>', get_resp.text):
-            existing[m2.group(1)] = m2.group(2).strip()
-        existing["_token"] = csrf
-        existing.pop("_method", None)
-        existing["invoice_no"] = invoice_no_text
-        post_resp = session.post(edit_url, data=existing, headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded"}, allow_redirects=True)
+
+        payload = _build_purchase_edit_payload_from_page(
+            get_resp.text,
+            csrf,
+            overrides={"invoice_no": invoice_no_text},
+        )
+        post_resp = session.post(
+            edit_url,
+            data=payload,
+            headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded"},
+            allow_redirects=True,
+        )
         success = post_resp.status_code in (200, 302)
         return success, f"HTTP {post_resp.status_code}"
     except Exception as e:
@@ -1702,6 +1841,11 @@ def _update_order_invoice_no_text(session, base_url, order_no, invoice_no_text):
 
 
 def _update_order_note(session, base_url, order_no, note):
+    """
+    更新處理備註 memoProcess。
+    其餘欄位同樣用 Vue purchase JSON 的真實值保留，避免訂單修改頁靜態 HTML
+    裡的 radio/textarea 樣板值誤改加收、待退、服務狀態等欄位。
+    """
     try:
         edit_id = _fetch_order_edit_id(session, order_no)
         if not edit_id:
@@ -1713,16 +1857,22 @@ def _update_order_note(session, base_url, order_no, note):
         token_m = re.search(r'<meta name="csrf-token" content="([^"]+)"', get_resp.text)
         csrf = token_m.group(1) if token_m else ""
         if not csrf:
+            token_m2 = re.search(r'name="_token"[^>]*value="([^"]+)"', get_resp.text)
+            csrf = token_m2.group(1) if token_m2 else ""
+        if not csrf:
             return False, "無法取得 CSRF token"
-        existing = {}
-        for m2 in re.finditer(r'<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"[^>]*>', get_resp.text):
-            existing[m2.group(1)] = m2.group(2)
-        for m2 in re.finditer(r'<textarea[^>]+name="([^"]+)"[^>]*>([^<]*)</textarea>', get_resp.text):
-            existing[m2.group(1)] = m2.group(2).strip()
-        existing["_token"] = csrf
-        existing["_method"] = "PUT"
-        existing["memoProcess"] = note
-        post_resp = session.post(edit_url, data=existing, headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded"}, allow_redirects=True)
+
+        payload = _build_purchase_edit_payload_from_page(
+            get_resp.text,
+            csrf,
+            overrides={"memoProcess": note},
+        )
+        post_resp = session.post(
+            edit_url,
+            data=payload,
+            headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded"},
+            allow_redirects=True,
+        )
         success = post_resp.status_code in (200, 302)
         return success, f"HTTP {post_resp.status_code}"
     except Exception as e:
@@ -2488,10 +2638,11 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
 
             service_due = _service_due_after_fare(session, order_result["order_no"])
             if service_due == 0:
-                mark_paid_ok, mark_paid_msg = _mark_order_as_paid(session, base_url, order_result["order_no"])
+                # 2026-07-08：依客服確認，只在發票號碼欄註記不開立發票，不再改付款狀態。
+                mark_paid_ok, mark_paid_msg = None, "依規則不自動標記已付款，僅註記發票號碼"
                 invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(session, base_url, order_result["order_no"], "不開立發票")
             else:
-                mark_paid_ok, mark_paid_msg = False, f"服務金額未歸零（總金額扣車馬費={service_due}），不自動標記已付款"
+                mark_paid_ok, mark_paid_msg = None, f"服務金額未歸零（總金額扣車馬費={service_due}），不自動標記已付款"
                 invoice_note_ok, invoice_note_msg = False, "服務金額未歸零，不自動標註不開立發票"
 
             # v2026.07.10：訂單轉換的 LINE 訊息改成「原訂單A＋新訂單B 合併
@@ -3820,10 +3971,11 @@ def stored_value_makeup_create_paid_order(
     _update_order_note(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], note)
     service_due = _service_due_after_fare(paid_order["session"], paid_order["order_no"])
     if service_due == 0:
-        mark_paid_ok, mark_paid_msg = _mark_order_as_paid(paid_order["session"], _configure_environment(env_name), paid_order["order_no"])
+        # 2026-07-08：依客服確認，只在發票號碼欄註記不開立發票，不再改付款狀態。
+        mark_paid_ok, mark_paid_msg = None, "依規則不自動標記已付款，僅註記發票號碼"
         invoice_note_ok, invoice_note_msg = _update_order_invoice_no_text(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], "不開立發票")
     else:
-        mark_paid_ok, mark_paid_msg = False, f"服務金額未歸零（總金額扣車馬費={service_due}），不自動標記已付款"
+        mark_paid_ok, mark_paid_msg = None, f"服務金額未歸零（總金額扣車馬費={service_due}），不自動標記已付款"
         invoice_note_ok, invoice_note_msg = False, "服務金額未歸零，不自動標註不開立發票"
 
     # v2026.07.10：LINE 訊息改成「儲值金歸零訂單＋補價差訂單 合併訂單」的
@@ -4147,13 +4299,9 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     tel = str(customer.get("tel", "")).strip()
     line = str(customer.get("line", "")).strip()
     address = str(customer["address"]).strip()
-    # v8.6：地址若完全缺少行政區（區/鄉/鎮），嘗試查詢並補在「市/縣」之後；
-    # 若地址區域順序錯誤（例如「大安區台北市...」），自動對調為「台北市大安區...」。
-    if not re.search(r"[區鄉鎮]", address):
-        _fallback_district = _lookup_district_via_geocode(address)
-    else:
-        _fallback_district = ""
-    address = _fix_address_district_order(address, fallback_district=_fallback_district)
+    # 2026-07-08：移除 geocode 猜行政區。
+    # 之前地址缺少行政區時可能猜成大安區，導致新單區域錯誤；現在只修正既有行政區順序，不再補猜。
+    address = _fix_address_district_order(address, fallback_district="")
     payway = str(customer["payway"]).strip()
     clean_type_id = str(customer["clean_type_id"]).strip()
     date_s = str(customer["date_s"]).strip()
@@ -4289,11 +4437,9 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         purchase_info = matched_addr.get("purchase", {}) or {}
         company_id = str(purchase_info.get("company_id", "1"))
     else:
-        # v8.11：新地址一定要先 geocode 取得經緯度，check_contain 才有辦法正確判斷區域。
-        # 原本 lat/lng 永遠送空字串，導致 check_contain 查無結果，area_id 掉進寫死的
-        # fallback "25"，若 25 剛好對應到錯誤區域（例如大安區），會造成每一筆新客訂單
-        # 不論實際地址為何，全部被誤標成同一個錯誤區域。
-        geo_lat, geo_lng = geocode_address(address)
+        # 2026-07-08：不再用 geocode 猜地址/行政區；交由後台 check_contain 判斷。
+        # 若後台無法判斷 area_id，直接擋下，不使用任何大安區 fallback。
+        geo_lat, geo_lng = "", ""
         check_resp = session.post(
             f"{base_url}/ajax/check_contain",
             data={
@@ -4325,9 +4471,14 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
                 f"（check_contain 回傳無 area_id，地址是否正確或是否為服務涵蓋範圍？）"
                 f"，請確認地址格式或改用後台手動建單。"
             )
-        area_id = str(area_info.get("area_id"))
-        company_id = str(area_info.get("company_id", "1"))
-        country_id = str(area_info.get("country_id", "12"))
+        area_id = str(area_info.get("area_id") or "")
+        company_id = str(area_info.get("company_id") or "")
+        country_id = str(area_info.get("country_id") or "12")
+        if not company_id:
+            raise Exception(
+                f"查詢地址區域失敗：地址「{address}」無法判斷 company_id，"
+                "已停止成單，避免系統誤判區域。"
+            )
         lat = str(geo_lat or "")
         lng = str(geo_lng or "")
         address_id = ""
@@ -4355,6 +4506,12 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "person": person, "hour": hour,
         "date_s": date_s, "period_s": period_s,
     }
+    if not str(area_id or "").strip() or not str(company_id or "").strip():
+        raise Exception(
+            f"地址「{address}」缺少明確 area_id/company_id，已停止成單，"
+            "請先到後台手動確認區域，避免系統誤判成大安區。"
+        )
+
     _slot = f"{date_s}_{period_s}"
     _raw_section = get_section_raw(session, _base_data_check, token_for_section, _slot)
     _slot_found = slot_exists_in_section_response(_raw_section, _slot)
