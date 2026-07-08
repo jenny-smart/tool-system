@@ -764,6 +764,8 @@ def _fix_address_district_order(address, fallback_district=""):
         if district_m:
             district = district_m.group("district")
             rest_before = before_city[district_m.end():]
+            if re.match(r"^[^區鄉鎮]{0,6}[區鄉鎮]", after_city):
+                return f"{rest_before}{city}{after_city}".strip()
             return f"{rest_before}{city}{district}{after_city}".strip()
         if re.match(r"^[^區鄉鎮]{0,6}[區鄉鎮]", after_city):
             return address
@@ -813,6 +815,16 @@ def _lookup_district_via_geocode(address):
     except Exception:
         pass
     return ""
+
+
+def _extract_district_from_address(address):
+    address = str(address or "").strip()
+    city_m = re.search(r"[^市縣區鄉鎮]{1,6}[市縣]", address)
+    if not city_m:
+        return ""
+    after_city = address[city_m.end():]
+    district_m = re.match(r"(?P<district>[^區鄉鎮市]{1,6}[區鄉鎮])", after_city)
+    return district_m.group("district") if district_m else ""
 
 
 def _extract_address_line(lines):
@@ -1258,12 +1270,18 @@ def quick_create_order(
         raise Exception("此電話查無會員資料，請先走新客人資訊收集流程建立會員後再建單")
     member = member_payload.get("member", {})
     best_addr = pick_best_address_info(member_payload, address)
+    is_new_address = not bool(best_addr)
     if not best_addr:
         # v2026.07.06 修正：舊客地址不在既有清單裡不再直接擋掉查詢，
         # 當作新地址處理（跟 quick_create_order 的新地址邏輯一致）。
         best_addr = {}
     selected_address = str(best_addr.get("address") or address).strip()
     geo_lat, geo_lng = geocode_address(selected_address)
+    if is_new_address and (not geo_lat or not geo_lng):
+        raise Exception(
+            f"新地址「{selected_address}」無法取得經緯度，已停止成單，"
+            "避免後台用空座標誤判成大安區。請確認地址是否完整到路段/門牌，或改用後台手動建單。"
+        )
     if geo_lat and geo_lng:
         best_addr["lat"] = geo_lat
         best_addr["lng"] = geo_lng
@@ -1285,6 +1303,19 @@ def quick_create_order(
         if not area_info.get("area_id"):
             route = BOOKING_ENDPOINT_MAP.get(payway, "/booking/single")
             raise Exception(f"地址缺少已存區域，且查詢地址/地區失敗（{payway}：{route}）：{selected_address}，請先到會員地址或後台手動確認區域")
+        input_district = _extract_district_from_address(selected_address)
+        returned_area_name = str(
+            area_info.get("area_name")
+            or area_info.get("name")
+            or area_info.get("area")
+            or area_info.get("district")
+            or ""
+        ).strip()
+        if input_district and returned_area_name and input_district not in returned_area_name:
+            raise Exception(
+                f"查詢地址區域疑似錯誤：地址寫的是「{input_district}」，"
+                f"但後台回傳區域為「{returned_area_name}」。已停止成單，避免地址被誤加錯區。"
+            )
         best_addr["area_id"] = area_info.get("area_id")
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
         best_addr["country_id"] = area_info.get("country_id", best_addr.get("country_id"))
@@ -4439,7 +4470,10 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     else:
         # 2026-07-08：不再用 geocode 猜地址/行政區；交由後台 check_contain 判斷。
         # 若後台無法判斷 area_id，直接擋下，不使用任何大安區 fallback。
-        geo_lat, geo_lng = "", ""
+        # 2026-07-08 補強：check_contain 若拿不到 lat/lng，後台可能用錯誤預設區域
+        # 回傳 area_id，造成成單後地址被加上「大安區」。所以這裡仍先 geocode 取座標，
+        # 但只把座標交給後台判斷，不用 geocode 結果自行猜行政區或改地址字串。
+        geo_lat, geo_lng = geocode_address(address)
         check_resp = session.post(
             f"{base_url}/ajax/check_contain",
             data={
@@ -4474,6 +4508,19 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         area_id = str(area_info.get("area_id") or "")
         company_id = str(area_info.get("company_id") or "")
         country_id = str(area_info.get("country_id") or "12")
+        input_district = _extract_district_from_address(address)
+        returned_area_name = str(
+            area_info.get("area_name")
+            or area_info.get("name")
+            or area_info.get("area")
+            or area_info.get("district")
+            or ""
+        ).strip()
+        if input_district and returned_area_name and input_district not in returned_area_name:
+            raise Exception(
+                f"查詢地址區域疑似錯誤：地址寫的是「{input_district}」，"
+                f"但後台回傳區域為「{returned_area_name}」。已停止成單，避免地址被誤加錯區。"
+            )
         if not company_id:
             raise Exception(
                 f"查詢地址區域失敗：地址「{address}」無法判斷 company_id，"
