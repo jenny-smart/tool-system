@@ -362,6 +362,36 @@ PERIOD_DISPLAY_INFO = {
 }
 
 COUPON_COMPANY_ID_MAP = {"台北": "1", "桃園": "2", "新竹": "3", "台中": "4"}
+COUNTRY_ID_BY_CITY_AREA = {
+    ("台北市", "中正區"): "8", ("台北市", "大同區"): "9", ("台北市", "中山區"): "10",
+    ("台北市", "松山區"): "11", ("台北市", "大安區"): "12", ("台北市", "萬華區"): "13",
+    ("台北市", "信義區"): "14", ("台北市", "士林區"): "15", ("台北市", "北投區"): "16",
+    ("台北市", "內湖區"): "17", ("台北市", "南港區"): "18", ("台北市", "文山區"): "19",
+    ("新北市", "板橋區"): "22", ("新北市", "汐止區"): "23", ("新北市", "新店區"): "30",
+    ("新北市", "永和區"): "33", ("新北市", "中和區"): "34", ("新北市", "土城區"): "35",
+    ("新北市", "三峽區"): "36", ("新北市", "樹林區"): "37", ("新北市", "鶯歌區"): "38",
+    ("新北市", "三重區"): "39", ("新北市", "新莊區"): "40", ("新北市", "泰山區"): "41",
+    ("新北市", "林口區"): "42", ("新北市", "蘆洲區"): "43", ("新北市", "五股區"): "44",
+    ("桃園市", "中壢區"): "49", ("桃園市", "平鎮區"): "50", ("桃園市", "桃園區"): "55",
+    ("桃園市", "龜山區"): "56", ("桃園市", "八德區"): "57", ("桃園市", "蘆竹區"): "61",
+    ("新竹市", "東區"): "62", ("新竹市", "北區"): "63", ("新竹市", "香山區"): "64",
+    ("新竹縣", "竹北市"): "65", ("新竹縣", "新豐鄉"): "67", ("新竹縣", "寶山鄉"): "71",
+    ("新竹縣", "竹東鎮"): "72",
+    ("苗栗縣", "竹南鎮"): "78", ("苗栗縣", "頭份市"): "79",
+    ("台中市", "中區"): "96", ("台中市", "東區"): "97", ("台中市", "南區"): "98",
+    ("台中市", "西區"): "99", ("台中市", "北區"): "100", ("台中市", "北屯區"): "101",
+    ("台中市", "西屯區"): "102", ("台中市", "南屯區"): "103", ("台中市", "太平區"): "104",
+    ("台中市", "大里區"): "105", ("台中市", "烏日區"): "107", ("台中市", "潭子區"): "114",
+    ("台中市", "大雅區"): "115",
+    ("台南市", "中西區"): "204", ("台南市", "東區"): "205", ("台南市", "南區"): "206",
+    ("台南市", "北區"): "207", ("台南市", "安平區"): "208", ("台南市", "安南區"): "209",
+    ("台南市", "永康區"): "210",
+    ("高雄市", "新興區"): "241", ("高雄市", "前金區"): "242", ("高雄市", "苓雅區"): "243",
+    ("高雄市", "鹽埕區"): "244", ("高雄市", "鼓山區"): "245", ("高雄市", "前鎮區"): "247",
+    ("高雄市", "三民區"): "248", ("高雄市", "楠梓區"): "249", ("高雄市", "小港區"): "250",
+    ("高雄市", "左營區"): "251", ("高雄市", "岡山區"): "254", ("高雄市", "橋頭區"): "259",
+    ("高雄市", "梓官區"): "260", ("高雄市", "彌陀區"): "261", ("高雄市", "鳳山區"): "264",
+}
 COUPON_SERVICE_ITEM_MAP = {
     "居家清潔": "1", "辦公室清潔": "2", "裝修細清": "3", "年節大掃除": "4",
     "冷氣機清潔": "5", "洗衣機清潔": "6", "沙發/床墊清潔": "7", "整理收納": "8",
@@ -825,6 +855,29 @@ def _extract_district_from_address(address):
     after_city = address[city_m.end():]
     district_m = re.match(r"(?P<district>[^區鄉鎮市]{1,6}[區鄉鎮])", after_city)
     return district_m.group("district") if district_m else ""
+
+
+def _split_booking_address(address):
+    address = _fix_address_district_order(str(address or "").strip(), fallback_district="")
+    result = {"city": "", "district": "", "country_id": "", "detail": address, "full": address}
+    city_m = re.search(r"(?P<city>[^市縣區鄉鎮]{1,6}[市縣])", address)
+    if not city_m:
+        return result
+    city = city_m.group("city")
+    after_city = address[city_m.end():]
+    district_m = re.match(r"(?P<district>[^區鄉鎮市]{1,6}[區鄉鎮])", after_city)
+    if not district_m:
+        return result
+    district = district_m.group("district")
+    detail = after_city[district_m.end():].strip()
+    country_id = COUNTRY_ID_BY_CITY_AREA.get((city, district), "")
+    return {
+        "city": city,
+        "district": district,
+        "country_id": country_id,
+        "detail": detail or address,
+        "full": f"{city}{district}{detail}".strip(),
+    }
 
 
 def _validate_area_not_known_bad(address, area_info, context=""):
@@ -1307,10 +1360,13 @@ def quick_create_order(
         # 當作新地址處理（跟 quick_create_order 的新地址邏輯一致）。
         best_addr = {}
     selected_address = str(best_addr.get("address") or address).strip()
-    geo_lat, geo_lng = geocode_address(selected_address)
+    address_parts = _split_booking_address(selected_address)
+    address_for_lookup = address_parts["full"]
+    address_for_submit = address_parts["detail"]
+    geo_lat, geo_lng = geocode_address(address_for_lookup)
     if is_new_address and (not geo_lat or not geo_lng):
         raise Exception(
-            f"新地址「{selected_address}」無法取得經緯度，已停止成單，"
+            f"新地址「{address_for_lookup}」無法取得經緯度，已停止成單，"
             "避免後台用空座標誤判成大安區。請確認地址是否完整到路段/門牌，或改用後台手動建單。"
         )
     if geo_lat and geo_lng:
@@ -1321,21 +1377,21 @@ def quick_create_order(
     # 只有在既有地址完全沒有 area_id 時，才呼叫後台 check_contain；查不到就擋下，不套預設大安區。
     addr_check = {}
     if not str(best_addr.get("area_id") or best_addr.get("areaId") or "").strip():
-        addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
+        addr_check = check_contain(session, member.get("member_id", ""), address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
         if not addr_check and lookup_result.get("token") and lookup_result.get("token") != token:
-            addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
+            addr_check = check_contain(session, member.get("member_id", ""), address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
         if not addr_check and payway == "儲值金":
             _fallback_token = _fetch_csrf_from_url(session, f"{base_url}/booking/single")
             if _fallback_token and _fallback_token != token and _fallback_token != lookup_result.get("token"):
-                addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
+                addr_check = check_contain(session, member.get("member_id", ""), address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
                 if addr_check:
                     token = _fallback_token
         area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
         if not area_info.get("area_id"):
             route = BOOKING_ENDPOINT_MAP.get(payway, "/booking/single")
-            raise Exception(f"地址缺少已存區域，且查詢地址/地區失敗（{payway}：{route}）：{selected_address}，請先到會員地址或後台手動確認區域")
-        _validate_area_not_known_bad(selected_address, area_info, context="舊客新地址")
-        input_district = _extract_district_from_address(selected_address)
+            raise Exception(f"地址缺少已存區域，且查詢地址/地區失敗（{payway}：{route}）：{address_for_lookup}，請先到會員地址或後台手動確認區域")
+        _validate_area_not_known_bad(address_for_lookup, area_info, context="舊客新地址")
+        input_district = _extract_district_from_address(address_for_lookup)
         returned_area_name = str(
             area_info.get("area_name")
             or area_info.get("name")
@@ -1350,7 +1406,7 @@ def quick_create_order(
             )
         best_addr["area_id"] = area_info.get("area_id")
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
-        best_addr["country_id"] = area_info.get("country_id", best_addr.get("country_id"))
+        best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
     else:
         if best_addr.get("areaId") and not best_addr.get("area_id"):
             best_addr["area_id"] = best_addr.get("areaId")
@@ -1392,8 +1448,8 @@ def quick_create_order(
         "fbName": str(member.get("fb_name") or ""), "fb": str(member.get("fb") or ""),
         "memoProcess": str(member.get("memo_process") or ""), "memoFinance": str(member.get("memo_finance") or ""),
         "addressId": str(best_addr.get("addressId") or ""),
-        "country_id": str(best_addr.get("country_id") or pick("country_id", "12")),
-        "address": selected_address, "ping": str(pick("ping", "4")),
+        "country_id": str(address_parts.get("country_id") or best_addr.get("country_id") or pick("country_id", "12")),
+        "address": address_for_submit, "ping": str(pick("ping", "4")),
         "room": str(pick("room", "0")), "bathroom": str(pick("bathroom", "0")),
         "balcony": str(pick("balcony", "0")), "livingroom": str(pick("livingroom", "0")),
         "kitchen": str(pick("kitchen", "0")), "window": str(pick("window", "")),
@@ -1424,10 +1480,10 @@ def quick_create_order(
     # 不再用 area_id=25/company_id=1 當預設值；缺少區域就擋下，避免誤成大安區。
     if not str(base_data.get("area_id") or "").strip() or not str(base_data.get("company_id") or "").strip():
         raise Exception(
-            f"地址「{selected_address}」缺少明確 area_id/company_id，已停止成單，"
+            f"地址「{address_for_lookup}」缺少明確 area_id/company_id，已停止成單，"
             "請先在會員地址或後台手動確認區域，避免系統誤判成大安區。"
         )
-    _validate_address_before_submit(selected_address, base_data.get("area_id"), context="舊客建單")
+    _validate_address_before_submit(address_for_lookup, base_data.get("area_id"), context="舊客建單")
 
     calc_result = calculate_hour(session, base_data, token)
     if not calc_result:
@@ -4366,6 +4422,9 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     # 2026-07-08：移除 geocode 猜行政區。
     # 之前地址缺少行政區時可能猜成大安區，導致新單區域錯誤；現在只修正既有行政區順序，不再補猜。
     address = _fix_address_district_order(address, fallback_district="")
+    address_parts = _split_booking_address(address)
+    address_for_lookup = address_parts["full"]
+    address_for_submit = address_parts["detail"]
     payway = str(customer["payway"]).strip()
     clean_type_id = str(customer["clean_type_id"]).strip()
     date_s = str(customer["date_s"]).strip()
@@ -4480,7 +4539,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
 
     # Step 3: 查或建地址，取 addressId / area_id / company_id / lat / lng
     addr_list = member.get("memberAddressList", []) or []
-    address_norm = normalize_addr_for_match(address)
+    address_norm = normalize_addr_for_match(address_for_lookup)
     matched_addr = None
     for a in addr_list:
         if normalize_addr_for_match(a.get("address", "")) == address_norm:
@@ -4506,7 +4565,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         # 2026-07-08 補強：check_contain 若拿不到 lat/lng，後台可能用錯誤預設區域
         # 回傳 area_id，造成成單後地址被加上「大安區」。所以這裡仍先 geocode 取座標，
         # 但只把座標交給後台判斷，不用 geocode 結果自行猜行政區或改地址字串。
-        geo_lat, geo_lng = geocode_address(address)
+        geo_lat, geo_lng = geocode_address(address_for_lookup)
         check_resp = session.post(
             f"{base_url}/ajax/check_contain",
             data={
@@ -4520,7 +4579,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
                 # （例如大安區）。這才是「常常是大安區」現象的真正原因，不是後台
                 # 自己的地址正規化行為。
                 "_token": csrf, "memberId": member_id,
-                "address": address, "lat": str(geo_lat or ""), "lng": str(geo_lng or ""),
+                "address": address_for_lookup, "lat": str(geo_lat or ""), "lng": str(geo_lng or ""),
                 "cleanTypeId": clean_type_id,
             },
             headers={**HEADERS, "X-Requested-With": "XMLHttpRequest"},
@@ -4534,15 +4593,15 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
             # v8.11：查無正確區域時直接擋下，不再默默套用可能錯誤的固定值，
             # 避免地址被誤標成錯誤區域（例如一律變成大安區）。
             raise Exception(
-                f"查詢地址區域失敗：地址「{address}」無法判斷所屬區域"
+                f"查詢地址區域失敗：地址「{address_for_lookup}」無法判斷所屬區域"
                 f"（check_contain 回傳無 area_id，地址是否正確或是否為服務涵蓋範圍？）"
                 f"，請確認地址格式或改用後台手動建單。"
             )
         area_id = str(area_info.get("area_id") or "")
         company_id = str(area_info.get("company_id") or "")
-        country_id = str(area_info.get("country_id") or "12")
-        _validate_area_not_known_bad(address, area_info, context="新客地址")
-        input_district = _extract_district_from_address(address)
+        country_id = str(address_parts.get("country_id") or area_info.get("country_id") or "12")
+        _validate_area_not_known_bad(address_for_lookup, area_info, context="新客地址")
+        input_district = _extract_district_from_address(address_for_lookup)
         returned_area_name = str(
             area_info.get("area_name")
             or area_info.get("name")
@@ -4557,7 +4616,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
             )
         if not company_id:
             raise Exception(
-                f"查詢地址區域失敗：地址「{address}」無法判斷 company_id，"
+                f"查詢地址區域失敗：地址「{address_for_lookup}」無法判斷 company_id，"
                 "已停止成單，避免系統誤判區域。"
             )
         lat = str(geo_lat or "")
@@ -4583,16 +4642,16 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "company_id": company_id,
         "country_id": country_id,
         "lat": lat, "lng": lng,
-        "address": address,
+        "address": address_for_submit,
         "person": person, "hour": hour,
         "date_s": date_s, "period_s": period_s,
     }
     if not str(area_id or "").strip() or not str(company_id or "").strip():
         raise Exception(
-            f"地址「{address}」缺少明確 area_id/company_id，已停止成單，"
+            f"地址「{address_for_lookup}」缺少明確 area_id/company_id，已停止成單，"
             "請先到後台手動確認區域，避免系統誤判成大安區。"
         )
-    _validate_address_before_submit(address, area_id, context="新客建單")
+    _validate_address_before_submit(address_for_lookup, area_id, context="新客建單")
 
     _slot = f"{date_s}_{period_s}"
     _raw_section = get_section_raw(session, _base_data_check, token_for_section, _slot)
@@ -4641,7 +4700,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "addressId": address_id,
         "last_area": "",
         "country_id": country_id,
-        "address": address,
+        "address": address_for_submit,
         "ping": ping,
         "serviceType": service_type,
         "room": str(customer.get("room", "")),
@@ -4689,8 +4748,8 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "lng": lng,
     }
 
-    # 確保 POST 的 address 是 user 提供的原始地址，不被 geocode 結果覆蓋
-    post_data["address"] = address
+    # 後台表單的縣市/區域由 country_id 下拉承接，address 欄只送路街巷號樓。
+    post_data["address"] = address_for_submit
 
     # 依付款方式選 endpoint 和欄位
     if payway_code == "4":  # 儲值金
