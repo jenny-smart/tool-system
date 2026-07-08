@@ -1339,11 +1339,24 @@ def extract_cleaners_from_section_response(raw_text, date_slot):
                 item_date = str(item.get("date", "")).strip()
                 item_section = str(item.get("section", "")).strip().replace(" ", "")
                 if item_date == date_part and item_section == period_part.replace(" ", ""):
-                    cleaners = item.get("cleaner") or item.get("cleaners") or []
+                    cleaners = (
+                        item.get("cleaner")
+                        or item.get("cleaners")
+                        or item.get("staff")
+                        or item.get("staffs")
+                        or item.get("cleaner_name")
+                        or item.get("cleanerName")
+                        or item.get("name")
+                        or item.get("text")
+                        or item.get("title")
+                        or ""
+                    )
                     if isinstance(cleaners, list):
                         return [str(x).strip().lstrip("＊*") for x in cleaners if str(x).strip()]
                     if isinstance(cleaners, str) and cleaners.strip():
-                        return [x.strip().lstrip("＊*") for x in re.split(r"[,，、/]+", cleaners) if x.strip()]
+                        m = re.search(r"[（(]([^）)]+)[）)]", cleaners)
+                        text = m.group(1) if m else cleaners
+                        return [x.strip().lstrip("＊*") for x in re.split(r"[,，、/]+", text) if x.strip()]
     except Exception:
         pass
 
@@ -1443,6 +1456,21 @@ def slot_exists_in_section_response(raw_text, date_slot):
 
     raw = str(raw_text)
     unescaped = html.unescape(raw)
+
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            data = data.get("data") or data.get("result") or data.get("sections") or []
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                item_date = str(item.get("date", "")).strip()
+                item_section = str(item.get("section", "")).strip().replace(" ", "")
+                if item_date == date_part and item_section == period_part.replace(" ", ""):
+                    return True
+    except Exception:
+        pass
 
     try:
         soup_text = BeautifulSoup(unescaped, "html.parser").get_text(" ", strip=True)
