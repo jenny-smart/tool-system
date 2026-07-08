@@ -2683,8 +2683,8 @@ def convert_order_stage1_reassign_original(
 def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     """
     v2026.07.10：訂單轉換第二階段（跟儲值金補價差的分階段介面一致）——用
-    第一階段的結果，建折價券（面額=新訂單含稅金額，讓新訂單被折抵成 0，
-    實際上是把原訂單A的錢轉過來）並建立新訂單B1/B2/B3...，最後比對「原訂單A
+    第一階段的結果，建折價券（所有新單券額加總最多等於原訂單A服務金額，
+    新單超出時保留應付差額）並建立新訂單B1/B2/B3...，最後比對「原訂單A
     的服務金額」跟「新訂單合計金額」是否有差額，有差額會在結果的 ph_warning
     裡明確標示出來，不會默默忽略。
     """
@@ -2725,6 +2725,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     today_str = date.today().strftime("%Y-%m-%d")
     new_order_results = []
     new_order_nos = []
+    remaining_coupon_budget = max(int(service_amount_a_int or 0), 0)
 
     for idx, new_order in enumerate(new_orders):
         new_date_s = new_order["date_s"]
@@ -2741,14 +2742,18 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                 raise Exception(f"金額計算為 0（{new_person}人{new_hour}小時），請確認設定")
 
             coupon_prefix = f"c{order_no_a[-3:]}{idx+1}"
-            coupon_code = _build_coupon_via_session(
-                session, base_url,
-                title=f"訂單轉換-{order_no_a}-B{idx+1}",
-                discount=price_with_tax,
-                date_s=today_str, date_e=new_date_s,
-                prefix=coupon_prefix, piece=2,
-                regions=["台北", "台中"], service_items=["居家清潔", "裝修細清"],
-            )
+            coupon_discount = min(price_with_tax, remaining_coupon_budget)
+            coupon_code = ""
+            if coupon_discount > 0:
+                coupon_code = _build_coupon_via_session(
+                    session, base_url,
+                    title=f"訂單轉換-{order_no_a}-B{idx+1}",
+                    discount=coupon_discount,
+                    date_s=today_str, date_e=new_date_s,
+                    prefix=coupon_prefix, piece=2,
+                    regions=["台北", "台中"], service_items=["居家清潔", "裝修細清"],
+                )
+                remaining_coupon_budget -= coupon_discount
             order_result = quick_create_order(
                 env_name=env_name, payway=payway_a, region=region_a,
                 lookup_result=lookup_result, address=address_a,
@@ -2769,19 +2774,22 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
 
             # v2026.07.10：訂單轉換的 LINE 訊息改成「原訂單A＋新訂單B 合併
             # 訂單」的格式，另起一行顯示新訂單真正的服務時間，且不顯示
-            # 服務金額（新訂單是優惠券折抵成0，顯示金額容易讓客人誤會）。
+            # 服務金額（僅全額折抵時隱藏；若有補差額則要保留金額）。
             _new_period_disp = _format_period_display(new_period_s.replace(" ", ""), new_person)
             order_result["merged_service_time_line"] = (
                 f"服務時間 : {order_no_a}＋{order_result['order_no']}  合併訂單\n"
                 f"                      實際服務時間：{new_date_s.replace('-', '/')} {_new_period_disp}"
             )
-            order_result["hide_amount_line"] = True
+            customer_due = max(price_with_tax - coupon_discount, 0)
+            order_result["hide_amount_line"] = (customer_due == 0)
 
             new_order_results.append({
                 "index": idx + 1, "order_no": order_result["order_no"],
                 "date_s": new_date_s, "period_s": new_period_s,
                 "hour": new_hour, "person": new_person,
                 "price_with_tax": price_with_tax, "coupon_code": coupon_code,
+                "coupon_discount": coupon_discount, "customer_due": customer_due,
+                "coupon_budget_remaining": remaining_coupon_budget,
                 "coupon_prefix": coupon_prefix, "assign_result": {"success": True, "message": "由後台建單時自動配班"},
                 "order_result": order_result,
                 "line_message": build_line_message(order_result),
@@ -2883,6 +2891,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
 
     # v2026.07.10：比對原訂單A跟新訂單合計是否有差額（客服要求的驗證步驟）
     new_amount_total = sum(int(r.get("price_with_tax", 0)) for r in new_order_results if r.get("order_no"))
+    coupon_discount_total = sum(int(r.get("coupon_discount", 0)) for r in new_order_results if r.get("order_no"))
     new_ph = sum(int(r.get("person", 0)) * int(r.get("hour", 0)) for r in new_order_results if r.get("order_no"))
     ph_warning = None
     if service_amount_a_int > 0 and new_amount_total != service_amount_a_int:
@@ -2890,6 +2899,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
         ph_warning = (
             f"⚠️ 金額不符：原訂單服務金額 {service_amount_a_int} 元，"
             f"新訂單合計 {new_amount_total} 元（{' + '.join(str(r.get('price_with_tax', 0)) for r in new_order_results if r.get('order_no'))}），"
+            f"折價券合計 {coupon_discount_total} 元，"
             f"差額 {abs(diff_amount)} 元（{'缺少' if diff_amount > 0 else '超出'}）。"
             f"請確認是否需要補建新訂單。"
         )
@@ -2907,6 +2917,8 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
         "ph_warning": ph_warning,
         "service_amount_a_display": service_amount_a_int,
         "new_amount_total": new_amount_total,
+        "coupon_discount_total": coupon_discount_total,
+        "coupon_budget_remaining": remaining_coupon_budget,
         "new_ph": new_ph,
         "person_a_count": person_a,
         "combined_line_message": combined_line_message,
