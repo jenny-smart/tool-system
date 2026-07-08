@@ -1513,7 +1513,8 @@ def quick_create_order(
     # 遠近，不再是「查無班表就標記待配班、照樣送出訂單」）。
     cleaners = extract_cleaners_from_section_response(raw_section, slot) if _slot_found else []
     _need = int(person) if str(person).isdigit() else 2
-    if _slot_found and len(cleaners) < _need and allow_auto_lemon_shift:
+    _has_explicit_cleaners = bool(cleaners)
+    if _slot_found and _has_explicit_cleaners and len(cleaners) < _need and allow_auto_lemon_shift:
         _pre2 = ensure_lemon_cleaner_shifts(
             session=session,
             base_url=base_url,
@@ -1523,7 +1524,8 @@ def quick_create_order(
         raw_section = get_section_raw(session, base_data, token, slot)
         _slot_found = slot_exists_in_section_response(raw_section, slot)
         cleaners = extract_cleaners_from_section_response(raw_section, slot) if _slot_found else []
-    if not _slot_found or len(cleaners) < _need:
+        _has_explicit_cleaners = bool(cleaners)
+    if not _slot_found or (_has_explicit_cleaners and len(cleaners) < _need):
         raise Exception(
             f"查無班表或人數不足（需要 {_need} 人，目前排班頁只有 {len(cleaners)} 人可指派），"
             f"依規定人數不足不能成單，請先確認/補足班表後再建單。"
@@ -4658,9 +4660,10 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     _slot_found = slot_exists_in_section_response(_raw_section, _slot)
     _cleaners = extract_cleaners_from_section_response(_raw_section, _slot) if _slot_found else []
     _need = int(person)
+    _has_explicit_cleaners = bool(_cleaners)
     # v8.13：查無班表/人數不足時，預設不自動勾檸檬人，必須客服明確勾選才會執行。
-    if (not _slot_found or len(_cleaners) < _need) and allow_auto_lemon_shift:
-        _short = _need - len(_cleaners) if _slot_found else _need
+    if (not _slot_found or (_has_explicit_cleaners and len(_cleaners) < _need)) and allow_auto_lemon_shift:
+        _short = _need - len(_cleaners) if _slot_found and _has_explicit_cleaners else _need
         ensure_lemon_cleaner_shifts(
             session=session, base_url=base_url,
             service_date=date_s, period_s=period_s,
@@ -4670,8 +4673,9 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         _raw_section = get_section_raw(session, _base_data_check, token_for_section, _slot)
         _slot_found = slot_exists_in_section_response(_raw_section, _slot)
         _cleaners = extract_cleaners_from_section_response(_raw_section, _slot) if _slot_found else []
+        _has_explicit_cleaners = bool(_cleaners)
 
-    if not _slot_found or len(_cleaners) < _need:
+    if not _slot_found or (_has_explicit_cleaners and len(_cleaners) < _need):
         # v2026.07.07：加上診斷資訊——地址審核期間解析出的 area_id/company_id，
         # 以及 get_section 實際回傳內容的前 300 字。之前只顯示「0人可指派」，
         # 但排班頁明明看得到人，無法判斷是查詢班表時用錯了 area_id/company_id
