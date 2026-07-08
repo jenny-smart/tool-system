@@ -1949,7 +1949,7 @@ else:
             [
                 "此功能拆成兩段：先修改原訂單A的日期並全部換成檸檬人，再建立新訂單（優惠券折抵原訂單金額）。",
                 "第一段：把原訂單A的服務日期改到新日期，配班一律自動補檸檬人排班（不用勾選，此單必須全是檸檬人）。",
-                "第二段：逐筆新訂單各建一張折價券（面額＝該筆含稅金額，讓新訂單被折抵成0），並比對原訂單A金額跟新訂單合計是否一致。",
+                "第二段：逐筆新訂單建立折價券，所有新單券額加總必須等於原訂單A服務金額；若新單金額超過原單，超出部分保留為應付差額。",
                 "備註自動寫入：A+B1+B2+B3 合併服務。",
             ],
         )
@@ -2023,7 +2023,7 @@ else:
             st.info("請先完成第一段，才能建立新訂單。")
         else:
             conv_order_count = st.number_input("新訂單筆數", min_value=1, max_value=6, value=2, step=1, key="conv_order_count")
-            st.markdown('<div class="hint-box">💡 每筆新訂單各自選日期、時段、人數。時數由時段自動帶出。每筆會各建一張折價券，面額＝該筆含稅金額，讓客人這筆新訂單被折抵成 0。</div>', unsafe_allow_html=True)
+            st.markdown('<div class="hint-box">💡 每筆新訂單各自選日期、時段、人數。時數由時段自動帶出。折價券會依序折抵原訂單A服務金額；新單超過原單時，超出部分會留在新單應付。</div>', unsafe_allow_html=True)
 
             new_orders_input = []
             for i in range(int(conv_order_count)):
@@ -2062,9 +2062,12 @@ else:
             for r in new_orders_ok:
                 ph_str = f"{r['person']}人{r['hour']}小時"
                 _r_order_result = r.get("order_result") or {}
+                _coupon_discount = int(r.get("coupon_discount", r.get("price_with_tax", 0)) or 0)
+                _customer_due = int(r.get("customer_due", max(int(r.get("price_with_tax", 0) or 0) - _coupon_discount, 0)) or 0)
+                _coupon_text = f"折價券 {r['coupon_code']}（折{_coupon_discount}元）" if r.get("coupon_code") else "未建立折價券"
                 st.success(
                     f"✅ 第二段：新訂單 {r['order_no']}，{r['date_s']} {r['period_s']} {ph_str}，"
-                    f"折價券 {r['coupon_code']}（{r['price_with_tax']}元）　"
+                    f"{_coupon_text}，應付{_customer_due}元　"
                     f"👤 專員：{_r_order_result.get('staff') or '（無班表資料）'}"
                 )
                 if r.get("mark_paid_ok") is True:
