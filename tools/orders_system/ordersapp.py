@@ -5,6 +5,9 @@
 # 最後更新：2026-07-08
 #
 # Change Log
+# v8.61
+# - 訂單轉換第二段結果調整顯示順序：先顯示第三階段金額比對，再顯示 LINE 訊息。
+# - 訂單轉換與儲值金補價差若不自動標記已付款，畫面改顯示說明，不再提示要手動改已付款。
 # v8.60
 # - 將原本「儲值金搜尋」與「儲值金備註」整併為單一功能「儲值獎金備註」。
 # - 配合 orders.py v2026.07.08-1：搜尋結果保留 edit_id，套用獎金備註時直接使用
@@ -2064,10 +2067,12 @@ else:
                     f"折價券 {r['coupon_code']}（{r['price_with_tax']}元）　"
                     f"👤 專員：{_r_order_result.get('staff') or '（無班表資料）'}"
                 )
-                if r.get("mark_paid_ok"):
+                if r.get("mark_paid_ok") is True:
                     st.caption(f"✅ {r['order_no']} 已標記為已付款")
+                elif r.get("mark_paid_ok") is None:
+                    st.caption(f"ℹ️ {r['order_no']} {r.get('mark_paid_msg', '未自動標記已付款')}")
                 else:
-                    st.warning(f"⚠️ {r['order_no']} 標記已付款失敗，請至後台手動改成已付款：{r.get('mark_paid_msg', '')}")
+                    st.warning(f"⚠️ {r['order_no']} 標記已付款失敗：{r.get('mark_paid_msg', '')}")
                 if r.get("invoice_note_ok"):
                     st.caption(f"✅ {r['order_no']} 發票號碼欄位已標註「不開立發票」")
                 else:
@@ -2079,20 +2084,6 @@ else:
                     )
             for r in [r for r in conv_stage2.get("new_order_results", []) if r.get("error")]:
                 st.error(f"❌ 第二段 B{r['index']}（{r['date_s']} {r['period_s']}）失敗：{r['error']}")
-
-            # v2026.07.10：LINE 訊息改成直接顯示，跟其他流程（新客建單/儲值金
-            # 補價差/儲值金購買）一致，不要藏在預設收合的「細項」裡看不到。
-            combined_msg = conv_stage2.get("combined_line_message", "")
-            if combined_msg:
-                st.markdown("#### 💬 合併 LINE 訊息（全部新訂單）")
-                st.text_area("合併 LINE 訊息", combined_msg, height=380, label_visibility="collapsed")
-                copy_button("複製合併 LINE 訊息", combined_msg, "copy_conv_combined_line")
-            else:
-                st.markdown("#### 💬 新訂單 LINE 訊息")
-                for r in new_orders_ok:
-                    if r.get("line_message"):
-                        st.text_area(f"B{r['index']} LINE（{r['order_no']}）", r["line_message"], height=320, label_visibility="collapsed")
-                        copy_button(f"複製 B{r['index']} LINE 訊息", r["line_message"], f"copy_conv_line_{r['index']}")
 
             with st.expander("🔍 細項", expanded=False):
                 st.markdown(f"[🔗 開啟原訂單A後台]({conv_stage2['purchase_url_a']})")
@@ -2115,6 +2106,19 @@ else:
                 st.success(f"✅ 金額比對：原訂單A {_orig_amount}元 ＝ 新訂單合計 {_new_amt_detail} = {_new_amount}元")
             else:
                 st.warning(f"⚠️ 金額比對：原訂單A金額解析失敗，無法自動比較，新訂單合計 {_new_amt_detail} = {_new_amount}元，請手動核對。")
+
+            # 2026-07-08：先顯示第三階段金額比對，再顯示 LINE 訊息。
+            combined_msg = conv_stage2.get("combined_line_message", "")
+            if combined_msg:
+                st.markdown("#### 💬 合併 LINE 訊息（全部新訂單）")
+                st.text_area("合併 LINE 訊息", combined_msg, height=380, label_visibility="collapsed")
+                copy_button("複製合併 LINE 訊息", combined_msg, "copy_conv_combined_line")
+            else:
+                st.markdown("#### 💬 新訂單 LINE 訊息")
+                for r in new_orders_ok:
+                    if r.get("line_message"):
+                        st.text_area(f"B{r['index']} LINE（{r['order_no']}）", r["line_message"], height=320, label_visibility="collapsed")
+                        copy_button(f"複製 B{r['index']} LINE 訊息", r["line_message"], f"copy_conv_line_{r['index']}")
     # --------------------------------------------------
     # 儲值金補價差
     # --------------------------------------------------
@@ -2258,10 +2262,12 @@ else:
                 f"優惠券B {cb.get('coupon_code') or cb.get('coupon_prefix')}。　"
                 f"👤 專員：{po.get('staff') or '（無班表資料）'}"
             )
-            if paid_stage.get("mark_paid_ok"):
+            if paid_stage.get("mark_paid_ok") is True:
                 st.caption("✅ 已標記為已付款")
+            elif paid_stage.get("mark_paid_ok") is None:
+                st.caption(f"ℹ️ {paid_stage.get('mark_paid_msg', '未自動標記已付款')}")
             else:
-                st.warning(f"⚠️ 標記已付款失敗，請至後台手動改成已付款：{paid_stage.get('mark_paid_msg', '')}")
+                st.warning(f"⚠️ 標記已付款失敗：{paid_stage.get('mark_paid_msg', '')}")
             if paid_stage.get("invoice_note_ok"):
                 st.caption("✅ 發票號碼欄位已標註「不開立發票」")
             else:
