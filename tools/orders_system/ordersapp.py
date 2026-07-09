@@ -2499,7 +2499,7 @@ else:
         info_panel("功能說明", [
             "依「地址(B欄) + 電話(E欄)」查後台該電話底下所有訂單，比對地址後取最近3次"
             "服務日期，寫入 L/M/N 欄（L=最近一次，N=最遠一次）。",
-            "登入帳密沿用 accounts.py 裡對應區域（台北/台中）的既有帳密，不用另外輸入。",
+            "登入帳密沿用 Step 1 上方輸入的後台帳號密碼，不用另外輸入。",
             "會自動跳過純儲值金訂單與已取消/已退款訂單。",
         ])
 
@@ -2521,25 +2521,22 @@ else:
                 nsd_logs.append(str(msg))
                 nsd_log_box.text("\n".join(nsd_logs[-200:]))
 
-            try:
-                targets = nsd.SHEETS if nsd_sheet_choice == "全部四份" else [_nsd_sheet_options[nsd_sheet_choice]]
-                sheets_by_region = {}
-                for _region, _spreadsheet_id, _gid in targets:
-                    sheets_by_region.setdefault(_region, []).append((_spreadsheet_id, _gid))
-
-                total_updated = 0
-                with st.spinner("查詢中，依資料量可能需要幾分鐘…"):
-                    for _region, _sheet_list in sheets_by_region.items():
-                        _nsd_ui_log(f"▶ 登入 {_region}…")
-                        _session = nsd.login_region(env, _region)
-                        _nsd_ui_log(f"▶ 開始處理 {_region}（共 {len(_sheet_list)} 份工作表）…")
-                        for _spreadsheet_id, _gid in _sheet_list:
+            if not backend_email.strip() or not backend_password.strip():
+                st.error("請先在上方 Step 1 輸入後台帳號密碼")
+            else:
+                try:
+                    targets = nsd.SHEETS if nsd_sheet_choice == "全部四份" else [_nsd_sheet_options[nsd_sheet_choice]]
+                    total_updated = 0
+                    with st.spinner("查詢中，依資料量可能需要幾分鐘…"):
+                        _session = nsd.login_backend(env, backend_email.strip(), backend_password.strip())
+                        for _region, _spreadsheet_id, _gid in targets:
+                            _nsd_ui_log(f"▶ 開始處理：{_region}｜gid={_gid}")
                             total_updated += nsd.update_next_service_dates_sheet(
                                 _session, _spreadsheet_id, _gid, logger=_nsd_ui_log,
                             )
-                st.success(f"✅ 完成，共更新 {total_updated} 列。")
-            except Exception as e:
-                st.error(f"執行失敗：{e}")
+                    st.success(f"✅ 完成，共更新 {total_updated} 列。")
+                except Exception as e:
+                    st.error(f"執行失敗：{e}")
 
     elif single_feature == "會員喜好設定":
         info_panel("使用說明", [
