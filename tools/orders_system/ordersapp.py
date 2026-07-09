@@ -779,6 +779,9 @@ FUNCTION_OPTIONS = [
     ("整理預約下次服務：搜尋評價日期區間內有填「預約下次服務」的評價，"
      "回查每筆訂單的電話/地址/服務日期時數/人數，整理成一份名單。",
      "orders", "整理預約下次服務"),
+    ("更新建議下次服務時間：依「地址(B欄)+電話(E欄)」查後台最近3次服務日期，"
+     "寫入 Google Sheet 的 L/M/N 欄（L=最近一次，N=最遠一次）。",
+     "orders", "更新建議下次服務時間"),
 ]
 
 selected_label = st.selectbox(
@@ -2491,6 +2494,52 @@ else:
                 )
                 copy_button("複製整理結果（文字訊息用）", rn_text, "copy_rn_results")
                 copy_button("複製整理結果（貼到 Google Sheets 用，會自動分欄，含 LINE 網址）", rn_tsv, "copy_rn_results_tsv")
+
+    elif single_feature == "更新建議下次服務時間":
+        info_panel("功能說明", [
+            "依「地址(B欄) + 電話(E欄)」查後台該電話底下所有訂單，比對地址後取最近3次"
+            "服務日期，寫入 L/M/N 欄（L=最近一次，N=最遠一次）。",
+            "登入帳密沿用 accounts.py 裡對應區域（台北/台中）的既有帳密，不用另外輸入。",
+            "會自動跳過純儲值金訂單與已取消/已退款訂單。",
+        ])
+
+        import next_service_dates as nsd
+
+        _nsd_sheet_options = {
+            f"{i+1}. {region}｜gid={gid}": (region, spreadsheet_id, gid)
+            for i, (region, spreadsheet_id, gid) in enumerate(nsd.SHEETS)
+        }
+        nsd_sheet_choice = st.selectbox(
+            "目標工作表", ["全部四份"] + list(_nsd_sheet_options.keys()), key="nsd_sheet_choice",
+        )
+
+        if st.button("🚀 開始查詢並更新", use_container_width=True, key="nsd_run_btn", type="primary"):
+            nsd_logs = []
+            nsd_log_box = st.empty()
+
+            def _nsd_ui_log(msg):
+                nsd_logs.append(str(msg))
+                nsd_log_box.text("\n".join(nsd_logs[-200:]))
+
+            try:
+                targets = nsd.SHEETS if nsd_sheet_choice == "全部四份" else [_nsd_sheet_options[nsd_sheet_choice]]
+                sheets_by_region = {}
+                for _region, _spreadsheet_id, _gid in targets:
+                    sheets_by_region.setdefault(_region, []).append((_spreadsheet_id, _gid))
+
+                total_updated = 0
+                with st.spinner("查詢中，依資料量可能需要幾分鐘…"):
+                    for _region, _sheet_list in sheets_by_region.items():
+                        _nsd_ui_log(f"▶ 登入 {_region}…")
+                        _session = nsd.login_region(env, _region)
+                        _nsd_ui_log(f"▶ 開始處理 {_region}（共 {len(_sheet_list)} 份工作表）…")
+                        for _spreadsheet_id, _gid in _sheet_list:
+                            total_updated += nsd.update_next_service_dates_sheet(
+                                _session, _spreadsheet_id, _gid, logger=_nsd_ui_log,
+                            )
+                st.success(f"✅ 完成，共更新 {total_updated} 列。")
+            except Exception as e:
+                st.error(f"執行失敗：{e}")
 
     elif single_feature == "會員喜好設定":
         info_panel("使用說明", [
