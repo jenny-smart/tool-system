@@ -352,6 +352,19 @@ from env import BASE_URL_DEV, BASE_URL_PROD, ORDER_PREFIX_DEV, ORDER_PREFIX_PROD
 
 PAYWAY_MAP = {"信用卡": "1", "ATM": "2", "儲值金": "4"}
 BOOKING_ENDPOINT_MAP = {"信用卡": "/booking/single", "ATM": "/booking/single", "儲值金": "/booking/stored_value_routine"}
+
+
+def normalize_booking_payway(payway):
+    text = str(payway or "").strip()
+    if text in PAYWAY_MAP:
+        return text
+    if "儲值金" in text:
+        return "儲值金"
+    if "信用卡" in text or "刷卡" in text:
+        return "信用卡"
+    if "ATM" in text.upper() or "匯款" in text or "轉帳" in text or "藍新" in text:
+        return "ATM"
+    return text
 TAX_RATE = 1.05
 
 PERIOD_DISPLAY_INFO = {
@@ -1344,6 +1357,7 @@ def quick_create_order(
     invoice_type_override="", carrier_type_id_override="",
     extra_fields=None, allow_auto_lemon_shift=False,
 ):
+    payway = normalize_booking_payway(payway)
     base_url = _configure_environment(env_name)
     session = lookup_result["session"]
     token = _get_booking_token_for_payway(session, base_url, payway)
@@ -2496,7 +2510,7 @@ def convert_order(
     joined_a = "\n".join(lines_a)
     service_date_a, period_a_raw = _parse_service_date_time_loose(joined_a)
     address_a = _extract_address_line(lines_a)
-    payway_a = _extract_payway_line(joined_a)
+    payway_a = normalize_booking_payway(_extract_payway_line(joined_a))
     fare_a = _extract_fare_line(joined_a) or "0"
     service_amount_a = _service_amount_from_block(joined_a, fare_a)
     phone_a = _extract_phone_from_block_lines(lines_a)
@@ -2693,7 +2707,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     env_name = stage1_result["env_name"]
     order_no_a = stage1_result["order_no_a"]
     address_a = stage1_result["address_a"]
-    payway_a = stage1_result["payway_a"]
+    payway_a = normalize_booking_payway(stage1_result["payway_a"])
     region_a = stage1_result["region_a"]
     clean_type_id = stage1_result["clean_type_id"]
     lookup_result = stage1_result["lookup_result"]
@@ -2741,7 +2755,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
             if price_with_tax <= 0 and payway_a != "儲值金":
                 raise Exception(f"金額計算為 0（{new_person}人{new_hour}小時），請確認設定")
 
-            coupon_prefix = f"c{order_no_a[-3:]}{idx+1}"
+            coupon_prefix = f"c{order_no_a[-3:]}{idx+1}{datetime.now().strftime('%H%M%S')}"
             coupon_discount = min(price_with_tax, remaining_coupon_budget)
             coupon_code = ""
             if coupon_discount > 0:
@@ -2753,6 +2767,11 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                     prefix=coupon_prefix, piece=2,
                     regions=["台北", "台中"], service_items=["居家清潔", "裝修細清"],
                 )
+                if not coupon_code or coupon_code == coupon_prefix:
+                    raise Exception(
+                        f"折價券建立失敗：prefix={coupon_prefix}，折抵金額={coupon_discount}。"
+                        "已停止建立新訂單，避免後台 /booking/single 因無效優惠碼回 500。"
+                    )
                 remaining_coupon_budget -= coupon_discount
             order_result = quick_create_order(
                 env_name=env_name, payway=payway_a, region=region_a,
@@ -2800,7 +2819,13 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
         except Exception as e:
             new_order_results.append({
                 "index": idx + 1, "date_s": new_date_s, "period_s": new_period_s,
-                "hour": new_hour, "person": new_person, "order_no": None, "error": str(e),
+                "hour": new_hour, "person": new_person, "order_no": None,
+                "error": (
+                    f"{e}\n"
+                    f"🔧 第二段B{idx+1}：payway={payway_a}，coupon_prefix={locals().get('coupon_prefix', '')}，"
+                    f"coupon_code={locals().get('coupon_code', '')}，coupon_discount={locals().get('coupon_discount', '')}，"
+                    f"price_with_tax={locals().get('price_with_tax', '')}，remaining_coupon_budget={remaining_coupon_budget}"
+                ),
             })
 
     # 合併 LINE 訊息（所有新訂單 B1+B2...）
