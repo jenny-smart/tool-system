@@ -1,9 +1,14 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.46
-# 最後更新：2026-07-08
+# 版本：v8.49
+# 最後更新：2026-07-10
 #
 # Change Log
+# v8.49
+# - 訂單轉換第二段（convert_order_stage2_create_new_orders）：新單配班的
+#   allow_auto_lemon_shift 原本寫死 True，客服無法個別關閉；改成讀每筆
+#   new_orders[i].get("allow_lemon", True)，預設維持原行為（True），但可
+#   針對個別新單關閉「無人力時自動補檸檬人」。
 # v8.48
 # - 移除新單成單時可能把地址誤判成大安區的區域查詢/預設 fallback：
 #   不再用 geocode 猜行政區、不再用 area_id=25/company_id=1 當預設值；
@@ -959,14 +964,25 @@ def _extract_service_type_label(lines):
 
 
 def _extract_payway_line(joined_text):
-    m = re.search(r"付款方式[：:]\s*([^\s\n]+)", joined_text)
+    text = str(joined_text or "")
+    for line in text.splitlines():
+        if "付款方式" not in line:
+            continue
+        m_line = re.search(r"付款方式[：:]\s*(.+)", line)
+        if m_line:
+            value = normalize_booking_payway(m_line.group(1).strip())
+            if value in ("信用卡", "ATM", "儲值金"):
+                return value
+    m = re.search(r"付款方式[：:]\s*([^\s\n]+)", text)
     if m:
         value = normalize_booking_payway(m.group(1).strip())
         if value in ("信用卡", "ATM", "儲值金"):
             return value
-    if "儲值金" in joined_text:
+    if "藍新ATM" in text or "ATM" in text:
+        return "ATM"
+    if "儲值金" in text:
         return "儲值金"
-    if _extract_total_amount_line(joined_text) == "0" and not _extract_invoice_line(joined_text):
+    if _extract_total_amount_line(text) == "0" and not _extract_invoice_line(text):
         return "儲值金"
     return ""
 
@@ -1700,19 +1716,21 @@ def _get_newest_coupon_code(session, base_url, prefix):
     try:
         list_resp = session.get(f"{base_url}/coupon", headers=HEADERS, allow_redirects=True)
         if list_resp.status_code != 200:
-            return prefix
+            return ""
         ids = re.findall(r"/coupon/detail/(\d+)", list_resp.text)
         if not ids:
-            return prefix
-        detail_resp = session.get(f"{base_url}/coupon/detail/{ids[0]}", headers=HEADERS)
-        if detail_resp.status_code != 200:
-            return prefix
+            return ""
         prefix_esc = re.escape(prefix)
-        codes = re.findall(rf"\b{prefix_esc}[A-Za-z0-9]*\b", detail_resp.text)
-        codes = [c for c in codes if len(c) > len(prefix)]
-        return codes[0] if codes else prefix
+        for coupon_id in ids[:10]:
+            detail_resp = session.get(f"{base_url}/coupon/detail/{coupon_id}", headers=HEADERS)
+            if detail_resp.status_code != 200:
+                continue
+            codes = re.findall(rf"\b{prefix_esc}[A-Za-z0-9]*\b", detail_resp.text)
+            if codes:
+                return codes[0]
+        return ""
     except Exception:
-        return prefix
+        return ""
 
 
 def _build_coupon_via_session(session, base_url, title, discount, date_s, date_e, prefix, piece, regions, service_items):
@@ -1737,7 +1755,12 @@ def _build_coupon_via_session(session, base_url, title, discount, date_s, date_e
         coupon_fields.append(("service_item[]", COUPON_SERVICE_ITEM_MAP.get(svc, "1")))
     coupon_files = [(k, (None, v)) for k, v in coupon_fields]
     post_headers = {k: v for k, v in HEADERS.items() if k.lower() != "content-type"}
-    session.post(coupon_add_url, files=coupon_files, headers=post_headers, allow_redirects=True)
+    post_resp = session.post(coupon_add_url, files=coupon_files, headers=post_headers, allow_redirects=True)
+    if post_resp.status_code not in (200, 302):
+        snippet = post_resp.text[:200].replace("\n", " ")
+        raise Exception(f"優惠券建立失敗：HTTP {post_resp.status_code}｜{snippet}")
+    if post_resp.url and "add" in post_resp.url:
+        raise Exception("優惠券建立失敗：後台驗證未通過，請確認區域/服務項目欄位")
     time.sleep(1)
     return _get_newest_coupon_code(session, base_url, str(prefix))
 
@@ -2708,6 +2731,11 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     order_no_a = stage1_result["order_no_a"]
     address_a = stage1_result["address_a"]
     payway_a = normalize_booking_payway(stage1_result["payway_a"])
+    if not payway_a:
+        raise Exception(
+            f"原訂單付款方式解析失敗：讀到「{stage1_result.get('payway_a', '')}」。"
+            "付款方式必須是信用卡、ATM、儲值金或藍新ATM。"
+        )
     region_a = stage1_result["region_a"]
     clean_type_id = stage1_result["clean_type_id"]
     lookup_result = stage1_result["lookup_result"]
@@ -2764,8 +2792,9 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                     title=f"訂單轉換-{order_no_a}-B{idx+1}",
                     discount=coupon_discount,
                     date_s=today_str, date_e=new_date_s,
-                    prefix=coupon_prefix, piece=2,
-                    regions=["台北", "台中"], service_items=["居家清潔", "裝修細清"],
+                    prefix=coupon_prefix, piece=1,
+                    regions=[region_a] if region_a else ["台北", "台中"],
+                    service_items=["居家清潔", "裝修細清"],
                 )
                 if not coupon_code:
                     raise Exception(
@@ -2778,7 +2807,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                 lookup_result=lookup_result, address=address_a,
                 clean_type_id=clean_type_id, date_s=new_date_s, period_s=new_period_s,
                 hour=new_hour, person=new_person, discount_code=coupon_code,
-                allow_auto_lemon_shift=True,
+                allow_auto_lemon_shift=bool(new_order.get("allow_lemon", True)),
             )
             new_order_nos.append(order_result["order_no"])
 
