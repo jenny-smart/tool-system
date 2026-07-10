@@ -1,9 +1,14 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.51
+# 版本：v8.52
 # 最後更新：2026-07-11
 #
 # Change Log
+# v8.52
+# - 修正 _build_purchase_edit_payload_from_page 誤塞 _method=PUT，導致
+#   _update_order_invoice_no_text／_update_order_note 呼叫 /purchase/edit/{id}
+#   一律回 HTTP 405（訂單修改頁的表單本來就是純 POST，沒有 _method 欄位，
+#   後台也沒註冊 PUT 路由）。移除這個誤塞的欄位，改回純 POST。
 # v8.51
 # - 訂單轉換第二段／儲值金補價差第二段：總金額扣車馬費為 0 時，改回呼叫
 #   _mark_order_as_paid 自動標記已付款（v8.47 一度改成只註記發票不改付款
@@ -1973,7 +1978,6 @@ def _build_purchase_edit_payload_from_page(html_text, csrf, overrides=None):
             existing[form_key] = "" if val is None else str(val)
 
     existing["_token"] = csrf
-    existing["_method"] = "PUT"
 
     for k, v in overrides.items():
         existing[k] = "" if v is None else str(v)
