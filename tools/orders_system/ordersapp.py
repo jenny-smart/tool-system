@@ -1,10 +1,18 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.60
+# 版本：v8.64
 # 模組：服務訂單系統主畫面
-# 最後更新：2026-07-08
+# 最後更新：2026-07-10
 #
 # Change Log
+# v8.64
+# - 訂單轉換第二段：每筆新訂單 B1/B2/B3... 新增「若無人力，可自動補檸檬人
+#   排班」勾選框（預設打勾，維持原行為），可個別關閉；對應
+#   quick_order.py v8.49，新增 new_orders_input 的 allow_lemon 欄位。
+# v8.63
+# - 舊客快速建單付款方式混合選項由「信用卡/ATM」改為「信用卡/ATM/儲值金」；
+#   選此混合選項時沿用客人上回付款方式（信用卡、ATM、儲值金皆可），
+#   若單獨選信用卡/ATM/儲值金，則以目前選擇的付款方式建單。
 # v8.61
 # - 訂單轉換第二段結果調整顯示順序：先顯示第三階段金額比對，再顯示 LINE 訊息。
 # - 訂單轉換與儲值金補價差若不自動標記已付款，畫面改顯示說明，不再提示要手動改已付款。
@@ -1442,21 +1450,21 @@ else:
                     default_clean_type = last_summary["clean_type"] if last_summary and last_summary.get("clean_type") in CLEAN_TYPE_ID_MAP else "居家清潔"
                     default_person = int(last_summary["person"]) if last_summary and str(last_summary.get("person", "")).isdigit() else 2
                     q_clean_type_confirm = st.selectbox("服務類別", list(CLEAN_TYPE_ID_MAP.keys()), index=list(CLEAN_TYPE_ID_MAP.keys()).index(default_clean_type), key="old_clean_confirm")
-                    # v8.6：付款方式選單新增「信用卡/ATM」選項——維持上次付款方式（僅限信用卡或ATM）
-                    # 選單顯示：信用卡/ATM、信用卡、ATM、儲值金
+                    # v8.63：付款方式混合選項改為「信用卡/ATM/儲值金」——維持上次付款方式
+                    # 選單顯示：信用卡/ATM/儲值金、信用卡、ATM、儲值金
                     # 實際送單時一律解析成「信用卡」「ATM」或「儲值金」三者之一
-                    _payway_ui_options = ["信用卡/ATM", "信用卡", "ATM", "儲值金"]
+                    _payway_ui_options = ["信用卡/ATM/儲值金", "信用卡", "ATM", "儲值金"]
                     _last_payway = last_summary.get("payway") if last_summary else ""
-                    _default_ui_payway = "儲值金" if _last_payway == "儲值金" else "信用卡/ATM"
+                    _default_ui_payway = "信用卡/ATM/儲值金"
                     _q_payway_ui = st.selectbox(
                         "付款方式",
                         _payway_ui_options,
                         index=_payway_ui_options.index(_default_ui_payway),
                         key="old_payway",
                     )
-                    if _q_payway_ui == "信用卡/ATM":
-                        # 沿用上次付款方式；若上次不是信用卡或ATM（例如儲值金或查無紀錄），預設信用卡
-                        q_payway = _last_payway if _last_payway in ("信用卡", "ATM") else "信用卡"
+                    if _q_payway_ui == "信用卡/ATM/儲值金":
+                        # 沿用上次付款方式；若查無可用紀錄，預設信用卡
+                        q_payway = _last_payway if _last_payway in ("信用卡", "ATM", "儲值金") else "信用卡"
                         _payway_note = f"（沿用上次：{q_payway}）"
                     else:
                         q_payway = _q_payway_ui
@@ -2041,11 +2049,15 @@ else:
                 with b4:
                     b_hour = PERIOD_HOUR_MAP.get(b_period, 4)
                     st.markdown(f"<br><b>{b_hour} 小時</b>（依時段帶出）", unsafe_allow_html=True)
+                b_allow_lemon = st.checkbox(
+                    f"B{i+1} 若無人力，可自動補檸檬人排班", value=True, key=f"conv_allow_lemon_{i}",
+                )
                 new_orders_input.append({
                     "date_s": b_date.strftime("%Y-%m-%d"),
                     "period_s": b_period,
                     "hour": b_hour,
                     "person": int(b_person),
+                    "allow_lemon": bool(b_allow_lemon),
                 })
 
             if st.button("② 建立新訂單（優惠券折抵）", use_container_width=True, key="conv_stage2_btn"):
@@ -2536,10 +2548,7 @@ else:
                             )
                     st.success(f"✅ 完成，共更新 {total_updated} 列。")
                 except Exception as e:
-                    import traceback
-                    st.error(f"執行失敗：{type(e).__name__}: {e}")
-                    with st.expander("🔍 完整錯誤內容（除錯用）", expanded=True):
-                        st.code(traceback.format_exc())
+                    st.error(f"執行失敗：{e}")
 
     elif single_feature == "會員喜好設定":
         info_panel("使用說明", [
