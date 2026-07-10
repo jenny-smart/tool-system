@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.63
+# 版本：v8.64
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-10
 #
 # Change Log
+# v8.64
+# - 訂單轉換第二段：每筆新訂單 B1/B2/B3... 新增「若無人力，可自動補檸檬人
+#   排班」勾選框（預設打勾，維持原行為），可個別關閉；對應
+#   quick_order.py v8.49，新增 new_orders_input 的 allow_lemon 欄位。
 # v8.63
 # - 舊客快速建單付款方式混合選項由「信用卡/ATM」改為「信用卡/ATM/儲值金」；
 #   選此混合選項時沿用客人上回付款方式（信用卡、ATM、儲值金皆可），
@@ -2045,11 +2049,15 @@ else:
                 with b4:
                     b_hour = PERIOD_HOUR_MAP.get(b_period, 4)
                     st.markdown(f"<br><b>{b_hour} 小時</b>（依時段帶出）", unsafe_allow_html=True)
+                b_allow_lemon = st.checkbox(
+                    f"B{i+1} 若無人力，可自動補檸檬人排班", value=True, key=f"conv_allow_lemon_{i}",
+                )
                 new_orders_input.append({
                     "date_s": b_date.strftime("%Y-%m-%d"),
                     "period_s": b_period,
                     "hour": b_hour,
                     "person": int(b_person),
+                    "allow_lemon": bool(b_allow_lemon),
                 })
 
             if st.button("② 建立新訂單（優惠券折抵）", use_container_width=True, key="conv_stage2_btn"):
