@@ -1,9 +1,21 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.49
+# 版本：v8.50
 # 最後更新：2026-07-10
 #
 # Change Log
+# v8.50
+# - 修正 build_line_message：ATM「轉帳金額」跟信用卡「服務金額」這兩行，
+#   原本不管優惠券折抵多少，一律顯示折抵前的原始訂單金額（訂單轉換／
+#   儲值金補價差用優惠券折掉大半後，LINE 訊息卻還是要客人匯全額）。
+#   改成只要呼叫端有算出 customer_due（折抵後客人實際待付金額），就一律
+#   顯示 customer_due。
+# - convert_order_stage2_create_new_orders：order_result 補上 customer_due
+#   欄位，讓 build_line_message 實際拿得到折抵後金額（原本只算出來卻沒有
+#   塞進 order_result，等於白算）。
+# - stored_value_makeup_create_paid_order：custom_amount_line 改用
+#   service_due（總金額扣車馬費後、已反映優惠券折抵的真正待付金額）取代
+#   原本錯用的訂單原始金額，同時補上 customer_due 欄位。
 # v8.49
 # - 訂單轉換第二段（convert_order_stage2_create_new_orders）：新單配班的
 #   allow_auto_lemon_shift 原本寫死 True，客服無法個別關閉；改成讀每筆
@@ -2830,6 +2842,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
             )
             customer_due = max(price_with_tax - coupon_discount, 0)
             order_result["hide_amount_line"] = (customer_due == 0)
+            order_result["customer_due"] = customer_due
 
             new_order_results.append({
                 "index": idx + 1, "order_no": order_result["order_no"],
@@ -3032,6 +3045,13 @@ def build_line_message(order_result):
         person_cnt = str(order_result.get("person", "") or "")
         period = _format_period_display(period_raw, person_cnt, display_override=actual_period)
     price = order_result.get("service_amount") or order_result.get("price_with_tax", order_result.get("price"))
+    # v8.49：訂單轉換／儲值金補價差用優惠券折抵後，LINE 訊息裡「服務金額」
+    # （信用卡）跟「轉帳金額」（ATM）這兩行原本都還是顯示折抵前的原始訂單
+    # 金額（例如客付單已用優惠券折掉大半，畫面卻還是要客人匯全額），改成
+    # 只要呼叫端有算出 customer_due（折抵後客人實際要付的金額），這兩行都
+    # 一律改顯示 customer_due，不再顯示折抵前的原始金額。
+    if order_result.get("customer_due") is not None:
+        price = order_result.get("customer_due")
     fare = order_result["fare"]
     address = order_result["address"]
     order_no = order_result["order_no"]
@@ -4175,9 +4195,10 @@ def stored_value_makeup_create_paid_order(
             f"服務時間 : {stored_order_no}＋{paid_order['order_no']}  合併訂單\n"
             f"                      實際服務時間：{str(service_date).replace('-', '/')} {_new_period_disp}"
         )
-    _paid_amount = paid_order.get("service_amount") or paid_order.get("price_with_tax") or paid_order.get("price")
+    _paid_amount = service_due
     paid_order["custom_amount_line"] = f"服務金額：{_paid_amount}（含稅，已扣除儲值金餘額${ctx['balance']}）"
     paid_order["hide_amount_line"] = False
+    paid_order["customer_due"] = service_due
 
     return {
         "stage": "paid_order", "balance": ctx["balance"], "plan": ctx["plan"], "day_type": ctx["day_type"],
