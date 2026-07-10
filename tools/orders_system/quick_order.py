@@ -961,8 +961,8 @@ def _extract_service_type_label(lines):
 def _extract_payway_line(joined_text):
     m = re.search(r"付款方式[：:]\s*([^\s\n]+)", joined_text)
     if m:
-        value = m.group(1).strip()
-        if value in ("信用卡", "ATM"):
+        value = normalize_booking_payway(m.group(1).strip())
+        if value in ("信用卡", "ATM", "儲值金"):
             return value
     if "儲值金" in joined_text:
         return "儲值金"
@@ -2767,7 +2767,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                     prefix=coupon_prefix, piece=2,
                     regions=["台北", "台中"], service_items=["居家清潔", "裝修細清"],
                 )
-                if not coupon_code or coupon_code == coupon_prefix:
+                if not coupon_code:
                     raise Exception(
                         f"折價券建立失敗：prefix={coupon_prefix}，折抵金額={coupon_discount}。"
                         "已停止建立新訂單，避免後台 /booking/single 因無效優惠碼回 500。"
