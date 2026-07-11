@@ -5,10 +5,6 @@
 # 最後更新：2026-07-10
 #
 # Change Log
-# v8.65
-# - 新增公開「AI 清潔估時」入口，不需登入後台。
-# - 支援照片／影片上傳、影片擷取畫面、AI 初步辨識、人工確認、照片完整度警示、規則式人時計算與客戶版評估文字。
-# - 櫃內／抽屜僅計已打開且清楚拍攝者；缺房間或窗戶照片會要求補拍。
 # v8.64
 # - 訂單轉換第二段：每筆新訂單 B1/B2/B3... 新增「若無人力，可自動補檸檬人
 #   排班」勾選框（預設打勾，維持原行為），可個別關閉；對應
@@ -733,30 +729,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 公開估時不需登入；內部訂單系統才顯示後台帳密。
-entry_mode = st.radio(
-    "入口",
-    ["AI 清潔估時（公開，不需登入）", "內部訂單／備忘系統（需登入）"],
-    horizontal=True,
-    key="orders_entry_mode",
-)
-if entry_mode.startswith("AI 清潔估時"):
-    render_public_ai_estimate()
-    st.stop()
-
-step("1", "登入與環境設定")
-col_e, col_p, col_env = st.columns([3.2, 3.2, 1.2])
-with col_e:
-    backend_email = st.text_input("後台帳號")
-with col_p:
-    backend_password = st.text_input("後台密碼", type="password")
-with col_env:
-    env_label = st.selectbox("環境", ["prod（正式機 backend）", "dev（測試機 backend-dev）"], index=0)
-    env = "dev" if env_label.startswith("dev") else "prod"
-
-st.markdown("<hr>", unsafe_allow_html=True)
-
-step("2", "功能選單")
+step("1", "功能選單")
 
 # v8.26：功能選單改成下拉形式（跟 memo-system 一致），並把備忘系統
 # （排班管理/訂單備註/對帳管理/異動管理/評估工具）合併進同一個選單，
@@ -806,6 +779,9 @@ FUNCTION_OPTIONS = [
     ("更新建議下次服務時間：依「地址(B欄)+電話(E欄)」查後台最近3次服務日期，"
      "寫入 Google Sheet 的 L/M/N 欄（L=最近一次，N=最遠一次）。",
      "orders", "更新建議下次服務時間"),
+    ("AI 清潔估時：公開功能，不需登入；可上傳照片或影片，檢查照片完整度、"
+     "確認已打開拍攝的櫃內／抽屜，並依規則估算建議人時。",
+     "public", "AI 清潔估時"),
 ]
 
 selected_label = st.selectbox(
@@ -818,6 +794,24 @@ _selected_option = next(
     if f"{i}. {item[0]}" == selected_label
 )
 _system_key, mode = _selected_option[1], _selected_option[2]
+
+st.markdown("<hr>", unsafe_allow_html=True)
+
+# 公開功能：位於原本功能選單中，不顯示也不要求後台登入。
+if _system_key == "public" and mode == "AI 清潔估時":
+    render_public_ai_estimate()
+    st.stop()
+
+# 其餘既有功能維持原本登入流程。
+step("2", "登入與環境設定")
+col_e, col_p, col_env = st.columns([3.2, 3.2, 1.2])
+with col_e:
+    backend_email = st.text_input("後台帳號")
+with col_p:
+    backend_password = st.text_input("後台密碼", type="password")
+with col_env:
+    env_label = st.selectbox("環境", ["prod（正式機 backend）", "dev（測試機 backend-dev）"], index=0)
+    env = "dev" if env_label.startswith("dev") else "prod"
 
 st.markdown("<hr>", unsafe_allow_html=True)
 
