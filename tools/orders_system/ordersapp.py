@@ -5,6 +5,10 @@
 # 最後更新：2026-07-10
 #
 # Change Log
+# v8.65
+# - 新增公開「AI 清潔估時」入口，不需登入後台。
+# - 支援照片／影片上傳、影片擷取畫面、AI 初步辨識、人工確認、照片完整度警示、規則式人時計算與客戶版評估文字。
+# - 櫃內／抽屜僅計已打開且清楚拍攝者；缺房間或窗戶照片會要求補拍。
 # v8.64
 # - 訂單轉換第二段：每筆新訂單 B1/B2/B3... 新增「若無人力，可自動補檸檬人
 #   排班」勾選框（預設打勾，維持原行為），可個別關閉；對應
@@ -335,7 +339,7 @@
 # v7.7 - 儲值金補價差拆兩段按鈕
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.60"
+__version__ = "8.65"
 
 import html
 import re
@@ -348,6 +352,7 @@ from datetime import date, timedelta, datetime
 from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet, fetch_member_edit_page, submit_member_preferences, fetch_recent_service_records
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
+from ai_cleaning_estimate import render_public_ai_estimate
 try:
     import quick_order as qo
 except Exception as e:
@@ -727,6 +732,17 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# 公開估時不需登入；內部訂單系統才顯示後台帳密。
+entry_mode = st.radio(
+    "入口",
+    ["AI 清潔估時（公開，不需登入）", "內部訂單／備忘系統（需登入）"],
+    horizontal=True,
+    key="orders_entry_mode",
+)
+if entry_mode.startswith("AI 清潔估時"):
+    render_public_ai_estimate()
+    st.stop()
 
 step("1", "登入與環境設定")
 col_e, col_p, col_env = st.columns([3.2, 3.2, 1.2])
