@@ -436,6 +436,11 @@ COUNTRY_ID_BY_CITY_AREA = {
     ("高雄市", "左營區"): "251", ("高雄市", "岡山區"): "254", ("高雄市", "橋頭區"): "259",
     ("高雄市", "梓官區"): "260", ("高雄市", "彌陀區"): "261", ("高雄市", "鳳山區"): "264",
 }
+COUNTRY_ID_BY_CITY_AREA.update({
+    (city.replace("台", "臺"), area): country_id
+    for (city, area), country_id in list(COUNTRY_ID_BY_CITY_AREA.items())
+    if "台" in city
+})
 COUPON_SERVICE_ITEM_MAP = {
     "居家清潔": "1", "辦公室清潔": "2", "裝修細清": "3", "年節大掃除": "4",
     "冷氣機清潔": "5", "洗衣機清潔": "6", "沙發/床墊清潔": "7", "整理收納": "8",
@@ -901,6 +906,10 @@ def _extract_district_from_address(address):
     return district_m.group("district") if district_m else ""
 
 
+def _normalize_city_for_country_id(city):
+    return str(city or "").strip().replace("臺", "台")
+
+
 def _split_booking_address(address):
     address = _fix_address_district_order(str(address or "").strip(), fallback_district="")
     result = {"city": "", "district": "", "country_id": "", "detail": address, "full": address}
@@ -909,19 +918,60 @@ def _split_booking_address(address):
         return result
     city = city_m.group("city")
     after_city = address[city_m.end():]
+    city_for_country = _normalize_city_for_country_id(city)
     district_m = re.match(r"(?P<district>[^區鄉鎮市]{1,6}[區鄉鎮])", after_city)
     if not district_m:
-        return result
+        return {
+            "city": city_for_country,
+            "district": "",
+            "country_id": "",
+            "detail": after_city.strip() or address,
+            "full": f"{city_for_country}{after_city}".strip(),
+        }
     district = district_m.group("district")
     detail = after_city[district_m.end():].strip()
-    country_id = COUNTRY_ID_BY_CITY_AREA.get((city, district), "")
+    country_id = COUNTRY_ID_BY_CITY_AREA.get((city, district), "") or COUNTRY_ID_BY_CITY_AREA.get((city_for_country, district), "")
     return {
-        "city": city,
+        "city": city_for_country,
         "district": district,
         "country_id": country_id,
         "detail": detail or address,
-        "full": f"{city}{district}{detail}".strip(),
+        "full": f"{city_for_country}{district}{detail}".strip(),
     }
+
+
+def _assert_address_region_resolved(address_parts, original_address, context="地址"):
+    if address_parts.get("city") and address_parts.get("district") and not address_parts.get("country_id"):
+        raise Exception(
+            f"{context}無法對應後台縣市/區域下拉選單：{original_address}。"
+            "已停止成單，不會自動改成大安區；請確認此區域是否在服務範圍或補上區域對照。"
+        )
+
+
+def _area_district_from_info(area_info):
+    text = str(
+        (area_info or {}).get("area_name")
+        or (area_info or {}).get("name")
+        or (area_info or {}).get("area")
+        or (area_info or {}).get("district")
+        or ""
+    ).strip()
+    m = re.search(r"([^區鄉鎮市]{1,6}[區鄉鎮])", text)
+    return m.group(1) if m else ""
+
+
+def _complete_missing_district(address_parts, area_info, original_address, context="地址"):
+    if address_parts.get("district"):
+        return address_parts
+    city = address_parts.get("city", "")
+    district = _area_district_from_info(area_info)
+    if not city or not district:
+        raise Exception(f"{context}「{original_address}」無法判斷區域，已停止成單，請確認地址是否正確。")
+    country_id = COUNTRY_ID_BY_CITY_AREA.get((city, district), "")
+    if not country_id:
+        raise Exception(f"{context}「{original_address}」找到區域「{district}」，但無法對應後台下拉選單，已停止成單。")
+    detail = address_parts.get("detail", "")
+    return {"city": city, "district": district, "country_id": country_id, "detail": detail, "full": f"{city}{district}{detail}".strip()}
 
 
 def _validate_area_not_known_bad(address, area_info, context=""):
@@ -1082,6 +1132,19 @@ def _period_to_shift_code(period_s):
 def _shift_value_to_code(value):
     value = str(value or "").strip()
     return VALUE_TO_SHIFT_CODE.get(value, value)
+
+
+def _shift_value_to_code_by_name(name, value):
+    name = str(name or "")
+    value = str(value or "").strip()
+    group = name.rsplit("_", 1)[-1] if "_" in name else ""
+    if group == "1" and value in {"2", "3", "4"}:
+        return {"2": "上2", "3": "上3", "4": "上4"}[value]
+    if group == "2" and value in {"2", "3", "4"}:
+        return {"2": "下2", "3": "下3", "4": "下4"}[value]
+    if group == "3" and value == "2":
+        return "晚2"
+    return _shift_value_to_code(value)
 
 
 def _shift_code_to_value(code):
@@ -1311,28 +1374,32 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
         # 當作新地址處理（跟 quick_create_order 的新地址邏輯一致）。
         best_addr = {}
     selected_address = str(best_addr.get("address") or address).strip()
-    geo_lat, geo_lng = geocode_address(selected_address)
+    address_parts = _split_booking_address(selected_address)
+    _assert_address_region_resolved(address_parts, selected_address, context="查詢可預約地址")
+    selected_address_for_lookup = address_parts["full"]
+    selected_address_for_submit = address_parts["detail"]
+    geo_lat, geo_lng = geocode_address(selected_address_for_lookup)
     if geo_lat and geo_lng:
         best_addr["lat"] = geo_lat
         best_addr["lng"] = geo_lng
-    addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
+    addr_check = check_contain(session, member.get("member_id", ""), selected_address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
     if not addr_check and lookup_result.get("token") and lookup_result.get("token") != token:
-        addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
+        addr_check = check_contain(session, member.get("member_id", ""), selected_address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
     if not addr_check and payway == "儲值金":
         # v8.5：stored_value_routine 頁面的 token 有時無法用於 check_contain，
         # 改向 /booking/single 借一個可靠的 token 重試
         _fallback_token = _fetch_csrf_from_url(session, f"{base_url}/booking/single")
         if _fallback_token and _fallback_token != token and _fallback_token != lookup_result.get("token"):
-            addr_check = check_contain(session, member.get("member_id", ""), selected_address, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
+            addr_check = check_contain(session, member.get("member_id", ""), selected_address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
             if addr_check:
                 token = _fallback_token
     if not addr_check:
-        raise Exception(f"查詢地址/地區失敗：{selected_address}")
+        raise Exception(f"查詢地址/地區失敗：{selected_address_for_lookup}")
     area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
     if area_info:
         best_addr["area_id"] = area_info.get("area_id", best_addr.get("area_id"))
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
-        best_addr["country_id"] = area_info.get("country_id", best_addr.get("country_id"))
+        best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
     old_purchase = best_addr.get("purchase", {}) if isinstance(best_addr.get("purchase"), dict) else {}
 
     def pick(key, default=""):
@@ -1347,8 +1414,8 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
         "fb": str(member.get("fb") or ""), "memoProcess": str(member.get("memo_process") or ""),
         "memoFinance": str(member.get("memo_finance") or ""),
         "addressId": str(best_addr.get("addressId") or ""),
-        "country_id": str(best_addr.get("country_id") or pick("country_id", "12")),
-        "address": selected_address, "ping": str(pick("ping", "4")),
+        "country_id": str(address_parts.get("country_id") or best_addr.get("country_id") or pick("country_id", "")),
+        "address": selected_address_for_submit, "ping": str(pick("ping", "4")),
         "room": str(pick("room", "0")), "bathroom": str(pick("bathroom", "0")),
         "balcony": str(pick("balcony", "0")), "livingroom": str(pick("livingroom", "0")),
         "kitchen": str(pick("kitchen", "0")), "window": str(pick("window", "")),
@@ -1372,6 +1439,8 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
         "lng": str(best_addr.get("lng") or pick("lng", "")),
     }
     rows = []
+    if not str(base_data.get("country_id") or "").strip():
+        raise Exception(f"地址「{selected_address_for_lookup}」無法判斷縣市/區域下拉選單，已停止查詢，不會自動改成大安區。")
     for period in periods or []:
         slot = f"{date_s}_{period}"
         data = base_data.copy()
@@ -1417,6 +1486,7 @@ def quick_create_order(
         best_addr = {}
     selected_address = str(best_addr.get("address") or address).strip()
     address_parts = _split_booking_address(selected_address)
+    _assert_address_region_resolved(address_parts, selected_address, context="舊客地址")
     address_for_lookup = address_parts["full"]
     address_for_submit = address_parts["detail"]
     geo_lat, geo_lng = geocode_address(address_for_lookup)
@@ -1463,6 +1533,8 @@ def quick_create_order(
         best_addr["area_id"] = area_info.get("area_id")
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
         best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
+        if not str(best_addr.get("country_id") or "").strip():
+            raise Exception(f"地址「{address_for_lookup}」無法判斷縣市/區域下拉選單，已停止成單，不會自動改成大安區。")
     else:
         if best_addr.get("areaId") and not best_addr.get("area_id"):
             best_addr["area_id"] = best_addr.get("areaId")
@@ -1504,7 +1576,7 @@ def quick_create_order(
         "fbName": str(member.get("fb_name") or ""), "fb": str(member.get("fb") or ""),
         "memoProcess": str(member.get("memo_process") or ""), "memoFinance": str(member.get("memo_finance") or ""),
         "addressId": str(best_addr.get("addressId") or ""),
-        "country_id": str(address_parts.get("country_id") or best_addr.get("country_id") or pick("country_id", "12")),
+        "country_id": str(address_parts.get("country_id") or best_addr.get("country_id") or pick("country_id", "")),
         "address": address_for_submit, "ping": str(pick("ping", "4")),
         "room": str(pick("room", "0")), "bathroom": str(pick("bathroom", "0")),
         "balcony": str(pick("balcony", "0")), "livingroom": str(pick("livingroom", "0")),
@@ -1534,6 +1606,11 @@ def quick_create_order(
         base_data.update(extra_fields)
 
     # 不再用 area_id=25/company_id=1 當預設值；缺少區域就擋下，避免誤成大安區。
+    if not str(base_data.get("country_id") or "").strip():
+        raise Exception(
+            f"地址「{address_for_lookup}」缺少明確縣市/區域下拉選單，已停止成單，"
+            "不會自動改成大安區。"
+        )
     if not str(base_data.get("area_id") or "").strip() or not str(base_data.get("company_id") or "").strip():
         raise Exception(
             f"地址「{address_for_lookup}」缺少明確 area_id/company_id，已停止成單，"
@@ -1553,6 +1630,7 @@ def quick_create_order(
     slot = f"{date_s}_{period_s}"
     raw_section = get_section_raw(session, base_data, token, slot)
     _slot_found = slot_exists_in_section_response(raw_section, slot)
+    _auto_shift_ok = False
     if not _slot_found and allow_auto_lemon_shift:
         # v8.13：該時段查無班表 → 去勾檸檬人班表，再重查。
         # 只有在客服明確勾選「查無班表時自動補檸檬人」時才會執行，
@@ -1562,6 +1640,7 @@ def quick_create_order(
             base_url=base_url,
             service_date=date_s, period_s=period_s, person_count=str(person),
         )
+        _auto_shift_ok = bool(_pre.get("success"))
         time.sleep(2)
         raw_section = get_section_raw(session, base_data, token, slot)
         _slot_found = slot_exists_in_section_response(raw_section, slot)
@@ -1576,12 +1655,13 @@ def quick_create_order(
             base_url=base_url,
             service_date=date_s, period_s=period_s, person_count=str(_need - len(cleaners)),
         )
+        _auto_shift_ok = bool(_pre2.get("success"))
         time.sleep(2)
         raw_section = get_section_raw(session, base_data, token, slot)
         _slot_found = slot_exists_in_section_response(raw_section, slot)
         cleaners = extract_cleaners_from_section_response(raw_section, slot) if _slot_found else []
         _has_explicit_cleaners = bool(cleaners)
-    if not _slot_found or (_has_explicit_cleaners and len(cleaners) < _need):
+    if (not _slot_found and not _auto_shift_ok) or (_has_explicit_cleaners and len(cleaners) < _need and not _auto_shift_ok):
         raise Exception(
             f"查無班表或人數不足（需要 {_need} 人，目前排班頁只有 {len(cleaners)} 人可指派），"
             f"依規定人數不足不能成單，請先確認/補足班表後再建單。"
@@ -2142,6 +2222,12 @@ def _parse_cleaner_shift_page(html_text, date_str=None):
         csrf = meta_m.group(1) if meta_m else ""
     checked_fields = []
     checked_codes_on_date = set()
+    for m in re.finditer(r'<input\b[^>]*\btype=["\']hidden["\'][^>]*>', html_text or "", re.I):
+        tag = m.group(0)
+        name_m = re.search(r'\bname=["\']([^"\']+)["\']', tag, re.I)
+        value_m = re.search(r'\bvalue=["\']([^"\']*)["\']', tag, re.I)
+        if name_m:
+            checked_fields.append((name_m.group(1), value_m.group(1) if value_m else ""))
     for m in re.finditer(r'<input\b[^>]*\bchecked\b[^>]*>', html_text or "", re.I):
         tag = m.group(0)
         name_m = re.search(r'\bname=["\']([^"\']+)["\']', tag, re.I)
@@ -2154,7 +2240,7 @@ def _parse_cleaner_shift_page(html_text, date_str=None):
         checked_fields.append((name, value))
         d = date_m.group(1) if date_m else ""
         if date_str and d == date_str:
-            checked_codes_on_date.add(_shift_value_to_code(value))
+            checked_codes_on_date.add(_shift_value_to_code_by_name(name, value))
     return csrf, checked_fields, checked_codes_on_date
 
 
@@ -2287,9 +2373,12 @@ def _set_cleaner_shift_if_available(session, base_url, cleaner_id, cleaner_name,
         fields.append((target_name, target_value))
     resp = session.post(f"{base_url}/cleaner1/{cleaner_id}/shift", params={"month": str(date_str)[:7]}, data=fields, headers=HEADERS, allow_redirects=True)
     ok = resp.status_code in (200, 302)
+    if ok:
+        _csrf2, _fields2, checked_after, _err2 = _get_cleaner_shift_form_info(session, base_url, cleaner_id, date_str)
+        ok = target_shift_code in checked_after
     return {
         "success": ok, "name": cleaner_name, "id": cleaner_id,
-        "message": f"{cleaner_name} 已補勾 {date_str} {target_shift_code}" if ok else f"POST 失敗：HTTP {resp.status_code}",
+        "message": f"{cleaner_name} 已補勾 {date_str} {target_shift_code}" if ok else f"POST 後未確認到班別 {date_str} {target_shift_code}（HTTP {resp.status_code}）",
         "checked": sorted(checked_codes), "target": target_shift_code,
     }
 
@@ -4547,6 +4636,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     # 之前地址缺少行政區時可能猜成大安區，導致新單區域錯誤；現在只修正既有行政區順序，不再補猜。
     address = _fix_address_district_order(address, fallback_district="")
     address_parts = _split_booking_address(address)
+    _assert_address_region_resolved(address_parts, address, context="新客地址")
     address_for_lookup = address_parts["full"]
     address_for_submit = address_parts["detail"]
     payway = str(customer["payway"]).strip()
@@ -4678,7 +4768,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         else:
             address_id = ""  # 地址不一致，不帶舊 addressId 避免帶入錯誤地址
         area_id = str(matched_addr.get("areaId", ""))
-        country_id = str(matched_addr.get("countryId", "12"))
+        country_id = str(matched_addr.get("countryId", ""))
         lat = str(matched_addr.get("lat", ""))
         lng = str(matched_addr.get("lng", ""))
         purchase_info = matched_addr.get("purchase", {}) or {}
@@ -4723,7 +4813,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
             )
         area_id = str(area_info.get("area_id") or "")
         company_id = str(area_info.get("company_id") or "")
-        country_id = str(address_parts.get("country_id") or area_info.get("country_id") or "12")
+        country_id = str(address_parts.get("country_id") or area_info.get("country_id") or "")
         _validate_area_not_known_bad(address_for_lookup, area_info, context="新客地址")
         input_district = _extract_district_from_address(address_for_lookup)
         returned_area_name = str(
@@ -4742,6 +4832,11 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
             raise Exception(
                 f"查詢地址區域失敗：地址「{address_for_lookup}」無法判斷 company_id，"
                 "已停止成單，避免系統誤判區域。"
+            )
+        if not country_id:
+            raise Exception(
+                f"查詢地址區域失敗：地址「{address_for_lookup}」無法判斷縣市/區域下拉選單，"
+                "已停止成單，不會自動改成大安區。"
             )
         lat = str(geo_lat or "")
         lng = str(geo_lng or "")
@@ -4770,6 +4865,11 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "person": person, "hour": hour,
         "date_s": date_s, "period_s": period_s,
     }
+    if not str(country_id or "").strip():
+        raise Exception(
+            f"地址「{address_for_lookup}」缺少明確縣市/區域下拉選單，已停止成單，"
+            "不會自動改成大安區。"
+        )
     if not str(area_id or "").strip() or not str(company_id or "").strip():
         raise Exception(
             f"地址「{address_for_lookup}」缺少明確 area_id/company_id，已停止成單，"
@@ -4783,21 +4883,23 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     _cleaners = extract_cleaners_from_section_response(_raw_section, _slot) if _slot_found else []
     _need = int(person)
     _has_explicit_cleaners = bool(_cleaners)
+    _auto_shift_ok = False
     # v8.13：查無班表/人數不足時，預設不自動勾檸檬人，必須客服明確勾選才會執行。
     if (not _slot_found or (_has_explicit_cleaners and len(_cleaners) < _need)) and allow_auto_lemon_shift:
         _short = _need - len(_cleaners) if _slot_found and _has_explicit_cleaners else _need
-        ensure_lemon_cleaner_shifts(
+        _pre_shift = ensure_lemon_cleaner_shifts(
             session=session, base_url=base_url,
             service_date=date_s, period_s=period_s,
             person_count=str(_short),
         )
+        _auto_shift_ok = bool(_pre_shift.get("success"))
         time.sleep(2)
         _raw_section = get_section_raw(session, _base_data_check, token_for_section, _slot)
         _slot_found = slot_exists_in_section_response(_raw_section, _slot)
         _cleaners = extract_cleaners_from_section_response(_raw_section, _slot) if _slot_found else []
         _has_explicit_cleaners = bool(_cleaners)
 
-    if not _slot_found or (_has_explicit_cleaners and len(_cleaners) < _need):
+    if (not _slot_found and not _auto_shift_ok) or (_has_explicit_cleaners and len(_cleaners) < _need and not _auto_shift_ok):
         # v2026.07.07：加上診斷資訊——地址審核期間解析出的 area_id/company_id，
         # 以及 get_section 實際回傳內容的前 300 字。之前只顯示「0人可指派」，
         # 但排班頁明明看得到人，無法判斷是查詢班表時用錯了 area_id/company_id
