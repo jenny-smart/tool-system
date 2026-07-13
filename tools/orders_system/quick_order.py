@@ -1,9 +1,13 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.52
-# 最後更新：2026-07-11
+# 版本：v8.53
+# 最後更新：2026-07-13
 #
 # Change Log
+# v8.53
+# - 修正舊客建單價格仍沿用後台 calculate_hour 回傳金額，造成 3人4小時平日
+#   12人時被算成 10800。舊客與新客統一用固定公式：平日每人時600、週末
+#   每人時700；送後台時反推未稅 price 欄位，避免後台再乘稅後金額跑掉。
 # v8.52
 # - 修正 _build_purchase_edit_payload_from_page 誤塞 _method=PUT，導致
 #   _update_order_invoice_no_text／_update_order_note 呼叫 /purchase/edit/{id}
@@ -1397,6 +1401,9 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
         raise Exception(f"查詢地址/地區失敗：{selected_address_for_lookup}")
     area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
     if area_info:
+        address_parts = _complete_missing_district(address_parts, area_info, selected_address_for_lookup, context="查詢可預約地址")
+        selected_address_for_lookup = address_parts["full"]
+        selected_address_for_submit = address_parts["detail"]
         best_addr["area_id"] = area_info.get("area_id", best_addr.get("area_id"))
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
         best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
@@ -1516,6 +1523,9 @@ def quick_create_order(
         if not area_info.get("area_id"):
             route = BOOKING_ENDPOINT_MAP.get(payway, "/booking/single")
             raise Exception(f"地址缺少已存區域，且查詢地址/地區失敗（{payway}：{route}）：{address_for_lookup}，請先到會員地址或後台手動確認區域")
+        address_parts = _complete_missing_district(address_parts, area_info, address_for_lookup, context="舊客新地址")
+        address_for_lookup = address_parts["full"]
+        address_for_submit = address_parts["detail"]
         _validate_area_not_known_bad(address_for_lookup, area_info, context="舊客新地址")
         input_district = _extract_district_from_address(address_for_lookup)
         returned_area_name = str(
@@ -1622,7 +1632,12 @@ def quick_create_order(
     if not calc_result:
         raise Exception("計算時數失敗")
     calc_fields = extract_calc_fields(calc_result, fallback_hours=base_data["hour"], fallback_fare=best_addr.get("fare", "0"))
-    base_data["price"] = str(calc_fields.get("price") or "0")
+    day_type = _day_type_from_date(date_s)
+    unit_price = 700 if day_type == "週末" else 600
+    person_hours = int(person) * int(float(hour))
+    formula_price_with_tax = unit_price * person_hours
+    formula_price_no_tax = int(round(formula_price_with_tax / TAX_RATE))
+    base_data["price"] = str(formula_price_no_tax)
     base_data["price_vvip"] = str(calc_fields.get("price_vvip") or "0")
     base_data["fare"] = first_nonzero(calc_fields.get("fare"), best_addr.get("fare"), default="0")
     if base_data["price"] in ("", "0", "0.0") and payway != "儲值金":
@@ -1766,10 +1781,7 @@ def quick_create_order(
             order_no = sorted(new_order_nos)[-1]
     meta = fetch_order_meta_by_order_no(session, order_no)
     price_no_tax = base_data["price"]
-    try:
-        price_with_tax = int(round(float(price_no_tax) * TAX_RATE))
-    except Exception:
-        price_with_tax = price_no_tax
+    price_with_tax = formula_price_with_tax
     # v8.13：建單成功後檢查此訂單編號是否重複對應到多張訂單卡片
     _is_dup, _dup_count = _check_order_no_duplicate(session, order_no)
     _dup_warning = (
@@ -4811,6 +4823,9 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
                 f"（check_contain 回傳無 area_id，地址是否正確或是否為服務涵蓋範圍？）"
                 f"，請確認地址格式或改用後台手動建單。"
             )
+        address_parts = _complete_missing_district(address_parts, area_info, address_for_lookup, context="新客地址")
+        address_for_lookup = address_parts["full"]
+        address_for_submit = address_parts["detail"]
         area_id = str(area_info.get("area_id") or "")
         company_id = str(area_info.get("company_id") or "")
         country_id = str(address_parts.get("country_id") or area_info.get("country_id") or "")
