@@ -225,8 +225,13 @@ def _extract_tax_id(text: str) -> str:
 def _extract_company_title(text: str) -> str:
     value = _label_value(text, ["公司抬頭", "發票抬頭", "買受人", "公司名稱", "buyer_name"], 120)
     if not value:
+        match = re.search(r"三聯式[：:\s]*([^\n\d]{2,80}?)(?=\s*\d{8})", text)
+        if match:
+            value = match.group(1).strip()
+    if not value:
         return ""
     value = re.sub(r"(統一編號|統編|公司統編|買受人統編).*", "", value).strip()
+    value = re.sub(r"\d{8}.*$", "", value).strip("：:;；,， ")
     return value
 
 
