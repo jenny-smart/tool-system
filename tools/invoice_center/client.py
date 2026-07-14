@@ -80,7 +80,7 @@ class EIInvoiceClient:
         self,
         *,
         captcha: str | None = None,
-        captcha_field: str = "capchacode",
+        captcha_field: str = "captcha",
     ) -> requests.Response:
         login_url = self._url(LOGIN_ENDPOINT)
         landing = self.session.get(login_url, timeout=self.timeout)
@@ -205,23 +205,11 @@ class EIInvoiceClient:
         date1: str,
         date2: str,
     ) -> list[dict[str, str]]:
-        return self.query_invoices(date1, date2, order_id=order_id)
-
-    def query_invoices(
-        self,
-        date1: str,
-        date2: str,
-        *,
-        order_id: str = "",
-        extra_params: Mapping[str, Any] | None = None,
-    ) -> list[dict[str, str]]:
         params = {
+            "orderid": order_id,
             "date1": date1,
             "date2": date2,
         }
-        if order_id:
-            params["orderid"] = order_id
-        params.update(dict(extra_params or {}))
         response = self.session.get(
             self._url(INVOICE_LIST_ENDPOINT),
             params=params,
@@ -232,8 +220,4 @@ class EIInvoiceClient:
 
         from .query import parse_invoice_list_html
 
-        return parse_invoice_list_html(
-            response.text,
-            order_id=order_id,
-            base_url=self.base_url,
-        )
+        return parse_invoice_list_html(response.text, order_id=order_id)
