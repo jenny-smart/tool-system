@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from datetime import date
 from typing import Any
 
@@ -523,6 +524,20 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
         if st.button("🔍 預覽 Payload", use_container_width=True):
             result = create_invoice_from_payload(payload, dry_run=True)
             st.session_state["invoice_center_preview"] = result.payload
+            st.success("Payload 已產生")
+
+        preview_payload = st.session_state.get("invoice_center_preview")
+        if preview_payload:
+            with st.expander("Payload 預覽 / 複製", expanded=True):
+                preview_text = json.dumps(preview_payload, ensure_ascii=False, indent=2)
+                st.code(preview_text, language="json")
+                st.download_button(
+                    "下載 Payload JSON",
+                    data=preview_text.encode("utf-8"),
+                    file_name=f"{payload.orderid or 'invoice'}_payload.json",
+                    mime="application/json",
+                    use_container_width=True,
+                )
 
         if is_child_invoice:
             st.caption("子單會用 EI SOAP API 正式開立，不使用母單既有發票號碼，也不需要 EI Captcha。")
@@ -596,11 +611,6 @@ def _render_invoice_create_tab() -> None:
         _render_product_tools()
     with right:
         _render_sidebar_summary(area, order_no, suffix, invoice_type)
-
-    preview = st.session_state.get("invoice_center_preview")
-    if preview:
-        with st.expander("Payload 預覽", expanded=False):
-            st.json(preview)
 
 
 def _render_allowance_tab() -> None:
