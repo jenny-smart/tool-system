@@ -13,7 +13,8 @@ except Exception:
 EI_BASE_URL = "https://www.ei.com.tw/InvoiceRent"
 LOGIN_ENDPOINT = "/index.jsp"
 ADD_INVOICE_ENDPOINT = "/addInvoice.action"
-INVOICE_LIST_ENDPOINT = "/common/invoice/invoicelist.jsp"
+INVOICE_LIST_ENDPOINT = "/invoicequery.jsp"
+INVOICE_EXPORT_ENDPOINT = "/invoiceexport.jsp"
 
 
 AREA_ENV = {

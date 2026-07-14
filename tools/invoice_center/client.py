@@ -11,6 +11,7 @@ from .auth import build_login_payload
 from .config import (
     ADD_INVOICE_ENDPOINT,
     EI_BASE_URL,
+    INVOICE_EXPORT_ENDPOINT,
     INVOICE_LIST_ENDPOINT,
     LOGIN_ENDPOINT,
     EICredentials,
@@ -199,16 +200,21 @@ class EIInvoiceClient:
             )
 
         invoice_no = self.extract_invoice_no(response.text, payload.orderid)
+        success = response.ok and bool(invoice_no)
         return InvoiceResult(
-            success=response.ok,
+            success=success,
             dry_run=False,
-            message="EI addInvoice.action submitted.",
+            message=(
+                "EI addInvoice.action submitted."
+                if success
+                else "EI addInvoice.action did not return an invoice number."
+            ),
             payload=data,
             status_code=response.status_code,
             response_url=response.url,
             invoice_no=invoice_no,
             raw_text=response.text,
-            error="" if response.ok else response.text[:500],
+            error="" if success else response.text[:500],
         )
 
     def query_invoice_by_order_id(
@@ -227,12 +233,21 @@ class EIInvoiceClient:
         order_id: str = "",
         extra_params: Mapping[str, Any] | None = None,
     ) -> list[dict[str, str]]:
+        from .query import parse_invoice_list_html, to_roc_date
+
         params = {
-            "date1": date1,
-            "date2": date2,
+            "date1": to_roc_date(date1),
+            "date2": to_roc_date(date2),
         }
         if order_id:
-            params["orderid"] = order_id
+            params.update(
+                {
+                    "orderid": order_id,
+                    "keyword": order_id,
+                    "keys": order_id,
+                    "q": order_id,
+                }
+            )
         params.update(dict(extra_params or {}))
         response = self.session.get(
             self._url(INVOICE_LIST_ENDPOINT),
@@ -242,10 +257,17 @@ class EIInvoiceClient:
         )
         response.raise_for_status()
 
-        from .query import parse_invoice_list_html
-
         return parse_invoice_list_html(
             response.text,
             order_id=order_id,
             base_url=self.base_url,
         )
+
+    def export_invoices(self) -> requests.Response:
+        response = self.session.get(
+            self._url(INVOICE_EXPORT_ENDPOINT),
+            timeout=self.timeout,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        return response

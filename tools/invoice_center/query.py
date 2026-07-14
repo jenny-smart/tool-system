@@ -13,6 +13,17 @@ if TYPE_CHECKING:
 INVOICE_NO_RE = re.compile(r"\b[A-Z]{2}\d{8}\b")
 
 
+def to_roc_date(value: str) -> str:
+    text = str(value or "").strip().replace("-", "/")
+    parts = text.split("/")
+    if len(parts) != 3:
+        return text
+    year, month, day = parts
+    if len(year) == 4:
+        year = str(int(year) - 1911)
+    return f"{int(year):03d}/{int(month):02d}/{int(day):02d}"
+
+
 def _without_order_refs(text: str, order_id: str) -> str:
     cleaned = text
     order_id = str(order_id or "").strip()
@@ -50,6 +61,55 @@ def _row_links(tr: Any, base_url: str = "") -> str:
     return "\n".join(links)
 
 
+def _normalize_header(value: str) -> str:
+    value = str(value or "").replace(" ", "")
+    mapping = {
+        "發票日期": "invoice_date",
+        "發票號碼": "invoice_no",
+        "訂單日期": "order_date",
+        "訂單編號": "orderid",
+        "買方統編": "buyer_identifier",
+        "買方名稱": "buyer_name",
+        "銷售合計": "saleamount",
+        "營業稅": "taxamount",
+        "總計": "totalamount",
+        "付款方式": "payway",
+        "載具類別": "carrier_type",
+        "發票方式": "invoice_type",
+        "狀態": "status",
+    }
+    for label, key in mapping.items():
+        if label in value:
+            return key
+    return ""
+
+
+def _row_from_cells(
+    cells: list[str],
+    headers: list[str],
+    *,
+    order_id: str,
+    base_url: str,
+    tr: Any,
+) -> dict[str, str]:
+    row_text = " | ".join(cells)
+    row: dict[str, str] = {
+        "orderid": order_id if order_id in row_text else "",
+        "invoice_no": _find_invoice_no(row_text, order_id),
+        "paper_invoice": _looks_like_paper_invoice(row_text),
+        "download_links": _row_links(tr, base_url),
+        "row_text": row_text,
+    }
+    for idx, key in enumerate(headers):
+        if key and idx < len(cells):
+            row[key] = cells[idx]
+    if not row.get("invoice_no"):
+        row["invoice_no"] = _find_invoice_no(row_text, order_id)
+    if not row.get("orderid") and order_id:
+        row["orderid"] = order_id if order_id in row_text else ""
+    return row
+
+
 def parse_invoice_list_html(
     html: str,
     *,
@@ -58,6 +118,7 @@ def parse_invoice_list_html(
 ) -> list[dict[str, str]]:
     soup = BeautifulSoup(html or "", "html.parser")
     results: list[dict[str, str]] = []
+    headers: list[str] = []
 
     for tr in soup.find_all("tr"):
         cells = [
@@ -66,17 +127,23 @@ def parse_invoice_list_html(
         ]
         if not cells:
             continue
+        normalized = [_normalize_header(cell) for cell in cells]
+        if "invoice_no" in normalized or "orderid" in normalized:
+            headers = normalized
+            continue
         row_text = " | ".join(cells)
+        if "無資料" in row_text or "顯示第 0 至 0" in row_text:
+            continue
         if order_id and order_id not in row_text:
             continue
         results.append(
-            {
-                "orderid": order_id if order_id in row_text else "",
-                "invoice_no": _find_invoice_no(row_text, order_id),
-                "paper_invoice": _looks_like_paper_invoice(row_text),
-                "download_links": _row_links(tr, base_url),
-                "row_text": row_text,
-            }
+            _row_from_cells(
+                cells,
+                headers,
+                order_id=order_id,
+                base_url=base_url,
+                tr=tr,
+            )
         )
 
     if not results:
