@@ -7,7 +7,7 @@
 
 (() => {
   const TOOL_ID = "lemon-ei-fill-btn";
-  const TOOL_VERSION = "2026-07-15.2";
+  const TOOL_VERSION = "2026-07-15.3";
   if (window.__lemonEiToolVersion === TOOL_VERSION) return;
   window.__lemonEiToolVersion = TOOL_VERSION;
 
@@ -38,6 +38,16 @@
     return true;
   };
 
+  const forceRadio = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    const label = document.querySelector(`label[for="${id}"]`);
+    if (label) label.click();
+    el.checked = true;
+    fire(el);
+    return true;
+  };
+
   const setPay = (payway) => {
     const pay = document.getElementById("pay");
     if (!pay) return false;
@@ -53,11 +63,12 @@
   };
 
   const setTax = (d) => {
-    clickId("invoicetype07");
-    clickId(valueText(d.hastax) === "1" ? "hastax1" : "hastax2");
+    const isTriplicate = Boolean(valueText(d.buyer_identifier));
+    forceRadio("invoicetype07");
+    forceRadio(isTriplicate ? "hastax2" : (valueText(d.hastax) === "1" ? "hastax1" : "hastax2"));
     const taxMap = { 1: "businesstax1", 2: "businesstax2", 3: "businesstax3", 4: "businesstax4" };
-    clickId(taxMap[valueText(d.taxtype)] || "businesstax1");
-    clickId(`roundnum${valueText(d.roundnum) || "4"}`);
+    forceRadio(taxMap[valueText(d.taxtype)] || "businesstax1");
+    forceRadio(`roundnum${valueText(d.roundnum) || "4"}`);
     setValue("rate", d.rate || "0.05");
   };
 
@@ -66,6 +77,13 @@
     setValue("carrierid1", "");
     setValue("carrierid2", "");
     setValue("donatevat", "");
+    for (const id of ["barcode3J0002", "barcodeCQ0001", "barcodeEJ0011"]) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.checked = false;
+        fire(el);
+      }
+    }
   };
 
   const setCarrier = async (d) => {
@@ -77,14 +95,16 @@
     const carrier2 = valueText(d.carrierid2 || d.carrierid1);
 
     if (buyerId) {
-      clickId("donate2");
+      forceRadio("donate2");
+      await sleep(80);
+      clearCarrier();
       await sleep(80);
       clearCarrier();
       return;
     }
 
     if (donate === "1" || donatevat) {
-      clickId("donate1");
+      forceRadio("donate1");
       await sleep(80);
       clearCarrier();
       setValue("donatevat", donatevat);
@@ -92,17 +112,18 @@
     }
 
     if (!carrierType && !carrier1 && !carrier2) {
-      clickId("donate2");
+      forceRadio("donate2");
       await sleep(80);
       clearCarrier();
       return;
     }
 
-    clickId("donate0");
+    clearCarrier();
+    forceRadio("donate0");
     await sleep(100);
-    if (carrierType === "3J0002") clickId("barcode3J0002");
-    else if (carrierType === "CQ0001") clickId("barcodeCQ0001");
-    else clickId("barcodeEJ0011");
+    if (carrierType === "3J0002") forceRadio("barcode3J0002");
+    else if (carrierType === "CQ0001") forceRadio("barcodeCQ0001");
+    else forceRadio("barcodeEJ0011");
 
     setValue("carriertype", carrierType || "EJ0011");
     setValue("carrierid1", carrier1);
@@ -128,6 +149,7 @@
       return;
     }
 
+    clearCarrier();
     setValue("orderid", d.orderid);
     setValue("orderdate", d.orderdate);
     setValue("buyer_name", d.buyer_name);
@@ -140,8 +162,14 @@
     setValue("mainremark", d.mainremark);
     setTax(d);
     await setCarrier(d);
+    setValue("buyer_emailaddress", d.buyer_emailaddress);
     fillDetailHidden(d);
 
+    const email = document.getElementById("buyer_emailaddress")?.value || "";
+    if (email && !email.includes("@")) {
+      alert(`Email 欄位異常：${email}\n請勿按下一步，請確認 Tampermonkey 腳本已更新到 ${TOOL_VERSION}`);
+      return;
+    }
     alert("已填入。請檢查買受人/統編、Email、付款方式、載具後再按下一步。");
   };
 
