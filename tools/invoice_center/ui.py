@@ -525,8 +525,7 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
             st.session_state["invoice_center_preview"] = result.payload
 
         if is_child_invoice:
-            st.text_input("EI Captcha", value="", type="password", key="invoice_center_ei_captcha")
-            st.caption("子單會用 EI addInvoice payload 正式開立，不使用母單既有發票號碼。")
+            st.caption("子單會用 EI SOAP API 正式開立，不使用母單既有發票號碼，也不需要 EI Captcha。")
         else:
             st.caption("母單會呼叫 Lemon 發票 API。")
         confirm_live = st.checkbox("確認正式開立發票", key="invoice_center_confirm_live")
@@ -537,7 +536,6 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
                     result = create_invoice_from_payload(
                         payload,
                         dry_run=False,
-                        captcha=st.session_state.get("invoice_center_ei_captcha") or None,
                     )
                     if not result.success:
                         st.error(result.error or result.message)
@@ -545,7 +543,7 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
                         st.session_state["invoice_center_child_invoice_no"] = result.invoice_no
                         st.success(f"子單開立成功：{result.invoice_no}")
                     else:
-                        st.warning("已送出 EI addInvoice，但尚未解析到新發票號碼，請用發票下載頁查詢子單 orderid。")
+                        st.warning("EI SOAP 已回應，但尚未解析到新發票號碼，請用發票下載頁查詢子單 orderid。")
                 elif not purchase_id:
                     st.warning("請先查詢 Lemon 訂單，取得 purchase_id。")
                 elif order.get("invoice_no"):

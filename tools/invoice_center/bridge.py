@@ -212,14 +212,14 @@ def create_invoice_from_payload(
         return InvoiceResult(
             success=True,
             dry_run=True,
-            message="Dry-run only. EI addInvoice.action was not called.",
+            message="Dry-run only. EI SOAP CreateInvoiceV3 was not called.",
             payload=data,
         )
 
     if client is None:
-        from .client import EIInvoiceClient
+        from .lemon_invoice_api import create_invoice_by_soap
 
-        client = EIInvoiceClient(invoice_payload.area)
+        return create_invoice_by_soap(invoice_payload, dry_run=False)
 
     if not getattr(client, "logged_in", False):
         client.login(captcha=captcha, captcha_field=captcha_field)

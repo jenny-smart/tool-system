@@ -179,6 +179,22 @@ def query_invoice_by_order_id(
     captcha: str | None = None,
     captcha_field: str = "capchacode",
 ) -> list[dict[str, Any]]:
+    if client is None:
+        from .lemon_invoice_api import query_invoice_number_by_order_id
+
+        invoice_no = query_invoice_number_by_order_id(order_id, area=area)
+        if not invoice_no:
+            return []
+        return [
+            {
+                "orderid": order_id,
+                "invoice_no": invoice_no,
+                "paper_invoice": "",
+                "download_links": "",
+                "row_text": "EI SOAP QueryInvoiceNumberByOrderid",
+            }
+        ]
+
     from .client import EIInvoiceClient
 
     ei_client = client or EIInvoiceClient(area)
