@@ -85,6 +85,18 @@ class EIInvoiceClient:
             "ctoken": hidden_fields.get("ctoken", ""),
         }
 
+    @staticmethod
+    def _looks_like_login_page(text: str) -> bool:
+        compact = str(text or "").replace(" ", "")
+        markers = ["帳號", "密碼", "驗證碼", "無密碼登入", "系統已登出", "請重新登入"]
+        return any(marker in compact for marker in markers)
+
+    @staticmethod
+    def _looks_like_ei_app_page(text: str) -> bool:
+        compact = str(text or "").replace(" ", "")
+        markers = ["電子發票作業", "開立發票查詢", "發票開立", "invoicequery.jsp"]
+        return any(marker in compact for marker in markers)
+
     def login(
         self,
         *,
@@ -97,6 +109,9 @@ class EIInvoiceClient:
         if not (landing.text or "").strip() and landing_url != login_url:
             landing = self.session.get(login_url, timeout=self.timeout)
         landing.raise_for_status()
+        if self._looks_like_ei_app_page(landing.text) and not self._looks_like_login_page(landing.text):
+            self.logged_in = True
+            return landing
         hidden = self.parse_hidden_inputs(landing.text)
         self.last_hidden_fields = hidden
         post_url = self.parse_form_action(landing.text, landing.url or login_url)
@@ -114,6 +129,8 @@ class EIInvoiceClient:
             allow_redirects=True,
         )
         response.raise_for_status()
+        if self._looks_like_login_page(response.text) and not self._looks_like_ei_app_page(response.text):
+            raise RuntimeError("EI 登入失敗或系統已登出，請確認 entry_url、帳密或驗證碼。")
         self.logged_in = True
         return response
 
@@ -182,6 +199,17 @@ class EIInvoiceClient:
             timeout=self.timeout,
             allow_redirects=True,
         )
+        if self._looks_like_login_page(response.text):
+            return InvoiceResult(
+                success=False,
+                dry_run=False,
+                message="EI session logged out.",
+                payload=data,
+                status_code=response.status_code,
+                response_url=response.url,
+                raw_text=response.text,
+                error="EI 系統已登出或尚未登入，未開立發票。",
+            )
 
         if (
             retry_on_token_expired
@@ -198,6 +226,17 @@ class EIInvoiceClient:
                 timeout=self.timeout,
                 allow_redirects=True,
             )
+            if self._looks_like_login_page(response.text):
+                return InvoiceResult(
+                    success=False,
+                    dry_run=False,
+                    message="EI session logged out.",
+                    payload=data,
+                    status_code=response.status_code,
+                    response_url=response.url,
+                    raw_text=response.text,
+                    error="EI 系統已登出或尚未登入，未開立發票。",
+                )
 
         invoice_no = self.extract_invoice_no(response.text, payload.orderid)
         success = response.ok and bool(invoice_no)
@@ -256,6 +295,8 @@ class EIInvoiceClient:
             allow_redirects=True,
         )
         response.raise_for_status()
+        if self._looks_like_login_page(response.text) and not self._looks_like_ei_app_page(response.text):
+            raise RuntimeError("EI 系統已登出或尚未登入，無法查詢發票。")
 
         return parse_invoice_list_html(
             response.text,

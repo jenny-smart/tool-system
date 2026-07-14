@@ -117,6 +117,10 @@ def parse_invoice_list_html(
     base_url: str = "",
 ) -> list[dict[str, str]]:
     soup = BeautifulSoup(html or "", "html.parser")
+    page_text = " ".join(soup.get_text(" ", strip=True).split())
+    login_markers = ["帳號", "密碼", "驗證碼", "無密碼登入", "系統已登出"]
+    if any(marker in page_text for marker in login_markers) and "發票號碼" not in page_text:
+        return []
     results: list[dict[str, str]] = []
     headers: list[str] = []
 
@@ -132,6 +136,8 @@ def parse_invoice_list_html(
             headers = normalized
             continue
         row_text = " | ".join(cells)
+        if any(marker in row_text for marker in login_markers):
+            continue
         if "無資料" in row_text or "顯示第 0 至 0" in row_text:
             continue
         if order_id and order_id not in row_text:
