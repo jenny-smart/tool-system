@@ -136,7 +136,7 @@ def _clean_invoice_value(value: str) -> str:
 
 def _label_value(text: str, labels: list[str], max_length: int = 80) -> str:
     joined = "|".join(re.escape(label) for label in labels)
-    pattern = rf"(?:{joined})\s*[：:]?\s*([^\n]{{1,{max_length}}})"
+    pattern = rf"(?:{joined})[ \t　]*[：:]?[ \t　]*([^\n]{{1,{max_length}}})"
     match = re.search(pattern, text, flags=re.IGNORECASE)
     return _clean_invoice_value(match.group(1)) if match else ""
 
@@ -173,15 +173,30 @@ def _extract_payway(text: str) -> str:
 
 
 def _extract_paid_status(text: str) -> str:
+    labeled = _label_value(text, ["付款狀態"], 20)
+    if labeled:
+        for status in ["已付款", "待付款", "未付款", "已退款", "取消訂單", "已取消"]:
+            if status in labeled:
+                return "取消訂單" if status == "已取消" else status
     compact = normalize_text(text)
     if "已退款" in compact:
         return "已退款"
-    if "取消訂單" in compact or "已取消" in compact:
-        return "取消訂單"
     if "待付款" in compact or "未付款" in compact:
         return "未付款"
     if "已付款" in compact:
         return "已付款"
+    return ""
+
+
+def _extract_order_status(text: str) -> str:
+    labeled = _label_value(text, ["服務狀態", "訂單狀態"], 30)
+    if labeled:
+        for status in ["已處理", "取消訂單", "已取消", "未處理", "處理中"]:
+            if status in labeled:
+                return "取消訂單" if status == "已取消" else status
+    compact = normalize_text(text)
+    if "已處理" in compact:
+        return "已處理"
     return ""
 
 
@@ -231,9 +246,10 @@ def _extract_mobile_carrier(text: str) -> str:
 
 def _extract_member_carrier(text: str, email: str) -> str:
     value = _label_value(text, ["會員載具", "Email載具", "電子信箱載具", "載具信箱"], 80)
-    if value and not value.startswith("/"):
+    if value:
         email_match = EMAIL_RE.search(value)
-        return email_match.group(1) if email_match else value
+        if email_match:
+            return email_match.group(1)
     return email
 
 
@@ -321,6 +337,7 @@ def parse_order_block(block: PurchaseBlock) -> BackendOrder:
         address=extract_address_from_text(text),
         amount=_extract_money(text),
         payway=_extract_payway(text),
+        order_status=_extract_order_status(text),
         paid_status=_extract_paid_status(text),
         invoice_no=_extract_invoice_no(text, block.order_no),
         invoice_type=invoice_fields["invoice_type"],
@@ -339,6 +356,121 @@ def parse_order_block(block: PurchaseBlock) -> BackendOrder:
     )
 
 
+def _form_fields_from_html(html: str) -> dict[str, str]:
+    soup = BeautifulSoup(html or "", "html.parser")
+    fields: dict[str, str] = {}
+    for item in soup.find_all(["input", "textarea", "select"]):
+        name = item.get("name")
+        if not name:
+            continue
+        if item.name == "select":
+            selected = item.find("option", selected=True) or item.find("option")
+            if selected:
+                fields[name] = (selected.get("value") or selected.get_text(" ", strip=True) or "").strip()
+                fields[f"{name}__text"] = selected.get_text(" ", strip=True)
+        elif item.name == "textarea":
+            fields[name] = item.get_text("\n", strip=True)
+        else:
+            item_type = str(item.get("type") or "").lower()
+            if item_type in {"radio", "checkbox"} and not item.has_attr("checked"):
+                continue
+            fields[name] = str(item.get("value") or "").strip()
+    return fields
+
+
+def _field_value(fields: dict[str, str], *names: str) -> str:
+    lowered = {key.lower(): value for key, value in fields.items()}
+    for name in names:
+        value = fields.get(name) or lowered.get(name.lower())
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, str] | None:
+    invoice_type = _field_value(fields, "invoice_type", "invoiceType")
+    carrier_type_id = _field_value(fields, "carrier_type_id", "carrierTypeId")
+    carrier_info = _field_value(fields, "carrier_info", "carrierInfo")
+    company_title = _field_value(fields, "company_title", "companyTitle")
+    company_no = _field_value(fields, "company_no", "companyNo")
+    donate_code = _field_value(fields, "donate_code", "donateCode", "donatevat")
+
+    if invoice_type == "3" or company_no:
+        return {
+            "invoice_type": "三聯式",
+            "buyer_identifier": company_no,
+            "buyer_name": company_title,
+            "carrier_type": "紙本",
+            "carrier_no": "",
+            "donate_code": "",
+        }
+    if invoice_type == "1" or donate_code:
+        return {
+            "invoice_type": "二聯式",
+            "buyer_identifier": "",
+            "buyer_name": "",
+            "carrier_type": "捐贈",
+            "carrier_no": "",
+            "donate_code": donate_code or "8585",
+        }
+    if invoice_type == "2":
+        carrier_labels = {
+            "1": "會員載具",
+            "2": "手機載具",
+            "3": "自然人憑證",
+            "4": "紙本",
+        }
+        carrier_type = carrier_labels.get(carrier_type_id, "會員載具")
+        carrier_no = carrier_info
+        if carrier_type == "會員載具":
+            carrier_no = carrier_info or email
+        elif carrier_type == "紙本":
+            carrier_no = ""
+        return {
+            "invoice_type": "二聯式",
+            "buyer_identifier": "",
+            "buyer_name": "",
+            "carrier_type": carrier_type,
+            "carrier_no": carrier_no,
+            "donate_code": "",
+        }
+    return None
+
+
+def hydrate_order_from_edit_page(session: LemonBackendSession, order: BackendOrder) -> BackendOrder:
+    if not (order.edit_url or order.purchase_id):
+        return order
+
+    path = order.edit_url or f"/purchase/edit/{order.purchase_id}"
+    kwargs: dict[str, Any] = {}
+    if not order.edit_url and order.order_no:
+        kwargs["params"] = {"orderNo": order.order_no}
+
+    try:
+        response = session.get(path, **kwargs)
+        response.raise_for_status()
+    except Exception:
+        return order
+
+    fields = _form_fields_from_html(response.text)
+    text = BeautifulSoup(response.text or "", "html.parser").get_text("\n", strip=True)
+    invoice_fields = _invoice_fields_from_codes(fields, order.email) or _extract_invoice_fields(text, order.email)
+
+    payway_code = _field_value(fields, "payway")
+    payway_map = {"1": "信用卡", "2": "ATM", "3": "儲值金"}
+    if payway_code in payway_map:
+        order.payway = payway_map[payway_code]
+    if invoice_fields:
+        order.invoice_type = invoice_fields["invoice_type"] or order.invoice_type
+        order.buyer_identifier = invoice_fields["buyer_identifier"] or order.buyer_identifier
+        order.buyer_name = invoice_fields["buyer_name"] or order.buyer_name
+        order.carrier_type = invoice_fields["carrier_type"] or order.carrier_type
+        order.carrier_no = invoice_fields["carrier_no"] or order.carrier_no
+        order.donate_code = invoice_fields["donate_code"] or order.donate_code
+    order.extra["edit_page_loaded"] = True
+    return order
+
+
 def parse_purchase_list_page(html: str, base_url: str = "") -> list[BackendOrder]:
     return [parse_order_block(block) for block in extract_order_cards_from_purchase_html(html, base_url)]
 
@@ -351,7 +483,7 @@ def search_order(session: LemonBackendSession, order_no: str) -> list[BackendOrd
 
 def get_order(session: LemonBackendSession, order_no: str) -> BackendOrder | None:
     matches = search_order(session, order_no)
-    return matches[0] if matches else None
+    return hydrate_order_from_edit_page(session, matches[0]) if matches else None
 
 
 def search_orders_by_phone(session: LemonBackendSession, phone: str) -> list[BackendOrder]:
