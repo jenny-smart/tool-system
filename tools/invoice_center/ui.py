@@ -163,9 +163,13 @@ def _apply_payload_to_state(payload: Any) -> None:
     elif payload.carriertype == "3J0002":
         st.session_state["invoice_center_delivery_method"] = "手機載具"
         st.session_state["invoice_center_mobile_barcode"] = payload.carrierid1 or ""
+        st.session_state["invoice_center_member_carrier"] = ""
     elif payload.carrierid1:
         st.session_state["invoice_center_delivery_method"] = "會員載具"
         st.session_state["invoice_center_member_carrier"] = payload.carrierid1 or ""
+        st.session_state["invoice_center_mobile_barcode"] = ""
+    elif not payload.buyer_identifier and payload.donate != "1":
+        st.session_state["invoice_center_delivery_method"] = "紙本"
     if payload.items:
         st.session_state["invoice_center_line_items"] = _normalize_line_items(
             [
@@ -182,12 +186,36 @@ def _apply_payload_to_state(payload: Any) -> None:
         )
 
 
+def _reset_invoice_state_for_order() -> None:
+    reset_values = {
+        "invoice_center_buyer_type": "自然人",
+        "invoice_center_buyer_name": "",
+        "invoice_center_company_title": "",
+        "invoice_center_buyer_identifier": "",
+        "invoice_center_buyer_phone": "",
+        "invoice_center_buyer_emailaddress": "",
+        "invoice_center_buyer_address": "",
+        "invoice_center_delivery_method": "會員載具",
+        "invoice_center_member_carrier": "",
+        "invoice_center_mobile_barcode": "",
+        "invoice_center_citizen_cert": "",
+        "invoice_center_donate_code": "",
+        "invoice_center_preview": None,
+    }
+    for key, value in reset_values.items():
+        if value is None:
+            st.session_state.pop(key, None)
+        else:
+            st.session_state[key] = value
+
+
 def _apply_order_defaults(order: dict[str, Any]) -> None:
     buyer_identifier = _order_extra_value(order, "buyer_identifier", "invoice_identifier", "tax_id", "company_no") or str(order.get("buyer_identifier") or "")
     company_title = _order_extra_value(order, "buyer_name", "invoice_title", "company_title") or str(order.get("buyer_name") or "")
     carrier_no = _order_extra_value(order, "carrier_no", "carrierid1", "carrierid2", "carrier_info")
     carrier_type = _order_extra_value(order, "carrier_type", "carriertype", "carrier_label")
     donate_code = _order_extra_value(order, "donate_code", "love_code", "npoban")
+    email = str(order.get("email") or "").strip()
 
     if buyer_identifier:
         st.session_state["invoice_center_buyer_type"] = "公司"
@@ -201,22 +229,31 @@ def _apply_order_defaults(order: dict[str, Any]) -> None:
     if donate_code:
         st.session_state["invoice_center_delivery_method"] = "捐贈"
         st.session_state["invoice_center_donate_code"] = donate_code
+        st.session_state["invoice_center_member_carrier"] = ""
+        st.session_state["invoice_center_mobile_barcode"] = ""
     elif "手機" in carrier_type:
         st.session_state["invoice_center_delivery_method"] = "手機載具"
         st.session_state["invoice_center_mobile_barcode"] = carrier_no
+        st.session_state["invoice_center_member_carrier"] = ""
     elif "自然人" in carrier_type:
         st.session_state["invoice_center_delivery_method"] = "自然人憑證"
         st.session_state["invoice_center_citizen_cert"] = carrier_no
+        st.session_state["invoice_center_member_carrier"] = ""
+        st.session_state["invoice_center_mobile_barcode"] = ""
     elif "紙本" in carrier_type:
         st.session_state["invoice_center_delivery_method"] = "紙本"
+        st.session_state["invoice_center_member_carrier"] = ""
+        st.session_state["invoice_center_mobile_barcode"] = ""
     elif "會員" in carrier_type or carrier_no:
         st.session_state["invoice_center_delivery_method"] = "會員載具"
-        st.session_state["invoice_center_member_carrier"] = str(order.get("email") or carrier_no or "")
+        st.session_state["invoice_center_member_carrier"] = email or carrier_no
+        st.session_state["invoice_center_mobile_barcode"] = ""
 
 
 def _load_backend_order(area: str, order_no: str, suffix: str) -> dict[str, Any]:
     backend_order, payload = fetch_backend_order_invoice_payload(area, order_no, suffix=suffix)
     order = backend_order.to_dict()
+    _reset_invoice_state_for_order()
     st.session_state["invoice_center_backend_order"] = order
     st.session_state.pop("invoice_center_child_invoice_no", None)
     _apply_payload_to_state(payload)
