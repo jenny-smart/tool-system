@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -122,6 +123,214 @@ def _dedupe_blocks(blocks: list[PurchaseBlock]) -> list[PurchaseBlock]:
     for block in blocks:
         seen[block.order_no] = block
     return list(seen.values())
+
+
+def _extract_purchase_list_data(html: str) -> list[dict[str, Any]]:
+    """Extract the Vue purchaseList JSON embedded in the Lemon purchase page."""
+    source = str(html or "")
+    marker = "purchaseList:"
+    start = source.find(marker)
+    if start < 0:
+        return []
+
+    brace = source.find("{", start)
+    if brace < 0:
+        return []
+
+    depth = 0
+    in_string = False
+    escaped = False
+    end = -1
+    for index in range(brace, len(source)):
+        char = source[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+
+    if end < 0:
+        return []
+
+    try:
+        payload = json.loads(source[brace:end])
+    except json.JSONDecodeError:
+        return []
+    data = payload.get("data", [])
+    return data if isinstance(data, list) else []
+
+
+def _text_value(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def _money_value(value: Any) -> str:
+    text = _text_value(value).replace(",", "")
+    if not text:
+        return ""
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    return str(int(number)) if number.is_integer() else str(number)
+
+
+def _payway_from_purchase_data(item: dict[str, Any]) -> str:
+    code = _text_value(item.get("payway"))
+    mapping = {
+        "1": "信用卡",
+        "2": "ATM",
+        "3": "現金",
+        "4": "儲值金",
+    }
+    return mapping.get(code, code)
+
+
+def _paid_status_from_purchase_data(item: dict[str, Any]) -> str:
+    if item.get("cancel_at") or item.get("cancel_log"):
+        return "取消訂單"
+    if item.get("paid_at") or _text_value(item.get("purchase_status")) == "1":
+        return "已付款"
+    if _text_value(item.get("purchase_status")) == "0":
+        return "待付款"
+    return ""
+
+
+def _order_status_from_purchase_data(item: dict[str, Any]) -> str:
+    if item.get("cancel_at") or item.get("cancel_log"):
+        return "取消訂單"
+    if _text_value(item.get("progress")) == "1":
+        return "已處理"
+    return ""
+
+
+def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
+    invoice_type = _text_value(item.get("invoice_type"))
+    company_no = _text_value(item.get("company_no") or item.get("tax_no"))
+    company_title = _text_value(item.get("company_title"))
+    donate_code = _text_value(item.get("donate_code"))
+    carrier_type_id = _text_value(item.get("carrier_type_id"))
+    carrier_info = _text_value(item.get("carrier_info"))
+    email = _text_value(item.get("email"))
+
+    if invoice_type == "3" or company_no:
+        return {
+            "invoice_type": "三聯式",
+            "buyer_identifier": company_no,
+            "buyer_name": company_title,
+            "carrier_type": "紙本",
+            "carrier_no": "",
+            "donate_code": "",
+        }
+    if invoice_type == "1" or donate_code:
+        return {
+            "invoice_type": "二聯式",
+            "buyer_identifier": "",
+            "buyer_name": "",
+            "carrier_type": "捐贈",
+            "carrier_no": "",
+            "donate_code": donate_code,
+        }
+
+    carrier_labels = {
+        "1": "會員載具",
+        "2": "手機載具",
+        "3": "自然人憑證",
+        "4": "紙本",
+    }
+    carrier_type = carrier_labels.get(carrier_type_id, "會員載具")
+    carrier_no = carrier_info
+    if carrier_type == "會員載具":
+        carrier_no = carrier_info or email
+    elif carrier_type == "紙本":
+        carrier_no = ""
+
+    return {
+        "invoice_type": "二聯式",
+        "buyer_identifier": "",
+        "buyer_name": "",
+        "carrier_type": carrier_type,
+        "carrier_no": carrier_no,
+        "donate_code": "",
+    }
+
+
+def _safe_raw_text_from_purchase_data(item: dict[str, Any], invoice_fields: dict[str, str]) -> str:
+    parts = [
+        _text_value(item.get("order_no")),
+        _text_value(item.get("name")),
+        _text_value(item.get("phone")),
+        _text_value(item.get("email")),
+        _text_value(item.get("address")),
+        f"付款方式：{_payway_from_purchase_data(item)}",
+        f"發票：{invoice_fields.get('invoice_type', '')}",
+        f"載具：{invoice_fields.get('carrier_type', '')} {invoice_fields.get('carrier_no', '')}".strip(),
+        f"公司：{invoice_fields.get('buyer_name', '')} {invoice_fields.get('buyer_identifier', '')}".strip(),
+    ]
+    return "\n".join(part for part in parts if part and not part.endswith("："))
+
+
+def _order_from_purchase_data(item: dict[str, Any], base_url: str = "") -> BackendOrder:
+    invoice_fields = _invoice_fields_from_purchase_data(item)
+    purchase_id = _text_value(item.get("purchase_id"))
+    order_no = _text_value(item.get("order_no"))
+    edit_url = ""
+    if purchase_id:
+        root = base_url.rstrip("/")
+        edit_url = f"{root}/purchase/edit/{purchase_id}?orderNo={order_no}" if root else f"/purchase/edit/{purchase_id}?orderNo={order_no}"
+    service_date = _text_value(item.get("date_clean"))
+    period_s = _text_value(item.get("period_s"))
+    period_e = _text_value(item.get("period_e"))
+    service_time = f"{period_s} - {period_e}" if period_s and period_e else ""
+    item_name = _text_value(item.get("clean_type_name")) or "居家清潔"
+
+    return BackendOrder(
+        order_no=order_no,
+        customer_name=_text_value(item.get("name")),
+        phone=normalize_phone(_text_value(item.get("phone"))),
+        email=_text_value(item.get("email")),
+        address=_text_value(item.get("address")),
+        amount=_money_value(item.get("total")),
+        payway=_payway_from_purchase_data(item),
+        order_status=_order_status_from_purchase_data(item),
+        paid_status=_paid_status_from_purchase_data(item),
+        invoice_no=_text_value(item.get("invoice_no")),
+        invoice_type=invoice_fields["invoice_type"],
+        buyer_identifier=invoice_fields["buyer_identifier"],
+        buyer_name=invoice_fields["buyer_name"],
+        carrier_type=invoice_fields["carrier_type"],
+        carrier_no=invoice_fields["carrier_no"],
+        donate_code=invoice_fields["donate_code"],
+        service_date=service_date,
+        service_time=service_time,
+        items=[item_name],
+        raw_text=_safe_raw_text_from_purchase_data(item, invoice_fields),
+        raw_lines=[],
+        edit_url=edit_url,
+        purchase_id=purchase_id,
+        source="purchase_json",
+        extra={
+            "purchase_data_loaded": True,
+            "invoice_type_code": _text_value(item.get("invoice_type")),
+            "carrier_type_id": _text_value(item.get("carrier_type_id")),
+            "carrier_info": _text_value(item.get("carrier_info")),
+            "company_title": _text_value(item.get("company_title")),
+            "company_no": _text_value(item.get("company_no")),
+            "payway_code": _text_value(item.get("payway")),
+        },
+    )
 
 
 def _first_match(pattern: str, text: str) -> str:
@@ -477,6 +686,16 @@ def hydrate_order_from_edit_page(session: LemonBackendSession, order: BackendOrd
 
 
 def parse_purchase_list_page(html: str, base_url: str = "") -> list[BackendOrder]:
+    json_orders = [
+        _order_from_purchase_data(item, base_url)
+        for item in _extract_purchase_list_data(html)
+        if isinstance(item, dict) and _text_value(item.get("order_no"))
+    ]
+    if json_orders:
+        seen: dict[str, BackendOrder] = {}
+        for order in json_orders:
+            seen[order.order_no] = order
+        return list(seen.values())
     return [parse_order_block(block) for block in extract_order_cards_from_purchase_html(html, base_url)]
 
 
