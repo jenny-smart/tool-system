@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import fields
+from datetime import date
 from typing import Any, Mapping
 
 from .invoice import build_add_invoice_payload, build_invoice_payload
-from .models import InvoiceLineItem, InvoicePayload, InvoiceResult
+from .models import InvoiceLineItem, InvoicePayload, InvoiceResult, format_amount
 
 
 def _coerce_payload(payload: InvoicePayload | Mapping[str, Any]) -> InvoicePayload:
@@ -18,32 +19,180 @@ def _coerce_payload(payload: InvoicePayload | Mapping[str, Any]) -> InvoicePaylo
     return InvoicePayload(**data)
 
 
+def _clean(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _money_or_zero(value: Any) -> str:
+    return format_amount(value or "0")
+
+
+def _build_backend_remark(order: Any) -> str:
+    parts = []
+    if _clean(getattr(order, "service_date", "")):
+        parts.append(f"服務日期：{_clean(getattr(order, 'service_date', ''))}")
+    if _clean(getattr(order, "service_time", "")):
+        parts.append(f"服務時間：{_clean(getattr(order, 'service_time', ''))}")
+    if _clean(getattr(order, "paid_status", "")):
+        parts.append(f"付款狀態：{_clean(getattr(order, 'paid_status', ''))}")
+    return "；".join(parts)
+
+
+def _order_value(order: Any, key: str, default: str = "") -> str:
+    value = getattr(order, key, "")
+    if value not in (None, ""):
+        return _clean(value)
+    extra = getattr(order, "extra", {}) or {}
+    if isinstance(extra, Mapping):
+        return _clean(extra.get(key, default))
+    return default
+
+
+def _invoice_overrides_from_order(order: Any) -> dict[str, str]:
+    buyer_identifier = _order_value(order, "buyer_identifier")
+    carrier_type = _order_value(order, "carrier_type")
+    carrier_no = _order_value(order, "carrier_no")
+    donate_code = _order_value(order, "donate_code")
+    email = _order_value(order, "email")
+
+    if buyer_identifier:
+        return {
+            "carriertype": "",
+            "carrierid1": "",
+            "carrierid2": "",
+            "donate": "0",
+            "donatevat": "",
+        }
+    if donate_code or "捐贈" in carrier_type:
+        return {
+            "carriertype": "",
+            "carrierid1": "",
+            "carrierid2": "",
+            "donate": "1",
+            "donatevat": donate_code,
+        }
+    if "手機" in carrier_type:
+        return {
+            "carriertype": "3J0002",
+            "carrierid1": carrier_no,
+            "carrierid2": carrier_no,
+            "donate": "0",
+            "donatevat": "",
+        }
+    if "自然人" in carrier_type:
+        return {
+            "carriertype": "CQ0001",
+            "carrierid1": carrier_no,
+            "carrierid2": carrier_no,
+            "donate": "0",
+            "donatevat": "",
+        }
+    if "紙本" in carrier_type:
+        return {
+            "carriertype": "",
+            "carrierid1": "",
+            "carrierid2": "",
+            "donate": "0",
+            "donatevat": "",
+        }
+    return {
+        "carriertype": "EJ0011",
+        "carrierid1": carrier_no or email,
+        "carrierid2": carrier_no or email,
+        "donate": "0",
+        "donatevat": "",
+    }
+
+
+def build_invoice_payload_from_backend_order(
+    area: str,
+    order: Any,
+    *,
+    suffix: str = "-1",
+    overrides: Mapping[str, Any] | None = None,
+) -> InvoicePayload:
+    """Build an EI invoice payload from a lemon_backend BackendOrder-like object."""
+    amount = _money_or_zero(getattr(order, "amount", "0"))
+    items = list(getattr(order, "items", []) or [])
+    goodname = _clean(items[0]) if items else "清潔服務"
+    service_remark = _build_backend_remark(order)
+    orderdate = _clean(getattr(order, "service_date", "")) or date.today().isoformat()
+    buyer_identifier = _order_value(order, "buyer_identifier")
+    buyer_name = _order_value(order, "buyer_name") if buyer_identifier else _order_value(order, "customer_name")
+    invoice_overrides = _invoice_overrides_from_order(order)
+    invoice_overrides.update(dict(overrides or {}))
+
+    return build_invoice_payload(
+        area=area,
+        order_no=_clean(getattr(order, "order_no", "")),
+        suffix=suffix,
+        orderdate=orderdate,
+        saleamount=amount,
+        buyer_identifier=buyer_identifier,
+        buyer_name=buyer_name,
+        buyer_address=_clean(getattr(order, "address", "")),
+        buyer_emailaddress=_clean(getattr(order, "email", "")),
+        buyer_phone=_clean(getattr(order, "phone", "")),
+        payway=_clean(getattr(order, "payway", "")),
+        mainremark=service_remark,
+        items=[
+            InvoiceLineItem(
+                goodcode="CLEAN",
+                goodname=goodname,
+                unit="式",
+                quantity="1",
+                unitprice=amount,
+                amount=amount,
+                fremark=service_remark,
+            )
+        ],
+        **invoice_overrides,
+    )
+
+
+def fetch_backend_order_invoice_payload(
+    area: str,
+    order_no: str,
+    *,
+    suffix: str = "-1",
+    env_name: str | None = None,
+    backend_client: Any | None = None,
+) -> tuple[Any, InvoicePayload]:
+    """Fetch a Lemon order via lemon_backend and convert it to an invoice payload."""
+    if not _clean(order_no):
+        raise ValueError("請先輸入 Lemon 訂單號")
+
+    if backend_client is None:
+        from tools.lemon_backend import BackendClient
+
+        backend_client = BackendClient(area, env_name=env_name)
+
+    order = backend_client.get_order(_clean(order_no))
+    if order is None:
+        raise LookupError(f"查無 Lemon 訂單：{order_no}")
+
+    return order, build_invoice_payload_from_backend_order(area, order, suffix=suffix)
+
+
 def preview_invoice_from_order(
     area: str,
     order_no: str,
     suffix: str = "-1",
+    *,
+    env_name: str | None = None,
+    backend_client: Any | None = None,
 ) -> InvoiceResult:
-    payload = build_invoice_payload(
-        area=area,
-        order_no=order_no,
+    _order, payload = fetch_backend_order_invoice_payload(
+        area,
+        order_no,
         suffix=suffix,
-        items=[
-            InvoiceLineItem(
-                goodcode="CLEAN",
-                goodname="清潔服務",
-                unit="式",
-                quantity="1",
-                unitprice="0",
-                amount="0",
-                fremark="preview",
-            )
-        ],
-        saleamount="0",
+        env_name=env_name,
+        backend_client=backend_client,
     )
     return InvoiceResult(
         success=True,
         dry_run=True,
-        message="Preview only. No EI request was sent.",
+        message="Preview only. Lemon order was loaded; no EI request was sent.",
         payload=build_add_invoice_payload(payload),
     )
 
@@ -54,7 +203,7 @@ def create_invoice_from_payload(
     *,
     client: Any | None = None,
     captcha: str | None = None,
-    captcha_field: str = "captcha",
+    captcha_field: str = "capchacode",
 ) -> InvoiceResult:
     invoice_payload = _coerce_payload(payload)
     data = build_add_invoice_payload(invoice_payload)

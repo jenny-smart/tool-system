@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Mapping
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -67,6 +68,13 @@ class EIInvoiceClient:
         return fields
 
     @staticmethod
+    def parse_form_action(html: str, fallback_url: str) -> str:
+        soup = BeautifulSoup(html or "", "html.parser")
+        form = soup.find("form")
+        action = form.get("action") if form else ""
+        return urljoin(fallback_url, action) if action else fallback_url
+
+    @staticmethod
     def extract_tokens(hidden_fields: Mapping[str, str]) -> dict[str, str]:
         token_name = hidden_fields.get("struts.token.name", "token") or "token"
         token = hidden_fields.get(token_name, hidden_fields.get("token", ""))
@@ -80,13 +88,17 @@ class EIInvoiceClient:
         self,
         *,
         captcha: str | None = None,
-        captcha_field: str = "captcha",
+        captcha_field: str = "capchacode",
     ) -> requests.Response:
         login_url = self._url(LOGIN_ENDPOINT)
-        landing = self.session.get(login_url, timeout=self.timeout)
+        landing_url = self.credentials.entry_url or login_url
+        landing = self.session.get(landing_url, timeout=self.timeout)
+        if not (landing.text or "").strip() and landing_url != login_url:
+            landing = self.session.get(login_url, timeout=self.timeout)
         landing.raise_for_status()
         hidden = self.parse_hidden_inputs(landing.text)
         self.last_hidden_fields = hidden
+        post_url = self.parse_form_action(landing.text, landing.url or login_url)
 
         payload = build_login_payload(
             self.credentials,
@@ -95,7 +107,7 @@ class EIInvoiceClient:
             captcha_field=captcha_field,
         )
         response = self.session.post(
-            login_url,
+            post_url,
             data=payload,
             timeout=self.timeout,
             allow_redirects=True,
@@ -205,11 +217,23 @@ class EIInvoiceClient:
         date1: str,
         date2: str,
     ) -> list[dict[str, str]]:
+        return self.query_invoices(date1, date2, order_id=order_id)
+
+    def query_invoices(
+        self,
+        date1: str,
+        date2: str,
+        *,
+        order_id: str = "",
+        extra_params: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, str]]:
         params = {
-            "orderid": order_id,
             "date1": date1,
             "date2": date2,
         }
+        if order_id:
+            params["orderid"] = order_id
+        params.update(dict(extra_params or {}))
         response = self.session.get(
             self._url(INVOICE_LIST_ENDPOINT),
             params=params,
@@ -220,4 +244,8 @@ class EIInvoiceClient:
 
         from .query import parse_invoice_list_html
 
-        return parse_invoice_list_html(response.text, order_id=order_id)
+        return parse_invoice_list_html(
+            response.text,
+            order_id=order_id,
+            base_url=self.base_url,
+        )
