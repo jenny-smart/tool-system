@@ -91,7 +91,7 @@ class EIInvoiceClient:
         captcha_field: str = "capchacode",
     ) -> requests.Response:
         login_url = self._url(LOGIN_ENDPOINT)
-        landing_url = self.credentials.entry_url or login_url
+        landing_url = getattr(self.credentials, "entry_url", "") or login_url
         landing = self.session.get(landing_url, timeout=self.timeout)
         if not (landing.text or "").strip() and landing_url != login_url:
             landing = self.session.get(login_url, timeout=self.timeout)

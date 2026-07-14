@@ -11,7 +11,7 @@ except Exception:
 
 
 EI_BASE_URL = "https://www.ei.com.tw/InvoiceRent"
-LOGIN_ENDPOINT = "/enterlogin.action"
+LOGIN_ENDPOINT = "/index.jsp"
 ADD_INVOICE_ENDPOINT = "/addInvoice.action"
 INVOICE_LIST_ENDPOINT = "/common/invoice/invoicelist.jsp"
 
@@ -21,26 +21,31 @@ AREA_ENV = {
         "label": "台北",
         "userid": "TAIPEI_EI_USERID",
         "password": "TAIPEI_EI_PASSWORD",
+        "entry_url": "TAIPEI_EI_ENTRY_URL",
     },
     "taichung": {
         "label": "台中",
         "userid": "TAICHUNG_EI_USERID",
         "password": "TAICHUNG_EI_PASSWORD",
+        "entry_url": "TAICHUNG_EI_ENTRY_URL",
     },
     "taoyuan": {
         "label": "桃園",
         "userid": "TAOYUAN_EI_USERID",
         "password": "TAOYUAN_EI_PASSWORD",
+        "entry_url": "TAOYUAN_EI_ENTRY_URL",
     },
     "hsinchu": {
         "label": "新竹",
         "userid": "HSINCHU_EI_USERID",
         "password": "HSINCHU_EI_PASSWORD",
+        "entry_url": "HSINCHU_EI_ENTRY_URL",
     },
     "kaohsiung": {
         "label": "高雄",
         "userid": "KAOHSIUNG_EI_USERID",
         "password": "KAOHSIUNG_EI_PASSWORD",
+        "entry_url": "KAOHSIUNG_EI_ENTRY_URL",
     },
 }
 
@@ -64,6 +69,7 @@ class EICredentials:
     label: str
     userid: str
     password: str
+    entry_url: str = ""
 
     @property
     def masked_userid(self) -> str:
@@ -77,7 +83,24 @@ def _streamlit_secret(name: str) -> str:
         return ""
     try:
         value = st.secrets.get(name, "")
+    except Exception:
+        value = ""
+    if str(value or "").strip():
         return str(value).strip()
+
+    def find_nested(mapping: Any) -> str:
+        if not hasattr(mapping, "items"):
+            return ""
+        for key, nested_value in mapping.items():
+            if str(key) == name and str(nested_value or "").strip():
+                return str(nested_value).strip()
+            found = find_nested(nested_value)
+            if found:
+                return found
+        return ""
+
+    try:
+        return find_nested(st.secrets)
     except Exception:
         return ""
 
@@ -104,6 +127,7 @@ def get_area_credentials(area: str, required: bool = True) -> EICredentials | No
     meta = AREA_ENV[area_key]
     userid = get_secret(meta["userid"])
     password = get_secret(meta["password"])
+    entry_url = get_secret(meta.get("entry_url", ""))
 
     if userid and password:
         return EICredentials(
@@ -111,6 +135,7 @@ def get_area_credentials(area: str, required: bool = True) -> EICredentials | No
             label=meta["label"],
             userid=userid,
             password=password,
+            entry_url=entry_url,
         )
 
     if required:
@@ -132,8 +157,10 @@ def get_area_status() -> list[dict[str, Any]]:
                 "label": meta["label"],
                 "userid_env": meta["userid"],
                 "password_env": meta["password"],
+                "entry_url_env": meta.get("entry_url", ""),
                 "has_userid": bool(userid),
                 "has_password": bool(password),
+                "has_entry_url": bool(get_secret(meta.get("entry_url", ""))),
                 "configured": bool(userid and password),
             }
         )
