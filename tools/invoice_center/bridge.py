@@ -71,11 +71,27 @@ def _invoice_overrides_from_order(order: Any) -> dict[str, str]:
             "donate": "1",
             "donatevat": donate_code,
         }
-    if "手機" in carrier_type or carrier_no.startswith("/"):
+    if "手機" in carrier_type:
         return {
             "carriertype": "3J0002",
             "carrierid1": carrier_no,
             "carrierid2": carrier_no,
+            "donate": "0",
+            "donatevat": "",
+        }
+    if "自然人" in carrier_type:
+        return {
+            "carriertype": "CQ0001",
+            "carrierid1": carrier_no,
+            "carrierid2": carrier_no,
+            "donate": "0",
+            "donatevat": "",
+        }
+    if "紙本" in carrier_type:
+        return {
+            "carriertype": "",
+            "carrierid1": "",
+            "carrierid2": "",
             "donate": "0",
             "donatevat": "",
         }

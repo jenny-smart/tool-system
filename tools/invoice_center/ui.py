@@ -159,7 +159,7 @@ def _apply_payload_to_state(payload: Any) -> None:
     if payload.donate == "1":
         st.session_state["invoice_center_delivery_method"] = "捐贈"
         st.session_state["invoice_center_donate_code"] = payload.donatevat or ""
-    elif payload.carriertype == "3J0002" or str(payload.carrierid1 or "").startswith("/"):
+    elif payload.carriertype == "3J0002":
         st.session_state["invoice_center_delivery_method"] = "手機載具"
         st.session_state["invoice_center_mobile_barcode"] = payload.carrierid1 or ""
     elif payload.carrierid1:
@@ -200,21 +200,24 @@ def _apply_order_defaults(order: dict[str, Any]) -> None:
     if donate_code:
         st.session_state["invoice_center_delivery_method"] = "捐贈"
         st.session_state["invoice_center_donate_code"] = donate_code
+    elif "手機" in carrier_type:
+        st.session_state["invoice_center_delivery_method"] = "手機載具"
+        st.session_state["invoice_center_mobile_barcode"] = carrier_no
     elif "自然人" in carrier_type:
         st.session_state["invoice_center_delivery_method"] = "自然人憑證"
         st.session_state["invoice_center_citizen_cert"] = carrier_no
-    elif "手機" in carrier_type or carrier_no.startswith("/"):
-        st.session_state["invoice_center_delivery_method"] = "手機載具"
-        st.session_state["invoice_center_mobile_barcode"] = carrier_no
+    elif "紙本" in carrier_type:
+        st.session_state["invoice_center_delivery_method"] = "紙本"
     elif "會員" in carrier_type or carrier_no:
         st.session_state["invoice_center_delivery_method"] = "會員載具"
-        st.session_state["invoice_center_member_carrier"] = carrier_no or str(order.get("email") or "")
+        st.session_state["invoice_center_member_carrier"] = str(order.get("email") or carrier_no or "")
 
 
 def _load_backend_order(area: str, order_no: str, suffix: str) -> dict[str, Any]:
     backend_order, payload = fetch_backend_order_invoice_payload(area, order_no, suffix=suffix)
     order = backend_order.to_dict()
     st.session_state["invoice_center_backend_order"] = order
+    st.session_state.pop("invoice_center_child_invoice_no", None)
     _apply_payload_to_state(payload)
     _apply_order_defaults(order)
     return order
@@ -260,7 +263,7 @@ def _render_order_card() -> None:
         with c1:
             st.date_input("訂單 / 發票日期", key="invoice_center_orderdate")
         with c2:
-            st.selectbox("付款方式", ["現金", "信用卡", "ATM", "轉帳", "LINE Pay", "儲值金", "其他"], key="invoice_center_payway")
+            st.selectbox("付款方式", ["現金", "ATM", "信用卡", "儲值金"], key="invoice_center_payway")
         with c3:
             st.text_input("備註", key="invoice_center_mainremark")
 
@@ -487,8 +490,12 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
     order = st.session_state.get("invoice_center_backend_order") or {}
     rows = _normalize_line_items(st.session_state.get("invoice_center_line_items", []))
     totals = _calculate_totals(rows)
+    payload = _build_payload(area, order_no, suffix, rows, totals)
     invoice_kind = "三聯式" if st.session_state.get("invoice_center_buyer_type") == "公司" else "二聯式"
-    status = "已開立" if order.get("invoice_no") else "未開立"
+    is_child_invoice = bool(str(suffix or "").strip())
+    child_invoice_no = st.session_state.get("invoice_center_child_invoice_no", "")
+    current_invoice_no = child_invoice_no if is_child_invoice else order.get("invoice_no", "")
+    status = "已開立" if current_invoice_no else "未開立"
 
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">發票摘要</div>', unsafe_allow_html=True)
@@ -499,25 +506,47 @@ def _render_sidebar_summary(area: str, order_no: str, suffix: str, invoice_type:
         st.write("發票種類：", invoice_kind)
         st.write("計價方式：", st.session_state.get("invoice_center_tax_mode"))
         st.write("交付方式：", st.session_state.get("invoice_center_delivery_method"))
+        st.write("EI orderid：", payload.orderid or "-")
 
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">發票狀態</div>', unsafe_allow_html=True)
         st.markdown(f"<div class=\"{'ic-status-done' if status == '已開立' else 'ic-status-open'}\">{status}</div>", unsafe_allow_html=True)
-        st.write("發票號碼：", order.get("invoice_no") or "-")
+        if is_child_invoice:
+            st.write("子單發票號碼：", child_invoice_no or "-")
+            st.write("母單發票號碼：", order.get("invoice_no") or "-")
+        else:
+            st.write("發票號碼：", order.get("invoice_no") or "-")
         st.write("purchase_id：", order.get("purchase_id") or "-")
 
     with st.container(border=True):
         st.markdown('<div class="ic-section-title">操作</div>', unsafe_allow_html=True)
-        payload = _build_payload(area, order_no, suffix, rows, totals)
         if st.button("🔍 預覽 Payload", use_container_width=True):
             result = create_invoice_from_payload(payload, dry_run=True)
             st.session_state["invoice_center_preview"] = result.payload
 
-        confirm_live = st.checkbox("確認正式呼叫 Lemon 發票 API", key="invoice_center_confirm_live")
+        if is_child_invoice:
+            st.text_input("EI Captcha", value="", type="password", key="invoice_center_ei_captcha")
+            st.caption("子單會用 EI addInvoice payload 正式開立，不使用母單既有發票號碼。")
+        else:
+            st.caption("母單會呼叫 Lemon 發票 API。")
+        confirm_live = st.checkbox("確認正式開立發票", key="invoice_center_confirm_live")
         if st.button("🧾 正式開立發票", type="primary", use_container_width=True, disabled=not confirm_live):
             try:
                 purchase_id = str(order.get("purchase_id") or "").strip()
-                if not purchase_id:
+                if is_child_invoice:
+                    result = create_invoice_from_payload(
+                        payload,
+                        dry_run=False,
+                        captcha=st.session_state.get("invoice_center_ei_captcha") or None,
+                    )
+                    if not result.success:
+                        st.error(result.error or result.message)
+                    elif result.invoice_no:
+                        st.session_state["invoice_center_child_invoice_no"] = result.invoice_no
+                        st.success(f"子單開立成功：{result.invoice_no}")
+                    else:
+                        st.warning("已送出 EI addInvoice，但尚未解析到新發票號碼，請用發票下載頁查詢子單 orderid。")
+                elif not purchase_id:
                     st.warning("請先查詢 Lemon 訂單，取得 purchase_id。")
                 elif order.get("invoice_no"):
                     st.success(f"此訂單已開立發票：{order.get('invoice_no')}")
