@@ -6,91 +6,117 @@
 // ==/UserScript==
 
 (() => {
-  if (window.__lemonEiTool) return;
-  window.__lemonEiTool = true;
+  const TOOL_ID = "lemon-ei-fill-btn";
+  const TOOL_VERSION = "2026-07-15.2";
+  if (window.__lemonEiToolVersion === TOOL_VERSION) return;
+  window.__lemonEiToolVersion = TOOL_VERSION;
 
-  const clean = (value) => String(value || "").replace(/\s+/g, "");
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const valueText = (value) => String(value ?? "").trim();
+
   const fire = (el) => {
+    if (!el) return false;
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     el.dispatchEvent(new Event("blur", { bubbles: true }));
+    return true;
   };
-  const rows = () => [...document.querySelectorAll("tr")];
 
-  const setByName = (names, value) => {
-    for (const name of names) {
-      const el = document.querySelector(`[name="${name}"], #${name}`);
-      if (!el) continue;
-      el.value = value || "";
-      fire(el);
-      return true;
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.value = valueText(value);
+    fire(el);
+    return true;
+  };
+
+  const clickId = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.click();
+    fire(el);
+    return true;
+  };
+
+  const setPay = (payway) => {
+    const pay = document.getElementById("pay");
+    if (!pay) return false;
+    const text = valueText(payway);
+    let value = "1";
+    if (text.includes("ATM") || text === "2") value = "2";
+    else if (text.includes("信用卡") || text === "3") value = "3";
+    else if (text.includes("現金") || text === "1") value = "1";
+    else if (text.includes("儲值金")) value = "5";
+    pay.value = value;
+    fire(pay);
+    return true;
+  };
+
+  const setTax = (d) => {
+    clickId("invoicetype07");
+    clickId(valueText(d.hastax) === "1" ? "hastax1" : "hastax2");
+    const taxMap = { 1: "businesstax1", 2: "businesstax2", 3: "businesstax3", 4: "businesstax4" };
+    clickId(taxMap[valueText(d.taxtype)] || "businesstax1");
+    clickId(`roundnum${valueText(d.roundnum) || "4"}`);
+    setValue("rate", d.rate || "0.05");
+  };
+
+  const clearCarrier = () => {
+    setValue("carriertype", "");
+    setValue("carrierid1", "");
+    setValue("carrierid2", "");
+    setValue("donatevat", "");
+  };
+
+  const setCarrier = async (d) => {
+    const buyerId = valueText(d.buyer_identifier);
+    const donate = valueText(d.donate);
+    const donatevat = valueText(d.donatevat);
+    const carrierType = valueText(d.carriertype);
+    const carrier1 = valueText(d.carrierid1);
+    const carrier2 = valueText(d.carrierid2 || d.carrierid1);
+
+    if (buyerId) {
+      clickId("donate2");
+      await sleep(80);
+      clearCarrier();
+      return;
     }
-    return false;
-  };
 
-  const setInputByRow = (label, value) => {
-    for (const row of rows()) {
-      if (!clean(row.textContent).includes(clean(label))) continue;
-      const input = row.querySelector("input[type='text'], input:not([type]), textarea");
-      if (!input) continue;
-      input.value = value || "";
-      fire(input);
-      return true;
+    if (donate === "1" || donatevat) {
+      clickId("donate1");
+      await sleep(80);
+      clearCarrier();
+      setValue("donatevat", donatevat);
+      return;
     }
-    return false;
-  };
 
-  const setSelectByRow = (label, value) => {
-    const target = clean(value);
-    for (const row of rows()) {
-      if (!clean(row.textContent).includes(clean(label))) continue;
-      const select = row.querySelector("select");
-      if (!select) continue;
-      const option = [...select.options].find((item) => {
-        return clean(item.text).includes(target) || clean(item.value).includes(target);
-      });
-      if (option) select.value = option.value;
-      fire(select);
-      return true;
+    if (!carrierType && !carrier1 && !carrier2) {
+      clickId("donate2");
+      await sleep(80);
+      clearCarrier();
+      return;
     }
-    return false;
+
+    clickId("donate0");
+    await sleep(100);
+    if (carrierType === "3J0002") clickId("barcode3J0002");
+    else if (carrierType === "CQ0001") clickId("barcodeCQ0001");
+    else clickId("barcodeEJ0011");
+
+    setValue("carriertype", carrierType || "EJ0011");
+    setValue("carrierid1", carrier1);
+    setValue("carrierid2", carrier2);
   };
 
-  const textAfter = (input) => {
-    let text = "";
-    let node = input.nextSibling;
-    while (node) {
-      if (node.nodeType === 1 && node.matches?.("input[type='radio']")) break;
-      text += node.textContent || "";
-      node = node.nextSibling;
-    }
-    return clean(text || input.closest("label")?.textContent || input.parentElement?.textContent);
+  const fillDetailHidden = (d) => {
+    setValue("detaildata", d.detaildata || "");
+    setValue("saleamount", d.saleamount || "");
+    setValue("taxamount", d.taxamount || "");
+    setValue("totalamount", d.totalamount || "");
   };
 
-  const clickRadio = (rowLabel, optionLabel) => {
-    const target = clean(optionLabel);
-    const scopeRows = rowLabel ? rows().filter((row) => clean(row.textContent).includes(clean(rowLabel))) : rows();
-    for (const row of scopeRows) {
-      for (const radio of row.querySelectorAll("input[type='radio']")) {
-        if (textAfter(radio).includes(target)) {
-          radio.click();
-          fire(radio);
-          return true;
-        }
-      }
-    }
-    return false;
-  };
-
-  const setPayment = (payway) => {
-    const value = String(payway || "");
-    if (value.includes("ATM") || value === "2") return setSelectByRow("付款方式", "ATM");
-    if (value.includes("信用卡") || value === "3") return setSelectByRow("付款方式", "信用卡");
-    if (value.includes("現金")) return setSelectByRow("付款方式", "現金");
-    return false;
-  };
-
-  const fill = () => {
+  const fill = async () => {
     const raw = prompt("貼上發票中心 Payload JSON");
     if (!raw) return;
 
@@ -102,50 +128,34 @@
       return;
     }
 
-    setByName(["orderid", "orderId"], d.orderid) || setInputByRow("訂單編號", d.orderid);
-    setByName(["orderdate", "orderDate"], d.orderdate) || setInputByRow("訂單日期", d.orderdate);
-    setByName(["buyer_name", "buyerName"], d.buyer_name) || setInputByRow("買方名稱", d.buyer_name);
-    setByName(["buyer_identifier", "buyerIdentifier"], d.buyer_identifier) || setInputByRow("買方統編", d.buyer_identifier);
-    setByName(["buyer_address", "buyerAddress"], d.buyer_address) || setInputByRow("買方地址", d.buyer_address);
-    setByName(["buyer_emailaddress", "buyerEmailAddress"], d.buyer_emailaddress) || setInputByRow("買方Email", d.buyer_emailaddress);
-    setByName(["buyer_phone", "buyerPhone"], d.buyer_phone) || setInputByRow("買方電話", d.buyer_phone);
-    setByName(["mainremark", "remark"], d.mainremark) || setInputByRow("備註", d.mainremark);
-    setPayment(d.payway);
+    setValue("orderid", d.orderid);
+    setValue("orderdate", d.orderdate);
+    setValue("buyer_name", d.buyer_name);
+    setValue("buyer_identifier", d.buyer_identifier);
+    setValue("buyer_phone", d.buyer_phone);
+    setValue("buyer_address", d.buyer_address);
+    setValue("buyer_emailaddress", d.buyer_emailaddress);
+    setPay(d.payway);
+    setValue("buyer_emailaddress", d.buyer_emailaddress);
+    setValue("mainremark", d.mainremark);
+    setTax(d);
+    await setCarrier(d);
+    fillDetailHidden(d);
 
-    clickRadio("單價是否含稅", "含稅");
-    clickRadio("營業稅", "應稅");
-    clickRadio("發票計算位數", "4");
-    setByName(["rate"], d.rate || "0.05") || setInputByRow("稅率", d.rate || "0.05");
-
-    if (d.buyer_identifier) {
-      clickRadio("發票方式", "紙本");
-    } else if (d.donate === "1" || d.donatevat) {
-      clickRadio("發票方式", "捐贈");
-      setByName(["donatevat"], d.donatevat);
-    } else {
-      clickRadio("發票方式", "載具");
-      if (d.carriertype === "3J0002") clickRadio("", "手機條碼");
-      else if (d.carriertype === "CQ0001") clickRadio("", "自然人憑證");
-      else clickRadio("", "會員");
-      setByName(["carriertype", "carrierType"], d.carriertype) || setInputByRow("載具類別編號", d.carriertype);
-      setByName(["carrierid1", "carrierId1"], d.carrierid1) || setInputByRow("顯碼", d.carrierid1);
-      setByName(["carrierid2", "carrierId2"], d.carrierid2) || setInputByRow("隱碼", d.carrierid2);
-    }
-
-    setByName(["detaildata"], d.detaildata);
-    alert("已填入。請檢查買方名稱/統編、Email、付款方式、載具與商品明細後再按下一步。");
+    alert("已填入。請檢查買受人/統編、Email、付款方式、載具後再按下一步。");
   };
 
   const addButton = () => {
-    if (document.getElementById("lemon-ei-fill-btn")) return;
+    document.getElementById(TOOL_ID)?.remove();
     const btn = document.createElement("button");
-    btn.id = "lemon-ei-fill-btn";
+    btn.id = TOOL_ID;
+    btn.type = "button";
     btn.textContent = "貼上發票資料";
     btn.onclick = fill;
     btn.style.cssText = `
       position: fixed;
       right: 18px;
-      top: 80px;
+      top: 82px;
       z-index: 999999;
       padding: 12px 18px;
       background: #e53935;
@@ -161,5 +171,7 @@
   };
 
   addButton();
-  setInterval(addButton, 1000);
+  setInterval(() => {
+    if (!document.getElementById(TOOL_ID)) addButton();
+  }, 1000);
 })();

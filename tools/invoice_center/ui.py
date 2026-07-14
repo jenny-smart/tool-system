@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from datetime import date
 from typing import Any
 
@@ -59,6 +60,21 @@ def _order_extra_value(order: dict[str, Any], *keys: str) -> str:
             value = extra.get(key)
             if value not in (None, ""):
                 return str(value)
+    return ""
+
+
+def _company_title_from_raw_text(order: dict[str, Any], tax_id: str) -> str:
+    text = str(order.get("raw_text") or "")
+    if not text or not tax_id:
+        return ""
+    patterns = [
+        rf"三聯式[：:\s]*([^\n\d]{{2,100}}?)[\s\n]*{re.escape(tax_id)}",
+        rf"發票[：:\s]*三聯式[：:\s]*([^\n\d]{{2,100}}?)[\s\n]*{re.escape(tax_id)}",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip("：:;；,， \n\t")
     return ""
 
 
@@ -212,6 +228,8 @@ def _reset_invoice_state_for_order() -> None:
 def _apply_order_defaults(order: dict[str, Any]) -> None:
     buyer_identifier = _order_extra_value(order, "buyer_identifier", "invoice_identifier", "tax_id", "company_no") or str(order.get("buyer_identifier") or "")
     company_title = _order_extra_value(order, "buyer_name", "invoice_title", "company_title") or str(order.get("buyer_name") or "")
+    if buyer_identifier and not company_title:
+        company_title = _company_title_from_raw_text(order, buyer_identifier)
     carrier_no = _order_extra_value(order, "carrier_no", "carrierid1", "carrierid2", "carrier_info")
     carrier_type = _order_extra_value(order, "carrier_type", "carriertype", "carrier_label")
     donate_code = _order_extra_value(order, "donate_code", "love_code", "npoban")
@@ -473,6 +491,7 @@ def _build_payload(area: str, order_no: str, suffix: str, rows: list[dict[str, A
     buyer_identifier = st.session_state.get("invoice_center_buyer_identifier", "").strip() if buyer_type == "公司" else ""
     buyer_name = (
         st.session_state.get("invoice_center_company_title", "").strip()
+        or st.session_state.get("invoice_center_buyer_name", "").strip()
         if buyer_identifier
         else st.session_state.get("invoice_center_buyer_name", "").strip()
     )
