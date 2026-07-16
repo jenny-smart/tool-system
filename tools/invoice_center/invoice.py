@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import date
 from decimal import Decimal
+import re
 from typing import Iterable, Any
 
 from .models import (
@@ -29,6 +30,44 @@ def build_detail_rows(items: Iterable[InvoiceLineItem]) -> str:
 def build_detaildata(items: Iterable[InvoiceLineItem]) -> str:
     raw = build_detail_rows(items)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
+
+
+ISO_DATE_RE = re.compile(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b")
+
+
+def to_ei_roc_date(value: str | date | None) -> str:
+    text = str(value or "").strip().replace("-", "/")
+    parts = text.split("/")
+    if len(parts) != 3:
+        return text
+    year, month, day = parts
+    try:
+        if len(year) == 4:
+            year = str(int(year) - 1911)
+        return f"{int(year):03d}/{int(month):02d}/{int(day):02d}"
+    except ValueError:
+        return text
+
+
+def replace_iso_dates_with_roc(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        year, month, day = match.groups()
+        return to_ei_roc_date(f"{year}/{month}/{day}")
+
+    return ISO_DATE_RE.sub(repl, str(text or ""))
+
+
+def normalize_detaildata_dates(detaildata: str) -> str:
+    if not detaildata:
+        return detaildata
+    try:
+        raw = base64.b64decode(detaildata).decode("utf-8")
+    except Exception:
+        return detaildata
+    normalized = replace_iso_dates_with_roc(raw)
+    if normalized == raw:
+        return detaildata
+    return base64.b64encode(normalized.encode("utf-8")).decode("ascii")
 
 
 def sum_line_amounts(items: Iterable[InvoiceLineItem]) -> Decimal:
@@ -58,7 +97,7 @@ def build_invoice_payload(
 ) -> InvoicePayload:
     line_items = list(items or [])
     resolved_orderid = orderid or build_ei_order_id(order_no, suffix)
-    resolved_orderdate = orderdate or date.today().isoformat()
+    resolved_orderdate = to_ei_roc_date(orderdate or date.today().isoformat())
     resolved_saleamount = (
         saleamount if saleamount not in (None, "") else sum_line_amounts(line_items)
     )
@@ -75,7 +114,7 @@ def build_invoice_payload(
         buyer_emailaddress=buyer_emailaddress,
         buyer_phone=buyer_phone,
         payway=payway,
-        mainremark=mainremark,
+        mainremark=replace_iso_dates_with_roc(mainremark),
         **overrides,
     )
 
@@ -99,7 +138,9 @@ def _resolve_total_amount(
 
 
 def build_add_invoice_payload(payload: InvoicePayload) -> dict[str, Any]:
-    detaildata = payload.detaildata or build_detaildata(payload.items)
+    detaildata = normalize_detaildata_dates(payload.detaildata) or build_detaildata(
+        payload.items
+    )
     saleamount = to_decimal(payload.saleamount)
     if saleamount == 0 and payload.items:
         saleamount = sum_line_amounts(payload.items)
@@ -109,7 +150,7 @@ def build_add_invoice_payload(payload: InvoicePayload) -> dict[str, Any]:
     data: dict[str, Any] = {
         "roundnum": str(payload.roundnum),
         "orderid": payload.orderid,
-        "orderdate": payload.orderdate,
+        "orderdate": to_ei_roc_date(payload.orderdate),
         "detaildata": detaildata,
         "buyer_identifier": payload.buyer_identifier,
         "buyer_name": payload.buyer_name,
@@ -117,7 +158,7 @@ def build_add_invoice_payload(payload: InvoicePayload) -> dict[str, Any]:
         "buyer_emailaddress": payload.buyer_emailaddress,
         "buyer_phone": payload.buyer_phone,
         "payway": payload.payway,
-        "mainremark": payload.mainremark,
+        "mainremark": replace_iso_dates_with_roc(payload.mainremark),
         "invoicetype": payload.invoicetype,
         "taxtype": payload.taxtype,
         "zerotype": payload.zerotype,
