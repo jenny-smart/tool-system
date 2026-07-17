@@ -1,20 +1,25 @@
 """
 檔案：tools/service_management/service_schedule.py
-版本：0717_v1
+版本：0717_v2
 更新日期：2026-07-17
 
-功能：
-- Step 1：更新排班統計表。
-- Step 2：更新每日回報。
-- Step 3：從 Gmail 更新前一天營業分數及營業額。
+檸檬家事 客服排程系統
 
-本次更新：
-- 修正 Gmail 主旨比對過於嚴格的問題。
-- 原本要求主旨必須完全等於「近三日營業額-台北／台中」。
-- 新版改為主旨包含指定關鍵字即可，並忽略半形空白、全形空白及零寬字元。
-- IMAP 搜尋改為先依日期抓取信件，再由 Python 比對解碼後的完整主旨，避免中文主旨搜尋不穩定。
-- 若同日有多封符合信件，仍選擇寄送時間最接近 17:25 的信。
-- 執行日誌會列出當日候選信件主旨及是否符合，方便除錯。
+三步驟：
+  Step 1. 更新排班統計表（Drive 來源資料夾 → 目標試算表）
+  Step 2. 更新每日回報（排班統計表 → 每日回報）
+  Step 3. 更新前一天營業分數及營業額（Gmail → 每日回報）
+
+本版 Step 3 修正：
+  1. IMAP 不再只搜尋 INBOX，改為自動選取 Gmail「所有郵件 / All Mail」。
+  2. 搜尋方式比照 GAS：先找指定日期的郵件，再檢查解碼後主旨完全相等。
+  3. 同日有多封符合主旨的信時，選最接近 17:25 的那一封。
+  4. 郵件日期一律轉成台北時區後再判斷是否為目標日期。
+  5. Log 會列出所選信箱、掃描數、候選主旨與郵件時間，方便除錯。
+
+打卡：
+  - 主控表  (TOOLS_APP_LOG_SPREADSHEET_ID) → 工作表「執行記錄」
+  - 執行檔  (LEMON_TARGET_FILE_ID)         → 工作表「客服排程執行Log」
 
 執行方式：
   python -u -m tools.service_management.service_schedule --step 0
@@ -549,12 +554,70 @@ def _get_secret(key: str) -> str:
 
 def _imap_connect() -> imaplib.IMAP4_SSL:
     user = _get_secret("GMAIL_USER")
-    pwd  = _get_secret("GMAIL_APP_PASSWORD")
+    pwd = _get_secret("GMAIL_APP_PASSWORD")
     if not user or not pwd:
         raise EnvironmentError("需要 GMAIL_USER 和 GMAIL_APP_PASSWORD")
+
     imap = imaplib.IMAP4_SSL("imap.gmail.com")
     imap.login(user, pwd)
     return imap
+
+
+def _decode_mailbox_name(raw_name: bytes | str) -> str:
+    """解碼 IMAP LIST 回傳的信箱名稱。"""
+    if isinstance(raw_name, bytes):
+        text = raw_name.decode("utf-8", errors="replace")
+    else:
+        text = str(raw_name)
+
+    quoted = re.findall(r'"([^"]*)"', text)
+    if quoted:
+        return quoted[-1]
+
+    parts = text.rsplit(" ", 1)
+    return parts[-1].strip().strip('"')
+
+
+def _select_all_mail(imap: imaplib.IMAP4_SSL) -> str:
+    """優先選 Gmail 的 All Mail 特殊信箱，避免只在 INBOX 搜尋。"""
+    status, rows = imap.list()
+    if status != "OK" or not rows:
+        raise RuntimeError("IMAP 無法取得信箱清單")
+
+    candidates: list[str] = []
+    fallback_names: list[str] = []
+
+    for raw in rows:
+        raw_text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+        mailbox_name = _decode_mailbox_name(raw)
+        fallback_names.append(mailbox_name)
+
+        if re.search(r"\\All(?:\s|\))", raw_text, flags=re.IGNORECASE):
+            candidates.insert(0, mailbox_name)
+        elif mailbox_name.lower() in {
+            "[gmail]/all mail",
+            "[google mail]/all mail",
+            "[gmail]/所有郵件",
+            "[google mail]/所有郵件",
+        }:
+            candidates.append(mailbox_name)
+
+    candidates.append("INBOX")
+
+    attempted: list[str] = []
+    for mailbox_name in candidates:
+        if mailbox_name in attempted:
+            continue
+        attempted.append(mailbox_name)
+
+        status, _ = imap.select(mailbox_name, readonly=True)
+        if status == "OK":
+            log.info("  [mail] 已選取信箱：%s", mailbox_name)
+            return mailbox_name
+
+    raise RuntimeError(
+        "無法選取 Gmail 所有郵件或 INBOX。可用信箱：" + ", ".join(fallback_names)
+    )
 
 
 def _decode_subject(msg) -> str:
@@ -623,123 +686,103 @@ def _plain_body(msg) -> str:
     return ""
 
 
-def _normalize_subject_for_match(value: str) -> str:
-    """主旨比對用：移除空白、全形空白與零寬字元。"""
-    value = str(value or "")
-    for ch in [" ", "\t", "\r", "\n", "\u3000", "\u00A0", "\u200B", "\u200C", "\u200D", "\uFEFF"]:
-        value = value.replace(ch, "")
-    return value.strip()
-
-
 def _pick_mail(subject: str, target_date: datetime) -> str:
     """
-    抓 target_date 當天、主旨包含指定關鍵字的信，
-    並取寄送時間最接近 17:25 的那封。
-
-    例如設定關鍵字「近三日營業額-台北」，可匹配：
-      近三日營業額-台北 - 2026-07-14【專業清潔】營業額：156400
+    比照可正常執行的 GAS：先搜尋目標日期的所有郵件，再要求主旨完全相等，
+    同日有多封符合時取最接近 17:25 的信。
     """
+    target_date = target_date.astimezone(TZ_TAIPEI)
     target_time = target_date.replace(
         hour=CONFIG["mail_target_hour"],
         minute=CONFIG["mail_target_minute"],
         second=0,
         microsecond=0,
     )
-    imap_date = fmt(target_date, "%d-%b-%Y")
-    expected_subject = _normalize_subject_for_match(subject)
+
+    search_start = target_date - timedelta(days=1)
+    search_end = target_date + timedelta(days=2)
+    since_str = fmt(search_start, "%d-%b-%Y")
+    before_str = fmt(search_end, "%d-%b-%Y")
 
     imap = _imap_connect()
     try:
-        imap.select("INBOX")
+        selected_mailbox = _select_all_mail(imap)
 
-        # 中文 SUBJECT 的 IMAP 搜尋在不同伺服器／編碼下不穩定。
-        # 先只依日期取得當天信件，再由 Python 解碼並比對完整主旨。
-        status, data = imap.search(None, f'(ON {imap_date})')
+        status, data = imap.search(None, "SINCE", since_str, "BEFORE", before_str)
         if status != "OK":
-            raise RuntimeError(f"Gmail 搜尋失敗：status={status}")
+            raise RuntimeError(f"Gmail 搜尋失敗：SINCE {since_str} BEFORE {before_str}")
 
         mail_ids = data[0].split() if data and data[0] else []
-        if not mail_ids:
-            raise RuntimeError(
-                f"找不到 {fmt(target_date, '%Y-%m-%d')} 的信件"
-            )
-
         log.info(
-            "  [mail] %s 當日共找到 %d 封信，開始比對主旨關鍵字：%s",
-            fmt(target_date, "%Y-%m-%d"),
+            "  [mail] 信箱=%s，搜尋區間=%s~%s，共掃描 %d 封",
+            selected_mailbox,
+            since_str,
+            before_str,
             len(mail_ids),
-            subject,
         )
 
-        candidates = []
+        candidates: list[dict[str, Any]] = []
+        decoded_subjects_for_target_date: list[str] = []
 
-        for mid in mail_ids:
+        for mid in reversed(mail_ids):
             status, msg_data = imap.fetch(mid, "(RFC822)")
             if status != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
-                log.warning("  [mail] 無法讀取信件 id=%r，略過", mid)
                 continue
 
             msg = email.message_from_bytes(msg_data[0][1])
-            decoded_subject = _decode_subject(msg).strip()
-            normalized_subject = _normalize_subject_for_match(decoded_subject)
-            matched = expected_subject in normalized_subject
-
-            log.info(
-                "  [mail] 主旨=%r｜符合=%s",
-                decoded_subject,
-                matched,
-            )
-
-            if not matched:
-                continue
+            mail_subject = _decode_subject(msg).strip()
 
             date_tuple = email.utils.parsedate_tz(msg.get("Date", ""))
             if not date_tuple:
-                log.warning("  [mail] 主旨符合但缺少有效 Date：%r", decoded_subject)
+                log.warning("  [mail] 略過無法解析日期的信：%r", mail_subject)
                 continue
 
-            msg_dt = datetime.fromtimestamp(
-                email.utils.mktime_tz(date_tuple),
-                tz=TZ_TAIPEI,
+            msg_dt = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple), tz=TZ_TAIPEI)
+            if msg_dt.date() != target_date.date():
+                continue
+
+            decoded_subjects_for_target_date.append(mail_subject)
+            log.info(
+                "  [mail] 目標日信件：%s | subject=%r",
+                fmt(msg_dt, "%Y-%m-%d %H:%M:%S"),
+                mail_subject,
             )
 
-            if msg_dt.date() != target_date.date():
-                log.info(
-                    "  [mail] 主旨符合但寄送日期不符：%s / %r",
-                    fmt(msg_dt, "%Y-%m-%d %H:%M:%S"),
-                    decoded_subject,
-                )
+            if mail_subject != subject:
                 continue
 
             diff = abs((msg_dt - target_time).total_seconds())
-            candidates.append(
-                {
-                    "dt": msg_dt,
-                    "diff": diff,
-                    "body": _plain_body(msg),
-                    "subject": decoded_subject,
-                }
-            )
+            candidates.append({
+                "dt": msg_dt,
+                "diff": diff,
+                "body": _plain_body(msg),
+                "subject": mail_subject,
+            })
 
         if not candidates:
+            preview_subjects = sorted(set(decoded_subjects_for_target_date))[:20]
+            preview_text = "、".join(repr(s) for s in preview_subjects) or "無"
             raise RuntimeError(
-                f"找到 {fmt(target_date, '%Y-%m-%d')} 的信件，"
-                f"但沒有主旨包含「{subject}」的信"
+                f"找到 {fmt(target_date, '%Y-%m-%d')} 的信件，但沒有主旨完全等於「{subject}」的信。"
+                f"當日已解碼主旨：{preview_text}"
             )
 
         candidates.sort(key=lambda item: item["diff"])
         chosen = candidates[0]
-
         log.info(
-            "  %s → 選中 %s（與17:25差%.0fs）｜主旨=%s",
+            "  [mail] %s → 選中 %s（與17:25差 %.0f 秒，共 %d 封候選）",
             subject,
-            fmt(chosen["dt"], "%H:%M:%S"),
+            fmt(chosen["dt"], "%Y-%m-%d %H:%M:%S"),
             chosen["diff"],
-            chosen["subject"],
+            len(candidates),
         )
         return chosen["body"]
 
     finally:
+        try:
+            imap.close()
+        except Exception:
+            pass
         try:
             imap.logout()
         except Exception:
