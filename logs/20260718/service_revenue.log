@@ -1,0 +1,41 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+2026-07-17 22:45:21 [INFO] 目標試算表 ID 來源：主控試算表系統設定
+2026-07-17 22:45:21 [INFO] === 客服排程系統 run_id=006d1ae8 step=3 台北時間=2026-07-18 06:45:20 ===
+2026-07-17 22:45:21 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-17 22:45:28 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-07-17 22:45:30 [INFO]   [mail] Gmail 登入帳號：jenny@lemonclean.com.tw
+2026-07-17 22:45:31 [INFO]   [mail] 使用信箱：[Gmail]/&UWiQ6JD1TvY-
+2026-07-17 22:45:31 [INFO]   [mail] X-GM-RAW：subject:"近三日營業額-台北" after:2026/07/17 before:2026/07/18
+2026-07-17 22:45:31 [WARNING]   [mail] X-GM-RAW 搜尋失敗，改用日期搜尋：UID command error: BAD [b'Could not parse command']
+2026-07-17 22:45:31 [INFO]   [mail] 日期搜尋 17-Jul-2026 找到 UID：54
+2026-07-17 22:45:39 [INFO]   [mail] text/plain 為空，fallback 到 text/html（5541 字元）
+2026-07-17 22:45:39 [INFO]   [mail] 候選：UID=159215 / 2026-07-17 17:25:04 / exact / 與17:25差4秒 / '近三日營業額-台北'
+2026-07-17 22:45:43 [INFO]   近三日營業額-台北 → 選中 17:25:04（exact，與17:25差4秒，UID=159215）
+2026-07-17 22:45:43 [INFO]   [debug] 行95 repr='2026-07-15：63分'
+2026-07-17 22:45:43 [INFO]   [debug] 行96 repr='2026-07-16：71分'
+2026-07-17 22:45:43 [INFO]   [debug] 行97 repr='2026-07-17：48分'
+2026-07-17 22:45:43 [INFO]   [debug] 行98 repr='【家電清潔】日營業額'
+2026-07-17 22:45:43 [INFO]   [debug] 行99 repr='2026-07-15：0分'
+2026-07-17 22:45:43 [INFO]   [debug] 行100 repr='2026-07-16：0分'
+2026-07-17 22:45:43 [INFO]   [debug] 行101 repr='2026-07-17：0分'
+2026-07-17 22:45:43 [INFO]   [debug] 行102 repr='【儲值金】日營業額'
+2026-07-17 22:45:44 [INFO]   [mail] Gmail 登入帳號：jenny@lemonclean.com.tw
+2026-07-17 22:45:45 [INFO]   [mail] 使用信箱：[Gmail]/&UWiQ6JD1TvY-
+2026-07-17 22:45:45 [INFO]   [mail] X-GM-RAW：subject:"近三日營業額-台中" after:2026/07/17 before:2026/07/18
+2026-07-17 22:45:45 [WARNING]   [mail] X-GM-RAW 搜尋失敗，改用日期搜尋：UID command error: BAD [b'Could not parse command']
+2026-07-17 22:45:45 [INFO]   [mail] 日期搜尋 17-Jul-2026 找到 UID：54
+2026-07-17 22:45:53 [INFO]   [mail] text/plain 為空，fallback 到 text/html（1258 字元）
+2026-07-17 22:45:53 [INFO]   [mail] 候選：UID=159218 / 2026-07-17 17:25:08 / exact / 與17:25差8秒 / '近三日營業額-台中'
+2026-07-17 22:45:57 [INFO]   近三日營業額-台中 → 選中 17:25:08（exact，與17:25差8秒，UID=159218）
+2026-07-17 22:45:57 [INFO]   [debug] 行27 repr='2026-07-15：7分'
+2026-07-17 22:45:57 [INFO]   [debug] 行28 repr='2026-07-16：8分'
+2026-07-17 22:45:57 [INFO]   [debug] 行29 repr='2026-07-17：0分'
+2026-07-17 22:45:57 [INFO]   [debug] 行30 repr='【家電清潔】日營業額'
+2026-07-17 22:45:57 [INFO]   [debug] 行31 repr='2026-07-15：0分'
+2026-07-17 22:45:57 [INFO]   [debug] 行32 repr='2026-07-16：0分'
+2026-07-17 22:45:57 [INFO]   [debug] 行33 repr='2026-07-17：0分'
+2026-07-17 22:45:57 [INFO]   [debug] 行34 repr='【儲值金】日營業額'
+2026-07-17 22:45:57 [INFO]   台北：{'daily_value': 48, 'total_count': 1103, 'total_amount': 2205650}
+2026-07-17 22:45:57 [INFO]   台中：{'daily_value': 0, 'total_count': 74, 'total_amount': 148700}
+2026-07-17 22:45:58 [INFO] Step 3 完成，row=2344（29.3s）
+2026-07-17 22:45:59 [INFO] === 全部完成 run_id=006d1ae8（30.1s）===
