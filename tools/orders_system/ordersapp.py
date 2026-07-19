@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.64
+# 版本：v8.65
 # 模組：服務訂單系統主畫面
-# 最後更新：2026-07-10
+# 最後更新：2026-07-19
 #
 # Change Log
+# v8.65
+# - 訂單轉換的舊單A與新單B全面禁止自動補班，移除新單B的
+#   「自動補檸檬人」選項。轉換只能使用後台當下已有可用班表，
+#   人力不足時停止，不得改動未配班名單或已配班人員班別。
 # v8.64
 # - 訂單轉換第二段：每筆新訂單 B1/B2/B3... 新增「若無人力，可自動補檸檬人
 #   排班」勾選框（預設打勾，維持原行為），可個別關閉；對應
@@ -1958,8 +1962,8 @@ else:
         info_panel(
             "流程說明",
             [
-                "此功能拆成兩段：先修改原訂單A的日期並全部換成檸檬人，再建立新訂單（優惠券折抵原訂單金額）。",
-                "第一段：把原訂單A的服務日期改到新日期，配班一律自動補檸檬人排班（不用勾選，此單必須全是檸檬人）。",
+                "此功能拆成兩段：先修改原訂單A的日期並使用既有班表換成檸檬人，再建立新訂單（優惠券折抵原訂單金額）。",
+                "舊單A與新單B都只能使用後台當下已有的可用班表；禁止自動補班或改寫專員班別，人力不足時會停止。",
                 "第二段：逐筆新訂單建立折價券，所有新單券額加總必須等於原訂單A服務金額；若新單金額超過原單，超出部分保留為應付差額。",
                 "備註自動寫入：A+B1+B2+B3 合併服務。",
             ],
@@ -1974,7 +1978,7 @@ else:
         with col_a3:
             conv_target_date = st.date_input("原訂單A要改到的新日期", value=date.today() + timedelta(days=1), key="conv_target_date")
 
-        if st.button("① 修改原訂單日期並換成檸檬人排班", use_container_width=True, key="conv_stage1_btn"):
+        if st.button("① 修改原訂單日期並使用既有班表換成檸檬人", use_container_width=True, key="conv_stage1_btn"):
             # 開始新的一次轉換前，先清空上一次殘留的舊結果（含第二、三段）。
             st.session_state.conv_stage1 = {}
             st.session_state.conv_stage2 = {}
@@ -1984,7 +1988,7 @@ else:
                 st.error("請輸入原訂單A編號")
             else:
                 try:
-                    with st.spinner("第一段執行中：查原訂單A → 改日期 → 換成檸檬人排班…"):
+                    with st.spinner("第一段執行中：查原訂單A → 改日期 → 用既有班表換成檸檬人…"):
                         stage1 = convert_order_stage1_reassign_original(
                             env_name=env,
                             backend_email=backend_email.strip(),
@@ -2049,18 +2053,24 @@ else:
                 with b4:
                     b_hour = PERIOD_HOUR_MAP.get(b_period, 4)
                     st.markdown(f"<br><b>{b_hour} 小時</b>（依時段帶出）", unsafe_allow_html=True)
-                b_allow_lemon = st.checkbox(
-                    f"B{i+1} 若無人力，可自動補檸檬人排班", value=True, key=f"conv_allow_lemon_{i}",
-                )
+                st.caption(f"B{i+1} 僅使用已有可用班表；人力不足時停止，不自動補班。")
                 new_orders_input.append({
                     "date_s": b_date.strftime("%Y-%m-%d"),
                     "period_s": b_period,
                     "hour": b_hour,
                     "person": int(b_person),
-                    "allow_lemon": bool(b_allow_lemon),
+                    "allow_lemon": False,
                 })
 
-            if st.button("② 建立新訂單（優惠券折抵）", use_container_width=True, key="conv_stage2_btn"):
+            _conv_stage1_result = conv_stage1.get("lemon_result_a", {}) or {}
+            _conv_stage1_ready = bool(
+                _conv_stage1_result.get("success")
+                and _conv_stage1_result.get("date_change_ok", True)
+            )
+            if not _conv_stage1_ready:
+                st.error("原訂單A還沒有用既有班表完成配班，已鎖定第二段；請先由人工處理班表。")
+
+            if st.button("② 建立新訂單（優惠券折抵）", use_container_width=True, key="conv_stage2_btn", disabled=not _conv_stage1_ready):
                 st.session_state.conv_stage2 = {}
                 try:
                     with st.spinner("第二段執行中：建折價券 → 建新訂單 → 標記已付款 → 標註發票…"):
