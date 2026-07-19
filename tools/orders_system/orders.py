@@ -1,10 +1,15 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.07-5
+# 版本：v2026.07.19-1
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
-# 最後更新：2026-07-07
+# 最後更新：2026-07-19
 #
 # Change Log
+# v2026.07.19-1
+# - 批次建單禁止自動新增或改寫專員班表；只能使用後台當下已有的
+#   可用人力，查無班表或人數不足時直接停止。
+# - 補班底層保護：專員當日已有任何班別時拒絕寫入，避免動到其他
+#   本來已配班的人員。
 # v2026.07.08-1
 # - 儲值獎金備註效能優化：find_pending_stored_value_orders 搜尋時一併回傳
 #   edit_id，apply_bonus_notes / add_bonus_note_to_order 可直接使用這個 edit_id
@@ -1716,6 +1721,12 @@ def _set_cleaner_shift_if_available(session, base_url, cleaner_id, cleaner_name,
     if err:
         return {"success": False, "name": cleaner_name, "id": cleaner_id, "reason": err, "checked": sorted(checked_codes)}
     target_shift_code = _shift_value_to_code(target_shift_code)
+    if checked_codes:
+        return {
+            "success": False, "name": cleaner_name, "id": cleaner_id,
+            "reason": f"{date_str} 已有班別 {'、'.join(sorted(checked_codes))}，為保護已配班人員不寫入新班別",
+            "checked": sorted(checked_codes), "protected_existing_shift": True,
+        }
     conflicts = sorted(c for c in checked_codes if _shift_codes_conflict(c, target_shift_code))
     if conflicts:
         return {"success": False, "name": cleaner_name, "id": cleaner_id, "reason": f"{date_str} 已勾 {'、'.join(conflicts)}，與 {target_shift_code} 衝突", "checked": sorted(checked_codes)}
@@ -2502,6 +2513,8 @@ def process_existing_order_only(row, gcal_service, region, session, selected_act
 
 
 def process_one_group(session, rows_with_idx, token, gcal_service, region, backend_user_id=None, selected_actions=None, allow_auto_lemon_shift=False, used_order_nos=None):
+    # 批次建單不得改寫專員班表；舊畫面／舊 session 即使傳入 True 也強制關閉。
+    allow_auto_lemon_shift = False
     _, row0 = rows_with_idx[0]
 
     purchase_item = str(row0["購買項目"]).strip()
@@ -2832,23 +2845,7 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         slot_ok = slot_exists_in_section_response(raw, detail["slot"])
         cleaners = extract_cleaners_from_section_response(raw, detail["slot"])
 
-        # v2026-07：查無班表時，若客服有勾選「查無班表時自動補檸檬人排班」
-        # （allow_auto_lemon_shift），才嘗試補勾檸檬人班表後重查一次；
-        # 未勾選則維持原行為，直接標記為「無班表」。與舊客/新客/訂單轉換/
-        # 儲值金補價差四個成單功能的行為保持一致。
-        if not slot_ok and allow_auto_lemon_shift:
-            try:
-                ensure_lemon_cleaner_shifts(
-                    session=session, base_url=BASE_URL,
-                    service_date=detail["date"], period_s=system_period,
-                    person_count=str(people),
-                )
-                time.sleep(2)
-                raw = get_section_raw(session, detail["payload"], token, detail["slot"])
-                slot_ok = slot_exists_in_section_response(raw, detail["slot"])
-                cleaners = extract_cleaners_from_section_response(raw, detail["slot"])
-            except Exception as _e_lemon:
-                print(f"[DEBUG] 自動補檸檬人排班失敗：{_e_lemon}")
+        # 批次建單只讀取當下班表；無班表時不得補班或改寫任何專員班別。
 
         detail["section_cleaners"] = cleaners
         detail["section_staff"] = format_staff_from_cleaners(cleaners, people=people)
