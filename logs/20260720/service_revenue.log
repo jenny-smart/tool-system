@@ -1,0 +1,42 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+2026-07-19 22:48:18 [INFO] 目標試算表 ID 來源：主控試算表系統設定
+2026-07-19 22:48:18 [INFO] === 客服排程系統 run_id=618327c1 step=3 台北時間=2026-07-20 06:48:17 ===
+2026-07-19 22:48:18 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-07-19 22:48:18 [WARNING] [主控表打卡失敗（非致命）] <HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'consumer': 'projects/1042663213860', 'quota_unit': '1/min/{project}/{user}', 'quota_location': 'global', 'service': 'sheets.googleapis.com', 'quota_limit_value': '60', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'quota_metric': 'sheets.googleapis.com/read_requests'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+2026-07-19 22:48:19 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-07-19 22:48:22 [INFO]   [mail] Gmail 登入帳號：jenny@lemonclean.com.tw
+2026-07-19 22:48:22 [INFO]   [mail] 使用信箱：[Gmail]/&UWiQ6JD1TvY-
+2026-07-19 22:48:22 [INFO]   [mail] X-GM-RAW：subject:"近三日營業額-台北" after:2026/07/19 before:2026/07/20
+2026-07-19 22:48:22 [WARNING]   [mail] X-GM-RAW 搜尋失敗，改用日期搜尋：UID command error: BAD [b'Could not parse command']
+2026-07-19 22:48:23 [INFO]   [mail] 日期搜尋 19-Jul-2026 找到 UID：33
+2026-07-19 22:48:29 [INFO]   [mail] text/plain 為空，fallback 到 text/html（3213 字元）
+2026-07-19 22:48:29 [INFO]   [mail] 候選：UID=159292 / 2026-07-19 17:25:04 / exact / 與17:25差4秒 / '近三日營業額-台北'
+2026-07-19 22:48:32 [INFO]   近三日營業額-台北 → 選中 17:25:04（exact，與17:25差4秒，UID=159292）
+2026-07-19 22:48:32 [INFO]   [debug] 行58 repr='2026-07-17：59分'
+2026-07-19 22:48:32 [INFO]   [debug] 行59 repr='2026-07-18：20分'
+2026-07-19 22:48:32 [INFO]   [debug] 行60 repr='2026-07-19：8分'
+2026-07-19 22:48:32 [INFO]   [debug] 行61 repr='【家電清潔】日營業額'
+2026-07-19 22:48:32 [INFO]   [debug] 行62 repr='2026-07-17：0分'
+2026-07-19 22:48:32 [INFO]   [debug] 行63 repr='2026-07-18：0分'
+2026-07-19 22:48:32 [INFO]   [debug] 行64 repr='2026-07-19：0分'
+2026-07-19 22:48:32 [INFO]   [debug] 行65 repr='【儲值金】日營業額'
+2026-07-19 22:48:33 [INFO]   [mail] Gmail 登入帳號：jenny@lemonclean.com.tw
+2026-07-19 22:48:34 [INFO]   [mail] 使用信箱：[Gmail]/&UWiQ6JD1TvY-
+2026-07-19 22:48:34 [INFO]   [mail] X-GM-RAW：subject:"近三日營業額-台中" after:2026/07/19 before:2026/07/20
+2026-07-19 22:48:34 [WARNING]   [mail] X-GM-RAW 搜尋失敗，改用日期搜尋：UID command error: BAD [b'Could not parse command']
+2026-07-19 22:48:34 [INFO]   [mail] 日期搜尋 19-Jul-2026 找到 UID：33
+2026-07-19 22:48:42 [INFO]   [mail] text/plain 為空，fallback 到 text/html（873 字元）
+2026-07-19 22:48:42 [INFO]   [mail] 候選：UID=159295 / 2026-07-19 17:25:08 / exact / 與17:25差8秒 / '近三日營業額-台中'
+2026-07-19 22:48:45 [INFO]   近三日營業額-台中 → 選中 17:25:08（exact，與17:25差8秒，UID=159295）
+2026-07-19 22:48:46 [INFO]   [debug] 行21 repr='2026-07-17：0分'
+2026-07-19 22:48:46 [INFO]   [debug] 行22 repr='2026-07-18：0分'
+2026-07-19 22:48:46 [INFO]   [debug] 行23 repr='2026-07-19：0分'
+2026-07-19 22:48:46 [INFO]   [debug] 行24 repr='【家電清潔】日營業額'
+2026-07-19 22:48:46 [INFO]   [debug] 行25 repr='2026-07-17：0分'
+2026-07-19 22:48:46 [INFO]   [debug] 行26 repr='2026-07-18：0分'
+2026-07-19 22:48:46 [INFO]   [debug] 行27 repr='2026-07-19：0分'
+2026-07-19 22:48:46 [INFO]   [debug] 行28 repr='【儲值金】日營業額'
+2026-07-19 22:48:46 [INFO]   台北：{'daily_value': 8, 'total_count': 1141, 'total_amount': 2282450}
+2026-07-19 22:48:46 [INFO]   台中：{'daily_value': 0, 'total_count': 74, 'total_amount': 148700}
+2026-07-19 22:48:48 [INFO] Step 3 完成，row=2346（27.8s）
+2026-07-19 22:48:49 [INFO] === 全部完成 run_id=618327c1（28.8s）===
