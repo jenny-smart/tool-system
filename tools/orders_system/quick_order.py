@@ -1,9 +1,15 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.55
+# 版本：v8.56
 # 最後更新：2026-07-19
 #
 # Change Log
+# v8.56
+# - 排班安全規則擴大到批次建單、舊客建單、新客建單、訂單轉換與
+#   儲值金補價差：這些流程一律禁止自動新增或改寫專員班表，
+#   只能使用後台當下已有的可用人力；人力不足就停止。
+# - 補班底層增加保護：檸檬人當日只要已有任何班別，就不得寫入新班別，
+#   避免動到本來已配班的人員。
 # v8.55
 # - 訂單轉換安全修正：舊單A與新單B都不得呼叫自動補檸檬人班表，
 #   只能使用後台當下已有的可用班表。若人力不足就停止並提示手動處理，
@@ -1479,6 +1485,9 @@ def quick_create_order(
     invoice_type_override="", carrier_type_id_override="",
     extra_fields=None, allow_auto_lemon_shift=False,
 ):
+    # 建單流程不得改寫專員班表。就算舊畫面或舊 session 傳入 True，
+    # 核心層仍強制關閉；無班表／人力不足時直接擋單。
+    allow_auto_lemon_shift = False
     payway = normalize_booking_payway(payway)
     base_url = _configure_environment(env_name)
     session = lookup_result["session"]
@@ -2367,6 +2376,12 @@ def _set_cleaner_shift_if_available(session, base_url, cleaner_id, cleaner_name,
     if err:
         return {"success": False, "name": cleaner_name, "id": cleaner_id, "reason": err, "checked": sorted(checked_codes)}
     target_shift_code = _shift_value_to_code(target_shift_code)
+    if checked_codes:
+        return {
+            "success": False, "name": cleaner_name, "id": cleaner_id,
+            "reason": f"{date_str} 已有班別 {'、'.join(sorted(checked_codes))}，為保護已配班人員不寫入新班別",
+            "checked": sorted(checked_codes), "protected_existing_shift": True,
+        }
     conflicts = sorted(c for c in checked_codes if _shift_codes_conflict(c, target_shift_code))
     if conflicts:
         return {"success": False, "name": cleaner_name, "id": cleaner_id, "reason": f"{date_str} 已勾 {'、'.join(conflicts)}，與 {target_shift_code} 衝突", "checked": sorted(checked_codes)}
@@ -2462,6 +2477,7 @@ def assign_lemon_cleaners_to_order(session, base_url, order_no_a, service_date, 
        班表，再重取頁面換人；預設不會自動勾班，避免查無班表就自動幫忙勾人。
     不預先全量勾班，避免把其他訂單的檸檬人班別干擾掉。
     """
+    allow_auto_lemon_shift = False
     purchase_id = _fetch_order_edit_id(session, order_no_a)
     if not purchase_id:
         return {"success": False, "message": f"無法取得訂單 {order_no_a} 的後台 ID"}
@@ -2574,6 +2590,7 @@ def _assign_mixed_cleaners_to_order(session, base_url, order_no, service_date, p
     v8.13：是否預先勾檸檬人班表改由 allow_auto_lemon_shift 控制。
     回傳 dict: success / assigned / assigned_types / message
     """
+    allow_auto_lemon_shift = False
     purchase_id = _fetch_order_edit_id(session, order_no)
     if not purchase_id:
         return {"success": False, "message": f"無法取得訂單 {order_no} 的後台 ID"}
@@ -3123,7 +3140,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
 
 def convert_order_multi(
     env_name, backend_email, backend_password, order_no_a, new_orders, clean_type_id="1",
-    allow_auto_lemon_shift=True,
+    allow_auto_lemon_shift=False,
 ):
     """
     v2026.07.10：保留原本「一次到位」的介面給舊呼叫端相容用，內部直接組合
@@ -4294,13 +4311,9 @@ def stored_value_makeup_create_stored_order(
     services = ["居家清潔", "裝修細清"]
     coupon_a = create_coupon(env_name, backend_email, backend_password, title=f"儲值金清零-{phone}", discount=ctx["plan"]["coupon_a"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_a"], piece="1", regions=regions, service_items=services)
     code_a = coupon_a.get("coupon_code") or coupon_a.get("coupon_prefix") or ctx["prefix_a"]
-    # v2026.07.10：儲值金補價差人數不夠時，直接自動補檸檬人排班，不用客服
-    # 另外勾選（跟訂單轉換一致），補不到才會由 quick_create_order 擋單。
-    stored_order = quick_create_order(env_name=env_name, payway="儲值金", region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_a, allow_auto_lemon_shift=True)
-    # v2026.07.10：儲值金清零單依規定必須「全部」是檸檬人，如果排班頁當下
-    # 沒有現成的檸檬人可換，也要自動補班湊到需要的人數，不能因為排班頁剛好
-    # 沒有現成候選人就放棄，導致這張單留著一般專員沒真的換成檸檬人。
-    lemon_result = assign_lemon_cleaners_to_order(session=stored_order["session"], base_url=_configure_environment(env_name), order_no_a=stored_order["order_no"], service_date=service_date, period_s=period_s, person_count=str(person), allow_auto_lemon_shift=True)
+    # 儲值金補價差也只能使用當下已有班表，禁止自動補班。
+    stored_order = quick_create_order(env_name=env_name, payway="儲值金", region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_a, allow_auto_lemon_shift=False)
+    lemon_result = assign_lemon_cleaners_to_order(session=stored_order["session"], base_url=_configure_environment(env_name), order_no_a=stored_order["order_no"], service_date=service_date, period_s=period_s, person_count=str(person), allow_auto_lemon_shift=False)
     note = (f"儲值金補價差第一段：儲值金折抵單 {stored_order['order_no']}，{ctx['day_type']}單價 {ctx['plan']['unit_price']} × {ctx['plan']['total_person_hours']}人時 = {ctx['plan']['dummy_price']}，優惠券A折抵 {ctx['plan']['coupon_a']} 元，剩餘 {ctx['plan']['stored_value_applied']} 元扣儲值金後總額應為 0，檸檬人勿動。")
     _update_order_note(stored_order["session"], _configure_environment(env_name), stored_order["order_no"], note)
     return {"stage": "stored_order", "balance": ctx["balance"], "plan": ctx["plan"], "day_type": ctx["day_type"], "coupon_a": coupon_a, "stored_order": stored_order, "lemon_result": lemon_result, "note": note, "address": ctx["address"], "region": ctx["region"], "phone": phone, "clean_type_id": clean_type_id, "service_date": service_date, "period_s": period_s, "hour": str(hour), "person": str(person), "coupon_prefix_base": coupon_prefix_base or phone, "coupon_valid_days": coupon_valid_days}
@@ -4321,8 +4334,8 @@ def stored_value_makeup_create_paid_order(
     coupon_b = create_coupon(env_name, backend_email, backend_password, title=f"儲值金補價差客付-{phone}", discount=ctx["plan"]["coupon_b"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_b"], piece="1", regions=regions, service_items=services)
     code_b = coupon_b.get("coupon_code") or coupon_b.get("coupon_prefix") or ctx["prefix_b"]
     invoice = _invoice_payload(invoice_mode, member_email=ctx["member"].get("email") or "", mobile_carrier=mobile_carrier, company_title=company_title, company_no=company_no)
-    # v2026.07.10：同上，第二段客付補價差單也直接自動補檸檬人排班。
-    paid_order = quick_create_order(env_name=env_name, payway=customer_payway, region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_b, allow_auto_lemon_shift=True, **invoice)
+    # 第二段客付補價差單同樣禁止自動補班。
+    paid_order = quick_create_order(env_name=env_name, payway=customer_payway, region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_b, allow_auto_lemon_shift=False, **invoice)
     pair = f"儲值折抵單 {stored_order_no} + 客付補價差單 {paid_order['order_no']}" if stored_order_no else f"客付補價差單 {paid_order['order_no']}"
     note = f"儲值金補價差第二段：{pair}，客付單使用優惠券B折抵原儲值金餘額 {ctx['balance']} 元。"
     _update_order_note(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], note)
@@ -4640,6 +4653,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
                         date_s, period_s, hour, person
     選填：ping, service_type, carrier, company_title, company_no, tel, line
     """
+    allow_auto_lemon_shift = False
     required = ["name", "phone", "email", "address", "payway", "clean_type_id",
                 "date_s", "period_s", "hour", "person"]
     missing = [k for k in required if not str((customer or {}).get(k, "")).strip()]
