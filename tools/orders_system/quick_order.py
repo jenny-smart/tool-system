@@ -1,14 +1,13 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.54
-# 最後更新：2026-07-16
+# 版本：v8.55
+# 最後更新：2026-07-19
 #
 # Change Log
-# v8.54
-# - 修正新客建單／舊客新地址：客人地址已明確寫縣市＋行政區時，只採用地址
-#   本身拆出的行政區下拉值；check_contain 僅用來補服務區域必要欄位，不再拿
-#   回傳區域名稱覆蓋或否定客人填的行政區。只有客人沒寫行政區時，才用
-#   check_contain 回傳值補行政區，補不到就停下。
+# v8.55
+# - 訂單轉換安全修正：舊單A與新單B都不得呼叫自動補檸檬人班表，
+#   只能使用後台當下已有的可用班表。若人力不足就停止並提示手動處理，
+#   避免轉換流程改動「未配班」名單或已配班人員的班別。
 # v8.53
 # - 修正舊客建單價格仍沿用後台 calculate_hour 回傳金額，造成 3人4小時平日
 #   12人時被算成 10800。舊客與新客統一用固定公式：平日每人時600、週末
@@ -1532,6 +1531,19 @@ def quick_create_order(
         address_for_lookup = address_parts["full"]
         address_for_submit = address_parts["detail"]
         _validate_area_not_known_bad(address_for_lookup, area_info, context="舊客新地址")
+        input_district = _extract_district_from_address(address_for_lookup)
+        returned_area_name = str(
+            area_info.get("area_name")
+            or area_info.get("name")
+            or area_info.get("area")
+            or area_info.get("district")
+            or ""
+        ).strip()
+        if input_district and returned_area_name and input_district not in returned_area_name:
+            raise Exception(
+                f"查詢地址區域疑似錯誤：地址寫的是「{input_district}」，"
+                f"但後台回傳區域為「{returned_area_name}」。已停止成單，避免地址被誤加錯區。"
+            )
         best_addr["area_id"] = area_info.get("area_id")
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
         best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
@@ -2714,10 +2726,9 @@ def convert_order_stage1_reassign_original(
     env_name, backend_email, backend_password, order_no_a, target_date_s=None, clean_type_id="1",
 ):
     """
-    v2026.07.10：訂單轉換第一階段（跟儲值金補價差的分階段介面一致）——只處理
-    原訂單A：把服務日期改到指定的新日期，並把配班全部換成檸檬人（一律自動
-    補檸檬人排班，不用客服另外勾選，跟儲值金補價差第一段「此單必須全是
-    檸檬人」的規則一致）。
+    訂單轉換第一階段：只處理原訂單A。把服務日期改到指定的新日期，
+    再從後台當下已有的可用班表中換成檸檬人。本流程禁止自動新增、
+    改寫任何專員班表；當下班表不足時必須停止並由人工處理。
 
     target_date_s 沒給的話就不改日期，只做換人為檸檬人。
 
@@ -2791,15 +2802,15 @@ def convert_order_stage1_reassign_original(
         "member_payload": member_payload, "base_url": base_url, "env_name": env_name,
     }
 
-    # ── Step 3: 原訂單A 先勾班 → 改日期 → 換人（一律全部檸檬人）───
+    # ── Step 3: 原訂單A 改日期 → 用既有班表換人（禁止自動補班）───
     target_date_a = target_date_s or service_date_a
     period_a_for_assign = period_a_raw.replace(" ", "") if period_a_raw else ""
-
-    # v2026.07.10：跟儲值金補價差一致，一律自動補檸檬人排班，不用客服勾選。
-    pre_shift_a = ensure_lemon_cleaner_shifts(
-        session=session, base_url=base_url,
-        service_date=target_date_a, period_s=period_a_for_assign, person_count=str(person_a),
-    )
+    pre_shift_a = {
+        "success": True,
+        "assigned": [],
+        "message": "訂單轉換已禁止自動補班；僅使用後台當下已有班表",
+        "shift_mutation_blocked": True,
+    }
 
     date_change_ok = False
     date_change_msg = ""
@@ -2815,7 +2826,7 @@ def convert_order_stage1_reassign_original(
     lemon_result_a = assign_lemon_cleaners_to_order(
         session=session, base_url=base_url, order_no_a=order_no_a,
         service_date=target_date_a, period_s=period_a_for_assign, person_count=str(person_a),
-        allow_auto_lemon_shift=True,
+        allow_auto_lemon_shift=False,
     )
     lemon_result_a["date_change_ok"] = date_change_ok
     lemon_result_a["date_change_msg"] = date_change_msg
@@ -2843,6 +2854,15 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     的服務金額」跟「新訂單合計金額」是否有差額，有差額會在結果的 ph_warning
     裡明確標示出來，不會默默忽略。
     """
+    lemon_result_a = stage1_result.get("lemon_result_a") or {}
+    if not lemon_result_a.get("date_change_ok", True):
+        raise Exception("原訂單A日期修改失敗，已停止建立新訂單B，請先完成第一段。")
+    if not lemon_result_a.get("success"):
+        raise Exception(
+            "原訂單A無法用後台當下已有班表完成配班，已停止建立新訂單B。"
+            "系統不會自動補班或改寫專員班別，請先由人工處理班表。"
+        )
+
     session = stage1_result["session"]
     base_url = stage1_result["base_url"]
     env_name = stage1_result["env_name"]
@@ -2858,7 +2878,6 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     clean_type_id = stage1_result["clean_type_id"]
     lookup_result = stage1_result["lookup_result"]
     member_payload = stage1_result["member_payload"]
-    lemon_result_a = stage1_result["lemon_result_a"]
     service_amount_a_int = stage1_result["service_amount_a_int"]
     person_a = stage1_result["person_a"]
 
@@ -2925,7 +2944,9 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                 lookup_result=lookup_result, address=address_a,
                 clean_type_id=clean_type_id, date_s=new_date_s, period_s=new_period_s,
                 hour=new_hour, person=new_person, discount_code=coupon_code,
-                allow_auto_lemon_shift=bool(new_order.get("allow_lemon", True)),
+                # 訂單轉換的新單B絕對不得改寫專員班表。即使舊版
+                # 畫面或舊 session 還傳入 allow_lemon=True，核心層也強制關閉。
+                allow_auto_lemon_shift=False,
             )
             new_order_nos.append(order_result["order_no"])
 
@@ -4822,6 +4843,19 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         company_id = str(area_info.get("company_id") or "")
         country_id = str(address_parts.get("country_id") or area_info.get("country_id") or "")
         _validate_area_not_known_bad(address_for_lookup, area_info, context="新客地址")
+        input_district = _extract_district_from_address(address_for_lookup)
+        returned_area_name = str(
+            area_info.get("area_name")
+            or area_info.get("name")
+            or area_info.get("area")
+            or area_info.get("district")
+            or ""
+        ).strip()
+        if input_district and returned_area_name and input_district not in returned_area_name:
+            raise Exception(
+                f"查詢地址區域疑似錯誤：地址寫的是「{input_district}」，"
+                f"但後台回傳區域為「{returned_area_name}」。已停止成單，避免地址被誤加錯區。"
+            )
         if not company_id:
             raise Exception(
                 f"查詢地址區域失敗：地址「{address_for_lookup}」無法判斷 company_id，"
