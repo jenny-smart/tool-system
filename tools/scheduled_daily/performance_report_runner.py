@@ -911,7 +911,7 @@ def email_settings_ready() -> bool:
     return bool(sender and password and recipients)
 
 
-def send_region4_email(df4, recipient="jenny@lemonclean.com.tw", required=False) -> bool:
+def send_region4_email(df4, recipient="jenny@hers.com.tw", required=False) -> bool:
     sender, password, recipients = get_email_settings(recipient)
 
     missing = []
