@@ -434,6 +434,68 @@ def build_region2_df(raw_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def validate_region2_totals(raw_df: pd.DataFrame, region2_df: pd.DataFrame) -> None:
+    work = raw_df.copy()
+    work["類別"] = work.apply(lambda r: to_category(r["服務"], r["收入類型"]), axis=1)
+    work = work[work["類別"].notna()].copy()
+
+    expected = (
+        work.groupby(["城市", "收入類型", "類別", "月份"], as_index=False)[["已付款", "待付款"]]
+        .sum()
+    )
+
+    expected_rows = []
+    for city in CITY_ORDER:
+        for income in INCOME_ORDER:
+            for category in CATEGORY_ORDER:
+                sub = expected[
+                    (expected["城市"] == city) &
+                    (expected["收入類型"] == income) &
+                    (expected["類別"] == category)
+                ]
+                bm = sub[sub["月份"] == "本月"]
+                nm = sub[sub["月份"] == "下月"]
+                expected_rows.append({
+                    "城市": city,
+                    "收入類型": income,
+                    "類別": category,
+                    "本月待付": int(bm["待付款"].sum()),
+                    "本月已付": int(bm["已付款"].sum()),
+                    "本月加總": int(bm["已付款"].sum() + bm["待付款"].sum()),
+                    "次月待付": int(nm["待付款"].sum()),
+                    "次月已付": int(nm["已付款"].sum()),
+                    "次月加總": int(nm["已付款"].sum() + nm["待付款"].sum()),
+                })
+
+    expected_df = pd.DataFrame(expected_rows)
+    check_cols = ["本月待付", "本月已付", "本月加總", "次月待付", "次月已付", "次月加總"]
+    merged_check = expected_df.merge(
+        region2_df,
+        on=["城市", "收入類型", "類別"],
+        how="outer",
+        suffixes=("_raw", "_df2"),
+    )
+
+    mismatches = []
+    for _, row in merged_check.iterrows():
+        for col in check_cols:
+            raw_val = safe_int(row.get(f"{col}_raw", 0))
+            df2_val = safe_int(row.get(f"{col}_df2", 0))
+            if raw_val != df2_val:
+                mismatches.append(
+                    f"{row.get('城市')} / {row.get('收入類型')} / {row.get('類別')} / {col}: raw={raw_val}, df2={df2_val}"
+                )
+
+    if mismatches:
+        raise RuntimeError("df2 分類後彙總與 raw_df 不一致：" + "；".join(mismatches[:20]))
+
+    stored_clean = region2_df[
+        (region2_df["收入類型"] == "儲值金") &
+        (region2_df["類別"] == "清潔")
+    ][["城市", "本月已付", "本月加總", "次月已付", "次月加總"]]
+    log("✅ df2 對帳完成；儲值金/清潔 = " + stored_clean.to_dict("records").__repr__())
+
+
 def build_region3_df(region2_df: pd.DataFrame) -> pd.DataFrame:
     rows = []
 
@@ -822,21 +884,19 @@ def split_email_recipients(raw: str) -> list[str]:
 
 def get_email_settings(default_recipient="jenny@hers.com.tw"):
     sender = get_secret(
-        ["email", "sender"],
+        ["NOTIFY_EMAIL"],
         env_name="NOTIFY_EMAIL",
-        fallback_env_names=["REPORT_EMAIL_SENDER", "EMAIL_SENDER", "GMAIL_USER"],
         required=False,
+        default="jenny@hers.com.tw",
     )
     password = get_secret(
-        ["email", "app_password"],
+        ["NOTIFY_PASSWORD"],
         env_name="NOTIFY_PASSWORD",
-        fallback_env_names=["REPORT_EMAIL_APP_PASSWORD", "EMAIL_APP_PASSWORD", "GMAIL_APP_PASSWORD"],
         required=False,
     )
     recipient = get_secret(
-        ["email", "recipient"],
+        ["NOTIFY_TO"],
         env_name="NOTIFY_TO",
-        fallback_env_names=["REPORT_EMAIL_RECIPIENT", "EMAIL_RECIPIENT"],
         required=False,
         default=default_recipient,
     )
@@ -854,11 +914,11 @@ def send_region4_email(df4, recipient="jenny@hers.com.tw", required=False) -> bo
 
     missing = []
     if not sender:
-        missing.append("REPORT_EMAIL_SENDER 或 NOTIFY_EMAIL")
+        missing.append("NOTIFY_EMAIL")
     if not password:
-        missing.append("REPORT_EMAIL_APP_PASSWORD 或 NOTIFY_PASSWORD")
+        missing.append("NOTIFY_PASSWORD")
     if not recipients:
-        missing.append("REPORT_EMAIL_RECIPIENT 或 NOTIFY_TO")
+        missing.append("NOTIFY_TO")
 
     if missing:
         message = "缺少寄信設定：" + " / ".join(missing)
@@ -882,8 +942,8 @@ def send_region4_email(df4, recipient="jenny@hers.com.tw", required=False) -> bo
             server.sendmail(sender, recipients, msg.as_string())
     except smtplib.SMTPAuthenticationError as exc:
         message = (
-            "Gmail 拒絕登入，請確認 email.sender / REPORT_EMAIL_SENDER 與 "
-            "email.app_password / REPORT_EMAIL_APP_PASSWORD 是同一個 Gmail 帳號的 app password"
+            "Gmail 拒絕登入，請確認 NOTIFY_EMAIL 與 NOTIFY_PASSWORD "
+            "是同一個 Gmail 帳號及其 App Password"
         )
         if required:
             raise RuntimeError(message) from exc
@@ -1198,6 +1258,7 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
 
     df1 = build_region1_df(raw_df)
     df2 = build_region2_df(raw_df)
+    validate_region2_totals(raw_df, df2)
     df3 = build_region3_df(df2)
     df4 = build_region4_df(df2)
 
