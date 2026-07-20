@@ -4,6 +4,15 @@ from __future__ import annotations
 檔案：toolapp.py
 版本：0704_v3
 更新日期：2026-07-04
+
+更新內容：
+- 強制修正月排程非上下半月訂單的區域傳遞。
+- 已退款、預收、儲值金結算、儲值金預收一定會把畫面選到的區域傳入 --area。
+- 執行時會顯示：
+  1. 畫面選擇區域
+  2. 實際傳入 --area
+  3. 完整執行參數
+- 避免畫面顯示「只執行：台北」，但腳本收到 all。
 """
 import html
 import json
@@ -1144,12 +1153,8 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
         cmd = [sys.executable, str(script), *args]
         display_name = script_path
 
-    # 只需確保 PYTHONPATH 包含 BASE_DIR，其餘環境自然繼承（對齊外場/日排程做法）
-    env = os.environ.copy()
-    base_str = str(BASE_DIR)
-    existing_pp = env.get("PYTHONPATH", "")
-    if base_str not in existing_pp:
-        env["PYTHONPATH"] = base_str + (":" + existing_pp if existing_pp else "")
+    # Streamlit Secrets 不會自動傳給子程序，必須明確注入環境變數。
+    env = _build_subprocess_env()
 
     completed = subprocess.run(
         cmd,
