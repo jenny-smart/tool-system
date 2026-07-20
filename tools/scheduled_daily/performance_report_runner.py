@@ -882,7 +882,7 @@ def split_email_recipients(raw: str) -> list[str]:
     ]
 
 
-def get_email_settings(default_recipient="jenny@lemonclean.com.tw"):
+def get_email_settings(default_recipient="jenny@hers.com.tw"):
     sender = get_secret(
         ["email", "sender"],
         env_name="NOTIFY_EMAIL",
