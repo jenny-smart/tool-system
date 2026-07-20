@@ -1,9 +1,19 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.57
+# 版本：v8.59
 # 最後更新：2026-07-19
 #
 # Change Log
+# v8.59
+# - 所有建單的人力判斷必須來自後台回覆的「同日期＋完整同時段」名單；
+#   人數不足即停止，不得用短時段或自行推算放行。
+# v8.58
+# - 修正新客建單班表誤判：get_section 改送完整服務資料，避免已選
+#   09:00-12:00 卻回傳 09:00-11:00，導致有人力被判成 0 人。
+# - 自動補檸檬人後必須重查到正確時段且人數足夠才可送單，不再因
+#   「補班動作成功」就繞過班表驗證。
+# - 新客勾選自動補檸檬人時，建單後必須實際把本單換成檸檬人；
+#   置換失敗會明確警示，不再顯示為檸檬人成功。
 # v8.57
 # - 批次／舊客／新客／訂單轉換／儲值金補價差恢復「自動補檸檬人」
 #   可選開關。安全保護保留：專員當日只要已有任何班別，補班程式就跳過，
@@ -1652,7 +1662,7 @@ def quick_create_order(
     raw_section = get_section_raw(session, base_data, token, slot)
     _slot_found = slot_exists_in_section_response(raw_section, slot)
     _auto_shift_ok = False
-    if not _slot_found and allow_auto_lemon_shift:
+    if (not _slot_found or not extract_cleaners_from_section_response(raw_section, slot)) and allow_auto_lemon_shift:
         # v8.13：該時段查無班表 → 去勾檸檬人班表，再重查。
         # 只有在客服明確勾選「查無班表時自動補檸檬人」時才會執行，
         # 預設不自動執行，避免查不到班表就自動幫忙勾人。
@@ -1682,7 +1692,7 @@ def quick_create_order(
         _slot_found = slot_exists_in_section_response(raw_section, slot)
         cleaners = extract_cleaners_from_section_response(raw_section, slot) if _slot_found else []
         _has_explicit_cleaners = bool(cleaners)
-    if (not _slot_found and not _auto_shift_ok) or (_has_explicit_cleaners and len(cleaners) < _need and not _auto_shift_ok):
+    if not _slot_found or not _has_explicit_cleaners or len(cleaners) < _need:
         raise Exception(
             f"查無班表或人數不足（需要 {_need} 人，目前排班頁只有 {len(cleaners)} 人可指派），"
             f"依規定人數不足不能成單，請先確認/補足班表後再建單。"
@@ -4881,6 +4891,24 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "address": address_for_submit,
         "person": person, "hour": hour,
         "date_s": date_s, "period_s": period_s,
+        "ping": ping, "serviceType": service_type,
+        "room": str(customer.get("room", "")),
+        "bathroom": str(customer.get("bathroom", "")),
+        "balcony": str(customer.get("balcony", "")),
+        "livingroom": str(customer.get("livingroom", "")),
+        "kitchen": str(customer.get("kitchen", "")),
+        "window": str(customer.get("window", "")),
+        "shutter": str(customer.get("shutter", "")),
+        "clothes": str(customer.get("clothes", "0")),
+        "dyson": str(customer.get("dyson", "0")),
+        "refrigerator": str(customer.get("refrigerator", "0")),
+        "disinfection": str(customer.get("disinfection", "0")),
+        "go_abord": str(customer.get("go_abord", "0")),
+        "home_move": str(customer.get("home_move", "0")),
+        "storage": str(customer.get("storage", "0")),
+        "cabinet": str(customer.get("cabinet", "0")),
+        "quintuple": str(customer.get("quintuple", "0")),
+        "member_id": member_id,
     }
     if not str(country_id or "").strip():
         raise Exception(
@@ -4901,6 +4929,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     _need = int(person)
     _has_explicit_cleaners = bool(_cleaners)
     _auto_shift_ok = False
+    _pre_shift = {}
     # v8.13：查無班表/人數不足時，預設不自動勾檸檬人，必須客服明確勾選才會執行。
     if (not _slot_found or (_has_explicit_cleaners and len(_cleaners) < _need)) and allow_auto_lemon_shift:
         _short = _need - len(_cleaners) if _slot_found and _has_explicit_cleaners else _need
@@ -4916,7 +4945,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         _cleaners = extract_cleaners_from_section_response(_raw_section, _slot) if _slot_found else []
         _has_explicit_cleaners = bool(_cleaners)
 
-    if (not _slot_found and not _auto_shift_ok) or (_has_explicit_cleaners and len(_cleaners) < _need and not _auto_shift_ok):
+    if not _slot_found or not _has_explicit_cleaners or len(_cleaners) < _need:
         # v2026.07.07：加上診斷資訊——地址審核期間解析出的 area_id/company_id，
         # 以及 get_section 實際回傳內容的前 300 字。之前只顯示「0人可指派」，
         # 但排班頁明明看得到人，無法判斷是查詢班表時用錯了 area_id/company_id
@@ -5052,6 +5081,19 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
             f"請至後台訂單管理確認電話 {phone} 是否已有新訂單，若有請直接使用該訂單號碼。"
         )
 
+    # 勾選「自動補檸檬人」不只是補出可成單的時段；成單後還必須
+    # 實際把這張訂單的人員換成檸檬人。只修改本單，且補班底層會
+    # 跳過當日已有班別的專員，不動其他客人的已配班專員。
+    lemon_assignment = {}
+    if allow_auto_lemon_shift:
+        lemon_assignment = assign_lemon_cleaners_to_order(
+            session=session, base_url=base_url, order_no_a=order_no,
+            service_date=date_s, period_s=period_s, person_count=str(person),
+            allow_auto_lemon_shift=True,
+        )
+        if lemon_assignment.get("success"):
+            time.sleep(1)
+
     # v8.6：補齊 build_line_message 需要的欄位（date/period/region/fare/service_amount/
     # actual_period），避免呼叫端組 LINE 訊息時因缺少欄位而 KeyError 或漏掉地址所屬區域。
     _region_computed = get_region_by_address(address, ACCOUNTS) or "台北"
@@ -5103,6 +5145,15 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         _meta = {}
     _staff_fallback = format_staff_from_cleaners(_cleaners, people=person) if _cleaners else "（無班表資料）"
     staff_display = _meta.get("服務人員") or _staff_fallback
+    lemon_assignment_ok = (not allow_auto_lemon_shift) or bool(lemon_assignment.get("success"))
+    if allow_auto_lemon_shift and lemon_assignment.get("success") and lemon_assignment.get("assigned"):
+        staff_display = " X ".join(lemon_assignment["assigned"])
+    lemon_assignment_warning = ""
+    if allow_auto_lemon_shift and not lemon_assignment_ok:
+        lemon_assignment_warning = (
+            f"⚠️ 訂單 {order_no} 已建立，但檸檬人置換失敗："
+            f"{lemon_assignment.get('message', '無法取得足夠檸檬人')}。請先人工確認配班，不要發確認信。"
+        )
 
     # v8.13：建單成功後檢查此訂單編號是否重複對應到多張訂單卡片
     _is_dup, _dup_count = _check_order_no_duplicate(session, order_no)
@@ -5124,6 +5175,9 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "hour": hour,
         "person": person,
         "staff": staff_display,
+        "lemon_assignment": lemon_assignment,
+        "lemon_assignment_ok": lemon_assignment_ok,
+        "lemon_assignment_warning": lemon_assignment_warning,
         "price_with_tax": price_with_tax,
         "service_amount": price_with_tax,
         "backend_actual_amount": backend_actual_amount,

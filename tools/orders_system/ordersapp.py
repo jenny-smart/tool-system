@@ -1,10 +1,13 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.67
+# 版本：v8.68
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-19
 #
 # Change Log
+# v8.68
+# - 新客勾選自動樸檬人時，建單後必須將本單專員置換為樸檬人；
+#   置換失敗會明確報錯並禁止發送確認信。
 # v8.67
 # - 批次、舊客、新客、訂單轉換、儲值金補價差恢復「自動補檸檬人」
 #   勾選功能。補班只能使用當日無任何班別的檸檬人；已服務其他客人的
@@ -1408,7 +1411,10 @@ else:
                                 nc_result["mail_sent"] = False
                                 nc_result["mail_msg"] = "尚未發送"
                             st.session_state.q_order_result = nc_result
-                            st.success(f"✅ 訂單建立成功：{nc_result['order_no']}")
+                            if nc_result.get("lemon_assignment_ok") is False:
+                                st.error(nc_result.get("lemon_assignment_warning") or "訂單已建立，但樸檬人置換失敗，請先處理班表。")
+                            else:
+                                st.success(f"✅ 訂單建立成功：{nc_result['order_no']}")
                         except Exception as e:
                             st.error(f"建單失敗：{e}")
             else:
@@ -1909,7 +1915,10 @@ else:
             for _i, r in enumerate(_nc_multi, start=1):
                 if r["ok"]:
                     res = r["result"]
-                    st.success(f"✅ 第{_i}筆：{res.get('order_no')}　{res.get('date_s')} {res.get('period_s')}")
+                    if res.get("lemon_assignment_ok") is False:
+                        st.error(f"⚠️ 第{_i}筆訂單已建立：{res.get('order_no')}，{res.get('lemon_assignment_warning') or '樸檬人置換失敗'}")
+                    else:
+                        st.success(f"✅ 第{_i}筆：{res.get('order_no')}　{res.get('date_s')} {res.get('period_s')}")
                     if res.get("existing_member_warning"):
                         st.warning(res["existing_member_warning"])
                     if res.get("address_mismatch_warning"):
@@ -1922,11 +1931,16 @@ else:
         # 顯示建單結果
         _r = st.session_state.get("nc_result", {})
         if _r.get("order_no"):
-            st.success(
-                f"✅ 訂單：{_r['order_no']}　{_r.get('date_s')} {_r.get('period_s')}　"
+            _lemon_failed = _r.get("lemon_assignment_ok") is False
+            _result_msg = (
+                f"訂單：{_r['order_no']}　{_r.get('date_s')} {_r.get('period_s')}　"
                 f"{_r.get('person')}人{_r.get('hour')}小時　{_r.get('price_with_tax', 0):,}元　"
                 f"👤 專員：{_r.get('staff') or '（無班表資料）'}"
             )
+            if _lemon_failed:
+                st.error(f"⚠️ {_result_msg}\n\n{_r.get('lemon_assignment_warning') or '樸檬人置換失敗'}")
+            else:
+                st.success(f"✅ {_result_msg}")
             if _r.get("price_mismatch_warning"):
                 st.warning(_r["price_mismatch_warning"])
             if _r.get("address_mismatch_warning"):
@@ -1935,7 +1949,9 @@ else:
                 st.warning(_r["existing_member_warning"])
             if _r.get("order_no_duplicated"):
                 show_duplicate_order_warning(_r.get("order_no"), _r.get("order_no_duplicate_count", 2), dedup_key=f"nc_{_r.get('order_no')}")
-            if not _r.get("mail_sent"):
+            if _lemon_failed:
+                st.warning("樸檬人置換完成前，不可發送確認信。")
+            elif not _r.get("mail_sent"):
                 if st.button("📧 發送確認信", key="nc_send_mail_btn", type="primary"):
                     try:
                         ok_m2, msg_m2 = send_confirmation(_r)
@@ -2727,14 +2743,20 @@ else:
         c2.metric("金額（含稅）", order_result.get("service_amount") or order_result.get("price_with_tax") or "—")
         c3.metric("車馬費", order_result.get("fare") or "0")
         c4.metric("確認信", "已發送" if order_result.get("mail_sent") else "未發送")
-        st.success(f"✅ 訂單建立成功：{order_result['order_no']}　👤 專員：{order_result.get('staff') or '（無班表資料）'}")
+        _order_lemon_failed = order_result.get("lemon_assignment_ok") is False
+        if _order_lemon_failed:
+            st.error(order_result.get("lemon_assignment_warning") or "訂單已建立，但樸檬人置換失敗。")
+        else:
+            st.success(f"✅ 訂單建立成功：{order_result['order_no']}　👤 專員：{order_result.get('staff') or '（無班表資料）'}")
         if order_result.get("price_mismatch_warning"):
             st.warning(order_result["price_mismatch_warning"])
         if order_result.get("address_mismatch_warning"):
             st.warning(order_result["address_mismatch_warning"])
         if order_result.get("order_no_duplicated"):
             show_duplicate_order_warning(order_result.get("order_no"), order_result.get("order_no_duplicate_count", 2), dedup_key=f"old_{order_result.get('order_no')}")
-        if not order_result.get("mail_sent"):
+        if _order_lemon_failed:
+            st.warning("樸檬人置換完成前，不可發送確認信。")
+        elif not order_result.get("mail_sent"):
             if st.button("📧 發送確認信", key="send_mail_btn", type="primary"):
                 try:
                     ok_m, msg_m = send_confirmation(order_result)
