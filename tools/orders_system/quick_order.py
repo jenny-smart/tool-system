@@ -1,6 +1,6 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.59
+# 版本：v8.60
 # 最後更新：2026-07-19
 #
 # Change Log
@@ -2725,7 +2725,7 @@ def convert_order(
     lemon_result = assign_lemon_cleaners_to_order(
         session=session, base_url=base_url, order_no_a=order_no_a,
         service_date=service_date_a, period_s=new_period_s, person_count=new_person,
-        allow_auto_lemon_shift=allow_auto_lemon_shift,
+        allow_auto_lemon_shift=True,
     )
     return {
         "order_no_a": order_no_a, "order_no_b": order_no_b, "coupon_code": coupon_code,
@@ -2742,7 +2742,7 @@ def convert_order(
 
 def convert_order_stage1_reassign_original(
     env_name, backend_email, backend_password, order_no_a, target_date_s=None, clean_type_id="1",
-    allow_auto_lemon_shift=False,
+    allow_auto_lemon_shift=True,
 ):
     """
     訂單轉換第一階段：只處理原訂單A。把服務日期改到指定的新日期，
@@ -2844,7 +2844,7 @@ def convert_order_stage1_reassign_original(
     lemon_result_a = assign_lemon_cleaners_to_order(
         session=session, base_url=base_url, order_no_a=order_no_a,
         service_date=target_date_a, period_s=period_a_for_assign, person_count=str(person_a),
-        allow_auto_lemon_shift=bool(allow_auto_lemon_shift),
+        allow_auto_lemon_shift=True,
     )
     lemon_result_a["date_change_ok"] = date_change_ok
     lemon_result_a["date_change_msg"] = date_change_msg

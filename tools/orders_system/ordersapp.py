@@ -1,6 +1,6 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.68
+# 版本：v8.69
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-19
 #
@@ -1998,9 +1998,10 @@ else:
             conv_clean_type = st.selectbox("服務類別", list(CLEAN_TYPE_ID_MAP.keys()), key="conv_clean_type")
         with col_a3:
             conv_target_date = st.date_input("原訂單A要改到的新日期", value=date.today() + timedelta(days=1), key="conv_target_date")
-        conv_stage1_allow_lemon = st.checkbox("原訂單A查無檸檬人時自動補檸檬人（不動其他客人已配班專員）", value=False, key="conv_stage1_allow_lemon")
+        conv_stage1_allow_lemon = True
+        st.caption("原訂單 A 固定全部換成檸檬人；不足時系統會自動補檸檬人班表。")
 
-        if st.button("① 修改原訂單日期並使用既有班表換成檸檬人", use_container_width=True, key="conv_stage1_btn"):
+        if st.button("① 修改原訂單日期並全部換成檸檬人", use_container_width=True, key="conv_stage1_btn"):
             # 開始新的一次轉換前，先清空上一次殘留的舊結果（含第二、三段）。
             st.session_state.conv_stage1 = {}
             st.session_state.conv_stage2 = {}
