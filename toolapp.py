@@ -562,7 +562,9 @@ st.markdown(
     """
 <style>
   .stApp { background: #f4f8fc; }
-  #MainMenu, footer, header { visibility: hidden; }
+  #MainMenu, footer { visibility: hidden; }
+  /* 不隱藏整個 header：側欄收合後的重新開啟按鈕位於 header 內。 */
+  [data-testid="stHeader"] { background: transparent; }
 
   .app-title {
     font-size: 1.45rem;
