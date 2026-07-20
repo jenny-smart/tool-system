@@ -8,6 +8,7 @@ roles:
       - service_schedule
       - invoice_center
       - orders_memo_system
+      - bank_statement_tool
     pages:
       - report
       - log
