@@ -886,13 +886,13 @@ def get_email_settings(default_recipient="jenny@hers.com.tw"):
     sender = get_secret(
         ["email", "sender"],
         env_name="NOTIFY_EMAIL",
-        fallback_env_names=["REPORT_EMAIL_SENDER", "EMAIL_SENDER", "GMAIL_USER"],
+        fallback_env_names=["REPORT_EMAIL_SENDER", "EMAIL_SENDER"],
         required=False,
     )
     password = get_secret(
         ["email", "app_password"],
         env_name="NOTIFY_PASSWORD",
-        fallback_env_names=["REPORT_EMAIL_APP_PASSWORD", "EMAIL_APP_PASSWORD", "GMAIL_APP_PASSWORD"],
+        fallback_env_names=["REPORT_EMAIL_APP_PASSWORD", "EMAIL_APP_PASSWORD"],
         required=False,
     )
     recipient = get_secret(
