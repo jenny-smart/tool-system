@@ -1,10 +1,13 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.19-1
+# 版本：v2026.07.20-1
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
-# 最後更新：2026-07-19
+# 最後更新：2026-07-20
 #
 # Change Log
+# v2026.07.20-1
+# - 批次建單恢復「自動補檸檬人」可選開關。底層安全保護維持：
+#   專員當日已有任何班別時一律跳過，不動到其他客人已配班人員。
 # v2026.07.19-1
 # - 批次建單禁止自動新增或改寫專員班表；只能使用後台當下已有的
 #   可用人力，查無班表或人數不足時直接停止。
@@ -2513,8 +2516,6 @@ def process_existing_order_only(row, gcal_service, region, session, selected_act
 
 
 def process_one_group(session, rows_with_idx, token, gcal_service, region, backend_user_id=None, selected_actions=None, allow_auto_lemon_shift=False, used_order_nos=None):
-    # 批次建單不得改寫專員班表；舊畫面／舊 session 即使傳入 True 也強制關閉。
-    allow_auto_lemon_shift = False
     _, row0 = rows_with_idx[0]
 
     purchase_item = str(row0["購買項目"]).strip()
@@ -2845,7 +2846,21 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         slot_ok = slot_exists_in_section_response(raw, detail["slot"])
         cleaners = extract_cleaners_from_section_response(raw, detail["slot"])
 
-        # 批次建單只讀取當下班表；無班表時不得補班或改寫任何專員班別。
+        # 若有勾選安全補檸檬人，才在無班表時嘗試補班。補班底層會跳過
+        # 當日已有任何班別的專員，不會動到其他客人已配班人員。
+        if not slot_ok and allow_auto_lemon_shift:
+            try:
+                ensure_lemon_cleaner_shifts(
+                    session=session, base_url=BASE_URL,
+                    service_date=detail["date"], period_s=system_period,
+                    person_count=str(people),
+                )
+                time.sleep(2)
+                raw = get_section_raw(session, detail["payload"], token, detail["slot"])
+                slot_ok = slot_exists_in_section_response(raw, detail["slot"])
+                cleaners = extract_cleaners_from_section_response(raw, detail["slot"])
+            except Exception as _e_lemon:
+                print(f"[DEBUG] 安全自動補檸檬人失敗：{_e_lemon}")
 
         detail["section_cleaners"] = cleaners
         detail["section_staff"] = format_staff_from_cleaners(cleaners, people=people)

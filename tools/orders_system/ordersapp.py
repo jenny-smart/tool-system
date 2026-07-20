@@ -1,10 +1,14 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.66
+# 版本：v8.67
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-19
 #
 # Change Log
+# v8.67
+# - 批次、舊客、新客、訂單轉換、儲值金補價差恢復「自動補檸檬人」
+#   勾選功能。補班只能使用當日無任何班別的檸檬人；已服務其他客人的
+#   專員不會被改班、換走或覆寫。
 # v8.66
 # - 批次建單、舊客建單、新客建單、訂單轉換、儲值金補價差全面禁止
 #   自動補班；移除畫面上的自動補檸檬人選項。只使用已有可用人力，
@@ -775,8 +779,6 @@ FUNCTION_OPTIONS = [
      "memo", "📋 客服作業"),
     ("對帳管理：ATM 待付款清單查詢、配對銀行明細、更新系統對帳。",
      "memo", "💰 財務對帳"),
-    ("付款後5碼及星和診所比對：依付款日期、付款狀態搜尋 ATM 訂單，寫入 K～S 欄並比對銀行 B～H 欄；支援一筆匯款對多筆訂單。",
-     "memo", "💳 付款後5碼及星和診所比對"),
     ("異動管理：車馬費/異動費、服務前後加減時、退款/客訴退款/物損退款，"
      "分階段查詢試算後回填後台。",
      "memo", "🔄 服務異動"),
@@ -800,6 +802,8 @@ FUNCTION_OPTIONS = [
     ("更新建議下次服務時間：依「地址(B欄)+電話(E欄)」查後台最近3次服務日期，"
      "寫入 Google Sheet 的 L/M/N 欄（L=最近一次，N=最遠一次）。",
      "orders", "更新建議下次服務時間"),
+    ("付款後5碼及星和診所比對：依付款日期、付款狀態搜尋 ATM 訂單，寫入 K～S 欄並比對銀行 B～H 欄；支援一筆匯款對多筆訂單。",
+     "memo", "💳 付款後5碼及星和診所比對"),
 ]
 
 selected_label = st.selectbox(
@@ -850,7 +854,7 @@ if mode == "批次建單（Google Sheet）":
     default_actions = (["建單", "寄確認信", "改 Google 日曆"] if env == "prod" else ["建單"])
     selected_actions = st.multiselect("執行項目", options=["建單", "寄確認信", "改 Google 日曆"], default=default_actions, label_visibility="collapsed")
     st.markdown('<div class="hint-box">可自由組合，例如只寄確認信、只改日曆，或全流程一起跑。</div>', unsafe_allow_html=True)
-    st.caption("批次建單僅使用已有可用人力；查無班表或人力不足時停止，不自動補班。")
+    batch_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="batch_allow_auto_lemon")
     auto_no_slot_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="auto_no_slot_rows")
     auto_missing_o_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="auto_missing_o_rows")
     st.markdown("<hr>", unsafe_allow_html=True)
@@ -906,7 +910,7 @@ if mode == "批次建單（Google Sheet）":
                         backend_email=backend_email.strip(), backend_password=backend_password.strip(),
                         sheet_name=sheet_name.strip(), start_row=row_no, end_row=row_no,
                         selected_actions=selected_actions, logger=ui_log,
-                        allow_auto_lemon_shift=False,
+                        allow_auto_lemon_shift=batch_allow_auto_lemon,
                     )
                     if isinstance(result, dict):
                         total_success += result.get("success_count", 0)
@@ -1366,7 +1370,7 @@ else:
                     with nci2:
                         nc_company_no = st.text_input("統一編號", key="nc_company_no")
                 nc_clean_type = st.selectbox("服務類別", list(CLEAN_TYPE_ID_MAP.keys()), key="nc_clean_type")
-                st.caption("新客建單僅使用已有可用人力；人力不足時停止，不自動補班。")
+                nc_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="nc_allow_auto_lemon")
                 if st.button("🚀 建立新客訂單", use_container_width=True, key="nc_create_btn"):
                     # v8.15：開始新的一次建單嘗試前，先清空上一次殘留在畫面下方的舊結果，
                     # 避免這次失敗時，舊的成功訊息還留在畫面上跟新的錯誤訊息重疊混淆。
@@ -1382,7 +1386,7 @@ else:
                                     env_name=env,
                                     backend_email=backend_email.strip(),
                                     backend_password=backend_password.strip(),
-                                    allow_auto_lemon_shift=False,
+                                    allow_auto_lemon_shift=nc_allow_auto_lemon,
                                     customer={
                                         "name": nc_name.strip(),
                                         "phone": q_phone.strip(),
@@ -1532,7 +1536,7 @@ else:
                                     st.success(f"{r.get('date')} {r.get('period')} 可安排　服務人員：{r.get('staff') or '待確認'}")
                             else:
                                 st.warning("此日期/時段目前無可安排班表。")
-                        st.caption("舊客建單僅使用已有可用人力；人力不足時停止，不自動補班。")
+                        old_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="old_allow_auto_lemon")
                         _old_create_label = "🚀 建立訂單" if int(old_n_orders) == 1 else f"🚀 建立 {int(old_n_orders)} 筆訂單"
                         if st.button(_old_create_label, use_container_width=True, key="old_create_known"):
                             # v8.15：開始新的一次建單嘗試前，先清空上一次殘留的舊結果。
@@ -1542,7 +1546,7 @@ else:
                             for _i, entry in enumerate(old_entries, start=1):
                                 try:
                                     with st.spinner(f"建單中（第 {_i}/{len(old_entries)} 筆），請稍候…"):
-                                        result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=entry["date"].strftime("%Y-%m-%d"), period_s=entry["period"], hour=entry["hour"], person=entry["person"], allow_auto_lemon_shift=False)
+                                        result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=entry["date"].strftime("%Y-%m-%d"), period_s=entry["period"], hour=entry["hour"], person=entry["person"], allow_auto_lemon_shift=old_allow_auto_lemon)
                                         # 不立即發確認信，等 user 確認後再發
                                         result["mail_sent"] = False
                                         result["mail_msg"] = "尚未發送"
@@ -1718,7 +1722,7 @@ else:
         with nb3:
             nc_notice = st.text_area("客服備註", height=80, key="nc_notice_d")
 
-        st.caption("新客建單僅使用已有可用人力；人力不足時停止，不自動補班。")
+        nc_d_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="nc_d_allow_auto_lemon")
 
         if st.button("🚀 建立新客訂單", use_container_width=True, key="nc_create_d", type="primary"):
             # v8.15：開始新的一次建單嘗試前，先清空上一次殘留在畫面下方的舊結果
@@ -1790,7 +1794,7 @@ else:
                             "company_title": _nc_company_title,
                             "company_no": _nc_company_no,
                             "member_email": _m_existing.get("email", ""),
-                            "allow_auto_lemon_shift": False,
+                            "allow_auto_lemon_shift": nc_d_allow_auto_lemon,
                         }
                         st.rerun()
                     elif _nc_lookup is not None:
@@ -1804,7 +1808,7 @@ else:
                                             env_name=env,
                                             backend_email=backend_email.strip(),
                                             backend_password=backend_password.strip(),
-                                            allow_auto_lemon_shift=False,
+                                            allow_auto_lemon_shift=nc_d_allow_auto_lemon,
                                             customer={
                                                 "name": _nc_name, "phone": _nc_phone,
                                                 "email": _nc_email, "address": _nc_address,
@@ -1964,7 +1968,7 @@ else:
             "流程說明",
             [
                 "此功能拆成兩段：先修改原訂單A的日期並使用既有班表換成檸檬人，再建立新訂單（優惠券折抵原訂單金額）。",
-                "舊單A與新單B都只能使用後台當下已有的可用班表；禁止自動補班或改寫專員班別，人力不足時會停止。",
+                "舊單A與新單B均可勾選安全自動補檸檬人；已有任何班別的專員一律跳過，不動其他客人已配班專員。",
                 "第二段：逐筆新訂單建立折價券，所有新單券額加總必須等於原訂單A服務金額；若新單金額超過原單，超出部分保留為應付差額。",
                 "備註自動寫入：A+B1+B2+B3 合併服務。",
             ],
@@ -1978,6 +1982,7 @@ else:
             conv_clean_type = st.selectbox("服務類別", list(CLEAN_TYPE_ID_MAP.keys()), key="conv_clean_type")
         with col_a3:
             conv_target_date = st.date_input("原訂單A要改到的新日期", value=date.today() + timedelta(days=1), key="conv_target_date")
+        conv_stage1_allow_lemon = st.checkbox("原訂單A查無檸檬人時自動補檸檬人（不動其他客人已配班專員）", value=False, key="conv_stage1_allow_lemon")
 
         if st.button("① 修改原訂單日期並使用既有班表換成檸檬人", use_container_width=True, key="conv_stage1_btn"):
             # 開始新的一次轉換前，先清空上一次殘留的舊結果（含第二、三段）。
@@ -1997,6 +2002,7 @@ else:
                             order_no_a=conv_order_no_a.strip(),
                             target_date_s=conv_target_date.strftime("%Y-%m-%d"),
                             clean_type_id=CLEAN_TYPE_ID_MAP[conv_clean_type],
+                            allow_auto_lemon_shift=conv_stage1_allow_lemon,
                         )
                     st.session_state.conv_stage1 = stage1
                     st.session_state.conv_stage2 = {}
@@ -2054,13 +2060,16 @@ else:
                 with b4:
                     b_hour = PERIOD_HOUR_MAP.get(b_period, 4)
                     st.markdown(f"<br><b>{b_hour} 小時</b>（依時段帶出）", unsafe_allow_html=True)
-                st.caption(f"B{i+1} 僅使用已有可用班表；人力不足時停止，不自動補班。")
+                b_allow_lemon = st.checkbox(
+                    f"B{i+1} 若無人力，自動補檸檬人（不動其他客人已配班專員）",
+                    value=False, key=f"conv_allow_lemon_{i}",
+                )
                 new_orders_input.append({
                     "date_s": b_date.strftime("%Y-%m-%d"),
                     "period_s": b_period,
                     "hour": b_hour,
                     "person": int(b_person),
-                    "allow_lemon": False,
+                    "allow_lemon": bool(b_allow_lemon),
                 })
 
             _conv_stage1_result = conv_stage1.get("lemon_result_a", {}) or {}
@@ -2154,7 +2163,7 @@ else:
     elif single_feature == "儲值金補價差":
         info_panel("流程說明", [
             "此功能拆成兩段：先成立儲值金折抵單，再成立客付補價差訂單。",
-            "兩段都只使用後台當下已有可用人力；禁止自動補班或改寫其他已配班人員班別。",
+            "兩段都可勾選安全自動補檸檬人；已有任何班別的專員一律跳過，不動其他客人已配班專員。",
             "日期類型由服務日期自動判斷：週一到週五為平日，週六日為週末。",
             "儲值金清零單走 /booking/stored_value_routine，優惠券A = 服務總額 - 儲值金餘額；剩餘額用儲值金扣掉後歸零。",
             "補差價訂單走 /booking/single，優惠券B = 原儲值金餘額，付款方式限 ATM / 信用卡。",
@@ -2208,6 +2217,7 @@ else:
             sv_address = st.text_input("指定服務地址（留空則用會員第一個地址）", key="sv_auto_address")
         with opt2:
             sv_region = st.selectbox("適用地區", [""] + list(COUPON_COMPANY_ID_MAP.keys()), format_func=lambda x: x or "依地址自動判斷", key="sv_auto_region")
+        sv_allow_auto_lemon = st.checkbox("查無檸檬人時自動補檸檬人（不動其他客人已配班專員）", value=False, key="sv_allow_auto_lemon")
         st.markdown("<hr>", unsafe_allow_html=True)
         step("5", "第一段：建立儲值金清零訂單")
         sv_stored_total_preview = sv_unit_price * sv_person_hours
@@ -2229,6 +2239,7 @@ else:
                             service_date=sv_svc_date.strftime("%Y-%m-%d"), period_s=sv_svc_period,
                             hour=str(sv_svc_hour), person=str(int(sv_svc_person)),
                             address=sv_address.strip(), region=sv_region, coupon_prefix_base=sv_phone.strip(),
+                            allow_auto_lemon_shift=sv_allow_auto_lemon,
                         )
                     st.session_state.sv_stored_stage = stored_stage
                     st.session_state.sv_paid_stage = {}
@@ -2280,6 +2291,7 @@ else:
                             coupon_prefix_base=stored_stage.get("coupon_prefix_base") or sv_phone.strip(),
                             stored_order_no=stored_stage.get("stored_order", {}).get("order_no", ""),
                             balance_override=stored_stage.get("balance"),
+                            allow_auto_lemon_shift=sv_allow_auto_lemon,
                         )
                     st.session_state.sv_paid_stage = paid_stage
                 except Exception as e:

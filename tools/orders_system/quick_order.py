@@ -1,9 +1,13 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.56
+# 版本：v8.57
 # 最後更新：2026-07-19
 #
 # Change Log
+# v8.57
+# - 批次／舊客／新客／訂單轉換／儲值金補價差恢復「自動補檸檬人」
+#   可選開關。安全保護保留：專員當日只要已有任何班別，補班程式就跳過，
+#   不會去動其他客人已配班的專員。
 # v8.56
 # - 排班安全規則擴大到批次建單、舊客建單、新客建單、訂單轉換與
 #   儲值金補價差：這些流程一律禁止自動新增或改寫專員班表，
@@ -14,6 +18,11 @@
 # - 訂單轉換安全修正：舊單A與新單B都不得呼叫自動補檸檬人班表，
 #   只能使用後台當下已有的可用班表。若人力不足就停止並提示手動處理，
 #   避免轉換流程改動「未配班」名單或已配班人員的班別。
+# v8.54
+# - 修正新客建單／舊客新地址：客人地址已明確寫縣市＋行政區時，只採用地址
+#   本身拆出的行政區下拉值；check_contain 僅用來補服務區域必要欄位，不再拿
+#   回傳區域名稱覆蓋或否定客人填的行政區。只有客人沒寫行政區時，才用
+#   check_contain 回傳值補行政區，補不到就停下。
 # v8.53
 # - 修正舊客建單價格仍沿用後台 calculate_hour 回傳金額，造成 3人4小時平日
 #   12人時被算成 10800。舊客與新客統一用固定公式：平日每人時600、週末
@@ -1485,9 +1494,6 @@ def quick_create_order(
     invoice_type_override="", carrier_type_id_override="",
     extra_fields=None, allow_auto_lemon_shift=False,
 ):
-    # 建單流程不得改寫專員班表。就算舊畫面或舊 session 傳入 True，
-    # 核心層仍強制關閉；無班表／人力不足時直接擋單。
-    allow_auto_lemon_shift = False
     payway = normalize_booking_payway(payway)
     base_url = _configure_environment(env_name)
     session = lookup_result["session"]
@@ -1540,19 +1546,6 @@ def quick_create_order(
         address_for_lookup = address_parts["full"]
         address_for_submit = address_parts["detail"]
         _validate_area_not_known_bad(address_for_lookup, area_info, context="舊客新地址")
-        input_district = _extract_district_from_address(address_for_lookup)
-        returned_area_name = str(
-            area_info.get("area_name")
-            or area_info.get("name")
-            or area_info.get("area")
-            or area_info.get("district")
-            or ""
-        ).strip()
-        if input_district and returned_area_name and input_district not in returned_area_name:
-            raise Exception(
-                f"查詢地址區域疑似錯誤：地址寫的是「{input_district}」，"
-                f"但後台回傳區域為「{returned_area_name}」。已停止成單，避免地址被誤加錯區。"
-            )
         best_addr["area_id"] = area_info.get("area_id")
         best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
         best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
@@ -2477,7 +2470,6 @@ def assign_lemon_cleaners_to_order(session, base_url, order_no_a, service_date, 
        班表，再重取頁面換人；預設不會自動勾班，避免查無班表就自動幫忙勾人。
     不預先全量勾班，避免把其他訂單的檸檬人班別干擾掉。
     """
-    allow_auto_lemon_shift = False
     purchase_id = _fetch_order_edit_id(session, order_no_a)
     if not purchase_id:
         return {"success": False, "message": f"無法取得訂單 {order_no_a} 的後台 ID"}
@@ -2590,7 +2582,6 @@ def _assign_mixed_cleaners_to_order(session, base_url, order_no, service_date, p
     v8.13：是否預先勾檸檬人班表改由 allow_auto_lemon_shift 控制。
     回傳 dict: success / assigned / assigned_types / message
     """
-    allow_auto_lemon_shift = False
     purchase_id = _fetch_order_edit_id(session, order_no)
     if not purchase_id:
         return {"success": False, "message": f"無法取得訂單 {order_no} 的後台 ID"}
@@ -2741,11 +2732,12 @@ def convert_order(
 
 def convert_order_stage1_reassign_original(
     env_name, backend_email, backend_password, order_no_a, target_date_s=None, clean_type_id="1",
+    allow_auto_lemon_shift=False,
 ):
     """
     訂單轉換第一階段：只處理原訂單A。把服務日期改到指定的新日期，
-    再從後台當下已有的可用班表中換成檸檬人。本流程禁止自動新增、
-    改寫任何專員班表；當下班表不足時必須停止並由人工處理。
+    再從後台當下已有的可用班表中換成檸檬人。若開啟自動補檸檬人，
+    只能補當日沒有任何班別的人；已有班別的專員一律跳過。
 
     target_date_s 沒給的話就不改日期，只做換人為檸檬人。
 
@@ -2819,14 +2811,13 @@ def convert_order_stage1_reassign_original(
         "member_payload": member_payload, "base_url": base_url, "env_name": env_name,
     }
 
-    # ── Step 3: 原訂單A 改日期 → 用既有班表換人（禁止自動補班）───
+    # ── Step 3: 原訂單A 改日期 → 用既有班表／安全補檸檬人換人 ───
     target_date_a = target_date_s or service_date_a
     period_a_for_assign = period_a_raw.replace(" ", "") if period_a_raw else ""
     pre_shift_a = {
-        "success": True,
-        "assigned": [],
-        "message": "訂單轉換已禁止自動補班；僅使用後台當下已有班表",
-        "shift_mutation_blocked": True,
+        "success": True, "assigned": [],
+        "message": "已開啟安全補檸檬人" if allow_auto_lemon_shift else "未勾選自動補檸檬人",
+        "protect_other_orders": True,
     }
 
     date_change_ok = False
@@ -2843,7 +2834,7 @@ def convert_order_stage1_reassign_original(
     lemon_result_a = assign_lemon_cleaners_to_order(
         session=session, base_url=base_url, order_no_a=order_no_a,
         service_date=target_date_a, period_s=period_a_for_assign, person_count=str(person_a),
-        allow_auto_lemon_shift=False,
+        allow_auto_lemon_shift=bool(allow_auto_lemon_shift),
     )
     lemon_result_a["date_change_ok"] = date_change_ok
     lemon_result_a["date_change_msg"] = date_change_msg
@@ -2877,7 +2868,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     if not lemon_result_a.get("success"):
         raise Exception(
             "原訂單A無法用後台當下已有班表完成配班，已停止建立新訂單B。"
-            "系統不會自動補班或改寫專員班別，請先由人工處理班表。"
+            "系統不會改寫已有班別或動到其他客人的專員，請先由人工處理班表。"
         )
 
     session = stage1_result["session"]
@@ -2961,9 +2952,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                 lookup_result=lookup_result, address=address_a,
                 clean_type_id=clean_type_id, date_s=new_date_s, period_s=new_period_s,
                 hour=new_hour, person=new_person, discount_code=coupon_code,
-                # 訂單轉換的新單B絕對不得改寫專員班表。即使舊版
-                # 畫面或舊 session 還傳入 allow_lemon=True，核心層也強制關閉。
-                allow_auto_lemon_shift=False,
+                allow_auto_lemon_shift=bool(new_order.get("allow_lemon", False)),
             )
             new_order_nos.append(order_result["order_no"])
 
@@ -4305,15 +4294,15 @@ def _stored_value_makeup_context(
 def stored_value_makeup_create_stored_order(
     env_name, backend_email, backend_password, phone, clean_type_id, service_date, period_s,
     hour, person, address="", region="", coupon_prefix_base="", coupon_valid_days=60,
+    allow_auto_lemon_shift=False,
 ):
     ctx = _stored_value_makeup_context(env_name, backend_email, backend_password, phone, clean_type_id, service_date, period_s, hour, person, address, region, coupon_prefix_base, coupon_valid_days)
     regions = [ctx["region"]] if ctx.get("region") else list(COUPON_COMPANY_ID_MAP.keys())
     services = ["居家清潔", "裝修細清"]
     coupon_a = create_coupon(env_name, backend_email, backend_password, title=f"儲值金清零-{phone}", discount=ctx["plan"]["coupon_a"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_a"], piece="1", regions=regions, service_items=services)
     code_a = coupon_a.get("coupon_code") or coupon_a.get("coupon_prefix") or ctx["prefix_a"]
-    # 儲值金補價差也只能使用當下已有班表，禁止自動補班。
-    stored_order = quick_create_order(env_name=env_name, payway="儲值金", region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_a, allow_auto_lemon_shift=False)
-    lemon_result = assign_lemon_cleaners_to_order(session=stored_order["session"], base_url=_configure_environment(env_name), order_no_a=stored_order["order_no"], service_date=service_date, period_s=period_s, person_count=str(person), allow_auto_lemon_shift=False)
+    stored_order = quick_create_order(env_name=env_name, payway="儲值金", region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_a, allow_auto_lemon_shift=bool(allow_auto_lemon_shift))
+    lemon_result = assign_lemon_cleaners_to_order(session=stored_order["session"], base_url=_configure_environment(env_name), order_no_a=stored_order["order_no"], service_date=service_date, period_s=period_s, person_count=str(person), allow_auto_lemon_shift=bool(allow_auto_lemon_shift))
     note = (f"儲值金補價差第一段：儲值金折抵單 {stored_order['order_no']}，{ctx['day_type']}單價 {ctx['plan']['unit_price']} × {ctx['plan']['total_person_hours']}人時 = {ctx['plan']['dummy_price']}，優惠券A折抵 {ctx['plan']['coupon_a']} 元，剩餘 {ctx['plan']['stored_value_applied']} 元扣儲值金後總額應為 0，檸檬人勿動。")
     _update_order_note(stored_order["session"], _configure_environment(env_name), stored_order["order_no"], note)
     return {"stage": "stored_order", "balance": ctx["balance"], "plan": ctx["plan"], "day_type": ctx["day_type"], "coupon_a": coupon_a, "stored_order": stored_order, "lemon_result": lemon_result, "note": note, "address": ctx["address"], "region": ctx["region"], "phone": phone, "clean_type_id": clean_type_id, "service_date": service_date, "period_s": period_s, "hour": str(hour), "person": str(person), "coupon_prefix_base": coupon_prefix_base or phone, "coupon_valid_days": coupon_valid_days}
@@ -4324,6 +4313,7 @@ def stored_value_makeup_create_paid_order(
     hour, person, customer_payway="ATM", invoice_mode="會員載具", mobile_carrier="",
     company_title="", company_no="", address="", region="", coupon_prefix_base="",
     coupon_valid_days=60, stored_order_no="", balance_override=None,
+    allow_auto_lemon_shift=False,
 ):
     ctx = _stored_value_makeup_context(env_name, backend_email, backend_password, phone, clean_type_id, service_date, period_s, hour, person, address, region, coupon_prefix_base, coupon_valid_days, balance_override=balance_override)
     if balance_override not in (None, ""):
@@ -4334,8 +4324,7 @@ def stored_value_makeup_create_paid_order(
     coupon_b = create_coupon(env_name, backend_email, backend_password, title=f"儲值金補價差客付-{phone}", discount=ctx["plan"]["coupon_b"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_b"], piece="1", regions=regions, service_items=services)
     code_b = coupon_b.get("coupon_code") or coupon_b.get("coupon_prefix") or ctx["prefix_b"]
     invoice = _invoice_payload(invoice_mode, member_email=ctx["member"].get("email") or "", mobile_carrier=mobile_carrier, company_title=company_title, company_no=company_no)
-    # 第二段客付補價差單同樣禁止自動補班。
-    paid_order = quick_create_order(env_name=env_name, payway=customer_payway, region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_b, allow_auto_lemon_shift=False, **invoice)
+    paid_order = quick_create_order(env_name=env_name, payway=customer_payway, region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_b, allow_auto_lemon_shift=bool(allow_auto_lemon_shift), **invoice)
     pair = f"儲值折抵單 {stored_order_no} + 客付補價差單 {paid_order['order_no']}" if stored_order_no else f"客付補價差單 {paid_order['order_no']}"
     note = f"儲值金補價差第二段：{pair}，客付單使用優惠券B折抵原儲值金餘額 {ctx['balance']} 元。"
     _update_order_note(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], note)
@@ -4653,7 +4642,6 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
                         date_s, period_s, hour, person
     選填：ping, service_type, carrier, company_title, company_no, tel, line
     """
-    allow_auto_lemon_shift = False
     required = ["name", "phone", "email", "address", "payway", "clean_type_id",
                 "date_s", "period_s", "hour", "person"]
     missing = [k for k in required if not str((customer or {}).get(k, "")).strip()]
@@ -4857,19 +4845,6 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         company_id = str(area_info.get("company_id") or "")
         country_id = str(address_parts.get("country_id") or area_info.get("country_id") or "")
         _validate_area_not_known_bad(address_for_lookup, area_info, context="新客地址")
-        input_district = _extract_district_from_address(address_for_lookup)
-        returned_area_name = str(
-            area_info.get("area_name")
-            or area_info.get("name")
-            or area_info.get("area")
-            or area_info.get("district")
-            or ""
-        ).strip()
-        if input_district and returned_area_name and input_district not in returned_area_name:
-            raise Exception(
-                f"查詢地址區域疑似錯誤：地址寫的是「{input_district}」，"
-                f"但後台回傳區域為「{returned_area_name}」。已停止成單，避免地址被誤加錯區。"
-            )
         if not company_id:
             raise Exception(
                 f"查詢地址區域失敗：地址「{address_for_lookup}」無法判斷 company_id，"
