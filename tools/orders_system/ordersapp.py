@@ -369,6 +369,7 @@ from weekend_reminders import (
     load_tracking_rows, merge_tracking_rows, save_tracking_rows,
     schedule_line_reminders, fetch_line_reminder_statuses,
     apply_line_reminder_statuses, tracking_rows_tsv,
+    line_id_from_chat_url,
     NOTICE_STATUSES, REPLY_STATUSES,
 )
 from accounts import ACCOUNTS
@@ -1031,13 +1032,13 @@ elif mode == "週末服務 LINE 提醒":
     with wr_send_c1:
         wr_send_date = st.date_input("預約發送日期", value=_suggested_run_day, key="wr_send_date")
     with wr_send_c2:
-        wr_send_time = st.time_input(
-            "預約發送時間",
-            value=datetime.strptime("09:00", "%H:%M").time(),
-            step=60,
+        wr_send_time = st.text_input(
+            "預約發送時間（24小時制）",
+            value="09:00",
+            placeholder="例如 12:40",
             key="wr_send_time",
         )
-    wr_scheduled_at = f"{wr_send_date.strftime('%Y-%m-%d')} {wr_send_time.strftime('%H:%M')}"
+    wr_scheduled_at = f"{wr_send_date.strftime('%Y-%m-%d')} {wr_send_time.strip()}"
     st.caption("可設定任意分鐘；系統會透過 LINE Messaging API 發送含「已收到」按鈕的訊息。")
 
     try:
@@ -1074,10 +1075,10 @@ elif mode == "週末服務 LINE 提醒":
                 key="wr_test_send_date",
             )
         with wr_test_c2:
-            wr_test_send_time = st.time_input(
-                "測試發送時間",
-                value=_test_default_at.time(),
-                step=60,
+            wr_test_send_time = st.text_input(
+                "測試發送時間（24小時制）",
+                value=_test_default_at.strftime("%H:%M"),
+                placeholder="例如 12:40",
                 key="wr_test_send_time",
             )
         wr_test_service_date = st.date_input(
@@ -1113,7 +1114,7 @@ elif mode == "週末服務 LINE 提醒":
                 else:
                     _test_scheduled_at = (
                         f"{wr_test_send_date.strftime('%Y-%m-%d')} "
-                        f"{wr_test_send_time.strftime('%H:%M')}"
+                        f"{wr_test_send_time.strip()}"
                     )
                     _test_row = {
                         "訂單編號": st.session_state.wr_test_id,
