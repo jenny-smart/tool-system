@@ -350,7 +350,7 @@
 # v7.7 - 儲值金補價差拆兩段按鈕
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.60"
+__version__ = "8.70"
 
 import html
 import re
@@ -361,6 +361,7 @@ import streamlit.components.v1 as components
 from datetime import date, timedelta, datetime
 
 from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet, fetch_member_edit_page, submit_member_preferences, fetch_recent_service_records
+from weekend_reminders import upcoming_weekend, previous_workday, find_paid_weekend_orders, load_tracking_rows, merge_tracking_rows, save_tracking_rows, NOTICE_STATUSES, REPLY_STATUSES
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
 try:
@@ -778,6 +779,8 @@ FUNCTION_OPTIONS = [
      "memo", "📅 排班管理"),
     ("LINE通知訊息：用已成立訂單編號補產生通知訊息，支援多筆同時產生。",
      "orders", "LINE 通知產生器"),
+    ("週末服務LINE提醒：篩選週末已付款訂單、產生提醒訊息，並追蹤客人是否回覆。",
+     "orders", "週末服務 LINE 提醒"),
     ("訂單備註：舊客回購備註回填、新成單提醒建立、客服備忘錄整理。",
      "memo", "📋 客服作業"),
     ("對帳管理：ATM 待付款清單查詢、配對銀行明細、更新系統對帳。",
@@ -996,6 +999,82 @@ elif mode == "雙向訂單檢查":
                 st.warning(f"{_row_label}（訂單 {_p.get('order_no', '') or '（無）'}）：{_p.get('issue')}")
         else:
             st.success(f"✅ 工作表「{dc_result.get('sheet_name')}」檢查通過，訂單編號皆與電話/地址/日期/時段相符，後台也沒有查到工作表未記錄的訂單。")
+
+elif mode == "週末服務 LINE 提醒":
+    step("3", "週末服務 LINE 提醒")
+    info_panel("建議流程", [
+        "在畫面顯示的『建議執行日』查詢名單；系統只列服務日期區間內的已付款訂單。",
+        "逐筆開啟 LINE、複製訊息；送出後將通知狀態改為『已通知』並儲存。",
+        "客人回覆後改為『已回覆』；當天下班前仍未回覆者改為『需追蹤』並電話確認。",
+        "追蹤狀態會保存到既有 Google 試算表的『週末服務提醒』分頁。",
+    ])
+    _default_sat, _default_sun = upcoming_weekend()
+    try:
+        from memo_system.change_order import TAIWAN_PUBLIC_HOLIDAYS
+        _holidays = TAIWAN_PUBLIC_HOLIDAYS
+    except Exception:
+        _holidays = set()
+    _suggested_run_day = previous_workday(_default_sat, _holidays)
+    st.info(f"建議執行日：{_suggested_run_day.strftime('%Y-%m-%d')}；預設服務區間：{_default_sat}～{_default_sun}")
+    wr_c1, wr_c2 = st.columns(2)
+    with wr_c1:
+        wr_date_s = st.date_input("服務日期-起", value=_default_sat, key="wr_date_s")
+    with wr_c2:
+        wr_date_e = st.date_input("服務日期-迄", value=_default_sun, key="wr_date_e")
+
+    if st.button("🔍 查詢已付款名單", use_container_width=True, type="primary", key="wr_search"):
+        if not backend_email.strip() or not backend_password.strip():
+            st.error("請先在上方輸入後台帳號密碼")
+        elif wr_date_s > wr_date_e:
+            st.error("服務日期起日不可晚於迄日")
+        else:
+            try:
+                with st.spinner("登入後台並查詢已付款訂單…"):
+                    _orders, _debug = find_paid_weekend_orders(
+                        env, backend_email.strip(), backend_password.strip(),
+                        wr_date_s.strftime("%Y-%m-%d"), wr_date_e.strftime("%Y-%m-%d"),
+                    )
+                    _tracking = load_tracking_rows()
+                st.session_state.wr_rows = merge_tracking_rows(_orders, _tracking)
+                st.session_state.wr_debug = _debug
+            except Exception as e:
+                st.error(f"查詢失敗：{e}")
+
+    wr_rows = st.session_state.get("wr_rows")
+    if wr_rows is not None:
+        _debug = st.session_state.get("wr_debug", {})
+        st.caption(f"後台：{_debug.get('base_url', '')}｜找到 {len(wr_rows)} 筆已付款服務")
+        if _debug.get("hit_page_limit"):
+            st.warning("查詢已達 20 頁上限，請縮小日期範圍後再查，避免漏單。")
+        if not wr_rows:
+            st.success("此服務日期區間沒有已付款訂單。")
+        else:
+            _editable = [{k: v for k, v in row.items() if k != "LINE訊息"} for row in wr_rows]
+            _edited = st.data_editor(
+                _editable, use_container_width=True, hide_index=True, key="wr_editor",
+                disabled=["訂單編號", "服務日期", "服務時間", "姓名", "電話", "地址", "LINE", "通知時間", "回覆時間", "最後更新"],
+                column_config={
+                    "LINE": st.column_config.LinkColumn("LINE", display_text="開啟聊天"),
+                    "通知狀態": st.column_config.SelectboxColumn("通知狀態", options=NOTICE_STATUSES, required=True),
+                    "回覆狀態": st.column_config.SelectboxColumn("回覆狀態", options=REPLY_STATUSES, required=True),
+                },
+            )
+            if st.button("💾 儲存通知／回覆狀態", use_container_width=True, key="wr_save"):
+                try:
+                    count = save_tracking_rows(_edited)
+                    st.success(f"已保存 {count} 筆追蹤狀態。")
+                except Exception as e:
+                    st.error(f"儲存失敗：{e}")
+
+            st.markdown("#### LINE 提醒訊息")
+            for _idx, _row in enumerate(wr_rows):
+                with st.expander(f"{_row['服務日期']} {_row['服務時間']}｜{_row['姓名']}｜{_row['訂單編號']}"):
+                    st.text_area("訊息", _row["LINE訊息"], height=220, key=f"wr_msg_{_row['訂單編號']}")
+                    copy_button("複製訊息", _row["LINE訊息"], f"wr_copy_{_idx}")
+                    if _row.get("LINE"):
+                        st.link_button("開啟 LINE 聊天", _row["LINE"])
+                    else:
+                        st.warning("此訂單沒有 LINE 聊天連結，請改用電話聯絡。")
 
 elif mode == "查詢無LINE連結訂單":
     step("3", "查詢無LINE連結訂單")
