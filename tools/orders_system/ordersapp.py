@@ -368,6 +368,7 @@ from weekend_reminders import (
     upcoming_weekend, previous_workday, find_paid_weekend_orders,
     load_tracking_rows, merge_tracking_rows, save_tracking_rows,
     schedule_line_reminders, fetch_line_reminder_statuses,
+    fetch_line_recipients,
     apply_line_reminder_statuses, tracking_rows_tsv,
     line_id_from_chat_url,
     NOTICE_STATUSES, REPLY_STATUSES,
@@ -1063,10 +1064,45 @@ elif mode == "週末服務 LINE 提醒":
         if "wr_test_id" not in st.session_state:
             st.session_state.wr_test_id = f"TEST-{_test_now.strftime('%Y%m%d-%H%M%S')}"
         wr_test_line_url = st.text_input(
-            "測試 LINE 聊天連結",
+            "測試 LINE 聊天連結（只供開啟聊天）",
             placeholder="https://chat.line.biz/.../chat/U...",
             key="wr_test_line_url",
         )
+        st.caption("LINE 管理後台網址中的 ID 不能直接用於 Messaging API；請用測試帳號先傳一段容易辨識的文字。")
+        wr_test_lookup = st.text_input(
+            "測試帳號剛傳入的文字或 LINE 名稱",
+            value="Test",
+            key="wr_test_lookup",
+        )
+        if st.button(
+            "🔎 從 Webhook 尋找真實 LINE ID",
+            use_container_width=True,
+            key="wr_test_find_recipient",
+            disabled=not (wr_api_url and wr_api_key),
+        ):
+            try:
+                st.session_state.wr_test_recipients = fetch_line_recipients(
+                    wr_test_lookup, wr_api_url, wr_api_key,
+                )
+            except Exception as e:
+                st.error(f"尋找測試帳號失敗：{e}")
+        _test_recipients = st.session_state.get("wr_test_recipients", [])
+        _test_line_id = ""
+        if _test_recipients:
+            _test_recipient_idx = st.selectbox(
+                "Webhook 收件人（請確認名稱與最後訊息）",
+                range(len(_test_recipients)),
+                format_func=lambda idx: (
+                    f"{_test_recipients[idx].get('display_name') or '未命名'}｜"
+                    f"{_test_recipients[idx].get('message_text') or ''}｜"
+                    f"{_test_recipients[idx].get('received_at') or ''}"
+                ),
+                key="wr_test_recipient_idx",
+            )
+            _test_line_id = str(
+                _test_recipients[_test_recipient_idx].get("line_user_id") or ""
+            ).strip()
+            st.success("已取得 Webhook 的真實 LINE ID，可建立測試排程。")
         wr_test_c1, wr_test_c2 = st.columns(2)
         with wr_test_c1:
             wr_test_send_date = st.date_input(
@@ -1107,8 +1143,8 @@ elif mode == "週末服務 LINE 提醒":
             ):
                 if not wr_test_confirm:
                     st.warning("請先勾選測試確認。")
-                elif not line_id_from_chat_url(wr_test_line_url):
-                    st.warning("測試 LINE 聊天連結格式不正確。")
+                elif not _test_line_id:
+                    st.warning("請先按「從 Webhook 尋找真實 LINE ID」並選擇測試帳號。")
                 elif not wr_test_message.strip():
                     st.warning("請輸入測試訊息。")
                 else:
@@ -1124,7 +1160,7 @@ elif mode == "週末服務 LINE 提醒":
                         "電話": "",
                         "地址": "",
                         "LINE": wr_test_line_url.strip(),
-                        "LINE ID": line_id_from_chat_url(wr_test_line_url),
+                        "LINE ID": _test_line_id,
                         "預約發送時間": _test_scheduled_at,
                         "通知狀態": "待通知",
                         "通知時間": "",
