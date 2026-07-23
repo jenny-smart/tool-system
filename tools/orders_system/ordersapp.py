@@ -368,13 +368,31 @@ from weekend_reminders import (
     upcoming_weekend, previous_workday, find_paid_weekend_orders,
     load_tracking_rows, merge_tracking_rows, save_tracking_rows,
     schedule_line_reminders, fetch_line_reminder_statuses,
-    fetch_line_recipients,
     apply_line_reminder_statuses, tracking_rows_tsv,
     line_id_from_chat_url,
     NOTICE_STATUSES, REPLY_STATUSES,
 )
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
+
+
+def fetch_line_recipients(query, api_url, api_key):
+    """從 LINE Webhook 記錄搜尋 Messaging API 可使用的真實 userId。"""
+    response = requests.post(
+        f"{str(api_url).rstrip('/')}/api/reminders/recipients",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"query": str(query or "").strip()},
+        timeout=20,
+    )
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    if not response.ok:
+        raise RuntimeError(data.get("error") or f"LINE 提醒服務回傳 HTTP {response.status_code}")
+    return data.get("recipients", [])
+
+
 try:
     import quick_order as qo
 except Exception as e:
