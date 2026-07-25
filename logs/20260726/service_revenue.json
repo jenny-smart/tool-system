@@ -1,0 +1,8 @@
+{
+    "job_name": "service_revenue",
+    "status": "failed",
+    "exit_code": 1,
+    "started_at": "2026-07-26 06:52:26",
+    "finished_at": "2026-07-26 06:52:27",
+    "duration_seconds": 1
+  }
