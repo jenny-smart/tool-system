@@ -1,9 +1,14 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.60
-# 最後更新：2026-07-19
+# 版本：v8.61
+# 最後更新：2026-07-21
 #
 # Change Log
+# v8.61
+# - 新客建單的日期／時段查班表流程改為與舊客一致：使用
+#   /booking/single 的 token，先送完整服務表單到 calculate_hour，再將
+#   hour/price/price_vvip/fare 回填後查 get_section，避免同資料舊客
+#   查得到專員、新客卻因 payload 不完整而被判定無班表。
 # v8.59
 # - 所有建單的人力判斷必須來自後台回覆的「同日期＋完整同時段」名單；
 #   人數不足即停止，不得用短時段或自行推算放行。
@@ -4788,6 +4793,71 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         if is_existing_member else ""
     )
 
+    # 新會員建立完成後，直接使用舊客建單的唯一核心流程。
+    # 不再於本函式另做一套 calculate_hour/get_section，避免相同日期時段
+    # 在新客與舊客流程得到不同班表結果。
+    _lookup_for_order = {
+        "session": session,
+        "token": csrf,
+        "phone": phone,
+        "member_payload": member_payload,
+        "base_url": base_url,
+        "env_name": env_name,
+    }
+    _shared_result = quick_create_order(
+        env_name=env_name,
+        payway=payway,
+        region=get_region_by_address(address, ACCOUNTS) or "台北",
+        lookup_result=_lookup_for_order,
+        address=address,
+        clean_type_id=clean_type_id,
+        date_s=date_s,
+        period_s=period_s,
+        hour=hour,
+        person=person,
+        carrier_info=carrier_info,
+        company_no=company_no,
+        company_title=company_title,
+        invoice_type_override=invoice_type,
+        carrier_type_id_override=carrier_type_id,
+        extra_fields={
+            "ping": ping,
+            "serviceType": service_type,
+            "room": str(customer.get("room", "0")),
+            "bathroom": str(customer.get("bathroom", "0")),
+            "balcony": str(customer.get("balcony", "0")),
+            "livingroom": str(customer.get("livingroom", "0")),
+            "kitchen": str(customer.get("kitchen", "0")),
+            "window": str(customer.get("window", "")),
+            "shutter": str(customer.get("shutter", "")),
+            "clothes": str(customer.get("clothes", "0")),
+            "dyson": str(customer.get("dyson", "0")),
+            "refrigerator": str(customer.get("refrigerator", "0")),
+            "disinfection": str(customer.get("disinfection", "0")),
+            "go_abord": str(customer.get("go_abord", "0")),
+            "home_move": str(customer.get("home_move", "0")),
+            "storage": str(customer.get("storage", "0")),
+            "cabinet": str(customer.get("cabinet", "0")),
+            "quintuple": str(customer.get("quintuple", "0")),
+            "memo": memo,
+            "notice": notice,
+            "period": actual_time,
+        },
+        allow_auto_lemon_shift=allow_auto_lemon_shift,
+    )
+    _shared_result.update({
+        "member_id": member_id,
+        "date_s": date_s,
+        "period_s": period_s,
+        "period": period_s,
+        "actual_period": actual_time,
+        "hour": hour,
+        "person": person,
+        "existing_member_warning": existing_member_warning,
+        "day_type": _day_type_from_date(date_s),
+    })
+    return _shared_result
+
     # Step 3: 查或建地址，取 addressId / area_id / company_id / lat / lng
     addr_list = member.get("memberAddressList", []) or []
     address_norm = normalize_addr_for_match(address_for_lookup)
@@ -4881,22 +4951,21 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     # Step 4b: 查班表，若無人或人數不足，且客服有明確勾選「自動補檸檬人」才勾檸檬人班表；
     # v2026.07.09：查完（含補勾檸檬人重查）後，人數還是不夠就直接擋單，不再靜默放行
     # （之前 except 整段吞掉，就算查無班表/人數不足也照樣建單）。
-    token_for_section = get_csrf_token(session)
+    # 與舊客 quick_create_order 使用相同的 /booking/single token。
+    # 這裡不能再呼叫 get_csrf_token：_configure_environment 的預設
+    # BOOKING_URL 是 stored_value_routine，會讓新客查班表與一般舊客走不同表單。
+    token_for_section = csrf
     _base_data_check = {
         "clean_type_id": clean_type_id,
-        "area_id": area_id,
-        "company_id": company_id,
-        "country_id": country_id,
-        "lat": lat, "lng": lng,
-        "address": address_for_submit,
-        "person": person, "hour": hour,
-        "date_s": date_s, "period_s": period_s,
+        "phone": phone, "name": name, "email": email, "tel": tel or phone,
+        "line": line, "fbName": "", "fb": "", "memoProcess": "", "memoFinance": "",
+        "addressId": address_id, "country_id": country_id, "address": address_for_submit,
         "ping": ping, "serviceType": service_type,
-        "room": str(customer.get("room", "")),
-        "bathroom": str(customer.get("bathroom", "")),
-        "balcony": str(customer.get("balcony", "")),
-        "livingroom": str(customer.get("livingroom", "")),
-        "kitchen": str(customer.get("kitchen", "")),
+        "room": str(customer.get("room", "0")),
+        "bathroom": str(customer.get("bathroom", "0")),
+        "balcony": str(customer.get("balcony", "0")),
+        "livingroom": str(customer.get("livingroom", "0")),
+        "kitchen": str(customer.get("kitchen", "0")),
         "window": str(customer.get("window", "")),
         "shutter": str(customer.get("shutter", "")),
         "clothes": str(customer.get("clothes", "0")),
@@ -4908,7 +4977,16 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         "storage": str(customer.get("storage", "0")),
         "cabinet": str(customer.get("cabinet", "0")),
         "quintuple": str(customer.get("quintuple", "0")),
+        "hour": str(int(float(hour))), "price": "", "price_vvip": "",
+        "person": person, "date_s": date_s, "period_s": period_s,
+        "period": "", "cycle": "1", "fare": "", "memo": memo, "notice": notice,
+        "discount_code": "", "payway": payway_code,
+        "invoice_type": invoice_type, "carrier_type_id": carrier_type_id,
+        "carrier_info": carrier_info, "company_title": company_title,
+        "company_no": company_no, "donate_code": "", "is_backend": is_backend,
         "member_id": member_id,
+        "company_id": company_id, "area_id": area_id,
+        "lat": lat, "lng": lng,
     }
     if not str(country_id or "").strip():
         raise Exception(
@@ -4921,6 +4999,21 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
             "請先到後台手動確認區域，避免系統誤判成大安區。"
         )
     _validate_address_before_submit(address_for_lookup, area_id, context="新客建單")
+
+    # 後台手動建單與舊客流程都會先 calculate_hour；get_section
+    # 會依賴這些回填欄位判斷完整時段。新客原本略過這步，
+    # 會出現選 09:00-12:00 卻回到 09:00-11:00，進而誤判無人力。
+    _calc_result = calculate_hour(session, _base_data_check, token_for_section)
+    if not _calc_result:
+        raise Exception("計算時數失敗")
+    _calc_fields = extract_calc_fields(
+        _calc_result,
+        fallback_hours=_base_data_check["hour"],
+        fallback_fare="0",
+    )
+    _base_data_check["price"] = str(int(round(price_with_tax / TAX_RATE)))
+    _base_data_check["price_vvip"] = str(_calc_fields.get("price_vvip") or "0")
+    _base_data_check["fare"] = str(_calc_fields.get("fare") or "0")
 
     _slot = f"{date_s}_{period_s}"
     _raw_section = get_section_raw(session, _base_data_check, token_for_section, _slot)
