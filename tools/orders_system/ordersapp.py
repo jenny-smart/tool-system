@@ -1,13 +1,13 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.71
+# 版本：v8.72
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-07-19
 #
 # Change Log
-# v8.71
-# - 週末服務 LINE 提醒新增預約發送日期／時間，並保存到追蹤表。
-# - 通知狀態新增「已排程」，舊版追蹤表會自動安全新增排程欄。
+# v8.72
+# - 恢復週末提醒的 LINE Messaging API、Quick Reply 測試、全選與逐筆勾選排程。
+# - 測試機與正式機使用相同的已付款／服務日期篩選規則。
 # v8.70
 # - 新增「週末服務 LINE 提醒」：篩選週末已付款訂單、產生提醒訊息，
 #   並用 Google Sheet 記錄通知與客人回覆狀態。
@@ -356,7 +356,7 @@
 # v7.7 - 儲值金補價差拆兩段按鈕
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.71"
+__version__ = "8.72"
 
 import html
 import re
@@ -367,9 +367,36 @@ import streamlit.components.v1 as components
 from datetime import date, timedelta, datetime
 
 from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet, fetch_member_edit_page, submit_member_preferences, fetch_recent_service_records
-from weekend_reminders import upcoming_weekend, previous_workday, find_paid_weekend_orders, load_tracking_rows, merge_tracking_rows, save_tracking_rows, NOTICE_STATUSES, REPLY_STATUSES
+from weekend_reminders import (
+    upcoming_weekend, previous_workday, find_paid_weekend_orders,
+    load_tracking_rows, merge_tracking_rows, save_tracking_rows,
+    schedule_line_reminders, fetch_line_reminder_statuses,
+    apply_line_reminder_statuses, tracking_rows_tsv,
+    line_id_from_chat_url,
+    NOTICE_STATUSES, REPLY_STATUSES,
+)
+from cleaner_reminders import find_paid_cleaner_reminders
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
+
+
+def fetch_line_recipients(query, api_url, api_key):
+    """從 LINE Webhook 記錄搜尋 Messaging API 可使用的真實 userId。"""
+    response = requests.post(
+        f"{str(api_url).rstrip('/')}/api/reminders/recipients",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={"query": str(query or "").strip()},
+        timeout=20,
+    )
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    if not response.ok:
+        raise RuntimeError(data.get("error") or f"LINE 提醒服務回傳 HTTP {response.status_code}")
+    return data.get("recipients", [])
+
+
 try:
     import quick_order as qo
 except Exception as e:
@@ -787,6 +814,9 @@ FUNCTION_OPTIONS = [
      "orders", "LINE 通知產生器"),
     ("週末服務LINE提醒：篩選週末已付款訂單、產生提醒訊息，並追蹤客人是否回覆。",
      "orders", "週末服務 LINE 提醒"),
+    ("專員隔日上班提醒：依服務日期篩選已付款訂單、彙整每位專員班次，"
+     "並從專員詳細資料取得 LINE 聊天連結。",
+     "orders", "專員隔日上班提醒"),
     ("訂單備註：舊客回購備註回填、新成單提醒建立、客服備忘錄整理。",
      "memo", "📋 客服作業"),
     ("對帳管理：ATM 待付款清單查詢、配對銀行明細、更新系統對帳。",
@@ -1006,12 +1036,127 @@ elif mode == "雙向訂單檢查":
         else:
             st.success(f"✅ 工作表「{dc_result.get('sheet_name')}」檢查通過，訂單編號皆與電話/地址/日期/時段相符，後台也沒有查到工作表未記錄的訂單。")
 
+elif mode == "專員隔日上班提醒":
+    step("3", "專員隔日上班提醒")
+    info_panel("操作方式", [
+        "可設定服務日期區間；只納入已付款訂單，並把同一位專員跨日工作整合成一則訊息。",
+        "系統會由專員名單及詳細資料讀取 LINE 連結；勾選名單後逐筆複製訊息並開啟聊天。",
+        "此頁使用 LINE 官方帳號管理後台連結，因此由客服確認後人工送出。",
+    ])
+    cr_date_c1, cr_date_c2 = st.columns(2)
+    with cr_date_c1:
+        cr_service_date_s = st.date_input(
+            "服務日期-起",
+            value=date.today() + timedelta(days=1),
+            key="cr_service_date_s",
+        )
+    with cr_date_c2:
+        cr_service_date_e = st.date_input(
+            "服務日期-迄",
+            value=date.today() + timedelta(days=2),
+            key="cr_service_date_e",
+        )
+    if st.button(
+        "🔍 查詢已付款訂單並整合專員名單",
+        use_container_width=True,
+        type="primary",
+        key="cr_search",
+    ):
+        if not backend_email.strip() or not backend_password.strip():
+            st.error("請先在上方輸入後台帳號密碼")
+        elif cr_service_date_s > cr_service_date_e:
+            st.error("服務日期起日不可晚於迄日")
+        else:
+            try:
+                with st.spinner("查詢已付款訂單與專員 LINE 資料…"):
+                    _cleaner_rows, _cleaner_debug = find_paid_cleaner_reminders(
+                        env,
+                        backend_email.strip(),
+                        backend_password.strip(),
+                        cr_service_date_s.strftime("%Y-%m-%d"),
+                        cr_service_date_e.strftime("%Y-%m-%d"),
+                    )
+                st.session_state.cr_rows = _cleaner_rows
+                st.session_state.cr_debug = _cleaner_debug
+                st.session_state.pop("cr_editor", None)
+            except Exception as e:
+                st.error(f"查詢失敗：{e}")
+
+    cr_rows = st.session_state.get("cr_rows")
+    if cr_rows is not None:
+        _debug = st.session_state.get("cr_debug", {})
+        st.caption(
+            f"找到 {_debug.get('cleaner_count', 0)} 位專員，"
+            f"共 {_debug.get('job_count', 0)} 筆專員工作"
+        )
+        if _debug.get("hit_page_limit"):
+            st.warning("查詢已達 20 頁上限，請確認是否有漏單。")
+        if not cr_rows:
+            st.success("此服務日期沒有已付款且已排專員的訂單。")
+        else:
+            cr_select_all = st.checkbox(
+                "全選有 LINE 連結的專員（取消勾選可全部取消）",
+                value=True,
+                key="cr_select_all",
+            )
+            if st.session_state.get("cr_select_all_previous") != cr_select_all:
+                st.session_state.cr_select_all_previous = cr_select_all
+                st.session_state.pop("cr_editor", None)
+            _cleaner_table = [{
+                "選取": bool(cr_select_all and row.get("line_url")),
+                "專員": row["name"],
+                "工作筆數": len(row["jobs"]),
+                "服務日期": "、".join(sorted({
+                    job.get("service_date", "") for job in row["jobs"]
+                    if job.get("service_date")
+                })),
+                "LINE狀態": "已有連結" if row.get("line_url") else "查無連結",
+            } for row in cr_rows]
+            _cleaner_edited = st.data_editor(
+                _cleaner_table,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["專員", "工作筆數", "服務日期", "LINE狀態"],
+                key="cr_editor",
+            )
+            _cleaner_records = (
+                _cleaner_edited.to_dict("records")
+                if hasattr(_cleaner_edited, "to_dict")
+                else list(_cleaner_edited or [])
+            )
+            _selected_names = {
+                row["專員"] for row in _cleaner_records if row.get("選取")
+            }
+            st.markdown("#### 專員提醒訊息")
+            for _idx, _row in enumerate(cr_rows):
+                if _row["name"] not in _selected_names:
+                    continue
+                with st.expander(
+                    f"{_row['name']}｜{len(_row['jobs'])} 筆工作｜"
+                    f"{'已有 LINE' if _row.get('line_url') else '查無 LINE'}"
+                ):
+                    _message = st.text_area(
+                        "訊息",
+                        _row["message"],
+                        height=260,
+                        key=(
+                            f"cr_msg_{_row['name']}_"
+                            f"{_row['service_date_s']}_{_row['service_date_e']}"
+                        ),
+                    )
+                    copy_button("複製訊息", _message, f"cr_copy_{_idx}")
+                    if _row.get("line_url"):
+                        st.link_button("開啟專員 LINE 聊天", _row["line_url"])
+                    else:
+                        st.warning("專員詳細資料沒有 LINE 連結，請改用電話聯絡。")
+
 elif mode == "週末服務 LINE 提醒":
     step("3", "週末服務 LINE 提醒")
     info_panel("建議流程", [
         "在畫面顯示的『建議執行日』查詢名單；系統只列服務日期區間內的已付款訂單。",
-        "逐筆開啟 LINE、複製訊息；送出後將通知狀態改為『已通知』並儲存。",
-        "客人回覆後改為『已回覆』；當天下班前仍未回覆者改為『需追蹤』並電話確認。",
+        "設定任意分鐘的發送時間，勾選名單後建立 LINE Quick Reply 排程。",
+        "客人按『已收到』後，按同步即可帶回 LINE ID、發送時間與回覆時間。",
+        "當天下班前仍未回覆者改為『需追蹤』並電話確認。",
         "追蹤狀態會保存到既有 Google 試算表的『週末服務提醒』分頁。",
     ])
     _default_sat, _default_sun = upcoming_weekend()
@@ -1027,12 +1172,191 @@ elif mode == "週末服務 LINE 提醒":
     with wr_send_c1:
         wr_send_date = st.date_input("預約發送日期", value=_suggested_run_day, key="wr_send_date")
     with wr_send_c2:
-        wr_send_time = st.time_input(
-            "預約發送時間", value=datetime.strptime("09:00", "%H:%M").time(),
-            step=60, key="wr_send_time",
+        wr_send_time = st.text_input(
+            "預約發送時間（24小時制）",
+            value="09:00",
+            placeholder="例如 12:40",
+            key="wr_send_time",
         )
-    wr_scheduled_at = f"{wr_send_date.strftime('%Y-%m-%d')} {wr_send_time.strftime('%H:%M')}"
-    st.caption("此欄位會保存排程時間；開啟 LINE 後仍需將訊息貼入並完成 LINE 的「設定傳送時間」。")
+    wr_scheduled_at = f"{wr_send_date.strftime('%Y-%m-%d')} {wr_send_time.strip()}"
+    st.caption("可設定任意分鐘；系統會透過 LINE Messaging API 發送含「已收到」按鈕的訊息。")
+
+    try:
+        wr_api_url = st.secrets.get("LINE_REMINDER_API_URL", "")
+        wr_api_key = st.secrets.get("LINE_REMINDER_API_KEY", "")
+        # 容錯：若使用者把設定誤放在 [gcp_service_account] 後方，
+        # TOML 會將它解析成該區段的子欄位。
+        _gcp_secrets = st.secrets.get("gcp_service_account", {})
+        if not wr_api_url and hasattr(_gcp_secrets, "get"):
+            wr_api_url = _gcp_secrets.get("LINE_REMINDER_API_URL", "")
+        if not wr_api_key and hasattr(_gcp_secrets, "get"):
+            wr_api_key = _gcp_secrets.get("LINE_REMINDER_API_KEY", "")
+    except Exception:
+        wr_api_url = wr_api_key = ""
+    if not wr_api_url or not wr_api_key:
+        st.warning("尚未設定 LINE_REMINDER_API_URL／LINE_REMINDER_API_KEY，目前只能查詢與複製，不能建立 Quick Reply 排程。")
+
+    with st.expander("🧪 Quick Reply 測試（測試帳號）"):
+        st.caption("測試訊息由 LINE Messaging API 發送；「已收到」按鈕會顯示在收件人的 LINE App。")
+        _test_now = datetime.now()
+        _test_default_at = (_test_now + timedelta(minutes=10)).replace(second=0, microsecond=0)
+        if "wr_test_id" not in st.session_state:
+            st.session_state.wr_test_id = f"TEST-{_test_now.strftime('%Y%m%d-%H%M%S')}"
+        wr_test_line_url = st.text_input(
+            "測試 LINE 聊天連結（只供開啟聊天）",
+            placeholder="https://chat.line.biz/.../chat/U...",
+            key="wr_test_line_url",
+        )
+        st.caption("LINE 管理後台網址中的 ID 不能直接用於 Messaging API；請用測試帳號先傳一段容易辨識的文字。")
+        wr_test_lookup = st.text_input(
+            "測試帳號剛傳入的文字或 LINE 名稱",
+            value="Test",
+            key="wr_test_lookup",
+        )
+        if st.button(
+            "🔎 從 Webhook 尋找真實 LINE ID",
+            use_container_width=True,
+            key="wr_test_find_recipient",
+            disabled=not (wr_api_url and wr_api_key),
+        ):
+            try:
+                st.session_state.wr_test_recipients = fetch_line_recipients(
+                    wr_test_lookup, wr_api_url, wr_api_key,
+                )
+            except Exception as e:
+                st.error(f"尋找測試帳號失敗：{e}")
+        _test_recipients = st.session_state.get("wr_test_recipients", [])
+        _test_line_id = ""
+        if _test_recipients:
+            _test_recipient_idx = st.selectbox(
+                "Webhook 收件人（請確認名稱與最後訊息）",
+                range(len(_test_recipients)),
+                format_func=lambda idx: (
+                    f"{_test_recipients[idx].get('display_name') or '未命名'}｜"
+                    f"{_test_recipients[idx].get('message_text') or ''}｜"
+                    f"{_test_recipients[idx].get('received_at') or ''}"
+                ),
+                key="wr_test_recipient_idx",
+            )
+            _test_line_id = str(
+                _test_recipients[_test_recipient_idx].get("line_user_id") or ""
+            ).strip()
+            st.success("已取得 Webhook 的真實 LINE ID，可建立測試排程。")
+        wr_test_c1, wr_test_c2 = st.columns(2)
+        with wr_test_c1:
+            wr_test_send_date = st.date_input(
+                "測試發送日期",
+                value=_test_default_at.date(),
+                key="wr_test_send_date",
+            )
+        with wr_test_c2:
+            wr_test_send_time = st.text_input(
+                "測試發送時間（24小時制）",
+                value=_test_default_at.strftime("%H:%M"),
+                placeholder="例如 12:40",
+                key="wr_test_send_time",
+            )
+        wr_test_service_date = st.date_input(
+            "測試服務日期（用於追蹤識別）",
+            value=_default_sat,
+            key="wr_test_service_date",
+        )
+        wr_test_message = st.text_area(
+            "測試訊息",
+            height=220,
+            key="wr_test_message",
+            placeholder="輸入要測試的 LINE 提醒訊息",
+        )
+        wr_test_confirm = st.checkbox(
+            "我確認這是測試帳號，並同意建立測試排程",
+            key="wr_test_confirm",
+        )
+        wr_test_create_c1, wr_test_create_c2 = st.columns(2)
+        with wr_test_create_c1:
+            if st.button(
+                "📅 建立測試 Quick Reply 排程",
+                use_container_width=True,
+                type="primary",
+                key="wr_test_schedule",
+                disabled=not (wr_api_url and wr_api_key),
+            ):
+                if not wr_test_confirm:
+                    st.warning("請先勾選測試確認。")
+                elif not _test_line_id:
+                    st.warning("請先按「從 Webhook 尋找真實 LINE ID」並選擇測試帳號。")
+                elif not wr_test_message.strip():
+                    st.warning("請輸入測試訊息。")
+                else:
+                    _test_scheduled_at = (
+                        f"{wr_test_send_date.strftime('%Y-%m-%d')} "
+                        f"{wr_test_send_time.strip()}"
+                    )
+                    _test_row = {
+                        "訂單編號": st.session_state.wr_test_id,
+                        "服務日期": wr_test_service_date.strftime("%Y-%m-%d"),
+                        "服務時間": "",
+                        "姓名": "Quick Reply 測試",
+                        "電話": "",
+                        "地址": "",
+                        "LINE": wr_test_line_url.strip(),
+                        "LINE ID": _test_line_id,
+                        "預約發送時間": _test_scheduled_at,
+                        "通知狀態": "待通知",
+                        "通知時間": "",
+                        "回覆狀態": "未回覆",
+                        "回覆時間": "",
+                        "回覆備註": "測試排程",
+                        "發送錯誤": "",
+                        "最後更新": "",
+                        "LINE訊息": wr_test_message.strip(),
+                    }
+                    try:
+                        _test_saved, _test_skipped = schedule_line_reminders(
+                            [_test_row], wr_api_url, wr_api_key,
+                        )
+                        if _test_saved:
+                            _test_row["通知狀態"] = "已排程"
+                            save_tracking_rows([_test_row])
+                            st.session_state.wr_test_row = _test_row
+                            st.success(
+                                f"測試排程已建立：{_test_scheduled_at}；"
+                                "請在收件人的 LINE App 查看「已收到」按鈕。"
+                            )
+                        else:
+                            _reason = _test_skipped[0]["原因"] if _test_skipped else "未知原因"
+                            st.warning(f"未建立測試排程：{_reason}")
+                    except Exception as e:
+                        st.error(f"建立測試排程失敗：{e}")
+        with wr_test_create_c2:
+            if st.button(
+                "🔄 同步測試回覆",
+                use_container_width=True,
+                key="wr_test_sync",
+                disabled=not (
+                    wr_api_url and wr_api_key and st.session_state.get("wr_test_row")
+                ),
+            ):
+                try:
+                    _test_current = st.session_state.wr_test_row
+                    _test_remote = fetch_line_reminder_statuses(
+                        [_test_current], wr_api_url, wr_api_key,
+                    )
+                    _test_synced = apply_line_reminder_statuses(
+                        [_test_current], _test_remote,
+                    )[0]
+                    save_tracking_rows([_test_synced])
+                    st.session_state.wr_test_row = _test_synced
+                    st.success("測試狀態已同步並保存。")
+                except Exception as e:
+                    st.error(f"同步測試狀態失敗：{e}")
+        if st.session_state.get("wr_test_row"):
+            _test_status = st.session_state.wr_test_row
+            st.info(
+                f"通知狀態：{_test_status.get('通知狀態', '')}｜"
+                f"實際發送：{_test_status.get('通知時間') or '尚未發送'}｜"
+                f"回覆狀態：{_test_status.get('回覆狀態', '')}｜"
+                f"回覆時間：{_test_status.get('回覆時間') or '尚未回覆'}"
+            )
 
     st.markdown("**服務日期區間**")
     wr_c1, wr_c2 = st.columns(2)
@@ -1058,6 +1382,7 @@ elif mode == "週末服務 LINE 提醒":
                     _orders, _tracking, scheduled_at=wr_scheduled_at,
                 )
                 st.session_state.wr_debug = _debug
+                st.session_state.pop("wr_editor", None)
             except Exception as e:
                 st.error(f"查詢失敗：{e}")
 
@@ -1070,41 +1395,142 @@ elif mode == "週末服務 LINE 提醒":
         if not wr_rows:
             st.success("此服務日期區間沒有已付款訂單。")
         else:
-            _editable = [{k: v for k, v in row.items() if k != "LINE訊息"} for row in wr_rows]
+            wr_select_all = st.checkbox(
+                "全選可排程名單（取消勾選可全部取消）",
+                value=True,
+                key="wr_select_all",
+            )
+            if st.session_state.get("wr_select_all_previous") != wr_select_all:
+                st.session_state.wr_select_all_previous = wr_select_all
+                st.session_state.pop("wr_editor", None)
+            _editable = [
+                {
+                    "選取": wr_select_all and row.get("通知狀態") in ("待通知", "發送失敗"),
+                    **{k: v for k, v in row.items() if k != "LINE訊息"},
+                }
+                for row in wr_rows
+            ]
             _edited = st.data_editor(
                 _editable, use_container_width=True, hide_index=True, key="wr_editor",
-                disabled=["訂單編號", "服務日期", "服務時間", "姓名", "電話", "地址", "LINE", "通知時間", "回覆時間", "最後更新"],
+                column_order=[
+                    "選取", "訂單編號", "服務日期", "姓名",
+                    "預約發送時間", "通知狀態", "通知時間",
+                    "回覆狀態", "回覆時間", "LINE",
+                    "服務時間", "電話", "地址", "LINE ID",
+                    "回覆備註", "發送錯誤", "最後更新",
+                ],
+                disabled=[
+                    "訂單編號", "服務日期", "服務時間", "姓名", "電話", "地址",
+                    "LINE", "LINE ID", "通知時間", "回覆時間", "發送錯誤", "最後更新",
+                ],
                 column_config={
+                    "選取": st.column_config.CheckboxColumn("排程", help="勾選要建立或重新建立排程的訂單"),
                     "LINE": st.column_config.LinkColumn("LINE", display_text="開啟聊天"),
-                    "LINE ID": st.column_config.TextColumn(
-                        "LINE ID", help="回覆狀態改為「已回覆」後，會由 LINE 聊天網址自動記錄；也可手動補填。",
-                    ),
+                    "LINE ID": st.column_config.TextColumn("LINE ID", help="由 LINE 聊天網址／客人回覆自動記錄"),
                     "預約發送時間": st.column_config.TextColumn(
                         "預約發送時間", help="格式：YYYY-MM-DD HH:MM",
                         validate=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$", required=True,
                     ),
                     "通知狀態": st.column_config.SelectboxColumn("通知狀態", options=NOTICE_STATUSES, required=True),
+                    "通知時間": st.column_config.TextColumn(
+                        "實際發送時間",
+                        help="LINE Messaging API 實際成功發送的時間；按「同步發送／回覆狀態」後自動帶入並保存。",
+                    ),
                     "回覆狀態": st.column_config.SelectboxColumn("回覆狀態", options=REPLY_STATUSES, required=True),
                 },
             )
             _edited_records = _edited.to_dict("records") if hasattr(_edited, "to_dict") else _edited
-            _edited_by_order = {row["訂單編號"]: row for row in _edited_records}
+            _message_by_order = {row["訂單編號"]: row.get("LINE訊息", "") for row in wr_rows}
+            _rows_with_messages = [
+                {**row, "LINE訊息": _message_by_order.get(row.get("訂單編號"), "")}
+                for row in _edited_records
+            ]
+
+            wr_confirm_schedule = st.checkbox(
+                "我確認要為勾選的客人建立 LINE 排程",
+                key="wr_confirm_schedule",
+            )
+            wr_action_c1, wr_action_c2 = st.columns(2)
+            with wr_action_c1:
+                if st.button(
+                    "📅 建立 Quick Reply 排程",
+                    use_container_width=True,
+                    type="primary",
+                    key="wr_schedule",
+                    disabled=not (wr_api_url and wr_api_key),
+                ):
+                    if not wr_confirm_schedule:
+                        st.warning("請先勾選確認。")
+                    else:
+                        _selected = [row for row in _rows_with_messages if row.get("選取")]
+                        if not _selected:
+                            st.warning("請至少勾選一筆訂單。")
+                        else:
+                            try:
+                                _saved, _skipped = schedule_line_reminders(
+                                    _selected, wr_api_url, wr_api_key,
+                                )
+                                _saved_keys = {item.get("reminder_key") for item in _saved}
+                                for row in _edited_records:
+                                    _key = f"{row.get('訂單編號', '')}|{row.get('服務日期', '')}"
+                                    if _key in _saved_keys:
+                                        row["通知狀態"] = "已排程"
+                                save_tracking_rows(_edited_records)
+                                st.session_state.wr_rows = [
+                                    {**row, "LINE訊息": _message_by_order.get(row.get("訂單編號"), "")}
+                                    for row in _edited_records
+                                ]
+                                st.success(f"已建立 {len(_saved)} 筆排程；略過 {len(_skipped)} 筆。")
+                                if _saved:
+                                    st.info(
+                                        f"排程已建立，預計於 {wr_scheduled_at} 發送；"
+                                        "發送後按「同步發送／回覆狀態」，表單會自動記錄實際發送時間。"
+                                    )
+                                for _item in _skipped:
+                                    st.warning(f"{_item['訂單編號']}：{_item['原因']}")
+                            except Exception as e:
+                                st.error(f"建立排程失敗：{e}")
+            with wr_action_c2:
+                if st.button(
+                    "🔄 同步發送／回覆狀態",
+                    use_container_width=True,
+                    key="wr_sync",
+                    disabled=not (wr_api_url and wr_api_key),
+                ):
+                    try:
+                        _remote = fetch_line_reminder_statuses(
+                            _edited_records, wr_api_url, wr_api_key,
+                        )
+                        _synced = apply_line_reminder_statuses(_edited_records, _remote)
+                        save_tracking_rows(_synced)
+                        st.session_state.wr_rows = [
+                            {**row, "LINE訊息": _message_by_order.get(row.get("訂單編號"), "")}
+                            for row in _synced
+                        ]
+                        st.success(f"已同步 {len(_remote)} 筆 LINE 狀態。")
+                    except Exception as e:
+                        st.error(f"同步失敗：{e}")
+
             if st.button("💾 儲存通知／回覆狀態", use_container_width=True, key="wr_save"):
                 try:
                     count = save_tracking_rows(_edited_records)
-                    st.success(f"已保存 {count} 筆追蹤狀態；已回覆者會一併記錄 LINE ID。")
+                    st.success(f"已保存 {count} 筆追蹤狀態。")
                 except Exception as e:
                     st.error(f"儲存失敗：{e}")
 
+            copy_button(
+                "複製追蹤紀錄（貼到 Google Sheets 會自動分欄）",
+                tracking_rows_tsv(_edited_records),
+                "wr_copy_tracking",
+            )
+
             st.markdown("#### LINE 提醒訊息")
             for _idx, _row in enumerate(wr_rows):
-                _edited_row = _edited_by_order.get(_row["訂單編號"], _row)
                 with st.expander(f"{_row['服務日期']} {_row['服務時間']}｜{_row['姓名']}｜{_row['訂單編號']}"):
-                    st.info(f"預約發送時間：{_edited_row.get('預約發送時間') or wr_scheduled_at}")
                     st.text_area("訊息", _row["LINE訊息"], height=220, key=f"wr_msg_{_row['訂單編號']}")
                     copy_button("複製訊息", _row["LINE訊息"], f"wr_copy_{_idx}")
                     if _row.get("LINE"):
-                        st.link_button("開啟 LINE 聊天並依上述時間排程", _row["LINE"])
+                        st.link_button("開啟 LINE 聊天", _row["LINE"])
                     else:
                         st.warning("此訂單沒有 LINE 聊天連結，請改用電話聯絡。")
 
