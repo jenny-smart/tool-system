@@ -2025,6 +2025,39 @@ else:
                     st.caption(f"建單介面：{_route_label}　｜　送單網址：{_route_url}　｜　實際付款方式：{q_payway}{_payway_note}　｜　區域：{q_region}")
                     if last_summary:
                         st.markdown(last_summary_card_html(last_summary), unsafe_allow_html=True)
+
+                    # 舊客原本只能沿用歷史訂單的發票設定，無法在本次建單時修正。
+                    # 儲值金訂單本身不開立發票，因此只在信用卡／ATM 顯示此功能。
+                    q_invoice_mode = "沿用上次發票設定"
+                    q_invoice_carrier = ""
+                    q_invoice_company_title = ""
+                    q_invoice_company_no = ""
+                    if q_payway != "儲值金":
+                        q_invoice_mode = st.selectbox(
+                            "本次發票資訊",
+                            ["沿用上次發票設定", "會員載具", "手機載具", "三聯式"],
+                            key="old_invoice_mode",
+                            help="選擇非「沿用上次」時，會以本次填寫資料覆蓋歷史發票設定。",
+                        )
+                        if q_invoice_mode == "手機載具":
+                            q_invoice_carrier = st.text_input(
+                                "手機載具條碼",
+                                placeholder="/ABC1234",
+                                key="old_invoice_carrier",
+                            )
+                        elif q_invoice_mode == "三聯式":
+                            _old_inv_c1, _old_inv_c2 = st.columns(2)
+                            with _old_inv_c1:
+                                q_invoice_company_title = st.text_input(
+                                    "公司抬頭", key="old_invoice_company_title"
+                                )
+                            with _old_inv_c2:
+                                q_invoice_company_no = st.text_input(
+                                    "統一編號", key="old_invoice_company_no"
+                                )
+                    else:
+                        st.caption("發票資訊：儲值金訂單不開立發票")
+
                     upcoming_orders = get_unserved_paid_orders(lookup["session"], lookup["phone"], member_payload, addr_options, today_value=date.today())
                     if upcoming_orders:
                         st.markdown('<div class="hint-box"><b>⚠️ 目前已付款但尚未服務訂單</b><br>請先確認客人是否要異動既有訂單，避免重複建單。</div>', unsafe_allow_html=True)
@@ -2083,10 +2116,27 @@ else:
                             st.session_state.q_order_result = {}
                             st.session_state.old_results_multi = []
                             _multi_results = []
+                            try:
+                                _old_invoice_kwargs = (
+                                    {}
+                                    if q_invoice_mode == "沿用上次發票設定"
+                                    else qo._invoice_payload(
+                                        q_invoice_mode,
+                                        member_email=member.get("email") or "",
+                                        mobile_carrier=q_invoice_carrier,
+                                        company_title=q_invoice_company_title,
+                                        company_no=q_invoice_company_no,
+                                    )
+                                )
+                            except Exception as e:
+                                st.error(f"發票資訊錯誤：{e}")
+                                _old_invoice_kwargs = None
+                            if _old_invoice_kwargs is None:
+                                st.stop()
                             for _i, entry in enumerate(old_entries, start=1):
                                 try:
                                     with st.spinner(f"建單中（第 {_i}/{len(old_entries)} 筆），請稍候…"):
-                                        result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=entry["date"].strftime("%Y-%m-%d"), period_s=entry["period"], hour=entry["hour"], person=entry["person"], allow_auto_lemon_shift=old_allow_auto_lemon)
+                                        result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=entry["date"].strftime("%Y-%m-%d"), period_s=entry["period"], hour=entry["hour"], person=entry["person"], allow_auto_lemon_shift=old_allow_auto_lemon, **_old_invoice_kwargs)
                                         # 不立即發確認信，等 user 確認後再發
                                         result["mail_sent"] = False
                                         result["mail_msg"] = "尚未發送"
