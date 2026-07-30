@@ -1173,12 +1173,7 @@ elif mode == "週末服務 LINE 提醒":
                         wr_date_s.strftime("%Y-%m-%d"), wr_date_e.strftime("%Y-%m-%d"),
                     )
                     _tracking = load_tracking_rows()
-                st.session_state.wr_rows = merge_tracking_rows(
-                    _orders,
-                    _tracking,
-                    query_date_s=wr_date_s.strftime("%Y-%m-%d"),
-                    query_date_e=wr_date_e.strftime("%Y-%m-%d"),
-                )
+                st.session_state.wr_rows = merge_tracking_rows(_orders, _tracking)
                 st.session_state.wr_debug = _debug
                 st.session_state.pop("wr_editor", None)
             except Exception as e:
