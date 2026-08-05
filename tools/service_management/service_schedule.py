@@ -1,19 +1,32 @@
 """
-檔案：tools/service_management/service_schedule.py
-版本：0717_v3
-更新日期：2026-07-17
-
 檸檬家事 客服排程系統
+tools/service_management/service_schedule.py
 
-本版 Step 3 修正：
-- Gmail 改選「所有郵件 / All Mail」，不再只查 INBOX。
-- 優先使用 Gmail IMAP 擴充 X-GM-RAW，比照 GAS GmailApp.search：
-  subject:"近三日營業額-台北" after:YYYY/MM/DD before:YYYY/MM/DD
-- 若中文 X-GM-RAW 搜尋失敗或無結果，自動改用日期搜尋，再由 Python 解碼主旨比對。
-- 搜尋取得全部 UID，不受分頁限制。
-- 主旨先正規化；優先完全相等，沒有時接受包含關鍵字。
-- 同日多封符合信件時，選最接近 17:25 的一封。
-- Log 顯示登入帳號、使用信箱、搜尋條件、UID 數量與候選主旨。
+三步驟：
+  Step 1. 更新排班統計表（Drive 來源資料夾 → 目標試算表）
+  Step 2. 更新每日回報（排班統計表 → 每日回報）
+  Step 3. 更新前一天營業分數及營業額（Gmail → 每日回報）
+
+打卡：
+  - 主控表  (TOOLS_APP_LOG_SPREADSHEET_ID) → 工作表「執行記錄」
+  - 執行檔  (LEMON_TARGET_FILE_ID)         → 工作表「_py_execution_log」
+
+執行方式：
+  python -u -m tools.service_management.service_schedule --step 0   # 全部
+  python -u -m tools.service_management.service_schedule --step 1
+  python -u -m tools.service_management.service_schedule --step 2
+  python -u -m tools.service_management.service_schedule --step 3
+
+必要 GitHub Secrets：
+  GOOGLE_SERVICE_ACCOUNT        Service Account JSON 字串
+  LEMON_TARGET_FILE_ID          目標試算表 ID
+  TOOLS_APP_LOG_SPREADSHEET_ID  主控表 ID（打卡用）
+  GMAIL_USER                    Gmail 帳號（讀信）
+  GMAIL_APP_PASSWORD            Gmail App 密碼
+
+選填：
+  LOG_SPREADSHEET_ID            執行檔試算表（預設同 LEMON_TARGET_FILE_ID）
+  NOTIFY_EMAIL / NOTIFY_PASSWORD / NOTIFY_TO
 """
 
 from __future__ import annotations
@@ -74,6 +87,23 @@ CONFIG: dict[str, Any] = {
         "taichung_next":    {"source_skip_rows": 1, "target_range": "CS3"},
     },
 
+    # 依資料月份由近到遠寫入，清除時保留格式。
+    "schedule_import_slots": [
+        {"taipei": "G3:O",   "taichung": "CD3:CK"},
+        {"taipei": "V3:AD",  "taichung": "CS3:CZ"},
+        {"taipei": "AK3:AS", "taichung": "DH3:DP"},
+        {"taipei": "AZ3:BH", "taichung": "DW3:EE"},
+        {"taipei": "BO3:BW", "taichung": "EL3:ET"},
+    ],
+
+    # 每月 1 日清理前一個月的檔案。
+    "monthly_cleanup_folders": {
+        "訂單資料": "1QnOJzn-xmZ_oAMoiM6Qnfk3Y2CWuM1c4",
+        "專員個資": "199wJef-ISEP5bsSWaSseCAHynoVRE26e",
+        "專員班表": "10__ajnbpu2oabAVUG_u3RAHK2a2vcgj2",
+        "排班統計表": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
+    },
+
     # 每日回報欄位對應
     "report_mappings": [
         {"source": "Q5:S5",   "target_col": 11},   # K:M
@@ -96,8 +126,7 @@ CONFIG: dict[str, Any] = {
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive",
 ]
 
 logging.basicConfig(
@@ -270,6 +299,18 @@ def _matches(normalized: str, date_str: str, city: str) -> bool:
     return normalized == f"排班統計表{date_str}{city}"
 
 
+def _parse_schedule_filename(name: str) -> tuple[str, str, str] | None:
+    """回傳 (YYYYMM, DD, 地區)；只接受正式 Sheet 或 .xlsx。"""
+    if ".xlsx_temp_" in name.lower():
+        return None
+    match = re.fullmatch(
+        r"排班統計表(\d{6})(\d{2})-(台北|台中)(?:\.xlsx)?",
+        name.strip(),
+        flags=re.IGNORECASE,
+    )
+    return match.groups() if match else None
+
+
 def _pick_best(files: list[dict]) -> dict | None:
     if not files:
         return None
@@ -279,56 +320,75 @@ def _pick_best(files: list[dict]) -> dict | None:
     return pool[0]
 
 
-def find_schedule_files(base: datetime) -> dict[str, dict]:
+def _list_drive_files(drive, **kwargs) -> list[dict]:
+    """完整取得 Drive 分頁結果。"""
+    files: list[dict] = []
+    page_token = None
+    while True:
+        call_kwargs = dict(kwargs)
+        if page_token:
+            call_kwargs["pageToken"] = page_token
+        response = drive.files().list(**call_kwargs).execute()
+        files.extend(response.get("files", []))
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            return files
+
+
+def find_schedule_files(base: datetime) -> dict[str, dict[str, dict]]:
     drive = _drive()
-    cur = fmt(base, "%Y%m%d")
-    nxt = _build_next_month_day_str(base)
+    local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
+    current_month = fmt(local_base, "%Y%m")
+    run_day = fmt(local_base, "%d")
 
     q = (
         f"'{CONFIG['source_folder_id']}' in parents and trashed=false and ("
         "mimeType='application/vnd.google-apps.spreadsheet' or "
         "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')"
     )
-    files = drive.files().list(
+    files = _list_drive_files(
+        drive,
         q=q,
         fields="files(id,name,mimeType,modifiedTime)",
-        pageSize=100,
+        pageSize=1000,
         supportsAllDrives=True,
         includeItemsFromAllDrives=True,
-    ).execute().get("files", [])
+    )
 
     log.info("Drive 資料夾找到 %d 個檔案", len(files))
     for f in files:
         log.info("  找到檔案：%s (%s)", f.get("name"), f.get("mimeType"))
-    buckets: dict[str, list] = {
-        "taipei_current": [], "taipei_next": [],
-        "taichung_current": [], "taichung_next": [],
-    }
+    buckets: dict[str, dict[str, list[dict]]] = {}
     for f in files:
         name = f.get("name", "").strip()
-        if "_temp_" in name:
+        parsed = _parse_schedule_filename(name)
+        if not parsed:
             continue
-        n = _normalize_name(name)
-        if   _matches(n, cur, "台北"): buckets["taipei_current"].append(f)
-        elif _matches(n, nxt, "台北"): buckets["taipei_next"].append(f)
-        elif _matches(n, cur, "台中"): buckets["taichung_current"].append(f)
-        elif _matches(n, nxt, "台中"): buckets["taichung_next"].append(f)
+        month, day, city = parsed
+        if month < current_month or day != run_day:
+            continue
+        bucket = buckets.setdefault(month, {"台北": [], "台中": []})
+        bucket[city].append(f)
 
-    found = {k: _pick_best(v) for k, v in buckets.items()}
+    found: dict[str, dict[str, dict]] = {}
+    for month in sorted(buckets):
+        taipei = _pick_best(buckets[month]["台北"])
+        taichung = _pick_best(buckets[month]["台中"])
+        if not taipei or not taichung:
+            missing = "台北" if not taipei else "台中"
+            log.error("%s 缺少%s排班檔，略過該月份", month, missing)
+            continue
+        found[month] = {"taipei": taipei, "taichung": taichung}
 
-    expected = {
-        "taipei_current":   f"排班統計表{cur}-台北",
-        "taipei_next":      f"排班統計表{nxt}-台北",
-        "taichung_current": f"排班統計表{cur}-台中",
-        "taichung_next":    f"排班統計表{nxt}-台中",
-    }
-    missing = [f"{k}：{expected[k]}" for k, v in found.items() if v is None]
-    if missing:
+    if not found:
         raise FileNotFoundError(
-            "找不到以下排班檔：\n  " + "\n  ".join(missing)
+            f"找不到 {current_month} 起、日號 {run_day} 的完整台北／台中排班檔配對"
         )
 
-    log.info("排班檔確認 OK：%s", {k: v["name"] for k, v in found.items()})
+    log.info("排班檔確認 OK：%s", {
+        month: {city: info["name"] for city, info in pair.items()}
+        for month, pair in found.items()
+    })
     return found
 
 
@@ -342,13 +402,19 @@ def _a1_start(a1: str) -> tuple[int, int]:
     return int(m.group(2)), col
 
 
-def _import_block(
+def _month_offset(base: datetime, month: str) -> int:
+    """計算 YYYYMM 相對於執行月份的月數，用來保留缺檔月份的槽位。"""
+    local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
+    year, month_number = int(month[:4]), int(month[4:])
+    return (year - local_base.year) * 12 + month_number - local_base.month
+
+
+def _read_import_values(
     file_info: dict,
-    target_sheet: gspread.Worksheet,
-    cfg: dict,
     drive,
     gc: gspread.Client,
-) -> None:
+) -> list[list[str]]:
+    """完整讀取並驗證一份來源檔，本函式不會修改目標表。"""
     fid  = file_info["id"]
     mime = file_info["mimeType"]
     name = file_info["name"]
@@ -400,21 +466,77 @@ def _import_block(
         gs_ss = gc.open_by_key(new_gs_id)
         all_values = gs_ss.get_worksheet(0).get_all_values()
 
-    skip = cfg["source_skip_rows"]
+    skip = 1
     values = [(r[:9] + [""] * 9)[:9] for r in all_values[skip:]]
-    values = [r for r in values if any(c.strip() for c in r)]
+    values = [r for r in values if any(str(c).strip() for c in r)]
 
     if not values:
-        log.warning("  來源無資料，略過：%s", name)
-        return
+        raise ValueError(f"來源沒有可貼入資料：{name}")
+    return values
 
-    start_row, start_col = _a1_start(cfg["target_range"])
+
+def _write_import_values(
+    target_sheet: gspread.Worksheet,
+    target_range: str,
+    values: list[list[str]],
+) -> None:
+    """寫入已驗證的資料。"""
+    start_row, start_col = _a1_start(target_range)
     target_sheet.update(
         values=values,
         range_name=f"R{start_row}C{start_col}:R{start_row + len(values) - 1}C{start_col + 8}",
         value_input_option="USER_ENTERED",
     )
     log.info("  → 寫入 %d 列（起始 R%dC%d）", len(values), start_row, start_col)
+
+
+def _import_block(
+    file_info: dict,
+    target_sheet: gspread.Worksheet,
+    cfg: dict,
+    drive,
+    gc: gspread.Client,
+) -> None:
+    """舊介面相容；Step 1 會先批次讀取驗證再另行清除。"""
+    values = _read_import_values(file_info, drive, gc)
+    _write_import_values(target_sheet, cfg["target_range"], values)
+
+
+def cleanup_previous_month_files(run_dt: datetime, drive) -> list[str]:
+    """每月 1 日（Asia/Taipei）將四個資料夾的前月檔案移到垃圾桶。"""
+    local_dt = run_dt.astimezone(TZ_TAIPEI) if run_dt.tzinfo else run_dt.replace(tzinfo=TZ_TAIPEI)
+    if local_dt.day != 1:
+        return []
+
+    previous_month = (local_dt.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
+    trashed: list[str] = []
+    for folder_name, folder_id in CONFIG["monthly_cleanup_folders"].items():
+        q = (
+            f"'{folder_id}' in parents and trashed=false and ("
+            "mimeType='application/vnd.google-apps.spreadsheet' or "
+            "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')"
+        )
+        files = _list_drive_files(
+            drive,
+            q=q,
+            fields="files(id,name,mimeType)",
+            pageSize=1000,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
+        matched = [f for f in files if previous_month in f.get("name", "")]
+        for file_info in matched:
+            drive.files().update(
+                fileId=file_info["id"],
+                body={"trashed": True},
+                supportsAllDrives=True,
+            ).execute()
+            label = f"{folder_name}/{file_info['name']}"
+            trashed.append(label)
+            log.info("已移至垃圾桶：%s", label)
+        if not matched:
+            log.info("%s 找不到 %s 檔案（略過）", folder_name, previous_month)
+    return trashed
 
 
 # ──────────────────────────────────────────────────────────
@@ -429,21 +551,44 @@ def step1_update_schedule_stats(
     checkin_both(gc, run_id, task, "START", "RUNNING")
 
     try:
+        trashed = cleanup_previous_month_files(run_dt, drive)
         found = find_schedule_files(run_dt)
         target_ss = gc.open_by_key(CONFIG["target_file_id"])
         target_sh = target_ss.worksheet(CONFIG["target_sheet_name"])
 
-        cfg = CONFIG["import_config"]
-        _import_block(found["taipei_current"],   target_sh, cfg["taipei_current"],   drive, gc)
-        _import_block(found["taipei_next"],      target_sh, cfg["taipei_next"],      drive, gc)
-        _import_block(found["taichung_current"], target_sh, cfg["taichung_current"], drive, gc)
-        _import_block(found["taichung_next"],    target_sh, cfg["taichung_next"],    drive, gc)
+        processed: dict[str, dict[str, str]] = {}
+        slots = CONFIG["schedule_import_slots"]
+        for month, pair in found.items():
+            index = _month_offset(run_dt, month)
+            if index >= len(slots):
+                log.error("%s 超過目標表可容納的 %d 個月份，略過", month, len(slots))
+                continue
+
+            slot = slots[index]
+            try:
+                # 同月台北／台中都讀取並驗證完成後，才可清除目標。
+                taipei_values = _read_import_values(pair["taipei"], drive, gc)
+                taichung_values = _read_import_values(pair["taichung"], drive, gc)
+            except Exception as exc:
+                log.error("%s 來源讀取／驗證失敗，略過該月份：%s", month, exc)
+                continue
+
+            target_sh.batch_clear([slot["taipei"], slot["taichung"]])
+            _write_import_values(target_sh, slot["taipei"], taipei_values)
+            _write_import_values(target_sh, slot["taichung"], taichung_values)
+            processed[month] = {
+                "taipei": pair["taipei"]["name"],
+                "taichung": pair["taichung"]["name"],
+            }
+
+        if not processed:
+            raise RuntimeError("沒有任何月份成功更新")
 
         elapsed = (now_tp() - t0).total_seconds()
-        note = json.dumps({k: v["name"] for k, v in found.items()}, ensure_ascii=False)
+        note = json.dumps({"files": processed, "trashed": trashed}, ensure_ascii=False)
         checkin_both(gc, run_id, task, "DONE", "SUCCESS", note, elapsed)
         log.info("Step 1 完成（%.1fs）", elapsed)
-        return {"ok": True, "files": {k: v["name"] for k, v in found.items()}}
+        return {"ok": True, "files": processed, "trashed": trashed}
 
     except Exception as e:
         elapsed = (now_tp() - t0).total_seconds()
@@ -542,81 +687,12 @@ def _get_secret(key: str) -> str:
 
 def _imap_connect() -> imaplib.IMAP4_SSL:
     user = _get_secret("GMAIL_USER")
-    pwd = _get_secret("GMAIL_APP_PASSWORD")
+    pwd  = _get_secret("GMAIL_APP_PASSWORD")
     if not user or not pwd:
         raise EnvironmentError("需要 GMAIL_USER 和 GMAIL_APP_PASSWORD")
-
     imap = imaplib.IMAP4_SSL("imap.gmail.com")
     imap.login(user, pwd)
-
-    try:
-        if "ENABLE" in imap.capabilities:
-            imap.enable("UTF8=ACCEPT")
-    except Exception as exc:
-        log.info("  [mail] UTF8=ACCEPT 未啟用（可忽略）：%s", exc)
-
-    log.info("  [mail] Gmail 登入帳號：%s", user)
     return imap
-
-
-def _decode_imap_mailbox_name(raw_line: bytes | str) -> tuple[str, str]:
-    """解析 IMAP LIST 回傳，回傳 (flags, mailbox_name)。"""
-    if isinstance(raw_line, bytes):
-        line = raw_line.decode("utf-8", errors="replace")
-    else:
-        line = str(raw_line)
-
-    match = re.match(r'^\((?P<flags>[^)]*)\)\s+"[^"]*"\s+(?P<name>.+)$', line)
-    if not match:
-        return "", line.strip().strip('"')
-
-    flags = match.group("flags")
-    name = match.group("name").strip()
-    if name.startswith('"') and name.endswith('"'):
-        name = name[1:-1]
-    return flags, name
-
-
-def _select_all_mail(imap: imaplib.IMAP4_SSL) -> str:
-    """優先選 Gmail 的 All Mail；找不到才退回 INBOX。"""
-    candidates: list[str] = []
-
-    try:
-        status, rows = imap.list()
-        if status == "OK" and rows:
-            for row in rows:
-                if not row:
-                    continue
-                flags, name = _decode_imap_mailbox_name(row)
-                normalized = name.casefold().replace(" ", "")
-                if "\\All" in flags:
-                    candidates.insert(0, name)
-                elif normalized.endswith("/allmail") or normalized.endswith("/所有郵件"):
-                    candidates.append(name)
-    except Exception as exc:
-        log.warning("  [mail] 無法列出 Gmail 信箱：%s", exc)
-
-    candidates.extend([
-        "[Gmail]/All Mail",
-        "[Google Mail]/All Mail",
-        "[Gmail]/所有郵件",
-        "INBOX",
-    ])
-
-    seen: set[str] = set()
-    for mailbox in candidates:
-        if not mailbox or mailbox in seen:
-            continue
-        seen.add(mailbox)
-        try:
-            status, _ = imap.select(mailbox, readonly=True)
-            if status == "OK":
-                log.info("  [mail] 使用信箱：%s", mailbox)
-                return mailbox
-        except Exception:
-            continue
-
-    raise RuntimeError("Gmail 無法選取所有郵件或 INBOX")
 
 
 def _decode_subject(msg) -> str:
@@ -628,29 +704,6 @@ def _decode_subject(msg) -> str:
         else:
             result += str(part)
     return result
-
-
-
-def _normalize_subject(value: str) -> str:
-    value = str(value or "")
-    value = value.replace("\r", " ").replace("\n", " ")
-    for ch in ["\u00A0", "\u200B", "\u200C", "\u200D", "\uFEFF", "\u3000"]:
-        value = value.replace(ch, " ")
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def _subject_matches(actual: str, expected: str) -> tuple[bool, str]:
-    actual_norm = _normalize_subject(actual)
-    expected_norm = _normalize_subject(expected)
-    if actual_norm == expected_norm:
-        return True, "exact"
-    if expected_norm and expected_norm in actual_norm:
-        return True, "contains"
-    compact_actual = re.sub(r"\s+", "", actual_norm)
-    compact_expected = re.sub(r"\s+", "", expected_norm)
-    if compact_expected and compact_expected in compact_actual:
-        return True, "compact_contains"
-    return False, ""
 
 
 def _strip_html(html_text: str) -> str:
@@ -708,142 +761,59 @@ def _plain_body(msg) -> str:
     return ""
 
 
-def _imap_uid_search_x_gm_raw(imap: imaplib.IMAP4_SSL, query: str) -> list[bytes]:
-    """用 Gmail X-GM-RAW 執行 Gmail 搜尋；失敗時回傳空清單。"""
-    log.info("  [mail] X-GM-RAW：%s", query)
-    attempts = [
-        (None, "X-GM-RAW", query),
-        (None, "X-GM-RAW", f'"{query}"'),
-        (None, b"X-GM-RAW", query.encode("utf-8")),
-    ]
-    last_error = None
-    for args in attempts:
-        try:
-            status, data = imap.uid("SEARCH", *args)
-            if status == "OK" and data:
-                ids = data[0].split() if data[0] else []
-                log.info("  [mail] X-GM-RAW 找到 UID：%d", len(ids))
-                return ids
-        except Exception as exc:
-            last_error = exc
-    if last_error:
-        log.warning("  [mail] X-GM-RAW 搜尋失敗，改用日期搜尋：%s", last_error)
-    return []
-
-
-def _imap_uid_search_date(imap: imaplib.IMAP4_SSL, target_date: datetime) -> list[bytes]:
-    imap_date = fmt(target_date, "%d-%b-%Y")
-    status, data = imap.uid("SEARCH", None, "ON", imap_date)
-    if status != "OK":
-        raise RuntimeError(f"Gmail 日期搜尋失敗：{imap_date}")
-    ids = data[0].split() if data and data[0] else []
-    log.info("  [mail] 日期搜尋 %s 找到 UID：%d", imap_date, len(ids))
-    return ids
-
-
-def _fetch_message_by_uid(imap: imaplib.IMAP4_SSL, uid: bytes):
-    status, msg_data = imap.uid("FETCH", uid, "(RFC822)")
-    if status != "OK" or not msg_data:
-        return None
-    for item in msg_data:
-        if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], bytes):
-            return email.message_from_bytes(item[1])
-    return None
-
-
 def _pick_mail(subject: str, target_date: datetime) -> str:
-    """比照 GAS GmailApp.search，從所有郵件抓指定日主旨信並選最接近 17:25。"""
+    """抓 target_date 當天、主旨完全符合的信，取最接近 17:25 的那封。"""
     target_time = target_date.replace(
         hour=CONFIG["mail_target_hour"],
         minute=CONFIG["mail_target_minute"],
-        second=0,
-        microsecond=0,
+        second=0, microsecond=0,
     )
-    next_date = target_date + timedelta(days=1)
-    date_text = fmt(target_date, "%Y-%m-%d")
+    imap_date = fmt(target_date, "%d-%b-%Y")
     imap = _imap_connect()
-    decoded_subjects: list[str] = []
+    imap.select("INBOX")
 
+    # 中文主旨需用 UTF-8 搜尋（IMAP 預設 ASCII 無法處理中文）
+    search_criteria = f'(SUBJECT "{subject}" ON {imap_date})'
     try:
-        _select_all_mail(imap)
-        gmail_query = (
-            f'subject:"{subject}" '
-            f'after:{fmt(target_date, "%Y/%m/%d")} '
-            f'before:{fmt(next_date, "%Y/%m/%d")}'
-        )
-        mail_ids = _imap_uid_search_x_gm_raw(imap, gmail_query)
-        if not mail_ids:
-            mail_ids = _imap_uid_search_date(imap, target_date)
-        if not mail_ids:
-            raise RuntimeError(f"找不到 {date_text} 的任何 Gmail 信件")
-
-        candidates: list[dict[str, Any]] = []
-        for uid in mail_ids:
-            msg = _fetch_message_by_uid(imap, uid)
-            if msg is None:
-                continue
-            actual_subject = _normalize_subject(_decode_subject(msg))
-            if actual_subject:
-                decoded_subjects.append(actual_subject)
-            matched, match_mode = _subject_matches(actual_subject, subject)
-            if not matched:
-                continue
-
-            date_tuple = email.utils.parsedate_tz(msg.get("Date", ""))
-            if not date_tuple:
-                continue
-            msg_dt = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple), tz=TZ_TAIPEI)
-            if msg_dt.date() != target_date.date():
-                continue
-
-            diff = abs((msg_dt - target_time).total_seconds())
-            body = _plain_body(msg)
-            candidates.append({
-                "uid": uid.decode("ascii", errors="ignore"),
-                "subject": actual_subject,
-                "match_mode": match_mode,
-                "dt": msg_dt,
-                "diff": diff,
-                "body": body,
-            })
-            log.info(
-                "  [mail] 候選：UID=%s / %s / %s / 與17:25差%.0f秒 / %r",
-                candidates[-1]["uid"],
-                fmt(msg_dt, "%Y-%m-%d %H:%M:%S"),
-                match_mode,
-                diff,
-                actual_subject,
-            )
-
-        if not candidates:
-            sample = "、".join(repr(s) for s in decoded_subjects[:50])
-            raise RuntimeError(
-                f"找到 {date_text} 的信件，但沒有主旨等於或包含「{subject}」的信。"
-                f"登入帳號={_get_secret('GMAIL_USER')}；搜尋 UID 數={len(mail_ids)}；"
-                f"當日已解碼主旨：{sample or '無'}"
-            )
-
-        rank = {"exact": 0, "contains": 1, "compact_contains": 2}
-        candidates.sort(key=lambda item: (rank.get(item["match_mode"], 9), item["diff"]))
-        chosen = candidates[0]
-        log.info(
-            "  %s → 選中 %s（%s，與17:25差%.0f秒，UID=%s）",
-            subject,
-            fmt(chosen["dt"], "%H:%M:%S"),
-            chosen["match_mode"],
-            chosen["diff"],
-            chosen["uid"],
-        )
-        return chosen["body"]
-    finally:
+        # 嘗試 UTF-8 搜尋
+        _, data = imap.search("UTF-8", search_criteria.encode("utf-8"))
+    except Exception:
+        # fallback：用 CHARSET 參數
         try:
-            imap.close()
+            _, data = imap.uid("search", "CHARSET", "UTF-8",
+                               "SUBJECT", subject.encode("utf-8"),
+                               "ON", imap_date)
         except Exception:
-            pass
-        try:
-            imap.logout()
-        except Exception:
-            pass
+            _, data = imap.search(None, f'(ON {imap_date})')
+    mail_ids = data[0].split()
+
+    if not mail_ids:
+        imap.logout()
+        raise RuntimeError(f"找不到主旨「{subject}」在 {fmt(target_date, '%Y-%m-%d')} 的信件")
+
+    candidates = []
+    for mid in mail_ids:
+        _, msg_data = imap.fetch(mid, "(RFC822)")
+        msg = email.message_from_bytes(msg_data[0][1])
+        if _decode_subject(msg).strip() != subject:
+            continue
+        date_tuple = email.utils.parsedate_tz(msg.get("Date", ""))
+        if not date_tuple:
+            continue
+        msg_dt = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple), tz=TZ_TAIPEI)
+        if msg_dt.date() != target_date.date():
+            continue
+        diff = abs((msg_dt - target_time).total_seconds())
+        candidates.append({"dt": msg_dt, "diff": diff, "body": _plain_body(msg)})
+
+    imap.logout()
+    if not candidates:
+        raise RuntimeError(f"找到信件但沒有主旨完全符合「{subject}」且日期符合的信")
+
+    candidates.sort(key=lambda x: x["diff"])
+    chosen = candidates[0]
+    log.info("  %s → 選中 %s（與17:25差%.0fs）", subject, fmt(chosen["dt"], "%H:%M:%S"), chosen["diff"])
+    return chosen["body"]
 
 
 def _normalize_lines(text: str) -> list[str]:
