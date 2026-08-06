@@ -141,11 +141,52 @@ def build_newebpay_invoice_amounts(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_fubon_login(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    if not area or area == "全區":
+        raise ValueError("富邦登入請選擇單一區域")
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.login_only",
+        "--bank",
+        "fubon",
+        "--area",
+        area,
+    ]
+
+
+def build_fubon_download(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    start_date = str(params.get("start_date") or "").strip()
+    end_date = str(params.get("end_date") or "").strip()
+    if not area or area == "全區":
+        raise ValueError("富邦明細下載請選擇單一區域")
+    if not start_date or not end_date:
+        raise ValueError("富邦明細下載缺少開始日期或結束日期")
+    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.native_chrome",
+        "--area",
+        area,
+        "--start",
+        start_date,
+        "--end",
+        end_date,
+        "--output",
+        str(output),
+    ]
+
+
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
+register_action("fubon.login", build_fubon_login)
+register_action("fubon.download", build_fubon_download)
 
 
 def parse_params(task: dict[str, str]) -> dict[str, Any]:
