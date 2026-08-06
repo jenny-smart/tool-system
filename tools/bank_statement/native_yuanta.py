@@ -665,3 +665,19 @@ def collect_yuanta_failed_salary_rows(timeout: float = 60.0) -> tuple[int, list[
         close.click(timeout=5_000)
         time.sleep(0.5)
     return checked, failed_rows
+
+
+def logout_yuanta() -> None:
+    if _YUANTA_PAGE is None or _YUANTA_PAGE.is_closed():
+        return
+    for frame in _YUANTA_PAGE.frames:
+        logout = _visible_control(frame, "登出")
+        if logout is None:
+            text = frame.get_by_text("登出", exact=True)
+            logout = text.first if text.count() and text.first.is_visible() else None
+        if logout is not None:
+            logout.click(timeout=5_000)
+            time.sleep(1)
+            print("元大已登出。")
+            return
+    raise RuntimeError("元大找不到登出按鈕")

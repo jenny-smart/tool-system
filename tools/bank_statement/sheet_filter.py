@@ -40,6 +40,16 @@ def _normalize_amount(value: str) -> str:
     return format(number.normalize(), "f")
 
 
+def _integer_amount(value: str) -> str:
+    normalized = _normalize_amount(value)
+    if not normalized:
+        return ""
+    try:
+        return f"{Decimal(normalized):,.0f}"
+    except InvalidOperation:
+        return value
+
+
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
@@ -123,20 +133,43 @@ def _accounting_date_key(value: str) -> str:
     return date_part
 
 
+def _report_transaction_time_key(value: str) -> str:
+    text = _normalize_text(str(value))
+    for fmt in (
+        "%Y/%m/%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%y/%m/%d %H:%M:%S",
+        "%y-%m-%d %H:%M:%S",
+    ):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+    return ""
+
+
 def filter_yuanta_report_rows(
     table: CapturedTable,
     report_accounting_dates: list[list[str]],
 ) -> CapturedTable:
     """以財報 B 欄日期對應元大清單 A 欄，按同日既有列數扣除。"""
+    report_values = [str(row[0]) for row in report_accounting_dates if row]
+    existing_times = Counter(
+        key for value in report_values if (key := _report_transaction_time_key(value))
+    )
     existing_counts = Counter(
-        key
-        for row in report_accounting_dates
-        if row and (key := _accounting_date_key(row[0]))
+        key for value in report_values if (key := _accounting_date_key(value))
     )
     new_rows: list[list[str]] = []
     for row in table_target_rows(table):
+        time_key = transaction_time_key(row)
         key = _accounting_date_key(row[0])
-        if existing_counts[key] > 0:
+        if existing_times[time_key] > 0:
+            existing_times[time_key] -= 1
+            report_date = time_key[:10]
+            if existing_counts[report_date] > 0:
+                existing_counts[report_date] -= 1
+        elif existing_counts[key] > 0:
             existing_counts[key] -= 1
         elif key:
             new_rows.append(row)
@@ -214,15 +247,20 @@ def sync_bank_master_sheet(
         range=f"'{title}'!A2:G",
         body={},
     ).execute()
-    if table.rows:
+    write_rows = [list(row) for row in table.rows]
+    if bank == "fubon":
+        for row in write_rows:
+            for column in range(3, 6):
+                row[column] = _integer_amount(row[column])
+    if write_rows:
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!A2:G{len(table.rows) + 1}",
+            range=f"'{title}'!A2:G{len(write_rows) + 1}",
             # 保留銀行原始日期文字，避免 A/B 欄被轉成 2026/8/6 與 46240.36983。
             valueInputOption="RAW",
-            body={"values": table.rows},
+            body={"values": write_rows},
         ).execute()
-    if bank == "yuanta":
+    if bank in ("fubon", "yuanta"):
         service.spreadsheets().batchUpdate(
             spreadsheetId=spreadsheet_id,
             body={"requests": [{
@@ -263,3 +301,61 @@ def sync_yuanta_master_sheet(
     return sync_bank_master_sheet(
         table, area, "yuanta", service=service, spreadsheet_id=spreadsheet_id
     )
+
+
+def sync_yuanta_salary_status(
+    rows: list[list[str]],
+    *,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> int:
+    service = service or get_sheets_service()
+    spreadsheet_id = spreadsheet_id or get_master_spreadsheet_id()
+    title = "元大銀行-薪資付款狀態"
+    headers = ["區域", "收款人資料", "付款金額", "摘要", "手續費", "處理狀態/錯誤代碼"]
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(sheetId,title))",
+    ).execute()
+    sheet_ids = {
+        sheet["properties"]["title"]: sheet["properties"]["sheetId"]
+        for sheet in meta.get("sheets", [])
+    }
+    if title not in sheet_ids:
+        response = service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"frozenRowCount": 1}}}}]},
+        ).execute()
+        sheet_ids[title] = response["replies"][0]["addSheet"]["properties"]["sheetId"]
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!A1:F1",
+        valueInputOption="RAW",
+        body={"values": [headers]},
+    ).execute()
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!A2:F",
+        body={},
+    ).execute()
+    if rows:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{title}'!A2:F{len(rows) + 1}",
+            valueInputOption="RAW",
+            body={"values": rows},
+        ).execute()
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [
+            {
+                "repeatCell": {
+                    "range": {"sheetId": sheet_ids[title], "startRowIndex": 1, "startColumnIndex": column, "endColumnIndex": column + 1},
+                    "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT"}},
+                    "fields": "userEnteredFormat.horizontalAlignment",
+                }
+            }
+            for column in (2, 4)
+        ]},
+    ).execute()
+    return len(rows)

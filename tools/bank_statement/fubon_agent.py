@@ -92,6 +92,24 @@ def save_csv(table: CapturedTable, target: Path) -> None:
         writer.writerows(table.rows)
 
 
+def logout_and_close(context: BrowserContext, page: Page) -> None:
+    page = current_fubon_page(context, page) or page
+    try:
+        for frame in page.frames:
+            logout = frame.get_by_text("登出", exact=True)
+            if logout.count() and logout.first.is_visible():
+                logout.first.click(timeout=5_000)
+                page.wait_for_timeout(1_000)
+                print("富邦已登出。")
+                break
+        else:
+            print("富邦找不到登出按鈕。")
+    finally:
+        if not page.is_closed():
+            page.close()
+            print("富邦視窗已關閉。")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="共用 Agent Chrome 執行富邦登入與明細下載")
     parser.add_argument("mode", choices=("login", "download"))
@@ -116,26 +134,28 @@ def main() -> int:
         if args.mode == "login":
             print(f"富邦／{args.area} 登入完成；Agent Chrome 將保持開啟。")
             return 0
-        previous_table = find_fubon_statement(page)
-        page = open_fubon_statement(context, page, account, args.start, args.end)
-        page = current_fubon_page(context, page) or page
-        table = wait_statement(
-            page,
-            previous_fingerprint=(previous_table.fingerprint if previous_table else None),
-        )
-        if args.output:
-            target = args.output.expanduser()
-            save_csv(table, target)
-            print(f"RESULT_FILE:{target.resolve()}")
-        new_table = read_and_filter(table, args.area, "fubon")
-        # 工作表只同步與既有報表比對後的新增資料，不可寫入完整查詢結果。
-        sheet_rows = sync_fubon_master_sheet(new_table, args.area)
-        if new_table.rows:
-            copy_to_clipboard(new_table)
-        print(
-            f"富邦明細完成：共 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；"
-            f"工作表新增 {sheet_rows} 筆。"
-        )
+        try:
+            previous_table = find_fubon_statement(page)
+            page = open_fubon_statement(context, page, account, args.start, args.end)
+            page = current_fubon_page(context, page) or page
+            table = wait_statement(
+                page,
+                previous_fingerprint=(previous_table.fingerprint if previous_table else None),
+            )
+            if args.output:
+                target = args.output.expanduser()
+                save_csv(table, target)
+                print(f"RESULT_FILE:{target.resolve()}")
+            new_table = read_and_filter(table, args.area, "fubon")
+            sheet_rows = sync_fubon_master_sheet(new_table, args.area)
+            if new_table.rows:
+                copy_to_clipboard(new_table)
+            print(
+                f"富邦明細完成：共 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；"
+                f"工作表新增 {sheet_rows} 筆。"
+            )
+        finally:
+            logout_and_close(context, page)
     return 0
 
 

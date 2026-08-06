@@ -13,6 +13,7 @@ from tools.bank_statement.native_yuanta import (
     YUANTA_URL,
     bind_yuanta_page,
     configure_yuanta_query,
+    logout_yuanta,
     open_yuanta_statement_menu,
     wait_for_yuanta_login,
     wait_for_yuanta_statement,
@@ -67,23 +68,31 @@ def main() -> int:
         if args.mode == "login":
             print(f"元大／{args.area} 登入完成；沿用 Agent Chrome 工作階段。")
             return 0
-        if not args.start or not args.end:
-            raise ValueError("元大明細查詢缺少開始日期或結束日期")
-        account_number = YUANTA_ACCOUNT_OVERRIDES.get(args.area) or account.bank_account
-        if not account_number:
-            raise ValueError(f"bank_accounts.json 尚未設定元大／{args.area} 的 bank_account")
-        open_yuanta_statement_menu()
-        configure_yuanta_query(account_number, args.start, args.end)
-        table = wait_for_yuanta_statement()
-        if args.output:
-            save_csv(table, args.output.expanduser())
-            print(f"RESULT_FILE:{args.output.expanduser().resolve()}")
-        new_table = read_and_filter(table, args.area, "yuanta")
-        written = sync_yuanta_master_sheet(new_table, args.area)
-        print(
-            f"元大明細完成：區域 {args.area}；日期 {args.start:%Y/%m/%d}～{args.end:%Y/%m/%d}；"
-            f"查詢 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；寫入 {written} 筆。"
-        )
+        try:
+            if not args.start or not args.end:
+                raise ValueError("元大明細查詢缺少開始日期或結束日期")
+            account_number = YUANTA_ACCOUNT_OVERRIDES.get(args.area) or account.bank_account
+            if not account_number:
+                raise ValueError(f"bank_accounts.json 尚未設定元大／{args.area} 的 bank_account")
+            open_yuanta_statement_menu()
+            configure_yuanta_query(account_number, args.start, args.end)
+            table = wait_for_yuanta_statement()
+            if args.output:
+                save_csv(table, args.output.expanduser())
+                print(f"RESULT_FILE:{args.output.expanduser().resolve()}")
+            new_table = read_and_filter(table, args.area, "yuanta")
+            written = sync_yuanta_master_sheet(new_table, args.area)
+            print(
+                f"元大明細完成：區域 {args.area}；日期 {args.start:%Y/%m/%d}～{args.end:%Y/%m/%d}；"
+                f"查詢 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；寫入 {written} 筆。"
+            )
+        finally:
+            try:
+                logout_yuanta()
+            finally:
+                if not page.is_closed():
+                    page.close()
+                    print("元大視窗已關閉。")
     return 0
 
 
