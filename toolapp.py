@@ -20,6 +20,8 @@ import streamlit as st
 import yaml
 
 from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
+from tools.local_agent_queue import create_task as create_local_agent_task
+from tools.local_agent_queue import list_tasks as list_local_agent_tasks
 
 @st.cache_resource(show_spinner=False)
 def _get_sheets_service_cached():
@@ -1641,13 +1643,36 @@ def render_log_page() -> None:
 # ═══════════════════════════════════════════════════════════
 # 系統 / 功能設定
 # ═══════════════════════════════════════════════════════════
+def queue_cetustek_login(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "cetustek.login",
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
+def queue_cetustek_download(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "cetustek.download",
+        {
+            "month": str(month or "").strip(),
+            "area": area,
+            "format": "csv",
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 FINANCE_TASKS = [
     {"name": "【富邦銀行】富邦登入", "handler": None, "enabled": False},
     {"name": "【富邦銀行】富邦明細下載", "handler": None, "enabled": False},
     {"name": "【元大銀行】元大登入", "handler": None, "enabled": False},
     {"name": "【元大銀行】元大明細下載", "handler": None, "enabled": False},
-    {"name": "【鯨躍發票】鯨躍登入", "handler": None, "enabled": False},
-    {"name": "【鯨躍發票】鯨躍發票下載", "handler": None, "enabled": False},
+    {"name": "【鯨躍發票】登入", "handler": queue_cetustek_login, "enabled": True},
+    {"name": "【鯨躍發票】下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": None, "enabled": False},
     {"name": "【藍新金流】藍新收退款下載", "handler": None, "enabled": False},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": None, "enabled": False},
@@ -2084,6 +2109,31 @@ st.markdown("</div>", unsafe_allow_html=True)
 # UI — 日誌
 # ═══════════════════════════════════════════════════════════
 render_log()
+
+if system_type == "finance_management" and selected_function.startswith("【鯨躍發票】"):
+    try:
+        agent_tasks = [task for task in list_local_agent_tasks(limit=10) if task.get("action", "").startswith("cetustek.")]
+        if agent_tasks:
+            st.markdown("#### 本機 Agent 任務 Log")
+            st.dataframe(
+                [
+                    {
+                        "建立時間": task.get("created_at", ""),
+                        "任務": task.get("action", ""),
+                        "區域/參數": task.get("params_json", ""),
+                        "狀態": task.get("status", ""),
+                        "Agent": task.get("agent_id", ""),
+                        "訊息": task.get("message", ""),
+                    }
+                    for task in agent_tasks
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            with st.expander("最新完整 Log", expanded=agent_tasks[0].get("status") == "failed"):
+                st.code(agent_tasks[0].get("log") or "等待本機 Agent", language="text")
+    except Exception as exc:
+        st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
 
 clear_col, _ = st.columns([1, 3])
 
