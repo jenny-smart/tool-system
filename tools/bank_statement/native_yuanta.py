@@ -251,13 +251,96 @@ def _click_text(text: str, timeout: float = 20.0) -> None:
 
 
 def open_yuanta_statement_menu() -> None:
-    for step, label in enumerate(("帳戶查詢", "存款查詢", "交易明細查詢"), start=1):
-        _click_text(label)
-        print(f"步驟 {step}/4：點擊『{label}』。")
-        time.sleep(1)
+    def query_form_ready() -> bool:
+        if _YUANTA_PAGE is None or _YUANTA_PAGE.is_closed():
+            return False
+        for frame in _YUANTA_PAGE.frames:
+            account = frame.locator('[id="cacdp003:accountCombo"]')
+            if account.count() and account.first.is_visible():
+                return True
+        return False
+
+    if query_form_ready():
+        print("步驟 1～3/4：已在『帳戶查詢 → 存款查詢 → 交易明細查詢』。")
+        return
+
+    if _YUANTA_PAGE is not None and not _YUANTA_PAGE.is_closed():
+        target = None
+        for frame in _YUANTA_PAGE.frames:
+            text = frame.get_by_text("交易明細查詢", exact=True)
+            for index in range(text.count()):
+                item = text.nth(index)
+                if not item.is_visible():
+                    continue
+                link = item.locator("xpath=ancestor::a[1]")
+                if link.count() and link.first.is_visible():
+                    target = link.first
+                    break
+            if target is not None:
+                break
+        if target is None:
+            # 已在結果頁時，先回到相同功能的查詢表單。
+            for frame in _YUANTA_PAGE.frames:
+                again = frame.get_by_text("重新查詢", exact=True)
+                if again.count() and again.first.is_visible():
+                    target = again.first
+                    break
+        if target is None:
+            raise RuntimeError("元大找不到『交易明細查詢／重新查詢』連結")
+        # 使用 Playwright 真實滑鼠事件；元大不接受部分 JavaScript 合成點擊。
+        target.click(timeout=5_000)
+    else:
+        _click_text("交易明細查詢")
+
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if query_form_ready():
+            print("步驟 1～3/4：已進入『帳戶查詢 → 存款查詢 → 交易明細查詢』。")
+            return
+        time.sleep(0.5)
+    raise RuntimeError("元大點擊交易明細查詢後，表單未載入")
 
 
 def configure_yuanta_query(account_number: str, start: date, end: date) -> None:
+    if _YUANTA_PAGE is not None and not _YUANTA_PAGE.is_closed():
+        form = None
+        for frame in _YUANTA_PAGE.frames:
+            account_select = frame.locator('[id="cacdp003:accountCombo"]')
+            if account_select.count() and account_select.first.is_visible():
+                form = frame
+                break
+        if form is None:
+            raise RuntimeError("元大交易明細查詢表單尚未載入")
+        account_select = form.locator('[id="cacdp003:accountCombo"]').first
+        wanted = re.sub(r"\D", "", account_number)
+        option_value = None
+        options = account_select.locator("option")
+        for index in range(options.count()):
+            option = options.nth(index)
+            digits = re.sub(r"\D", "", option.inner_text())
+            if wanted in digits or digits.endswith(wanted[-8:]):
+                option_value = option.get_attribute("value")
+                break
+        if option_value is None:
+            raise RuntimeError(f"元大找不到帳號 {account_number}")
+        account_select.select_option(option_value)
+        form.locator('[id="cacdp003:rdoRange5"]').first.evaluate("el => el.click()")
+        for selector, value in (
+            ('[id="cacdp003:startDate"]', start.strftime("%Y/%m/%d")),
+            ('[id="cacdp003:endDate"]', end.strftime("%Y/%m/%d")),
+        ):
+            form.locator(selector).first.evaluate(
+                "(el, value) => { el.removeAttribute('readonly'); el.value=value; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }",
+                value,
+            )
+        form.locator('[id="cacdp003:startHourCombo"]').first.select_option("00")
+        form.locator('[id="cacdp003:startMinCombo"]').first.select_option("00")
+        form.locator('[id="cacdp003:endHourCombo"]').first.select_option("23")
+        form.locator('[id="cacdp003:endMinCombo"]').first.select_option("59")
+        form.locator('[id="cacdp003:linkCommand"]').first.click(timeout=5_000)
+        print(f"步驟 4/4：帳號末碼 {account_number[-5:]}，查詢 {start:%Y/%m/%d}～{end:%Y/%m/%d}。")
+        return
+
     values = json.dumps(
         {
             "account": re.sub(r"\D", "", account_number),
@@ -358,8 +441,10 @@ def normalize_yuanta_matrix(matrix: list[list[str]]) -> CapturedTable:
         key=lambda i: sum(word in "".join(matrix[i]).replace(" ", "") for word in ("交易日", "帳務日", "交易時間", "摘要", "支出", "存入", "餘額", "備註")),
     )
     source_headers = matrix[header_index]
-    date_index = _find_header(source_headers, ("帳務日期", "交易日期", "日期"), exclude=("時間",))
+    date_index = _find_header(source_headers, ("帳務日期", "帳務日", "交易日期", "日期"), exclude=("時間",))
     time_index = _find_header(source_headers, ("交易時間", "日期時間", "時間"))
+    if time_index is None:
+        time_index = _find_header(source_headers, ("交易日",))
     summary_index = _find_header(source_headers, ("摘要", "交易說明", "說明"))
     debit_index = _find_header(source_headers, ("支出", "提款", "借方"))
     credit_index = _find_header(source_headers, ("存入", "存款", "貸方"))

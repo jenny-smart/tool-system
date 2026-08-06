@@ -22,7 +22,7 @@ from tools.invoice_center.chrome_cdp import connect_existing_chrome
 
 
 YUANTA_ACCOUNT_OVERRIDES = {
-    "台北": "20212731293373",
+    "台北": "21022000300985",
     "台中": "21022000300985",
 }
 
