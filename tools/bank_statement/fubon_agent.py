@@ -54,13 +54,31 @@ def ensure_login(context: BrowserContext, account: BankAccount) -> Page:
     return wait_fubon_login(context, page)
 
 
-def wait_statement(page: Page, timeout_seconds: int = 60) -> CapturedTable:
+def wait_statement(
+    page: Page,
+    timeout_seconds: int = 60,
+    previous_fingerprint: tuple | None = None,
+) -> CapturedTable:
+    """等待查詢結果取代舊表格，並穩定後才擷取。"""
     deadline = time.monotonic() + timeout_seconds
+    unchanged_deadline = time.monotonic() + 10
+    candidate: CapturedTable | None = None
+    stable_since = 0.0
     while time.monotonic() < deadline:
         table = find_fubon_statement(page)
         if table is not None:
-            return table
-        page.wait_for_timeout(500)
+            now = time.monotonic()
+            if previous_fingerprint is not None and table.fingerprint == previous_fingerprint:
+                if now >= unchanged_deadline:
+                    return table
+                page.wait_for_timeout(250)
+                continue
+            if candidate is None or candidate.fingerprint != table.fingerprint:
+                candidate = table
+                stable_since = now
+            elif now - stable_since >= 0.75:
+                return table
+        page.wait_for_timeout(250)
     raise RuntimeError("等待富邦交易明細表逾時")
 
 
@@ -96,15 +114,20 @@ def main() -> int:
         if args.mode == "login":
             print(f"富邦／{args.area} 登入完成；Agent Chrome 將保持開啟。")
             return 0
+        previous_table = find_fubon_statement(page)
         page = open_fubon_statement(context, page, account, args.start, args.end)
         page = current_fubon_page(context, page) or page
-        table = wait_statement(page)
+        table = wait_statement(
+            page,
+            previous_fingerprint=(previous_table.fingerprint if previous_table else None),
+        )
         if args.output:
             target = args.output.expanduser()
             save_csv(table, target)
             print(f"RESULT_FILE:{target.resolve()}")
         new_table = read_and_filter(table, args.area, "fubon")
-        sheet_rows = sync_fubon_master_sheet(table, args.area)
+        # 工作表只同步與既有報表比對後的新增資料，不可寫入完整查詢結果。
+        sheet_rows = sync_fubon_master_sheet(new_table, args.area)
         if new_table.rows:
             copy_to_clipboard(new_table)
         print(
