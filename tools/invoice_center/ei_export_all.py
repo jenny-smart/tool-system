@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +69,17 @@ def month_range(yyyymm: str) -> tuple[str, str]:
     year, month = int(text[:4]), int(text[4:])
     last_day = calendar.monthrange(year, month)[1]
     return f"{year:04d}/{month:02d}/01", f"{year:04d}/{month:02d}/{last_day:02d}"
+
+
+def normalize_date_range(start: str, end: str) -> tuple[str, str]:
+    try:
+        start_date = datetime.strptime(str(start).replace("/", "-"), "%Y-%m-%d").date()
+        end_date = datetime.strptime(str(end).replace("/", "-"), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError("日期格式請使用 YYYY-MM-DD") from exc
+    if start_date > end_date:
+        raise ValueError("開始日期不可晚於結束日期")
+    return start_date.strftime("%Y/%m/%d"), end_date.strftime("%Y/%m/%d")
 
 
 def bi_month_folder(yyyymm: str) -> str:
@@ -400,6 +412,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="用瀏覽器下載 EI 各區整月發票資料")
     parser.add_argument("month", nargs="?", help="年月 YYYYMM，例如 202606")
     parser.add_argument("--month", dest="month_option", help="相容舊指令：年月 YYYYMM")
+    parser.add_argument("--start-date", help="開始日期 YYYY-MM-DD；需搭配 --end-date")
+    parser.add_argument("--end-date", help="結束日期 YYYY-MM-DD；需搭配 --start-date")
     parser.add_argument("--area", help="單一區域，例如 台中；未指定即全部已設定區域")
     parser.add_argument("--accounts", type=Path, help="EI 帳密 JSON")
     parser.add_argument("--output-root", type=Path, help="自訂輸出根目錄")
@@ -432,8 +446,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    yyyymm = normalize_month(args.month_option or args.month)
-    start, end = month_range(yyyymm)
+    month_value = args.month_option or args.month
+    if args.start_date or args.end_date:
+        if not args.start_date or not args.end_date:
+            raise ValueError("--start-date 與 --end-date 必須同時提供")
+        start, end = normalize_date_range(args.start_date, args.end_date)
+        yyyymm = start[:7].replace("/", "")
+        export_key = f"{start.replace('/', '')}-{end.replace('/', '')}"
+        range_mode = True
+    else:
+        yyyymm = normalize_month(month_value)
+        start, end = month_range(yyyymm)
+        export_key = yyyymm
+        range_mode = False
     accounts = load_accounts(args.accounts)
     areas = [normalize_area(args.area)] if args.area and args.area.lower() != "all" else configured_areas(accounts)
     csv = args.format == "csv"
@@ -514,7 +539,11 @@ def main() -> int:
                         paper_only=False,
                         csv=csv,
                         detail=args.detail,
-                        target=area_dir / f"{yyyymm}-2發票-{credentials.label}{extension}",
+                        target=area_dir / (
+                            f"{export_key}發票-{credentials.label}{extension}"
+                            if range_mode
+                            else f"{yyyymm}-2發票-{credentials.label}{extension}"
+                        ),
                     )
                     export_invoices(
                         ei_page,
@@ -523,7 +552,7 @@ def main() -> int:
                         paper_only=True,
                         csv=csv,
                         detail=args.detail,
-                        target=area_dir / f"{yyyymm}紙本發票-{credentials.label}{extension}",
+                        target=area_dir / f"{export_key}紙本發票-{credentials.label}{extension}",
                     )
                     logout_second(ei_page, credentials.label)
                     if ei_page is not portal_page:
