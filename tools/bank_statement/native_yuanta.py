@@ -501,3 +501,167 @@ def wait_for_yuanta_statement(timeout: float = 60.0) -> CapturedTable:
                 return table
         time.sleep(0.5)
     raise RuntimeError("等待元大交易明細表逾時")
+
+
+def _visible_frame_with_text(text: str) -> Any | None:
+    if _YUANTA_PAGE is None or _YUANTA_PAGE.is_closed():
+        return None
+    for frame in _YUANTA_PAGE.frames:
+        item = frame.get_by_text(text, exact=True)
+        if item.count() and item.first.is_visible():
+            return frame
+    return None
+
+
+def _visible_control(scope: Any, text: str) -> Any | None:
+    controls = scope.locator("a,button,input[type='button'],input[type='submit']")
+    for index in range(controls.count()):
+        item = controls.nth(index)
+        if not item.is_visible():
+            continue
+        label = (item.get_attribute("value") or item.inner_text() or "").strip()
+        if label == text:
+            return item
+    return None
+
+
+def open_yuanta_salary_status() -> None:
+    """進入收付款服務／薪資付款／薪資付款狀態查詢。"""
+    for text in ("收付款服務", "薪資付款", "薪資付款狀態查詢"):
+        frame = _visible_frame_with_text(text)
+        if frame is None:
+            raise RuntimeError(f"元大找不到『{text}』")
+        target = frame.get_by_text(text, exact=True)
+        visible = [target.nth(i) for i in range(target.count()) if target.nth(i).is_visible()]
+        if visible:
+            visible[-1].click(timeout=5_000)
+        time.sleep(1)
+    print("已進入『收付款服務 → 薪資付款 → 薪資付款狀態查詢』。")
+
+
+def query_yuanta_salary_last_week() -> None:
+    frame = _visible_frame_with_text("最近一週")
+    if frame is None:
+        raise RuntimeError("元大薪資付款狀態查詢表單未載入")
+    label = frame.get_by_text("最近一週", exact=True)
+    label.first.click(timeout=5_000)
+    query = _visible_control(frame, "查詢")
+    if query is not None:
+        query.click(timeout=5_000)
+        print("付款日期：最近一週；已送出查詢。")
+        return
+    raise RuntimeError("元大找不到薪資付款狀態查詢按鈕")
+
+
+def _table_matrix(table: Any) -> list[list[str]]:
+    return table.evaluate(
+        "table => [...table.rows].map(r => [...r.cells].map(c => (c.innerText || '').trim()))"
+    )
+
+
+def _salary_summary_table() -> tuple[Any, Any] | None:
+    if _YUANTA_PAGE is None or _YUANTA_PAGE.is_closed():
+        return None
+    for frame in _YUANTA_PAGE.frames:
+        tables = frame.locator("table")
+        for index in range(tables.count()):
+            table = tables.nth(index)
+            if not table.is_visible():
+                continue
+            text = re.sub(r"\s+", "", table.inner_text())
+            if "案件編號" in text and "付款日期" in text and "處理狀態" in text:
+                return frame, table
+    return None
+
+
+def _failed_salary_detail_rows() -> list[list[str]]:
+    if _YUANTA_PAGE is None or _YUANTA_PAGE.is_closed():
+        return []
+    for frame in _YUANTA_PAGE.frames:
+        tables = frame.locator("table")
+        for index in range(tables.count()):
+            table = tables.nth(index)
+            if not table.is_visible():
+                continue
+            matrix = _table_matrix(table)
+            header_index = next(
+                (i for i, row in enumerate(matrix[:6]) if "收款人資料" in "".join(row) and "付款金額" in "".join(row)),
+                None,
+            )
+            if header_index is None:
+                continue
+            headers = matrix[header_index]
+            indexes = {
+                "recipient": _find_header(headers, ("收款人資料",)),
+                "amount": _find_header(headers, ("付款金額",)),
+                "summary": _find_header(headers, ("摘要",)),
+                "fee": _find_header(headers, ("手續費",)),
+                "status": _find_header(headers, ("處理狀態", "錯誤代碼")),
+            }
+            if any(value is None for value in indexes.values()):
+                continue
+            output: list[list[str]] = []
+            for row in matrix[header_index + 1:]:
+                status_index = indexes["status"]
+                status = row[status_index].strip() if status_index < len(row) else ""
+                if "交易失敗" not in status:
+                    continue
+                output.append([
+                    row[indexes[name]].strip() if indexes[name] < len(row) else ""
+                    for name in ("recipient", "amount", "summary", "fee", "status")
+                ])
+            return output
+    raise RuntimeError("元大付款明細欄位無法辨識")
+
+
+def collect_yuanta_failed_salary_rows(timeout: float = 60.0) -> tuple[int, list[list[str]]]:
+    deadline = time.monotonic() + timeout
+    found = None
+    while time.monotonic() < deadline:
+        found = _salary_summary_table()
+        if found:
+            break
+        if _YUANTA_PAGE is not None:
+            page_text = "\n".join(
+                frame.locator("body").inner_text()
+                for frame in _YUANTA_PAGE.frames
+                if frame.locator("body").count()
+            )
+            if "查無資料" in page_text or "無符合條件" in page_text:
+                return 0, []
+        time.sleep(0.5)
+    if not found:
+        raise RuntimeError("等待元大薪資付款狀態查詢結果逾時")
+    _frame, table = found
+    rows = table.locator("tr")
+    failed_buttons: list[Any] = []
+    checked = 0
+    for index in range(rows.count()):
+        row = rows.nth(index)
+        text = re.sub(r"\s+", "", row.inner_text())
+        if not text or "案件編號" in text:
+            continue
+        if not any(status in text for status in ("交易成功", "交易失敗", "部分成功", "部分失敗")):
+            continue
+        checked += 1
+        if "交易成功" in text and "部分失敗" not in text:
+            continue
+        button = _visible_control(row, "檢視")
+        if button is not None:
+            failed_buttons.append(button)
+    failed_rows: list[list[str]] = []
+    for button in failed_buttons:
+        button.click(timeout=5_000)
+        time.sleep(1)
+        failed_rows.extend(_failed_salary_detail_rows())
+        close = None
+        if _YUANTA_PAGE is not None:
+            for frame in _YUANTA_PAGE.frames:
+                close = _visible_control(frame, "關閉")
+                if close is not None:
+                    break
+        if close is None:
+            raise RuntimeError("元大付款明細找不到關閉按鈕")
+        close.click(timeout=5_000)
+        time.sleep(0.5)
+    return checked, failed_rows
