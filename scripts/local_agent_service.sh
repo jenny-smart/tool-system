@@ -16,6 +16,7 @@ case "${1:-status}" in
     mkdir -p "$HOME/Library/LaunchAgents" "$RUNTIME_DIR" "$LOG_DIR"
     rsync -a --delete "$PROJECT_DIR/tools/" "$RUNTIME_DIR/tools/"
     launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+    sleep 1
     cp "$SOURCE_PLIST" "$TARGET_PLIST"
     plutil -lint "$TARGET_PLIST" >/dev/null
     launchctl bootstrap "$DOMAIN" "$TARGET_PLIST"

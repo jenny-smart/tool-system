@@ -1729,6 +1729,23 @@ def queue_newebpay_download(*, month="", start_date=None, end_date=None, area="�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, area="全區"):
+    if month:
+        months = str(month).strip()
+    elif start_date and end_date:
+        start_month = start_date.strftime("%Y%m")
+        end_month = end_date.strftime("%Y%m")
+        months = start_month if start_month == end_month else f"{start_month}-{end_month}"
+    else:
+        raise ValueError("請選擇日期區間")
+    task = create_local_agent_task(
+        "newebpay.invoice_amounts",
+        {"months": months, "area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": None, "enabled": False},
@@ -1739,7 +1756,7 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
-    {"name": "【藍新金流】藍新手續費發票金額", "handler": None, "enabled": False},
+    {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
