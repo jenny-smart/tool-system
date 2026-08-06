@@ -29,6 +29,29 @@ def get_service_account_info() -> dict[str, Any]:
     if path and Path(path).exists():
         return json.loads(Path(path).read_text(encoding="utf-8"))
 
+    local_secret_paths = []
+    explicit_secrets = os.getenv("TOOLS_APP_SECRETS_FILE", "").strip()
+    if explicit_secrets:
+        local_secret_paths.append(Path(explicit_secrets).expanduser())
+    local_secret_paths.extend([
+        Path.cwd() / ".streamlit" / "secrets.toml",
+        Path.home() / ".streamlit" / "secrets.toml",
+        Path.home() / "lemon" / ".streamlit" / "secrets.toml",
+    ])
+    for secret_path in local_secret_paths:
+        if not secret_path.exists():
+            continue
+        try:
+            import toml
+
+            secrets_data = toml.loads(secret_path.read_text(encoding="utf-8"))
+            for key in ("GOOGLE_SERVICE_ACCOUNT", "gcp_service_account"):
+                info = secrets_data.get(key)
+                if isinstance(info, dict) and info:
+                    return dict(info)
+        except Exception:
+            continue
+
     if st is not None:
         for key in ["GOOGLE_SERVICE_ACCOUNT", "gcp_service_account"]:
             try:
