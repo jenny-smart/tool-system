@@ -145,8 +145,8 @@ python3 tools/invoice_center/ei_export_all.py 202606
 
 Tool System 的「財務管理」可建立以下本機任務：
 
-- `【鯨躍發票】登入`
-- `【鯨躍發票】下載`
+- `【鯨躍發票】鯨躍登入`
+- `【鯨躍發票】鯨躍發票下載`
 
 先保持鯨躍 Chrome 開啟：
 

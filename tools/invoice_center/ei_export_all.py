@@ -312,6 +312,21 @@ def logout_second(page: Page, label: str) -> None:
         raise RuntimeError(f"{label} 第二層登出失敗：{exc}") from exc
 
 
+def logout_portal(page: Page) -> None:
+    controls = page.locator("a,button,input[type='button'],input[type='submit']")
+    for index in range(controls.count()):
+        item = controls.nth(index)
+        if not item.is_visible():
+            continue
+        label = (item.get_attribute("value") or item.inner_text() or "").strip()
+        if label in ("登出", "會員登出"):
+            item.click(timeout=5_000)
+            page.wait_for_timeout(1_000)
+            print("[第一層] 鯨躍已登出")
+            return
+    raise RuntimeError("第一層鯨躍找不到登出按鈕")
+
+
 def set_readonly_value(page: Page, selector: str, value: str) -> None:
     page.locator(selector).evaluate(
         "(el, value) => { el.removeAttribute('readonly'); el.value = value; "
@@ -530,6 +545,18 @@ def main() -> int:
                     input("\n發生錯誤，瀏覽器會保留供檢查。查看完成後按 Enter 關閉：")
                 except EOFError:
                     pass
+            else:
+                pages = [page for page in context.pages if not page.is_closed()]
+                for open_page in pages:
+                    try:
+                        if "cetustek.com.tw" in open_page.url:
+                            logout_portal(open_page)
+                    except Exception as exc:
+                        failures.append(f"鯨躍第一層: {exc}")
+                    finally:
+                        if ("cetustek.com.tw" in open_page.url or "ei.com.tw" in open_page.url) and not open_page.is_closed():
+                            open_page.close()
+                print("鯨躍視窗已關閉。")
 
     if failures:
         print("\n未完成：", file=sys.stderr)
