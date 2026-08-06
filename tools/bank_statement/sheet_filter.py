@@ -148,7 +148,8 @@ def sync_fubon_master_sheet(
         service.spreadsheets().values().append(
             spreadsheetId=spreadsheet_id,
             range=f"'{title}'!A:G",
-            valueInputOption="USER_ENTERED",
+            # 保留銀行原始日期文字，避免 A/B 欄被轉成 2026/8/6 與 46240.36983。
+            valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": new_table.rows},
         ).execute()
