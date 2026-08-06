@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -17,12 +20,14 @@ from tools.local_agent_queue import (
     default_agent_id,
     now_text,
     update_task,
+    write_agent_heartbeat,
 )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CommandBuilder = Callable[[dict[str, Any]], list[str]]
 ACTION_HANDLERS: dict[str, CommandBuilder] = {}
+AGENT_VERSION = "1"
 
 
 def register_action(action: str, builder: CommandBuilder) -> None:
@@ -255,6 +260,38 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def heartbeat_loop(agent_id: str, stop_event: threading.Event, interval: float = 10) -> None:
+    service = get_sheets_service()
+    spreadsheet_id = get_master_spreadsheet_id()
+    actions = sorted(ACTION_HANDLERS)
+    while not stop_event.is_set():
+        try:
+            write_agent_heartbeat(
+                agent_id,
+                status="online",
+                pid=os.getpid(),
+                actions=actions,
+                version=AGENT_VERSION,
+                service=service,
+                spreadsheet_id=spreadsheet_id,
+            )
+        except Exception as exc:
+            print(f"Heartbeat 失敗：{exc}", file=sys.stderr, flush=True)
+        stop_event.wait(max(3.0, interval))
+    try:
+        write_agent_heartbeat(
+            agent_id,
+            status="offline",
+            pid=os.getpid(),
+            actions=actions,
+            version=AGENT_VERSION,
+            service=service,
+            spreadsheet_id=spreadsheet_id,
+        )
+    except Exception:
+        pass
+
+
 def main() -> int:
     args = parse_args()
     service = get_sheets_service()
@@ -263,7 +300,21 @@ def main() -> int:
         f"Local Agent ready: {args.agent_id}; actions={','.join(sorted(ACTION_HANDLERS))}",
         flush=True,
     )
-    while True:
+    stop_event = threading.Event()
+
+    def request_stop(_signum: int, _frame: Any) -> None:
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    heartbeat = threading.Thread(
+        target=heartbeat_loop,
+        args=(args.agent_id, stop_event),
+        name="local-agent-heartbeat",
+        daemon=True,
+    )
+    heartbeat.start()
+    while not stop_event.is_set():
         try:
             task = claim_next_task(
                 agent_id=args.agent_id,
@@ -274,7 +325,7 @@ def main() -> int:
             print(f"Queue 連線失敗，{args.poll_seconds:g} 秒後重試：{exc}", file=sys.stderr, flush=True)
             if args.once:
                 return 1
-            time.sleep(max(1.0, args.poll_seconds))
+            stop_event.wait(max(1.0, args.poll_seconds))
             continue
         if task:
             run_task(task, service=service, spreadsheet_id=spreadsheet_id)
@@ -284,7 +335,10 @@ def main() -> int:
             print("No pending task", flush=True)
             return 0
         else:
-            time.sleep(max(1.0, args.poll_seconds))
+            stop_event.wait(max(1.0, args.poll_seconds))
+    stop_event.set()
+    heartbeat.join(timeout=5)
+    return 0
 
 
 if __name__ == "__main__":

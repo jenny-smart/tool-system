@@ -13,6 +13,7 @@ from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_ser
 
 __all__ = [
     "LOG_SHEET_NAME",
+    "STATUS_SHEET_NAME",
     "SHEET_NAME",
     "append_task_log",
     "claim_next_task",
@@ -20,14 +21,17 @@ __all__ = [
     "default_agent_id",
     "ensure_task_sheet",
     "list_tasks",
+    "list_agent_status",
     "now_text",
     "read_task_log",
     "update_task",
+    "write_agent_heartbeat",
 ]
 
 
 SHEET_NAME = "本機Agent任務"
 LOG_SHEET_NAME = "本機Agent任務Log"
+STATUS_SHEET_NAME = "本機Agent狀態"
 HEADERS = [
     "task_id",
     "created_at",
@@ -43,6 +47,7 @@ HEADERS = [
     "result_json",
 ]
 LOG_HEADERS = ["task_id", "seq", "logged_at", "content"]
+STATUS_HEADERS = ["agent_id", "status", "last_seen", "pid", "actions", "version"]
 TZ = ZoneInfo("Asia/Taipei")
 _ENSURED_SPREADSHEETS: set[str] = set()
 
@@ -106,6 +111,7 @@ def ensure_task_sheet(service: Any | None = None, spreadsheet_id: str = "") -> t
     if spreadsheet_id not in _ENSURED_SPREADSHEETS:
         _ensure_sheet(service, spreadsheet_id, SHEET_NAME, HEADERS)
         _ensure_sheet(service, spreadsheet_id, LOG_SHEET_NAME, LOG_HEADERS)
+        _ensure_sheet(service, spreadsheet_id, STATUS_SHEET_NAME, STATUS_HEADERS)
         _ENSURED_SPREADSHEETS.add(spreadsheet_id)
     return service, spreadsheet_id
 
@@ -235,6 +241,77 @@ def read_task_log(
                 seq = 0
             matches.append((seq, str(values[3])))
     return "".join(content for _seq, content in sorted(matches))
+
+
+def write_agent_heartbeat(
+    agent_id: str,
+    *,
+    status: str = "online",
+    pid: int | str = "",
+    actions: list[str] | tuple[str, ...] | None = None,
+    version: str = "1",
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> None:
+    service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
+    rows = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{STATUS_SHEET_NAME}'!A2:F",
+    ).execute().get("values", [])
+    row_number = None
+    for index, row in enumerate(rows, start=2):
+        if row and str(row[0]) == agent_id:
+            row_number = index
+            break
+    values = [
+        agent_id,
+        status,
+        now_text(),
+        str(pid),
+        ",".join(actions or ()),
+        version,
+    ]
+    if row_number is None:
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{STATUS_SHEET_NAME}'!A:F",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [values]},
+        ).execute()
+    else:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{STATUS_SHEET_NAME}'!A{row_number}:F{row_number}",
+            valueInputOption="RAW",
+            body={"values": [values]},
+        ).execute()
+
+
+def list_agent_status(
+    *,
+    max_age_seconds: int = 30,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> list[dict[str, Any]]:
+    service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
+    rows = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{STATUS_SHEET_NAME}'!A2:F",
+    ).execute().get("values", [])
+    now = datetime.now(TZ)
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        values = list(row) + [""] * (len(STATUS_HEADERS) - len(row))
+        item = dict(zip(STATUS_HEADERS, values[: len(STATUS_HEADERS)]))
+        try:
+            last_seen = datetime.strptime(item["last_seen"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+            fresh = (now - last_seen).total_seconds() <= max_age_seconds
+        except (TypeError, ValueError):
+            fresh = False
+        item["online"] = item.get("status") == "online" and fresh
+        result.append(item)
+    return result
 
 
 def claim_next_task(
