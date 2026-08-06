@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+"""
+檔案：toolapp.py
+版本：0704_v3
+更新日期：2026-07-04
+"""
 import html
 import json
 import os
@@ -134,6 +139,11 @@ DEFAULT_CONFIG = {
             "type": "invoice_center",
             "enabled": True,
             "regions": ["台北", "台中", "桃園", "新竹", "高雄"],
+        },
+        {
+            "name": "財務管理",
+            "type": "finance_management",
+            "enabled": True,
         },
     ]
 }
@@ -562,9 +572,7 @@ st.markdown(
     """
 <style>
   .stApp { background: #f4f8fc; }
-  #MainMenu, footer { visibility: hidden; }
-  /* 不隱藏整個 header：側欄收合後的重新開啟按鈕位於 header 內。 */
-  [data-testid="stHeader"] { background: transparent; }
+  #MainMenu, footer, header { visibility: hidden; }
 
   .app-title {
     font-size: 1.45rem;
@@ -999,6 +1007,9 @@ def available_areas_for_system(system: dict) -> list[str]:
     if system_type == "invoice_center":
         return ["台北", "台中", "桃園", "新竹", "高雄"]
 
+    if system_type == "finance_management":
+        return ["全區", "台北", "台中", "桃園", "新竹", "高雄"]
+
     # 舊日排程目前腳本本身會跑全部區域，先提供全區。
     return ["全區"]
 
@@ -1095,6 +1106,7 @@ def get_system_type_label(system_type: str) -> str:
         "service_schedule": "客服排程系統",   # ★ 新增
         "gmail_401": "Gmail 401歸檔",
         "invoice_center": "發票中心",
+        "finance_management": "財務管理",
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -1629,6 +1641,18 @@ def render_log_page() -> None:
 # ═══════════════════════════════════════════════════════════
 # 系統 / 功能設定
 # ═══════════════════════════════════════════════════════════
+FINANCE_TASKS = [
+    {"name": "【富邦銀行】富邦登入", "handler": None, "enabled": False},
+    {"name": "【富邦銀行】富邦明細下載", "handler": None, "enabled": False},
+    {"name": "【元大銀行】元大登入", "handler": None, "enabled": False},
+    {"name": "【元大銀行】元大明細下載", "handler": None, "enabled": False},
+    {"name": "【鯨躍發票】鯨躍登入", "handler": None, "enabled": False},
+    {"name": "【鯨躍發票】鯨躍發票下載", "handler": None, "enabled": False},
+    {"name": "【藍新金流】藍新登入", "handler": None, "enabled": False},
+    {"name": "【藍新金流】藍新收退款下載", "handler": None, "enabled": False},
+    {"name": "【藍新金流】藍新手續費發票金額", "handler": None, "enabled": False},
+]
+
 SYSTEM_FUNCTIONS_BY_TYPE = {
     "vip": [
         "建立當月彙整檔",
@@ -1690,6 +1714,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "發票下載",
         "設定",
     ],
+    "finance_management": [task["name"] for task in FINANCE_TASKS],
 }
 
 DAILY_SCRIPT_MAP = {
@@ -1921,6 +1946,25 @@ with date_col:
                 end_date_value = st.date_input("結束日期", value=today_date, key="monthly_end_date")
             period = start_date_value.strftime("%Y%m%d")
 
+    elif system_type == "finance_management":
+        today_date = datetime.now(TW_TZ).date()
+        st.markdown('<div class="field-label">📆 月份與日期區間</div>', unsafe_allow_html=True)
+        period = st.text_input(
+            "月份",
+            value=today_date.strftime("%Y%m"),
+            placeholder="例如：202608",
+            key="finance_month",
+        )
+        d1, d2 = st.columns(2)
+        with d1:
+            start_date_value = st.date_input(
+                "開始日期", value=today_date.replace(day=1), key="finance_start_date"
+            )
+        with d2:
+            end_date_value = st.date_input(
+                "結束日期", value=today_date, key="finance_end_date"
+            )
+
     elif system_type in ["vip", "monthly_scheduler"]:
         st.markdown('<div class="field-label">📆 執行期別</div>', unsafe_allow_html=True)
         period = st.text_input(
@@ -2075,6 +2119,7 @@ if can_access_page("settings"):
         system_type_options = [
             "vip", "daily_scheduler", "monthly_scheduler",
             "field_daily_schedule", "service_schedule", "gmail_401", "invoice_center",
+            "finance_management",
         ]
 
         if st.session_state.adding_system:
@@ -2328,6 +2373,27 @@ if run_clicked:
         st.rerun()
 
     system_type = selected_system.get("type", "vip")
+
+    if system_type == "finance_management":
+        finance_task = next(
+            (task for task in FINANCE_TASKS if task["name"] == selected_function),
+            None,
+        )
+        finance_handler = finance_task.get("handler") if finance_task else None
+
+        if not finance_task or not finance_task.get("enabled") or not callable(finance_handler):
+            add_log("此功能尚未接入本機 Agent", "warning")
+        else:
+            result = finance_handler(
+                month=period,
+                start_date=start_date_value,
+                end_date=end_date_value,
+                area=selected_area_value,
+            )
+            if result is not None:
+                add_log(str(result), "success")
+        st.rerun()
+
     master_id = selected_system.get("master_spreadsheet_id", "")
     folder_id = selected_system.get("folder_id", "")
 
