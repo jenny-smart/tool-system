@@ -113,19 +113,21 @@ def filter_existing_rows(
 
 def _accounting_date_key(value: str) -> str:
     text = _normalize_text(str(value))
-    for fmt in ("%Y/%m/%d", "%Y-%m-%d"):
+    # 財報 B 欄是交易日期時間；元大清單 A 欄是純帳務日期，只比較日期部分。
+    date_part = text.split(" ", 1)[0]
+    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%y/%m/%d", "%y-%m-%d"):
         try:
-            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(date_part, fmt).strftime("%Y-%m-%d")
         except ValueError:
             pass
-    return text
+    return date_part
 
 
 def filter_yuanta_report_rows(
     table: CapturedTable,
     report_accounting_dates: list[list[str]],
 ) -> CapturedTable:
-    """以財報 B 欄對應元大清單 A 欄，按同日既有列數扣除。"""
+    """以財報 B 欄日期對應元大清單 A 欄，按同日既有列數扣除。"""
     existing_counts = Counter(
         key
         for row in report_accounting_dates
@@ -147,7 +149,7 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     client = gspread.authorize(credentials)
     worksheet = client.open_by_key(target.spreadsheet_id).get_worksheet_by_id(target.worksheet_gid)
     if bank == "yuanta":
-        # 財報 B 欄（帳務日）對應「元大銀行-區域」A 欄（帳務日期）。
+        # 財報 B 欄（交易日期時間）的日期對應「元大銀行-區域」A 欄。
         return filter_yuanta_report_rows(table, worksheet.get("B2:B"))
     existing_rows = worksheet.get("B:H")
     return filter_existing_rows(table, existing_rows)
@@ -165,9 +167,13 @@ def sync_bank_master_sheet(
     spreadsheet_id = spreadsheet_id or get_master_spreadsheet_id()
     meta = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
-        fields="sheets(properties(title))",
+        fields="sheets(properties(sheetId,title))",
     ).execute()
-    titles = {sheet["properties"]["title"] for sheet in meta.get("sheets", [])}
+    sheet_ids = {
+        sheet["properties"]["title"]: sheet["properties"]["sheetId"]
+        for sheet in meta.get("sheets", [])
+    }
+    titles = set(sheet_ids)
     bank_name = {"fubon": "富邦銀行", "yuanta": "元大銀行"}.get(bank)
     if not bank_name:
         raise ValueError(f"不支援的銀行：{bank}")
@@ -180,6 +186,14 @@ def sync_bank_master_sheet(
                 for title in missing
             ]},
         ).execute()
+        meta = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields="sheets(properties(sheetId,title))",
+        ).execute()
+        sheet_ids = {
+            sheet["properties"]["title"]: sheet["properties"]["sheetId"]
+            for sheet in meta.get("sheets", [])
+        }
     for name in BANK_AREAS:
         title = f"{bank_name}-{name}"
         current = service.spreadsheets().values().get(
@@ -207,6 +221,22 @@ def sync_bank_master_sheet(
             # 保留銀行原始日期文字，避免 A/B 欄被轉成 2026/8/6 與 46240.36983。
             valueInputOption="RAW",
             body={"values": table.rows},
+        ).execute()
+    if bank == "yuanta":
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_ids[title],
+                        "startRowIndex": 1,
+                        "startColumnIndex": 3,
+                        "endColumnIndex": 6,
+                    },
+                    "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT"}},
+                    "fields": "userEnteredFormat.horizontalAlignment",
+                }
+            }]},
         ).execute()
     return len(table.rows)
 
