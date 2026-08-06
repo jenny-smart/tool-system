@@ -78,8 +78,47 @@ def build_cetustek_download(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_newebpay_login(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    if not area or area == "全區":
+        raise ValueError("藍新登入請選擇單一區域")
+    return [
+        sys.executable,
+        "-m",
+        "tools.newebpay.login_only",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+    ]
+
+
+def build_newebpay_download(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    start_date = str(params.get("start_date") or "").strip()
+    end_date = str(params.get("end_date") or "").strip()
+    if not start_date or not end_date:
+        raise ValueError("藍新下載缺少開始日期或結束日期")
+    command = [
+        sys.executable,
+        "-m",
+        "tools.newebpay.download_reports",
+        "--start-date",
+        start_date,
+        "--end-date",
+        end_date,
+        "--cdp-url",
+        cdp_url,
+    ]
+    if area and area != "全區":
+        command.extend(["--area", area])
+    return command
+
+
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
+register_action("newebpay.login", build_newebpay_login)
+register_action("newebpay.download", build_newebpay_download)
 
 
 def parse_params(task: dict[str, str]) -> dict[str, Any]:
@@ -106,6 +145,7 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
     preview = ""
     pending_log = ""
     next_seq = 1
+    result_files: list[str] = []
 
     def record(text: str) -> None:
         nonlocal preview, pending_log
@@ -144,6 +184,10 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
             line = raw_line.rstrip("\r\n")
             print(line, flush=True)
             record(line)
+            if line.startswith("RESULT_FILE:"):
+                file_path = line.split(":", 1)[1].strip()
+                if file_path and file_path not in result_files:
+                    result_files.append(file_path)
             if time.monotonic() - last_upload >= 3:
                 flush_full_log()
                 update_task(
@@ -156,6 +200,8 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
         return_code = process.wait()
         status = "completed" if return_code == 0 else "failed"
         message = "執行完成" if return_code == 0 else f"執行失敗（exit {return_code}）"
+        if return_code == 0 and result_files:
+            message += "；檔案：" + "、".join(result_files)
         record(f"[{now_text()}] {status.upper()} {message}")
         flush_full_log()
         update_task(
@@ -166,7 +212,11 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
                 "message": message,
                 "log": preview,
                 "result_json": json.dumps(
-                    {"exit_code": return_code, "log_sheet": LOG_SHEET_NAME},
+                    {
+                        "exit_code": return_code,
+                        "files": result_files,
+                        "log_sheet": LOG_SHEET_NAME,
+                    },
                     ensure_ascii=False,
                 ),
             },
