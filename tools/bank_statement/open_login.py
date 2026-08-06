@@ -89,7 +89,7 @@ def fill_fubon(page: Page, account: BankAccount) -> None:
     visible_login.click(force=True)
     context: Frame | Page | None = None
     fields = []
-    for _ in range(120):
+    for _ in range(40):
         for candidate in [page, *page.frames]:
             try:
                 body_text = candidate.locator("body").inner_text(timeout=500)
@@ -123,13 +123,13 @@ def fill_fubon(page: Page, account: BankAccount) -> None:
 
     # 富邦彈窗開啟後會再初始化動態鍵盤；太早填寫會被清空。
     # 密碼欄另有安全鍵盤腳本，不能用 input_value 回讀判斷是否成功。
-    page.wait_for_timeout(1_500)
+    page.wait_for_timeout(750)
 
     def type_like_user(locator: object, value: str) -> None:
         locator.click()
         locator.press("Meta+A")
         locator.press("Backspace")
-        locator.type(value, delay=45)
+        locator.type(value, delay=15)
 
     type_like_user(identity, account.login_id)
     type_like_user(user_code, account.user_code)
@@ -264,8 +264,8 @@ def wait_fubon_login(
             else:
                 stable_href = ""
                 stable_ms = 0
-            # 富邦登入後仍會初始化首頁權杖；連續穩定 8 秒再操作。
-            if stable_ms >= 8_000:
+            # 登入後短暫確認首頁權杖穩定即可接續執行。
+            if stable_ms >= 2_000:
                 return page
         else:
             stable_ms = 0
@@ -436,6 +436,33 @@ def find_account_row(page: Page, account: BankAccount, timeout_ms: int = 5_000) 
     return None
 
 
+def query_form_context(page: Page) -> tuple[Frame | Page, object, object] | None:
+    for candidate in [page, *page.frames]:
+        start = candidate.locator('[id="form1:startDate"]')
+        end = candidate.locator('[id="form1:endDate"]')
+        if start.count() and end.count() and start.first.is_visible() and end.first.is_visible():
+            return candidate, start.first, end.first
+    return None
+
+
+def wait_fubon_query_form(
+    browser_context: BrowserContext,
+    page: Page,
+    timeout_ms: int = 20_000,
+) -> tuple[Page, Frame | Page, object, object]:
+    waited = 0
+    while waited < timeout_ms:
+        page = current_fubon_page(browser_context, page) or page
+        if not page.is_closed():
+            found = query_form_context(page)
+            if found:
+                context, start, end = found
+                return page, context, start, end
+        time.sleep(0.25)
+        waited += 250
+    raise RuntimeError("富邦未能進入交易明細查詢頁")
+
+
 def open_fubon_statement(
     browser_context: BrowserContext,
     page: Page,
@@ -446,11 +473,16 @@ def open_fubon_statement(
     if not account.bank_account:
         raise RuntimeError("bank_accounts.json 尚未設定 bank_account，無法選擇查詢帳號")
 
-    # 首頁有同名的隱藏舊連結 CDS01，點擊會帶入失效權杖並被登出。
-    # 只點畫面上可見的 CBO03 功能方塊。
-    if not has_visible_text(page, "快速功能") and not has_visible_text(page, "查詢期間"):
-        tile = visible_in_viewport(page, "a.menu_CBO03.task_CBOQU003", timeout_ms=30_000)
-        print("已找到可見的『我的存款』CBO03，開始點擊。")
+    query_form = query_form_context(page)
+    if query_form is None:
+        account_row = find_account_row(page, account, timeout_ms=2_000)
+    else:
+        account_row = None
+
+    # 尚未在帳號清單時，從首頁點「我的存款」。
+    if query_form is None and account_row is None:
+        tile = visible_in_viewport(page, "a.menu_CBO03.task_CBOQU003", timeout_ms=10_000)
+        print("步驟 1/4：點擊『我的存款』。")
         try:
             tile.click(force=True, no_wait_after=True, timeout=5_000)
         except Exception:
@@ -467,43 +499,25 @@ def open_fubon_statement(
             browser_context, page, ("快速功能",), timeout_ms=10_000
         )
         print("已進入『我的存款』帳號清單。")
+        account_row = find_account_row(page, account, timeout_ms=10_000)
 
-    if not has_visible_text(page, "查詢期間"):
-        account_row = find_account_row(page, account, timeout_ms=30_000)
+    if query_form is None:
         if account_row is None:
             raise RuntimeError(f"我的存款頁找不到帳號末碼 {account.bank_account[-5:]}")
-        print(f"已找到帳號末碼 {account.bank_account[-5:]}，開啟快速功能。")
+        print(f"步驟 2/4：帳號末碼 {account.bank_account[-5:]}，開啟『快速功能』。")
         open_account_quick_menu(page, account_row)
-        _, statement_query = visible_text(page, "交易明細查詢", timeout_ms=10_000)
+        _, statement_query = visible_text(page, "交易明細查詢", timeout_ms=5_000)
         click_nearest_control(statement_query)
-        print("已點擊『交易明細查詢』。")
+        print("步驟 3/4：點擊『交易明細查詢』。")
+        page, context, start_input, end_input = wait_fubon_query_form(browser_context, page)
+    else:
+        context, start_input, end_input = query_form
 
-        # 此動作會關閉「我的存款」舊分頁並建立查詢分頁，必須重新綁定 Page。
-        page = wait_fubon_page_with_text(
-            browser_context,
-            page,
-            ("自訂查詢", "查詢期間"),
-            timeout_ms=30_000,
-        )
-
-    try:
-        context, custom = visible_text(page, "自訂查詢", timeout_ms=10_000)
-    except RuntimeError:
-        print("請確認已進入『交易明細查詢』；程式會接著自動選帳號與填日期。")
-        context, custom = visible_text(page, "自訂查詢", timeout_ms=180_000)
-    row = custom.locator("xpath=ancestor::tr[1]")
-    radios = row.locator('input[type="radio"]')
-    for index in range(radios.count()):
-        radio = radios.nth(index)
-        if radio.is_visible():
-            radio.check(force=True)
-            break
-    inputs = row.locator('input:not([type="hidden"]):not([type="radio"])')
-    visible_inputs = [inputs.nth(index) for index in range(inputs.count()) if inputs.nth(index).is_visible()]
-    if len(visible_inputs) < 2:
-        raise RuntimeError("富邦自訂查詢找不到起訖日期欄位")
-    write_date_input(visible_inputs[0], start)
-    write_date_input(visible_inputs[1], end)
+    custom = context.locator('[id="form1:rdoCustom"]')
+    if custom.count() and custom.first.is_visible():
+        custom.first.check(force=True)
+    write_date_input(start_input, start)
+    write_date_input(end_input, end)
 
     if account.bank_account:
         selects = context.locator("select")
@@ -520,7 +534,7 @@ def open_fubon_statement(
 
     _, query = visible_text(page, "開始查詢", timeout_ms=10_000)
     query.click()
-    print(f"已自動查詢富邦明細：{start:%Y/%m/%d}～{end:%Y/%m/%d}")
+    print(f"步驟 4/4：查詢日期 {start:%Y/%m/%d}～{end:%Y/%m/%d}。")
     return current_fubon_page(browser_context, page) or page
 
 
