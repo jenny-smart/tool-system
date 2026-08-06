@@ -1792,12 +1792,22 @@ def queue_yuanta_download(*, month="", start_date=None, end_date=None, area="全
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "yuanta.salary_status",
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
+    {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
     {"name": "【鯨躍發票】登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
@@ -2118,9 +2128,17 @@ with date_col:
         if selected_function == "【本機 Agent】啟動":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("啟動 launchd 常駐服務，不需選擇日期", icon="🟢")
-        elif selected_function in ("【鯨躍發票】登入", "【藍新金流】藍新登入", "【富邦銀行】富邦登入"):
+        elif selected_function in (
+            "【鯨躍發票】登入",
+            "【藍新金流】藍新登入",
+            "【富邦銀行】富邦登入",
+            "【元大銀行】元大登入",
+        ):
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("登入不需選擇月份或日期", icon="🔐")
+        elif selected_function == "【元大銀行】檢查薪資付款狀態":
+            st.markdown('<div class="field-label">📆 付款日期</div>', unsafe_allow_html=True)
+            st.info("固定查詢最近一週", icon="📅")
         elif selected_function == "【富邦銀行】富邦明細下載":
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -2312,6 +2330,9 @@ with area_col:
         "【藍新金流】藍新登入",
         "【富邦銀行】富邦登入",
         "【富邦銀行】富邦明細下載",
+        "【元大銀行】元大登入",
+        "【元大銀行】元大明細下載",
+        "【元大銀行】檢查薪資付款狀態",
     ):
         area_select_options = [area for area in area_options if area != "全區"]
 
@@ -2340,7 +2361,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ═══════════════════════════════════════════════════════════
 render_log()
 
-if system_type == "finance_management" and selected_function.startswith(("【鯨躍發票】", "【藍新金流】", "【富邦銀行】")):
+if system_type == "finance_management" and selected_function.startswith(("【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】")):
     try:
         agent_tasks = [
             task
