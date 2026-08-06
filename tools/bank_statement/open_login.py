@@ -234,8 +234,6 @@ def wait_fubon_login(
 ) -> Page:
     """富邦登入可能關閉原分頁並開新分頁，因此每輪都重新鎖定有效頁面。"""
     waited = 0
-    stable_ms = 0
-    stable_href = ""
     while waited < timeout_ms:
         active_page = current_fubon_page(context, page)
         if active_page is None:
@@ -252,39 +250,14 @@ def wait_fubon_login(
                     break
         except Exception:
             # 分頁正於登入後替換；下一輪改抓新分頁。
-            stable_ms = 0
-            stable_href = ""
             time.sleep(0.5)
             waited += 500
             continue
         if logged_in:
-            navigation_ready = has_visible_text(page, "快速功能") or has_visible_text(page, "查詢期間")
-            if not navigation_ready:
-                try:
-                    tile = visible_in_viewport(
-                        page, "a.menu_CBO03.task_CBOQU003", timeout_ms=500
-                    )
-                    href = tile.get_attribute("href") or "visible_my_deposit"
-                    navigation_ready = True
-                except RuntimeError:
-                    href = ""
-            else:
-                href = "existing_page"
-
-            if navigation_ready and href == stable_href:
-                stable_ms += 500
-            elif navigation_ready:
-                stable_href = href
-                stable_ms = 500
-            else:
-                stable_href = ""
-                stable_ms = 0
-            # 登入後短暫確認首頁權杖穩定即可接續執行。
-            if stable_ms >= 2_000:
-                return page
-        else:
-            stable_ms = 0
-            stable_href = ""
+            # 一偵測到已登入便交給明細流程；首頁元件可能延遲載入，
+            # 不應在此重複等待「我的存款」或快速功能。
+            time.sleep(0.25)
+            return current_fubon_page(context, page) or page
         time.sleep(0.5)
         waited += 500
     raise RuntimeError("等待富邦登入逾時")
