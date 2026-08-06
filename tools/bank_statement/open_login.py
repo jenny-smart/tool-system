@@ -299,13 +299,13 @@ def is_fubon_logged_in(page: Page) -> bool:
         return False
     if any("/Logout.faces" in url for url in frame_urls):
         return True
-    for context in [page, *page.frames]:
-        for text in ("登出", "我的存款", "快速功能", "查詢期間"):
-            locator = context.get_by_text(text, exact=True)
-            for index in range(locator.count()):
-                if locator.nth(index).is_visible():
-                    return True
-    return False
+    # 登入後主要功能會載入 /B2C/<功能代碼>/... 頁框；登入前僅有 /common/。
+    # 僅依 URL 判斷，避免舊 PreLogin frame 的 DOM locator 永久等待。
+    return any(
+        "/B2C/" in url and "/B2C/common/" not in url
+        for url in frame_urls
+        if url.startswith("http")
+    )
 
 
 def wait_visible_text(page: Page, text: str, timeout_ms: int = 2_000) -> bool:
