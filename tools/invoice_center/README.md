@@ -109,7 +109,7 @@ python3 -m tools.invoice_center.cetustek_login_only --area 台中
 程式預設連接已開啟的 Chrome，不會每次另開視窗。第一次先開啟可供程式連接、且會保留 Cookie 的 Chrome：
 
 ```bash
-open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/EI account/chrome_profile"
+open -na "Google Chrome" --args --remote-debugging-port=9222
 ```
 
 這個 Chrome 視窗保持開啟即可。第一層成功登入一次後會保留 Cookie；後續程式會直接連接同一視窗。執行全部區域時，也只登入第一層一次，接著逐區完成第二層登入、匯出及登出。
@@ -151,7 +151,7 @@ Tool System 的「財務管理」可建立以下本機任務：
 先保持鯨躍 Chrome 開啟：
 
 ```bash
-open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/EI account/chrome_profile"
+open -na "Google Chrome" --args --remote-debugging-port=9222
 ```
 
 再啟動 Local Agent：

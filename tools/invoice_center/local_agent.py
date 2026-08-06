@@ -43,25 +43,28 @@ def command_for(task: dict[str, str]) -> list[str]:
             sys.executable,
             "-m",
             "tools.invoice_center.cetustek_login_only",
-            "--require-existing-chrome",
             "--cdp-url",
             cdp_url,
         ]
     else:
         month = str(params.get("month") or "").strip()
-        if not month:
-            raise ValueError("下載任務缺少 month（YYYYMM）")
+        start_date = str(params.get("start_date") or "").strip()
+        end_date = str(params.get("end_date") or "").strip()
+        if not month and not (start_date and end_date):
+            raise ValueError("下載任務必須提供月份或日期區間")
         command = [
             sys.executable,
             "-m",
             "tools.invoice_center.ei_export_all",
-            month,
-            "--require-existing-chrome",
             "--cdp-url",
             cdp_url,
             "--format",
             str(params.get("format") or "csv"),
         ]
+        if month:
+            command.append(month)
+        else:
+            command.extend(["--start-date", start_date, "--end-date", end_date])
         if bool(params.get("detail")):
             command.append("--detail")
     if area and area != "全區":

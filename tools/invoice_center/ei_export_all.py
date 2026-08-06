@@ -22,13 +22,17 @@ else:
     from .config import AREA_ENV, EICredentials, normalize_area
     from .query import to_roc_date
 
+from tools.invoice_center.chrome_cdp import (
+    DEFAULT_CDP_URL,
+    connect_existing_chrome,
+    find_invoice_pages,
+)
+
 
 PORTAL_LOGIN_URL = "https://www.cetustek.com.tw/memberlogin.php"
 PORTAL_MEMBER_URL = "https://www.cetustek.com.tw/member.php"
 EI_LOGIN_URL = "https://www.ei.com.tw/InvoiceRent/index.jsp"
 EI_EXPORT_URL = "https://www.ei.com.tw/InvoiceRent/invoiceexport.jsp"
-DEFAULT_CHROME_PROFILE = Path.home() / "EI account" / "chrome_profile"
-
 DEFAULT_ACCOUNT_PATHS = [
     Path.home() / "EI account" / "ei_accounts.json",
     Path.home() / "EI_account" / "ei_accounts.json",
@@ -185,8 +189,7 @@ def fill_if_present(page: Page, selector: str, value: str) -> None:
 
 def login_portal(page: Page, accounts: dict[str, Any]) -> None:
     install_dialog_log(page, "第一層")
-    # 使用會保留 Cookie 的專用 Chrome 設定檔。已登入過第一層時，
-    # member.php 會直接開啟會員頁，不必再次輸入帳密與驗證碼。
+    # 沿用目前 Chrome 的登入狀態；已登入時直接使用會員頁。
     page.goto(PORTAL_MEMBER_URL, wait_until="domcontentloaded")
     try:
         find_ei_link(page)
@@ -256,7 +259,14 @@ def open_second_login(context: BrowserContext, portal_page: Page) -> Page:
 def login_second(page: Page, credentials: EICredentials) -> None:
     install_dialog_log(page, credentials.label)
     page.wait_for_load_state("domcontentloaded")
-    if page.locator("#userid").count() == 0:
+    login_field = page.locator("#userid")
+    if (
+        "ei.com.tw/InvoiceRent" in page.url
+        and (login_field.count() == 0 or not login_field.first.is_visible())
+    ):
+        print(f"[{credentials.label}] 沿用目前 EI 登入狀態")
+        return
+    if login_field.count() == 0:
         page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
     page.locator("#userid").fill(credentials.userid)
     page.locator("#pwd").fill(credentials.password)
@@ -419,27 +429,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, help="自訂輸出根目錄")
     parser.add_argument("--format", choices=("csv", "excel"), default="csv")
     parser.add_argument("--detail", action="store_true", help="匯出含明細")
-    parser.add_argument("--slow-mo", type=int, default=100, help="瀏覽器每步延遲毫秒")
-    parser.add_argument(
-        "--chrome-profile",
-        type=Path,
-        default=DEFAULT_CHROME_PROFILE,
-        help=f"保留第一層登入狀態的 Chrome 設定檔（預設：{DEFAULT_CHROME_PROFILE}）",
-    )
     parser.add_argument(
         "--cdp-url",
-        default="http://127.0.0.1:9222",
+        default=DEFAULT_CDP_URL,
         help="連接已開啟 Chrome 的控制網址（預設：http://127.0.0.1:9222）",
-    )
-    parser.add_argument(
-        "--launch-chrome",
-        action="store_true",
-        help="略過 CDP 偵測，直接由程式使用指定 Chrome Profile 開啟視窗",
-    )
-    parser.add_argument(
-        "--require-existing-chrome",
-        action="store_true",
-        help="只允許連接已用遠端除錯模式開啟的 Chrome；連不到時直接報錯",
     )
     return parser.parse_args()
 
@@ -468,68 +461,29 @@ def main() -> int:
 
     failures: list[str] = []
     with sync_playwright() as playwright:
-        chrome_profile = args.chrome_profile.expanduser()
-        chrome_profile.mkdir(parents=True, exist_ok=True)
-
-        connected_browser = None
-        owns_context = False
-        context = None
-
-        # 先嘗試接管已經用 remote-debugging-port 開啟的 Chrome。
-        # 一般方式啟動的 Chrome 無法在啟動後再被 Playwright 接管。
-        if not args.launch_chrome:
-            try:
-                connected_browser = playwright.chromium.connect_over_cdp(args.cdp_url)
-                if connected_browser.contexts:
-                    context = connected_browser.contexts[0]
-                    print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
-                else:
-                    connected_browser.close()
-                    connected_browser = None
-            except Exception:
-                connected_browser = None
-
-        if context is None:
-            if args.require_existing_chrome:
-                raise RuntimeError(
-                    f"找不到可連接的 Chrome：{args.cdp_url}\n"
-                    "請先以 --remote-debugging-port=9222 啟動 Chrome，"
-                    "或移除 --require-existing-chrome 讓程式自動開啟專用視窗。"
-                )
-
-            # 連不到既有 Chrome 時，自動用同一個 EI 專用 Profile 開啟。
-            # 此 Profile 會保留 Cookie 與登入狀態，不需每次重新建立帳號。
-            try:
-                context = playwright.chromium.launch_persistent_context(
-                    user_data_dir=chrome_profile,
-                    channel="chrome",
-                    headless=False,
-                    slow_mo=args.slow_mo,
-                    accept_downloads=True,
-                    locale="zh-TW",
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    f"無法開啟 EI 專用 Chrome Profile：{chrome_profile}\n"
-                    "可能已有另一個 Chrome 正在使用同一個 Profile。"
-                ) from exc
-            owns_context = True
-            print(f"瀏覽器：已自動開啟 EI 專用 Chrome Profile：{chrome_profile}")
-
-        portal_page = next(
-            (page for page in context.pages if "cetustek.com.tw" in page.url),
-            None,
-        ) or context.new_page()
+        _browser, context = connect_existing_chrome(playwright, args.cdp_url)
+        print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
+        portal_page, existing_ei_page = find_invoice_pages(context)
         try:
-            login_portal(portal_page, accounts)
             for index, area in enumerate(areas):
                 credentials = credentials_for(area, accounts)
                 print(f"\n開始處理：{credentials.label}")
                 try:
+                    reused_existing_ei = (
+                        index == 0
+                        and portal_page is None
+                        and existing_ei_page is not None
+                    )
+                    if reused_existing_ei:
+                        ei_page = existing_ei_page
+                    else:
+                        if portal_page is None or "cetustek.com.tw" not in portal_page.url:
+                            portal_page = context.new_page()
+                        login_portal(portal_page, accounts)
+                        ei_page = open_second_login(context, portal_page)
                     if index and "cetustek.com.tw" not in portal_page.url:
                         portal_page = context.new_page()
                         portal_page.goto(PORTAL_MEMBER_URL, wait_until="domcontentloaded")
-                    ei_page = open_second_login(context, portal_page)
                     login_second(ei_page, credentials)
                     area_dir = output_dir(area, accounts, yyyymm, args.output_root)
                     export_invoices(
@@ -555,7 +509,7 @@ def main() -> int:
                         target=area_dir / f"{export_key}紙本發票-{credentials.label}{extension}",
                     )
                     logout_second(ei_page, credentials.label)
-                    if ei_page is not portal_page:
+                    if ei_page is not portal_page and not reused_existing_ei:
                         ei_page.close()
                 except Exception as exc:
                     failures.append(f"{credentials.label}: {exc}")
@@ -566,9 +520,6 @@ def main() -> int:
                     input("\n發生錯誤，瀏覽器會保留供檢查。查看完成後按 Enter 關閉：")
                 except EOFError:
                     pass
-            if owns_context and context is not None:
-                context.close()
-            # 連接既有 Chrome 時只結束 Playwright 連線，不關閉使用者的 Chrome。
 
     if failures:
         print("\n未完成：", file=sys.stderr)
