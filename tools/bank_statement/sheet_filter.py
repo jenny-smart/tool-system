@@ -3,18 +3,21 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 from tools.bank_statement.capture import CapturedTable
 from tools.bank_statement.google_config import load_google_credentials, load_sheet_target
+from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 
 
 SCOPES = (
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 )
+FUBON_AREAS = ("台北", "台中", "桃園", "新竹", "高雄")
 
 
 def _note_first_line(value: str) -> str:
@@ -97,3 +100,56 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     worksheet = client.open_by_key(target.spreadsheet_id).get_worksheet_by_id(target.worksheet_gid)
     existing_rows = worksheet.get("B:H")
     return filter_existing_rows(table, existing_rows)
+
+
+def sync_fubon_master_sheet(
+    table: CapturedTable,
+    area: str,
+    *,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> int:
+    service = service or get_sheets_service()
+    spreadsheet_id = spreadsheet_id or get_master_spreadsheet_id()
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(title))",
+    ).execute()
+    titles = {sheet["properties"]["title"] for sheet in meta.get("sheets", [])}
+    missing = [f"富邦銀行-{name}" for name in FUBON_AREAS if f"富邦銀行-{name}" not in titles]
+    if missing:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [
+                {"addSheet": {"properties": {"title": title, "gridProperties": {"frozenRowCount": 1}}}}
+                for title in missing
+            ]},
+        ).execute()
+    for name in FUBON_AREAS:
+        title = f"富邦銀行-{name}"
+        current = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{title}'!A1:G1",
+        ).execute().get("values", [])
+        if not current:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{title}'!A1:G1",
+                valueInputOption="RAW",
+                body={"values": [table.headers]},
+            ).execute()
+    title = f"富邦銀行-{area}"
+    existing = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!A2:G",
+    ).execute().get("values", [])
+    new_table = filter_existing_rows(table, existing)
+    if new_table.rows:
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{title}'!A:G",
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": new_table.rows},
+        ).execute()
+    return len(new_table.rows)

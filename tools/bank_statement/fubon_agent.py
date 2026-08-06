@@ -19,7 +19,7 @@ from tools.bank_statement.open_login import (
     parse_date,
     wait_fubon_login,
 )
-from tools.bank_statement.sheet_filter import read_and_filter
+from tools.bank_statement.sheet_filter import read_and_filter, sync_fubon_master_sheet
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
 
@@ -102,9 +102,13 @@ def main() -> int:
             save_csv(table, target)
             print(f"RESULT_FILE:{target.resolve()}")
         new_table = read_and_filter(table, args.area, "fubon")
+        sheet_rows = sync_fubon_master_sheet(table, args.area)
         if new_table.rows:
             copy_to_clipboard(new_table)
-        print(f"富邦明細完成：共 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆。")
+        print(
+            f"富邦明細完成：共 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；"
+            f"工作表新增 {sheet_rows} 筆。"
+        )
     return 0
 
 
