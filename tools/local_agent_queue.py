@@ -12,6 +12,7 @@ from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_ser
 
 
 SHEET_NAME = "本機Agent任務"
+LOG_SHEET_NAME = "本機Agent任務Log"
 HEADERS = [
     "task_id",
     "created_at",
@@ -26,7 +27,9 @@ HEADERS = [
     "log",
     "result_json",
 ]
+LOG_HEADERS = ["task_id", "seq", "logged_at", "content"]
 TZ = ZoneInfo("Asia/Taipei")
+_ENSURED_SPREADSHEETS: set[str] = set()
 
 
 def now_text() -> str:
@@ -37,29 +40,32 @@ def default_agent_id() -> str:
     return os.getenv("TOOL_LOCAL_AGENT_ID", "").strip() or socket.gethostname()
 
 
-def _sheet_id(service: Any, spreadsheet_id: str) -> int | None:
+def _sheet_id(service: Any, spreadsheet_id: str, sheet_name: str) -> int | None:
     meta = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
         fields="sheets(properties(sheetId,title))",
     ).execute()
     for sheet in meta.get("sheets", []):
         props = sheet.get("properties", {})
-        if props.get("title") == SHEET_NAME:
+        if props.get("title") == sheet_name:
             return int(props["sheetId"])
     return None
 
 
-def ensure_task_sheet(service: Any | None = None, spreadsheet_id: str = "") -> tuple[Any, str]:
-    service = service or get_sheets_service()
-    spreadsheet_id = spreadsheet_id or get_master_spreadsheet_id()
-    if _sheet_id(service, spreadsheet_id) is None:
+def _ensure_sheet(
+    service: Any,
+    spreadsheet_id: str,
+    sheet_name: str,
+    headers: list[str],
+) -> None:
+    if _sheet_id(service, spreadsheet_id, sheet_name) is None:
         service.spreadsheets().batchUpdate(
             spreadsheetId=spreadsheet_id,
             body={
                 "requests": [{
                     "addSheet": {
                         "properties": {
-                            "title": SHEET_NAME,
+                            "title": sheet_name,
                             "gridProperties": {"frozenRowCount": 1},
                         }
                     }
@@ -68,15 +74,24 @@ def ensure_task_sheet(service: Any | None = None, spreadsheet_id: str = "") -> t
         ).execute()
     current = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{SHEET_NAME}'!A1:L1",
+        range=f"'{sheet_name}'!A1:Z1",
     ).execute().get("values", [])
-    if not current or current[0] != HEADERS:
+    if not current or current[0][: len(headers)] != headers:
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{SHEET_NAME}'!A1",
+            range=f"'{sheet_name}'!A1",
             valueInputOption="RAW",
-            body={"values": [HEADERS]},
+            body={"values": [headers]},
         ).execute()
+
+
+def ensure_task_sheet(service: Any | None = None, spreadsheet_id: str = "") -> tuple[Any, str]:
+    service = service or get_sheets_service()
+    spreadsheet_id = spreadsheet_id or get_master_spreadsheet_id()
+    if spreadsheet_id not in _ENSURED_SPREADSHEETS:
+        _ensure_sheet(service, spreadsheet_id, SHEET_NAME, HEADERS)
+        _ensure_sheet(service, spreadsheet_id, LOG_SHEET_NAME, LOG_HEADERS)
+        _ENSURED_SPREADSHEETS.add(spreadsheet_id)
     return service, spreadsheet_id
 
 
@@ -95,7 +110,7 @@ def create_task(
         "created_by": created_by,
         "action": action,
         "params_json": json.dumps(params or {}, ensure_ascii=False, separators=(",", ":")),
-        "status": "queued",
+        "status": "pending",
         "agent_id": "",
         "started_at": "",
         "finished_at": "",
@@ -157,6 +172,56 @@ def update_task(
     ).execute()
 
 
+def append_task_log(
+    task_id: str,
+    content: str,
+    *,
+    start_seq: int = 1,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> int:
+    service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
+    text = str(content or "")
+    if not text:
+        return start_seq
+    chunks = [text[index:index + 40000] for index in range(0, len(text), 40000)]
+    rows = [
+        [task_id, start_seq + index, now_text(), chunk]
+        for index, chunk in enumerate(chunks)
+    ]
+    service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{LOG_SHEET_NAME}'!A:D",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": rows},
+    ).execute()
+    return start_seq + len(rows)
+
+
+def read_task_log(
+    task_id: str,
+    *,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> str:
+    service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
+    rows = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{LOG_SHEET_NAME}'!A2:D",
+    ).execute().get("values", [])
+    matches = []
+    for row in rows:
+        values = list(row) + [""] * (len(LOG_HEADERS) - len(row))
+        if str(values[0]) == task_id:
+            try:
+                seq = int(values[1])
+            except (TypeError, ValueError):
+                seq = 0
+            matches.append((seq, str(values[3])))
+    return "".join(content for _seq, content in sorted(matches))
+
+
 def claim_next_task(
     *,
     agent_id: str = "",
@@ -165,10 +230,14 @@ def claim_next_task(
 ) -> dict[str, str] | None:
     service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
     agent_id = agent_id or default_agent_id()
-    queued = [task for task in reversed(list_tasks(limit=500, service=service, spreadsheet_id=spreadsheet_id)) if task["status"] == "queued"]
-    if not queued:
+    pending = [
+        task
+        for task in reversed(list_tasks(limit=500, service=service, spreadsheet_id=spreadsheet_id))
+        if task["status"] in {"pending", "queued"}
+    ]
+    if not pending:
         return None
-    task = queued[0]
+    task = pending[0]
     row_number = int(task["_row"])
     update_task(
         row_number,
