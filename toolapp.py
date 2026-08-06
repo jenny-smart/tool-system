@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -2098,6 +2098,21 @@ with date_col:
         elif selected_function in ("【鯨躍發票】登入", "【藍新金流】藍新登入", "【富邦銀行】富邦登入"):
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("登入不需選擇月份或日期", icon="🔐")
+        elif selected_function == "【富邦銀行】富邦明細下載":
+            st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
+            d1, d2 = st.columns(2)
+            with d1:
+                start_date_value = st.date_input(
+                    "開始日期",
+                    value=today_date - timedelta(days=1),
+                    key="finance_fubon_start_date",
+                )
+            with d2:
+                end_date_value = st.date_input(
+                    "結束日期",
+                    value=today_date,
+                    key="finance_fubon_end_date",
+                )
         elif selected_function == "【鯨躍發票】下載":
             st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
             finance_invoice_date_mode = st.radio(
