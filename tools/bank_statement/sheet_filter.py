@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -110,13 +111,46 @@ def filter_existing_rows(
     return CapturedTable(headers=table.headers, rows=new_rows)
 
 
+def _accounting_date_key(value: str) -> str:
+    text = _normalize_text(str(value))
+    for fmt in ("%Y/%m/%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return text
+
+
+def filter_yuanta_report_rows(
+    table: CapturedTable,
+    report_accounting_dates: list[list[str]],
+) -> CapturedTable:
+    """以財報 B 欄對應元大清單 A 欄，按同日既有列數扣除。"""
+    existing_counts = Counter(
+        key
+        for row in report_accounting_dates
+        if row and (key := _accounting_date_key(row[0]))
+    )
+    new_rows: list[list[str]] = []
+    for row in table_target_rows(table):
+        key = _accounting_date_key(row[0])
+        if existing_counts[key] > 0:
+            existing_counts[key] -= 1
+        elif key:
+            new_rows.append(row)
+    return CapturedTable(headers=table.headers, rows=new_rows)
+
+
 def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable:
     target = load_sheet_target(area, bank)
     credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
     client = gspread.authorize(credentials)
     worksheet = client.open_by_key(target.spreadsheet_id).get_worksheet_by_id(target.worksheet_gid)
+    if bank == "yuanta":
+        # 財報 B 欄（帳務日）對應「元大銀行-區域」A 欄（帳務日期）。
+        return filter_yuanta_report_rows(table, worksheet.get("B2:B"))
     existing_rows = worksheet.get("B:H")
-    return filter_existing_rows(table, existing_rows, strict=(bank == "yuanta"))
+    return filter_existing_rows(table, existing_rows)
 
 
 def sync_bank_master_sheet(
