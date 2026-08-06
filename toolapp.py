@@ -1746,10 +1746,32 @@ def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, 
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_fubon_login(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "fubon.login",
+        {"area": area},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
+def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "fubon.download",
+        {
+            "start_date": start_date.isoformat() if start_date else "",
+            "end_date": end_date.isoformat() if end_date else "",
+            "area": area,
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】啟動", "handler": start_local_agent_service, "enabled": True},
-    {"name": "【富邦銀行】富邦登入", "handler": None, "enabled": False},
-    {"name": "【富邦銀行】富邦明細下載", "handler": None, "enabled": False},
+    {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
+    {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": None, "enabled": False},
     {"name": "【元大銀行】元大明細下載", "handler": None, "enabled": False},
     {"name": "【鯨躍發票】登入", "handler": queue_cetustek_login, "enabled": True},
@@ -2072,7 +2094,7 @@ with date_col:
         if selected_function == "【本機 Agent】啟動":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("啟動 launchd 常駐服務，不需選擇日期", icon="🟢")
-        elif selected_function in ("【鯨躍發票】登入", "【藍新金流】藍新登入"):
+        elif selected_function in ("【鯨躍發票】登入", "【藍新金流】藍新登入", "【富邦銀行】富邦登入"):
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("登入不需選擇月份或日期", icon="🔐")
         elif selected_function == "【鯨躍發票】下載":
@@ -2247,7 +2269,11 @@ with area_col:
         area_options = ["全區"]
 
     area_select_options = ["全區"] + [area for area in area_options if area != "全區"]
-    if selected_function == "【藍新金流】藍新登入":
+    if selected_function in (
+        "【藍新金流】藍新登入",
+        "【富邦銀行】富邦登入",
+        "【富邦銀行】富邦明細下載",
+    ):
         area_select_options = [area for area in area_options if area != "全區"]
 
     selected_area_value = st.selectbox(
@@ -2275,12 +2301,12 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ═══════════════════════════════════════════════════════════
 render_log()
 
-if system_type == "finance_management" and selected_function.startswith(("【鯨躍發票】", "【藍新金流】")):
+if system_type == "finance_management" and selected_function.startswith(("【鯨躍發票】", "【藍新金流】", "【富邦銀行】")):
     try:
         agent_tasks = [
             task
             for task in list_local_agent_tasks(limit=10)
-            if task.get("action", "").startswith(("cetustek.", "newebpay."))
+            if task.get("action", "").startswith(("cetustek.", "newebpay.", "fubon."))
         ]
         if agent_tasks:
             st.markdown("#### 本機 Agent 任務 Log")

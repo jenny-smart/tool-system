@@ -19,7 +19,18 @@ case "${1:-status}" in
     sleep 1
     cp "$SOURCE_PLIST" "$TARGET_PLIST"
     plutil -lint "$TARGET_PLIST" >/dev/null
-    launchctl bootstrap "$DOMAIN" "$TARGET_PLIST"
+    bootstrap_ok=0
+    for _attempt in 1 2 3; do
+      if launchctl bootstrap "$DOMAIN" "$TARGET_PLIST"; then
+        bootstrap_ok=1
+        break
+      fi
+      sleep 2
+    done
+    if (( bootstrap_ok == 0 )); then
+      echo "failed to bootstrap: $LABEL" >&2
+      exit 1
+    fi
     launchctl enable "$DOMAIN/$LABEL"
     launchctl kickstart -k "$DOMAIN/$LABEL"
     echo "installed: $LABEL"
