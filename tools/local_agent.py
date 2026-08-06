@@ -120,10 +120,32 @@ def build_newebpay_download(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_newebpay_invoice_amounts(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    months = str(params.get("months") or "").strip()
+    if not months:
+        raise ValueError("藍新手續費發票金額缺少月份")
+    output = PROJECT_ROOT / "outputs" / f"newebpay_invoice_amounts_{months}.csv"
+    command = [
+        sys.executable,
+        "-m",
+        "tools.newebpay.invoice_amounts",
+        months,
+        "--cdp-url",
+        cdp_url,
+        "--output",
+        str(output),
+    ]
+    if area and area != "全區":
+        command.extend(["--area", area])
+    return command
+
+
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
+register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
 
 
 def parse_params(task: dict[str, str]) -> dict[str, Any]:
