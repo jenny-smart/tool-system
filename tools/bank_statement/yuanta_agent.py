@@ -5,14 +5,20 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
+from playwright.sync_api import sync_playwright
+
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.native_yuanta import (
+    YUANTA_HOST,
+    YUANTA_URL,
+    bind_yuanta_page,
     configure_yuanta_query,
     open_yuanta_statement_menu,
     wait_for_yuanta_login,
     wait_for_yuanta_statement,
 )
 from tools.bank_statement.sheet_filter import read_and_filter, sync_yuanta_master_sheet
+from tools.invoice_center.chrome_cdp import connect_existing_chrome
 
 
 YUANTA_ACCOUNT_OVERRIDES = {
@@ -49,27 +55,35 @@ def main() -> int:
     args = parse_args()
     account = load_account("yuanta", args.area, args.accounts_file.expanduser())
     print(f"區域：{args.area}")
-    wait_for_yuanta_login(account)
-    if args.mode == "login":
-        print(f"元大／{args.area} 登入完成；沿用既有 Chrome 工作階段。")
-        return 0
-    if not args.start or not args.end:
-        raise ValueError("元大明細查詢缺少開始日期或結束日期")
-    account_number = YUANTA_ACCOUNT_OVERRIDES.get(args.area) or account.bank_account
-    if not account_number:
-        raise ValueError(f"bank_accounts.json 尚未設定元大／{args.area} 的 bank_account")
-    open_yuanta_statement_menu()
-    configure_yuanta_query(account_number, args.start, args.end)
-    table = wait_for_yuanta_statement()
-    if args.output:
-        save_csv(table, args.output.expanduser())
-        print(f"RESULT_FILE:{args.output.expanduser().resolve()}")
-    new_table = read_and_filter(table, args.area, "yuanta")
-    written = sync_yuanta_master_sheet(new_table, args.area)
-    print(
-        f"元大明細完成：區域 {args.area}；日期 {args.start:%Y/%m/%d}～{args.end:%Y/%m/%d}；"
-        f"查詢 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；寫入 {written} 筆。"
-    )
+    with sync_playwright() as playwright:
+        _browser, context = connect_existing_chrome(playwright, args.cdp_url)
+        pages = [page for page in context.pages if not page.is_closed() and YUANTA_HOST in page.url]
+        page = pages[-1] if pages else context.new_page()
+        if YUANTA_HOST not in page.url:
+            page.goto(YUANTA_URL, wait_until="domcontentloaded", timeout=60_000)
+        bind_yuanta_page(page)
+        print(f"瀏覽器：沿用 Agent Chrome（{args.cdp_url}）")
+        wait_for_yuanta_login(account)
+        if args.mode == "login":
+            print(f"元大／{args.area} 登入完成；沿用 Agent Chrome 工作階段。")
+            return 0
+        if not args.start or not args.end:
+            raise ValueError("元大明細查詢缺少開始日期或結束日期")
+        account_number = YUANTA_ACCOUNT_OVERRIDES.get(args.area) or account.bank_account
+        if not account_number:
+            raise ValueError(f"bank_accounts.json 尚未設定元大／{args.area} 的 bank_account")
+        open_yuanta_statement_menu()
+        configure_yuanta_query(account_number, args.start, args.end)
+        table = wait_for_yuanta_statement()
+        if args.output:
+            save_csv(table, args.output.expanduser())
+            print(f"RESULT_FILE:{args.output.expanduser().resolve()}")
+        new_table = read_and_filter(table, args.area, "yuanta")
+        written = sync_yuanta_master_sheet(new_table, args.area)
+        print(
+            f"元大明細完成：區域 {args.area}；日期 {args.start:%Y/%m/%d}～{args.end:%Y/%m/%d}；"
+            f"查詢 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；寫入 {written} 筆。"
+        )
     return 0
 
 

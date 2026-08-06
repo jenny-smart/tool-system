@@ -6,6 +6,7 @@ import re
 import subprocess
 import time
 from datetime import date
+from typing import Any
 
 from tools.bank_statement.capture import CapturedTable
 
@@ -16,6 +17,15 @@ YUANTA_URL = (
     "https://b2bank.yuantabank.com.tw/B2C/login/LOGIN_Home.faces"
     f"#{TAB_MARKER}"
 )
+_YUANTA_PAGE: Any | None = None
+_YUANTA_CONTEXT: Any | None = None
+
+
+def bind_yuanta_page(page: Any) -> None:
+    """將元大控制綁定到 Agent Chrome 的 Playwright 分頁。"""
+    global _YUANTA_PAGE, _YUANTA_CONTEXT
+    _YUANTA_PAGE = page
+    _YUANTA_CONTEXT = page.context
 
 
 def _compact(source: str) -> str:
@@ -23,7 +33,21 @@ def _compact(source: str) -> str:
 
 
 def execute_yuanta_js(source: str) -> str:
+    global _YUANTA_PAGE
     javascript = _compact(source)
+    if _YUANTA_CONTEXT is not None:
+        pages = [
+            page for page in _YUANTA_CONTEXT.pages
+            if not page.is_closed() and YUANTA_HOST in page.url
+        ]
+        if pages:
+            _YUANTA_PAGE = pages[-1]
+        if _YUANTA_PAGE is None or _YUANTA_PAGE.is_closed():
+            raise RuntimeError("Agent Chrome 找不到元大分頁")
+        result = _YUANTA_PAGE.evaluate(javascript)
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, ensure_ascii=False)
     quoted = json.dumps(javascript, ensure_ascii=False)
     script = f'''
 tell application "Google Chrome"
