@@ -32,6 +32,7 @@ from tools.invoice_center.chrome_cdp import (
 PORTAL_LOGIN_URL = "https://www.cetustek.com.tw/memberlogin.php"
 PORTAL_MEMBER_URL = "https://www.cetustek.com.tw/member.php"
 EI_LOGIN_URL = "https://www.ei.com.tw/InvoiceRent/index.jsp"
+EI_HOME_URL = "https://www.ei.com.tw/InvoiceRent/welcome.jsp"
 EI_EXPORT_URL = "https://www.ei.com.tw/InvoiceRent/invoiceexport.jsp"
 DEFAULT_ACCOUNT_PATHS = [
     Path.home() / "EI account" / "ei_accounts.json",
@@ -256,9 +257,17 @@ def open_second_login(context: BrowserContext, portal_page: Page) -> Page:
     return new_pages[-1] if new_pages else portal_page
 
 
+def skip_optional_ei_pages(page: Page, label: str) -> None:
+    optional_paths = ("updatepw", "firstlogin")
+    if any(path in page.url.lower() for path in optional_paths):
+        print(f"[{label}] 略過非必要頁面：{page.url}")
+        page.goto(EI_HOME_URL, wait_until="domcontentloaded")
+
+
 def login_second(page: Page, credentials: EICredentials) -> None:
     install_dialog_log(page, credentials.label)
     page.wait_for_load_state("domcontentloaded")
+    skip_optional_ei_pages(page, credentials.label)
     login_field = page.locator("#userid")
     if (
         "ei.com.tw/InvoiceRent" in page.url
@@ -277,6 +286,7 @@ def login_second(page: Page, credentials: EICredentials) -> None:
     while time.monotonic() < deadline:
         login_field = page.locator("#userid")
         if not login_field.count() or not login_field.first.is_visible():
+            skip_optional_ei_pages(page, credentials.label)
             print(f"[{credentials.label}] 第二層登入成功")
             return
         message_field = page.locator("#msg")
