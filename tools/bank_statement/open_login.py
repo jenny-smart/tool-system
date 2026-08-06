@@ -75,7 +75,18 @@ def visible_in_viewport(page: Page, selector: str, timeout_ms: int = 30_000) -> 
 
 def fill_fubon(page: Page, account: BankAccount) -> None:
     header = visible_context(page, '[id="header_form:header_login"]')
-    header.locator('[id="header_form:header_login"]').click()
+    login_buttons = header.locator('[id="header_form:header_login"]')
+    visible_login = next(
+        (
+            login_buttons.nth(index)
+            for index in range(login_buttons.count())
+            if login_buttons.nth(index).is_visible()
+        ),
+        None,
+    )
+    if visible_login is None:
+        raise RuntimeError("找不到可見的富邦登入按鈕")
+    visible_login.click(force=True)
     context: Frame | Page | None = None
     fields = []
     for _ in range(120):
