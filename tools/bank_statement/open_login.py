@@ -73,7 +73,8 @@ def visible_in_viewport(page: Page, selector: str, timeout_ms: int = 30_000) -> 
     raise RuntimeError(f"找不到畫面中的元素：{selector}")
 
 
-def fill_fubon(page: Page, account: BankAccount) -> None:
+def fill_fubon(page: Page, account: BankAccount) -> Page:
+    browser_context = page.context
     header = visible_context(page, '[id="header_form:header_login"]')
     login_buttons = header.locator('[id="header_form:header_login"]')
     visible_login = next(
@@ -86,37 +87,42 @@ def fill_fubon(page: Page, account: BankAccount) -> None:
     )
     if visible_login is None:
         raise RuntimeError("找不到可見的富邦登入按鈕")
-    visible_login.click(force=True)
+    visible_login.evaluate("el => el.click()")
     context: Frame | Page | None = None
+    active_page = page
     fields = []
     for _ in range(40):
-        for candidate in [page, *page.frames]:
-            try:
-                body_text = candidate.locator("body").inner_text(timeout=500)
-                if "身分證字號" not in body_text or "使用者代碼" not in body_text:
-                    continue
-                row_fields = []
-                for label in ("身分證字號", "使用者代碼", "使用者密碼", "請輸入右側驗證碼"):
-                    label_node = candidate.get_by_text(label, exact=True).filter(visible=True).first
-                    row_input = label_node.locator("xpath=ancestor::tr[1]//input[not(@type='hidden')]").first
-                    if not row_input.count() or not row_input.is_visible():
+        pages = [item for item in browser_context.pages if not item.is_closed() and "taipeifubon" in item.url]
+        for candidate_page in reversed(pages):
+            for candidate in [candidate_page, *candidate_page.frames]:
+                try:
+                    body_text = candidate.locator("body").inner_text(timeout=500)
+                    if "身分證字號" not in body_text or "使用者代碼" not in body_text:
+                        continue
+                    row_fields = []
+                    for label in ("身分證字號", "使用者代碼", "使用者密碼", "請輸入右側驗證碼"):
+                        label_node = candidate.get_by_text(label, exact=True).filter(visible=True).first
+                        row_input = label_node.locator("xpath=ancestor::tr[1]//input[not(@type='hidden')]").first
+                        if not row_input.count() or not row_input.is_visible():
+                            break
+                        row_fields.append(row_input)
+                    if len(row_fields) == 4:
+                        active_page, context, fields = candidate_page, candidate, row_fields
                         break
-                    row_fields.append(row_input)
-                if len(row_fields) == 4:
-                    context, fields = candidate, row_fields
-                    break
-                fallback_fields = candidate.locator(
-                    'input:visible:not([type="hidden"]):not([type="button"]):not([type="submit"])'
-                )
-                if fallback_fields.count() >= 4:
-                    context = candidate
-                    fields = [fallback_fields.nth(index) for index in range(4)]
-                    break
-            except Exception:
-                continue
+                    fallback_fields = candidate.locator(
+                        'input:visible:not([type="hidden"]):not([type="button"]):not([type="submit"])'
+                    )
+                    if fallback_fields.count() >= 4:
+                        active_page, context = candidate_page, candidate
+                        fields = [fallback_fields.nth(index) for index in range(4)]
+                        break
+                except Exception:
+                    continue
+            if context is not None:
+                break
         if context is not None:
             break
-        page.wait_for_timeout(250)
+        time.sleep(0.25)
     if context is None:
         details = []
         for frame in page.frames:
@@ -130,7 +136,7 @@ def fill_fubon(page: Page, account: BankAccount) -> None:
 
     # 富邦彈窗開啟後會再初始化動態鍵盤；太早填寫會被清空。
     # 密碼欄另有安全鍵盤腳本，不能用 input_value 回讀判斷是否成功。
-    page.wait_for_timeout(750)
+    active_page.wait_for_timeout(750)
 
     def type_like_user(locator: object, value: str) -> None:
         locator.click()
@@ -142,6 +148,8 @@ def fill_fubon(page: Page, account: BankAccount) -> None:
     type_like_user(user_code, account.user_code)
     type_like_user(password, account.password)
     captcha.focus()
+    active_page.bring_to_front()
+    return active_page
 
     # 不自動補填第二次；富邦安全鍵盤可能隱藏實際值，重填反而會造成重複輸入。
 
@@ -301,9 +309,9 @@ def click_nearest_control(locator: object) -> None:
         "xpath=ancestor-or-self::*[self::a or self::button or @onclick][1]"
     )
     if controls.count() and controls.first.is_visible():
-        controls.first.click(force=True)
+        controls.first.evaluate("el => el.click()")
     else:
-        locator.click(force=True)
+        locator.evaluate("el => el.click()")
 
 
 def has_visible_text(page: Page, text: str) -> bool:
@@ -382,9 +390,8 @@ def open_account_quick_menu(page: Page, account_row: object) -> None:
     # 先走實際畫面上驗證成功的操作，再保留右側箭頭與 select 作為相容 fallback。
     for item in visible:
         try:
-            item.hover(timeout=2_000)
             click_nearest_control(item)
-            if wait_visible_text(page, "交易明細查詢", timeout_ms=3_000):
+            if wait_visible_text(page, "交易明細查詢", timeout_ms=1_500):
                 return
         except Exception:
             continue
@@ -497,12 +504,16 @@ def open_fubon_statement(
 
     # 尚未在帳號清單時，從首頁點「我的存款」。
     if query_form is None and account_row is None:
-        tile = visible_in_viewport(page, "a.menu_CBO03.task_CBOQU003", timeout_ms=10_000)
+        tile = visible_in_viewport(page, "a.menu_CBO03.task_CBOQU003", timeout_ms=5_000)
         print("步驟 1/4：點擊『我的存款』。")
         try:
-            tile.click(force=True, no_wait_after=True, timeout=5_000)
+            page.keyboard.press("Escape")
         except Exception:
-            real_mouse_click_tile(page, tile)
+            pass
+        try:
+            tile.evaluate("el => el.click()")
+        except Exception:
+            tile.click(force=True, no_wait_after=True, timeout=2_000)
 
         if not wait_visible_text(page, "快速功能", timeout_ms=10_000):
             # 部分富邦首頁的輪播遮罩會吃掉滑鼠事件；直接觸發同一個可見連結。
@@ -548,8 +559,8 @@ def open_fubon_statement(
                     select.select_option(option.get_attribute("value") or "")
                     break
 
-    _, query = visible_text(page, "開始查詢", timeout_ms=10_000)
-    query.click()
+    _, query = visible_text(page, "開始查詢", timeout_ms=5_000)
+    click_nearest_control(query)
     print(f"步驟 4/4：查詢日期 {start:%Y/%m/%d}～{end:%Y/%m/%d}。")
     return current_fubon_page(browser_context, page) or page
 
@@ -656,7 +667,7 @@ def main() -> int:
             else:
                 page.goto(LOGIN_URLS[args.bank], wait_until="domcontentloaded", timeout=60_000)
                 if args.bank == "fubon":
-                    fill_fubon(page, account)
+                    page = fill_fubon(page, account)
                 else:
                     fill_yuanta(page, account)
                 print("帳密已預填，請在 Chrome 輸入圖形驗證碼並登入。")

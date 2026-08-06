@@ -38,14 +38,16 @@ def ensure_login(context: BrowserContext, account: BankAccount) -> Page:
     for attempt in range(2):
         page.goto(LOGIN_URLS["fubon"], wait_until="domcontentloaded", timeout=30_000)
         try:
-            fill_fubon(page, account)
+            page = fill_fubon(page, account)
             last_error = None
             break
         except Exception as exc:
             last_error = exc
             print(f"富邦登入預填重試 {attempt + 1}/2：{exc}")
-            page.reload(wait_until="domcontentloaded", timeout=30_000)
-            page.wait_for_timeout(500)
+            page = existing_page(context) or context.new_page()
+            if not page.is_closed():
+                page.goto(LOGIN_URLS["fubon"], wait_until="domcontentloaded", timeout=30_000)
+                page.wait_for_timeout(500)
     if last_error is not None:
         raise last_error
     print("富邦帳密已預填，請在 Agent Chrome 輸入驗證碼並登入。")
