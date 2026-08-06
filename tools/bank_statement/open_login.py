@@ -404,13 +404,22 @@ def find_account_row(page: Page, account: BankAccount, timeout_ms: int = 5_000) 
     suffix = account_digits[-5:]
     waited = 0
     while waited < timeout_ms:
+        matches: list[tuple[int, int, object]] = []
         for candidate in [page, *page.frames]:
             rows = candidate.locator("tr").filter(has_text=suffix)
             for index in range(rows.count()):
                 row = rows.nth(index)
                 row_digits = re.sub(r"\D", "", row.inner_text())
-                if row.is_visible() and suffix in row_digits:
-                    return row
+                if not row.is_visible() or suffix not in row_digits:
+                    continue
+                quick = row.get_by_text("快速功能", exact=True)
+                visible_quick_count = sum(
+                    quick.nth(item).is_visible() for item in range(quick.count())
+                )
+                if visible_quick_count:
+                    matches.append((visible_quick_count, len(row.inner_text()), row))
+        if matches:
+            return min(matches, key=lambda item: (item[0], item[1]))[2]
         page.wait_for_timeout(250)
         waited += 250
     return None
