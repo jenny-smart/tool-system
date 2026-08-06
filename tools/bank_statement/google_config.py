@@ -9,6 +9,10 @@ DEFAULT_GOOGLE_SHEET_FILE = Path.home() / "Bank account" / "google_sheet.json"
 DEFAULT_GOOGLE_CREDENTIALS_FILE = (
     Path.home() / "Bank account" / "tool-495212-58cabfa2def5.json"
 )
+YUANTA_TARGET_OVERRIDES = {
+    "台北": ("1AUoTzmZe6wkDpfTOcPYAOvgEWtD48I4MO1ZRcK4Dibs", 1026030291),
+    "台中": ("1hrcup-zsrDKwjde9Tgpes6Mu8x7WFGuPIW4w_AJQK-8", 717686622),
+}
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,8 @@ def load_sheet_target(
         worksheet_gid = int(area_config.get(gid_key, 0))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{area} 的 {gid_key} 必須是數字") from exc
+    if bank == "yuanta" and area in YUANTA_TARGET_OVERRIDES:
+        spreadsheet_id, worksheet_gid = YUANTA_TARGET_OVERRIDES[area]
     if not spreadsheet_id or not worksheet_gid:
         raise ValueError(f"尚未設定 {area} 的 spreadsheet_id／{gid_key}")
     return SheetTarget(area, bank, spreadsheet_id, worksheet_gid)

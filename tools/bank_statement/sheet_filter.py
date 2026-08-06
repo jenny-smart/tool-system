@@ -17,7 +17,7 @@ SCOPES = (
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 )
-FUBON_AREAS = ("台北", "台中", "桃園", "新竹", "高雄")
+BANK_AREAS = ("台北", "台中", "桃園", "新竹", "高雄")
 
 
 def _note_first_line(value: str) -> str:
@@ -70,6 +70,17 @@ def transaction_time_key(row: list[str]) -> str:
     return value
 
 
+def transaction_identity_key(row: list[str]) -> tuple[str, ...]:
+    normalized = normalize_target_row(row)
+    return (
+        transaction_time_key(normalized),
+        normalized[2],
+        normalized[3],
+        normalized[4],
+        normalized[5],
+    )
+
+
 def table_target_rows(table: CapturedTable) -> list[list[str]]:
     if len(table.headers) != 7:
         raise ValueError(f"富邦明細預期 7 欄，實際為 {len(table.headers)} 欄：{table.headers}")
@@ -83,12 +94,18 @@ def table_target_rows(table: CapturedTable) -> list[list[str]]:
     return rows
 
 
-def filter_existing_rows(table: CapturedTable, existing_rows: list[list[str]]) -> CapturedTable:
-    existing_keys = {transaction_time_key(row) for row in existing_rows if transaction_time_key(row)}
+def filter_existing_rows(
+    table: CapturedTable,
+    existing_rows: list[list[str]],
+    *,
+    strict: bool = False,
+) -> CapturedTable:
+    key_fn = transaction_identity_key if strict else transaction_time_key
+    existing_keys = {key_fn(row) for row in existing_rows if transaction_time_key(row)}
     new_rows = [
         row
         for row in table_target_rows(table)
-        if transaction_time_key(row) and transaction_time_key(row) not in existing_keys
+        if transaction_time_key(row) and key_fn(row) not in existing_keys
     ]
     return CapturedTable(headers=table.headers, rows=new_rows)
 
@@ -99,12 +116,13 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     client = gspread.authorize(credentials)
     worksheet = client.open_by_key(target.spreadsheet_id).get_worksheet_by_id(target.worksheet_gid)
     existing_rows = worksheet.get("B:H")
-    return filter_existing_rows(table, existing_rows)
+    return filter_existing_rows(table, existing_rows, strict=(bank == "yuanta"))
 
 
-def sync_fubon_master_sheet(
+def sync_bank_master_sheet(
     table: CapturedTable,
     area: str,
+    bank: str,
     *,
     service: Any | None = None,
     spreadsheet_id: str = "",
@@ -116,7 +134,10 @@ def sync_fubon_master_sheet(
         fields="sheets(properties(title))",
     ).execute()
     titles = {sheet["properties"]["title"] for sheet in meta.get("sheets", [])}
-    missing = [f"富邦銀行-{name}" for name in FUBON_AREAS if f"富邦銀行-{name}" not in titles]
+    bank_name = {"fubon": "富邦銀行", "yuanta": "元大銀行"}.get(bank)
+    if not bank_name:
+        raise ValueError(f"不支援的銀行：{bank}")
+    missing = [f"{bank_name}-{name}" for name in BANK_AREAS if f"{bank_name}-{name}" not in titles]
     if missing:
         service.spreadsheets().batchUpdate(
             spreadsheetId=spreadsheet_id,
@@ -125,8 +146,8 @@ def sync_fubon_master_sheet(
                 for title in missing
             ]},
         ).execute()
-    for name in FUBON_AREAS:
-        title = f"富邦銀行-{name}"
+    for name in BANK_AREAS:
+        title = f"{bank_name}-{name}"
         current = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
             range=f"'{title}'!A1:G1",
@@ -138,7 +159,7 @@ def sync_fubon_master_sheet(
                 valueInputOption="RAW",
                 body={"values": [table.headers]},
             ).execute()
-    title = f"富邦銀行-{area}"
+    title = f"{bank_name}-{area}"
     # 此分頁是「目前未登記清單」而非歷史資料，每次以最新比對結果重建。
     service.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
@@ -154,3 +175,27 @@ def sync_fubon_master_sheet(
             body={"values": table.rows},
         ).execute()
     return len(table.rows)
+
+
+def sync_fubon_master_sheet(
+    table: CapturedTable,
+    area: str,
+    *,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> int:
+    return sync_bank_master_sheet(
+        table, area, "fubon", service=service, spreadsheet_id=spreadsheet_id
+    )
+
+
+def sync_yuanta_master_sheet(
+    table: CapturedTable,
+    area: str,
+    *,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> int:
+    return sync_bank_master_sheet(
+        table, area, "yuanta", service=service, spreadsheet_id=spreadsheet_id
+    )

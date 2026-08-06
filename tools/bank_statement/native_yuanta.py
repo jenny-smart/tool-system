@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
+from datetime import date
+
+from tools.bank_statement.capture import CapturedTable
 
 
 YUANTA_HOST = "b2bank.yuantabank.com.tw"
@@ -188,3 +192,203 @@ def wait_for_yuanta_login(account: object, timeout: float = 300.0) -> dict[str, 
                 return stable
         time.sleep(1)
     raise RuntimeError("等待元大登入逾時，請重新執行指令")
+
+
+def _click_text(text: str, timeout: float = 20.0) -> None:
+    target = json.dumps(text, ensure_ascii=False)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = execute_yuanta_js(
+            f'''
+            (() => {{
+              const docs=[];
+              const walk=d=>{{docs.push(d);[...d.querySelectorAll('iframe,frame')].forEach(f=>{{try{{if(f.contentDocument)walk(f.contentDocument)}}catch(_){{}}}})}};
+              walk(document);
+              const wanted={target};
+              const matches=[];
+              for(const d of docs) for(const el of d.querySelectorAll('a,button,input,span,div,li')){{
+                const label=((el.value||el.innerText||'')+'').replace(/\\s+/g,' ').trim();
+                if(el.getClientRects().length && (label===wanted || label.includes(wanted))) matches.push([label===wanted?0:1,label.length,el]);
+              }}
+              if(!matches.length)return 'WAIT';
+              matches.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+              const el=matches[0][2];
+              const control=el.closest('a,button,[onclick],[role="button"],li')||el;
+              control.dispatchEvent(new MouseEvent('mouseover',{{bubbles:true}}));
+              control.click();
+              return 'CLICKED';
+            }})()
+            '''
+        )
+        if result == "CLICKED":
+            return
+        time.sleep(0.5)
+    raise RuntimeError(f"元大找不到可點選項目：{text}")
+
+
+def open_yuanta_statement_menu() -> None:
+    for step, label in enumerate(("帳戶查詢", "存款查詢", "交易明細查詢"), start=1):
+        _click_text(label)
+        print(f"步驟 {step}/4：點擊『{label}』。")
+        time.sleep(1)
+
+
+def configure_yuanta_query(account_number: str, start: date, end: date) -> None:
+    values = json.dumps(
+        {
+            "account": re.sub(r"\D", "", account_number),
+            "start": start.strftime("%Y/%m/%d"),
+            "end": end.strftime("%Y/%m/%d"),
+        },
+        ensure_ascii=False,
+    )
+    result = execute_yuanta_js(
+        f'''
+        (() => {{
+          const values={values};
+          const docs=[];
+          const walk=d=>{{docs.push(d);[...d.querySelectorAll('iframe,frame')].forEach(f=>{{try{{if(f.contentDocument)walk(f.contentDocument)}}catch(_){{}}}})}};
+          walk(document);
+          let accountFound=false;
+          for(const d of docs){{
+            for(const select of d.querySelectorAll('select')){{
+              if(!select.getClientRects().length)continue;
+              const option=[...select.options].find(o=>{{
+                const digits=(o.textContent||'').replace(/\\D/g,'');
+                return digits.includes(values.account)||digits.endsWith(values.account.slice(-8));
+              }});
+              if(option){{select.value=option.value;select.dispatchEvent(new Event('change',{{bubbles:true}}));accountFound=true;}}
+            }}
+          }}
+          if(!accountFound)return 'ACCOUNT_NOT_FOUND';
+          const setValue=(input,value)=>{{
+            input.removeAttribute('readonly');input.value=value;
+            input.dispatchEvent(new Event('input',{{bubbles:true}}));
+            input.dispatchEvent(new Event('change',{{bubbles:true}}));
+          }};
+          let startInput=null,endInput=null;
+          for(const d of docs){{
+            const inputs=[...d.querySelectorAll('input:not([type="hidden"]):not([type="button"]):not([type="submit"])')].filter(x=>x.getClientRects().length);
+            startInput ||= inputs.find(x=>/start|begin|from|sdate|date_s/i.test((x.id||'')+' '+(x.name||'')));
+            endInput ||= inputs.find(x=>/end|to|edate|date_e/i.test((x.id||'')+' '+(x.name||'')));
+            if(!startInput||!endInput){{
+              const dateInputs=inputs.filter(x=>/date|日期/i.test((x.id||'')+' '+(x.name||'')+' '+(x.placeholder||'')));
+              startInput ||= dateInputs[0];endInput ||= dateInputs[1];
+            }}
+          }}
+          if(!startInput||!endInput)return 'DATE_NOT_FOUND';
+          setValue(startInput,values.start);setValue(endInput,values.end);
+          for(const d of docs){{
+            const controls=[...d.querySelectorAll('button,input[type="button"],input[type="submit"],a')].filter(x=>x.getClientRects().length);
+            const query=controls.find(x=>/^(開始)?查詢$/.test(((x.value||x.innerText||'')+'').replace(/\\s+/g,'')));
+            if(query){{query.click();return 'SUBMITTED';}}
+          }}
+          return 'QUERY_NOT_FOUND';
+        }})()
+        '''
+    )
+    messages = {
+        "ACCOUNT_NOT_FOUND": f"元大找不到帳號 {account_number}",
+        "DATE_NOT_FOUND": "元大找不到開始／結束日期欄位",
+        "QUERY_NOT_FOUND": "元大找不到查詢按鈕",
+    }
+    if result != "SUBMITTED":
+        raise RuntimeError(messages.get(result, f"元大查詢設定失敗：{result}"))
+    print(f"步驟 4/4：帳號末碼 {account_number[-5:]}，查詢 {start:%Y/%m/%d}～{end:%Y/%m/%d}。")
+
+
+def _statement_matrix() -> list[list[str]] | None:
+    output = execute_yuanta_js(
+        r'''
+        (() => {
+          const docs=[];
+          const walk=d=>{docs.push(d);[...d.querySelectorAll('iframe,frame')].forEach(f=>{try{if(f.contentDocument)walk(f.contentDocument)}catch(_){}})};
+          walk(document);
+          const words=['交易日','帳務日','交易時間','摘要','支出','存入','餘額','備註'];
+          let best=null;
+          for(const d of docs) for(const table of d.querySelectorAll('table')){
+            if(!table.getClientRects().length)continue;
+            const matrix=[...table.rows].map(r=>[...r.cells].map(c=>(c.innerText||'').trim()));
+            if(matrix.length<2)continue;
+            const score=Math.max(...matrix.slice(0,6).map(r=>words.filter(w=>r.join('').replace(/\s/g,'').includes(w)).length));
+            if(score>=4 && (!best || score>best.score || (score===best.score && matrix.length>best.matrix.length))) best={score,matrix};
+          }
+          return JSON.stringify(best?best.matrix:null);
+        })()
+        '''
+    )
+    return json.loads(output)
+
+
+def _find_header(headers: list[str], words: tuple[str, ...], *, exclude: tuple[str, ...] = ()) -> int | None:
+    for index, header in enumerate(headers):
+        compact=re.sub(r"\s+", "", header)
+        if any(word in compact for word in words) and not any(word in compact for word in exclude):
+            return index
+    return None
+
+
+def normalize_yuanta_matrix(matrix: list[list[str]]) -> CapturedTable:
+    header_index = max(
+        range(min(6, len(matrix))),
+        key=lambda i: sum(word in "".join(matrix[i]).replace(" ", "") for word in ("交易日", "帳務日", "交易時間", "摘要", "支出", "存入", "餘額", "備註")),
+    )
+    source_headers = matrix[header_index]
+    date_index = _find_header(source_headers, ("帳務日期", "交易日期", "日期"), exclude=("時間",))
+    time_index = _find_header(source_headers, ("交易時間", "日期時間", "時間"))
+    summary_index = _find_header(source_headers, ("摘要", "交易說明", "說明"))
+    debit_index = _find_header(source_headers, ("支出", "提款", "借方"))
+    credit_index = _find_header(source_headers, ("存入", "存款", "貸方"))
+    balance_index = _find_header(source_headers, ("餘額",))
+    note_index = _find_header(source_headers, ("備註", "註記", "附言"))
+    required = (date_index, summary_index, debit_index, credit_index, balance_index)
+    if any(index is None for index in required):
+        raise RuntimeError(f"元大交易表欄位無法辨識：{source_headers}")
+
+    def cell(row: list[str], index: int | None) -> str:
+        return row[index].strip() if index is not None and index < len(row) else ""
+
+    rows: list[list[str]] = []
+    for source in matrix[header_index + 1 :]:
+        date_text = cell(source, date_index)
+        time_text = cell(source, time_index)
+        if not date_text or "總計" in "".join(source):
+            continue
+        if time_text and not re.search(r"\d{4}[/.-]\d{1,2}[/.-]\d{1,2}", time_text):
+            transaction_time = f"{date_text.split()[0]} {time_text}"
+        else:
+            transaction_time = time_text or date_text
+        accounting_date = date_text.split()[0]
+        rows.append([
+            accounting_date,
+            transaction_time,
+            cell(source, summary_index),
+            cell(source, debit_index),
+            cell(source, credit_index),
+            cell(source, balance_index),
+            cell(source, note_index),
+        ])
+    if not rows:
+        raise RuntimeError("元大查詢結果沒有可擷取的交易資料")
+    return CapturedTable(
+        headers=["帳務日期", "交易時間", "摘要", "支出金額", "存入金額", "即時餘額", "附註"],
+        rows=rows,
+    )
+
+
+def wait_for_yuanta_statement(timeout: float = 60.0) -> CapturedTable:
+    deadline = time.monotonic() + timeout
+    candidate: CapturedTable | None = None
+    stable_since = 0.0
+    time.sleep(2)
+    while time.monotonic() < deadline:
+        matrix = _statement_matrix()
+        if matrix:
+            table = normalize_yuanta_matrix(matrix)
+            now = time.monotonic()
+            if candidate is None or candidate.fingerprint != table.fingerprint:
+                candidate, stable_since = table, now
+            elif now - stable_since >= 1:
+                return table
+        time.sleep(0.5)
+    raise RuntimeError("等待元大交易明細表逾時")
