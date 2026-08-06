@@ -60,6 +60,8 @@ def wait_statement(
     previous_fingerprint: tuple | None = None,
 ) -> CapturedTable:
     """等待查詢結果取代舊表格，並穩定後才擷取。"""
+    # 富邦送出查詢後會短暫重新掛回舊結果；先等新查詢開始更新 DOM。
+    page.wait_for_timeout(2_000)
     deadline = time.monotonic() + timeout_seconds
     unchanged_deadline = time.monotonic() + 10
     candidate: CapturedTable | None = None

@@ -139,18 +139,18 @@ def sync_fubon_master_sheet(
                 body={"values": [table.headers]},
             ).execute()
     title = f"富邦銀行-{area}"
-    existing = service.spreadsheets().values().get(
+    # 此分頁是「目前未登記清單」而非歷史資料，每次以最新比對結果重建。
+    service.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
         range=f"'{title}'!A2:G",
-    ).execute().get("values", [])
-    new_table = filter_existing_rows(table, existing)
-    if new_table.rows:
-        service.spreadsheets().values().append(
+        body={},
+    ).execute()
+    if table.rows:
+        service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!A:G",
+            range=f"'{title}'!A2:G{len(table.rows) + 1}",
             # 保留銀行原始日期文字，避免 A/B 欄被轉成 2026/8/6 與 46240.36983。
             valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS",
-            body={"values": new_table.rows},
+            body={"values": table.rows},
         ).execute()
-    return len(new_table.rows)
+    return len(table.rows)
