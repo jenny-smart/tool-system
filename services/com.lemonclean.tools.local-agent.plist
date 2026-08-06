@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lemonclean.tools.local-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-m</string>
+    <string>tools.local_agent</string>
+    <string>--poll-seconds</string>
+    <string>5</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/jenny/Library/Application Support/LemonToolsAgent/tool-system</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/jenny</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>PYTHONPATH</key>
+    <string>/Users/jenny/Library/Application Support/LemonToolsAgent/tool-system</string>
+    <key>TOOLS_APP_SECRETS_FILE</key>
+    <string>/Users/jenny/lemon/.streamlit/secrets.toml</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/jenny/Library/Logs/LemonToolsAgent/local_agent.launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jenny/Library/Logs/LemonToolsAgent/local_agent.launchd.err.log</string>
+</dict>
+</plist>

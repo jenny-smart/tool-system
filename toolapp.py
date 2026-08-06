@@ -21,6 +21,7 @@ import yaml
 
 from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
 from tools.local_agent_queue import create_task as create_local_agent_task
+from tools.local_agent_queue import list_agent_status as list_local_agent_status
 from tools.local_agent_queue import list_tasks as list_local_agent_tasks
 from tools.local_agent_queue import read_task_log as read_local_agent_task_log
 
@@ -1644,6 +1645,25 @@ def render_log_page() -> None:
 # ═══════════════════════════════════════════════════════════
 # 系統 / 功能設定
 # ═══════════════════════════════════════════════════════════
+def start_local_agent_service(*, month="", start_date=None, end_date=None, area="全區"):
+    online_agents = [row for row in list_local_agent_status(max_age_seconds=30) if row.get("online")]
+    if online_agents:
+        return f"本機 Agent 已在線：{online_agents[0].get('agent_id', '')}"
+    script = BASE_DIR / "scripts" / "local_agent_service.sh"
+    if sys.platform != "darwin" or not script.exists():
+        raise RuntimeError("Mac 目前離線；請先在 Mac 安裝 launchd 服務")
+    result = subprocess.run(
+        [str(script), "install"],
+        cwd=BASE_DIR,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "Agent 啟動失敗").strip())
+    return "本機 Agent 已啟動"
+
+
 def queue_cetustek_login(*, month="", start_date=None, end_date=None, area="全區"):
     task = create_local_agent_task(
         "cetustek.login",
@@ -1705,6 +1725,7 @@ def queue_newebpay_download(*, month="", start_date=None, end_date=None, area="�
 
 
 FINANCE_TASKS = [
+    {"name": "【本機 Agent】啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": None, "enabled": False},
     {"name": "【富邦銀行】富邦明細下載", "handler": None, "enabled": False},
     {"name": "【元大銀行】元大登入", "handler": None, "enabled": False},
@@ -1904,6 +1925,21 @@ st.markdown(
 )
 render_user_bar()
 
+try:
+    _agent_rows = list_local_agent_status(max_age_seconds=30)
+    _online_agents = [row for row in _agent_rows if row.get("online")]
+    if _online_agents:
+        _agent = _online_agents[0]
+        st.success(
+            f"Local Agent Online｜{_agent.get('agent_id', '')}｜最後心跳 {_agent.get('last_seen', '')}",
+            icon="🟢",
+        )
+    else:
+        _last_seen = _agent_rows[0].get("last_seen", "尚無心跳") if _agent_rows else "尚無心跳"
+        st.error(f"Local Agent Offline｜最後心跳 {_last_seen}", icon="🔴")
+except Exception:
+    st.error("Local Agent Offline｜無法讀取心跳", icon="🔴")
+
 
 # ═══════════════════════════════════════════════════════════
 # UI — 執行設定
@@ -2011,7 +2047,10 @@ with date_col:
 
     elif system_type == "finance_management":
         today_date = datetime.now(TW_TZ).date()
-        if selected_function in ("【鯨躍發票】登入", "【藍新金流】藍新登入"):
+        if selected_function == "【本機 Agent】啟動":
+            st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
+            st.info("啟動 launchd 常駐服務，不需選擇日期", icon="🟢")
+        elif selected_function in ("【鯨躍發票】登入", "【藍新金流】藍新登入"):
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("登入不需選擇月份或日期", icon="🔐")
         elif selected_function == "【鯨躍發票】下載":
