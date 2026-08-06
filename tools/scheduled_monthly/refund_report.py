@@ -8,7 +8,7 @@ from __future__ import annotations
 功能：
 - 月排程：已退款
 - 修正：上傳時不再「每次新增一個同名檔案」。
-- 上傳規則改為：先尋找同名檔案，能更新就更新既有檔案；若有多個可處理同名檔，保留一個並刪除其他重複檔。
+- 上傳規則改為：先刪除所有同名舊檔，再新增唯一的新檔案。
 - 若舊檔 ID 已失效或無權限，會略過該舊項目，不讓刪除失敗中斷；但不再因此一直新增重複檔。
 - 搭配 toolapp_0704_v3.py，可確認畫面選台北時實際傳入 --area 台北。
 - 若期別資料夾已存在，直接使用既有資料夾。
@@ -334,44 +334,10 @@ def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     filename = os.path.basename(local_path)
     existing_files = list_files_in_folder(service, parent_folder_id, filename)
 
-    accessible_files = []
-    inaccessible_files = []
-
-    for file_info in existing_files:
-        if file_is_accessible(service, file_info["id"]):
-            accessible_files.append(file_info)
-        else:
-            inaccessible_files.append(file_info)
-
-    for file_info in inaccessible_files:
-        log(f"⚠️ 找到同名舊項目但無法存取，略過：{file_info.get('name', filename)} / {file_info['id']}")
+    for existing in existing_files:
+        safe_delete_drive_file(service, existing["id"], existing.get("name", filename))
 
     media = MediaFileUpload(local_path, resumable=True)
-
-    if accessible_files:
-        keep = accessible_files[0]
-
-        updated = service.files().update(
-            fileId=keep["id"],
-            media_body=media,
-            fields="id,name,webViewLink",
-            supportsAllDrives=True,
-        ).execute()
-
-        for duplicate in accessible_files[1:]:
-            safe_delete_drive_file(
-                service,
-                duplicate["id"],
-                duplicate.get("name", filename),
-            )
-
-        link = updated.get("webViewLink", keep.get("webViewLink", ""))
-        log(f"♻️ 已更新既有檔案：{updated['name']} → folder_id={parent_folder_id} {link}".strip())
-
-        remaining = list_files_in_folder(service, parent_folder_id, filename)
-        log(f"📌 同名檔檢查：{filename} / Drive 查詢筆數={len(remaining)}")
-        return updated["id"]
-
     body = {
         "name": filename,
         "parents": [parent_folder_id],

@@ -33,6 +33,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from tools.common.config_loader import load_monthly_config
@@ -396,7 +397,7 @@ def escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def find_child_folder(service, parent_id: str, folder_name: str) -> str | None:
+def list_child_folders(service, parent_id: str, folder_name: str) -> list[dict[str, Any]]:
     escaped_name = escape_drive_query_value(folder_name)
     q = (
         f"name='{escaped_name}' and "
@@ -405,15 +406,44 @@ def find_child_folder(service, parent_id: str, folder_name: str) -> str | None:
     )
     res = service.files().list(
         q=q,
-        fields="files(id,name)",
+        fields="files(id,name,createdTime)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True,
+        orderBy="createdTime",
     ).execute()
-    files = res.get("files", [])
-    return files[0]["id"] if files else None
+    return res.get("files", [])
 
 
-def create_child_folder(service, parent_id: str, folder_name: str) -> str:
+def delete_drive_file(service, file_id: str, name: str = "") -> bool:
+    try:
+        service.files().delete(
+            fileId=file_id,
+            supportsAllDrives=True,
+        ).execute()
+        log(f"🗑️ 已刪除舊項目：{name or file_id}")
+        return True
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            log(f"⚠️ 舊項目不存在，略過刪除：{name or file_id}")
+            return False
+        raise
+
+
+def get_or_create_single_child_folder(service, parent_id: str, folder_name: str) -> str:
+    folders = list_child_folders(service, parent_id, folder_name)
+
+    if folders:
+        keep = folders[0]
+        for duplicate in folders[1:]:
+            delete_drive_file(
+                service,
+                duplicate["id"],
+                f"{duplicate.get('name', folder_name)} / duplicate folder",
+            )
+        log(f"📁 使用既有資料夾：{folder_name} / {keep['id']}")
+        return keep["id"]
+
     body = {
         "name": folder_name,
         "mimeType": "application/vnd.google-apps.folder",
@@ -424,14 +454,8 @@ def create_child_folder(service, parent_id: str, folder_name: str) -> str:
         fields="id,name",
         supportsAllDrives=True,
     ).execute()
+    log(f"📁 已建立資料夾：{folder_name} / {res['id']}")
     return res["id"]
-
-
-def get_or_create_child_folder(service, parent_id: str, folder_name: str) -> str:
-    folder_id = find_child_folder(service, parent_id, folder_name)
-    if folder_id:
-        return folder_id
-    return create_child_folder(service, parent_id, folder_name)
 
 
 def resolve_area_folder(service, root_folder_id: str, city: str) -> str:
@@ -440,16 +464,12 @@ def resolve_area_folder(service, root_folder_id: str, city: str) -> str:
     if not folder_name:
         raise RuntimeError(f"找不到地區資料夾名稱設定：{city}")
 
-    folder_id = find_child_folder(service, root_folder_id, folder_name)
-
-    if not folder_id:
-        raise RuntimeError(f"月排程根目錄下找不到資料夾：{folder_name}")
-
+    folder_id = get_or_create_single_child_folder(service, root_folder_id, folder_name)
     log(f"📁 區域資料夾：{city} / {folder_name} / {folder_id}")
     return folder_id
 
 
-def find_file_in_folder(service, parent_folder_id: str, filename: str) -> dict[str, Any] | None:
+def list_files_in_folder(service, parent_folder_id: str, filename: str) -> list[dict[str, Any]]:
     escaped_name = escape_drive_query_value(filename)
     q = (
         f"name='{escaped_name}' and "
@@ -458,31 +478,43 @@ def find_file_in_folder(service, parent_folder_id: str, filename: str) -> dict[s
     )
     res = service.files().list(
         q=q,
-        fields="files(id,name,webViewLink,mimeType)",
+        fields="files(id,name,webViewLink,mimeType,createdTime)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True,
-        pageSize=10,
+        orderBy="createdTime",
+        pageSize=100,
     ).execute()
-    files = res.get("files", [])
-    return files[0] if files else None
+    return res.get("files", [])
+
+
+def safe_delete_drive_file(service, file_id: str, name: str = "") -> bool:
+    try:
+        service.files().delete(
+            fileId=file_id,
+            supportsAllDrives=True,
+        ).execute()
+        log(f"🗑️ 已刪除重複舊檔：{name or file_id}")
+        return True
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            log(f"⚠️ 舊項目不存在或無法存取，略過：{name or file_id}")
+            return False
+        raise
 
 
 def upload_to_gdrive(service, local_path: str, parent_folder_id: str) -> str:
     filename = os.path.basename(local_path)
+    existing_files = list_files_in_folder(service, parent_folder_id, filename)
+
+    for existing in existing_files:
+        safe_delete_drive_file(
+            service,
+            existing["id"],
+            existing.get("name", filename),
+        )
+
     media = MediaFileUpload(local_path, resumable=True)
-    existing = find_file_in_folder(service, parent_folder_id, filename)
-
-    if existing:
-        updated = service.files().update(
-            fileId=existing["id"],
-            media_body=media,
-            fields="id,name,webViewLink",
-            supportsAllDrives=True,
-        ).execute()
-        link = updated.get("webViewLink", existing.get("webViewLink", ""))
-        log(f"♻️ 已覆蓋舊檔：{updated['name']} → folder_id={parent_folder_id} {link}".strip())
-        return updated["id"]
-
     body = {
         "name": filename,
         "parents": [parent_folder_id],
@@ -584,7 +616,7 @@ def process_city(
     login(session, acc["email"], acc["password"])
 
     area_folder_id = resolve_area_folder(service, args.folder_id, city)
-    tag_folder_id = get_or_create_child_folder(service, area_folder_id, tag)
+    tag_folder_id = get_or_create_single_child_folder(service, area_folder_id, tag)
     log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
 
     status = "失敗"
