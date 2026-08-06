@@ -1653,10 +1653,14 @@ def queue_cetustek_login(*, month="", start_date=None, end_date=None, area="全�
 
 
 def queue_cetustek_download(*, month="", start_date=None, end_date=None, area="全區"):
+    start_text = start_date.isoformat() if start_date else ""
+    end_text = end_date.isoformat() if end_date else ""
     task = create_local_agent_task(
         "cetustek.download",
         {
             "month": str(month or "").strip(),
+            "start_date": start_text,
+            "end_date": end_text,
             "area": area,
             "format": "csv",
             "cdp_url": "http://127.0.0.1:9222",
@@ -1973,22 +1977,53 @@ with date_col:
 
     elif system_type == "finance_management":
         today_date = datetime.now(TW_TZ).date()
-        st.markdown('<div class="field-label">📆 月份與日期區間</div>', unsafe_allow_html=True)
-        period = st.text_input(
-            "月份",
-            value=today_date.strftime("%Y%m"),
-            placeholder="例如：202608",
-            key="finance_month",
-        )
-        d1, d2 = st.columns(2)
-        with d1:
-            start_date_value = st.date_input(
-                "開始日期", value=today_date.replace(day=1), key="finance_start_date"
+        if selected_function == "【鯨躍發票】登入":
+            st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
+            st.info("登入不需選擇月份或日期", icon="🔐")
+        elif selected_function == "【鯨躍發票】下載":
+            st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
+            finance_invoice_date_mode = st.radio(
+                "期間選擇",
+                ["月份", "日期區間"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="finance_invoice_date_mode",
             )
-        with d2:
-            end_date_value = st.date_input(
-                "結束日期", value=today_date, key="finance_end_date"
-            )
+            if finance_invoice_date_mode == "月份":
+                period = st.text_input(
+                    "月份",
+                    value=today_date.strftime("%Y%m"),
+                    placeholder="例如：202608",
+                    label_visibility="collapsed",
+                    key="finance_invoice_month",
+                )
+                st.caption("格式：YYYYMM；下載該月份完整發票資料")
+            else:
+                period = ""
+                d1, d2 = st.columns(2)
+                with d1:
+                    start_date_value = st.date_input(
+                        "開始日期",
+                        value=today_date.replace(day=1),
+                        key="finance_invoice_start_date",
+                    )
+                with d2:
+                    end_date_value = st.date_input(
+                        "結束日期",
+                        value=today_date,
+                        key="finance_invoice_end_date",
+                    )
+        else:
+            st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
+            d1, d2 = st.columns(2)
+            with d1:
+                start_date_value = st.date_input(
+                    "開始日期", value=today_date.replace(day=1), key="finance_start_date"
+                )
+            with d2:
+                end_date_value = st.date_input(
+                    "結束日期", value=today_date, key="finance_end_date"
+                )
 
     elif system_type in ["vip", "monthly_scheduler"]:
         st.markdown('<div class="field-label">📆 執行期別</div>', unsafe_allow_html=True)
