@@ -230,7 +230,7 @@ def wait_fubon_page_with_text(
 
 
 def wait_fubon_login(
-    context: BrowserContext, page: Page, timeout_ms: int = 180_000
+    context: BrowserContext, page: Page, timeout_ms: int = 600_000
 ) -> Page:
     """富邦登入可能關閉原分頁並開新分頁，因此每輪都重新鎖定有效頁面。"""
     waited = 0
@@ -522,8 +522,9 @@ def open_fubon_statement(
         context, start_input, end_input = query_form
 
     custom = context.locator('[id="form1:rdoCustom"]')
-    if custom.count() and custom.first.is_visible():
-        custom.first.check(force=True)
+    if custom.count():
+        # 富邦以 CSS 隱藏原生 radio；直接觸發 DOM click 才會執行 onclick。
+        custom.first.evaluate("el => el.click()")
     write_date_input(start_input, start)
     write_date_input(end_input, end)
 
