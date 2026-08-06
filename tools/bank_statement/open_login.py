@@ -185,7 +185,7 @@ def current_fubon_page(context: BrowserContext, fallback: Page | None = None) ->
     logged_in = []
     for candidate in pages:
         try:
-            if has_visible_text(candidate, "登出"):
+            if is_fubon_logged_in(candidate):
                 logged_in.append(candidate)
         except Exception:
             continue
@@ -238,7 +238,7 @@ def wait_fubon_login(
         logged_in = False
         try:
             for candidate in [page, *page.frames]:
-                logout = candidate.get_by_text("登出", exact=True)
+                logout = candidate.get_by_text("登出", exact=False)
                 if any(logout.nth(index).is_visible() for index in range(logout.count())):
                     logged_in = True
                     break
@@ -309,6 +309,15 @@ def click_nearest_control(locator: object) -> None:
 def has_visible_text(page: Page, text: str) -> bool:
     for context in [page, *page.frames]:
         locator = context.get_by_text(text, exact=True)
+        for index in range(locator.count()):
+            if locator.nth(index).is_visible():
+                return True
+    return False
+
+
+def is_fubon_logged_in(page: Page) -> bool:
+    for context in [page, *page.frames]:
+        locator = context.get_by_text("登出", exact=False)
         for index in range(locator.count()):
             if locator.nth(index).is_visible():
                 return True

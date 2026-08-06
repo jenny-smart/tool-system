@@ -14,6 +14,7 @@ from tools.bank_statement.open_login import (
     current_fubon_page,
     fill_fubon,
     has_visible_text,
+    is_fubon_logged_in,
     open_fubon_statement,
     parse_date,
     wait_fubon_login,
@@ -24,13 +25,13 @@ from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_ch
 
 def existing_page(context: BrowserContext) -> Page | None:
     pages = [page for page in context.pages if "ebank.taipeifubon.com.tw" in page.url]
-    logged_in = next((page for page in reversed(pages) if has_visible_text(page, "登出")), None)
+    logged_in = next((page for page in reversed(pages) if is_fubon_logged_in(page)), None)
     return logged_in or (pages[-1] if pages else None)
 
 
 def ensure_login(context: BrowserContext, account: BankAccount) -> Page:
     page = existing_page(context) or context.new_page()
-    if has_visible_text(page, "登出"):
+    if is_fubon_logged_in(page):
         print("偵測到富邦已登入，沿用 Agent Chrome 工作階段。")
         return page
     last_error: Exception | None = None
