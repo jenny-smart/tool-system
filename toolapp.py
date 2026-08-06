@@ -1749,7 +1749,7 @@ def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, 
 def queue_fubon_login(*, month="", start_date=None, end_date=None, area="全區"):
     task = create_local_agent_task(
         "fubon.login",
-        {"area": area},
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
         created_by=st.session_state.get("username", "Tool System"),
     )
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
@@ -1762,6 +1762,7 @@ def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全�
             "start_date": start_date.isoformat() if start_date else "",
             "end_date": end_date.isoformat() if end_date else "",
             "area": area,
+            "cdp_url": "http://127.0.0.1:9222",
         },
         created_by=st.session_state.get("username", "Tool System"),
     )
