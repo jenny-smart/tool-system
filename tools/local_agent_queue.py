@@ -11,6 +11,21 @@ from zoneinfo import ZoneInfo
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 
 
+__all__ = [
+    "LOG_SHEET_NAME",
+    "SHEET_NAME",
+    "append_task_log",
+    "claim_next_task",
+    "create_task",
+    "default_agent_id",
+    "ensure_task_sheet",
+    "list_tasks",
+    "now_text",
+    "read_task_log",
+    "update_task",
+]
+
+
 SHEET_NAME = "本機Agent任務"
 LOG_SHEET_NAME = "本機Agent任務Log"
 HEADERS = [
