@@ -88,7 +88,9 @@ def explicit_date_range(start: str, end: str) -> tuple[str, str, str]:
         raise ValueError("日期格式請使用 YYYY-MM-DD") from exc
     if start_date > end_date:
         raise ValueError("開始日期不可晚於結束日期")
-    period = f"{start_date:%Y%m%d}-{end_date:%Y%m%d}"
+    if (start_date.year, start_date.month) != (end_date.year, end_date.month):
+        raise ValueError("藍新下載的開始與結束日期必須在同一月份")
+    period = f"{start_date:%Y%m}-2"
     return start_date.isoformat(), end_date.isoformat(), period
 
 
