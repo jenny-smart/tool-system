@@ -1808,8 +1808,8 @@ FINANCE_TASKS = [
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
-    {"name": "【鯨躍發票】登入", "handler": queue_cetustek_login, "enabled": True},
-    {"name": "【鯨躍發票】下載", "handler": queue_cetustek_download, "enabled": True},
+    {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
+    {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
@@ -2129,7 +2129,7 @@ with date_col:
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("啟動 launchd 常駐服務，不需選擇日期", icon="🟢")
         elif selected_function in (
-            "【鯨躍發票】登入",
+            "【鯨躍發票】鯨躍登入",
             "【藍新金流】藍新登入",
             "【富邦銀行】富邦登入",
             "【元大銀行】元大登入",
@@ -2154,7 +2154,7 @@ with date_col:
                     value=today_date,
                     key="finance_fubon_end_date",
                 )
-        elif selected_function == "【鯨躍發票】下載":
+        elif selected_function == "【鯨躍發票】鯨躍發票下載":
             st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
             finance_invoice_date_mode = st.radio(
                 "期間選擇",
@@ -2366,7 +2366,7 @@ if system_type == "finance_management" and selected_function.startswith(("【鯨
         agent_tasks = [
             task
             for task in list_local_agent_tasks(limit=10)
-            if task.get("action", "").startswith(("cetustek.", "newebpay.", "fubon."))
+            if task.get("action", "").startswith(("cetustek.", "newebpay.", "fubon.", "yuanta."))
         ]
         if agent_tasks:
             st.markdown("#### 本機 Agent 任務 Log")
