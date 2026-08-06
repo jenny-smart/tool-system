@@ -477,26 +477,29 @@ def open_fubon_statement(
 
     # 尚未在帳號清單時，從首頁點「我的存款」。
     if query_form is None and account_row is None:
-        tile = visible_in_viewport(page, "a.menu_CBO03.task_CBOQU003", timeout_ms=5_000)
         print("步驟 1/4：點擊『我的存款』。")
         try:
             page.keyboard.press("Escape")
         except Exception:
             pass
         try:
-            tile.evaluate("el => el.click()")
-        except Exception:
-            tile.click(force=True, no_wait_after=True, timeout=2_000)
+            # 富邦會不定期更換首頁連結 class；以畫面文字鎖定實際控制項。
+            _, tile_text = visible_text(page, "我的存款", timeout_ms=8_000)
+            click_nearest_control(tile_text)
+        except Exception as text_error:
+            # 舊版首頁仍保留 CBO03 class，作為相容備援。
+            try:
+                tile = visible_in_viewport(
+                    page, "a.menu_CBO03.task_CBOQU003", timeout_ms=2_000
+                )
+                tile.evaluate("el => el.click()")
+            except Exception as selector_error:
+                raise RuntimeError(
+                    f"找不到可點擊的『我的存款』（文字：{text_error}；選擇器：{selector_error}）"
+                ) from selector_error
 
-        if not wait_visible_text(page, "快速功能", timeout_ms=10_000):
-            # 部分富邦首頁的輪播遮罩會吃掉滑鼠事件；直接觸發同一個可見連結。
-            print("一般點擊未換頁，改用可見 CBO03 連結直接導覽。")
-            tile = visible_in_viewport(page, "a.menu_CBO03.task_CBOQU003", timeout_ms=5_000)
-            tile.evaluate("el => el.click()")
-        if not wait_visible_text(page, "快速功能", timeout_ms=15_000):
-            raise RuntimeError("已點擊可見的『我的存款』CBO03，但頁面沒有進入帳號清單")
         page = wait_fubon_page_with_text(
-            browser_context, page, ("快速功能",), timeout_ms=10_000
+            browser_context, page, ("快速功能",), timeout_ms=20_000
         )
         print("已進入『我的存款』帳號清單。")
         account_row = find_account_row(page, account, timeout_ms=10_000)
