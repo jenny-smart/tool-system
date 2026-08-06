@@ -9,12 +9,20 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from playwright.sync_api import Browser, Page, sync_playwright
+from playwright.sync_api import Page, sync_playwright
+
+from tools.invoice_center.chrome_cdp import (
+    DEFAULT_CDP_URL,
+    connect_existing_chrome,
+    find_existing_page,
+)
+from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 
 
 BASE_URL = "https://www.newebpay.com"
 LOGIN_URL = f"{BASE_URL}/main/login_center/single_login"
 INVOICE_URL = f"{BASE_URL}/invoice/search_invoice/search_list"
+LOGOUT_URL = f"{BASE_URL}/company/company_procedures/logout"
 DEFAULT_ACCOUNTS_FILE = Path.home() / "NewebPay account" / "newebpay_accounts.json"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "outputs"
 
@@ -310,15 +318,23 @@ def parse_amount(value: str) -> int:
     return int(digits)
 
 
-def query_account(browser: Browser, account: AreaAccount, months: list[str], slow_mo: int) -> list[InvoiceAmount]:
-    context = browser.new_context(locale="zh-TW")
-    page = context.new_page()
+def logout(page: Page, area: str) -> None:
+    page.goto(LOGOUT_URL, wait_until="domcontentloaded")
+    try:
+        page.wait_for_url("**/main/login_center/single_login**", timeout=30_000)
+    except Exception:
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    print(f"[{area}] 藍新已登出。")
+
+
+def query_account(page: Page, account: AreaAccount, months: list[str], slow_mo: int) -> list[InvoiceAmount]:
     wanted = {invoice_date_for(month): month for month in months}
+    completed = False
     try:
         login(page, account)
         rows = query_invoice_rows(page, list(wanted))
         by_date = {row["invoice_date"]: row for row in rows}
-        return [
+        result = [
             InvoiceAmount(
                 area=account.area,
                 source_month=month,
@@ -329,6 +345,8 @@ def query_account(browser: Browser, account: AreaAccount, months: list[str], slo
             )
             for invoice_date, month in wanted.items()
         ]
+        completed = True
+        return result
     except Exception:
         debug_dir = DEFAULT_OUTPUT_DIR / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
@@ -338,7 +356,12 @@ def query_account(browser: Browser, account: AreaAccount, months: list[str], slo
     finally:
         if slow_mo:
             page.wait_for_timeout(slow_mo)
-        context.close()
+        try:
+            logout(page, account.area)
+        except Exception as exc:
+            if completed:
+                raise
+            print(f"[{account.area}] 登出失敗：{exc}", file=sys.stderr)
 
 
 def save_csv(rows: list[InvoiceAmount], target: Path) -> None:
@@ -350,12 +373,67 @@ def save_csv(rows: list[InvoiceAmount], target: Path) -> None:
             writer.writerow([row.area, row.source_month, row.invoice_date, row.amount if row.amount is not None else "", row.invoice_number, row.status])
 
 
+def sync_fee_sheet(rows: list[InvoiceAmount]) -> int:
+    service = get_sheets_service()
+    spreadsheet_id = get_master_spreadsheet_id()
+    title = "藍新手續費"
+    headers = ["區域", "月份", "發票日期", "金額"]
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(sheetId,title))",
+    ).execute()
+    sheet_ids = {
+        sheet["properties"]["title"]: sheet["properties"]["sheetId"]
+        for sheet in meta.get("sheets", [])
+    }
+    if title not in sheet_ids:
+        response = service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"frozenRowCount": 1}}}}]},
+        ).execute()
+        sheet_ids[title] = response["replies"][0]["addSheet"]["properties"]["sheetId"]
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!A1:D1",
+        valueInputOption="RAW",
+        body={"values": [headers]},
+    ).execute()
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!A2:D",
+        body={},
+    ).execute()
+    values = [
+        [row.area, row.source_month, row.invoice_date, row.amount if row.amount is not None else ""]
+        for row in rows
+    ]
+    if values:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{title}'!A2:D{len(values) + 1}",
+            valueInputOption="RAW",
+            body={"values": values},
+        ).execute()
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{
+            "repeatCell": {
+                "range": {"sheetId": sheet_ids[title], "startRowIndex": 1, "startColumnIndex": 3, "endColumnIndex": 4},
+                "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT", "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+                "fields": "userEnteredFormat(horizontalAlignment,numberFormat)",
+            }
+        }]},
+    ).execute()
+    return len(values)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="查詢藍新各區指定月份的發票金額")
     parser.add_argument("months", help="YYYYMM 或 YYYYMM-YYYYMM，例如 202605-202606")
     parser.add_argument("--area", nargs="+", help="地區，可輸入多個，例如 --area 台北 台中；省略表示全部")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--output", type=Path, help="輸出 CSV 路徑")
+    parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     parser.add_argument("--slow-mo", type=int, default=0, help="每區完成後額外停留毫秒數")
     parser.add_argument("--dry-run", action="store_true", help="只顯示查詢計畫，不開啟瀏覽器")
     return parser.parse_args()
@@ -381,31 +459,32 @@ def main() -> int:
     results: list[InvoiceAmount] = []
     failures: list[str] = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel="chrome", headless=False)
+        _browser, context = connect_existing_chrome(playwright, args.cdp_url)
+        shared_page = find_existing_page(context, ("newebpay.com",)) or context.new_page()
         try:
             for account in accounts:
                 try:
-                    results.extend(query_account(browser, account, months, args.slow_mo))
+                    results.extend(query_account(shared_page, account, months, args.slow_mo))
                 except Exception as exc:
                     failures.append(f"{account.area}: {exc}")
                     print(f"[{account.area}] 查詢失敗：{exc}", file=sys.stderr)
         finally:
-            if results:
-                print("\n查詢結果：")
-                for row in results:
-                    amount = f"NT$ {row.amount:,}" if row.amount is not None else "查無發票"
-                    print(f"{row.area}  {row.source_month}  {row.invoice_date}  {amount}")
-            prompt = "\n查詢完成，按 Enter 關閉 Chrome：" if not failures else "\n查詢失敗，Chrome 會保留供檢查；查看完成後按 Enter 關閉："
-            try:
-                input(prompt)
-            except EOFError:
-                pass
-            browser.close()
+            if not shared_page.is_closed():
+                shared_page.close()
+                print("藍新視窗已關閉。")
+        if results:
+            print("\n查詢結果：")
+            for row in results:
+                amount = f"NT$ {row.amount:,}" if row.amount is not None else "查無發票"
+                print(f"{row.area}  {row.source_month}  {row.invoice_date}  {amount}")
 
+    written = sync_fee_sheet(results)
+    print(f"藍新手續費工作表寫入 {written} 筆。")
     if results:
         if args.output:
             save_csv(results, args.output)
             print(f"\nCSV：{args.output}")
+            print(f"RESULT_FILE:{args.output.resolve()}")
     if failures:
         print("\n未完成：", file=sys.stderr)
         for failure in failures:

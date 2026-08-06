@@ -549,7 +549,9 @@ def main() -> int:
                     failures.append(f"{account.area}: {exc}")
                     print(f"  失敗：{exc}", file=sys.stderr)
         finally:
-            pass
+            if not shared_page.is_closed():
+                shared_page.close()
+                print("藍新視窗已關閉。")
 
     if failures:
         print("\n未完成：", file=sys.stderr)
