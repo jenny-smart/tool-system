@@ -251,6 +251,7 @@ def wait_fubon_login(
         if logged_in:
             # 一偵測到已登入便交給明細流程；首頁元件可能延遲載入，
             # 不應在此重複等待「我的存款」或快速功能。
+            dismiss_fubon_idle_dialog(page)
             time.sleep(0.25)
             return current_fubon_page(context, page) or page
         time.sleep(0.5)
@@ -291,21 +292,62 @@ def has_visible_text(page: Page, text: str) -> bool:
     return False
 
 
+def has_visible_text_containing(page: Page, text: str) -> bool:
+    """以部分文字辨識畫面；富邦會在日期、秒數等內容中插入動態文字。"""
+    for context in [page, *page.frames]:
+        try:
+            locator = context.get_by_text(text, exact=False)
+            for index in range(locator.count()):
+                if locator.nth(index).is_visible():
+                    return True
+        except Exception:
+            # 登入後富邦會替換 iframe；讀取到已卸載的 frame 時交給下一個判斷。
+            continue
+    return False
+
+
 def is_fubon_logged_in(page: Page) -> bool:
     frame_urls = [frame.url for frame in page.frames]
     # 富邦未登入頁的共用頁首也會顯示「登出」，不能以該文字單獨判定。
-    # 真正登入前會存在 PreLogin.faces；登入成功後則切換為 Logout.faces。
-    if any("/PreLogin.faces" in url for url in frame_urls):
-        return False
+    # 真正登入前會存在 PreLogin.faces；部分版本登入後仍保留舊 PreLogin frame，
+    # 因此要先檢查登入後的正向訊號，不能看見 PreLogin 就立即回傳 False。
     if any("/Logout.faces" in url for url in frame_urls):
         return True
+    # 2026-08 富邦登入後仍停在 /common/Index.faces，功能 iframe 也可能全在
+    # /common/ 下。首頁底部的「上次登入時間」只會出現在有效登入工作階段。
+    if has_visible_text_containing(page, "您上次登入系統時間為"):
+        return True
+    # 已進入帳號清單或交易明細查詢時也視為登入成功。
+    if query_form_context(page) is not None:
+        return True
+    if has_visible_text(page, "快速功能") and has_visible_text(page, "交易明細查詢"):
+        return True
+    if any("/PreLogin.faces" in url for url in frame_urls):
+        return False
     # 登入後主要功能會載入 /B2C/<功能代碼>/... 頁框；登入前僅有 /common/。
-    # 僅依 URL 判斷，避免舊 PreLogin frame 的 DOM locator 永久等待。
     return any(
         "/B2C/" in url and "/B2C/common/" not in url
         for url in frame_urls
         if url.startswith("http")
     )
+
+
+def dismiss_fubon_idle_dialog(page: Page) -> bool:
+    """關閉富邦「閒置過久」提示，避免遮住後續功能操作。"""
+    for context in [page, *page.frames]:
+        try:
+            buttons = context.get_by_text("繼續使用", exact=True)
+            for index in range(buttons.count()):
+                button = buttons.nth(index)
+                if not button.is_visible():
+                    continue
+                click_nearest_control(button)
+                page.wait_for_timeout(250)
+                print("已關閉富邦閒置提示，繼續執行。")
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def wait_visible_text(page: Page, text: str, timeout_ms: int = 2_000) -> bool:
@@ -471,6 +513,8 @@ def open_fubon_statement(
 ) -> Page:
     if not account.bank_account:
         raise RuntimeError("bank_accounts.json 尚未設定 bank_account，無法選擇查詢帳號")
+
+    dismiss_fubon_idle_dialog(page)
 
     query_form = query_form_context(page)
     if query_form is None:
