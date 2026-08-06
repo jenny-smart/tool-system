@@ -21,9 +21,14 @@ import yaml
 
 from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
 from tools.local_agent_queue import create_task as create_local_agent_task
-from tools.local_agent_queue import list_agent_status as list_local_agent_status
 from tools.local_agent_queue import list_tasks as list_local_agent_tasks
 from tools.local_agent_queue import read_task_log as read_local_agent_task_log
+
+try:
+    from tools.local_agent_queue import list_agent_status as list_local_agent_status
+except ImportError:
+    def list_local_agent_status(*, max_age_seconds=30, **_kwargs):
+        return []
 
 @st.cache_resource(show_spinner=False)
 def _get_sheets_service_cached():
