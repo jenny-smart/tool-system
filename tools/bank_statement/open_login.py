@@ -105,6 +105,13 @@ def fill_fubon(page: Page, account: BankAccount) -> None:
                 if len(row_fields) == 4:
                     context, fields = candidate, row_fields
                     break
+                fallback_fields = candidate.locator(
+                    'input:visible:not([type="hidden"]):not([type="button"]):not([type="submit"])'
+                )
+                if fallback_fields.count() >= 4:
+                    context = candidate
+                    fields = [fallback_fields.nth(index) for index in range(4)]
+                    break
             except Exception:
                 continue
         if context is not None:
@@ -249,8 +256,8 @@ def wait_fubon_login(
                     tile = visible_in_viewport(
                         page, "a.menu_CBO03.task_CBOQU003", timeout_ms=500
                     )
-                    href = tile.get_attribute("href") or ""
-                    navigation_ready = bool(href)
+                    href = tile.get_attribute("href") or "visible_my_deposit"
+                    navigation_ready = True
                 except RuntimeError:
                     href = ""
             else:
