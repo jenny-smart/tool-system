@@ -241,13 +241,8 @@ def wait_fubon_login(
             waited += 500
             continue
         page = active_page
-        logged_in = False
         try:
-            for candidate in [page, *page.frames]:
-                logout = candidate.get_by_text("登出", exact=False)
-                if any(logout.nth(index).is_visible() for index in range(logout.count())):
-                    logged_in = True
-                    break
+            logged_in = is_fubon_logged_in(page)
         except Exception:
             # 分頁正於登入後替換；下一輪改抓新分頁。
             time.sleep(0.5)
@@ -297,11 +292,19 @@ def has_visible_text(page: Page, text: str) -> bool:
 
 
 def is_fubon_logged_in(page: Page) -> bool:
+    frame_urls = [frame.url for frame in page.frames]
+    # 富邦未登入頁的共用頁首也會顯示「登出」，不能以該文字單獨判定。
+    # 真正登入前會存在 PreLogin.faces；登入成功後則切換為 Logout.faces。
+    if any("/PreLogin.faces" in url for url in frame_urls):
+        return False
+    if any("/Logout.faces" in url for url in frame_urls):
+        return True
     for context in [page, *page.frames]:
-        locator = context.get_by_text("登出", exact=False)
-        for index in range(locator.count()):
-            if locator.nth(index).is_visible():
-                return True
+        for text in ("登出", "我的存款", "快速功能", "查詢期間"):
+            locator = context.get_by_text(text, exact=True)
+            for index in range(locator.count()):
+                if locator.nth(index).is_visible():
+                    return True
     return False
 
 
@@ -483,14 +486,16 @@ def open_fubon_statement(
         except Exception:
             pass
         try:
-            # 富邦會不定期更換首頁連結 class；以畫面文字鎖定實際控制項。
-            _, tile_text = visible_text(page, "我的存款", timeout_ms=8_000)
-            click_nearest_control(tile_text)
+            # 首頁同時存在多個輪播複本；選取真正位於視窗中的連結。
+            tile = visible_in_viewport(
+                page, 'a:has-text("我的存款")', timeout_ms=8_000
+            )
+            tile.evaluate("el => el.click()")
         except Exception as text_error:
-            # 舊版首頁仍保留 CBO03 class，作為相容備援。
+            # 舊版首頁 class 作為相容備援。
             try:
                 tile = visible_in_viewport(
-                    page, "a.menu_CBO03.task_CBOQU003", timeout_ms=2_000
+                    page, "a.task_CBOQU003", timeout_ms=2_000
                 )
                 tile.evaluate("el => el.click()")
             except Exception as selector_error:
