@@ -22,6 +22,7 @@ import yaml
 from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
 from tools.local_agent_queue import create_task as create_local_agent_task
 from tools.local_agent_queue import list_tasks as list_local_agent_tasks
+from tools.local_agent_queue import read_task_log as read_local_agent_task_log
 
 @st.cache_resource(show_spinner=False)
 def _get_sheets_service_cached():
@@ -2166,7 +2167,8 @@ if system_type == "finance_management" and selected_function.startswith("【鯨�
                 hide_index=True,
             )
             with st.expander("最新完整 Log", expanded=agent_tasks[0].get("status") == "failed"):
-                st.code(agent_tasks[0].get("log") or "等待本機 Agent", language="text")
+                full_log = read_local_agent_task_log(agent_tasks[0].get("task_id", ""))
+                st.code(full_log or agent_tasks[0].get("log") or "等待本機 Agent", language="text")
     except Exception as exc:
         st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
 
