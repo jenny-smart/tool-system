@@ -143,21 +143,24 @@ def build_newebpay_invoice_amounts(params: dict[str, Any]) -> list[str]:
 
 def build_fubon_login(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
     if not area or area == "全區":
         raise ValueError("富邦登入請選擇單一區域")
     return [
         sys.executable,
         "-m",
-        "tools.bank_statement.login_only",
-        "--bank",
-        "fubon",
+        "tools.bank_statement.fubon_agent",
+        "login",
         "--area",
         area,
+        "--cdp-url",
+        cdp_url,
     ]
 
 
 def build_fubon_download(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
     start_date = str(params.get("start_date") or "").strip()
     end_date = str(params.get("end_date") or "").strip()
     if not area or area == "全區":
@@ -168,13 +171,16 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
     return [
         sys.executable,
         "-m",
-        "tools.bank_statement.native_chrome",
+        "tools.bank_statement.fubon_agent",
+        "download",
         "--area",
         area,
         "--start",
         start_date,
         "--end",
         end_date,
+        "--cdp-url",
+        cdp_url,
         "--output",
         str(output),
     ]
