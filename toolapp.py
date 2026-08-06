@@ -1769,12 +1769,35 @@ def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_yuanta_login(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "yuanta.login",
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
+def queue_yuanta_download(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "yuanta.download",
+        {
+            "start_date": start_date.isoformat() if start_date else "",
+            "end_date": end_date.isoformat() if end_date else "",
+            "area": area,
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
-    {"name": "【元大銀行】元大登入", "handler": None, "enabled": False},
-    {"name": "【元大銀行】元大明細下載", "handler": None, "enabled": False},
+    {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
+    {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【鯨躍發票】登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
