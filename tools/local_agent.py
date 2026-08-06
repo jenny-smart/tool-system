@@ -214,11 +214,18 @@ def main() -> int:
         flush=True,
     )
     while True:
-        task = claim_next_task(
-            agent_id=args.agent_id,
-            service=service,
-            spreadsheet_id=spreadsheet_id,
-        )
+        try:
+            task = claim_next_task(
+                agent_id=args.agent_id,
+                service=service,
+                spreadsheet_id=spreadsheet_id,
+            )
+        except Exception as exc:
+            print(f"Queue 連線失敗，{args.poll_seconds:g} 秒後重試：{exc}", file=sys.stderr, flush=True)
+            if args.once:
+                return 1
+            time.sleep(max(1.0, args.poll_seconds))
+            continue
         if task:
             run_task(task, service=service, spreadsheet_id=spreadsheet_id)
             if args.once:
