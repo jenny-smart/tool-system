@@ -1671,6 +1671,29 @@ def queue_cetustek_download(*, month="", start_date=None, end_date=None, area="�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_newebpay_login(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "newebpay.login",
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
+def queue_newebpay_download(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "newebpay.download",
+        {
+            "start_date": start_date.isoformat() if start_date else "",
+            "end_date": end_date.isoformat() if end_date else "",
+            "area": area,
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 FINANCE_TASKS = [
     {"name": "【富邦銀行】富邦登入", "handler": None, "enabled": False},
     {"name": "【富邦銀行】富邦明細下載", "handler": None, "enabled": False},
@@ -1678,8 +1701,8 @@ FINANCE_TASKS = [
     {"name": "【元大銀行】元大明細下載", "handler": None, "enabled": False},
     {"name": "【鯨躍發票】登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】下載", "handler": queue_cetustek_download, "enabled": True},
-    {"name": "【藍新金流】藍新登入", "handler": None, "enabled": False},
-    {"name": "【藍新金流】藍新收退款下載", "handler": None, "enabled": False},
+    {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
+    {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": None, "enabled": False},
 ]
 
@@ -1978,7 +2001,7 @@ with date_col:
 
     elif system_type == "finance_management":
         today_date = datetime.now(TW_TZ).date()
-        if selected_function == "【鯨躍發票】登入":
+        if selected_function in ("【鯨躍發票】登入", "【藍新金流】藍新登入"):
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("登入不需選擇月份或日期", icon="🔐")
         elif selected_function == "【鯨躍發票】下載":
@@ -2014,6 +2037,21 @@ with date_col:
                         value=today_date,
                         key="finance_invoice_end_date",
                     )
+        elif selected_function == "【藍新金流】藍新收退款下載":
+            st.markdown('<div class="field-label">📆 下載日期區間</div>', unsafe_allow_html=True)
+            d1, d2 = st.columns(2)
+            with d1:
+                start_date_value = st.date_input(
+                    "開始日期",
+                    value=today_date.replace(day=1),
+                    key="finance_newebpay_start_date",
+                )
+            with d2:
+                end_date_value = st.date_input(
+                    "結束日期",
+                    value=today_date,
+                    key="finance_newebpay_end_date",
+                )
         else:
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -2120,6 +2158,8 @@ with area_col:
         area_options = ["全區"]
 
     area_select_options = ["全區"] + [area for area in area_options if area != "全區"]
+    if selected_function == "【藍新金流】藍新登入":
+        area_select_options = [area for area in area_options if area != "全區"]
 
     selected_area_value = st.selectbox(
         "執行區域",
@@ -2146,9 +2186,13 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ═══════════════════════════════════════════════════════════
 render_log()
 
-if system_type == "finance_management" and selected_function.startswith("【鯨躍發票】"):
+if system_type == "finance_management" and selected_function.startswith(("【鯨躍發票】", "【藍新金流】")):
     try:
-        agent_tasks = [task for task in list_local_agent_tasks(limit=10) if task.get("action", "").startswith("cetustek.")]
+        agent_tasks = [
+            task
+            for task in list_local_agent_tasks(limit=10)
+            if task.get("action", "").startswith(("cetustek.", "newebpay."))
+        ]
         if agent_tasks:
             st.markdown("#### 本機 Agent 任務 Log")
             st.dataframe(
