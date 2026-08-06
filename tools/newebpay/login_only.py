@@ -36,19 +36,20 @@ def wait_for_login(page: Page, account: AreaAccount, timeout: float = 300.0) -> 
     if "newebpay.com" in page.url and "login_center/single_login" not in page.url:
         print(f"[{account.area}] 沿用目前藍新登入狀態。")
         return
-    page.goto(LOGIN_URL, wait_until="domcontentloaded")
     fill_enterprise_login(page, account)
     print(f"[{account.area}] 藍新帳密已預填，請輸入驗證碼並按『企業會員登入』。")
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        login_field = page.locator(".MoComUbn")
+        login_fields = page.locator('.MoComUbn, input[name="LoginUBN"]')
         on_login_page = "login_center/single_login" in page.url
-        field_visible = bool(login_field.count() and login_field.first.is_visible())
+        visible_fields = [login_fields.nth(i) for i in range(login_fields.count()) if login_fields.nth(i).is_visible()]
+        login_field = visible_fields[0] if visible_fields else None
+        field_visible = login_field is not None
         if not on_login_page and not field_visible:
             print(f"[{account.area}] 藍新登入完成。")
             return
-        if field_visible and not login_field.first.input_value().strip():
+        if field_visible and login_field is not None and not login_field.input_value().strip():
             fill_enterprise_login(page, account)
             print(f"[{account.area}] 帳密已重新預填，請輸入新的驗證碼。")
         page.wait_for_timeout(500)

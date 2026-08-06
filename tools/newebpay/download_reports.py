@@ -145,6 +145,42 @@ def first_visible(page: Page, selectors: Iterable[str]) -> Locator:
     raise RuntimeError("找不到下載按鈕；藍新頁面可能已改版")
 
 
+def visible_login_field(page: Page, selectors: Iterable[str]) -> Locator | None:
+    for selector in selectors:
+        locator = page.locator(selector)
+        for index in range(locator.count()):
+            item = locator.nth(index)
+            if item.is_visible():
+                return item
+    return None
+
+
+def prepare_enterprise_login(page: Page) -> tuple[Locator, Locator, Locator]:
+    page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        for selector in (
+            'a[href="#com_login"]',
+            '[data-target="#com_login"]',
+            'a:has-text("企業會員")',
+            'button:has-text("企業會員")',
+        ):
+            tab = visible_login_field(page, (selector,))
+            if tab is not None:
+                try:
+                    tab.click(timeout=2_000)
+                except Exception:
+                    pass
+                break
+        company_id = visible_login_field(page, ('.MoComUbn', 'input[name="LoginUBN"]'))
+        account = visible_login_field(page, ('.MoComId', 'input[name="LoginID"]'))
+        password = visible_login_field(page, ('.MoComPwd', 'input[name="LoginPWD"]'))
+        if company_id is not None and account is not None and password is not None:
+            return company_id, account, password
+        page.wait_for_timeout(300)
+    raise RuntimeError(f"找不到可見的企業會員登入欄位，頁面：{page.url}")
+
+
 def set_date(page: Page, names: Iterable[str], value: str, position: int) -> None:
     for name in names:
         locator = page.locator(f'input[name="{name}"], input#{name}')
@@ -252,12 +288,10 @@ def select_merchant(page: Page, account: AreaAccount) -> None:
 
 
 def fill_enterprise_login(page: Page, account: AreaAccount) -> None:
-    enterprise_tab = page.locator('a[href="#com_login"]')
-    if enterprise_tab.count() and enterprise_tab.first.is_visible():
-        enterprise_tab.first.click()
-    page.locator(".MoComUbn").fill(account.company_id)
-    page.locator(".MoComId").fill(account.account)
-    page.locator(".MoComPwd").fill(account.password)
+    company_id, account_field, password = prepare_enterprise_login(page)
+    company_id.fill(account.company_id)
+    account_field.fill(account.account)
+    password.fill(account.password)
 
 
 def login(page: Page, account: AreaAccount) -> list[str]:
@@ -280,7 +314,6 @@ def login(page: Page, account: AreaAccount) -> list[str]:
     if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
         print(f"[{account.area}] 沿用目前藍新登入狀態。")
         return login_messages
-    page.goto(LOGIN_URL, wait_until="domcontentloaded")
     fill_enterprise_login(page, account)
 
     print(f"\n[{account.area}] 企業帳密已預填。")
@@ -293,9 +326,9 @@ def login(page: Page, account: AreaAccount) -> list[str]:
         if "/sale/Sell_center/search_transaction" in page.url:
             return login_messages
         if "/main/login_center/single_login" in page.url:
-            company_id = page.locator(".MoComUbn")
-            if company_id.count() and company_id.first.is_visible():
-                if not company_id.first.input_value().strip():
+            company_id = visible_login_field(page, ('.MoComUbn', 'input[name="LoginUBN"]'))
+            if company_id is not None:
+                if not company_id.input_value().strip():
                     fill_enterprise_login(page, account)
                     if login_messages or refilled_after_failure:
                         print(f"[{account.area}] 已重新填入企業帳密，請輸入網頁上的新驗證碼。")
