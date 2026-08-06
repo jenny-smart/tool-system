@@ -24,6 +24,7 @@ BASE_URL = "https://www.newebpay.com"
 LOGIN_URL = f"{BASE_URL}/main/login_center/single_login"
 PAYMENT_URL = f"{BASE_URL}/sale/Sell_center/search_transaction?count=1"
 REFUND_URL = f"{BASE_URL}/payment/Credit_finance/search_credit_close"
+LOGOUT_URL = f"{BASE_URL}/company/company_procedures/logout"
 DEFAULT_ACCOUNTS_FILE = Path.home() / "NewebPay account" / "newebpay_accounts.json"
 BASE_GOOGLE_DRIVE = (
     Path.home()
@@ -444,6 +445,15 @@ def download_refunds(
     )
 
 
+def logout(page: Page, area: str) -> None:
+    page.goto(LOGOUT_URL, wait_until="domcontentloaded")
+    try:
+        page.wait_for_url("**/main/login_center/single_login**", timeout=30_000)
+    except Exception:
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    print(f"[{area}] 藍新已登出。")
+
+
 def run_account(
     context: BrowserContext,
     account: AreaAccount,
@@ -457,6 +467,7 @@ def run_account(
     page = page or context.new_page()
     payment_path = output / f"{period}藍新收款-{account.area}.csv"
     refund_path = output / f"{period}藍新退款-{account.area}.csv"
+    completed = False
     try:
         messages = login(page, account)
         download_payments(
@@ -475,6 +486,8 @@ def run_account(
             refund_path,
             messages,
         )
+        completed = True
+        return [payment_path, refund_path]
     except Exception:
         debug = output / "debug"
         debug.mkdir(parents=True, exist_ok=True)
@@ -482,9 +495,14 @@ def run_account(
         (debug / f"{period}-{account.area}.html").write_text(page.content(), encoding="utf-8")
         raise
     finally:
+        try:
+            logout(page, account.area)
+        except Exception as exc:
+            if completed:
+                raise
+            print(f"[{account.area}] 登出失敗：{exc}", file=sys.stderr)
         if owns_page:
             page.close()
-    return [payment_path, refund_path]
 
 
 def parse_args() -> argparse.Namespace:
@@ -517,15 +535,14 @@ def main() -> int:
     failures: list[str] = []
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
-        existing_page = find_existing_page(context, ("newebpay.com",))
+        shared_page = find_existing_page(context, ("newebpay.com",)) or context.new_page()
         try:
-            for index, account in enumerate(accounts):
+            for account in accounts:
                 print(f"\n開始處理：{account.area}")
                 try:
                     output = area_output_dir(account.area, period, args.output)
                     print(f"儲存位置：{output}")
-                    page = existing_page if index == 0 and existing_page is not None else None
-                    files = run_account(context, account, start, end, period, output, page=page)
+                    files = run_account(context, account, start, end, period, output, page=shared_page)
                     for file_path in files:
                         print(f"RESULT_FILE: {file_path}")
                 except Exception as exc:
