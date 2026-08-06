@@ -1681,6 +1681,16 @@ def queue_newebpay_login(*, month="", start_date=None, end_date=None, area="全�
 
 
 def queue_newebpay_download(*, month="", start_date=None, end_date=None, area="全區"):
+    if month and not start_date and not end_date:
+        import calendar
+
+        month_text = str(month).strip().replace("-", "").replace("/", "")
+        if len(month_text) != 6 or not month_text.isdigit():
+            raise ValueError("月份格式請使用 YYYYMM")
+        year, month_number = int(month_text[:4]), int(month_text[4:])
+        last_day = calendar.monthrange(year, month_number)[1]
+        start_date = datetime(year, month_number, 1).date()
+        end_date = datetime(year, month_number, last_day).date()
     task = create_local_agent_task(
         "newebpay.download",
         {
@@ -2038,20 +2048,38 @@ with date_col:
                         key="finance_invoice_end_date",
                     )
         elif selected_function == "【藍新金流】藍新收退款下載":
-            st.markdown('<div class="field-label">📆 下載日期區間</div>', unsafe_allow_html=True)
-            d1, d2 = st.columns(2)
-            with d1:
-                start_date_value = st.date_input(
-                    "開始日期",
-                    value=today_date.replace(day=1),
-                    key="finance_newebpay_start_date",
+            st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
+            newebpay_date_mode = st.radio(
+                "期間選擇",
+                ["月份", "日期區間"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="finance_newebpay_date_mode",
+            )
+            if newebpay_date_mode == "月份":
+                period = st.text_input(
+                    "月份",
+                    value=today_date.strftime("%Y%m"),
+                    placeholder="例如：202608",
+                    label_visibility="collapsed",
+                    key="finance_newebpay_month",
                 )
-            with d2:
-                end_date_value = st.date_input(
-                    "結束日期",
-                    value=today_date,
-                    key="finance_newebpay_end_date",
-                )
+                st.caption("格式：YYYYMM；下載該月份完整收款與退款資料")
+            else:
+                period = ""
+                d1, d2 = st.columns(2)
+                with d1:
+                    start_date_value = st.date_input(
+                        "開始日期",
+                        value=today_date.replace(day=1),
+                        key="finance_newebpay_start_date",
+                    )
+                with d2:
+                    end_date_value = st.date_input(
+                        "結束日期",
+                        value=today_date,
+                        key="finance_newebpay_end_date",
+                    )
         else:
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
