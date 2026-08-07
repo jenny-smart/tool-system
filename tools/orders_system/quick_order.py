@@ -3537,7 +3537,7 @@ def _parse_invoice_details_from_block(lines):
                 info["carrier_type_id"] = "2"
                 # v8.30：手機條碼載具本來就是「/」開頭的格式（例如 /HWHMPF6），
                 # 送出去的 carrier_info 要保留這個「/」，不能只取後面的字元。
-                m = re.search(r"(/\s*[A-Za-z0-9+\-]+)", rest)
+                m = re.search(r"(/\s*[A-Za-z0-9.\-]+)", rest)
                 info["carrier_info"] = re.sub(r"\s+", "", m.group(1)) if m else ""
             elif "自然人憑證" in rest:
                 info["carrier_type_id"] = "3"
