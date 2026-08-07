@@ -1,0 +1,53 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.orders --date 20260807 --system-name 外場排程系統 --run-type 排程
+[2026-08-07 08:59:55] 開始處理訂單資料：20260807訂單-台北
+[2026-08-07 08:59:56] 失敗：20260807訂單-台北 / 找不到來源檔案：20260807訂單-台北 / 20260807訂單-台北.xlsx / 20260807訂單-台北.xls / 20260807訂單-台北.csv；資料夾內目前檔案：20260806訂單-台中.xls_temp_1785967465、20260806訂單-台北.xls_temp_1785967449、20260806訂單-台中.xls_temp_1785967414、20260806訂單-台北.xls_temp_1785967404、20260806訂單-台中.xls、20260806訂單-台北.xls、20260805訂單-台中.xls_temp_1785881003、20260805訂單-台北.xls_temp_1785880983、20260805訂單-台中.xls_temp_1785880944、20260805訂單-台北.xls_temp_1785880931、20260805訂單-台中.xls、20260805訂單-台北.xls、20260804訂單-台中.xls_temp_1785794308、20260804訂單-台北.xls_temp_1785794287、20260804訂單-台中.xls_temp_1785794249、20260804訂單-台北.xls_temp_1785794235、20260804訂單-台中.xls、20260804訂單-台北.xls、20260803訂單-台中.xls_temp_1785707078、20260803訂單-台北.xls_temp_1785707058、20260803訂單-台中.xls_temp_1785707027、20260803訂單-台北.xls_temp_1785707014、20260803訂單-台中.xls、20260803訂單-台北.xls、20260802訂單-台中.xls_temp_1785620729、20260802訂單-台北.xls_temp_1785620714、20260802訂單-台中.xls_temp_1785620690、20260802訂單-台北.xls_temp_1785620679、20260802訂單-台中.xls、20260802訂單-台北.xls、20260801訂單-台中.xls_temp_1785535000、20260801訂單-台北.xls_temp_1785534980、20260801訂單-台中.xls_temp_1785534943、20260801訂單-台北.xls_temp_1785534930、20260801訂單-台中.xls、20260801訂單-台北.xls
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 426, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 412, in main
+    run_orders_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 348, in run_orders_for_area
+    file = find_file_by_possible_names(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 212, in find_file_by_possible_names
+    raise RuntimeError(
+RuntimeError: 找不到來源檔案：20260807訂單-台北 / 20260807訂單-台北.xlsx / 20260807訂單-台北.xls / 20260807訂單-台北.csv；資料夾內目前檔案：20260806訂單-台中.xls_temp_1785967465、20260806訂單-台北.xls_temp_1785967449、20260806訂單-台中.xls_temp_1785967414、20260806訂單-台北.xls_temp_1785967404、20260806訂單-台中.xls、20260806訂單-台北.xls、20260805訂單-台中.xls_temp_1785881003、20260805訂單-台北.xls_temp_1785880983、20260805訂單-台中.xls_temp_1785880944、20260805訂單-台北.xls_temp_1785880931、20260805訂單-台中.xls、20260805訂單-台北.xls、20260804訂單-台中.xls_temp_1785794308、20260804訂單-台北.xls_temp_1785794287、20260804訂單-台中.xls_temp_1785794249、20260804訂單-台北.xls_temp_1785794235、20260804訂單-台中.xls、20260804訂單-台北.xls、20260803訂單-台中.xls_temp_1785707078、20260803訂單-台北.xls_temp_1785707058、20260803訂單-台中.xls_temp_1785707027、20260803訂單-台北.xls_temp_1785707014、20260803訂單-台中.xls、20260803訂單-台北.xls、20260802訂單-台中.xls_temp_1785620729、20260802訂單-台北.xls_temp_1785620714、20260802訂單-台中.xls_temp_1785620690、20260802訂單-台北.xls_temp_1785620679、20260802訂單-台中.xls、20260802訂單-台北.xls、20260801訂單-台中.xls_temp_1785535000、20260801訂單-台北.xls_temp_1785534980、20260801訂單-台中.xls_temp_1785534943、20260801訂單-台北.xls_temp_1785534930、20260801訂單-台中.xls、20260801訂單-台北.xls
+
+📝 外場排程打卡：外場訂單 / failed
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
+    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
+    results.append(run_job(job_name, date_key, area, system_name))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
+    raise RuntimeError(message)
+RuntimeError: 外場訂單 執行失敗，exit=1
+STDOUT:
+[2026-08-07 08:59:55] 開始處理訂單資料：20260807訂單-台北
+[2026-08-07 08:59:56] 失敗：20260807訂單-台北 / 找不到來源檔案：20260807訂單-台北 / 20260807訂單-台北.xlsx / 20260807訂單-台北.xls / 20260807訂單-台北.csv；資料夾內目前檔案：20260806訂單-台中.xls_temp_1785967465、20260806訂單-台北.xls_temp_1785967449、20260806訂單-台中.xls_temp_1785967414、20260806訂單-台北.xls_temp_1785967404、20260806訂單-台中.xls、20260806訂單-台北.xls、20260805訂單-台中.xls_temp_1785881003、20260805訂單-台北.xls_temp_1785880983、20260805訂單-台中.xls_temp_1785880944、20260805訂單-台北.xls_temp_1785880931、20260805訂單-台中.xls、20260805訂單-台北.xls、20260804訂單-台中.xls_temp_1785794308、20260804訂單-台北.xls_temp_1785794287、20260804訂單-台中.xls_temp_1785794249、20260804訂單-台北.xls_temp_1785794235、20260804訂單-台中.xls、20260804訂單-台北.xls、20260803訂單-台中.xls_temp_1785707078、20260803訂單-台北.xls_temp_1785707058、20260803訂單-台中.xls_temp_1785707027、20260803訂單-台北.xls_temp_1785707014、20260803訂單-台中.xls、20260803訂單-台北.xls、20260802訂單-台中.xls_temp_1785620729、20260802訂單-台北.xls_temp_1785620714、20260802訂單-台中.xls_temp_1785620690、20260802訂單-台北.xls_temp_1785620679、20260802訂單-台中.xls、20260802訂單-台北.xls、20260801訂單-台中.xls_temp_1785535000、20260801訂單-台北.xls_temp_1785534980、20260801訂單-台中.xls_temp_1785534943、20260801訂單-台北.xls_temp_1785534930、20260801訂單-台中.xls、20260801訂單-台北.xls
+
+STDERR:
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 426, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 412, in main
+    run_orders_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 348, in run_orders_for_area
+    file = find_file_by_possible_names(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 212, in find_file_by_possible_names
+    raise RuntimeError(
+RuntimeError: 找不到來源檔案：20260807訂單-台北 / 20260807訂單-台北.xlsx / 20260807訂單-台北.xls / 20260807訂單-台北.csv；資料夾內目前檔案：20260806訂單-台中.xls_temp_1785967465、20260806訂單-台北.xls_temp_1785967449、20260806訂單-台中.xls_temp_1785967414、20260806訂單-台北.xls_temp_1785967404、20260806訂單-台中.xls、20260806訂單-台北.xls、20260805訂單-台中.xls_temp_1785881003、20260805訂單-台北.xls_temp_1785880983、20260805訂單-台中.xls_temp_1785880944、20260805訂單-台北.xls_temp_1785880931、20260805訂單-台中.xls、20260805訂單-台北.xls、20260804訂單-台中.xls_temp_1785794308、20260804訂單-台北.xls_temp_1785794287、20260804訂單-台中.xls_temp_1785794249、20260804訂單-台北.xls_temp_1785794235、20260804訂單-台中.xls、20260804訂單-台北.xls、20260803訂單-台中.xls_temp_1785707078、20260803訂單-台北.xls_temp_1785707058、20260803訂單-台中.xls_temp_1785707027、20260803訂單-台北.xls_temp_1785707014、20260803訂單-台中.xls、20260803訂單-台北.xls、20260802訂單-台中.xls_temp_1785620729、20260802訂單-台北.xls_temp_1785620714、20260802訂單-台中.xls_temp_1785620690、20260802訂單-台北.xls_temp_1785620679、20260802訂單-台中.xls、20260802訂單-台北.xls、20260801訂單-台中.xls_temp_1785535000、20260801訂單-台北.xls_temp_1785534980、20260801訂單-台中.xls_temp_1785534943、20260801訂單-台北.xls_temp_1785534930、20260801訂單-台中.xls、20260801訂單-台北.xls
+
