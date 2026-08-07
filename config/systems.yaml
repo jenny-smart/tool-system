@@ -50,15 +50,7 @@ systems:
         台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
         台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
 
-  # V2：發票中心由 Tools App 主畫面進入，不再使用 Streamlit pages 側邊欄。
-  # 現階段沿用 invoice_center type 與既有 render_invoice_center() 核心，
-  # 系統名稱先統一為「營收管理」，後續再逐步納入退款／預收／儲值金功能。
-  - name: 營收管理
-    type: invoice_center
+  # 財務管理既有功能維持不動；營收相關功能後續併入此系統。
+  - name: 財務管理
+    type: finance_management
     enabled: true
-    regions:
-      - 台北
-      - 台中
-      - 桃園
-      - 新竹
-      - 高雄
