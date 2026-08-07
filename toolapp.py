@@ -1905,10 +1905,30 @@ DAILY_TARGET_MAP = {
 }
 
 FIELD_SCRIPT_MAP = {
-    "外場排班統計表": ["tools/field_management/schedule_stats.py"],
-    "外場專員班表": ["tools/field_management/staff_schedule.py"],
-    "外場當月次月訂單": ["tools/field_management/orders.py"],
-    "外場專員個資": ["tools/field_management/staff_profile.py"],
+    "外場排班統計表": [
+        "module:tools.field_management.scheduler",
+        "--target",
+        "schedule_stats",
+    ],
+
+    "外場專員班表": [
+        "module:tools.field_management.scheduler",
+        "--target",
+        "staff_schedule",
+    ],
+
+    "外場當月次月訂單": [
+        "module:tools.field_management.scheduler",
+        "--target",
+        "orders",
+    ],
+
+    "外場專員個資": [
+        "module:tools.field_management.scheduler",
+        "--target",
+        "staff_profile",
+    ],
+
     "一鍵執行外場日排程": [
         "module:tools.field_management.scheduler",
         "--target",
