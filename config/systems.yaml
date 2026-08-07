@@ -20,7 +20,7 @@ systems:
   - name: 外場排程系統
     type: field_daily_schedule
     enabled: true
-    log_spreadsheet_id: "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"  # ← 加這行
+    log_spreadsheet_id: "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
 
     folder_ids:
       schedule_stats: "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv"
@@ -50,7 +50,10 @@ systems:
         台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
         台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
 
-  - name: 發票中心
+  # V2：發票中心由 Tools App 主畫面進入，不再使用 Streamlit pages 側邊欄。
+  # 現階段沿用 invoice_center type 與既有 render_invoice_center() 核心，
+  # 系統名稱先統一為「營收管理」，後續再逐步納入退款／預收／儲值金功能。
+  - name: 營收管理
     type: invoice_center
     enabled: true
     regions:
