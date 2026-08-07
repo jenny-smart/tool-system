@@ -1,0 +1,8 @@
+{
+    "job_name": "service_schedule_stats",
+    "status": "failed",
+    "exit_code": 1,
+    "started_at": "2026-08-07 09:29:04",
+    "finished_at": "2026-08-07 09:29:22",
+    "duration_seconds": 18
+  }
