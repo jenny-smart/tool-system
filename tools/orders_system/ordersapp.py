@@ -1,10 +1,23 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.73
+# 版本：v8.75
 # 模組：服務訂單系統主畫面
-# 最後更新：2026-07-19
+# 最後更新：2026-08-08
 #
 # Change Log
+# v8.75
+# - 取消訂單新增「月份／日期區間」兩種服務日期查詢方式；月份模式自動帶入當月起迄日。
+# - 取消訂單付款狀態新增「待付款」，預設仍為「已付款」。
+# - 「取消訂單」與「VIP 訂單／Google 日曆同步」補上與其他功能一致的功能說明。
+# v8.74
+# - 新增「取消訂單」功能：一般訂單皆可使用，不限定 VIP；可依手機號碼、服務日期區間
+#   查詢已付款訂單，並處理不需退款／待退款／待收異動、客人備註及加收／待退備註。
+# - 新增「VIP 訂單／Google 日曆同步」功能：同步查詢後台訂單與 Google 日曆，
+#   支援異動日期／時段、取消／暫停、僅新增日曆、先預約再新增日曆及修改日曆資訊。
+# - VIP 同步不自動判斷訂單對應的既有日曆事件；需要修改既有事件時由使用者自行選擇。
+# - VIP 操作畫面統一為左側「訂單資訊」、右側「日曆資訊」，日期與時段欄位水平對齊。
+# - Google 日曆欄位統一包含日期、時段、確認文字與顏色／安排狀態；
+#   紫色＝未安排、黃色＝已安排、綠色＝暫停。
 # v8.73
 # - 週末提醒移除 LINE 預約發送與 Quick Reply 測試功能。
 # - 勾選後只將追蹤資料寫入 Google Sheet，不會透過程式發送 LINE。
@@ -360,7 +373,7 @@
 # v7.7 - 儲值金補價差拆兩段按鈕
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.73"
+__version__ = "8.75"
 
 import html
 import re
@@ -827,6 +840,10 @@ FUNCTION_OPTIONS = [
     ("更新建議下次服務時間：依「地址(B欄)+電話(E欄)」查後台最近3次服務日期，"
      "寫入 Google Sheet 的 L/M/N 欄（L=最近一次，N=最遠一次）。",
      "orders", "更新建議下次服務時間"),
+    ("取消訂單：依手機號碼、服務月份／日期區間與付款狀態搜尋訂單，處理不需退款／待退款／待收異動、客人備註及加收／待退備註。",
+     "orders", "取消訂單"),
+    ("VIP 訂單／Google 日曆同步：同時查詢後台訂單與 Google 日曆，支援異動日期／時段、取消／暫停、僅新增日曆、先預約再新增日曆及修改日曆資訊。",
+     "orders", "VIP 訂單／Google 日曆同步"),
     ("付款後5碼及星和診所比對：依付款日期、付款狀態搜尋 ATM 訂單，寫入 K～S 欄並比對銀行 B～H 欄；支援一筆匯款對多筆訂單。",
      "memo", "💳 付款後5碼及星和診所比對"),
 ]
@@ -851,6 +868,117 @@ if _system_key == "memo":
         shared_backend_email=backend_email,
         shared_backend_password=backend_password,
         shared_env=env,
+    )
+    st.stop()
+
+# =========================================================
+# v8.74：一般取消訂單
+# =========================================================
+if mode == "取消訂單":
+    from cancel_order import render_cancel_order
+
+    step("3", "取消訂單")
+    info_panel("功能說明", [
+        "依手機號碼搜尋一般訂單，不限定 VIP。",
+        "服務日期可用「月份」或「日期區間」查詢；月份模式會自動帶入該月起日與迄日。",
+        "付款狀態可選「已付款」或「待付款」，預設為已付款。",
+        "搜尋後可勾選一筆或多筆訂單，再選擇不需退款／待退款／待收異動。",
+        "取消時可同時寫入客人備註、加收備註與待退備註。",
+    ])
+    render_cancel_order(
+        backend_email.strip(),
+        backend_password.strip(),
+        env,
+    )
+    st.stop()
+
+# =========================================================
+# v8.74：VIP 訂單／Google 日曆同步
+# =========================================================
+if mode == "VIP 訂單／Google 日曆同步":
+    import calendar as _calendar
+    import vip_calendar_sync as _vcs
+    import vip_calendar_patch as _vcp
+    from vip_calendar_patch import apply_patch as _apply_patch1
+    from vip_calendar_patch2 import apply_patch as _apply_patch2
+    from vip_calendar_patch3 import apply_patch as _apply_patch3
+    from vip_calendar_patch4 import apply_patch as _apply_patch4
+    from vip_calendar_patch5 import apply_patch as _apply_patch5
+
+    # Streamlit 會重跑腳本；同一程序只套一次 patch。
+    if not getattr(_vcs, "_ordersapp_vip_patches_applied", False):
+        _apply_patch1(_vcs)
+        _apply_patch2(_vcs, _vcp)
+        _apply_patch3(_vcs, _vcp)
+        _apply_patch4(_vcs, _vcp)
+        _apply_patch5(_vcs, _vcp)
+        _vcs._ordersapp_vip_patches_applied = True
+
+    step("3", "VIP 訂單／Google 日曆同步")
+    info_panel("功能說明", [
+        "依 VIP 客戶手機號碼及月份／日期區間，同時查詢後台訂單與 Google 日曆。",
+        "畫面左側固定為訂單資訊、右側固定為日曆資訊，日期與時段欄位水平對齊。",
+        "支援異動日期／時段、取消／暫停、僅新增日曆、先預約再新增日曆及修改日曆資訊。",
+        "異動或新增訂單時會先確認後台該日期／時段可用，再進行後續日曆同步。",
+        "Google 日曆顏色：紫色＝未安排、黃色＝已安排、綠色＝暫停。",
+        "系統不會自行決定訂單應對應哪一筆既有日曆事件；修改既有事件時由使用者自行選擇。",
+    ])
+
+    _query_mode = st.radio(
+        "查詢方式",
+        ["月份", "日期區間"],
+        horizontal=True,
+        key="vipcal_query_mode",
+    )
+    _today = date.today()
+
+    if _query_mode == "月份":
+        _year_options = list(range(_today.year - 1, _today.year + 3))
+        _q1, _q2 = st.columns(2)
+        with _q1:
+            _query_year = st.selectbox(
+                "年份",
+                _year_options,
+                index=_year_options.index(_today.year),
+                key="vipcal_query_year",
+            )
+        with _q2:
+            _query_month = st.selectbox(
+                "月份",
+                list(range(1, 13)),
+                index=_today.month - 1,
+                format_func=lambda m: f"{m} 月",
+                key="vipcal_query_month",
+            )
+        _last_day = _calendar.monthrange(int(_query_year), int(_query_month))[1]
+        _query_date_s = date(int(_query_year), int(_query_month), 1)
+        _query_date_e = date(int(_query_year), int(_query_month), _last_day)
+    else:
+        _r1, _r2 = st.columns(2)
+        with _r1:
+            _query_date_s = st.date_input(
+                "查詢起日",
+                value=_today - timedelta(days=30),
+                key="vipcal_range_s",
+            )
+        with _r2:
+            _query_date_e = st.date_input(
+                "查詢迄日",
+                value=_today + timedelta(days=90),
+                key="vipcal_range_e",
+            )
+        if _query_date_s > _query_date_e:
+            st.error("查詢起日不可晚於查詢迄日")
+            st.stop()
+
+    st.session_state["vipcal_query_date_s"] = _query_date_s.isoformat()
+    st.session_state["vipcal_query_date_e"] = _query_date_e.isoformat()
+    st.caption(f"查詢範圍：{_query_date_s.isoformat()} ～ {_query_date_e.isoformat()}")
+
+    _vcs.render_vip_calendar_sync(
+        backend_email.strip(),
+        backend_password.strip(),
+        env,
     )
     st.stop()
 
