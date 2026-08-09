@@ -148,6 +148,11 @@ def today_tp() -> date:
 # ──────────────────────────────────────────────────────────
 # process-level cache：避免重複讀取工作表造成 429
 _LOG_SHEET_CACHE: dict[str, gspread.Worksheet] = {}
+_SERVICE_LOG_CONTEXT = {
+    "area": "全區",
+    "period": "",
+    "run_feature": "CRM／儲值全部執行",
+}
 
 def _ensure_log_sheet(ss: gspread.Spreadsheet, sheet_name: str) -> gspread.Worksheet:
     cache_key = ss.id + ":" + sheet_name
@@ -157,7 +162,13 @@ def _ensure_log_sheet(ss: gspread.Spreadsheet, sheet_name: str) -> gspread.Works
         sh = ss.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
         sh = ss.add_worksheet(title=sheet_name, rows=2000, cols=10)
-        sh.append_row(["run_id", "時間", "系統名稱", "任務", "步驟", "狀態", "說明", "耗時(秒)"])
+        if sheet_name == "客服排程執行Log":
+            sh.append_row([
+                "執行時間", "系統", "功能", "執行類型", "區域",
+                "期別/日期", "目標", "來源", "結果", "訊息",
+            ])
+        else:
+            sh.append_row(["run_id", "時間", "系統名稱", "任務", "步驟", "狀態", "說明", "耗時(秒)"])
     _LOG_SHEET_CACHE[cache_key] = sh
     return sh
 
@@ -180,8 +191,59 @@ def checkin_both(gc: gspread.Client, run_id: str, task: str, step: str,
                  status: str, note: str = "", elapsed: float = 0.0) -> None:
     master_id = os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "")
     target_id = _load_target_file_id()
-    _checkin(gc, master_id, "執行記錄",       run_id, task, step, status, note, elapsed)
+    _checkin_service_schedule_log(
+        gc, master_id, run_id, task, step, status, note, elapsed
+    )
     _checkin(gc, target_id, "_py_execution_log", run_id, task, step, status, note, elapsed)
+
+
+def _checkin_service_schedule_log(
+    gc: gspread.Client,
+    spreadsheet_id: str,
+    run_id: str,
+    task: str,
+    step: str,
+    status: str,
+    note: str = "",
+    elapsed: float = 0.0,
+) -> None:
+    """將 CRM／儲值執行紀錄併入「客服排程執行Log」。"""
+    if not spreadsheet_id:
+        return
+
+    feature_names = {
+        "Step1_抓取儲值金": "【儲值】抓儲值金",
+        "Step2_匯出定期VIP日曆": "【CRM】產生 CRM",
+        "RUN": _SERVICE_LOG_CONTEXT["run_feature"],
+    }
+    result_names = {
+        "RUNNING": "執行中",
+        "SUCCESS": "成功",
+        "ERROR": "失敗",
+    }
+
+    try:
+        ss = gc.open_by_key(spreadsheet_id)
+        sh = _ensure_log_sheet(ss, "客服排程執行Log")
+        message_parts = [f"run_id={run_id}", f"step={step}"]
+        if note:
+            message_parts.append(note[:240])
+        if elapsed:
+            message_parts.append(f"耗時={elapsed:.1f}秒")
+        sh.append_row([
+            fmt(now_tp(), "%Y-%m-%d %H:%M:%S"),
+            "客服排程",
+            feature_names.get(task, task),
+            "排程",
+            _SERVICE_LOG_CONTEXT["area"],
+            _SERVICE_LOG_CONTEXT["period"],
+            "",
+            "CRM客服系統",
+            result_names.get(status, status),
+            " | ".join(message_parts)[:500],
+        ])
+    except Exception as e:
+        log.warning("[客服排程 Log 寫入失敗（非致命）] %s", e)
 
 
 # ──────────────────────────────────────────────────────────
@@ -855,6 +917,16 @@ def main() -> None:
 
     gc    = _gc()
     areas = load_area_config(gc, filter_area=args.area)
+
+    _SERVICE_LOG_CONTEXT["area"] = args.area
+    _SERVICE_LOG_CONTEXT["period"] = (
+        f"{fmt(start_dt, '%Y-%m-%d')}~{fmt(end_dt, '%Y-%m-%d')}"
+    )
+    _SERVICE_LOG_CONTEXT["run_feature"] = {
+        0: "CRM／儲值全部執行",
+        1: "【儲值】抓儲值金",
+        2: "【CRM】產生 CRM",
+    }[args.step]
 
     if not areas:
         sys.exit(f"❌ 沒有啟用的地區設定（filter={args.area}），請檢查主控試算表「客服地區設定」")
