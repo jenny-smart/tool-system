@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 """
-檔案：tools/scheduled_monthly/scheduler.py
-版本：0621_v1
-更新日期：2026-06-21
-更新內容：
-- 月排程一鍵執行維持 6 個 job：上半月訂單、下半月訂單、已退款、預收、儲值金結算、儲值金預收。
-- 相容舊地區參數：01.台北專員、02.台中專員、03.桃園專員、04.新竹專員、05.高雄專員。
-- 不新增「已退款待加收」。
+月排程 scheduler。
+
+- MONTHLY_ROOT_FOLDER_ID 指向「03 服務分潤表」總根目錄。
+- 執行時依 period/start/目前年份，自動尋找或建立「YYYY專員承攬服務費」。
+- 各月排程子程式收到的是該年度資料夾 ID，再自行尋找各地區資料夾。
 """
 
 import argparse
@@ -16,6 +14,9 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
 from tools.common.log_to_sheet import write_job_log
 
@@ -81,6 +82,91 @@ def normalize_area_arg(area: str = "all") -> str:
     return AREA_ALIASES.get(value, value)
 
 
+def get_drive_service():
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    refresh_token = os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip()
+
+    missing = [
+        name
+        for name, value in [
+            ("GOOGLE_OAUTH_CLIENT_ID", client_id),
+            ("GOOGLE_OAUTH_CLIENT_SECRET", client_secret),
+            ("GOOGLE_OAUTH_REFRESH_TOKEN", refresh_token),
+        ]
+        if not value
+    ]
+    if missing:
+        raise RuntimeError("缺少 Google OAuth 設定：" + ", ".join(missing))
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=["https://www.googleapis.com/auth/drive"],
+    )
+    return build("drive", "v3", credentials=credentials, cache_discovery=False)
+
+
+def q_escape(value: str) -> str:
+    return value.replace("'", "\\'")
+
+
+def resolve_year(period: str = "", start: str = "") -> int:
+    period = str(period or "").strip()
+    start = str(start or "").strip()
+
+    if len(period) >= 4 and period[:4].isdigit():
+        return int(period[:4])
+    if len(start) >= 4 and start[:4].isdigit():
+        return int(start[:4])
+    return now_tw().year
+
+
+def find_child_folder(service, parent_id: str, folder_name: str) -> str:
+    query = (
+        f"'{q_escape(parent_id)}' in parents and "
+        "mimeType='application/vnd.google-apps.folder' and "
+        f"name='{q_escape(folder_name)}' and trashed=false"
+    )
+    result = service.files().list(
+        q=query,
+        fields="files(id,name)",
+        pageSize=10,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    files = result.get("files", [])
+    return files[0]["id"] if files else ""
+
+
+def get_or_create_year_folder(root_folder_id: str, year: int) -> str:
+    if not root_folder_id:
+        raise RuntimeError("缺少 MONTHLY_ROOT_FOLDER_ID")
+
+    service = get_drive_service()
+    folder_name = f"{year}專員承攬服務費"
+    folder_id = find_child_folder(service, root_folder_id, folder_name)
+
+    if folder_id:
+        print(f"📁 月排程年度資料夾：{folder_name} ({folder_id})", flush=True)
+        return folder_id
+
+    created = service.files().create(
+        body={
+            "name": folder_name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [root_folder_id],
+        },
+        fields="id,name",
+        supportsAllDrives=True,
+    ).execute()
+    print(f"📁 已建立月排程年度資料夾：{created['name']} ({created['id']})", flush=True)
+    return created["id"]
+
+
 def punch(
     label,
     status,
@@ -141,16 +227,14 @@ def run_job(
 
     if area:
         cmd.extend(["--area", area])
-
     if period:
         cmd.extend(["--period", period])
-
     if start and end:
         cmd.extend(["--start", start, "--end", end])
 
     period_text = period or f"{start}~{end}".strip("~")
-
     started_at = now_tw()
+
     punch(
         label,
         "running",
@@ -162,15 +246,8 @@ def run_job(
     )
 
     print("Command:", " ".join(cmd), flush=True)
-
-    completed = subprocess.run(
-        cmd,
-        cwd=BASE_DIR,
-        text=True,
-        capture_output=True,
-    )
+    completed = subprocess.run(cmd, cwd=BASE_DIR, text=True, capture_output=True)
     finished_at = now_tw()
-
     stdout_text = completed.stdout or ""
     stderr_text = completed.stderr or ""
 
@@ -219,6 +296,12 @@ def main(
     start: str = "",
     end: str = "",
 ) -> list[dict]:
+    year = resolve_year(period=period, start=start)
+    year_folder_id = get_or_create_year_folder(folder_id, year)
+    print(f"📂 月排程總根目錄：{folder_id}", flush=True)
+    print(f"📂 本次使用年度：{year}", flush=True)
+    print(f"📂 本次年度 folder_id：{year_folder_id}", flush=True)
+
     targets = list(JOBS.keys()) if target == "all" else [target]
     results = []
     failed = []
@@ -228,7 +311,7 @@ def main(
             results.append(
                 run_job(
                     job_name,
-                    folder_id=folder_id,
+                    folder_id=year_folder_id,
                     area=area,
                     period=period,
                     start=start,
