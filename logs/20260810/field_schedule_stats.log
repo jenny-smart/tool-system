@@ -1,8 +1,8 @@
 📋 log_spreadsheet_id 已從設定檔載入
 📝 外場排程打卡：外場排班統計表 / running
 Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.schedule_stats --date 20260810 --system-name 外場排程系統 --run-type 排程
-[2026-08-10 05:41:04] 開始處理排班統計表：20260810排班統計表-台北
-[2026-08-10 05:41:05] 失敗：20260810排班統計表-台北 / 找不到來源檔案：20260810排班統計表-台北 / 20260810排班統計表-台北.xlsx / 20260810排班統計表-台北.xls；資料夾內目前檔案：
+[2026-08-10 05:44:17] 開始處理排班統計表：20260810排班統計表-台北
+[2026-08-10 05:44:18] 失敗：20260810排班統計表-台北 / <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1Td0Neny6rJ7nCnjYw2bgoINLGF8iyzAL/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "The user's Drive storage quota has been exceeded.". Details: "[{'message': "The user's Drive storage quota has been exceeded.", 'domain': 'usageLimits', 'reason': 'storageQuotaExceeded'}]">
 
 Traceback (most recent call last):
   File "<frozen runpy>", line 198, in _run_module_as_main
@@ -12,12 +12,27 @@ Traceback (most recent call last):
   File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 420, in main
     run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 357, in run_schedule_stats_for_area
-    file = find_file_by_possible_names(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 223, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810排班統計表-台北 / 20260810排班統計表-台北.xlsx / 20260810排班統計表-台北.xls；資料夾內目前檔案：
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 368, in run_schedule_stats_for_area
+    raw_values = read_file_values(drive, sheets, file)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 251, in read_file_values
+    return read_drive_spreadsheet_values(drive, sheets, file)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 171, in read_drive_spreadsheet_values
+    temp_file_id = convert_excel_to_google_sheet(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 79, in convert_excel_to_google_sheet
+    copied = execute_with_retry(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 20, in execute_with_retry
+    return request.execute()
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1Td0Neny6rJ7nCnjYw2bgoINLGF8iyzAL/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "The user's Drive storage quota has been exceeded.". Details: "[{'message': "The user's Drive storage quota has been exceeded.", 'domain': 'usageLimits', 'reason': 'storageQuotaExceeded'}]">
 
 📝 外場排程打卡：外場排班統計表 / failed
 Traceback (most recent call last):
@@ -32,8 +47,8 @@ Traceback (most recent call last):
     raise RuntimeError(message)
 RuntimeError: 外場排班統計表 執行失敗，exit=1
 STDOUT:
-[2026-08-10 05:41:04] 開始處理排班統計表：20260810排班統計表-台北
-[2026-08-10 05:41:05] 失敗：20260810排班統計表-台北 / 找不到來源檔案：20260810排班統計表-台北 / 20260810排班統計表-台北.xlsx / 20260810排班統計表-台北.xls；資料夾內目前檔案：
+[2026-08-10 05:44:17] 開始處理排班統計表：20260810排班統計表-台北
+[2026-08-10 05:44:18] 失敗：20260810排班統計表-台北 / <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1Td0Neny6rJ7nCnjYw2bgoINLGF8iyzAL/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "The user's Drive storage quota has been exceeded.". Details: "[{'message': "The user's Drive storage quota has been exceeded.", 'domain': 'usageLimits', 'reason': 'storageQuotaExceeded'}]">
 
 STDERR:
 Traceback (most recent call last):
@@ -44,10 +59,25 @@ Traceback (most recent call last):
   File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 420, in main
     run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 357, in run_schedule_stats_for_area
-    file = find_file_by_possible_names(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 223, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810排班統計表-台北 / 20260810排班統計表-台北.xlsx / 20260810排班統計表-台北.xls；資料夾內目前檔案：
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 368, in run_schedule_stats_for_area
+    raw_values = read_file_values(drive, sheets, file)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 251, in read_file_values
+    return read_drive_spreadsheet_values(drive, sheets, file)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 171, in read_drive_spreadsheet_values
+    temp_file_id = convert_excel_to_google_sheet(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 79, in convert_excel_to_google_sheet
+    copied = execute_with_retry(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 20, in execute_with_retry
+    return request.execute()
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 403 when requesting https://www.googleapis.com/drive/v3/files/1Td0Neny6rJ7nCnjYw2bgoINLGF8iyzAL/copy?fields=id%2Cname%2CmimeType&supportsAllDrives=true&alt=json returned "The user's Drive storage quota has been exceeded.". Details: "[{'message': "The user's Drive storage quota has been exceeded.", 'domain': 'usageLimits', 'reason': 'storageQuotaExceeded'}]">
 
