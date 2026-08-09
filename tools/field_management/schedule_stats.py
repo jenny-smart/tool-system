@@ -199,15 +199,26 @@ def find_file_by_possible_names(
     folder_id: str,
     possible_names: list[str],
 ) -> dict[str, Any]:
-    targets = [normalize_file_name(name) for name in possible_names]
+    targets = list(dict.fromkeys(
+        normalize_file_name(name) for name in possible_names
+    ))
     candidates: list[str] = []
+    files = list_files_in_folder(drive, folder_id)
 
-    for file in list_files_in_folder(drive, folder_id):
-        name = file.get("name", "")
-        candidates.append(name)
+    for file in files:
+        candidates.append(file.get("name", ""))
 
-        if normalize_file_name(name) in targets:
-            return file
+    # possible_names 的排列即優先序；新格式放前面、舊格式作為備援。
+    for target in targets:
+        matches = [
+            file for file in files
+            if normalize_file_name(file.get("name", "")) == target
+        ]
+        if matches:
+            return max(
+                matches,
+                key=lambda file: file.get("modifiedTime", ""),
+            )
 
     raise RuntimeError(
         "找不到來源檔案："
@@ -334,7 +345,8 @@ def run_schedule_stats_for_area(
     for key in target_keys:
         month = int(key[4:6])
         paste_cell = PASTE_MAP[month]
-        file_base = f"排班統計表{key}-{area}"
+        file_base = f"{key}排班統計表-{area}"
+        legacy_file_base = f"排班統計表{key}-{area}"
         source_file_name = ""
         status = "失敗"
         message = ""
@@ -350,6 +362,9 @@ def run_schedule_stats_for_area(
                     file_base,
                     f"{file_base}.xlsx",
                     f"{file_base}.xls",
+                    legacy_file_base,
+                    f"{legacy_file_base}.xlsx",
+                    f"{legacy_file_base}.xls",
                 ],
             )
             source_file_name = file.get("name", "")  # ★
