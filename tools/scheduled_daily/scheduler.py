@@ -23,26 +23,10 @@ except Exception:
 
 
 JOBS = {
-    "schedule_report": {
-        "label": "排班統計表",
-        "script": "tools/scheduled_daily/schedule_report.py",
-        "needs_folder_id": True,
-    },
-    "staff_schedule": {
-        "label": "專員班表",
-        "script": "tools/scheduled_daily/staff_schedule.py",
-        "needs_folder_id": True,
-    },
-    "orders_report": {
-        "label": "當月次月訂單",
-        "script": "tools/scheduled_daily/orders_report.py",
-        "needs_folder_id": True,
-    },
-    "staff_info": {
-        "label": "專員個資",
-        "script": "tools/scheduled_daily/staff_info.py",
-        "needs_folder_id": True,
-    },
+    "schedule_report": {"label": "排班統計表", "script": "tools/scheduled_daily/schedule_report.py", "needs_folder_id": True},
+    "staff_schedule": {"label": "專員班表", "script": "tools/scheduled_daily/staff_schedule.py", "needs_folder_id": True},
+    "orders_report": {"label": "當月次月訂單", "script": "tools/scheduled_daily/orders_report.py", "needs_folder_id": True},
+    "staff_info": {"label": "專員個資", "script": "tools/scheduled_daily/staff_info.py", "needs_folder_id": True},
 }
 
 
@@ -64,70 +48,71 @@ def status_to_sheet_text(status: str) -> str:
     return "失敗"
 
 
-def punch(
-    *,
-    label: str,
-    job_name: str,
-    status: str,
-    started_at: datetime,
-    finished_at: datetime | None = None,
-    folder_id: str = "",
-    message: str = "",
-    traceback_text: str = "",
-) -> None:
-    """寫入日排程打卡表。
+def _secret_value(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if value:
+        return value
+    try:
+        import streamlit as st
+        value = str(st.secrets.get(name, "") or "").strip()
+        if value:
+            return value
+    except Exception:
+        pass
+    return ""
 
-    兼容兩種 common/log_to_sheet.py：
-    1. 有 write_job_log()
-    2. 只有 log_to_sheet()
+
+def build_child_env() -> dict[str, str]:
+    """把 Streamlit Secrets 明確傳入日排程子程序。
+
+    Streamlit 主程序可讀 st.secrets，但 subprocess 不會自動繼承 st.secrets；
+    因此一鍵執行過去會退回 Service Account。這裡把 OAuth 與既有帳密注入 env。
     """
+    env = os.environ.copy()
+    for name in (
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_OAUTH_REFRESH_TOKEN",
+        "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "GOOGLE_SERVICE_ACCOUNT",
+        "TAIPEI_EMAIL",
+        "TAIPEI_PASSWORD",
+        "TAICHUNG_EMAIL",
+        "TAICHUNG_PASSWORD",
+    ):
+        value = _secret_value(name)
+        if value:
+            env[name] = value
+
+    env["DAILY_SCHEDULER_MANAGED"] = "1"
+    return env
+
+
+def punch(*, label: str, job_name: str, status: str, started_at: datetime,
+          finished_at: datetime | None = None, folder_id: str = "", message: str = "",
+          traceback_text: str = "") -> None:
     status_text = status_to_sheet_text(status)
     finished_text = format_dt(finished_at) if finished_at else ""
-
-    msg = (
-        f"開始時間：{format_dt(started_at)}｜"
-        f"完成時間：{finished_text}｜"
-        f"folder_id：{folder_id}｜"
-        f"{message}"
-    )
-
+    msg = (f"開始時間：{format_dt(started_at)}｜完成時間：{finished_text}｜"
+           f"folder_id：{folder_id}｜{message}")
     try:
         if _write_job_log is not None:
             _write_job_log(
-                system_name="日排程系統",
-                job_name=label,
-                status=status,
-                started_at=started_at,
-                finished_at=finished_at or "",
-                message=message,
-                area="全區",
-                period="",
-                date=now_tw().strftime("%Y%m%d"),
-                target=folder_id,
-                source_file="",
-                run_type="手動",
+                system_name="日排程系統", job_name=label, status=status,
+                started_at=started_at, finished_at=finished_at or "", message=message,
+                area="全區", period="", date=now_tw().strftime("%Y%m%d"),
+                target=folder_id, source_file="", run_type="手動",
                 traceback_text=traceback_text,
             )
             return
-
         if _log_to_sheet is not None:
             _log_to_sheet(
-                system="daily",
-                function=label,
-                run_type="手動",
-                area="全區",
-                period="",
-                date=now_tw().strftime("%Y%m%d"),
-                target=folder_id,
-                source_file="",
-                status=status_text,
-                message=msg,
-                traceback_text=traceback_text,
+                system="daily", function=label, run_type="手動", area="全區", period="",
+                date=now_tw().strftime("%Y%m%d"), target=folder_id, source_file="",
+                status=status_text, message=msg, traceback_text=traceback_text,
             )
             return
-
         print("⚠️ 找不到 tools.common.log_to_sheet，略過打卡", flush=True)
-
     except Exception as exc:
         print(f"⚠️ 寫入日排程打卡失敗：{exc}", flush=True)
 
@@ -135,118 +120,71 @@ def punch(
 def run_job(job_name: str, folder_id: str = "") -> dict:
     if job_name not in JOBS:
         raise RuntimeError(f"未知 job：{job_name}")
-
     job = JOBS[job_name]
     label = job["label"]
     script = BASE_DIR / job["script"]
-
     if not script.exists():
         raise RuntimeError(f"{label} 找不到執行檔：{script}")
 
     cmd = [sys.executable, "-u", str(script)]
-
     if job.get("needs_folder_id"):
         if not folder_id:
             raise RuntimeError(f"{label} 缺少 folder_id")
         cmd.extend(["--folder-id", folder_id])
 
     started_at = now_tw()
-
-    punch(
-        label=label,
-        job_name=job_name,
-        status="running",
-        started_at=started_at,
-        folder_id=folder_id,
-        message="開始執行",
-    )
+    punch(label=label, job_name=job_name, status="running", started_at=started_at,
+          folder_id=folder_id, message="開始執行")
 
     print(f"開始執行：{label}", flush=True)
     print("Command:", " ".join(cmd), flush=True)
 
+    child_env = build_child_env()
+    oauth_ready = all(child_env.get(k, "").strip() for k in (
+        "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REFRESH_TOKEN"
+    ))
+    print(f"OAuth env ready = {oauth_ready}", flush=True)
+
     completed = subprocess.run(
-        cmd,
-        cwd=BASE_DIR,
-        text=True,
-        capture_output=True,
+        cmd, cwd=BASE_DIR, text=True, capture_output=True, env=child_env,
     )
-
     finished_at = now_tw()
-
     stdout_text = completed.stdout or ""
     stderr_text = completed.stderr or ""
-
     if stdout_text:
         print(stdout_text, flush=True)
-
     if stderr_text:
         print(stderr_text, flush=True)
 
     if completed.returncode != 0:
         error_message = (
             f"{label} 執行失敗，exit={completed.returncode}\n\n"
-            f"STDOUT:\n{stdout_text[:3000]}\n\n"
-            f"STDERR:\n{stderr_text[:5000]}"
+            f"STDOUT:\n{stdout_text[:3000]}\n\nSTDERR:\n{stderr_text[:5000]}"
         )
-
-        punch(
-            label=label,
-            job_name=job_name,
-            status="failed",
-            started_at=started_at,
-            finished_at=finished_at,
-            folder_id=folder_id,
-            message=error_message,
-            traceback_text=stderr_text or error_message,
-        )
-
+        punch(label=label, job_name=job_name, status="failed", started_at=started_at,
+              finished_at=finished_at, folder_id=folder_id, message=error_message,
+              traceback_text=stderr_text or error_message)
         raise RuntimeError(error_message)
 
-    punch(
-        label=label,
-        job_name=job_name,
-        status="success",
-        started_at=started_at,
-        finished_at=finished_at,
-        folder_id=folder_id,
-        message="完成",
-    )
-
+    punch(label=label, job_name=job_name, status="success", started_at=started_at,
+          finished_at=finished_at, folder_id=folder_id, message="完成")
     print(f"完成執行：{label}", flush=True)
-
-    return {
-        "job": job_name,
-        "label": label,
-        "status": "success",
-        "started_at": format_dt(started_at),
-        "finished_at": format_dt(finished_at),
-    }
+    return {"job": job_name, "label": label, "status": "success",
+            "started_at": format_dt(started_at), "finished_at": format_dt(finished_at)}
 
 
 def main(target: str = "all", folder_id: str = "") -> list[dict]:
     targets = list(JOBS.keys()) if target == "all" else [target]
-
-    results = []
-    failed = []
-
+    results, failed = [], []
     for job_name in targets:
         try:
             results.append(run_job(job_name, folder_id=folder_id))
         except Exception as exc:
-            failed.append(
-                {
-                    "job": job_name,
-                    "status": "failed",
-                    "message": str(exc),
-                }
-            )
-
+            failed.append({"job": job_name, "status": "failed", "message": str(exc)})
             if target != "all":
                 raise
-
     if failed:
         raise RuntimeError(f"日排程有失敗項目：{failed}")
-
     print("scheduled_daily scheduler 全部完成", flush=True)
     return results
 
@@ -256,5 +194,4 @@ if __name__ == "__main__":
     parser.add_argument("--target", default="all", choices=["all", *JOBS.keys()])
     parser.add_argument("--folder-id", default=os.getenv("DAILY_ROOT_FOLDER_ID", ""))
     args = parser.parse_args()
-
     main(target=args.target, folder_id=args.folder_id)
