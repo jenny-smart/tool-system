@@ -7,6 +7,7 @@ on:
     - cron: "20 17 * * *"
     - cron: "30 17 * * *"
     - cron: "0 18 * * *"
+    - cron: "0 14 * * *"   # 台北 22:00：月底才清空 @日排程 四個來源資料夾
   workflow_dispatch:
     inputs:
       target:
@@ -14,7 +15,7 @@ on:
         required: true
         default: "all"
         type: choice
-        options: [all, schedule_report, staff_schedule, orders_report, staff_info, notify]
+        options: [all, schedule_report, staff_schedule, orders_report, staff_info, notify, month_end_cleanup]
 
 permissions:
   contents: write
@@ -59,6 +60,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then TASK="${{ github.event.inputs.target }}"; else
             HM=$(date -u +"%H:%M")
             case "$HM" in
+              14:00) TASK="month_end_cleanup" ;;
               17:00) TASK="schedule_report" ;;
               17:10) TASK="staff_schedule" ;;
               17:20) TASK="orders_report" ;;
@@ -89,6 +91,14 @@ jobs:
           [ "$TASK" = "orders_report" ] || [ "$TASK" = "all" ] && run_one orders_report "python -u tools/scheduled_daily/scheduler.py --target orders_report --folder-id '$DAILY_ROOT_FOLDER_ID'"
           [ "$TASK" = "staff_info" ] || [ "$TASK" = "all" ] && run_one staff_info "python -u tools/scheduled_daily/scheduler.py --target staff_info --folder-id '$DAILY_ROOT_FOLDER_ID'"
           [ "$TASK" = "notify" ] || [ "$TASK" = "all" ] && run_one send_daily_result "python -u tools/notify/send_daily_result.py"
+          if [ "$TASK" = "month_end_cleanup" ]; then
+            # Drive 清理使用 Jenny OAuth；Log 仍讓 log_to_sheet 使用 Service Account。
+            export CLEANUP_GOOGLE_OAUTH_CLIENT_ID="$GOOGLE_OAUTH_CLIENT_ID"
+            export CLEANUP_GOOGLE_OAUTH_CLIENT_SECRET="$GOOGLE_OAUTH_CLIENT_SECRET"
+            export CLEANUP_GOOGLE_OAUTH_REFRESH_TOKEN="$GOOGLE_OAUTH_REFRESH_TOKEN"
+            unset GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN
+            run_one month_end_cleanup "python -u tools/scheduled_daily/month_end_cleanup.py"
+          fi
           [ "$FAILED" -ne 0 ] && exit 1 || exit 0
       - name: Commit logs
         if: always()
