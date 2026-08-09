@@ -1,6 +1,6 @@
-2026-08-09 22:06:05 [INFO] === 客服排程系統 run_id=6fcf2325 step=2 台北時間=2026-08-10 06:06:05 ===
-2026-08-09 22:06:05 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
-2026-08-09 22:06:05 [INFO] file_cache is only supported with oauth2client<4.0.0
-2026-08-09 22:06:16 [INFO] --- Step2_更新每日回報 ---
-2026-08-09 22:06:21 [INFO] Step 2 完成，row=2368（4.0s）
-2026-08-09 22:06:22 [INFO] === 全部完成 run_id=6fcf2325（4.8s）===
+2026-08-09 22:12:14 [INFO] === 客服排程系統 run_id=a4f13c23 step=2 台北時間=2026-08-10 06:12:14 ===
+2026-08-09 22:12:14 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-08-09 22:12:14 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-09 22:12:27 [INFO] --- Step2_更新每日回報 ---
+2026-08-09 22:12:33 [INFO] Step 2 完成，row=2368（5.0s）
+2026-08-09 22:12:34 [INFO] === 全部完成 run_id=a4f13c23（6.2s）===
