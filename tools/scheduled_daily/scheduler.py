@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -48,43 +49,79 @@ def status_to_sheet_text(status: str) -> str:
     return "失敗"
 
 
-def _secret_value(name: str) -> str:
-    value = os.getenv(name, "").strip()
-    if value:
-        return value
+def _plain_secret(value):
+    """把 Streamlit Secrets 的 AttrDict/Mapping 轉成可序列化普通資料。"""
     try:
-        import streamlit as st
-        value = str(st.secrets.get(name, "") or "").strip()
-        if value:
-            return value
+        if hasattr(value, "to_dict"):
+            return value.to_dict()
     except Exception:
         pass
-    return ""
+    try:
+        if hasattr(value, "items") and not isinstance(value, str):
+            return {str(k): _plain_secret(v) for k, v in value.items()}
+    except Exception:
+        pass
+    return value
 
 
 def build_child_env() -> dict[str, str]:
-    """把 Streamlit Secrets 明確傳入日排程子程序。
+    """完全比照 toolapp.py 的 run_script() 建立子程序環境。
 
-    Streamlit 主程序可讀 st.secrets，但 subprocess 不會自動繼承 st.secrets；
-    因此一鍵執行過去會退回 Service Account。這裡把 OAuth 與既有帳密注入 env。
+    單項日排程已確認可正常使用 Jenny OAuth；一鍵執行必須使用完全相同的
+    Streamlit Secrets -> subprocess env 傳遞方式，不能再另外維護一套簡化邏輯。
     """
     env = os.environ.copy()
-    for name in (
+
+    # 與 toolapp._build_subprocess_env() 相同：確保 repo root 在 PYTHONPATH，
+    # 讓子程序啟動時可載入 sitecustomize.py OAuth 相容層。
+    base_str = str(BASE_DIR)
+    existing_pp = env.get("PYTHONPATH", "")
+    pp_parts = [p for p in existing_pp.split(os.pathsep) if p]
+    if base_str not in pp_parts:
+        env["PYTHONPATH"] = base_str + (os.pathsep + existing_pp if existing_pp else "")
+
+    try:
+        import streamlit as st
+
+        # 1) 和 toolapp 一樣，把整份 st.secrets 帶給子程序。
+        try:
+            import toml
+            secrets_dict = {str(k): _plain_secret(v) for k, v in st.secrets.items()}
+            env["STREAMLIT_SECRETS_TOML"] = toml.dumps(secrets_dict)
+        except Exception as exc:
+            print(f"⚠️ 一鍵日排程 secrets TOML 注入失敗：{exc}", flush=True)
+
+        # 2) 所有頂層純字串 secret 直接注入 env，與 toolapp.run_script 一致。
+        try:
+            for key in st.secrets:
+                try:
+                    value = st.secrets[key]
+                    plain = _plain_secret(value)
+                    if isinstance(plain, str):
+                        env[str(key)] = plain
+                    elif isinstance(plain, dict):
+                        env[str(key)] = json.dumps(plain, ensure_ascii=False)
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(f"⚠️ 一鍵日排程 secrets env 注入失敗：{exc}", flush=True)
+
+    except Exception as exc:
+        print(f"⚠️ 一鍵日排程無法讀取 Streamlit Secrets：{exc}", flush=True)
+
+    # scheduler 管理 Log；子程式不要再由 sitecustomize 重複寫一次。
+    env["DAILY_SCHEDULER_MANAGED"] = "1"
+
+    # 不顯示 secret 值，只顯示是否存在，便於確認身份傳遞。
+    oauth_keys = (
         "GOOGLE_OAUTH_CLIENT_ID",
         "GOOGLE_OAUTH_CLIENT_SECRET",
         "GOOGLE_OAUTH_REFRESH_TOKEN",
-        "GOOGLE_SERVICE_ACCOUNT_JSON",
-        "GOOGLE_SERVICE_ACCOUNT",
-        "TAIPEI_EMAIL",
-        "TAIPEI_PASSWORD",
-        "TAICHUNG_EMAIL",
-        "TAICHUNG_PASSWORD",
-    ):
-        value = _secret_value(name)
-        if value:
-            env[name] = value
+    )
+    missing = [key for key in oauth_keys if not env.get(key, "").strip()]
+    if missing:
+        raise RuntimeError("一鍵日排程子程序缺少 OAuth Secret：" + ", ".join(missing))
 
-    env["DAILY_SCHEDULER_MANAGED"] = "1"
     return env
 
 
@@ -139,11 +176,18 @@ def run_job(job_name: str, folder_id: str = "") -> dict:
     print(f"開始執行：{label}", flush=True)
     print("Command:", " ".join(cmd), flush=True)
 
-    child_env = build_child_env()
-    oauth_ready = all(child_env.get(k, "").strip() for k in (
-        "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REFRESH_TOKEN"
-    ))
-    print(f"OAuth env ready = {oauth_ready}", flush=True)
+    try:
+        child_env = build_child_env()
+    except Exception as exc:
+        finished_at = now_tw()
+        error_message = f"{label} 啟動前失敗：{exc}"
+        punch(label=label, job_name=job_name, status="failed", started_at=started_at,
+              finished_at=finished_at, folder_id=folder_id, message=error_message,
+              traceback_text=error_message)
+        raise RuntimeError(error_message) from exc
+
+    print("OAuth env ready = True", flush=True)
+    print(f"PYTHONPATH contains repo root = {str(BASE_DIR) in child_env.get('PYTHONPATH', '')}", flush=True)
 
     completed = subprocess.run(
         cmd, cwd=BASE_DIR, text=True, capture_output=True, env=child_env,
