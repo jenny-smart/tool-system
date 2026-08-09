@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from google.oauth2.service_account import Credentials
+from tools.common.google_auth import get_google_credentials
 from googleapiclient.discovery import build
 
 try:
@@ -92,11 +92,8 @@ def get_service_account_info() -> dict[str, Any]:
     raise RuntimeError("找不到 GOOGLE_SERVICE_ACCOUNT 設定")
 
 
-def get_credentials() -> Credentials:
-    return Credentials.from_service_account_info(
-        get_service_account_info(),
-        scopes=SCOPES,
-    )
+def get_credentials():
+    return get_google_credentials()
 
 
 def get_drive_service():
