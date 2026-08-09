@@ -288,54 +288,29 @@ def _build_next_month_day_str(base: datetime) -> str:
     return f"{ny}{nm:02d}{d}"
 
 
-def _normalize_name(name: str) -> str:
-    name = re.sub(r"\.[^.]+$", "", name, flags=re.IGNORECASE)
-    name = re.sub(r"\s+|_|-", "", name)
-    name = re.sub(r"schedule|lemon", "", name, flags=re.IGNORECASE)
-    return name
-
-
-def _matches(normalized: str, date_str: str, city: str) -> bool:
-    return normalized == f"排班統計表{date_str}{city}"
-
-
 def _parse_schedule_filename(name: str) -> tuple[str, str, str] | None:
-    """回傳 (YYYYMM, DD, 地區)；新舊檔名皆接受，排除轉檔暫存檔。"""
+    """回傳 (YYYYMM, DD, 地區)；僅接受 YYYYMMDD排班統計表-區域。"""
     clean_name = name.strip()
     if ".xlsx_temp_" in clean_name.lower():
         return None
 
     match = re.fullmatch(
-        r"(?:(?P<date_new>\d{8})排班統計表|排班統計表(?P<date_old>\d{8}))"
-        r"-(?P<city>台北|台中)(?:\.xlsx)?",
+        r"(?P<date>\d{8})排班統計表-(?P<city>台北|台中)(?:\.xlsx)?",
         clean_name,
         flags=re.IGNORECASE,
     )
     if not match:
         return None
 
-    date_str = match.group("date_new") or match.group("date_old")
+    date_str = match.group("date")
     return date_str[:6], date_str[6:], match.group("city")
-
-
-def _is_new_schedule_filename(name: str) -> bool:
-    return bool(
-        re.fullmatch(
-            r"\d{8}排班統計表-(台北|台中)(?:\.xlsx)?",
-            name.strip(),
-            flags=re.IGNORECASE,
-        )
-    )
 
 
 def _pick_best(files: list[dict]) -> dict | None:
     if not files:
         return None
 
-    # 同日期同地區若新舊格式並存，固定優先使用新格式。
-    preferred = [f for f in files if _is_new_schedule_filename(f.get("name", ""))]
-    pool = preferred or files
-
+    pool = files
     sheets = [
         f for f in pool
         if f["mimeType"] == "application/vnd.google-apps.spreadsheet"

@@ -208,7 +208,7 @@ def find_file_by_possible_names(
     for file in files:
         candidates.append(file.get("name", ""))
 
-    # possible_names 的排列即優先序；新格式放前面、舊格式作為備援。
+    # possible_names 僅列出正式的新格式及其副檔名變體。
     for target in targets:
         matches = [
             file for file in files
@@ -346,7 +346,6 @@ def run_schedule_stats_for_area(
         month = int(key[4:6])
         paste_cell = PASTE_MAP[month]
         file_base = f"{key}排班統計表-{area}"
-        legacy_file_base = f"排班統計表{key}-{area}"
         source_file_name = ""
         status = "失敗"
         message = ""
@@ -362,9 +361,6 @@ def run_schedule_stats_for_area(
                     file_base,
                     f"{file_base}.xlsx",
                     f"{file_base}.xls",
-                    legacy_file_base,
-                    f"{legacy_file_base}.xlsx",
-                    f"{legacy_file_base}.xls",
                 ],
             )
             source_file_name = file.get("name", "")  # ★
