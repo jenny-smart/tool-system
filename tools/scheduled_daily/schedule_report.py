@@ -388,8 +388,8 @@ def main():
         try:
             session = login(email, password)
 
-            current_filename = f"排班統計表{today_stamp}-{city}.xlsx"
-            next_filename = f"排班統計表{next_month_stamp}-{city}.xlsx"
+            current_filename = f"{today_stamp}排班統計表-{city}.xlsx"
+            next_filename = f"{next_month_stamp}排班統計表-{city}.xlsx"
 
             export_schedule(session, this_month, current_filename, upload_folder_id)
             export_schedule(session, next_month, next_filename, upload_folder_id)
