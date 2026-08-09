@@ -14,7 +14,7 @@ on:
         required: false
         default: ""
       folder_id:
-        description: "月排程總根目錄 ID（留空使用預設）"
+        description: "月排程總根目錄 ID（留空使用我的雲端硬碟/03 服務分潤表）"
         required: false
         default: ""
       area:
@@ -34,7 +34,7 @@ jobs:
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
       TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
-      MONTHLY_ROOT_FOLDER_ID: "1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK"
+      MONTHLY_ROOT_FOLDER_ID: "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
       MONTHLY_ORDERS_ROOT_FOLDER_ID: ${{ secrets.MONTHLY_ORDERS_ROOT_FOLDER_ID }}
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
