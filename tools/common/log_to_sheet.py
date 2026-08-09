@@ -15,6 +15,8 @@ except Exception:
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+from tools.common.google_auth import get_google_credentials
+
 TZ = timezone(timedelta(hours=8))
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -124,10 +126,14 @@ def get_log_spreadsheet_id(explicit_id: str = "") -> str:
 
 
 def get_sheets_service():
-    creds = service_account.Credentials.from_service_account_info(
-        get_service_account_info(),
-        scopes=SCOPES,
-    )
+    try:
+        creds = get_google_credentials()
+    except RuntimeError:
+        # 保留本機舊環境相容性；GitHub 排程一律提供 Jenny OAuth。
+        creds = service_account.Credentials.from_service_account_info(
+            get_service_account_info(),
+            scopes=SCOPES,
+        )
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 
