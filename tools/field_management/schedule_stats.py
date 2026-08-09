@@ -334,7 +334,8 @@ def run_schedule_stats_for_area(
     for key in target_keys:
         month = int(key[4:6])
         paste_cell = PASTE_MAP[month]
-        file_base = f"排班統計表{key}-{area}"
+        file_base = f"{key}排班統計表-{area}"
+        legacy_file_base = f"排班統計表{key}-{area}"
         source_file_name = ""
         status = "失敗"
         message = ""
@@ -350,6 +351,9 @@ def run_schedule_stats_for_area(
                     file_base,
                     f"{file_base}.xlsx",
                     f"{file_base}.xls",
+                    legacy_file_base,
+                    f"{legacy_file_base}.xlsx",
+                    f"{legacy_file_base}.xls",
                 ],
             )
             source_file_name = file.get("name", "")  # ★
