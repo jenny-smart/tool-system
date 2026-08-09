@@ -8,7 +8,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 TZ = timezone(timedelta(hours=8))
+DAILY_ROOT_FOLDER_ID = "11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc"
 MONTHLY_ROOT_FOLDER_ID = "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
+
+# 舊共用雲端來源 ID -> Jenny「我的雲端硬碟 / @日排程」子資料夾名稱。
+# 外場 / 客服程式可以繼續沿用既有設定值，Drive proxy 會在 API 呼叫前
+# 自動改寫成新的 My Drive 子資料夾 ID。
+_DAILY_SOURCE_FOLDER_NAMES = {
+    "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv": "排班統計表",
+    "10__ajnbpu2oabAVUG_u3RAHK2a2vcgj2": "專員班表",
+    "1QnOJzn-xmZ_oAMoiM6Qnfk3Y2CWuM1c4": "訂單資料",
+    "199wJef-ISEP5bsSWaSseCAHynoVRE26e": "專員個資",
+}
+_DAILY_SOURCE_FOLDER_CACHE: dict[str, str] = {}
 
 
 def _oauth_env_ready() -> bool:
@@ -22,12 +34,63 @@ def _oauth_env_ready() -> bool:
     )
 
 
-# 相容既有仍建立 service_account.Credentials 的程式：
-# 只要 OAuth secrets 已注入，就改由 Jenny OAuth credentials 執行 Google API。
-if _oauth_env_ready():
+def _argv_text() -> str:
+    values = []
+    try:
+        values.extend(str(v) for v in getattr(sys, "orig_argv", []) or [])
+    except Exception:
+        pass
+    try:
+        values.extend(str(v) for v in sys.argv)
+    except Exception:
+        pass
+    return " ".join(values)
+
+
+def _is_field_process() -> bool:
+    text = _argv_text()
+    return (
+        os.getenv("FIELD_SOURCE_FROM_DAILY", "").strip() == "1"
+        or "field_management" in text
+    )
+
+
+def _is_service_process() -> bool:
+    text = _argv_text()
+    return (
+        os.getenv("SERVICE_SOURCE_FROM_DAILY", "").strip() == "1"
+        or "service_management" in text
+    )
+
+
+def _is_field_or_service_process() -> bool:
+    return _is_field_process() or _is_service_process()
+
+
+def _oauth_credentials(scopes=None):
+    from google.oauth2.credentials import Credentials as UserCredentials
+
+    return UserCredentials(
+        token=None,
+        refresh_token=os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"].strip(),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"].strip(),
+        client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"].strip(),
+        scopes=scopes or [
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/spreadsheets",
+        ],
+    )
+
+
+# ============================================================
+# 日 / 月排程既有程式 OAuth 相容層
+# ============================================================
+# 外場 / 客服刻意排除：它們需要「來源 Drive = OAuth、目標 Sheets = SA」的
+# 混合認證，下面另有專用 bridge。
+if _oauth_env_ready() and not _is_field_or_service_process():
     try:
         from google.oauth2 import service_account
-        from google.oauth2.credentials import Credentials as UserCredentials
 
         _original_from_service_account_info = service_account.Credentials.from_service_account_info
 
@@ -36,20 +99,190 @@ if _oauth_env_ready():
             scopes = kwargs.get("scopes")
             if scopes is None and args:
                 scopes = args[0]
-
-            return UserCredentials(
-                token=None,
-                refresh_token=os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"].strip(),
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"].strip(),
-                client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"].strip(),
-                scopes=scopes,
-            )
+            return _oauth_credentials(scopes=scopes)
 
         service_account.Credentials.from_service_account_info = _from_service_account_info
     except Exception:
         pass
 
+
+# ============================================================
+# 外場 / 客服：Drive 來源改讀 Jenny My Drive，但 Sheets 仍保留 SA
+# ============================================================
+
+def _resolve_daily_source_folder(old_folder_id: str, original_build) -> str:
+    if old_folder_id not in _DAILY_SOURCE_FOLDER_NAMES:
+        return old_folder_id
+    if old_folder_id in _DAILY_SOURCE_FOLDER_CACHE:
+        return _DAILY_SOURCE_FOLDER_CACHE[old_folder_id]
+
+    folder_name = _DAILY_SOURCE_FOLDER_NAMES[old_folder_id]
+    drive = original_build(
+        "drive",
+        "v3",
+        credentials=_oauth_credentials(["https://www.googleapis.com/auth/drive"]),
+        cache_discovery=False,
+    )
+    escaped_parent = DAILY_ROOT_FOLDER_ID.replace("'", "\\'")
+    escaped_name = folder_name.replace("'", "\\'")
+    result = drive.files().list(
+        q=(
+            f"'{escaped_parent}' in parents and "
+            "mimeType='application/vnd.google-apps.folder' and "
+            f"name='{escaped_name}' and trashed=false"
+        ),
+        fields="files(id,name)",
+        pageSize=10,
+    ).execute()
+    files = result.get("files", [])
+    if not files:
+        raise RuntimeError(
+            f"@日排程 找不到來源子資料夾：{folder_name} "
+            f"(root={DAILY_ROOT_FOLDER_ID})"
+        )
+
+    folder_id = files[0]["id"]
+    _DAILY_SOURCE_FOLDER_CACHE[old_folder_id] = folder_id
+    print(
+        f"📂 外場/客服來源已切換：{folder_name} -> {folder_id}",
+        flush=True,
+    )
+    return folder_id
+
+
+def _rewrite_daily_source_ids(value, original_build):
+    if isinstance(value, str):
+        output = value
+        for old_id in _DAILY_SOURCE_FOLDER_NAMES:
+            if old_id in output:
+                new_id = _resolve_daily_source_folder(old_id, original_build)
+                output = output.replace(old_id, new_id)
+        return output
+    if isinstance(value, list):
+        return [_rewrite_daily_source_ids(v, original_build) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_rewrite_daily_source_ids(v, original_build) for v in value)
+    if isinstance(value, dict):
+        return {
+            k: _rewrite_daily_source_ids(v, original_build)
+            for k, v in value.items()
+        }
+    return value
+
+
+class _DailySourceFilesProxy:
+    def __init__(self, files_resource, original_build):
+        self._files_resource = files_resource
+        self._original_build = original_build
+
+    def __getattr__(self, name):
+        attr = getattr(self._files_resource, name)
+        if not callable(attr):
+            return attr
+
+        def wrapped(*args, **kwargs):
+            new_args = tuple(
+                _rewrite_daily_source_ids(v, self._original_build) for v in args
+            )
+            new_kwargs = {
+                k: _rewrite_daily_source_ids(v, self._original_build)
+                for k, v in kwargs.items()
+            }
+            return attr(*new_args, **new_kwargs)
+
+        return wrapped
+
+
+class _DailySourceDriveProxy:
+    def __init__(self, service, original_build):
+        self._service = service
+        self._original_build = original_build
+
+    def files(self):
+        return _DailySourceFilesProxy(
+            self._service.files(),
+            self._original_build,
+        )
+
+    def __getattr__(self, name):
+        return getattr(self._service, name)
+
+
+def _install_field_service_drive_bridge() -> None:
+    if not (_oauth_env_ready() and _is_field_or_service_process()):
+        return
+
+    import googleapiclient.discovery as discovery
+
+    original_build = discovery.build
+
+    def patched_build(serviceName, version, *args, **kwargs):
+        if str(serviceName).lower() == "drive":
+            # 來源 Drive 一律 Jenny OAuth；忽略呼叫端傳入的 SA credentials。
+            kwargs = dict(kwargs)
+            kwargs["credentials"] = _oauth_credentials(
+                ["https://www.googleapis.com/auth/drive"]
+            )
+            kwargs.setdefault("cache_discovery", False)
+            service = original_build(serviceName, version, *args, **kwargs)
+            return _DailySourceDriveProxy(service, original_build)
+        # Sheets / 其他 API 維持原本 credentials（通常為 Service Account）。
+        return original_build(serviceName, version, *args, **kwargs)
+
+    discovery.build = patched_build
+    print(
+        "🔐 外場/客服混合認證：來源 Drive=Jenny OAuth；目標 Sheets=Service Account",
+        flush=True,
+    )
+
+
+try:
+    _install_field_service_drive_bridge()
+except Exception as exc:
+    print(f"⚠️ 外場/客服 Drive OAuth bridge 啟用失敗：{exc}", flush=True)
+
+
+# 客服程式以 Service Account gspread 寫目標表；讀取 Jenny My Drive 中的
+# Google Sheet / xlsx 轉檔結果時，若 SA 無權限，才 fallback 到 Jenny OAuth。
+def _install_service_gspread_source_fallback() -> None:
+    if not (_oauth_env_ready() and _is_service_process()):
+        return
+
+    import gspread
+
+    original_open_by_key = gspread.Client.open_by_key
+    oauth_client_holder = {"client": None}
+
+    def patched_open_by_key(client, key):
+        try:
+            return original_open_by_key(client, key)
+        except Exception as original_exc:
+            if oauth_client_holder["client"] is None:
+                oauth_client_holder["client"] = gspread.authorize(
+                    _oauth_credentials(
+                        [
+                            "https://www.googleapis.com/auth/drive",
+                            "https://www.googleapis.com/auth/spreadsheets",
+                        ]
+                    )
+                )
+            try:
+                return original_open_by_key(oauth_client_holder["client"], key)
+            except Exception:
+                raise original_exc
+
+    gspread.Client.open_by_key = patched_open_by_key
+
+
+try:
+    _install_service_gspread_source_fallback()
+except Exception as exc:
+    print(f"⚠️ 客服來源 Sheet OAuth fallback 啟用失敗：{exc}", flush=True)
+
+
+# ============================================================
+# 月排程：單項執行先進年度根目錄
+# ============================================================
 
 def _arg_value(name: str) -> str:
     try:
@@ -81,86 +314,70 @@ def _monthly_year_from_args() -> int:
 
 
 def _route_standalone_monthly_folder() -> None:
-    """單項月排程若收到總根目錄，自動改成年度根目錄。
-
-    toolapp.py 的單項月排程目前直接把 MONTHLY_ROOT_FOLDER_ID 傳給各支 script。
-    這裡在 script 真正開始前先改成：
-    總根目錄 -> YYYY專員承攬服務費 -> 各區 -> 各期別。
-    一鍵月排程 scheduler 已經會先解析年度，因此收到年度 folder_id 時不再重複處理。
-    """
     script_path = Path(sys.argv[0] or "")
     if script_path.parent.name != "scheduled_monthly":
         return
 
     folder_id = _arg_value("--folder-id").strip()
-    if folder_id != MONTHLY_ROOT_FOLDER_ID:
-        return
-    if not _oauth_env_ready():
+    if folder_id != MONTHLY_ROOT_FOLDER_ID or not _oauth_env_ready():
         return
 
-    try:
-        from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
+    from googleapiclient.discovery import build
 
-        year = _monthly_year_from_args()
-        folder_name = f"{year}專員承攬服務費"
+    year = _monthly_year_from_args()
+    folder_name = f"{year}專員承攬服務費"
+    service = build(
+        "drive",
+        "v3",
+        credentials=_oauth_credentials(["https://www.googleapis.com/auth/drive"]),
+        cache_discovery=False,
+    )
 
-        creds = Credentials(
-            token=None,
-            refresh_token=os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"].strip(),
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"].strip(),
-            client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"].strip(),
-            scopes=["https://www.googleapis.com/auth/drive"],
-        )
-        service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    escaped_parent = MONTHLY_ROOT_FOLDER_ID.replace("'", "\\'")
+    escaped_name = folder_name.replace("'", "\\'")
+    result = service.files().list(
+        q=(
+            f"'{escaped_parent}' in parents and "
+            "mimeType='application/vnd.google-apps.folder' and "
+            f"name='{escaped_name}' and trashed=false"
+        ),
+        fields="files(id,name)",
+        pageSize=10,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    files = result.get("files", [])
 
-        escaped_parent = MONTHLY_ROOT_FOLDER_ID.replace("'", "\\'")
-        escaped_name = folder_name.replace("'", "\\'")
-        result = service.files().list(
-            q=(
-                f"'{escaped_parent}' in parents and "
-                "mimeType='application/vnd.google-apps.folder' and "
-                f"name='{escaped_name}' and trashed=false"
-            ),
-            fields="files(id,name)",
-            pageSize=10,
+    if files:
+        year_folder_id = files[0]["id"]
+    else:
+        created = service.files().create(
+            body={
+                "name": folder_name,
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [MONTHLY_ROOT_FOLDER_ID],
+            },
+            fields="id,name",
             supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
         ).execute()
-        files = result.get("files", [])
+        year_folder_id = created["id"]
 
-        if files:
-            year_folder_id = files[0]["id"]
-        else:
-            created = service.files().create(
-                body={
-                    "name": folder_name,
-                    "mimeType": "application/vnd.google-apps.folder",
-                    "parents": [MONTHLY_ROOT_FOLDER_ID],
-                },
-                fields="id,name",
-                supportsAllDrives=True,
-            ).execute()
-            year_folder_id = created["id"]
-
-        _replace_arg_value("--folder-id", year_folder_id)
-        print(
-            f"📂 月排程路徑已修正：{MONTHLY_ROOT_FOLDER_ID} -> {folder_name} ({year_folder_id})",
-            flush=True,
-        )
-    except Exception as exc:
-        print(f"⚠️ 月排程年度資料夾解析失敗：{exc}", flush=True)
+    _replace_arg_value("--folder-id", year_folder_id)
+    print(
+        f"📂 月排程路徑已修正：{MONTHLY_ROOT_FOLDER_ID} -> {folder_name} ({year_folder_id})",
+        flush=True,
+    )
 
 
 try:
     _route_standalone_monthly_folder()
-except Exception:
-    pass
+except Exception as exc:
+    print(f"⚠️ 月排程年度資料夾解析失敗：{exc}", flush=True)
 
 
-# 個別執行日排程時，自動補上與 scheduler 相同的執行 Log。
-# scheduler 管理的一鍵執行會設 DAILY_SCHEDULER_MANAGED=1，避免重複記錄。
+# ============================================================
+# 個別日排程 Log
+# ============================================================
 _DAILY_JOB_BY_SCRIPT = {
     "schedule_report.py": "排班統計表",
     "staff_schedule.py": "專員班表",
