@@ -288,17 +288,6 @@ def _build_next_month_day_str(base: datetime) -> str:
     return f"{ny}{nm:02d}{d}"
 
 
-def _normalize_name(name: str) -> str:
-    name = re.sub(r"\.[^.]+$", "", name, flags=re.IGNORECASE)
-    name = re.sub(r"\s+|_|-", "", name)
-    name = re.sub(r"schedule|lemon", "", name, flags=re.IGNORECASE)
-    return name
-
-
-def _matches(normalized: str, date_str: str, city: str) -> bool:
-    return normalized == f"排班統計表{date_str}{city}"
-
-
 def _parse_schedule_filename(name: str) -> tuple[str, str, str] | None:
     """回傳 (YYYYMM, DD, 地區)；僅接受 YYYYMMDD排班統計表-區域。"""
     clean_name = name.strip()
