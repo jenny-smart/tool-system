@@ -1,3 +1,6 @@
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-2026-08-09 21:51:47 [WARNING] 從主控試算表讀取目標 ID 失敗（非致命）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
-❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID
+2026-08-09 22:06:05 [INFO] === 客服排程系統 run_id=6fcf2325 step=2 台北時間=2026-08-10 06:06:05 ===
+2026-08-09 22:06:05 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-08-09 22:06:05 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-09 22:06:16 [INFO] --- Step2_更新每日回報 ---
+2026-08-09 22:06:21 [INFO] Step 2 完成，row=2368（4.0s）
+2026-08-09 22:06:22 [INFO] === 全部完成 run_id=6fcf2325（4.8s）===

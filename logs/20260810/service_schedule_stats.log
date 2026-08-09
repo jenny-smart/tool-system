@@ -1,3 +1,25 @@
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-2026-08-09 21:51:47 [WARNING] 從主控試算表讀取目標 ID 失敗（非致命）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
-❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID
+2026-08-09 22:05:44 [INFO] === 客服排程系統 run_id=30ed5155 step=1 台北時間=2026-08-10 06:05:44 ===
+2026-08-09 22:05:44 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-08-09 22:05:44 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-09 22:05:55 [INFO] --- Step1_更新排班統計表 ---
+2026-08-09 22:05:56 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-09 22:05:57 [INFO] Drive 資料夾找到 8 個檔案
+2026-08-09 22:05:57 [INFO]   找到檔案：20260910排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:05:57 [INFO]   找到檔案：20260910排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:05:57 [INFO]   找到檔案：20260810排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:05:57 [INFO]   找到檔案：20260810排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:05:57 [INFO]   找到檔案：20260910排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:05:57 [INFO]   找到檔案：20260810排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:05:57 [INFO]   找到檔案：20260910排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:05:57 [INFO]   找到檔案：20260810排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:05:57 [INFO] 排班檔確認 OK：{'202608': {'taipei': '20260810排班統計表-台北', 'taichung': '20260810排班統計表-台中'}, '202609': {'taipei': '20260910排班統計表-台北', 'taichung': '20260910排班統計表-台中'}}
+2026-08-09 22:05:57 [INFO]   匯入：20260810排班統計表-台北
+2026-08-09 22:05:58 [INFO]   匯入：20260810排班統計表-台中
+2026-08-09 22:05:59 [INFO]   → 寫入 77 列（起始 R3C7）
+2026-08-09 22:06:00 [INFO]   → 寫入 16 列（起始 R3C82）
+2026-08-09 22:06:00 [INFO]   匯入：20260910排班統計表-台北
+2026-08-09 22:06:01 [INFO]   匯入：20260910排班統計表-台中
+2026-08-09 22:06:02 [INFO]   → 寫入 52 列（起始 R3C22）
+2026-08-09 22:06:02 [INFO]   → 寫入 8 列（起始 R3C97）
+2026-08-09 22:06:03 [INFO] Step 1 完成（7.0s）
+2026-08-09 22:06:05 [INFO] === 全部完成 run_id=30ed5155（7.9s）===
