@@ -2,12 +2,14 @@ name: Scheduled Daily Jobs
 
 on:
   schedule:
-    - cron: "0 17 * * *"
-    - cron: "10 17 * * *"
-    - cron: "20 17 * * *"
-    - cron: "30 17 * * *"
-    - cron: "0 18 * * *"
-    - cron: "0 14 * * *"   # 台北 22:00：月底才清空 @日排程 四個來源資料夾
+    # UTC 時間；台北時間需加 8 小時
+    - cron: "0 17 * * *"    # 台北 01:00：日排程
+    - cron: "10 17 * * *"   # 台北 01:10：工作人員排班
+    - cron: "20 17 * * *"   # 台北 01:20：訂單資料
+    - cron: "30 17 * * *"   # 台北 01:30：工作人員資料
+    - cron: "0 18 * * *"    # 台北 02:00：寄送執行結果
+    - cron: "0 14 * * *"    # 台北 22:00：月底清空 @日排程來源資料夾
+
   workflow_dispatch:
     inputs:
       target:
@@ -15,7 +17,14 @@ on:
         required: true
         default: "all"
         type: choice
-        options: [all, schedule_report, staff_schedule, orders_report, staff_info, notify, month_end_cleanup]
+        options:
+          - all
+          - schedule_report
+          - staff_schedule
+          - orders_report
+          - staff_info
+          - notify
+          - month_end_cleanup
 
 permissions:
   contents: write
@@ -23,92 +32,324 @@ permissions:
 jobs:
   run-daily-jobs:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
     env:
       DAILY_ROOT_FOLDER_ID: "11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc"
+
+      # Jenny OAuth：Drive 建立、複製及清理檔案
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+
+      # Service Account：寫入執行 Log
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
       TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
       MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
+
+      # 各地區系統帳號
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
+
+      # 通知信箱
       NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
       NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
       NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           persist-credentials: true
-      - uses: actions/setup-python@v5
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install packages
-        run: pip install -r requirements.txt
-      - name: Verify Jenny OAuth secrets
         shell: bash
         run: |
-          test -n "$GOOGLE_OAUTH_CLIENT_ID"
-          test -n "$GOOGLE_OAUTH_CLIENT_SECRET"
-          test -n "$GOOGLE_OAUTH_REFRESH_TOKEN"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_secret() {
+            SECRET_NAME="$1"
+            SECRET_VALUE="$2"
+
+            if [ -z "$SECRET_VALUE" ]; then
+              echo "❌ 缺少 GitHub Secret：$SECRET_NAME"
+              exit 1
+            fi
+
+            echo "✅ 已設定：$SECRET_NAME"
+          }
+
+          check_secret \
+            "GOOGLE_OAUTH_CLIENT_ID" \
+            "$GOOGLE_OAUTH_CLIENT_ID"
+
+          check_secret \
+            "GOOGLE_OAUTH_CLIENT_SECRET" \
+            "$GOOGLE_OAUTH_CLIENT_SECRET"
+
+          check_secret \
+            "GOOGLE_OAUTH_REFRESH_TOKEN" \
+            "$GOOGLE_OAUTH_REFRESH_TOKEN"
+
+          check_secret \
+            "GOOGLE_SERVICE_ACCOUNT" \
+            "$GOOGLE_SERVICE_ACCOUNT"
+
+          check_secret \
+            "TOOLS_APP_LOG_SPREADSHEET_ID 或 MASTER_SPREADSHEET_ID" \
+            "$TOOLS_APP_LOG_SPREADSHEET_ID"
+
       - name: Decide task
         id: decide
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then TASK="${{ github.event.inputs.target }}"; else
-            HM=$(date -u +"%H:%M")
-            case "$HM" in
-              14:00) TASK="month_end_cleanup" ;;
-              17:00) TASK="schedule_report" ;;
-              17:10) TASK="staff_schedule" ;;
-              17:20) TASK="orders_report" ;;
-              17:30) TASK="staff_info" ;;
-              18:00) TASK="notify" ;;
-              *) TASK="none" ;;
+          set -euo pipefail
+
+          EVENT_NAME="${{ github.event_name }}"
+          EVENT_SCHEDULE="${{ github.event.schedule }}"
+          TASK=""
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TASK="${{ github.event.inputs.target }}"
+          else
+            case "$EVENT_SCHEDULE" in
+              "0 14 * * *")
+                TASK="month_end_cleanup"
+                ;;
+              "0 17 * * *")
+                TASK="schedule_report"
+                ;;
+              "10 17 * * *")
+                TASK="staff_schedule"
+                ;;
+              "20 17 * * *")
+                TASK="orders_report"
+                ;;
+              "30 17 * * *")
+                TASK="staff_info"
+                ;;
+              "0 18 * * *")
+                TASK="notify"
+                ;;
+              *)
+                echo "❌ 無法識別排程：$EVENT_SCHEDULE"
+                exit 1
+                ;;
             esac
           fi
+
+          if [ -z "$TASK" ]; then
+            echo "❌ 沒有取得有效的執行任務"
+            exit 1
+          fi
+
+          echo "event_name=$EVENT_NAME"
+          echo "event_schedule=$EVENT_SCHEDULE"
+          echo "selected_task=$TASK"
+
           echo "task=$TASK" >> "$GITHUB_OUTPUT"
+
       - name: Run daily task
+        id: run_daily_task
         shell: bash
         run: |
           set +e
+
           TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
-          LOG_DIR="logs/$TODAY"; mkdir -p "$LOG_DIR"
-          TASK="${{ steps.decide.outputs.task }}"; FAILED=0
-          run_one () {
-            NAME="$1"; CMD="$2"; START_TS=$(date +%s); START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
-            bash -lc "$CMD" > "$LOG_DIR/$NAME.log" 2>&1; EXIT_CODE=$?
-            END_TS=$(date +%s); END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S"); DURATION=$((END_TS-START_TS))
+          LOG_DIR="logs/$TODAY"
+          TASK="${{ steps.decide.outputs.task }}"
+          FAILED=0
+          EXECUTED=0
+
+          mkdir -p "$LOG_DIR"
+
+          echo "========================================"
+          echo "GitHub 事件：${{ github.event_name }}"
+          echo "GitHub cron：${{ github.event.schedule }}"
+          echo "台北時間：$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")"
+          echo "執行任務：$TASK"
+          echo "Drive 根目錄：$DAILY_ROOT_FOLDER_ID"
+          echo "Log 目錄：$LOG_DIR"
+          echo "========================================"
+
+          if [ -z "$TASK" ] || [ "$TASK" = "none" ]; then
+            echo "❌ 沒有取得有效的排程任務"
+            exit 1
+          fi
+
+          run_one() {
+            NAME="$1"
+            shift
+
+            START_TS=$(date +%s)
+            START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+            LOG_FILE="$LOG_DIR/$NAME.log"
+
+            EXECUTED=$((EXECUTED + 1))
+
+            echo
+            echo "🔵 開始執行：$NAME"
+            echo "開始時間：$START_TEXT"
+
+            "$@" > "$LOG_FILE" 2>&1
+            EXIT_CODE=$?
+
+            END_TS=$(date +%s)
+            END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+            DURATION=$((END_TS - START_TS))
+
             echo "$EXIT_CODE" > "$LOG_DIR/$NAME.exit"
-            [ "$EXIT_CODE" -eq 0 ] && STATUS="success" || STATUS="failed"
-            printf '{"job_name":"%s","status":"%s","exit_code":%s,"started_at":"%s","finished_at":"%s","duration_seconds":%s}\n' "$NAME" "$STATUS" "$EXIT_CODE" "$START_TEXT" "$END_TEXT" "$DURATION" > "$LOG_DIR/$NAME.json"
-            cat "$LOG_DIR/$NAME.log"; [ "$EXIT_CODE" -ne 0 ] && FAILED=1; return 0
+
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              STATUS="success"
+            else
+              STATUS="failed"
+              FAILED=1
+            fi
+
+            printf \
+              '{"job_name":"%s","status":"%s","exit_code":%s,"started_at":"%s","finished_at":"%s","duration_seconds":%s}\n' \
+              "$NAME" \
+              "$STATUS" \
+              "$EXIT_CODE" \
+              "$START_TEXT" \
+              "$END_TEXT" \
+              "$DURATION" \
+              > "$LOG_DIR/$NAME.json"
+
+            if [ -f "$LOG_FILE" ]; then
+              cat "$LOG_FILE"
+            fi
+
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              echo "✅ 執行成功：$NAME"
+            else
+              echo "❌ 執行失敗：$NAME（exit $EXIT_CODE）"
+            fi
+
+            echo "結束時間：$END_TEXT"
+            echo "執行秒數：$DURATION"
+            echo "----------------------------------------"
+
+            return 0
           }
-          [ "$TASK" = "schedule_report" ] || [ "$TASK" = "all" ] && run_one schedule_report "python -u tools/scheduled_daily/scheduler.py --target schedule_report --folder-id '$DAILY_ROOT_FOLDER_ID'"
-          [ "$TASK" = "staff_schedule" ] || [ "$TASK" = "all" ] && run_one staff_schedule "python -u tools/scheduled_daily/scheduler.py --target staff_schedule --folder-id '$DAILY_ROOT_FOLDER_ID'"
-          [ "$TASK" = "orders_report" ] || [ "$TASK" = "all" ] && run_one orders_report "python -u tools/scheduled_daily/scheduler.py --target orders_report --folder-id '$DAILY_ROOT_FOLDER_ID'"
-          [ "$TASK" = "staff_info" ] || [ "$TASK" = "all" ] && run_one staff_info "python -u tools/scheduled_daily/scheduler.py --target staff_info --folder-id '$DAILY_ROOT_FOLDER_ID'"
-          [ "$TASK" = "notify" ] || [ "$TASK" = "all" ] && run_one send_daily_result "python -u tools/notify/send_daily_result.py"
+
+          if [ "$TASK" = "schedule_report" ] || [ "$TASK" = "all" ]; then
+            run_one \
+              "schedule_report" \
+              python -u tools/scheduled_daily/scheduler.py \
+              --target schedule_report \
+              --folder-id "$DAILY_ROOT_FOLDER_ID"
+          fi
+
+          if [ "$TASK" = "staff_schedule" ] || [ "$TASK" = "all" ]; then
+            run_one \
+              "staff_schedule" \
+              python -u tools/scheduled_daily/scheduler.py \
+              --target staff_schedule \
+              --folder-id "$DAILY_ROOT_FOLDER_ID"
+          fi
+
+          if [ "$TASK" = "orders_report" ] || [ "$TASK" = "all" ]; then
+            run_one \
+              "orders_report" \
+              python -u tools/scheduled_daily/scheduler.py \
+              --target orders_report \
+              --folder-id "$DAILY_ROOT_FOLDER_ID"
+          fi
+
+          if [ "$TASK" = "staff_info" ] || [ "$TASK" = "all" ]; then
+            run_one \
+              "staff_info" \
+              python -u tools/scheduled_daily/scheduler.py \
+              --target staff_info \
+              --folder-id "$DAILY_ROOT_FOLDER_ID"
+          fi
+
+          if [ "$TASK" = "notify" ] || [ "$TASK" = "all" ]; then
+            run_one \
+              "send_daily_result" \
+              python -u tools/notify/send_daily_result.py
+          fi
+
           if [ "$TASK" = "month_end_cleanup" ]; then
-            # Drive 清理使用 Jenny OAuth；Log 仍讓 log_to_sheet 使用 Service Account。
+            # Drive 清理使用 Jenny OAuth。
+            # Log 寫入仍可繼續使用 GOOGLE_SERVICE_ACCOUNT。
             export CLEANUP_GOOGLE_OAUTH_CLIENT_ID="$GOOGLE_OAUTH_CLIENT_ID"
             export CLEANUP_GOOGLE_OAUTH_CLIENT_SECRET="$GOOGLE_OAUTH_CLIENT_SECRET"
             export CLEANUP_GOOGLE_OAUTH_REFRESH_TOKEN="$GOOGLE_OAUTH_REFRESH_TOKEN"
-            unset GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN
-            run_one month_end_cleanup "python -u tools/scheduled_daily/month_end_cleanup.py"
+
+            unset GOOGLE_OAUTH_CLIENT_ID
+            unset GOOGLE_OAUTH_CLIENT_SECRET
+            unset GOOGLE_OAUTH_REFRESH_TOKEN
+
+            run_one \
+              "month_end_cleanup" \
+              python -u tools/scheduled_daily/month_end_cleanup.py
           fi
-          [ "$FAILED" -ne 0 ] && exit 1 || exit 0
+
+          if [ "$EXECUTED" -eq 0 ]; then
+            echo "❌ 沒有執行任何日排程程式：TASK=$TASK"
+            exit 1
+          fi
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "❌ 本次日排程有一項或多項任務失敗"
+            exit 1
+          fi
+
+          echo
+          echo "✅ 本次日排程全部執行成功"
+          exit 0
+
       - name: Commit logs
         if: always()
         shell: bash
         run: |
+          set -euo pipefail
+
+          if [ ! -d "logs" ]; then
+            echo "沒有 logs 目錄，不需要提交"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add -f logs
-          if ! git diff --cached --quiet; then
-            git commit -m "Update daily logs"
-            git pull --rebase origin "${GITHUB_REF_NAME}"
-            git push
+
+          if git diff --cached --quiet; then
+            echo "沒有新的 Log 需要提交"
+            exit 0
           fi
+
+          git commit -m "Update daily logs"
+
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+
+          if ! git pull --rebase origin "$BRANCH_NAME"; then
+            echo "❌ Log 提交成功，但 git pull --rebase 失敗"
+            exit 1
+          fi
+
+          if ! git push origin "HEAD:$BRANCH_NAME"; then
+            echo "❌ Log 提交成功，但 git push 失敗"
+            exit 1
+          fi
+
+          echo "✅ 日排程 Log 已提交"
