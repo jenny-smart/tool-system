@@ -22,7 +22,6 @@ try:
 except Exception:
     _log_to_sheet = None
 
-
 JOBS = {
     "schedule_report": {"label": "排班統計表", "script": "tools/scheduled_daily/schedule_report.py", "needs_folder_id": True},
     "staff_schedule": {"label": "專員班表", "script": "tools/scheduled_daily/staff_schedule.py", "needs_folder_id": True},
@@ -50,7 +49,6 @@ def status_to_sheet_text(status: str) -> str:
 
 
 def _plain_secret(value):
-    """把 Streamlit Secrets 的 AttrDict/Mapping 轉成可序列化普通資料。"""
     try:
         if hasattr(value, "to_dict"):
             return value.to_dict()
@@ -65,15 +63,8 @@ def _plain_secret(value):
 
 
 def build_child_env() -> dict[str, str]:
-    """完全比照 toolapp.py 的 run_script() 建立子程序環境。
-
-    單項日排程已確認可正常使用 Jenny OAuth；一鍵執行必須使用完全相同的
-    Streamlit Secrets -> subprocess env 傳遞方式，不能再另外維護一套簡化邏輯。
-    """
     env = os.environ.copy()
 
-    # 與 toolapp._build_subprocess_env() 相同：確保 repo root 在 PYTHONPATH，
-    # 讓子程序啟動時可載入 sitecustomize.py OAuth 相容層。
     base_str = str(BASE_DIR)
     existing_pp = env.get("PYTHONPATH", "")
     pp_parts = [p for p in existing_pp.split(os.pathsep) if p]
@@ -83,7 +74,6 @@ def build_child_env() -> dict[str, str]:
     try:
         import streamlit as st
 
-        # 1) 和 toolapp 一樣，把整份 st.secrets 帶給子程序。
         try:
             import toml
             secrets_dict = {str(k): _plain_secret(v) for k, v in st.secrets.items()}
@@ -91,7 +81,6 @@ def build_child_env() -> dict[str, str]:
         except Exception as exc:
             print(f"⚠️ 一鍵日排程 secrets TOML 注入失敗：{exc}", flush=True)
 
-        # 2) 所有頂層純字串 secret 直接注入 env，與 toolapp.run_script 一致。
         try:
             for key in st.secrets:
                 try:
@@ -109,10 +98,8 @@ def build_child_env() -> dict[str, str]:
     except Exception as exc:
         print(f"⚠️ 一鍵日排程無法讀取 Streamlit Secrets：{exc}", flush=True)
 
-    # scheduler 管理 Log；子程式不要再由 sitecustomize 重複寫一次。
     env["DAILY_SCHEDULER_MANAGED"] = "1"
 
-    # 不顯示 secret 值，只顯示是否存在，便於確認身份傳遞。
     oauth_keys = (
         "GOOGLE_OAUTH_CLIENT_ID",
         "GOOGLE_OAUTH_CLIENT_SECRET",
@@ -154,47 +141,90 @@ def punch(*, label: str, job_name: str, status: str, started_at: datetime,
         print(f"⚠️ 寫入日排程打卡失敗：{exc}", flush=True)
 
 
+def build_child_command(script: Path, folder_id: str) -> list[str]:
+    """強制在子程序中重新載入 sitecustomize，再執行真正的日排程腳本。
+
+    這可確保 OAuth secrets 已進入 child env 後，service_account.Credentials
+    一定會被 Jenny OAuth credentials 接管，不再依賴 Python 是否自動載入
+    sitecustomize.py。
+    """
+    bootstrap = (
+        "import importlib, runpy, sys; "
+        "import sitecustomize; "
+        "importlib.reload(sitecustomize); "
+        "script = sys.argv[1]; "
+        "sys.argv = sys.argv[1:]; "
+        "runpy.run_path(script, run_name='__main__')"
+    )
+    return [
+        sys.executable,
+        "-u",
+        "-c",
+        bootstrap,
+        str(script),
+        "--folder-id",
+        folder_id,
+    ]
+
+
 def run_job(job_name: str, folder_id: str = "") -> dict:
     if job_name not in JOBS:
         raise RuntimeError(f"未知 job：{job_name}")
+
     job = JOBS[job_name]
     label = job["label"]
     script = BASE_DIR / job["script"]
     if not script.exists():
         raise RuntimeError(f"{label} 找不到執行檔：{script}")
-
-    cmd = [sys.executable, "-u", str(script)]
-    if job.get("needs_folder_id"):
-        if not folder_id:
-            raise RuntimeError(f"{label} 缺少 folder_id")
-        cmd.extend(["--folder-id", folder_id])
+    if job.get("needs_folder_id") and not folder_id:
+        raise RuntimeError(f"{label} 缺少 folder_id")
 
     started_at = now_tw()
-    punch(label=label, job_name=job_name, status="running", started_at=started_at,
-          folder_id=folder_id, message="開始執行")
+    punch(
+        label=label,
+        job_name=job_name,
+        status="running",
+        started_at=started_at,
+        folder_id=folder_id,
+        message="開始執行",
+    )
 
     print(f"開始執行：{label}", flush=True)
-    print("Command:", " ".join(cmd), flush=True)
 
     try:
         child_env = build_child_env()
     except Exception as exc:
         finished_at = now_tw()
         error_message = f"{label} 啟動前失敗：{exc}"
-        punch(label=label, job_name=job_name, status="failed", started_at=started_at,
-              finished_at=finished_at, folder_id=folder_id, message=error_message,
-              traceback_text=error_message)
+        punch(
+            label=label,
+            job_name=job_name,
+            status="failed",
+            started_at=started_at,
+            finished_at=finished_at,
+            folder_id=folder_id,
+            message=error_message,
+            traceback_text=error_message,
+        )
         raise RuntimeError(error_message) from exc
 
+    cmd = build_child_command(script, folder_id)
     print("OAuth env ready = True", flush=True)
-    print(f"PYTHONPATH contains repo root = {str(BASE_DIR) in child_env.get('PYTHONPATH', '')}", flush=True)
+    print("OAuth bootstrap forced = True", flush=True)
+    print("Command: Python bootstrap ->", str(script), flush=True)
 
     completed = subprocess.run(
-        cmd, cwd=BASE_DIR, text=True, capture_output=True, env=child_env,
+        cmd,
+        cwd=BASE_DIR,
+        text=True,
+        capture_output=True,
+        env=child_env,
     )
+
     finished_at = now_tw()
     stdout_text = completed.stdout or ""
     stderr_text = completed.stderr or ""
+
     if stdout_text:
         print(stdout_text, flush=True)
     if stderr_text:
@@ -203,23 +233,46 @@ def run_job(job_name: str, folder_id: str = "") -> dict:
     if completed.returncode != 0:
         error_message = (
             f"{label} 執行失敗，exit={completed.returncode}\n\n"
-            f"STDOUT:\n{stdout_text[:3000]}\n\nSTDERR:\n{stderr_text[:5000]}"
+            f"STDOUT:\n{stdout_text[:3000]}\n\n"
+            f"STDERR:\n{stderr_text[:5000]}"
         )
-        punch(label=label, job_name=job_name, status="failed", started_at=started_at,
-              finished_at=finished_at, folder_id=folder_id, message=error_message,
-              traceback_text=stderr_text or error_message)
+        punch(
+            label=label,
+            job_name=job_name,
+            status="failed",
+            started_at=started_at,
+            finished_at=finished_at,
+            folder_id=folder_id,
+            message=error_message,
+            traceback_text=stderr_text or error_message,
+        )
         raise RuntimeError(error_message)
 
-    punch(label=label, job_name=job_name, status="success", started_at=started_at,
-          finished_at=finished_at, folder_id=folder_id, message="完成")
+    punch(
+        label=label,
+        job_name=job_name,
+        status="success",
+        started_at=started_at,
+        finished_at=finished_at,
+        folder_id=folder_id,
+        message="完成",
+    )
+
     print(f"完成執行：{label}", flush=True)
-    return {"job": job_name, "label": label, "status": "success",
-            "started_at": format_dt(started_at), "finished_at": format_dt(finished_at)}
+    return {
+        "job": job_name,
+        "label": label,
+        "status": "success",
+        "started_at": format_dt(started_at),
+        "finished_at": format_dt(finished_at),
+    }
 
 
 def main(target: str = "all", folder_id: str = "") -> list[dict]:
     targets = list(JOBS.keys()) if target == "all" else [target]
-    results, failed = [], []
+    results = []
+    failed = []
+
     for job_name in targets:
         try:
             results.append(run_job(job_name, folder_id=folder_id))
@@ -227,8 +280,10 @@ def main(target: str = "all", folder_id: str = "") -> list[dict]:
             failed.append({"job": job_name, "status": "failed", "message": str(exc)})
             if target != "all":
                 raise
+
     if failed:
         raise RuntimeError(f"日排程有失敗項目：{failed}")
+
     print("scheduled_daily scheduler 全部完成", flush=True)
     return results
 
