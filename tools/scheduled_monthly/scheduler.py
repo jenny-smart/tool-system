@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-"""
-月排程 scheduler。
+"""月排程 scheduler。
 
 - MONTHLY_ROOT_FOLDER_ID 指向「03 服務分潤表」總根目錄。
-- 執行時依 period/start/目前年份，自動尋找或建立「YYYY專員承攬服務費」。
-- 各月排程子程式收到的是該年度資料夾 ID，再自行尋找各地區資料夾。
+- 依 period/start/目前年份自動進入「YYYY專員承攬服務費」。
+- 月排程 Drive 操作強制使用 Jenny OAuth。
+- 執行 Log 保持由主程序原本 Service Account 寫入。
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -26,48 +27,19 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 AREA_ALIASES = {
     "01.台北專員": "台北",
     "02.台中專員": "台中",
-    "03.桃園專員": "桃園",
-    "04.新竹專員": "新竹",
-    "05.高雄專員": "高雄",
+    "03.新北專員": "新北",
+    "04.桃園專員": "桃園",
+    "05.新竹專員": "新竹",
+    "06.高雄專員": "高雄",
 }
 
 JOBS = {
-    "half_month_orders_1": {
-        "label": "上半月訂單",
-        "script": "tools/scheduled_monthly/half_month_orders.py",
-        "extra": ["--half", "1"],
-        "needs_folder_id": True,
-    },
-    "half_month_orders_2": {
-        "label": "下半月訂單",
-        "script": "tools/scheduled_monthly/half_month_orders.py",
-        "extra": ["--half", "2"],
-        "needs_folder_id": True,
-    },
-    "refund_report": {
-        "label": "已退款",
-        "script": "tools/scheduled_monthly/refund_report.py",
-        "extra": [],
-        "needs_folder_id": True,
-    },
-    "prepaid_report": {
-        "label": "預收",
-        "script": "tools/scheduled_monthly/prepaid_report.py",
-        "extra": [],
-        "needs_folder_id": True,
-    },
-    "stored_value_settlement": {
-        "label": "儲值金結算",
-        "script": "tools/scheduled_monthly/stored_value_settlement.py",
-        "extra": [],
-        "needs_folder_id": True,
-    },
-    "stored_value_prepaid": {
-        "label": "儲值金預收",
-        "script": "tools/scheduled_monthly/stored_value_prepaid.py",
-        "extra": [],
-        "needs_folder_id": True,
-    },
+    "half_month_orders_1": {"label": "上半月訂單", "script": "tools/scheduled_monthly/half_month_orders.py", "extra": ["--half", "1"], "needs_folder_id": True},
+    "half_month_orders_2": {"label": "下半月訂單", "script": "tools/scheduled_monthly/half_month_orders.py", "extra": ["--half", "2"], "needs_folder_id": True},
+    "refund_report": {"label": "已退款", "script": "tools/scheduled_monthly/refund_report.py", "extra": [], "needs_folder_id": True},
+    "prepaid_report": {"label": "預收", "script": "tools/scheduled_monthly/prepaid_report.py", "extra": [], "needs_folder_id": True},
+    "stored_value_settlement": {"label": "儲值金結算", "script": "tools/scheduled_monthly/stored_value_settlement.py", "extra": [], "needs_folder_id": True},
+    "stored_value_prepaid": {"label": "儲值金預收", "script": "tools/scheduled_monthly/stored_value_prepaid.py", "extra": [], "needs_folder_id": True},
 }
 
 
@@ -82,29 +54,77 @@ def normalize_area_arg(area: str = "all") -> str:
     return AREA_ALIASES.get(value, value)
 
 
-def get_drive_service():
-    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
-    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
-    refresh_token = os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip()
+def _plain_secret(value):
+    try:
+        if hasattr(value, "to_dict"):
+            return value.to_dict()
+    except Exception:
+        pass
+    try:
+        if hasattr(value, "items") and not isinstance(value, str):
+            return {str(k): _plain_secret(v) for k, v in value.items()}
+    except Exception:
+        pass
+    return value
 
-    missing = [
-        name
-        for name, value in [
-            ("GOOGLE_OAUTH_CLIENT_ID", client_id),
-            ("GOOGLE_OAUTH_CLIENT_SECRET", client_secret),
-            ("GOOGLE_OAUTH_REFRESH_TOKEN", refresh_token),
-        ]
-        if not value
-    ]
+
+def build_child_env() -> dict[str, str]:
+    """把 Streamlit Secrets 完整傳給月排程 subprocess。"""
+    env = os.environ.copy()
+
+    base_str = str(BASE_DIR)
+    existing_pp = env.get("PYTHONPATH", "")
+    pp_parts = [p for p in existing_pp.split(os.pathsep) if p]
+    if base_str not in pp_parts:
+        env["PYTHONPATH"] = base_str + (os.pathsep + existing_pp if existing_pp else "")
+
+    try:
+        import streamlit as st
+        try:
+            import toml
+            secrets_dict = {str(k): _plain_secret(v) for k, v in st.secrets.items()}
+            env["STREAMLIT_SECRETS_TOML"] = toml.dumps(secrets_dict)
+        except Exception as exc:
+            print(f"⚠️ 月排程 secrets TOML 注入失敗：{exc}", flush=True)
+
+        try:
+            for key in st.secrets:
+                try:
+                    plain = _plain_secret(st.secrets[key])
+                    if isinstance(plain, str):
+                        env[str(key)] = plain
+                    elif isinstance(plain, dict):
+                        env[str(key)] = json.dumps(plain, ensure_ascii=False)
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(f"⚠️ 月排程 secrets env 注入失敗：{exc}", flush=True)
+    except Exception:
+        pass
+
+    env["MONTHLY_SCHEDULER_MANAGED"] = "1"
+
+    oauth_keys = (
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_OAUTH_REFRESH_TOKEN",
+    )
+    missing = [key for key in oauth_keys if not env.get(key, "").strip()]
     if missing:
-        raise RuntimeError("缺少 Google OAuth 設定：" + ", ".join(missing))
+        raise RuntimeError("一鍵月排程子程序缺少 OAuth Secret：" + ", ".join(missing))
 
+    return env
+
+
+def get_drive_service():
+    """年度資料夾解析本身也強制 Jenny OAuth。"""
+    child_env = build_child_env()
     credentials = Credentials(
         token=None,
-        refresh_token=refresh_token,
+        refresh_token=child_env["GOOGLE_OAUTH_REFRESH_TOKEN"].strip(),
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=client_id,
-        client_secret=client_secret,
+        client_id=child_env["GOOGLE_OAUTH_CLIENT_ID"].strip(),
+        client_secret=child_env["GOOGLE_OAUTH_CLIENT_SECRET"].strip(),
         scopes=["https://www.googleapis.com/auth/drive"],
     )
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
@@ -117,7 +137,6 @@ def q_escape(value: str) -> str:
 def resolve_year(period: str = "", start: str = "") -> int:
     period = str(period or "").strip()
     start = str(start or "").strip()
-
     if len(period) >= 4 and period[:4].isdigit():
         return int(period[:4])
     if len(start) >= 4 and start[:4].isdigit():
@@ -149,17 +168,12 @@ def get_or_create_year_folder(root_folder_id: str, year: int) -> str:
     service = get_drive_service()
     folder_name = f"{year}專員承攬服務費"
     folder_id = find_child_folder(service, root_folder_id, folder_name)
-
     if folder_id:
         print(f"📁 月排程年度資料夾：{folder_name} ({folder_id})", flush=True)
         return folder_id
 
     created = service.files().create(
-        body={
-            "name": folder_name,
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [root_folder_id],
-        },
+        body={"name": folder_name, "mimeType": "application/vnd.google-apps.folder", "parents": [root_folder_id]},
         fields="id,name",
         supportsAllDrives=True,
     ).execute()
@@ -167,17 +181,7 @@ def get_or_create_year_folder(root_folder_id: str, year: int) -> str:
     return created["id"]
 
 
-def punch(
-    label,
-    status,
-    started_at,
-    finished_at=None,
-    area="",
-    period="",
-    target="",
-    message="",
-    traceback_text="",
-):
+def punch(label, status, started_at, finished_at=None, area="", period="", target="", message="", traceback_text=""):
     try:
         write_job_log(
             system_name="月排程系統",
@@ -199,14 +203,27 @@ def punch(
         print(f"⚠️ 月排程打卡失敗：{exc}", flush=True)
 
 
-def run_job(
-    job_name: str,
-    folder_id: str = "",
-    area: str = "all",
-    period: str = "",
-    start: str = "",
-    end: str = "",
-) -> dict:
+def build_child_command(script: Path, extra: list[str], folder_id: str, area: str, period: str, start: str, end: str) -> list[str]:
+    """與日排程相同，強制 OAuth bootstrap 後才執行月排程 script。"""
+    bootstrap = (
+        "import importlib, runpy, sys; "
+        "import sitecustomize; "
+        "importlib.reload(sitecustomize); "
+        "script = sys.argv[1]; "
+        "sys.argv = sys.argv[1:]; "
+        "runpy.run_path(script, run_name='__main__')"
+    )
+    cmd = [sys.executable, "-u", "-c", bootstrap, str(script), *extra, "--folder-id", folder_id]
+    if area:
+        cmd.extend(["--area", area])
+    if period:
+        cmd.extend(["--period", period])
+    if start and end:
+        cmd.extend(["--start", start, "--end", end])
+    return cmd
+
+
+def run_job(job_name: str, folder_id: str = "", area: str = "all", period: str = "", start: str = "", end: str = "") -> dict:
     if job_name not in JOBS:
         raise RuntimeError(f"未知月排程 job：{job_name}")
 
@@ -214,43 +231,31 @@ def run_job(
     job = JOBS[job_name]
     label = job["label"]
     script = BASE_DIR / job["script"]
-
     if not script.exists():
         raise RuntimeError(f"{label} 找不到執行檔：{script}")
-
-    cmd = [sys.executable, "-u", str(script), *job.get("extra", [])]
-
-    if job.get("needs_folder_id"):
-        if not folder_id:
-            raise RuntimeError(f"{label} 缺少 folder_id")
-        cmd.extend(["--folder-id", folder_id])
-
-    if area:
-        cmd.extend(["--area", area])
-    if period:
-        cmd.extend(["--period", period])
-    if start and end:
-        cmd.extend(["--start", start, "--end", end])
+    if job.get("needs_folder_id") and not folder_id:
+        raise RuntimeError(f"{label} 缺少 folder_id")
 
     period_text = period or f"{start}~{end}".strip("~")
     started_at = now_tw()
+    punch(label, "running", started_at, area=area, period=period_text, target=folder_id, message="開始執行")
 
-    punch(
-        label,
-        "running",
-        started_at,
-        area=area,
-        period=period_text,
-        target=folder_id,
-        message="開始執行",
-    )
+    try:
+        child_env = build_child_env()
+        cmd = build_child_command(script, job.get("extra", []), folder_id, area, period, start, end)
+        print("OAuth env ready = True", flush=True)
+        print("OAuth bootstrap forced = True", flush=True)
+        print(f"Command: Python bootstrap -> {script}", flush=True)
+        completed = subprocess.run(cmd, cwd=BASE_DIR, text=True, capture_output=True, env=child_env)
+    except Exception as exc:
+        finished_at = now_tw()
+        message = f"{label} 啟動前失敗：{exc}"
+        punch(label, "failed", started_at, finished_at, area=area, period=period_text, target=folder_id, message=message, traceback_text=message)
+        raise RuntimeError(message) from exc
 
-    print("Command:", " ".join(cmd), flush=True)
-    completed = subprocess.run(cmd, cwd=BASE_DIR, text=True, capture_output=True)
     finished_at = now_tw()
     stdout_text = completed.stdout or ""
     stderr_text = completed.stderr or ""
-
     if stdout_text:
         print(stdout_text, flush=True)
     if stderr_text:
@@ -262,40 +267,14 @@ def run_job(
             f"STDOUT:\n{stdout_text[-3000:]}\n"
             f"STDERR:\n{stderr_text[-5000:]}"
         )
-        punch(
-            label,
-            "failed",
-            started_at,
-            finished_at,
-            area=area,
-            period=period_text,
-            target=folder_id,
-            message=message,
-            traceback_text=stderr_text or message,
-        )
+        punch(label, "failed", started_at, finished_at, area=area, period=period_text, target=folder_id, message=message, traceback_text=stderr_text or message)
         raise RuntimeError(message)
 
-    punch(
-        label,
-        "success",
-        started_at,
-        finished_at,
-        area=area,
-        period=period_text,
-        target=folder_id,
-        message="完成",
-    )
+    punch(label, "success", started_at, finished_at, area=area, period=period_text, target=folder_id, message="完成")
     return {"job": job_name, "label": label, "status": "success"}
 
 
-def main(
-    target: str = "half_month_orders_1",
-    folder_id: str = "",
-    area: str = "all",
-    period: str = "",
-    start: str = "",
-    end: str = "",
-) -> list[dict]:
+def main(target: str = "all", folder_id: str = "", area: str = "all", period: str = "", start: str = "", end: str = "") -> list[dict]:
     year = resolve_year(period=period, start=start)
     year_folder_id = get_or_create_year_folder(folder_id, year)
     print(f"📂 月排程總根目錄：{folder_id}", flush=True)
@@ -305,19 +284,9 @@ def main(
     targets = list(JOBS.keys()) if target == "all" else [target]
     results = []
     failed = []
-
     for job_name in targets:
         try:
-            results.append(
-                run_job(
-                    job_name,
-                    folder_id=year_folder_id,
-                    area=area,
-                    period=period,
-                    start=start,
-                    end=end,
-                )
-            )
+            results.append(run_job(job_name, folder_id=year_folder_id, area=area, period=period, start=start, end=end))
         except Exception as exc:
             failed.append({"job": job_name, "status": "failed", "message": str(exc)})
             if target != "all":
@@ -332,19 +301,11 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", default="half_month_orders_1", choices=["all", *JOBS.keys()])
+    parser.add_argument("--target", default="all", choices=["all", *JOBS.keys()])
     parser.add_argument("--folder-id", default=os.getenv("MONTHLY_ROOT_FOLDER_ID", ""))
     parser.add_argument("--area", default="all")
     parser.add_argument("--period", default="")
     parser.add_argument("--start", default="")
     parser.add_argument("--end", default="")
     args = parser.parse_args()
-
-    main(
-        target=args.target,
-        folder_id=args.folder_id,
-        area=args.area,
-        period=args.period,
-        start=args.start,
-        end=args.end,
-    )
+    main(target=args.target, folder_id=args.folder_id, area=args.area, period=args.period, start=args.start, end=args.end)
