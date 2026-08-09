@@ -23,7 +23,7 @@ jobs:
   run-daily-jobs:
     runs-on: ubuntu-latest
     env:
-      DAILY_ROOT_FOLDER_ID: "1SSWWXmdAuOCXup-MylhnaWe9Z-H9hUso"
+      DAILY_ROOT_FOLDER_ID: "11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc"
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
