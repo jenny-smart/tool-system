@@ -19,10 +19,12 @@ tools/service_management/crm_export.py
   其他地區可用地區名稱拼音大寫
 
 執行方式：
-  python -u -m tools.service_management.crm_export            # 全跑
+  python -u -m tools.service_management.crm_export            # 全區（台北＋台中）全跑
   python -u -m tools.service_management.crm_export --step 1   # 只抓儲值金
   python -u -m tools.service_management.crm_export --step 2   # 只匯出VIP日曆
+  python -u -m tools.service_management.crm_export --area 全區 # 台北＋台中
   python -u -m tools.service_management.crm_export --area 台北 # 只跑台北
+  python -u -m tools.service_management.crm_export --area 台中 # 只跑台中
   python -u -m tools.service_management.crm_export --start 2026-06-01 --end 2026-06-30
 
 必要 GitHub Secrets：
@@ -82,6 +84,14 @@ AREA_TO_SECRET_PREFIX: dict[str, str] = {
     "台南": "TAINAN",
     "嘉義": "CHIAYI",
     "宜蘭": "YILAN",
+}
+
+# 客服排程介面允許執行的區域。
+# 「全區」固定代表台北＋台中，避免設定表新增其他地區後被意外納入。
+SERVICE_AREA_GROUPS: dict[str, tuple[str, ...]] = {
+    "全區": ("台北", "台中"),
+    "台北": ("台北",),
+    "台中": ("台中",),
 }
 
 # Calendar 行事曆顏色代碼
@@ -204,11 +214,17 @@ def _ensure_area_sheet(gc: gspread.Client) -> gspread.Worksheet:
         log.info("已建立「%s」工作表，請填入各地區 Calendar ID", AREA_SHEET_NAME)
     return sh
 
-def load_area_config(gc: gspread.Client, filter_area: str | None = None) -> list[dict]:
+def load_area_config(gc: gspread.Client, filter_area: str | None = "全區") -> list[dict]:
     """
     從主控試算表讀取地區設定。
     回傳 [{"name": "台北", "calendar_id": "...", "target_spreadsheet_id": "...", "enabled": True}, ...]
     """
+    selected_area = (filter_area or "全區").strip()
+    if selected_area not in SERVICE_AREA_GROUPS:
+        allowed = "、".join(SERVICE_AREA_GROUPS)
+        raise ValueError(f"不支援的區域：{selected_area}；可選：{allowed}")
+    allowed_areas = set(SERVICE_AREA_GROUPS[selected_area])
+
     sh = _ensure_area_sheet(gc)
     records = sh.get_all_records()
     areas = []
@@ -220,7 +236,7 @@ def load_area_config(gc: gspread.Client, filter_area: str | None = None) -> list
         enabled    = enabled_v not in ("FALSE", "0", "否", "停用")
         if not name or not enabled:
             continue
-        if filter_area and name != filter_area:
+        if name not in allowed_areas:
             continue
         areas.append({
             "name":                name,
@@ -795,8 +811,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
     parser.add_argument("--step",  type=int, choices=[1, 2], default=0,
                         help="1=只抓儲值金, 2=只匯出VIP日曆, 不指定=全跑")
-    parser.add_argument("--area",  type=str, default="",
-                        help="只跑指定地區，例如：台北")
+    parser.add_argument(
+        "--area",
+        type=str,
+        choices=list(SERVICE_AREA_GROUPS),
+        default="全區",
+        help="執行區域：全區（台北＋台中）、台北或台中；預設為全區",
+    )
     parser.add_argument("--start", type=str, default="",
                         help="匯出起始日期 YYYY-MM-DD（預設：本月1日）")
     parser.add_argument("--end",   type=str, default="",
@@ -829,17 +850,17 @@ def main() -> None:
 
     run_id = str(uuid.uuid4())[:8]
     log.info("=== CRM 客服系統 run_id=%s area=%s step=%s %s ~ %s ===",
-             run_id, args.area or "ALL", args.step or "ALL",
+             run_id, args.area, args.step or "ALL",
              fmt(start_dt, "%Y-%m-%d"), fmt(end_dt, "%Y-%m-%d"))
 
     gc    = _gc()
-    areas = load_area_config(gc, filter_area=args.area or None)
+    areas = load_area_config(gc, filter_area=args.area)
 
     if not areas:
         sys.exit(f"❌ 沒有啟用的地區設定（filter={args.area}），請檢查主控試算表「客服地區設定」")
 
     checkin_both(gc, run_id, "RUN", "START", "RUNNING",
-                 f"area={args.area or 'ALL'} step={args.step or 'ALL'}", 0)
+                 f"area={args.area} step={args.step or 'ALL'}", 0)
 
     t_total = now_tp()
     errors  = []
