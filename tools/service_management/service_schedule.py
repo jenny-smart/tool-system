@@ -18,7 +18,9 @@ tools/service_management/service_schedule.py
   python -u -m tools.service_management.service_schedule --step 3
 
 必要 GitHub Secrets：
-  GOOGLE_SERVICE_ACCOUNT        Service Account JSON 字串
+  GOOGLE_OAUTH_CLIENT_ID        Jenny OAuth Client ID
+  GOOGLE_OAUTH_CLIENT_SECRET    Jenny OAuth Client Secret
+  GOOGLE_OAUTH_REFRESH_TOKEN    Jenny OAuth Refresh Token
   LEMON_TARGET_FILE_ID          目標試算表 ID
   TOOLS_APP_LOG_SPREADSHEET_ID  主控表 ID（打卡用）
   GMAIL_USER                    Gmail 帳號（讀信）
@@ -47,7 +49,7 @@ from email.header import decode_header
 from typing import Any
 
 import gspread
-from google.oauth2.service_account import Credentials
+from tools.common.google_auth import get_google_credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -138,16 +140,11 @@ log = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────
-# Google 認證（使用 tools.common.config_loader，支援 st.secrets）
+# Google 認證（統一使用 Jenny OAuth）
 # ──────────────────────────────────────────────────────────
 
-def _get_credentials() -> Credentials:
-    try:
-        from tools.common.config_loader import get_service_account_info
-        info = get_service_account_info()
-    except Exception as e:
-        raise EnvironmentError(f"無法取得 GOOGLE_SERVICE_ACCOUNT：{e}")
-    return Credentials.from_service_account_info(info, scopes=SCOPES)
+def _get_credentials():
+    return get_google_credentials()
 
 def _gc() -> gspread.Client:
     return gspread.authorize(_get_credentials())
