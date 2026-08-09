@@ -59,7 +59,7 @@ TZ_TAIPEI = timezone(timedelta(hours=8))
 
 CONFIG: dict[str, Any] = {
     # Drive 來源資料夾（放排班統計表 xlsx / Google Sheets）
-    "source_folder_id": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
+    "source_folder_id": "18XDXdrCSsLYwSzz1Da9pQh-jGm2h2Ed8",
 
     # 目標試算表（台北台中排班統計表、每日回報所在）
     # 由 main() 動態載入（env SERVICE_TARGET_SPREADSHEET_ID 或主控試算表）
@@ -98,10 +98,10 @@ CONFIG: dict[str, Any] = {
 
     # 每月 1 日清理前一個月的檔案。
     "monthly_cleanup_folders": {
-        "訂單資料": "1QnOJzn-xmZ_oAMoiM6Qnfk3Y2CWuM1c4",
-        "專員個資": "199wJef-ISEP5bsSWaSseCAHynoVRE26e",
-        "專員班表": "10__ajnbpu2oabAVUG_u3RAHK2a2vcgj2",
-        "排班統計表": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
+        "訂單資料": "1o6ROTdseIRKOivgYQt50cNuCZLT3Rpug",
+        "專員個資": "1v1Er8oC3BEAWHbBrDq3SUpjEDwHIuK0f",
+        "專員班表": "1V2AUNsT_jzQWawmnBNU_u-e7odYviwEk",
+        "排班統計表": "18XDXdrCSsLYwSzz1Da9pQh-jGm2h2Ed8",
     },
 
     # 每日回報欄位對應
