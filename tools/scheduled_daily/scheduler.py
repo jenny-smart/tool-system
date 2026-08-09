@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parents[2]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 TZ = timezone(timedelta(hours=8))
 
 try:
@@ -46,6 +49,10 @@ def status_to_sheet_text(status: str) -> str:
     if status in ["success", "成功"]:
         return "成功"
     return "失敗"
+
+
+def current_run_type() -> str:
+    return "排程" if os.getenv("GITHUB_EVENT_NAME", "").strip() == "schedule" else "手動"
 
 
 def _plain_secret(value):
@@ -125,13 +132,13 @@ def punch(*, label: str, job_name: str, status: str, started_at: datetime,
                 system_name="日排程系統", job_name=label, status=status,
                 started_at=started_at, finished_at=finished_at or "", message=message,
                 area="全區", period="", date=now_tw().strftime("%Y%m%d"),
-                target=folder_id, source_file="", run_type="手動",
+                target=folder_id, source_file="", run_type=current_run_type(),
                 traceback_text=traceback_text,
             )
             return
         if _log_to_sheet is not None:
             _log_to_sheet(
-                system="daily", function=label, run_type="手動", area="全區", period="",
+                system="daily", function=label, run_type=current_run_type(), area="全區", period="",
                 date=now_tw().strftime("%Y%m%d"), target=folder_id, source_file="",
                 status=status_text, message=msg, traceback_text=traceback_text,
             )
