@@ -1,59 +1,23 @@
 📋 log_spreadsheet_id 已從設定檔載入
 📝 外場排程打卡：外場專員個資 / running
 Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.staff_profile --date 20260810 --system-name 外場排程系統 --run-type 排程
-[2026-08-10 05:42:01] 開始處理專員個資：20260810專員個資-台北
-[2026-08-10 05:42:02] 失敗：20260810專員個資-台北 / 找不到來源檔案：20260810專員個資-台北 / 20260810專員個資-台北.xlsx / 20260810專員個資-台北.xls / 20260810專員系統個資-台北 / 20260810專員系統個資-台北.xlsx / 20260810專員系統個資-台北.xls；資料夾內目前檔案：
+[2026-08-10 05:58:04] 開始處理專員個資：20260810專員個資-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1MPO7xT8ZsEgtim95H09Ht20z_lQ9NkY4gnFeSzrlQig
+🗑️ 已刪除來源暫存 Google Sheet：1MPO7xT8ZsEgtim95H09Ht20z_lQ9NkY4gnFeSzrlQig
+[2026-08-10 05:58:14] 完成專員個資：20260810專員個資-台北.xlsx → 專員個人資料!A4:C / rows=93
+[2026-08-10 05:58:16] 開始處理訂單截取：20260810訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Egf6IrkbNgve6yfUWAJ63IEYr4eNQOnLucbLu-NXWe8
+🗑️ 已刪除來源暫存 Google Sheet：1Egf6IrkbNgve6yfUWAJ63IEYr4eNQOnLucbLu-NXWe8
+[2026-08-10 05:58:26] 完成訂單截取：20260810訂單-台北.xls → 專員個人資料!G1:N / rows=822
+[2026-08-10 05:58:28] 開始處理專員個資：20260810專員個資-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1jlBVBooPFfHTL0nbAMIzGN3fqYh2W63EuRDOteCOgHs
+🗑️ 已刪除來源暫存 Google Sheet：1jlBVBooPFfHTL0nbAMIzGN3fqYh2W63EuRDOteCOgHs
+[2026-08-10 05:58:37] 完成專員個資：20260810專員個資-台中.xlsx → 專員個人資料!A4:C / rows=17
+[2026-08-10 05:58:38] 開始處理訂單截取：20260810訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1srHVzcd1-4vtANAjOIn6aZn0bMxndtbzrnNTH5nAaew
+🗑️ 已刪除來源暫存 Google Sheet：1srHVzcd1-4vtANAjOIn6aZn0bMxndtbzrnNTH5nAaew
+[2026-08-10 05:58:47] 完成訂單截取：20260810訂單-台中.xls → 專員個人資料!G1:N / rows=45
+[2026-08-10 05:58:48] staff_profile.py 全部完成
 
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 499, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 485, in main
-    run_staff_profile_for_area(cfg, current_area, date_key, run_type)  # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 469, in run_staff_profile_for_area
-    run_staff_profile_only(cfg, area, date_key, run_type)           # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 312, in run_staff_profile_only
-    file = find_file_by_possible_names(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 217, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810專員個資-台北 / 20260810專員個資-台北.xlsx / 20260810專員個資-台北.xls / 20260810專員系統個資-台北 / 20260810專員系統個資-台北.xlsx / 20260810專員系統個資-台北.xls；資料夾內目前檔案：
-
-📝 外場排程打卡：外場專員個資 / failed
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
-    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
-    results.append(run_job(job_name, date_key, area, system_name))
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
-    raise RuntimeError(message)
-RuntimeError: 外場專員個資 執行失敗，exit=1
-STDOUT:
-[2026-08-10 05:42:01] 開始處理專員個資：20260810專員個資-台北
-[2026-08-10 05:42:02] 失敗：20260810專員個資-台北 / 找不到來源檔案：20260810專員個資-台北 / 20260810專員個資-台北.xlsx / 20260810專員個資-台北.xls / 20260810專員系統個資-台北 / 20260810專員系統個資-台北.xlsx / 20260810專員系統個資-台北.xls；資料夾內目前檔案：
-
-STDERR:
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 499, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 485, in main
-    run_staff_profile_for_area(cfg, current_area, date_key, run_type)  # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 469, in run_staff_profile_for_area
-    run_staff_profile_only(cfg, area, date_key, run_type)           # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 312, in run_staff_profile_only
-    file = find_file_by_possible_names(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 217, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810專員個資-台北 / 20260810專員個資-台北.xlsx / 20260810專員個資-台北.xls / 20260810專員系統個資-台北 / 20260810專員系統個資-台北.xlsx / 20260810專員系統個資-台北.xls；資料夾內目前檔案：
-
+📝 外場排程打卡：外場專員個資 / success
+field_management scheduler 全部完成

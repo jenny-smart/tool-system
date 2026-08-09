@@ -1,49 +1,31 @@
 📋 log_spreadsheet_id 已從設定檔載入
 📝 外場排程打卡：外場專員班表 / running
 Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.staff_schedule --date 20260810 --system-name 外場排程系統 --run-type 排程
-[2026-08-10 05:41:30] 開始處理專員班表：20260810專員班表-台北
-[2026-08-10 05:41:30] 失敗：20260810專員班表-台北 / 找不到來源檔案：20260810專員班表-台北 / 20260810專員班表-台北.xlsx / 20260810專員班表-台北.xls / 20260810專員班表-台北.csv；資料夾內目前檔案：
+[2026-08-10 05:56:11] 開始處理專員班表：20260810專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1-z_v2xff1MJ0nAco31S1f8zGiHHzHJejxTSni0wjpPI
+🗑️ 已刪除來源暫存 Google Sheet：1-z_v2xff1MJ0nAco31S1f8zGiHHzHJejxTSni0wjpPI
+[2026-08-10 05:56:22] 更新專員班表分頁名稱：專員班表查詢本月_0809 → 專員班表查詢本月_0810
+[2026-08-10 05:56:23] 專員班表分頁名稱更新完成：專員班表查詢本月_0810
+[2026-08-10 05:56:24] 完成：20260810專員班表-台北.xls → '專員班表查詢本月_0810'!A:G / rows=1425
+[2026-08-10 05:56:26] 開始處理專員班表：20260910專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1c65gN7TJIwegiR-CvzFmjIcCbFnvHR27GNNO0AmEQFs
+🗑️ 已刪除來源暫存 Google Sheet：1c65gN7TJIwegiR-CvzFmjIcCbFnvHR27GNNO0AmEQFs
+[2026-08-10 05:56:34] 更新專員班表分頁名稱：專員班表查詢次月_0809 → 專員班表查詢次月_0810
+[2026-08-10 05:56:35] 專員班表分頁名稱更新完成：專員班表查詢次月_0810
+[2026-08-10 05:56:35] 完成：20260910專員班表-台北.xls → '專員班表查詢次月_0810'!A:G / rows=998
+[2026-08-10 05:56:37] 開始處理專員班表：20260810專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：156Feunu2RhI2iANNh1izOIj6y_sVpS7ZxnKAVRxxu_o
+🗑️ 已刪除來源暫存 Google Sheet：156Feunu2RhI2iANNh1izOIj6y_sVpS7ZxnKAVRxxu_o
+[2026-08-10 05:56:46] 更新專員班表分頁名稱：專員班表查詢本月_0809 → 專員班表查詢本月_0810
+[2026-08-10 05:56:46] 專員班表分頁名稱更新完成：專員班表查詢本月_0810
+[2026-08-10 05:56:47] 完成：20260810專員班表-台中.xls → '專員班表查詢本月_0810'!A:G / rows=248
+[2026-08-10 05:56:48] 開始處理專員班表：20260910專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：19flHJ5YlMsGltR2jsxH6QJppr3WxpTuPrzNnBR4RmDc
+🗑️ 已刪除來源暫存 Google Sheet：19flHJ5YlMsGltR2jsxH6QJppr3WxpTuPrzNnBR4RmDc
+[2026-08-10 05:56:57] 更新專員班表分頁名稱：專員班表查詢次月_0809 → 專員班表查詢次月_0810
+[2026-08-10 05:56:57] 專員班表分頁名稱更新完成：專員班表查詢次月_0810
+[2026-08-10 05:56:58] 完成：20260910專員班表-台中.xls → '專員班表查詢次月_0810'!A:G / rows=198
+[2026-08-10 05:56:59] staff_schedule.py 全部完成
 
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 1048, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 1000, in main
-    run_staff_schedule_for_area(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 832, in run_staff_schedule_for_area
-    find_file_by_possible_names(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 381, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810專員班表-台北 / 20260810專員班表-台北.xlsx / 20260810專員班表-台北.xls / 20260810專員班表-台北.csv；資料夾內目前檔案：
-
-📝 外場排程打卡：外場專員班表 / failed
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
-    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
-    results.append(run_job(job_name, date_key, area, system_name))
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
-    raise RuntimeError(message)
-RuntimeError: 外場專員班表 執行失敗，exit=1
-STDOUT:
-[2026-08-10 05:41:30] 開始處理專員班表：20260810專員班表-台北
-[2026-08-10 05:41:30] 失敗：20260810專員班表-台北 / 找不到來源檔案：20260810專員班表-台北 / 20260810專員班表-台北.xlsx / 20260810專員班表-台北.xls / 20260810專員班表-台北.csv；資料夾內目前檔案：
-
-STDERR:
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 1048, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 1000, in main
-    run_staff_schedule_for_area(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 832, in run_staff_schedule_for_area
-    find_file_by_possible_names(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 381, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810專員班表-台北 / 20260810專員班表-台北.xlsx / 20260810專員班表-台北.xls / 20260810專員班表-台北.csv；資料夾內目前檔案：
-
+📝 外場排程打卡：外場專員班表 / success
+field_management scheduler 全部完成

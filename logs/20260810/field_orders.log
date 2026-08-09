@@ -1,53 +1,15 @@
 📋 log_spreadsheet_id 已從設定檔載入
 📝 外場排程打卡：外場訂單 / running
 Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.orders --date 20260810 --system-name 外場排程系統 --run-type 排程
-[2026-08-10 05:41:46] 開始處理訂單資料：20260810訂單-台北
-[2026-08-10 05:41:46] 失敗：20260810訂單-台北 / 找不到來源檔案：20260810訂單-台北 / 20260810訂單-台北.xlsx / 20260810訂單-台北.xls / 20260810訂單-台北.csv；資料夾內目前檔案：
+[2026-08-10 05:57:10] 開始處理訂單資料：20260810訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1eI4DS-qAxq3d_k6fTHwyIB6IEiHWPRRA1IgQGGwb8fA
+🗑️ 已刪除來源暫存 Google Sheet：1eI4DS-qAxq3d_k6fTHwyIB6IEiHWPRRA1IgQGGwb8fA
+[2026-08-10 05:57:28] 完成：20260810訂單-台北.xls → 訂單資料!A:ZZ / rows=822
+[2026-08-10 05:57:29] 開始處理訂單資料：20260810訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：10HsiDkhyQkw8oswtlnnKTx_bwOgJE97zZlLZcqCiUGE
+🗑️ 已刪除來源暫存 Google Sheet：10HsiDkhyQkw8oswtlnnKTx_bwOgJE97zZlLZcqCiUGE
+[2026-08-10 05:57:42] 完成：20260810訂單-台中.xls → 訂單資料!A:ZZ / rows=45
+[2026-08-10 05:57:53] orders.py 全部完成
 
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 426, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 412, in main
-    run_orders_for_area(cfg, current_area, date_key, run_type)  # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 348, in run_orders_for_area
-    file = find_file_by_possible_names(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 212, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810訂單-台北 / 20260810訂單-台北.xlsx / 20260810訂單-台北.xls / 20260810訂單-台北.csv；資料夾內目前檔案：
-
-📝 外場排程打卡：外場訂單 / failed
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
-    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
-    results.append(run_job(job_name, date_key, area, system_name))
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
-    raise RuntimeError(message)
-RuntimeError: 外場訂單 執行失敗，exit=1
-STDOUT:
-[2026-08-10 05:41:46] 開始處理訂單資料：20260810訂單-台北
-[2026-08-10 05:41:46] 失敗：20260810訂單-台北 / 找不到來源檔案：20260810訂單-台北 / 20260810訂單-台北.xlsx / 20260810訂單-台北.xls / 20260810訂單-台北.csv；資料夾內目前檔案：
-
-STDERR:
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 426, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 412, in main
-    run_orders_for_area(cfg, current_area, date_key, run_type)  # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 348, in run_orders_for_area
-    file = find_file_by_possible_names(
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/orders.py", line 212, in find_file_by_possible_names
-    raise RuntimeError(
-RuntimeError: 找不到來源檔案：20260810訂單-台北 / 20260810訂單-台北.xlsx / 20260810訂單-台北.xls / 20260810訂單-台北.csv；資料夾內目前檔案：
-
+📝 外場排程打卡：外場訂單 / success
+field_management scheduler 全部完成
