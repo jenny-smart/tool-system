@@ -1,25 +1,25 @@
-2026-08-09 22:11:49 [INFO] === 客服排程系統 run_id=68861047 step=1 台北時間=2026-08-10 06:11:49 ===
-2026-08-09 22:11:49 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
-2026-08-09 22:11:49 [INFO] file_cache is only supported with oauth2client<4.0.0
-2026-08-09 22:12:02 [INFO] --- Step1_更新排班統計表 ---
-2026-08-09 22:12:04 [INFO] file_cache is only supported with oauth2client<4.0.0
-2026-08-09 22:12:04 [INFO] Drive 資料夾找到 8 個檔案
-2026-08-09 22:12:04 [INFO]   找到檔案：20260910排班統計表-台中 (application/vnd.google-apps.spreadsheet)
-2026-08-09 22:12:04 [INFO]   找到檔案：20260910排班統計表-台北 (application/vnd.google-apps.spreadsheet)
-2026-08-09 22:12:04 [INFO]   找到檔案：20260810排班統計表-台中 (application/vnd.google-apps.spreadsheet)
-2026-08-09 22:12:04 [INFO]   找到檔案：20260810排班統計表-台北 (application/vnd.google-apps.spreadsheet)
-2026-08-09 22:12:04 [INFO]   找到檔案：20260910排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
-2026-08-09 22:12:04 [INFO]   找到檔案：20260810排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
-2026-08-09 22:12:04 [INFO]   找到檔案：20260910排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
-2026-08-09 22:12:04 [INFO]   找到檔案：20260810排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
-2026-08-09 22:12:04 [INFO] 排班檔確認 OK：{'202608': {'taipei': '20260810排班統計表-台北', 'taichung': '20260810排班統計表-台中'}, '202609': {'taipei': '20260910排班統計表-台北', 'taichung': '20260910排班統計表-台中'}}
-2026-08-09 22:12:05 [INFO]   匯入：20260810排班統計表-台北
-2026-08-09 22:12:06 [INFO]   匯入：20260810排班統計表-台中
-2026-08-09 22:12:07 [INFO]   → 寫入 77 列（起始 R3C7）
-2026-08-09 22:12:07 [INFO]   → 寫入 16 列（起始 R3C82）
-2026-08-09 22:12:07 [INFO]   匯入：20260910排班統計表-台北
-2026-08-09 22:12:09 [INFO]   匯入：20260910排班統計表-台中
-2026-08-09 22:12:10 [INFO]   → 寫入 52 列（起始 R3C22）
-2026-08-09 22:12:10 [INFO]   → 寫入 8 列（起始 R3C97）
-2026-08-09 22:12:13 [INFO] Step 1 完成（8.2s）
-2026-08-09 22:12:14 [INFO] === 全部完成 run_id=68861047（10.8s）===
+2026-08-09 22:25:47 [INFO] === 客服排程系統 run_id=ef238ed5 step=1 台北時間=2026-08-10 06:25:47 ===
+2026-08-09 22:25:47 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-08-09 22:25:47 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-09 22:25:58 [INFO] --- Step1_更新排班統計表 ---
+2026-08-09 22:25:59 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-09 22:25:59 [INFO] Drive 資料夾找到 8 個檔案
+2026-08-09 22:25:59 [INFO]   找到檔案：20260910排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:25:59 [INFO]   找到檔案：20260910排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:25:59 [INFO]   找到檔案：20260810排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:25:59 [INFO]   找到檔案：20260810排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-09 22:25:59 [INFO]   找到檔案：20260910排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:25:59 [INFO]   找到檔案：20260810排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:25:59 [INFO]   找到檔案：20260910排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:25:59 [INFO]   找到檔案：20260810排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-09 22:25:59 [INFO] 排班檔確認 OK：{'202608': {'taipei': '20260810排班統計表-台北', 'taichung': '20260810排班統計表-台中'}, '202609': {'taipei': '20260910排班統計表-台北', 'taichung': '20260910排班統計表-台中'}}
+2026-08-09 22:26:00 [INFO]   匯入：20260810排班統計表-台北
+2026-08-09 22:26:01 [INFO]   匯入：20260810排班統計表-台中
+2026-08-09 22:26:02 [INFO]   → 寫入 77 列（起始 R3C7）
+2026-08-09 22:26:03 [INFO]   → 寫入 16 列（起始 R3C82）
+2026-08-09 22:26:03 [INFO]   匯入：20260910排班統計表-台北
+2026-08-09 22:26:04 [INFO]   匯入：20260910排班統計表-台中
+2026-08-09 22:26:05 [INFO]   → 寫入 52 列（起始 R3C22）
+2026-08-09 22:26:05 [INFO]   → 寫入 8 列（起始 R3C97）
+2026-08-09 22:26:06 [INFO] Step 1 完成（7.1s）
+2026-08-09 22:26:07 [INFO] === 全部完成 run_id=ef238ed5（7.9s）===
