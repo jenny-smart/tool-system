@@ -945,16 +945,18 @@ def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
 def _load_target_file_id() -> str:
     """
     依序嘗試取得目標試算表 ID：
-    1. 環境變數 SERVICE_TARGET_SPREADSHEET_ID（由 toolapp.py 注入或 GitHub Secret）
-    2. 主控試算表「系統設定」→ 客服排程系統 → 共用雲端資料夾ID 欄位
+    1. 環境變數 SERVICE_TARGET_SPREADSHEET_ID
+    2. 環境變數 LEMON_TARGET_FILE_ID（既有客服目標檔 Secret）
+    3. 主控試算表「系統設定」→ 客服排程系統 → 共用雲端資料夾ID 欄位
     """
-    # 1. 環境變數優先（toolapp.py 執行前已注入）
-    val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
-    if val:
-        log.info("目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID")
-        return val
+    # 1-2. 排程與 Streamlit 注入的環境變數優先
+    for env_name in ("SERVICE_TARGET_SPREADSHEET_ID", "LEMON_TARGET_FILE_ID"):
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            log.info("目標試算表 ID 來源：環境變數 %s", env_name)
+            return val
 
-    # 2. 從主控試算表讀取（429 時忽略）
+    # 3. 從主控試算表讀取（429 時忽略）
     try:
         from tools.common.config_loader import get_system_config
         system_cfg = get_system_config("客服排程系統")
@@ -992,24 +994,32 @@ def main() -> None:
             sys.exit(f"❌ 日期格式錯誤：{args.date}，請用 YYYY-MM-DD")
     else:
         run_dt = now_tp()
-    target_id = _load_target_file_id()
-    if not target_id:
-        sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
-    CONFIG["target_file_id"] = target_id
-
-    # 主控表 ID（打卡用）
+    # 先建立執行識別與 Log client，讓目標 ID 等前置設定失敗也能留下紀錄。
+    run_id = str(uuid.uuid4())[:8]
+    step   = args.step
     CONFIG["master_log_spreadsheet_id"] = (
         os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
         or _get_secret("TOOLS_APP_LOG_SPREADSHEET_ID")
     )
 
-    run_id = str(uuid.uuid4())[:8]
-    step   = args.step
-
     log.info("=== 客服排程系統 run_id=%s step=%s 台北時間=%s ===",
              run_id, step or "ALL", fmt(run_dt, "%Y-%m-%d %H:%M:%S"))
 
-    gc    = _gc()
+    gc = _gc()
+
+    target_id = _load_target_file_id()
+    if not target_id:
+        error_message = (
+            "找不到客服目標試算表 ID；請設定 "
+            "SERVICE_TARGET_SPREADSHEET_ID 或 LEMON_TARGET_FILE_ID"
+        )
+        checkin_master(
+            gc, run_id, "RUN", "DONE", "ERROR", error_message, 0
+        )
+        log.error(error_message)
+        sys.exit(1)
+
+    CONFIG["target_file_id"] = target_id
     drive = _drive()
 
     # 整體開始打卡
