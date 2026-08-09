@@ -8,13 +8,13 @@ systems:
   - name: 日排程系統
     type: daily_scheduler
     master_spreadsheet_id: ""
-    folder_id: "0AK9RcXu_35GZUk9PVA"
+    folder_id: "11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc"
     enabled: true
 
   - name: 月排程系統
     type: monthly_scheduler
     master_spreadsheet_id: ""
-    folder_id: ""
+    folder_id: "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
     enabled: true
 
   - name: 外場排程系統
@@ -50,7 +50,6 @@ systems:
         台北: "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
         台中: "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM"
 
-  # 財務管理既有功能維持不動；營收相關功能後續併入此系統。
   - name: 財務管理
     type: finance_management
     enabled: true
