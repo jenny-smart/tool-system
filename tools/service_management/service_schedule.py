@@ -43,6 +43,7 @@ import logging
 import os
 import re
 import sys
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
@@ -137,6 +138,44 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+# Google Sheets 每分鐘配額超限時的指數退避秒數。
+_SHEETS_RETRY_DELAYS = (15, 30, 60, 120)
+
+
+def _is_sheets_rate_limit(error: Exception) -> bool:
+    """判斷是否為 Google Sheets API 429 / 配額暫時超限。"""
+    response = getattr(error, "response", None)
+    status_code = getattr(response, "status_code", None) or getattr(response, "status", None)
+    message = str(error).lower()
+    return (
+        status_code == 429
+        or "429" in message
+        or "quota exceeded" in message
+        or "rate limit" in message
+        or "resource_exhausted" in message
+    )
+
+
+def _sheets_call(label: str, operation):
+    """執行 Sheets API；遇到 429 時以 15/30/60/120 秒退避後重試。"""
+    for attempt in range(len(_SHEETS_RETRY_DELAYS) + 1):
+        try:
+            return operation()
+        except Exception as error:
+            if not _is_sheets_rate_limit(error) or attempt >= len(_SHEETS_RETRY_DELAYS):
+                raise
+            delay = _SHEETS_RETRY_DELAYS[attempt]
+            log.warning(
+                "%s 遇到 Sheets API 配額限制；%d 秒後重試（%d/%d）：%s",
+                label,
+                delay,
+                attempt + 1,
+                len(_SHEETS_RETRY_DELAYS),
+                error,
+            )
+            time.sleep(delay)
+    raise RuntimeError(f"{label} 重試流程異常")
 
 
 # ──────────────────────────────────────────────────────────
@@ -600,7 +639,10 @@ def step1_update_schedule_stats(
 def _find_date_row(sheet: gspread.Worksheet, target_dt: datetime) -> int:
     start = CONFIG["report_date_start_row"]
     target_key = fmt(target_dt, "%Y%m%d")
-    col_a = sheet.col_values(1)  # 1-indexed list，col_a[0]=row1
+    col_a = _sheets_call(
+        "讀取每日回報日期欄",
+        lambda: sheet.col_values(1),
+    )  # 1-indexed list，col_a[0]=row1
     for i in range(start - 1, len(col_a)):
         cell = col_a[i]
         if not cell:
@@ -900,8 +942,14 @@ def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
         date_str   = fmt(yesterday, "%Y-%m-%d")
         month_str  = fmt(yesterday, "%Y-%m")
 
-        target_ss  = gc.open_by_key(CONFIG["target_file_id"])
-        report_sh  = target_ss.worksheet(CONFIG["report_sheet_name"])
+        target_ss = _sheets_call(
+            "開啟客服目標試算表",
+            lambda: gc.open_by_key(CONFIG["target_file_id"]),
+        )
+        report_sh = _sheets_call(
+            "取得每日回報工作表",
+            lambda: target_ss.worksheet(CONFIG["report_sheet_name"]),
+        )
 
         row = _find_date_row(report_sh, yesterday)
         if row < 1:
@@ -914,16 +962,22 @@ def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
         log.info("  台中：%s", taichung)
 
         # 台北 → H/I/J（欄 8,9,10）
-        report_sh.update(
-            values=[[taipei["daily_value"], taipei["total_count"], taipei["total_amount"]]],
-            range_name=gspread.utils.rowcol_to_a1(row, 8),
-            value_input_option="USER_ENTERED",
+        _sheets_call(
+            "寫入台北營業資料",
+            lambda: report_sh.update(
+                values=[[taipei["daily_value"], taipei["total_count"], taipei["total_amount"]]],
+                range_name=gspread.utils.rowcol_to_a1(row, 8),
+                value_input_option="USER_ENTERED",
+            ),
         )
         # 台中 → CT/CU/CV（欄 98,99,100）
-        report_sh.update(
-            values=[[taichung["daily_value"], taichung["total_count"], taichung["total_amount"]]],
-            range_name=gspread.utils.rowcol_to_a1(row, 98),
-            value_input_option="USER_ENTERED",
+        _sheets_call(
+            "寫入台中營業資料",
+            lambda: report_sh.update(
+                values=[[taichung["daily_value"], taichung["total_count"], taichung["total_amount"]]],
+                range_name=gspread.utils.rowcol_to_a1(row, 98),
+                value_input_option="USER_ENTERED",
+            ),
         )
 
         elapsed = (now_tp() - t0).total_seconds()
@@ -1042,8 +1096,6 @@ def main() -> None:
             errors.append(f"Step {step_num}: {e}")
             log.error("Step %d 失敗：%s", step_num, e)
 
-    import time
-
     if step in (0, 1):
         run(1, step1_update_schedule_stats, run_dt, gc, drive, run_id)
     if step in (0, 2):
@@ -1053,8 +1105,8 @@ def main() -> None:
         run(2, step2_write_daily_report, run_dt, gc, run_id)
     if step in (0, 3):
         if step == 0:
-            log.info("等待 5 秒讓 API rate limit 恢復...")
-            time.sleep(5)
+            log.info("等待 60 秒讓 Sheets API 每分鐘配額恢復...")
+            time.sleep(60)
         run(3, step3_import_revenue, gc, run_id)
 
     elapsed_total = (now_tp() - t_total).total_seconds()
