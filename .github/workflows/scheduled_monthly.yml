@@ -1,6 +1,13 @@
 name: Scheduled Monthly Jobs
 
 on:
+  schedule:
+    - cron: "0 9 15 * *"      # 台灣每月 15 日 17:00：上半月訂單
+    - cron: "0 9 28-31 * *"   # 台灣每月最後一天 17:00：下半月訂單（程式判斷月底）
+    - cron: "0 10 28-31 * *"  # 台灣每月最後一天 18:00：已退款（程式判斷月底）
+    - cron: "0 16 28-31 * *"  # 台灣每月 1 日 00:00：預收（UTC 為前一日）
+    - cron: "30 16 28-31 * *" # 台灣每月 1 日 00:30：儲值金結算（UTC 為前一日）
+    - cron: "40 16 28-31 * *" # 台灣每月 1 日 00:40：儲值金預收（UTC 為前一日）
   workflow_dispatch:
     inputs:
       target:
@@ -50,36 +57,145 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install packages
         run: pip install -r requirements.txt
+
       - name: Verify Jenny OAuth secrets
         shell: bash
         run: |
           test -n "$GOOGLE_OAUTH_CLIENT_ID"
           test -n "$GOOGLE_OAUTH_CLIENT_SECRET"
           test -n "$GOOGLE_OAUTH_REFRESH_TOKEN"
-      - name: Run monthly task
+
+      - name: Resolve monthly task
+        id: resolve
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_TARGET: ${{ github.event.inputs.target }}
+          INPUT_PERIOD: ${{ github.event.inputs.period }}
+          INPUT_FOLDER_ID: ${{ github.event.inputs.folder_id }}
+          INPUT_AREA: ${{ github.event.inputs.area }}
+        run: |
+          set -euo pipefail
+
+          TASK=""
+          PERIOD=""
+          FOLDER_ID=""
+          AREA="all"
+          SHOULD_RUN="true"
+          TW_DATE=$(TZ=Asia/Taipei date +"%Y-%m-%d")
+          TW_DAY=$(TZ=Asia/Taipei date +"%d")
+          CURRENT_MONTH=$(TZ=Asia/Taipei date +"%Y%m")
+          TOMORROW_DAY=$(TZ=Asia/Taipei date -d "tomorrow" +"%d")
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TASK="$INPUT_TARGET"
+            PERIOD="$INPUT_PERIOD"
+            FOLDER_ID="$INPUT_FOLDER_ID"
+            AREA="${INPUT_AREA:-all}"
+          else
+            case "$SCHEDULE" in
+              "0 9 15 * *")
+                TASK="half_month_orders_1"
+                PERIOD="${CURRENT_MONTH}-1"
+                ;;
+              "0 9 28-31 * *")
+                if [ "$TOMORROW_DAY" != "01" ]; then
+                  SHOULD_RUN="false"
+                else
+                  TASK="half_month_orders_2"
+                  PERIOD="${CURRENT_MONTH}-2"
+                fi
+                ;;
+              "0 10 28-31 * *")
+                if [ "$TOMORROW_DAY" != "01" ]; then
+                  SHOULD_RUN="false"
+                else
+                  TASK="refund_report"
+                  PERIOD="${CURRENT_MONTH}-2"
+                fi
+                ;;
+              "0 16 28-31 * *"|"30 16 28-31 * *"|"40 16 28-31 * *")
+                if [ "$TW_DAY" != "01" ]; then
+                  SHOULD_RUN="false"
+                else
+                  PREVIOUS_MONTH=$(TZ=Asia/Taipei date -d "$TW_DATE -1 month" +"%Y%m")
+                  PERIOD="${PREVIOUS_MONTH}-2"
+                  case "$SCHEDULE" in
+                    "0 16 28-31 * *") TASK="prepaid_report" ;;
+                    "30 16 28-31 * *") TASK="stored_value_settlement" ;;
+                    "40 16 28-31 * *") TASK="stored_value_prepaid" ;;
+                  esac
+                fi
+                ;;
+              *)
+                echo "未知排程來源：$SCHEDULE" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          if [ "$SHOULD_RUN" = "true" ]; then
+            [ -n "$TASK" ] || { echo "缺少 target" >&2; exit 1; }
+            [ -n "$FOLDER_ID" ] || FOLDER_ID="$MONTHLY_ROOT_FOLDER_ID"
+            echo "本次月排程：target=$TASK period=$PERIOD area=$AREA"
+          else
+            echo "今天不是月底／月初目標日，略過候選 cron。"
+          fi
+
+          {
+            echo "should_run=$SHOULD_RUN"
+            echo "task=$TASK"
+            echo "period=$PERIOD"
+            echo "folder_id=$FOLDER_ID"
+            echo "area=$AREA"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run monthly task
+        if: steps.resolve.outputs.should_run == 'true'
+        shell: bash
+        env:
+          TASK: ${{ steps.resolve.outputs.task }}
+          PERIOD: ${{ steps.resolve.outputs.period }}
+          FOLDER_ID: ${{ steps.resolve.outputs.folder_id }}
+          AREA: ${{ steps.resolve.outputs.area }}
         run: |
           set +e
-          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d"); LOG_DIR="logs/$TODAY"; mkdir -p "$LOG_DIR"
-          TASK="${{ github.event.inputs.target }}"; PERIOD="${{ github.event.inputs.period }}"; FOLDER_ID="${{ github.event.inputs.folder_id }}"; AREA="${{ github.event.inputs.area }}"
-          [ -z "$FOLDER_ID" ] && FOLDER_ID="$MONTHLY_ROOT_FOLDER_ID"
-          START_TS=$(date +%s); START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
-          CMD="python -u -m tools.scheduled_monthly.scheduler --target '$TASK' --folder-id '$FOLDER_ID' --area '$AREA'"
-          [ -n "$PERIOD" ] && CMD="$CMD --period '$PERIOD'"
-          bash -lc "$CMD" > "$LOG_DIR/monthly_${TASK}.log" 2>&1; EXIT_CODE=$?
-          END_TS=$(date +%s); END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S"); DURATION=$((END_TS-START_TS))
+          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+          LOG_DIR="logs/$TODAY"
+          mkdir -p "$LOG_DIR"
+
+          START_TS=$(date +%s)
+          START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+
+          CMD=(python -u -m tools.scheduled_monthly.scheduler
+            --target "$TASK"
+            --folder-id "$FOLDER_ID"
+            --area "$AREA"
+          )
+          [ -n "$PERIOD" ] && CMD+=(--period "$PERIOD")
+
+          "${CMD[@]}" > "$LOG_DIR/monthly_${TASK}.log" 2>&1
+          EXIT_CODE=$?
+
+          END_TS=$(date +%s)
+          END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          DURATION=$((END_TS-START_TS))
           echo "$EXIT_CODE" > "$LOG_DIR/monthly_${TASK}.exit"
           [ "$EXIT_CODE" -eq 0 ] && STATUS="success" || STATUS="failed"
           printf '{"job_name":"monthly_%s","status":"%s","exit_code":%s,"started_at":"%s","finished_at":"%s","duration_seconds":%s}\n' "$TASK" "$STATUS" "$EXIT_CODE" "$START_TEXT" "$END_TEXT" "$DURATION" > "$LOG_DIR/monthly_${TASK}.json"
           cat "$LOG_DIR/monthly_${TASK}.log"
           exit "$EXIT_CODE"
+
       - name: Commit logs
-        if: always()
+        if: always() && steps.resolve.outputs.should_run == 'true'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
