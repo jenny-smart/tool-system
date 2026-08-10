@@ -10,7 +10,7 @@
     <string>-m</string>
     <string>tools.local_agent</string>
     <string>--poll-seconds</string>
-    <string>5</string>
+    <string>2</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/jenny/Library/Application Support/LemonToolsAgent/tool-system</string>
