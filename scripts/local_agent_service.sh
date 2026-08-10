@@ -2,55 +2,53 @@
 set -euo pipefail
 
 LABEL="com.lemonclean.tools.local-agent"
-SCRIPT_DIR="${0:A:h}"
-PROJECT_DIR="${SCRIPT_DIR:h}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_PLIST="$PROJECT_DIR/services/$LABEL.plist"
 TARGET_PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$UID"
 RUNTIME_ROOT="$HOME/Library/Application Support/LemonToolsAgent"
 RUNTIME_DIR="$RUNTIME_ROOT/tool-system"
 LOG_DIR="$HOME/Library/Logs/LemonToolsAgent"
-PYTHON_BIN="${TOOL_LOCAL_AGENT_PYTHON:-$(command -v python3)}"
-
-prepare_runtime() {
-  mkdir -p "$HOME/Library/LaunchAgents" "$RUNTIME_DIR" "$LOG_DIR"
-  rsync -a --delete "$PROJECT_DIR/tools/" "$RUNTIME_DIR/tools/"
-  cp "$SOURCE_PLIST" "$TARGET_PLIST"
-  /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 $PYTHON_BIN" "$TARGET_PLIST"
-  plutil -lint "$TARGET_PLIST" >/dev/null
-}
-
-bootstrap_service() {
-  launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
-  sleep 1
-  bootstrap_ok=0
-  for _attempt in 1 2 3; do
-    if launchctl bootstrap "$DOMAIN" "$TARGET_PLIST"; then
-      bootstrap_ok=1
-      break
-    fi
-    sleep 2
-  done
-  if (( bootstrap_ok == 0 )); then
-    echo "failed to bootstrap: $LABEL" >&2
-    exit 1
-  fi
-  launchctl enable "$DOMAIN/$LABEL"
-  launchctl kickstart -k "$DOMAIN/$LABEL"
-}
 
 case "${1:-status}" in
   install)
-    prepare_runtime
-    bootstrap_service
+    mkdir -p "$HOME/Library/LaunchAgents" "$RUNTIME_DIR" "$LOG_DIR"
+    rm -rf "$RUNTIME_DIR/tools"
+    mkdir -p "$RUNTIME_DIR/tools"
+    cp -R "$PROJECT_DIR/tools/." "$RUNTIME_DIR/tools/"
+    launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+    sleep 1
+    cp "$SOURCE_PLIST" "$TARGET_PLIST"
+    plutil -lint "$TARGET_PLIST" >/dev/null
+    bootstrap_ok=0
+    for _attempt in 1 2 3; do
+      if launchctl bootstrap "$DOMAIN" "$TARGET_PLIST"; then
+        bootstrap_ok=1
+        break
+      fi
+      sleep 2
+    done
+    if (( bootstrap_ok == 0 )); then
+      echo "failed to bootstrap: $LABEL" >&2
+      exit 1
+    fi
+    launchctl enable "$DOMAIN/$LABEL"
+    launchctl kickstart -k "$DOMAIN/$LABEL"
     echo "installed: $LABEL"
-    echo "python: $PYTHON_BIN"
     ;;
   restart)
-    prepare_runtime
-    bootstrap_service
-    echo "restarted: $LABEL"
-    echo "python: $PYTHON_BIN"
+    if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+      launchctl kickstart -k "$DOMAIN/$LABEL"
+      echo "restarted: $LABEL"
+    elif [[ -f "$TARGET_PLIST" ]]; then
+      launchctl bootstrap "$DOMAIN" "$TARGET_PLIST"
+      launchctl enable "$DOMAIN/$LABEL"
+      launchctl kickstart -k "$DOMAIN/$LABEL"
+      echo "restarted: $LABEL"
+    else
+      "$0" install
+    fi
     ;;
   uninstall)
     launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
@@ -61,21 +59,27 @@ case "${1:-status}" in
     echo "uninstalled: $LABEL"
     ;;
   status)
-    if launchctl print "$DOMAIN/$LABEL" >/tmp/local_agent_launchd_status.txt 2>/dev/null; then
-      grep -En "state =|pid =|last exit code =|program =|path =" /tmp/local_agent_launchd_status.txt || true
+    if status_output="$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null)"; then
+      state_line="$(printf '%s\n' "$status_output" | grep -m 1 'state = ' || true)"
+      pid_line="$(printf '%s\n' "$status_output" | grep -m 1 'pid = ' || true)"
+      exit_line="$(printf '%s\n' "$status_output" | grep -m 1 'last exit code = ' || true)"
+      [[ -n "$state_line" ]] || state_line="state = unknown"
+      [[ -n "$pid_line" ]] || pid_line="pid = unavailable"
+      [[ -n "$exit_line" ]] || exit_line="last exit code = 0 (running)"
+      printf '%s\n%s\n%s\n' "$state_line" "$pid_line" "$exit_line"
     else
       echo "offline: $LABEL"
       exit 1
     fi
     ;;
   logs)
-    echo "stdout: $LOG_DIR/local_agent.launchd.out.log"
-    echo "stderr: $LOG_DIR/local_agent.launchd.err.log"
-    tail -n 80 "$LOG_DIR/local_agent.launchd.out.log" 2>/dev/null || true
-    tail -n 80 "$LOG_DIR/local_agent.launchd.err.log" 2>/dev/null || true
+    echo "stdout: $LOG_DIR/local-agent.out.log"
+    [[ ! -f "$LOG_DIR/local-agent.out.log" ]] || tail -n 100 "$LOG_DIR/local-agent.out.log"
+    echo "stderr: $LOG_DIR/local-agent.err.log"
+    [[ ! -f "$LOG_DIR/local-agent.err.log" ]] || tail -n 100 "$LOG_DIR/local-agent.err.log"
     ;;
   *)
-    echo "usage: $0 {install|restart|uninstall|status|logs}" >&2
+    echo "usage: $0 {install|restart|status|logs|uninstall}" >&2
     exit 2
     ;;
 esac
