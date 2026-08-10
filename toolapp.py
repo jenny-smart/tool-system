@@ -145,12 +145,6 @@ DEFAULT_CONFIG = {
         },
         # ─────────────────────────────────────────────────────
         {
-            "name": "發票中心",
-            "type": "invoice_center",
-            "enabled": True,
-            "regions": ["台北", "台中", "桃園", "新竹", "高雄"],
-        },
-        {
             "name": "財務管理",
             "type": "finance_management",
             "enabled": True,
@@ -1014,9 +1008,6 @@ def available_areas_for_system(system: dict) -> list[str]:
         return ["全區"]
     # ────────────────────────────────────────────────────────
 
-    if system_type == "invoice_center":
-        return ["台北", "台中", "桃園", "新竹", "高雄"]
-
     if system_type == "finance_management":
         return ["全區", "台北", "台中", "桃園", "新竹", "高雄"]
 
@@ -1812,6 +1803,7 @@ FINANCE_TASKS = [
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
+    {"name": "【鯨躍發票】開立發票", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
@@ -1874,12 +1866,6 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
     "掃描並歸檔401附件",
     ],
     # ────────────────────────────────────────────────────────
-    "invoice_center": [
-        "發票開立",
-        "折讓單",
-        "發票下載",
-        "設定",
-    ],
     "finance_management": [task["name"] for task in FINANCE_TASKS],
 }
 
@@ -2011,13 +1997,6 @@ if selected_system_cfg.get("type") == "gmail_401":
     st.stop()
 # ────────────────────────────────────────────────────────
 
-if selected_system_cfg.get("type") == "invoice_center":
-    from tools.invoice_center.ui import render_invoice_center
-
-    render_invoice_center()
-    st.stop()
-
-
 # ═══════════════════════════════════════════════════════════
 # UI — 主標題
 # ═══════════════════════════════════════════════════════════
@@ -2091,13 +2070,6 @@ with sys_col:
 selected_system = get_system_by_name(config, system_name)
 system_type = selected_system.get("type", "vip")
 
-if system_type == "invoice_center":
-    st.markdown("</div>", unsafe_allow_html=True)
-    from tools.invoice_center.ui import render_invoice_center
-
-    render_invoice_center()
-    st.stop()
-
 with func_col:
     st.markdown('<div class="field-label">🎯 執行功能</div>', unsafe_allow_html=True)
 
@@ -2107,6 +2079,13 @@ with func_col:
         label_visibility="collapsed",
         key="selected_function",
     )
+
+if system_type == "finance_management" and selected_function == "【鯨躍發票】開立發票":
+    st.markdown("</div>", unsafe_allow_html=True)
+    from tools.invoice_center.ui import render_invoice_create
+
+    render_invoice_create()
+    st.stop()
 
 monthly_order_functions = ["上半月訂單", "下半月訂單"]
 
@@ -2508,7 +2487,7 @@ if can_access_page("settings"):
 
         system_type_options = [
             "vip", "daily_scheduler", "monthly_scheduler",
-            "field_daily_schedule", "service_schedule", "gmail_401", "invoice_center",
+            "field_daily_schedule", "service_schedule", "gmail_401",
             "finance_management",
         ]
 
