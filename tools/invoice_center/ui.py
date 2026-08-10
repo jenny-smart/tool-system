@@ -786,3 +786,8 @@ def render_invoice_center() -> None:
         _render_download_tab()
     with tabs[3]:
         _render_settings_tab()
+
+
+def render_invoice_create() -> None:
+    """Render the existing invoice creation page inside Tool System."""
+    _render_invoice_create_tab()
