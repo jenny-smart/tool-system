@@ -6,6 +6,7 @@ from __future__ import annotations
 更新日期：2026-07-04
 """
 import html
+import base64
 import json
 import os
 import subprocess
@@ -1747,21 +1748,24 @@ def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, 
 
 
 def queue_fubon_login(*, month="", start_date=None, end_date=None, area="全區"):
+    mobile = st.session_state.get("fubon_verification_mode") == "手機輸入驗證碼"
     task = create_local_agent_task(
-        "fubon.login",
-        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        "fubon.captcha" if mobile else "fubon.login",
+        {"area": area, "resume": "login", "cdp_url": "http://127.0.0.1:9222"},
         created_by=st.session_state.get("username", "Tool System"),
     )
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
 def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全區"):
+    mobile = st.session_state.get("fubon_verification_mode") == "手機輸入驗證碼"
     task = create_local_agent_task(
-        "fubon.download",
+        "fubon.captcha" if mobile else "fubon.download",
         {
             "start_date": start_date.isoformat() if start_date else "",
             "end_date": end_date.isoformat() if end_date else "",
             "area": area,
+            "resume": "download",
             "cdp_url": "http://127.0.0.1:9222",
         },
         created_by=st.session_state.get("username", "Tool System"),
@@ -2156,6 +2160,13 @@ with date_col:
         ):
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("登入不需選擇月份或日期", icon="🔐")
+            if selected_function == "【富邦銀行】富邦登入":
+                st.radio(
+                    "驗證碼輸入方式",
+                    ["Mac 人工輸入驗證碼", "手機輸入驗證碼"],
+                    horizontal=True,
+                    key="fubon_verification_mode",
+                )
         elif selected_function == "【元大銀行】檢查薪資付款狀態":
             st.markdown('<div class="field-label">📆 付款日期</div>', unsafe_allow_html=True)
             st.info("固定查詢最近一週", icon="📅")
@@ -2174,6 +2185,12 @@ with date_col:
                     value=today_date,
                     key="finance_fubon_end_date",
                 )
+            st.radio(
+                "驗證碼輸入方式",
+                ["Mac 人工輸入驗證碼", "手機輸入驗證碼"],
+                horizontal=True,
+                key="fubon_verification_mode",
+            )
         elif selected_function == "【鯨躍發票】鯨躍發票下載":
             st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
             finance_invoice_date_mode = st.radio(
@@ -2410,6 +2427,53 @@ if system_type == "finance_management" and selected_function.startswith(("【鯨
                 st.code(full_log or agent_tasks[0].get("log") or "等待本機 Agent", language="text")
     except Exception as exc:
         st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
+
+    if selected_function in ("【富邦銀行】富邦登入", "【富邦銀行】富邦明細下載"):
+        try:
+            captcha_tasks = list_local_agent_tasks(limit=40)
+            verified_tokens = set()
+            for item in captcha_tasks:
+                if item.get("action") == "fubon.verify":
+                    try:
+                        verified_tokens.add(json.loads(item.get("params_json") or "{}").get("session_token", ""))
+                    except json.JSONDecodeError:
+                        pass
+            captcha_payload = None
+            for item in captcha_tasks:
+                if item.get("action") != "fubon.captcha" or item.get("status") != "completed":
+                    continue
+                try:
+                    payload = json.loads(item.get("result_json") or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if payload.get("image_base64") and payload.get("session_token") not in verified_tokens:
+                    captcha_payload = payload
+                    break
+            if captcha_payload:
+                st.markdown("#### 富邦手機驗證")
+                st.image(base64.b64decode(captcha_payload["image_base64"]))
+                captcha_code = st.text_input("輸入圖片驗證碼", max_chars=12, key="fubon_mobile_captcha")
+                if st.button("送出驗證碼並繼續", type="primary", use_container_width=True):
+                    if not captcha_code.strip():
+                        st.error("請輸入驗證碼")
+                    else:
+                        task = create_local_agent_task(
+                            "fubon.verify",
+                            {
+                                "area": captcha_payload.get("area", ""),
+                                "resume": captcha_payload.get("resume", "login"),
+                                "start_date": captcha_payload.get("start_date", ""),
+                                "end_date": captcha_payload.get("end_date", ""),
+                                "session_token": captcha_payload.get("session_token", ""),
+                                "captcha": captcha_code.strip(),
+                                "cdp_url": "http://127.0.0.1:9222",
+                            },
+                            created_by=st.session_state.get("username", "Tool System"),
+                        )
+                        st.success(f"驗證任務已建立：{task['task_id']}")
+                        st.rerun()
+        except Exception as exc:
+            st.warning(f"富邦手機驗證資料讀取失敗：{exc}")
 
 clear_col, _ = st.columns([1, 3])
 
