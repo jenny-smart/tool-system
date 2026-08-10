@@ -413,7 +413,7 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Tool System 共用本機 Agent")
     parser.add_argument("--once", action="store_true", help="只處理一筆任務後結束")
-    parser.add_argument("--poll-seconds", type=float, default=5.0)
+    parser.add_argument("--poll-seconds", type=float, default=2.0)
     parser.add_argument("--agent-id", default=default_agent_id())
     return parser.parse_args()
 
