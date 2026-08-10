@@ -110,6 +110,36 @@ def logout_and_close(context: BrowserContext, page: Page) -> None:
             print("富邦視窗已關閉。")
 
 
+def run_download(
+    context: BrowserContext,
+    page: Page,
+    account: BankAccount,
+    start,
+    end,
+    output: Path | None = None,
+) -> Page:
+    previous_table = find_fubon_statement(page)
+    page = open_fubon_statement(context, page, account, start, end)
+    page = current_fubon_page(context, page) or page
+    table = wait_statement(
+        page,
+        previous_fingerprint=(previous_table.fingerprint if previous_table else None),
+    )
+    if output:
+        target = output.expanduser()
+        save_csv(table, target)
+        print(f"RESULT_FILE:{target.resolve()}")
+    new_table = read_and_filter(table, account.area, "fubon")
+    sheet_rows = sync_fubon_master_sheet(new_table, account.area)
+    if new_table.rows:
+        copy_to_clipboard(new_table)
+    print(
+        f"富邦明細完成：共 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；"
+        f"工作表新增 {sheet_rows} 筆。"
+    )
+    return page
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="共用 Agent Chrome 執行富邦登入與明細下載")
     parser.add_argument("mode", choices=("login", "download"))
@@ -135,25 +165,7 @@ def main() -> int:
             print(f"富邦／{args.area} 登入完成；Agent Chrome 將保持開啟。")
             return 0
         try:
-            previous_table = find_fubon_statement(page)
-            page = open_fubon_statement(context, page, account, args.start, args.end)
-            page = current_fubon_page(context, page) or page
-            table = wait_statement(
-                page,
-                previous_fingerprint=(previous_table.fingerprint if previous_table else None),
-            )
-            if args.output:
-                target = args.output.expanduser()
-                save_csv(table, target)
-                print(f"RESULT_FILE:{target.resolve()}")
-            new_table = read_and_filter(table, args.area, "fubon")
-            sheet_rows = sync_fubon_master_sheet(new_table, args.area)
-            if new_table.rows:
-                copy_to_clipboard(new_table)
-            print(
-                f"富邦明細完成：共 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；"
-                f"工作表新增 {sheet_rows} 筆。"
-            )
+            page = run_download(context, page, account, args.start, args.end, args.output)
         finally:
             logout_and_close(context, page)
     return 0
