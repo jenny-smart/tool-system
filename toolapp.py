@@ -1764,6 +1764,57 @@ def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+@st.fragment(run_every="2s")
+def render_fubon_mobile_verification():
+    try:
+        captcha_tasks = list_local_agent_tasks(limit=40)
+        verified_tokens = set()
+        for item in captcha_tasks:
+            if item.get("action") == "fubon.verify":
+                try:
+                    verified_tokens.add(json.loads(item.get("params_json") or "{}").get("session_token", ""))
+                except json.JSONDecodeError:
+                    pass
+        captcha_payload = None
+        for item in captcha_tasks:
+            if item.get("action") != "fubon.captcha" or item.get("status") != "completed":
+                continue
+            try:
+                payload = json.loads(item.get("result_json") or "{}")
+            except json.JSONDecodeError:
+                continue
+            if payload.get("image_base64") and payload.get("session_token") not in verified_tokens:
+                captcha_payload = payload
+                break
+        if not captcha_payload:
+            st.caption("驗證碼擷取中…")
+            return
+        st.markdown("#### 富邦手機驗證")
+        st.image(base64.b64decode(captcha_payload["image_base64"]))
+        captcha_code = st.text_input("輸入圖片驗證碼", max_chars=12, key="fubon_mobile_captcha")
+        if st.button("送出驗證碼並繼續", type="primary", use_container_width=True):
+            if not captcha_code.strip():
+                st.error("請輸入驗證碼")
+                return
+            task = create_local_agent_task(
+                "fubon.verify",
+                {
+                    "area": captcha_payload.get("area", ""),
+                    "resume": captcha_payload.get("resume", "login"),
+                    "start_date": captcha_payload.get("start_date", ""),
+                    "end_date": captcha_payload.get("end_date", ""),
+                    "session_token": captcha_payload.get("session_token", ""),
+                    "captcha": captcha_code.strip(),
+                    "cdp_url": "http://127.0.0.1:9222",
+                },
+                created_by=st.session_state.get("username", "Tool System"),
+            )
+            st.success(f"驗證任務已建立：{task['task_id']}")
+            st.rerun()
+    except Exception as exc:
+        st.warning(f"富邦手機驗證資料讀取失敗：{exc}")
+
+
 def queue_yuanta_login(*, month="", start_date=None, end_date=None, area="全區"):
     task = create_local_agent_task(
         "yuanta.login",
@@ -2408,51 +2459,7 @@ if system_type == "finance_management" and selected_function.startswith(("【鯨
         st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
 
     if selected_function in ("【富邦銀行】富邦登入", "【富邦銀行】富邦明細下載"):
-        try:
-            captcha_tasks = list_local_agent_tasks(limit=40)
-            verified_tokens = set()
-            for item in captcha_tasks:
-                if item.get("action") == "fubon.verify":
-                    try:
-                        verified_tokens.add(json.loads(item.get("params_json") or "{}").get("session_token", ""))
-                    except json.JSONDecodeError:
-                        pass
-            captcha_payload = None
-            for item in captcha_tasks:
-                if item.get("action") != "fubon.captcha" or item.get("status") != "completed":
-                    continue
-                try:
-                    payload = json.loads(item.get("result_json") or "{}")
-                except json.JSONDecodeError:
-                    continue
-                if payload.get("image_base64") and payload.get("session_token") not in verified_tokens:
-                    captcha_payload = payload
-                    break
-            if captcha_payload:
-                st.markdown("#### 富邦手機驗證")
-                st.image(base64.b64decode(captcha_payload["image_base64"]))
-                captcha_code = st.text_input("輸入圖片驗證碼", max_chars=12, key="fubon_mobile_captcha")
-                if st.button("送出驗證碼並繼續", type="primary", use_container_width=True):
-                    if not captcha_code.strip():
-                        st.error("請輸入驗證碼")
-                    else:
-                        task = create_local_agent_task(
-                            "fubon.verify",
-                            {
-                                "area": captcha_payload.get("area", ""),
-                                "resume": captcha_payload.get("resume", "login"),
-                                "start_date": captcha_payload.get("start_date", ""),
-                                "end_date": captcha_payload.get("end_date", ""),
-                                "session_token": captcha_payload.get("session_token", ""),
-                                "captcha": captcha_code.strip(),
-                                "cdp_url": "http://127.0.0.1:9222",
-                            },
-                            created_by=st.session_state.get("username", "Tool System"),
-                        )
-                        st.success(f"驗證任務已建立：{task['task_id']}")
-                        st.rerun()
-        except Exception as exc:
-            st.warning(f"富邦手機驗證資料讀取失敗：{exc}")
+        render_fubon_mobile_verification()
 
 clear_col, _ = st.columns([1, 3])
 
