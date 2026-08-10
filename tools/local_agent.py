@@ -186,6 +186,47 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    resume = str(params.get("resume") or "login").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    if not area or area == "全區":
+        raise ValueError("富邦手機驗證請選擇單一區域")
+    command = [
+        sys.executable, "-m", "tools.bank_statement.fubon_mobile", "capture",
+        "--area", area, "--resume", resume, "--cdp-url", cdp_url,
+    ]
+    if resume == "download":
+        start_date = str(params.get("start_date") or "").strip()
+        end_date = str(params.get("end_date") or "").strip()
+        if not start_date or not end_date:
+            raise ValueError("富邦明細下載缺少日期")
+        output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
+        command.extend(["--start", start_date, "--end", end_date, "--output", str(output)])
+    return command
+
+
+def build_fubon_verify(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    resume = str(params.get("resume") or "login").strip()
+    token = str(params.get("session_token") or "").strip()
+    captcha = str(params.get("captcha") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    if not area or not token or not captcha:
+        raise ValueError("富邦驗證任務缺少區域、Session 或驗證碼")
+    command = [
+        sys.executable, "-m", "tools.bank_statement.fubon_mobile", "verify",
+        "--area", area, "--resume", resume, "--session-token", token,
+        "--captcha", captcha, "--cdp-url", cdp_url,
+    ]
+    if resume == "download":
+        start_date = str(params.get("start_date") or "").strip()
+        end_date = str(params.get("end_date") or "").strip()
+        output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
+        command.extend(["--start", start_date, "--end", end_date, "--output", str(output)])
+    return command
+
+
 def build_yuanta_login(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     if not area or area == "全區":
@@ -209,6 +250,17 @@ def build_yuanta_download(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    if not area or area == "全區":
+        raise ValueError("元大薪資付款狀態請選擇單一區域")
+    return [
+        sys.executable, "-m", "tools.bank_statement.yuanta_salary_status",
+        "--area", area, "--cdp-url", cdp_url,
+    ]
+
+
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
 register_action("newebpay.login", build_newebpay_login)
@@ -216,8 +268,11 @@ register_action("newebpay.download", build_newebpay_download)
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
+register_action("fubon.captcha", build_fubon_captcha)
+register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
 register_action("yuanta.download", build_yuanta_download)
+register_action("yuanta.salary_status", build_yuanta_salary_status)
 
 
 def parse_params(task: dict[str, str]) -> dict[str, Any]:
@@ -245,6 +300,7 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
     pending_log = ""
     next_seq = 1
     result_files: list[str] = []
+    special_result: dict[str, Any] = {}
 
     def record(text: str) -> None:
         nonlocal preview, pending_log
@@ -281,6 +337,9 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
         assert process.stdout is not None
         for raw_line in process.stdout:
             line = raw_line.rstrip("\r\n")
+            if line.startswith("CAPTCHA_RESULT:"):
+                special_result.update(json.loads(line.split(":", 1)[1]))
+                continue
             print(line, flush=True)
             record(line)
             if line.startswith("RESULT_FILE:"):
@@ -299,6 +358,10 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
         return_code = process.wait()
         status = "completed" if return_code == 0 else "failed"
         message = "執行完成" if return_code == 0 else f"執行失敗（exit {return_code}）"
+        if return_code == 0 and special_result.get("image_base64"):
+            message = "驗證碼圖片已擷取，請在手機輸入驗證碼"
+        elif return_code == 0 and special_result.get("already_logged_in"):
+            message = "富邦已登入；任務已接續執行"
         if return_code == 0 and result_files:
             message += "；檔案：" + "、".join(result_files)
         record(f"[{now_text()}] {status.upper()} {message}")
@@ -315,6 +378,7 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
                         "exit_code": return_code,
                         "files": result_files,
                         "log_sheet": LOG_SHEET_NAME,
+                        **special_result,
                     },
                     ensure_ascii=False,
                 ),
