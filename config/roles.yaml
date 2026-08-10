@@ -6,7 +6,6 @@ roles:
       - monthly_scheduler
       - field_daily_schedule
       - service_schedule
-      - invoice_center
       - finance_management
     pages:
       - report
@@ -26,11 +25,3 @@ roles:
       - log
     logs:
       - field_daily_schedule
-
-  # 如果有其他角色（manager、staff 等），在下方依需求加入 invoice_center
-  # manager:
-  #   systems:
-  #     - invoice_center
-  #   pages:
-  #     - log
-  #   logs: []
