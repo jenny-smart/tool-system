@@ -184,8 +184,85 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     if bank == "yuanta":
         # 財報 B 欄（交易日期時間）的日期對應「元大銀行-區域」A 欄。
         return filter_yuanta_report_rows(table, worksheet.get("B2:B"))
-    existing_rows = worksheet.get("B:H")
+    # 財報 B 欄是交易時間；轉成銀行清單的 A/B 結構後比對。
+    existing_rows = [["", row[0]] for row in worksheet.get("B2:B") if row]
     return filter_existing_rows(table, existing_rows)
+
+
+def _report_amount(value: str) -> int | float | str:
+    normalized = _normalize_amount(value)
+    if not normalized:
+        return ""
+    try:
+        number = Decimal(normalized)
+    except InvalidOperation:
+        return value
+    return int(number) if number == number.to_integral_value() else float(number)
+
+
+def build_financial_report_rows(
+    table: CapturedTable,
+    *,
+    first_sequence: int,
+    include_bank_column: bool = True,
+) -> list[list[Any]]:
+    """銀行 A:G 轉為財報：序號、交易日、帳務日、說明、行庫、支出、存入、餘額、備註。"""
+    output: list[list[Any]] = []
+    for offset, row in enumerate(table_target_rows(table)):
+        values: list[Any] = [
+            first_sequence + offset,
+            row[1],
+            row[0],
+            row[2],
+        ]
+        if include_bank_column:
+            values.append("")
+        values.extend([
+            _report_amount(row[3]),
+            _report_amount(row[4]),
+            _report_amount(row[5]),
+            row[6],
+        ])
+        output.append(values)
+    return output
+
+
+def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
+    """將已確認未登記的明細同步追加至對應區域財報。"""
+    if not table.rows:
+        return 0
+    target = load_sheet_target(area, bank)
+    credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
+    worksheet = (
+        gspread.authorize(credentials)
+        .open_by_key(target.spreadsheet_id)
+        .get_worksheet_by_id(target.worksheet_gid)
+    )
+    existing = worksheet.get("A:I")
+    headers = existing[0] if existing else []
+    normalized_headers = [_normalize_text(value).replace("\n", "") for value in headers]
+    include_bank_column = any("交易行庫" in value for value in normalized_headers)
+    transaction_column = 1
+    last_row = 1
+    sequences: list[int] = []
+    for row_number, row in enumerate(existing[1:], start=2):
+        if len(row) > transaction_column and str(row[transaction_column]).strip():
+            last_row = row_number
+        if row and str(row[0]).strip().isdigit():
+            sequences.append(int(str(row[0]).strip()))
+    rows = build_financial_report_rows(
+        table,
+        first_sequence=(max(sequences, default=0) + 1),
+        include_bank_column=include_bank_column,
+    )
+    end_column = "I" if include_bank_column else "H"
+    start_row = last_row + 1
+    worksheet.update(
+        range_name=f"A{start_row}:{end_column}{start_row + len(rows) - 1}",
+        values=rows,
+        value_input_option="RAW",
+    )
+    return len(rows)
 
 
 def sync_bank_master_sheet(

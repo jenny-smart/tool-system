@@ -18,7 +18,11 @@ from tools.bank_statement.native_yuanta import (
     wait_for_yuanta_login,
     wait_for_yuanta_statement,
 )
-from tools.bank_statement.sheet_filter import read_and_filter, sync_yuanta_master_sheet
+from tools.bank_statement.sheet_filter import (
+    read_and_filter,
+    sync_financial_report,
+    sync_yuanta_master_sheet,
+)
 from tools.invoice_center.chrome_cdp import connect_existing_chrome
 
 
@@ -82,9 +86,11 @@ def main() -> int:
                 print(f"RESULT_FILE:{args.output.expanduser().resolve()}")
             new_table = read_and_filter(table, args.area, "yuanta")
             written = sync_yuanta_master_sheet(new_table, args.area)
+            report_written = sync_financial_report(new_table, args.area, "yuanta")
             print(
                 f"元大明細完成：區域 {args.area}；日期 {args.start:%Y/%m/%d}～{args.end:%Y/%m/%d}；"
-                f"查詢 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；寫入 {written} 筆。"
+                f"查詢 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；"
+                f"工作表寫入 {written} 筆；財報寫入 {report_written} 筆。"
             )
         finally:
             try:
