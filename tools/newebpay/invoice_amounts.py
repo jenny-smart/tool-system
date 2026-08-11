@@ -7,6 +7,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
@@ -373,11 +374,11 @@ def save_csv(rows: list[InvoiceAmount], target: Path) -> None:
             writer.writerow([row.area, row.source_month, row.invoice_date, row.amount if row.amount is not None else "", row.invoice_number, row.status])
 
 
-def sync_fee_sheet(rows: list[InvoiceAmount]) -> int:
+def sync_fee_sheets(rows: list[InvoiceAmount]) -> tuple[int, list[str]]:
+    """每個「區域＋月份」使用獨立工作表保存最新查詢結果。"""
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
-    title = "藍新手續費"
-    headers = ["區域", "月份", "發票日期", "金額"]
+    headers = ["區域", "月份", "發票日期", "發票金額", "發票號碼", "發票狀態", "更新時間"]
     meta = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
         fields="sheets(properties(sheetId,title))",
@@ -386,45 +387,47 @@ def sync_fee_sheet(rows: list[InvoiceAmount]) -> int:
         sheet["properties"]["title"]: sheet["properties"]["sheetId"]
         for sheet in meta.get("sheets", [])
     }
-    if title not in sheet_ids:
-        response = service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"frozenRowCount": 1}}}}]},
-        ).execute()
-        sheet_ids[title] = response["replies"][0]["addSheet"]["properties"]["sheetId"]
-    service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{title}'!A1:D1",
-        valueInputOption="RAW",
-        body={"values": [headers]},
-    ).execute()
-    service.spreadsheets().values().clear(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{title}'!A2:D",
-        body={},
-    ).execute()
-    values = [
-        [row.area, row.source_month, row.invoice_date, row.amount if row.amount is not None else ""]
-        for row in rows
-    ]
-    if values:
+    titles: list[str] = []
+    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for row in rows:
+        title = f"藍新發票-{row.area}-{row.source_month}"
+        titles.append(title)
+        if title not in sheet_ids:
+            response = service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{"addSheet": {"properties": {"title": title, "gridProperties": {"frozenRowCount": 1}}}}]},
+            ).execute()
+            sheet_ids[title] = response["replies"][0]["addSheet"]["properties"]["sheetId"]
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!A2:D{len(values) + 1}",
+            range=f"'{title}'!A1:G2",
             valueInputOption="RAW",
-            body={"values": values},
+            body={"values": [headers, [
+                row.area,
+                row.source_month,
+                row.invoice_date,
+                row.amount if row.amount is not None else "",
+                row.invoice_number,
+                row.status,
+                updated_at,
+            ]]},
         ).execute()
-    service.spreadsheets().batchUpdate(
-        spreadsheetId=spreadsheet_id,
-        body={"requests": [{
-            "repeatCell": {
-                "range": {"sheetId": sheet_ids[title], "startRowIndex": 1, "startColumnIndex": 3, "endColumnIndex": 4},
-                "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT", "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
-                "fields": "userEnteredFormat(horizontalAlignment,numberFormat)",
-            }
-        }]},
-    ).execute()
-    return len(values)
+        service.spreadsheets().values().clear(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{title}'!A3:G",
+            body={},
+        ).execute()
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{
+                "repeatCell": {
+                    "range": {"sheetId": sheet_ids[title], "startRowIndex": 1, "startColumnIndex": 3, "endColumnIndex": 4},
+                    "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT", "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+                    "fields": "userEnteredFormat(horizontalAlignment,numberFormat)",
+                }
+            }]},
+        ).execute()
+    return len(rows), titles
 
 
 def parse_args() -> argparse.Namespace:
@@ -478,8 +481,8 @@ def main() -> int:
                 amount = f"NT$ {row.amount:,}" if row.amount is not None else "查無發票"
                 print(f"{row.area}  {row.source_month}  {row.invoice_date}  {amount}")
 
-    written = sync_fee_sheet(results)
-    print(f"藍新手續費工作表寫入 {written} 筆。")
+    written, sheet_titles = sync_fee_sheets(results)
+    print(f"藍新發票獨立工作表寫入 {written} 筆：{', '.join(sheet_titles)}")
     if results:
         if args.output:
             save_csv(results, args.output)
