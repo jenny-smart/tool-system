@@ -98,20 +98,61 @@ def save_csv(table: CapturedTable, target: Path) -> None:
 
 def logout_and_close(context: BrowserContext, page: Page) -> None:
     page = current_fubon_page(context, page) or page
+    clicked = False
     try:
-        for frame in page.frames:
-            logout = frame.get_by_text("登出", exact=True)
-            if logout.count() and logout.first.is_visible():
-                logout.first.click(timeout=5_000)
-                page.wait_for_timeout(1_000)
-                print("富邦已登出。")
+        bank_pages = [
+            item for item in context.pages
+            if not item.is_closed() and "ebank.taipeifubon.com.tw" in item.url
+        ]
+        selectors = (
+            '[id="header_form:header_logout"]',
+            'a[onclick*="logout" i]',
+            'input[value="登出"]',
+            'button:has-text("登出")',
+            'a:has-text("登出")',
+        )
+        for bank_page in reversed(bank_pages):
+            for frame in [bank_page, *bank_page.frames]:
+                for selector in selectors:
+                    try:
+                        controls = frame.locator(selector)
+                        for index in range(controls.count()):
+                            control = controls.nth(index)
+                            if not control.is_visible():
+                                continue
+                            try:
+                                control.click(timeout=5_000)
+                            except Exception:
+                                control.evaluate("element => element.click()")
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+                    if clicked:
+                        break
+                if clicked:
+                    break
+            if clicked:
                 break
-        else:
-            print("富邦找不到登出按鈕。")
+        if not clicked:
+            raise RuntimeError("富邦找不到右上角登出按鈕")
+
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            active_pages = [
+                item for item in context.pages
+                if not item.is_closed() and "ebank.taipeifubon.com.tw" in item.url
+            ]
+            if not any(is_fubon_logged_in(item) for item in active_pages):
+                print("富邦已確認登出。")
+                return
+            page.wait_for_timeout(300)
+        raise RuntimeError("已點擊富邦登出，但未確認登出成功")
     finally:
-        if not page.is_closed():
-            page.close()
-            print("富邦視窗已關閉。")
+        for bank_page in list(context.pages):
+            if not bank_page.is_closed() and "ebank.taipeifubon.com.tw" in bank_page.url:
+                bank_page.close()
+        print("富邦視窗已關閉。")
 
 
 def run_download(
