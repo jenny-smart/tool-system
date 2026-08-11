@@ -1,11 +1,15 @@
 """
-檸檬家事 CRM 客服系統
-tools/service_management/crm_export.py
+檸檬家事客服排程－儲值功能
+tools/service_management/stored_value.py
 
 最後更新：2026-08-12
 
 Change Log：
-  - 2026-08-12：儲值金流程改為後台下載結算 Excel，覆寫各區固定試算表分頁並更新日期名稱；支援全區／台北／台中。
+- 2026-08-12：確認全跑參數允許 --step 0，並依序執行 Step 1 儲值結算與 Step 2 VIP 對帳。
+- 2026-08-12：修正部署版錯誤引用 crm_export；本檔維持完整獨立實作，不再依賴舊相容入口。
+- 2026-08-12：將完整儲值實作由 crm_export.py 正式移至 stored_value.py，名稱與功能一致。
+- 2026-08-12：修正明確傳入 --step 0 時被 argparse 拒絕，允許 0 執行儲值全跑。
+- 2026-08-12：儲值金流程改為後台下載結算 Excel，覆寫各區固定試算表分頁並更新日期名稱；支援全區／台北／台中。
 
 功能（依序執行）：
   Step 1. 各地區登入 backend.lemonclean.com.tw → 抓取儲值金會員資料
@@ -24,13 +28,13 @@ Change Log：
   其他地區可用地區名稱拼音大寫
 
 執行方式：
-  python -u -m tools.service_management.crm_export            # 全區（台北＋台中）全跑
-  python -u -m tools.service_management.crm_export --step 1   # 只抓儲值金
-  python -u -m tools.service_management.crm_export --step 2   # 只匯出VIP日曆
-  python -u -m tools.service_management.crm_export --area 全區 # 台北＋台中
-  python -u -m tools.service_management.crm_export --area 台北 # 只跑台北
-  python -u -m tools.service_management.crm_export --area 台中 # 只跑台中
-  python -u -m tools.service_management.crm_export --start 2026-06-01 --end 2026-06-30
+  python -u -m tools.service_management.stored_value            # 全區（台北＋台中）全跑
+  python -u -m tools.service_management.stored_value --step 1   # 只抓儲值金
+  python -u -m tools.service_management.stored_value --step 2   # 只匯出VIP日曆
+  python -u -m tools.service_management.stored_value --area 全區 # 台北＋台中
+  python -u -m tools.service_management.stored_value --area 台北 # 只跑台北
+  python -u -m tools.service_management.stored_value --area 台中 # 只跑台中
+  python -u -m tools.service_management.stored_value --start 2026-06-01 --end 2026-06-30
 
 必要 GitHub Secrets：
   GOOGLE_SERVICE_ACCOUNT        Service Account JSON
@@ -903,8 +907,8 @@ def _load_target_file_id() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
-    parser.add_argument("--step",  type=int, choices=[1, 2], default=0,
-                        help="1=只抓儲值金, 2=只匯出VIP日曆, 不指定=全跑")
+    parser.add_argument("--step",  type=int, choices=[0, 1, 2], default=0,
+                        help="0=全跑, 1=只抓儲值金, 2=只匯出VIP日曆（預設：0）")
     parser.add_argument(
         "--area",
         type=str,
