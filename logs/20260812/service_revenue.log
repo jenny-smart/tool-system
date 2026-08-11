@@ -1,0 +1,3 @@
+usage: service_schedule.py [-h] [--step {0,1,2}] [--area {全區,台北,台中}]
+                           [--start START] [--end END]
+service_schedule.py: error: argument --step: invalid choice: 3 (choose from 0, 1, 2)

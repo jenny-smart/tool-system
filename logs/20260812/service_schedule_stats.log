@@ -1,0 +1,25 @@
+2026-08-11 22:36:52 [INFO] === CRM 客服系統 run_id=799cb393 area=全區 step=1 2026-08-01 ~ 2026-08-31 ===
+Traceback (most recent call last):
+  File "/home/runner/work/tool-system/tool-system/tools/service_management/service_schedule.py", line 140, in _get_credentials
+    info = get_service_account_info()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/common/config_loader.py", line 64, in get_service_account_info
+    raise RuntimeError("找不到 GOOGLE_SERVICE_ACCOUNT 設定")
+RuntimeError: 找不到 GOOGLE_SERVICE_ACCOUNT 設定
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/service_management/service_schedule.py", line 1010, in <module>
+    main()
+  File "/home/runner/work/tool-system/tool-system/tools/service_management/service_schedule.py", line 951, in main
+    gc    = _gc()
+            ^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/service_management/service_schedule.py", line 146, in _gc
+    return gspread.authorize(_get_credentials())
+                             ^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/service_management/service_schedule.py", line 142, in _get_credentials
+    raise EnvironmentError(f"無法取得 GOOGLE_SERVICE_ACCOUNT：{e}")
+OSError: 無法取得 GOOGLE_SERVICE_ACCOUNT：找不到 GOOGLE_SERVICE_ACCOUNT 設定
