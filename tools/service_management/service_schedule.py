@@ -1,136 +1,70 @@
 """
-檸檬家事 客服排程系統
-tools/service_management/service_schedule.py
+檸檬家事 CRM 客服系統
+tools/service_management/crm_export.py
 
-三步驟：
-  Step 1. 更新排班統計表（Drive 來源資料夾 → 目標試算表）
-  Step 2. 更新每日回報（排班統計表 → 每日回報）
-  Step 3. 更新前一天營業分數及營業額（Gmail → 每日回報）
+最後更新：2026-08-12
 
-打卡：
-  - 主控表  (TOOLS_APP_LOG_SPREADSHEET_ID) → 工作表「執行記錄」
-  - 執行檔  (LEMON_TARGET_FILE_ID)         → 工作表「_py_execution_log」
+Change Log：
+- 2026-08-12：修正明確傳入 --step 0 時被 argparse 拒絕，允許 0 執行儲值全跑。
+- 2026-08-12：儲值金流程改為後台下載結算 Excel，覆寫各區固定試算表分頁並更新日期名稱；支援全區／台北／台中。
+
+功能（依序執行）：
+  Step 1. 各地區登入 backend.lemonclean.com.tw → 抓取儲值金會員資料
+          → 寫入目標試算表「儲值金表_{地區}」工作表
+  Step 2. 各地區讀取 Google Calendar → 整理定期VIP行事曆
+          → 寫入目標試算表「定期VIP_{地區}_{yyyyMMdd}」工作表
+
+地區設定來源（主控試算表「客服地區設定」工作表）：
+  欄位：地區名稱 | Calendar ID | 啟用
+  新增地區只需在試算表新增一列即可，無需改程式碼
+
+憑證來源（GitHub Secrets）：
+  {地區}_EMAIL    e.g. TAIPEI_EMAIL
+  {地區}_PASSWORD e.g. TAIPEI_PASSWORD
+  地區名稱轉 Secret key 規則：台北→TAIPEI, 台中→TAICHUNG, 新竹→HSINCHU, 高雄→KAOHSIUNG
+  其他地區可用地區名稱拼音大寫
 
 執行方式：
-  python -u -m tools.service_management.service_schedule --step 0   # 全部
-  python -u -m tools.service_management.service_schedule --step 1
-  python -u -m tools.service_management.service_schedule --step 2
-  python -u -m tools.service_management.service_schedule --step 3
+  python -u -m tools.service_management.crm_export            # 全區（台北＋台中）全跑
+  python -u -m tools.service_management.crm_export --step 1   # 只抓儲值金
+  python -u -m tools.service_management.crm_export --step 2   # 只匯出VIP日曆
+  python -u -m tools.service_management.crm_export --area 全區 # 台北＋台中
+  python -u -m tools.service_management.crm_export --area 台北 # 只跑台北
+  python -u -m tools.service_management.crm_export --area 台中 # 只跑台中
+  python -u -m tools.service_management.crm_export --start 2026-06-01 --end 2026-06-30
 
 必要 GitHub Secrets：
-  GOOGLE_OAUTH_CLIENT_ID        Jenny OAuth Client ID
-  GOOGLE_OAUTH_CLIENT_SECRET    Jenny OAuth Client Secret
-  GOOGLE_OAUTH_REFRESH_TOKEN    Jenny OAuth Refresh Token
-  LEMON_TARGET_FILE_ID          目標試算表 ID
-  TOOLS_APP_LOG_SPREADSHEET_ID  主控表 ID（打卡用）
-  GMAIL_USER                    Gmail 帳號（讀信）
-  GMAIL_APP_PASSWORD            Gmail App 密碼
-
-選填：
-  LOG_SPREADSHEET_ID            執行檔試算表（預設同 LEMON_TARGET_FILE_ID）
-  NOTIFY_EMAIL / NOTIFY_PASSWORD / NOTIFY_TO
+  GOOGLE_SERVICE_ACCOUNT        Service Account JSON
+  LEMON_TARGET_FILE_ID          目標試算表 ID（儲值金表、VIP 匯出寫在這裡）
+  TOOLS_APP_LOG_SPREADSHEET_ID  主控試算表 ID（地區設定讀這裡）
+  {地區}_EMAIL / {地區}_PASSWORD  各地區 backend 登入憑證
 """
 
 from __future__ import annotations
 
 import argparse
-import email
-import email.utils
-import imaplib
-import io
 import json
 import logging
 import os
 import re
 import sys
-import time
 import uuid
-from datetime import datetime, timedelta, timezone
-from email.header import decode_header
+from datetime import datetime, timedelta, timezone, date
+from html.parser import HTMLParser
+from io import BytesIO
 from typing import Any
 
+import pandas as pd
+import requests
 import gspread
-from tools.common.google_auth import get_google_credentials
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 
 # ──────────────────────────────────────────────────────────
-# 時區 & 基本設定
+# 基本設定
 # ──────────────────────────────────────────────────────────
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
-
-CONFIG: dict[str, Any] = {
-    # Drive 來源資料夾（放排班統計表 xlsx / Google Sheets）
-    "source_folder_id": "18XDXdrCSsLYwSzz1Da9pQh-jGm2h2Ed8",
-
-    # 目標試算表（台北台中排班統計表、每日回報所在）
-    # 由 main() 動態載入（env SERVICE_TARGET_SPREADSHEET_ID 或主控試算表）
-    "target_file_id": "",
-
-    # 工作表名稱
-    "target_sheet_name": "台北台中排班統計表",
-    "report_sheet_name": "【空班】居家清潔(每日回報)",
-
-    # 打卡 - 主控表（由 main() 動態載入）
-    "master_log_spreadsheet_id": "",
-    "master_log_sheet_name": "執行記錄",
-
-    # 打卡 - 執行檔（同目標試算表）
-    "job_log_sheet_name": "客服排程執行Log",
-
-    # 系統名稱（打卡用）
-    "system_name": "客服排程系統",
-
-    # 排班匯入區塊設定
-    "import_config": {
-        "taipei_current":   {"source_skip_rows": 1, "target_range": "G3"},
-        "taipei_next":      {"source_skip_rows": 1, "target_range": "V3"},
-        "taichung_current": {"source_skip_rows": 1, "target_range": "CD3"},
-        "taichung_next":    {"source_skip_rows": 1, "target_range": "CS3"},
-    },
-
-    # 依資料月份由近到遠寫入，清除時保留格式。
-    "schedule_import_slots": [
-        {"taipei": "G3:O",   "taichung": "CD3:CK"},
-        {"taipei": "V3:AD",  "taichung": "CS3:CZ"},
-        {"taipei": "AK3:AS", "taichung": "DH3:DP"},
-        {"taipei": "AZ3:BH", "taichung": "DW3:EE"},
-        {"taipei": "BO3:BW", "taichung": "EL3:ET"},
-    ],
-
-    # 每月 1 日清理前一個月的檔案。
-    "monthly_cleanup_folders": {
-        "訂單資料": "1o6ROTdseIRKOivgYQt50cNuCZLT3Rpug",
-        "專員個資": "1v1Er8oC3BEAWHbBrDq3SUpjEDwHIuK0f",
-        "專員班表": "1V2AUNsT_jzQWawmnBNU_u-e7odYviwEk",
-        "排班統計表": "18XDXdrCSsLYwSzz1Da9pQh-jGm2h2Ed8",
-    },
-
-    # 每日回報欄位對應
-    "report_mappings": [
-        {"source": "Q5:S5",   "target_col": 11},   # K:M
-        {"source": "AF5:AH5", "target_col": 15},   # O:Q
-        {"source": "CN5:CP5", "target_col": 101},  # CW:CY
-        {"source": "DC5:DE5", "target_col": 105},  # DA:DC
-    ],
-
-    # Gmail
-    "mail_subjects": {
-        "taipei":   "近三日營業額-台北",
-        "taichung": "近三日營業額-台中",
-    },
-    "mail_target_hour":   17,
-    "mail_target_minute": 25,
-
-    # 每日回報：從哪一列開始搜尋日期欄
-    "report_date_start_row": 2000,
-}
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -139,57 +73,81 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Google Sheets 每分鐘配額超限時的指數退避秒數。
-_SHEETS_RETRY_DELAYS = (15, 30, 60, 120)
+# backend API
+BACKEND_BASE = "https://backend.lemonclean.com.tw"
+LOGIN_URL = f"{BACKEND_BASE}/login"
+STORED_VALUE_EXPORT_URL = f"{BACKEND_BASE}/member/export_stored_value"
 
+# 客服儲值功能的固定目的試算表。網址中的 gid 只代表當時開啟的分頁；
+# 程式會在試算表內尋找並沿用「{地區}儲值金結算_YYYYMMDD」分頁。
+STORED_VALUE_SPREADSHEET_IDS: dict[str, str] = {
+    "台北": "1T01k68sV0NY6MPD2nw8Tg1ijC9dOXhhr26G5-Bc9bJM",
+    "台中": "17t3JcUEF0tQwr4a3fvLXUceCXgQDsmihYz7tkRQOc6s",
+}
+STORED_VALUE_WORKSHEET_GIDS: dict[str, int] = {
+    "台北": 141159387,
+    "台中": 2057599829,
+}
 
-def _is_sheets_rate_limit(error: Exception) -> bool:
-    """判斷是否為 Google Sheets API 429 / 配額暫時超限。"""
-    response = getattr(error, "response", None)
-    status_code = getattr(response, "status_code", None) or getattr(response, "status", None)
-    message = str(error).lower()
-    return (
-        status_code == 429
-        or "429" in message
-        or "quota exceeded" in message
-        or "rate limit" in message
-        or "resource_exhausted" in message
-    )
+# 主控試算表地區設定工作表
+AREA_SHEET_NAME    = "客服地區設定"
+AREA_SHEET_HEADERS = ["地區名稱", "Calendar ID", "目標試算表ID", "啟用"]
 
+# 地區名稱 → Secrets key 前綴對應
+AREA_TO_SECRET_PREFIX: dict[str, str] = {
+    "台北": "TAIPEI",
+    "台中": "TAICHUNG",
+    "新竹": "HSINCHU",
+    "高雄": "KAOHSIUNG",
+    "桃園": "TAOYUAN",
+    "新北": "XINBEI",
+    "台南": "TAINAN",
+    "嘉義": "CHIAYI",
+    "宜蘭": "YILAN",
+}
 
-def _sheets_call(label: str, operation):
-    """執行 Sheets API；遇到 429 時以 15/30/60/120 秒退避後重試。"""
-    for attempt in range(len(_SHEETS_RETRY_DELAYS) + 1):
-        try:
-            return operation()
-        except Exception as error:
-            if not _is_sheets_rate_limit(error) or attempt >= len(_SHEETS_RETRY_DELAYS):
-                raise
-            delay = _SHEETS_RETRY_DELAYS[attempt]
-            log.warning(
-                "%s 遇到 Sheets API 配額限制；%d 秒後重試（%d/%d）：%s",
-                label,
-                delay,
-                attempt + 1,
-                len(_SHEETS_RETRY_DELAYS),
-                error,
-            )
-            time.sleep(delay)
-    raise RuntimeError(f"{label} 重試流程異常")
+# 客服排程介面允許執行的區域。
+# 「全區」固定代表台北＋台中，避免設定表新增其他地區後被意外納入。
+SERVICE_AREA_GROUPS: dict[str, tuple[str, ...]] = {
+    "全區": ("台北", "台中"),
+    "台北": ("台北",),
+    "台中": ("台中",),
+}
+
+# Calendar 行事曆顏色代碼
+COLOR_INTERNAL   = "7"   # 內部行程（排除）
+COLOR_PAUSE      = "10"  # 暫停
+COLOR_UNARRANGED = "3"   # 未安排
+
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly",
+]
 
 
 # ──────────────────────────────────────────────────────────
-# Google 認證（統一使用 Jenny OAuth）
+# Google 認證
 # ──────────────────────────────────────────────────────────
 
-def _get_credentials():
-    return get_google_credentials()
+# ──────────────────────────────────────────────────────────
+# Google 認證（使用 tools.common.config_loader，支援 st.secrets）
+# ──────────────────────────────────────────────────────────
+
+def _get_credentials() -> Credentials:
+    try:
+        from tools.common.config_loader import get_service_account_info
+        info = get_service_account_info()
+    except Exception as e:
+        raise EnvironmentError(f"無法取得 GOOGLE_SERVICE_ACCOUNT：{e}")
+    return Credentials.from_service_account_info(info, scopes=SCOPES)
 
 def _gc() -> gspread.Client:
     return gspread.authorize(_get_credentials())
 
-def _drive():
-    return build("drive", "v3", credentials=_get_credentials())
+def _calendar_service():
+    return build("calendar", "v3", credentials=_get_credentials())
+
 
 # ──────────────────────────────────────────────────────────
 # 時間工具
@@ -198,105 +156,70 @@ def _drive():
 def now_tp() -> datetime:
     return datetime.now(TZ_TAIPEI)
 
-def yesterday_tp() -> datetime:
-    return now_tp() - timedelta(days=1)
-
 def fmt(dt: datetime, f: str) -> str:
     return dt.strftime(f)
 
+def today_tp() -> date:
+    return now_tp().date()
+
 
 # ──────────────────────────────────────────────────────────
-# 打卡工具
+# 打卡工具（同 lemon_schedule_sync 模式）
 # ──────────────────────────────────────────────────────────
-# process-level cache：同一次執行不重複呼叫 Sheets API 確認工作表
+# process-level cache：避免重複讀取工作表造成 429
 _LOG_SHEET_CACHE: dict[str, gspread.Worksheet] = {}
+_SERVICE_LOG_CONTEXT = {
+    "area": "全區",
+    "period": "",
+    "run_feature": "CRM／儲值全部執行",
+}
 
 def _ensure_log_sheet(ss: gspread.Spreadsheet, sheet_name: str) -> gspread.Worksheet:
-    """確保 log 工作表存在，不存在就建立並加標題列。結果 cache 在 process 內。"""
     cache_key = ss.id + ":" + sheet_name
     if cache_key in _LOG_SHEET_CACHE:
         return _LOG_SHEET_CACHE[cache_key]
     try:
         sh = ss.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        sh = ss.add_worksheet(title=sheet_name, rows=2000, cols=12)
-        sh.append_row(
-            ["run_id", "時間", "系統名稱", "任務", "步驟", "狀態", "說明", "耗時(秒)"],
-            value_input_option="USER_ENTERED",
-        )
+        sh = ss.add_worksheet(title=sheet_name, rows=2000, cols=10)
+        if sheet_name == "客服排程執行Log":
+            sh.append_row([
+                "執行時間", "系統", "功能", "執行類型", "區域",
+                "期別/日期", "目標", "來源", "結果", "訊息",
+            ])
+        else:
+            sh.append_row(["run_id", "時間", "系統名稱", "任務", "步驟", "狀態", "說明", "耗時(秒)"])
     _LOG_SHEET_CACHE[cache_key] = sh
     return sh
 
-
-def checkin_master(
-    gc: gspread.Client,
-    run_id: str,
-    task: str,
-    step: str,
-    status: str,
-    note: str = "",
-    elapsed: float = 0.0,
-) -> None:
-    """打卡到主控表 - 用 write_job_log 對齊主控表欄位格式。"""
-    try:
-        from tools.common.log_to_sheet import write_job_log
-        write_job_log(
-            system_name=CONFIG["system_name"],
-            job_name=task,
-            status="成功" if status == "SUCCESS" else ("執行中" if status == "RUNNING" else "失敗"),
-            started_at=now_tp() if step == "START" else "",
-            finished_at=now_tp() if step == "DONE" else "",
-            message=note[:300],
-            area="全區",
-            period="",
-            date=fmt(now_tp(), "%Y%m%d"),
-            target="",
-            source_file="",
-            run_type="排程" if os.getenv("GITHUB_ACTIONS") else "手動",
-            traceback_text=note[:300] if status == "ERROR" else "",
-        )
-    except Exception as e:
-        log.warning("[主控表打卡失敗（非致命）] %s", e)
-
-
-def checkin_job(
-    gc: gspread.Client,
-    run_id: str,
-    task: str,
-    step: str,
-    status: str,
-    note: str = "",
-    elapsed: float = 0.0,
-) -> None:
-    """打卡到執行檔（目標試算表）的 _py_execution_log 工作表。"""
-    target_id = (
-        CONFIG.get("target_file_id", "")
-        or os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "")
-    )
-    if not target_id:
+def _checkin(gc: gspread.Client, spreadsheet_id: str, sheet_name: str,
+             run_id: str, task: str, step: str, status: str,
+             note: str = "", elapsed: float = 0.0) -> None:
+    if not spreadsheet_id:
         return
     try:
-        ss = gc.open_by_key(target_id)
-        sh = _ensure_log_sheet(ss, CONFIG["job_log_sheet_name"])
-        sh.append_row(
-            [
-                run_id,
-                fmt(now_tp(), "%Y/%m/%d %H:%M:%S"),
-                CONFIG["system_name"],
-                task,
-                step,
-                status,
-                note[:300],
-                round(elapsed, 1),
-            ],
-            value_input_option="USER_ENTERED",
-        )
+        ss = gc.open_by_key(spreadsheet_id)
+        sh = _ensure_log_sheet(ss, sheet_name)
+        sh.append_row([
+            run_id, fmt(now_tp(), "%Y/%m/%d %H:%M:%S"),
+            "客服CRM系統", task, step, status, note[:300], round(elapsed, 1)
+        ])
     except Exception as e:
-        log.warning("[執行檔打卡失敗（非致命）] %s", e)
+        log.warning("[打卡失敗（非致命）%s] %s", sheet_name, e)
+
+def checkin_both(gc: gspread.Client, run_id: str, task: str, step: str,
+                 status: str, note: str = "", elapsed: float = 0.0) -> None:
+    master_id = os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "")
+    target_id = _load_target_file_id()
+    _checkin_service_schedule_log(
+        gc, master_id, run_id, task, step, status, note, elapsed
+    )
+    _checkin(gc, target_id, "_py_execution_log", run_id, task, step, status, note, elapsed)
 
 
-def checkin_both(
+def _checkin_service_schedule_log(
     gc: gspread.Client,
+    spreadsheet_id: str,
     run_id: str,
     task: str,
     step: str,
@@ -304,692 +227,654 @@ def checkin_both(
     note: str = "",
     elapsed: float = 0.0,
 ) -> None:
-    """同時打卡到主控表 + 執行檔。"""
-    checkin_master(gc, run_id, task, step, status, note, elapsed)
-    checkin_job(gc, run_id, task, step, status, note, elapsed)
+    """將 CRM／儲值執行紀錄併入「客服排程執行Log」。"""
+    if not spreadsheet_id:
+        return
+
+    feature_names = {
+        "Step1_抓取儲值金": "【儲值】抓儲值金",
+        "Step2_匯出定期VIP日曆": "【CRM】產生 CRM",
+        "RUN": _SERVICE_LOG_CONTEXT["run_feature"],
+    }
+    result_names = {
+        "RUNNING": "執行中",
+        "SUCCESS": "成功",
+        "ERROR": "失敗",
+    }
+
+    try:
+        ss = gc.open_by_key(spreadsheet_id)
+        sh = _ensure_log_sheet(ss, "客服排程執行Log")
+        message_parts = [f"run_id={run_id}", f"step={step}"]
+        if note:
+            message_parts.append(note[:240])
+        if elapsed:
+            message_parts.append(f"耗時={elapsed:.1f}秒")
+        sh.append_row([
+            fmt(now_tp(), "%Y-%m-%d %H:%M:%S"),
+            "客服排程",
+            feature_names.get(task, task),
+            "排程",
+            _SERVICE_LOG_CONTEXT["area"],
+            _SERVICE_LOG_CONTEXT["period"],
+            "",
+            "CRM客服系統",
+            result_names.get(status, status),
+            " | ".join(message_parts)[:500],
+        ])
+    except Exception as e:
+        log.warning("[客服排程 Log 寫入失敗（非致命）] %s", e)
 
 
 # ──────────────────────────────────────────────────────────
-# 找排班檔
+# 地區設定讀取（主控試算表）
 # ──────────────────────────────────────────────────────────
 
-def _build_next_month_day_str(base: datetime) -> str:
-    """年月+1，日不變（對應 GAS buildNextMonthSameDayString_）"""
-    y, m, d = base.year, base.month, base.strftime("%d")
-    nm = m + 1
-    ny = y
-    if nm > 12:
-        nm = 1
-        ny += 1
-    return f"{ny}{nm:02d}{d}"
-
-
-def _parse_schedule_filename(name: str) -> tuple[str, str, str] | None:
-    """回傳 (YYYYMM, DD, 地區)；僅接受 YYYYMMDD排班統計表-區域。"""
-    clean_name = name.strip()
-    if ".xlsx_temp_" in clean_name.lower():
-        return None
-
-    match = re.fullmatch(
-        r"(?P<date>\d{8})排班統計表-(?P<city>台北|台中)(?:\.xlsx)?",
-        clean_name,
-        flags=re.IGNORECASE,
+def _ensure_area_sheet(gc: gspread.Client) -> gspread.Worksheet:
+    """確保主控試算表有「客服地區設定」工作表。"""
+    from tools.common.config_loader import get_master_spreadsheet_id
+    master_id = (
+        os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
+        or get_master_spreadsheet_id()
     )
-    if not match:
-        return None
+    if not master_id:
+        raise EnvironmentError("TOOLS_APP_LOG_SPREADSHEET_ID 未設定")
+    ss = gc.open_by_key(master_id)
+    try:
+        sh = ss.worksheet(AREA_SHEET_NAME)
+    except gspread.WorksheetNotFound:
+        sh = ss.add_worksheet(title=AREA_SHEET_NAME, rows=50, cols=5)
+        sh.append_row(AREA_SHEET_HEADERS)
+        defaults = [
+            ["台北", "", "", "TRUE"],
+            ["台中", "", "", "TRUE"],
+            ["新竹", "", "", "TRUE"],
+            ["高雄", "", "", "TRUE"],
+        ]
+        for row in defaults:
+            sh.append_row(row)
+        log.info("已建立「%s」工作表，請填入各地區 Calendar ID", AREA_SHEET_NAME)
+    return sh
 
-    date_str = match.group("date")
-    return date_str[:6], date_str[6:], match.group("city")
+def load_area_config(gc: gspread.Client, filter_area: str | None = "全區") -> list[dict]:
+    """
+    從主控試算表讀取地區設定。
+    回傳 [{"name": "台北", "calendar_id": "...", "target_spreadsheet_id": "...", "enabled": True}, ...]
+    """
+    selected_area = (filter_area or "全區").strip()
+    if selected_area not in SERVICE_AREA_GROUPS:
+        allowed = "、".join(SERVICE_AREA_GROUPS)
+        raise ValueError(f"不支援的區域：{selected_area}；可選：{allowed}")
+    allowed_areas = set(SERVICE_AREA_GROUPS[selected_area])
 
-
-def _pick_best(files: list[dict]) -> dict | None:
-    if not files:
-        return None
-
-    pool = files
-    sheets = [
-        f for f in pool
-        if f["mimeType"] == "application/vnd.google-apps.spreadsheet"
-    ]
-    pool = sheets or pool
-    pool.sort(key=lambda f: f.get("modifiedTime", ""), reverse=True)
-    return pool[0]
-
-
-def _list_drive_files(drive, **kwargs) -> list[dict]:
-    """完整取得 Drive 分頁結果。"""
-    files: list[dict] = []
-    page_token = None
-    while True:
-        call_kwargs = dict(kwargs)
-        if page_token:
-            call_kwargs["pageToken"] = page_token
-        response = drive.files().list(**call_kwargs).execute()
-        files.extend(response.get("files", []))
-        page_token = response.get("nextPageToken")
-        if not page_token:
-            return files
-
-
-def find_schedule_files(base: datetime) -> dict[str, dict[str, dict]]:
-    drive = _drive()
-    local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
-    current_month = fmt(local_base, "%Y%m")
-    run_day = fmt(local_base, "%d")
-
-    q = (
-        f"'{CONFIG['source_folder_id']}' in parents and trashed=false and ("
-        "mimeType='application/vnd.google-apps.spreadsheet' or "
-        "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')"
-    )
-    files = _list_drive_files(
-        drive,
-        q=q,
-        fields="files(id,name,mimeType,modifiedTime)",
-        pageSize=1000,
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True,
-    )
-
-    log.info("Drive 資料夾找到 %d 個檔案", len(files))
-    for f in files:
-        log.info("  找到檔案：%s (%s)", f.get("name"), f.get("mimeType"))
-    buckets: dict[str, dict[str, list[dict]]] = {}
-    for f in files:
-        name = f.get("name", "").strip()
-        parsed = _parse_schedule_filename(name)
-        if not parsed:
+    sh = _ensure_area_sheet(gc)
+    records = sh.get_all_records()
+    areas = []
+    for r in records:
+        name       = str(r.get("地區名稱", "")).strip()
+        cal_id     = str(r.get("Calendar ID", "")).strip()
+        target_id  = str(r.get("目標試算表ID", "")).strip()
+        enabled_v  = str(r.get("啟用", "TRUE")).strip().upper()
+        enabled    = enabled_v not in ("FALSE", "0", "否", "停用")
+        if not name or not enabled:
             continue
-        month, day, city = parsed
-        if month < current_month or day != run_day:
+        if name not in allowed_areas:
             continue
-        bucket = buckets.setdefault(month, {"台北": [], "台中": []})
-        bucket[city].append(f)
+        areas.append({
+            "name":                name,
+            "calendar_id":         cal_id,
+            "target_spreadsheet_id": target_id,
+        })
+    return areas
 
-    found: dict[str, dict[str, dict]] = {}
-    for month in sorted(buckets):
-        taipei = _pick_best(buckets[month]["台北"])
-        taichung = _pick_best(buckets[month]["台中"])
-        if not taipei or not taichung:
-            missing = "台北" if not taipei else "台中"
-            log.error("%s 缺少%s排班檔，略過該月份", month, missing)
-            continue
-        found[month] = {"taipei": taipei, "taichung": taichung}
+def get_secret_prefix(area_name: str) -> str:
+    """台北 → TAIPEI 等，找不到就用拼音大寫（使用者自訂）。"""
+    return AREA_TO_SECRET_PREFIX.get(area_name, area_name.upper().replace(" ", "_"))
 
-    if not found:
-        raise FileNotFoundError(
-            f"找不到 {current_month} 起、日號 {run_day} 的完整台北／台中排班檔配對"
+def get_area_credentials(area_name: str) -> tuple[str, str]:
+    """取得地區的 EMAIL / PASSWORD，找不到就拋出例外。"""
+    prefix = get_secret_prefix(area_name)
+    email    = os.environ.get(f"{prefix}_EMAIL", "")
+    password = os.environ.get(f"{prefix}_PASSWORD", "")
+    if not email or not password:
+        raise EnvironmentError(
+            f"找不到 {prefix}_EMAIL / {prefix}_PASSWORD，"
+            f"請在 GitHub Secrets 新增這兩個 key"
         )
-
-    log.info("排班檔確認 OK：%s", {
-        month: {city: info["name"] for city, info in pair.items()}
-        for month, pair in found.items()
-    })
-    return found
+    return email, password
 
 
-def _a1_start(a1: str) -> tuple[int, int]:
-    """把 'G3' 解成 (row=3, col=7)，忽略結尾的 :XX"""
-    cell = a1.split(":")[0]
-    m = re.match(r"^([A-Za-z]+)(\d+)$", cell)
-    if not m:
-        raise ValueError(f"無法解析 A1: {a1}")
-    col = sum((ord(c) - 64) * (26 ** i) for i, c in enumerate(reversed(m.group(1).upper())))
-    return int(m.group(2)), col
+# ──────────────────────────────────────────────────────────
+# Step 1：下載並更新儲值金結算表
+# ──────────────────────────────────────────────────────────
+
+class _CsrfTokenParser(HTMLParser):
+    """Extract the Laravel login form's CSRF token without extra dependencies."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.token = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "input":
+            return
+        values = dict(attrs)
+        if values.get("name") == "_token" and values.get("value"):
+            self.token = values["value"] or ""
 
 
-def _month_offset(base: datetime, month: str) -> int:
-    """計算 YYYYMM 相對於執行月份的月數，用來保留缺檔月份的槽位。"""
-    local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
-    year, month_number = int(month[:4]), int(month[4:])
-    return (year - local_base.year) * 12 + month_number - local_base.month
+def _login_backend_session(email: str, password: str, area_name: str) -> requests.Session:
+    """以後台網頁表單登入，回傳保留登入 cookie 的 Session。"""
+    session = requests.Session()
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = session.get(LOGIN_URL, headers=headers, timeout=30, allow_redirects=True)
+    resp.raise_for_status()
+    parser = _CsrfTokenParser()
+    parser.feed(resp.text)
+    if not parser.token:
+        raise RuntimeError(f"[{area_name}] 登入頁面找不到 _token")
+
+    resp = session.post(
+        LOGIN_URL,
+        data={"_token": parser.token, "email": email, "password": password},
+        headers=headers,
+        timeout=30,
+        allow_redirects=True,
+    )
+    resp.raise_for_status()
+    if "login" in resp.url.lower():
+        raise RuntimeError(f"[{area_name}] 後台登入失敗")
+    return session
 
 
-def _read_import_values(
-    file_info: dict,
-    drive,
-    gc: gspread.Client,
-) -> list[list[str]]:
-    """完整讀取並驗證一份來源檔，本函式不會修改目標表。"""
-    fid  = file_info["id"]
-    mime = file_info["mimeType"]
-    name = file_info["name"]
-    log.info("  匯入：%s", name)
+def _download_stored_value_export(session: requests.Session, area_name: str) -> bytes:
+    """下載執行當下最新的儲值金結算 Excel。"""
+    resp = session.get(
+        STORED_VALUE_EXPORT_URL,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=120,
+        allow_redirects=True,
+    )
+    resp.raise_for_status()
+    preview = resp.content[:300].decode("utf-8", errors="ignore").lower()
+    if "<html" in preview or "login" in resp.url.lower():
+        raise RuntimeError(f"[{area_name}] 儲值金結算下載失敗：登入已失效或後台回傳 HTML")
+    if not resp.content:
+        raise RuntimeError(f"[{area_name}] 儲值金結算下載結果為空")
+    return resp.content
 
-    if mime == "application/vnd.google-apps.spreadsheet":
-        ss = gc.open_by_key(fid)
-        all_values = ss.get_worksheet(0).get_all_values()
-    else:
-        # xlsx 在共用雲端硬碟：轉成 Google Sheets 保留（新蓋舊），再讀取
-        gs_name = re.sub(r"\.xlsx$", "", name, flags=re.IGNORECASE)
-        log.info("  xlsx → Google Sheets：%s", gs_name)
 
-        # 先查並刪除資料夾內所有同名 Google Sheets（確保不留舊檔）
-        existing = drive.files().list(
-            q=(
-                f"'{CONFIG['source_folder_id']}' in parents"
-                f" and name = '{gs_name}'"
-                f" and mimeType = 'application/vnd.google-apps.spreadsheet'"
-                f" and trashed = false"
-            ),
-            fields="files(id,name)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-        ).execute().get("files", [])
+def _excel_to_rows(content: bytes, area_name: str) -> list[list[Any]]:
+    """將下載的第一張 Excel 工作表轉成可貼入 Google Sheets 的二維資料。"""
+    try:
+        frame = pd.read_excel(BytesIO(content), engine="openpyxl", dtype=object)
+    except Exception as exc:
+        raise RuntimeError(f"[{area_name}] 儲值金結算檔轉檔失敗：{exc}") from exc
 
-        for old in existing:
-            drive.files().delete(
-                fileId=old["id"], supportsAllDrives=True
-            ).execute()
-            log.info("  已刪除舊版 Google Sheets：%s (%s)", old["name"], old["id"])
-
-        # 用 Drive v2 copy 轉換（v2 支援 mimeType 轉換）
-        from googleapiclient.discovery import build as _build
-        drive_v2 = _build("drive", "v2", credentials=_get_credentials())
-        copied = drive_v2.files().copy(
-            fileId=fid,
-            body={
-                "title": gs_name,
-                "mimeType": "application/vnd.google-apps.spreadsheet",
-                "parents": [{"id": CONFIG["source_folder_id"]}],
-            },
-            supportsAllDrives=True,
-        ).execute()
-
-        new_gs_id = copied["id"]
-        log.info("  轉換完成，新 Google Sheets ID：%s", new_gs_id)
-
-        gs_ss = gc.open_by_key(new_gs_id)
-        all_values = gs_ss.get_worksheet(0).get_all_values()
-
-    skip = 1
-    values = [(r[:9] + [""] * 9)[:9] for r in all_values[skip:]]
-    values = [r for r in values if any(str(c).strip() for c in r)]
-
-    if not values:
-        raise ValueError(f"來源沒有可貼入資料：{name}")
+    frame = frame.fillna("")
+    values: list[list[Any]] = [list(map(str, frame.columns.tolist()))]
+    for row in frame.itertuples(index=False, name=None):
+        converted = []
+        for value in row:
+            if isinstance(value, (datetime, date)):
+                converted.append(value.strftime("%Y-%m-%d %H:%M:%S"))
+            elif hasattr(value, "item"):
+                converted.append(value.item())
+            else:
+                converted.append(value)
+        values.append(converted)
     return values
 
 
-def _write_import_values(
-    target_sheet: gspread.Worksheet,
-    target_range: str,
-    values: list[list[str]],
-) -> None:
-    """寫入已驗證的資料。"""
-    start_row, start_col = _a1_start(target_range)
-    target_sheet.update(
-        values=values,
-        range_name=f"R{start_row}C{start_col}:R{start_row + len(values) - 1}C{start_col + 8}",
-        value_input_option="USER_ENTERED",
-    )
-    log.info("  → 寫入 %d 列（起始 R%dC%d）", len(values), start_row, start_col)
-
-
-def _import_block(
-    file_info: dict,
-    target_sheet: gspread.Worksheet,
-    cfg: dict,
-    drive,
+def _write_stored_value_sheet(
     gc: gspread.Client,
-) -> None:
-    """舊介面相容；Step 1 會先批次讀取驗證再另行清除。"""
-    values = _read_import_values(file_info, drive, gc)
-    _write_import_values(target_sheet, cfg["target_range"], values)
+    area_name: str,
+    values: list[list[Any]],
+) -> gspread.Worksheet:
+    """覆寫各區固定試算表中的同一張儲值金結算分頁，並更新日期名稱。"""
+    target_id = STORED_VALUE_SPREADSHEET_IDS.get(area_name, "")
+    if not target_id:
+        raise EnvironmentError(f"[{area_name}] 尚未設定儲值金結算目的試算表")
 
+    ss = gc.open_by_key(target_id)
+    sheet_name = f"{area_name}儲值金結算_{fmt(now_tp(), '%Y%m%d')}"
+    pattern = re.compile(rf"^{re.escape(area_name)}儲值金結算_\d{{8}}$")
+    candidates = [worksheet for worksheet in ss.worksheets() if pattern.fullmatch(worksheet.title)]
 
-def cleanup_previous_month_files(run_dt: datetime, drive) -> list[str]:
-    """每月 1 日（Asia/Taipei）將四個資料夾的前月檔案移到垃圾桶。"""
-    local_dt = run_dt.astimezone(TZ_TAIPEI) if run_dt.tzinfo else run_dt.replace(tzinfo=TZ_TAIPEI)
-    if local_dt.day != 1:
-        return []
-
-    previous_month = (local_dt.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
-    trashed: list[str] = []
-    for folder_name, folder_id in CONFIG["monthly_cleanup_folders"].items():
-        q = (
-            f"'{folder_id}' in parents and trashed=false and ("
-            "mimeType='application/vnd.google-apps.spreadsheet' or "
-            "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')"
-        )
-        files = _list_drive_files(
-            drive,
-            q=q,
-            fields="files(id,name,mimeType)",
-            pageSize=1000,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-        )
-        matched = [f for f in files if previous_month in f.get("name", "")]
-        for file_info in matched:
-            drive.files().update(
-                fileId=file_info["id"],
-                body={"trashed": True},
-                supportsAllDrives=True,
-            ).execute()
-            label = f"{folder_name}/{file_info['name']}"
-            trashed.append(label)
-            log.info("已移至垃圾桶：%s", label)
-        if not matched:
-            log.info("%s 找不到 %s 檔案（略過）", folder_name, previous_month)
-    return trashed
-
-
-# ──────────────────────────────────────────────────────────
-# Step 1：更新排班統計表
-# ──────────────────────────────────────────────────────────
-
-def step1_update_schedule_stats(
-    run_dt: datetime, gc: gspread.Client, drive, run_id: str
-) -> dict:
-    task = "Step1_更新排班統計表"
-    t0 = now_tp()
-    checkin_both(gc, run_id, task, "START", "RUNNING")
-
-    try:
-        trashed = cleanup_previous_month_files(run_dt, drive)
-        found = find_schedule_files(run_dt)
-        target_ss = gc.open_by_key(CONFIG["target_file_id"])
-        target_sh = target_ss.worksheet(CONFIG["target_sheet_name"])
-
-        processed: dict[str, dict[str, str]] = {}
-        slots = CONFIG["schedule_import_slots"]
-        for month, pair in found.items():
-            index = _month_offset(run_dt, month)
-            if index >= len(slots):
-                log.error("%s 超過目標表可容納的 %d 個月份，略過", month, len(slots))
-                continue
-
-            slot = slots[index]
-            try:
-                # 同月台北／台中都讀取並驗證完成後，才可清除目標。
-                taipei_values = _read_import_values(pair["taipei"], drive, gc)
-                taichung_values = _read_import_values(pair["taichung"], drive, gc)
-            except Exception as exc:
-                log.error("%s 來源讀取／驗證失敗，略過該月份：%s", month, exc)
-                continue
-
-            target_sh.batch_clear([slot["taipei"], slot["taichung"]])
-            _write_import_values(target_sh, slot["taipei"], taipei_values)
-            _write_import_values(target_sh, slot["taichung"], taichung_values)
-            processed[month] = {
-                "taipei": pair["taipei"]["name"],
-                "taichung": pair["taichung"]["name"],
-            }
-
-        if not processed:
-            raise RuntimeError("沒有任何月份成功更新")
-
-        elapsed = (now_tp() - t0).total_seconds()
-        note = json.dumps({"files": processed, "trashed": trashed}, ensure_ascii=False)
-        checkin_both(gc, run_id, task, "DONE", "SUCCESS", note, elapsed)
-        log.info("Step 1 完成（%.1fs）", elapsed)
-        return {"ok": True, "files": processed, "trashed": trashed}
-
-    except Exception as e:
-        elapsed = (now_tp() - t0).total_seconds()
-        checkin_both(gc, run_id, task, "DONE", "ERROR", str(e)[:300], elapsed)
-        raise
-
-
-# ──────────────────────────────────────────────────────────
-# Step 2：更新每日回報
-# ──────────────────────────────────────────────────────────
-
-def _find_date_row(sheet: gspread.Worksheet, target_dt: datetime) -> int:
-    start = CONFIG["report_date_start_row"]
-    target_key = fmt(target_dt, "%Y%m%d")
-    col_a = _sheets_call(
-        "讀取每日回報日期欄",
-        lambda: sheet.col_values(1),
-    )  # 1-indexed list，col_a[0]=row1
-    for i in range(start - 1, len(col_a)):
-        cell = col_a[i]
-        if not cell:
-            continue
-        m = re.match(r"^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})", str(cell).strip())
-        if m:
-            key = f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
-            if key == target_key:
-                return i + 1  # 1-based
-    return -1
-
-
-def step2_write_daily_report(
-    run_dt: datetime, gc: gspread.Client, run_id: str
-) -> dict:
-    task = "Step2_更新每日回報"
-    t0 = now_tp()
-    checkin_both(gc, run_id, task, "START", "RUNNING")
-
-    try:
-        target_ss  = gc.open_by_key(CONFIG["target_file_id"])
-        stat_sh    = target_ss.worksheet(CONFIG["target_sheet_name"])
-        report_sh  = target_ss.worksheet(CONFIG["report_sheet_name"])
-
-        row = _find_date_row(report_sh, run_dt)
-        if row < 1:
-            raise ValueError(
-                f"找不到今天日期列：{fmt(run_dt, '%Y-%m-%d')}"
-            )
-
-        for mp in CONFIG["report_mappings"]:
-            vals = stat_sh.get(mp["source"])
-            if not vals:
-                continue
-            tc = mp["target_col"]
-            report_sh.update(
-                values=vals,
-                range_name=gspread.utils.rowcol_to_a1(row, tc),
-                value_input_option="USER_ENTERED",
-            )
-
-        elapsed = (now_tp() - t0).total_seconds()
-        checkin_both(gc, run_id, task, "DONE", "SUCCESS", f"row={row}", elapsed)
-        log.info("Step 2 完成，row=%d（%.1fs）", row, elapsed)
-        return {"ok": True, "row": row}
-
-    except Exception as e:
-        elapsed = (now_tp() - t0).total_seconds()
-        checkin_both(gc, run_id, task, "DONE", "ERROR", str(e)[:300], elapsed)
-        raise
-
-
-# ──────────────────────────────────────────────────────────
-# Step 3：從 Gmail 抓前一天營業額
-# ──────────────────────────────────────────────────────────
-
-def _get_secret(key: str) -> str:
-    """
-    依序嘗試四個來源取得 secret（對齊 config_loader.get_service_account_info 邏輯）：
-    1. os.environ
-    2. os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]（只適用 SA，一般 key 不用）
-    3. st.secrets[key]
-    4. st.secrets["gcp_service_account"][key]（不適用一般 key）
-    """
-    # 1. 直接從 os.environ 讀
-    val = os.environ.get(key, "").strip()
-    if val:
-        return val
-
-    # 2. 從 st.secrets 讀（子進程裡 Streamlit 仍可能有 secrets）
-    try:
-        import streamlit as st
-        val = str(st.secrets.get(key, "") or "").strip()
-        if val:
-            return val
-    except Exception:
-        pass
-
-    return ""
-
-
-def _imap_connect() -> imaplib.IMAP4_SSL:
-    user = _get_secret("GMAIL_USER")
-    pwd  = _get_secret("GMAIL_APP_PASSWORD")
-    if not user or not pwd:
-        raise EnvironmentError("需要 GMAIL_USER 和 GMAIL_APP_PASSWORD")
-    imap = imaplib.IMAP4_SSL("imap.gmail.com")
-    imap.login(user, pwd)
-    return imap
-
-
-def _decode_subject(msg) -> str:
-    parts = decode_header(msg.get("Subject", ""))
-    result = ""
-    for part, enc in parts:
-        if isinstance(part, bytes):
-            result += part.decode(enc or "utf-8", errors="replace")
-        else:
-            result += str(part)
-    return result
-
-
-def _strip_html(html_text: str) -> str:
-    """簡單移除 HTML 標籤，保留換行結構。"""
-    import html as html_module
-    text = re.sub(r"<br\s*/?>", "\n", html_text, flags=re.IGNORECASE)
-    text = re.sub(r"</p>|</div>|</tr>|</li>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = html_module.unescape(text)
-    text = re.sub(r"\r\n|\r", "\n", text)
-    text = re.sub(r" +", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def _plain_body(msg) -> str:
-    """取郵件純文字內容，優先 text/plain，fallback 到 text/html。"""
-    plain = ""
-    html_body = ""
-
-    if msg.is_multipart():
-        for part in msg.walk():
-            ct = part.get_content_type()
-            cd = str(part.get("Content-Disposition", ""))
-            if "attachment" in cd:
-                continue
-            charset = part.get_content_charset() or "utf-8"
-            payload = part.get_payload(decode=True)
-            if payload is None:
-                continue
-            decoded = payload.decode(charset, errors="replace")
-            if ct == "text/plain" and not plain:
-                plain = decoded
-            elif ct == "text/html" and not html_body:
-                html_body = decoded
+    if candidates:
+        # 同一區原則上只會有一張；若歷史上有多張，沿用最末日期的一張。
+        sh = max(candidates, key=lambda worksheet: worksheet.title)
+        if sh.title != sheet_name:
+            sh.update_title(sheet_name)
+        sh.clear()
     else:
-        charset = msg.get_content_charset() or "utf-8"
-        payload = msg.get_payload(decode=True)
-        if payload:
-            decoded = payload.decode(charset, errors="replace")
-            if msg.get_content_type() == "text/html":
-                html_body = decoded
-            else:
-                plain = decoded
+        # 首次執行沿用使用者指定網址中的既有 gid，不另外新增分頁。
+        worksheet_gid = STORED_VALUE_WORKSHEET_GIDS.get(area_name)
+        sh = ss.get_worksheet_by_id(worksheet_gid) if worksheet_gid is not None else None
+        if sh is None:
+            raise gspread.WorksheetNotFound(
+                f"[{area_name}] 找不到指定工作表 gid={worksheet_gid}"
+            )
+        sh.update_title(sheet_name)
+        sh.clear()
 
-    if plain.strip():
-        log.info("  [mail] 使用 text/plain（%d 字元）", len(plain))
-        return plain
+    if values:
+        required_rows = max(len(values) + 10, 500)
+        required_cols = max(max(len(row) for row in values) + 5, 10)
+        if sh.row_count < required_rows or sh.col_count < required_cols:
+            sh.resize(rows=max(sh.row_count, required_rows), cols=max(sh.col_count, required_cols))
+        sh.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
+        sh.freeze(rows=1)
 
-    if html_body.strip():
-        log.info("  [mail] text/plain 為空，fallback 到 text/html（%d 字元）", len(html_body))
-        return _strip_html(html_body)
-
-    log.warning("  [mail] 信件內容為空")
-    return ""
-
-
-def _pick_mail(subject: str, target_date: datetime) -> str:
-    """抓 target_date 當天、主旨完全符合的信，取最接近 17:25 的那封。"""
-    target_time = target_date.replace(
-        hour=CONFIG["mail_target_hour"],
-        minute=CONFIG["mail_target_minute"],
-        second=0, microsecond=0,
-    )
-    imap_date = fmt(target_date, "%d-%b-%Y")
-    imap = _imap_connect()
-    imap.select("INBOX")
-
-    # 中文主旨需用 UTF-8 搜尋（IMAP 預設 ASCII 無法處理中文）
-    search_criteria = f'(SUBJECT "{subject}" ON {imap_date})'
-    try:
-        # 嘗試 UTF-8 搜尋
-        _, data = imap.search("UTF-8", search_criteria.encode("utf-8"))
-    except Exception:
-        # fallback：用 CHARSET 參數
-        try:
-            _, data = imap.uid("search", "CHARSET", "UTF-8",
-                               "SUBJECT", subject.encode("utf-8"),
-                               "ON", imap_date)
-        except Exception:
-            _, data = imap.search(None, f'(ON {imap_date})')
-    mail_ids = data[0].split()
-
-    if not mail_ids:
-        imap.logout()
-        raise RuntimeError(f"找不到主旨「{subject}」在 {fmt(target_date, '%Y-%m-%d')} 的信件")
-
-    candidates = []
-    for mid in mail_ids:
-        _, msg_data = imap.fetch(mid, "(RFC822)")
-        msg = email.message_from_bytes(msg_data[0][1])
-        if _decode_subject(msg).strip() != subject:
-            continue
-        date_tuple = email.utils.parsedate_tz(msg.get("Date", ""))
-        if not date_tuple:
-            continue
-        msg_dt = datetime.fromtimestamp(email.utils.mktime_tz(date_tuple), tz=TZ_TAIPEI)
-        if msg_dt.date() != target_date.date():
-            continue
-        diff = abs((msg_dt - target_time).total_seconds())
-        candidates.append({"dt": msg_dt, "diff": diff, "body": _plain_body(msg)})
-
-    imap.logout()
-    if not candidates:
-        raise RuntimeError(f"找到信件但沒有主旨完全符合「{subject}」且日期符合的信")
-
-    candidates.sort(key=lambda x: x["diff"])
-    chosen = candidates[0]
-    log.info("  %s → 選中 %s（與17:25差%.0fs）", subject, fmt(chosen["dt"], "%H:%M:%S"), chosen["diff"])
-    return chosen["body"]
+    log.info("[%s] 儲值金結算寫入完成：%d 筆 → 工作表「%s」", area_name, max(len(values) - 1, 0), sheet_name)
+    return sh
 
 
-def _normalize_lines(text: str) -> list[str]:
-    for ch in ["\r\n", "\r"]:
-        text = text.replace(ch, "\n")
-    for ch in ["\u00A0", "\u200B", "\u200C", "\u200D", "\uFEFF"]:
-        text = text.replace(ch, "")
-    text = text.replace("\u3000", " ").replace("﹕", "：")
-    return [l.strip() for l in text.split("\n") if l.strip()]
-
-
-def _find_daily_value(lines: list[str], date_str: str) -> int:
-    """
-    從信件行列裡找【專業清潔】日營業額的指定日期數值。
-    信件格式：
-      【專業清潔】日營業額
-      2026-06-01：32分
-      2026-06-02：29分
-      2026-06-03：112分
-    """
-    header = "【專業清潔】日營業額"
-    idx = -1
-    for i in range(len(lines) - 1, -1, -1):
-        if header in lines[i].replace(" ", ""):
-            idx = i
-            break
-    if idx == -1:
-        raise ValueError("找不到【專業清潔】日營業額標題")
-
-    # debug：印出標題後 8 行的原始 repr，確認格式
-    for _di in range(idx + 1, min(idx + 9, len(lines))):
-        log.info("  [debug] 行%d repr=%r", _di, lines[_di])
-
-    for i in range(idx + 1, len(lines)):
-        raw = lines[i]
-        compact = raw.replace(" ", "")
-        # 遇到下一個區段標題就停止
-        if compact != header and re.match(r"^【.+】日營業額$", compact):
-            break
-        # 匹配格式：2026-06-03：112分 或 2026-06-03:112分 或無「分」字
-        m = re.match(r"^(\d{4}[-/]\d{2}[-/]\d{2})[：:](\d+)分?$", compact)
-        if m:
-            raw_date = m.group(1).replace("/", "-")
-            if raw_date == date_str:
-                return int(m.group(2))
-    raise ValueError(f"找到標題但找不到 {date_str} 的數值")
-
-
-def _find_monthly_total(lines: list[str], month_str: str) -> tuple[int, int]:
-    label = f"【{month_str}總營業額】"
-    amount, count = None, None
-    for i in range(len(lines) - 1, -1, -1):
-        compact = lines[i].replace(" ", "")
-        if label not in compact:
-            continue
-        if amount is None:
-            m = re.search(r"\$([\d,]+)", compact)
-            if m:
-                amount = int(m.group(1).replace(",", ""))
-        if count is None and "$" not in compact:
-            m = re.search(r"[：:](\d+)$", compact)
-            if m:
-                count = int(m.group(1))
-        if amount is not None and count is not None:
-            break
-    if amount is None:
-        raise ValueError(f"找不到【{month_str}總營業額】金額")
-    if count is None:
-        raise ValueError(f"找不到【{month_str}總營業額】筆數")
-    return amount, count
-
-
-def _parse_mail(body: str, month_str: str, date_str: str) -> dict:
-    lines = _normalize_lines(body)
-    daily = _find_daily_value(lines, date_str)
-    amount, count = _find_monthly_total(lines, month_str)
-    return {"daily_value": daily, "total_count": count, "total_amount": amount}
-
-
-def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
-    task = "Step3_更新前一天營業分數及營業額"
+def step1_fetch_stored_value(
+    gc: gspread.Client,
+    areas: list[dict],
+    run_id: str,
+) -> dict:
+    """Step 1：各地區登入抓儲值金，寫入試算表。"""
+    task = "Step1_抓取儲值金"
     t0 = now_tp()
     checkin_both(gc, run_id, task, "START", "RUNNING")
 
+    results = {}
+    errors  = []
+
+    for area in areas:
+        area_name = area["name"]
+        log.info("=== [%s] 抓取儲值金 ===", area_name)
+        try:
+            email, password = get_area_credentials(area_name)
+            session = _login_backend_session(email, password, area_name)
+            content = _download_stored_value_export(session, area_name)
+            values = _excel_to_rows(content, area_name)
+            worksheet = _write_stored_value_sheet(gc, area_name, values)
+
+            results[area_name] = {
+                "count": max(len(values) - 1, 0),
+                "sheet": worksheet.title,
+                "ok": True,
+            }
+        except Exception as e:
+            log.error("[%s] 儲值金抓取失敗：%s", area_name, e)
+            errors.append(f"{area_name}: {e}")
+            results[area_name] = {"ok": False, "error": str(e)}
+
+    elapsed = (now_tp() - t0).total_seconds()
+    status  = "ERROR" if errors else "SUCCESS"
+    note    = json.dumps(results, ensure_ascii=False)[:300]
+    checkin_both(gc, run_id, task, "DONE", status, note, elapsed)
+
+    if errors:
+        raise RuntimeError("部分地區儲值金抓取失敗：\n" + "\n".join(errors))
+
+    return results
+
+
+# ──────────────────────────────────────────────────────────
+# 工具函式（對應 GAS 邏輯）
+# ──────────────────────────────────────────────────────────
+
+def normalize_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return re.sub(r"\s+", " ", str(value).replace("\u3000", " ").replace("\r\n", " ").replace("\n", " ")).strip()
+
+def normalize_name(name: Any) -> str:
+    return normalize_text(name)
+
+def normalize_address(addr: Any) -> str:
+    s = normalize_text(addr)
+    for old, new in [("－", "-"), ("–", "-"), ("—", "-"), ("，", ","), ("：", ":"), ("；", ";"), ("（", "("), ("）", ")")]:
+        s = s.replace(old, new)
+    s = re.sub(r"\s*-\s*", "-", s)
+    return s
+
+def build_customer_key(name: str, addr: str) -> str:
+    return normalize_name(name) + "|||" + normalize_address(addr)
+
+def normalize_name_for_compare(name: str) -> str:
+    s = normalize_name(name)
+    s = re.sub(r"[－–—─]", "-", s)
+    s = re.sub(r"\s*-.*$", "", s)
+    return s.strip()
+
+def get_weekday_text(dt: datetime) -> str:
+    return ["一", "二", "三", "四", "五", "六", "日"][dt.weekday()]
+
+def get_price_by_date(dt: datetime) -> int:
+    return 700 if dt.weekday() >= 5 else 600  # 六日 700，平日 600
+
+def parse_service_people(service_text: str) -> int:
+    m = re.search(r"(\d+)\s*人", str(service_text or ""))
+    return int(m.group(1)) if m else 2
+
+def calc_hours(start: datetime, end: datetime) -> float:
+    diff = (end - start).total_seconds() / 3600
+    return max(diff, 0.0)
+
+def parse_title(title: str) -> dict:
+    service_m = re.search(r"《(.*?)》", title)
+    note_m    = re.search(r"<(.*?)>", title)
+    service   = service_m.group(1) if service_m else ""
+    note      = note_m.group(1) if note_m else ""
+    cleaned   = re.sub(r"《.*?》|<.*?>", "", title).strip()
+    parts     = [p.strip() for p in cleaned.split(",")]
+    return {
+        "service": service,
+        "note":    note,
+        "name":    parts[0] if parts else "",
+        "phone":   parts[1] if len(parts) > 1 else "",
+    }
+
+def get_status(color: str) -> str:
+    if color == COLOR_PAUSE:      return "暫停"
+    if color == COLOR_UNARRANGED: return "未安排"
+    return "已安排"
+
+def to_number_safe(value: Any) -> float:
     try:
-        yesterday  = yesterday_tp()
-        date_str   = fmt(yesterday, "%Y-%m-%d")
-        month_str  = fmt(yesterday, "%Y-%m")
+        return float(str(value).replace(",", "")) if value not in (None, "") else 0.0
+    except (ValueError, TypeError):
+        return 0.0
 
-        target_ss = _sheets_call(
-            "開啟客服目標試算表",
-            lambda: gc.open_by_key(CONFIG["target_file_id"]),
-        )
-        report_sh = _sheets_call(
-            "取得每日回報工作表",
-            lambda: target_ss.worksheet(CONFIG["report_sheet_name"]),
-        )
 
-        row = _find_date_row(report_sh, yesterday)
-        if row < 1:
-            raise ValueError(f"找不到前一天日期列：{date_str}")
+# ──────────────────────────────────────────────────────────
+# Step 2：匯出定期VIP日曆
+# ──────────────────────────────────────────────────────────
 
-        taipei   = _parse_mail(_pick_mail(CONFIG["mail_subjects"]["taipei"],   yesterday), month_str, date_str)
-        taichung = _parse_mail(_pick_mail(CONFIG["mail_subjects"]["taichung"], yesterday), month_str, date_str)
-
-        log.info("  台北：%s", taipei)
-        log.info("  台中：%s", taichung)
-
-        # 台北 → H/I/J（欄 8,9,10）
-        _sheets_call(
-            "寫入台北營業資料",
-            lambda: report_sh.update(
-                values=[[taipei["daily_value"], taipei["total_count"], taipei["total_amount"]]],
-                range_name=gspread.utils.rowcol_to_a1(row, 8),
-                value_input_option="USER_ENTERED",
-            ),
-        )
-        # 台中 → CT/CU/CV（欄 98,99,100）
-        _sheets_call(
-            "寫入台中營業資料",
-            lambda: report_sh.update(
-                values=[[taichung["daily_value"], taichung["total_count"], taichung["total_amount"]]],
-                range_name=gspread.utils.rowcol_to_a1(row, 98),
-                value_input_option="USER_ENTERED",
-            ),
-        )
-
-        elapsed = (now_tp() - t0).total_seconds()
-        note = json.dumps({"row": row, "taipei": taipei, "taichung": taichung}, ensure_ascii=False)
-        checkin_both(gc, run_id, task, "DONE", "SUCCESS", note[:300], elapsed)
-        log.info("Step 3 完成，row=%d（%.1fs）", row, elapsed)
-        return {"ok": True, "row": row, "taipei": taipei, "taichung": taichung}
-
+def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: str = "") -> dict[str, dict]:
+    """
+    從各區固定試算表內最新的「{地區}儲值金結算_YYYYMMDD」讀取
+    姓名 → {totalBalance, lineValue}。
+    """
+    target_id = STORED_VALUE_SPREADSHEET_IDS.get(area_name, "")
+    if not target_id:
+        return {}
+    try:
+        ss = gc.open_by_key(target_id)
+        pattern = re.compile(rf"^{re.escape(area_name)}儲值金結算_\d{{8}}$")
+        candidates = [worksheet for worksheet in ss.worksheets() if pattern.fullmatch(worksheet.title)]
+        if not candidates:
+            raise gspread.WorksheetNotFound(
+                f"找不到 {area_name}儲值金結算_YYYYMMDD 工作表"
+            )
+        sh = max(candidates, key=lambda worksheet: worksheet.title)
+        records = sh.get_all_records()
     except Exception as e:
-        elapsed = (now_tp() - t0).total_seconds()
-        checkin_both(gc, run_id, task, "DONE", "ERROR", str(e)[:300], elapsed)
-        raise
+        log.warning("[%s] 讀取儲值金資料失敗（非致命）：%s", area_name, e)
+        return {}
+
+    name_map: dict[str, dict] = {}
+    for r in records:
+        # 嘗試各種欄位名稱
+        raw_name = r.get("客戶姓名") or r.get("name") or r.get("customer_name") or ""
+        line_val = r.get("LINE@") or r.get("line_url") or r.get("line_id") or ""
+        stored   = to_number_safe(r.get("剩餘儲值金") or r.get("stored_value") or r.get("stored_balance") or 0)
+        shopping = to_number_safe(r.get("剩餘購物金") or r.get("shopping_value") or r.get("shopping_balance") or 0)
+        name_key = normalize_name_for_compare(raw_name)
+        if not name_key:
+            continue
+        if name_key not in name_map:
+            name_map[name_key] = {"totalBalance": 0.0, "lineValue": ""}
+        name_map[name_key]["totalBalance"] += stored + shopping
+        if not name_map[name_key]["lineValue"] and line_val:
+            name_map[name_key]["lineValue"] = str(line_val)
+
+    return name_map
+
+
+def _fetch_calendar_events(
+    cal_service,
+    calendar_id: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    area_name: str,
+) -> list:
+    """從 Google Calendar API 抓行程。"""
+    if not calendar_id:
+        raise ValueError(f"[{area_name}] Calendar ID 未設定，請在主控試算表「客服地區設定」填入")
+
+    time_min = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    events = []
+    page_token = None
+    while True:
+        kwargs: dict = {
+            "calendarId":  calendar_id,
+            "timeMin":     time_min,
+            "timeMax":     time_max,
+            "singleEvents": True,
+            "orderBy":     "startTime",
+            "maxResults":  2500,
+        }
+        if page_token:
+            kwargs["pageToken"] = page_token
+
+        resp  = cal_service.events().list(**kwargs).execute()
+        items = resp.get("items", [])
+        events.extend(items)
+
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+
+    log.info("[%s] 讀取到 %d 筆行事曆行程", area_name, len(events))
+    return events
+
+
+def _process_events(events: list, area_name: str) -> list[dict]:
+    """
+    篩選、解析行程，對應 GAS exportCalendarWithRange 核心邏輯：
+    - 排除 COLOR_INTERNAL 色碼的內部行程
+    - 只保留含手機號碼的行程
+    - 同客戶+地址+日期去重
+    """
+    rows = []
+    seen_keys: set[str] = set()
+
+    for e in events:
+        color = e.get("colorId", "")
+        title = e.get("summary", "")
+
+        # 排除內部行程
+        if color == COLOR_INTERNAL:
+            continue
+
+        # 只保留有手機號碼的
+        if not re.search(r"09\d{8}", title):
+            continue
+
+        parsed   = parse_title(title)
+        status   = get_status(color)
+        location = e.get("location", "")
+
+        start_raw = e.get("start", {}).get("dateTime") or e.get("start", {}).get("date", "")
+        end_raw   = e.get("end",   {}).get("dateTime") or e.get("end",   {}).get("date", "")
+
+        try:
+            start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00")).astimezone(TZ_TAIPEI)
+            end_dt   = datetime.fromisoformat(end_raw.replace("Z", "+00:00")).astimezone(TZ_TAIPEI)
+        except Exception:
+            log.debug("[%s] 無法解析行程時間：%s / %s", area_name, start_raw, end_raw)
+            continue
+
+        date_str  = start_dt.strftime("%Y/%m/%d")
+        start_str = start_dt.strftime("%H:%M")
+        end_str   = end_dt.strftime("%H:%M")
+
+        # 去重 key
+        unique_key = normalize_name(parsed["name"]) + "|||" + normalize_address(location) + "|||" + date_str
+        if unique_key in seen_keys:
+            continue
+        seen_keys.add(unique_key)
+
+        weekday    = get_weekday_text(start_dt)
+        price      = get_price_by_date(start_dt)
+        people     = parse_service_people(parsed["service"])
+        hours      = calc_hours(start_dt, end_dt)
+        person_hrs = people * hours
+        amount     = price * person_hrs
+
+        rows.append({
+            "service":    parsed["service"],
+            "note":       parsed["note"],
+            "name":       normalize_name(parsed["name"]),
+            "phone":      parsed["phone"],
+            "address":    location,
+            "start_dt":   start_dt,
+            "date_str":   date_str,
+            "start_str":  start_str,
+            "end_str":    end_str,
+            "status":     status,
+            "weekday":    weekday,
+            "price":      price,
+            "person_hrs": person_hrs,
+            "amount":     amount,
+            # 以下由儲值金表回填
+            "subtotal":   0.0,
+            "balance":    0.0,
+            "diff":       0.0,
+            "line":       "",
+        })
+
+    return rows
+
+
+def _enrich_with_stored_value(rows: list[dict], stored_info: dict[str, dict]) -> list[dict]:
+    """計算各客戶當月小計，並從儲值金表帶入餘額。"""
+    # 先算各人當月小計
+    subtotal_map: dict[str, float] = {}
+    for r in rows:
+        key = normalize_name_for_compare(r["name"])
+        subtotal_map[key] = subtotal_map.get(key, 0.0) + r["amount"]
+
+    for r in rows:
+        key  = normalize_name_for_compare(r["name"])
+        info = stored_info.get(key, {})
+        r["subtotal"] = subtotal_map.get(key, 0.0)
+        r["balance"]  = info.get("totalBalance", 0.0)
+        r["diff"]     = r["balance"] - r["subtotal"]
+        r["line"]     = info.get("lineValue", "")
+
+    return rows
+
+
+def _write_vip_sheet(
+    gc: gspread.Client,
+    area_name: str,
+    rows: list[dict],
+    start_dt: datetime,
+    area_target_id: str = "",
+) -> str:
+    """寫入地區目標試算表「定期VIP_{地區}_{yyyyMM}」工作表，回傳工作表名稱。"""
+    target_id = area_target_id or _load_target_file_id()
+    if not target_id:
+        raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
+
+    ss         = gc.open_by_key(target_id)
+    sheet_name = f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}"
+
+    try:
+        sh = ss.worksheet(sheet_name)
+        sh.clear()
+    except gspread.WorksheetNotFound:
+        sh = ss.add_worksheet(title=sheet_name, rows=max(len(rows) + 10, 200), cols=20)
+
+    headers = [
+        "服務人時", "備註", "姓名", "電話", "地址",
+        "日期", "開始時間", "結束時間", "狀態", "",
+        "星期", "單價", "人時", "金額",
+        "當月預約總金額", "儲值金餘額", "差額", "LINE@",
+    ]
+
+    out = [headers]
+    shown_names: set[str] = set()
+
+    for r in rows:
+        compare_name = normalize_name_for_compare(r["name"])
+        is_first     = compare_name not in shown_names
+        if is_first:
+            shown_names.add(compare_name)
+
+        out.append([
+            r["service"], r["note"], r["name"], r["phone"], r["address"],
+            r["date_str"], r["start_str"], r["end_str"], r["status"], "",
+            r["weekday"], r["price"], r["person_hrs"], r["amount"],
+            r["subtotal"] if is_first else "",
+            r["balance"]  if is_first else "",
+            r["diff"]     if is_first else "",
+            r["line"]     if is_first else "",
+        ])
+
+    sh.update(values=out, range_name="A1", value_input_option="USER_ENTERED")
+    sh.freeze(rows=1)
+
+    log.info("[%s] 定期VIP工作表寫入完成：%d 筆，工作表：%s", area_name, len(rows), sheet_name)
+    return sheet_name
+
+
+def step2_export_vip_calendar(
+    gc: gspread.Client,
+    areas: list[dict],
+    run_id: str,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> dict:
+    """Step 2：各地區讀取 Google Calendar → 整理後寫入試算表。"""
+    task = "Step2_匯出定期VIP日曆"
+    t0   = now_tp()
+    checkin_both(gc, run_id, task, "START", "RUNNING")
+
+    cal_service = _calendar_service()
+    results     = {}
+    errors      = []
+
+    for area in areas:
+        area_name  = area["name"]
+        calendar_id = area["calendar_id"]
+        log.info("=== [%s] 匯出定期VIP日曆 ===", area_name)
+
+        try:
+            # 抓行程
+            events = _fetch_calendar_events(cal_service, calendar_id, start_dt, end_dt, area_name)
+            rows   = _process_events(events, area_name)
+
+            if not rows:
+                log.warning("[%s] 指定日期範圍內無符合行程", area_name)
+                results[area_name] = {"count": 0, "sheet": "", "ok": True}
+                continue
+
+            # 排序：姓名 → 日期 → 開始時間
+            rows.sort(key=lambda r: (r["name"], r["start_dt"], r["start_str"]))
+
+            # 帶入儲值金資料
+            _area_target = area.get("target_spreadsheet_id", "")
+            stored_info = _load_stored_value_info(gc, area_name, area_target_id=_area_target)
+            rows        = _enrich_with_stored_value(rows, stored_info)
+
+            # 寫入工作表
+            sheet_name = _write_vip_sheet(gc, area_name, rows, start_dt, area_target_id=_area_target)
+            results[area_name] = {"count": len(rows), "sheet": sheet_name, "ok": True}
+
+        except Exception as e:
+            log.error("[%s] VIP日曆匯出失敗：%s", area_name, e)
+            errors.append(f"{area_name}: {e}")
+            results[area_name] = {"ok": False, "error": str(e)}
+
+    elapsed = (now_tp() - t0).total_seconds()
+    status  = "ERROR" if errors else "SUCCESS"
+    note    = json.dumps(results, ensure_ascii=False)[:300]
+    checkin_both(gc, run_id, task, "DONE", status, note, elapsed)
+
+    if errors:
+        raise RuntimeError("部分地區VIP日曆匯出失敗：\n" + "\n".join(errors))
+
+    return results
 
 
 # ──────────────────────────────────────────────────────────
@@ -997,20 +882,11 @@ def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
 # ──────────────────────────────────────────────────────────
 
 def _load_target_file_id() -> str:
-    """
-    依序嘗試取得目標試算表 ID：
-    1. 環境變數 SERVICE_TARGET_SPREADSHEET_ID
-    2. 環境變數 LEMON_TARGET_FILE_ID（既有客服目標檔 Secret）
-    3. 主控試算表「系統設定」→ 客服排程系統 → 共用雲端資料夾ID 欄位
-    """
-    # 1-2. 排程與 Streamlit 注入的環境變數優先
-    for env_name in ("SERVICE_TARGET_SPREADSHEET_ID", "LEMON_TARGET_FILE_ID"):
-        val = os.environ.get(env_name, "").strip()
-        if val:
-            log.info("目標試算表 ID 來源：環境變數 %s", env_name)
-            return val
-
-    # 3. 從主控試算表讀取（429 時忽略）
+    """依序從 Secret 或主控試算表系統設定取得目標試算表 ID。"""
+    val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
+    if val:
+        log.info("目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID")
+        return val
     try:
         from tools.common.config_loader import get_system_config
         system_cfg = get_system_config("客服排程系統")
@@ -1022,104 +898,112 @@ def _load_target_file_id() -> str:
             log.info("目標試算表 ID 來源：主控試算表系統設定")
             return folder_id
     except Exception as e:
-        log.warning("從主控試算表讀取目標 ID 失敗（非致命）：%s", e)
-
+        log.warning("從主控試算表讀取目標 ID 失敗：%s", e)
     return ""
 
 
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="檸檬家事客服排程系統")
+    parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
+    parser.add_argument("--step",  type=int, choices=[0, 1, 2], default=0,
+                        help="0=全跑, 1=只抓儲值金, 2=只匯出VIP日曆（預設：0）")
     parser.add_argument(
-        "--step", type=int, choices=[0, 1, 2, 3], default=0,
-        help="0=全部, 1=排班統計表, 2=每日回報, 3=前一天營業額",
+        "--area",
+        type=str,
+        choices=list(SERVICE_AREA_GROUPS),
+        default="全區",
+        help="執行區域：全區（台北＋台中）、台北或台中；預設為全區",
     )
-    parser.add_argument(
-        "--date", type=str, default="",
-        help="執行日期 YYYY-MM-DD（預設今日台北時間）",
-    )
+    parser.add_argument("--start", type=str, default="",
+                        help="匯出起始日期 YYYY-MM-DD（預設：本月1日）")
+    parser.add_argument("--end",   type=str, default="",
+                        help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
     args = parser.parse_args()
 
-    # 執行日期
-    if args.date:
-        try:
-            run_dt = datetime.fromisoformat(args.date).replace(tzinfo=TZ_TAIPEI)
-        except ValueError:
-            sys.exit(f"❌ 日期格式錯誤：{args.date}，請用 YYYY-MM-DD")
+    if args.step in (0, 2) and not (_load_target_file_id()):
+        sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
+
+    # 日期範圍
+    today = now_tp()
+    if args.start:
+        start_dt = datetime.fromisoformat(args.start).replace(
+            hour=0, minute=0, second=0, tzinfo=TZ_TAIPEI
+        )
     else:
-        run_dt = now_tp()
-    # 先建立執行識別與 Log client，讓目標 ID 等前置設定失敗也能留下紀錄。
+        start_dt = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    if args.end:
+        end_dt = datetime.fromisoformat(args.end).replace(
+            hour=23, minute=59, second=59, tzinfo=TZ_TAIPEI
+        )
+    else:
+        # 本月最後一天
+        if today.month == 12:
+            last_day = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
+        else:
+            last_day = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
+        end_dt = last_day.replace(hour=23, minute=59, second=59)
+
     run_id = str(uuid.uuid4())[:8]
-    step   = args.step
-    CONFIG["master_log_spreadsheet_id"] = (
-        os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
-        or _get_secret("TOOLS_APP_LOG_SPREADSHEET_ID")
+    log.info("=== CRM 客服系統 run_id=%s area=%s step=%s %s ~ %s ===",
+             run_id, args.area, args.step or "ALL",
+             fmt(start_dt, "%Y-%m-%d"), fmt(end_dt, "%Y-%m-%d"))
+
+    gc    = _gc()
+    areas = load_area_config(gc, filter_area=args.area)
+
+    _SERVICE_LOG_CONTEXT["area"] = args.area
+    _SERVICE_LOG_CONTEXT["period"] = (
+        f"{fmt(start_dt, '%Y-%m-%d')}~{fmt(end_dt, '%Y-%m-%d')}"
     )
+    _SERVICE_LOG_CONTEXT["run_feature"] = {
+        0: "CRM／儲值全部執行",
+        1: "【儲值】抓儲值金",
+        2: "【CRM】產生 CRM",
+    }[args.step]
 
-    log.info("=== 客服排程系統 run_id=%s step=%s 台北時間=%s ===",
-             run_id, step or "ALL", fmt(run_dt, "%Y-%m-%d %H:%M:%S"))
+    if not areas:
+        sys.exit(f"❌ 沒有啟用的地區設定（filter={args.area}），請檢查主控試算表「客服地區設定」")
 
-    gc = _gc()
-
-    target_id = _load_target_file_id()
-    if not target_id:
-        error_message = (
-            "找不到客服目標試算表 ID；請設定 "
-            "SERVICE_TARGET_SPREADSHEET_ID 或 LEMON_TARGET_FILE_ID"
-        )
-        checkin_master(
-            gc, run_id, "RUN", "DONE", "ERROR", error_message, 0
-        )
-        log.error(error_message)
-        sys.exit(1)
-
-    CONFIG["target_file_id"] = target_id
-    drive = _drive()
-
-    # 整體開始打卡
     checkin_both(gc, run_id, "RUN", "START", "RUNNING",
-                 f"step={step}", 0)
+                 f"area={args.area} step={args.step or 'ALL'}", 0)
 
     t_total = now_tp()
     errors  = []
 
-    def run(step_num: int, fn, *a):
-        labels = {
-            1: "Step1_更新排班統計表",
-            2: "Step2_更新每日回報",
-            3: "Step3_更新前一天營業分數及營業額",
-        }
-        log.info("--- %s ---", labels[step_num])
-        try:
-            fn(*a)
-        except Exception as e:
-            errors.append(f"Step {step_num}: {e}")
-            log.error("Step %d 失敗：%s", step_num, e)
+    try:
+        if args.step in (0, 1):
+            log.info("--- Step 1：抓取儲值金 ---")
+            try:
+                step1_fetch_stored_value(gc, areas, run_id)
+            except Exception as e:
+                errors.append(str(e))
+                log.error("Step 1 失敗：%s", e)
 
-    if step in (0, 1):
-        run(1, step1_update_schedule_stats, run_dt, gc, drive, run_id)
-    if step in (0, 2):
-        if step == 0:
-            log.info("等待 5 秒讓 API rate limit 恢復...")
-            time.sleep(5)
-        run(2, step2_write_daily_report, run_dt, gc, run_id)
-    if step in (0, 3):
-        if step == 0:
-            log.info("等待 60 秒讓 Sheets API 每分鐘配額恢復...")
-            time.sleep(60)
-        run(3, step3_import_revenue, gc, run_id)
+        if args.step in (0, 2):
+            log.info("--- Step 2：匯出定期VIP日曆 ---")
+            # Step 2 需要有 Calendar ID 的地區
+            areas_with_cal = [a for a in areas if a["calendar_id"]]
+            if not areas_with_cal:
+                log.warning("所有地區均未設定 Calendar ID，跳過 Step 2")
+                log.warning("請在主控試算表「客服地區設定」填入各地區的 Calendar ID")
+            else:
+                try:
+                    step2_export_vip_calendar(gc, areas_with_cal, run_id, start_dt, end_dt)
+                except Exception as e:
+                    errors.append(str(e))
+                    log.error("Step 2 失敗：%s", e)
 
-    elapsed_total = (now_tp() - t_total).total_seconds()
-    final_status  = "ERROR" if errors else "SUCCESS"
-    final_note    = "; ".join(errors) if errors else "全部完成"
-
-    checkin_both(gc, run_id, "RUN", "DONE", final_status, final_note[:300], elapsed_total)
+    finally:
+        elapsed_total = (now_tp() - t_total).total_seconds()
+        final_status  = "ERROR" if errors else "SUCCESS"
+        final_note    = "; ".join(errors) if errors else "全部完成"
+        checkin_both(gc, run_id, "RUN", "DONE", final_status, final_note[:300], elapsed_total)
 
     if errors:
-        log.error("執行結束（有失敗）：%s", errors)
+        log.error("執行結束（有失敗）")
         sys.exit(1)
 
-    log.info("=== 全部完成 run_id=%s（%.1fs）===", run_id, elapsed_total)
+    log.info("=== 全部完成 run_id=%s（%.1fs）===", run_id, (now_tp() - t_total).total_seconds())
 
 
 if __name__ == "__main__":
