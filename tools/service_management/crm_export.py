@@ -2,6 +2,11 @@
 檸檬家事 CRM 客服系統
 tools/service_management/crm_export.py
 
+最後更新：2026-08-12
+
+Change Log：
+  - 2026-08-12：儲值金流程改為後台下載結算 Excel，覆寫各區固定試算表分頁並更新日期名稱；支援全區／台北／台中。
+
 功能（依序執行）：
   Step 1. 各地區登入 backend.lemonclean.com.tw → 抓取儲值金會員資料
           → 寫入目標試算表「儲值金表_{地區}」工作表
@@ -44,8 +49,11 @@ import re
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone, date
+from html.parser import HTMLParser
+from io import BytesIO
 from typing import Any
 
+import pandas as pd
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
@@ -65,9 +73,20 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # backend API
-BACKEND_BASE   = "https://backend.lemonclean.com.tw"
-LOGIN_PATH     = "/auth/login"
-MEMBER_PATH    = "/member"
+BACKEND_BASE = "https://backend.lemonclean.com.tw"
+LOGIN_URL = f"{BACKEND_BASE}/login"
+STORED_VALUE_EXPORT_URL = f"{BACKEND_BASE}/member/export_stored_value"
+
+# 客服儲值功能的固定目的試算表。網址中的 gid 只代表當時開啟的分頁；
+# 程式會在試算表內尋找並沿用「{地區}儲值金結算_YYYYMMDD」分頁。
+STORED_VALUE_SPREADSHEET_IDS: dict[str, str] = {
+    "台北": "1T01k68sV0NY6MPD2nw8Tg1ijC9dOXhhr26G5-Bc9bJM",
+    "台中": "17t3JcUEF0tQwr4a3fvLXUceCXgQDsmihYz7tkRQOc6s",
+}
+STORED_VALUE_WORKSHEET_GIDS: dict[str, int] = {
+    "台北": 141159387,
+    "台中": 2057599829,
+}
 
 # 主控試算表地區設定工作表
 AREA_SHEET_NAME    = "客服地區設定"
@@ -325,121 +344,128 @@ def get_area_credentials(area_name: str) -> tuple[str, str]:
 
 
 # ──────────────────────────────────────────────────────────
-# Step 1：抓取儲值金
+# Step 1：下載並更新儲值金結算表
 # ──────────────────────────────────────────────────────────
 
-def _login_backend(email: str, password: str, area_name: str) -> str:
-    """登入 backend，回傳 Bearer token。"""
-    url = BACKEND_BASE + LOGIN_PATH
-    resp = requests.post(url, json={"email": email, "password": password}, timeout=30)
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"[{area_name}] 登入失敗 HTTP {resp.status_code}: {resp.text[:200]}"
-        )
-    data = resp.json()
-    # 常見的 token key：token / access_token / data.token
-    token = (
-        data.get("token")
-        or data.get("access_token")
-        or (data.get("data") or {}).get("token")
-        or ""
+class _CsrfTokenParser(HTMLParser):
+    """Extract the Laravel login form's CSRF token without extra dependencies."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.token = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "input":
+            return
+        values = dict(attrs)
+        if values.get("name") == "_token" and values.get("value"):
+            self.token = values["value"] or ""
+
+
+def _login_backend_session(email: str, password: str, area_name: str) -> requests.Session:
+    """以後台網頁表單登入，回傳保留登入 cookie 的 Session。"""
+    session = requests.Session()
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = session.get(LOGIN_URL, headers=headers, timeout=30, allow_redirects=True)
+    resp.raise_for_status()
+    parser = _CsrfTokenParser()
+    parser.feed(resp.text)
+    if not parser.token:
+        raise RuntimeError(f"[{area_name}] 登入頁面找不到 _token")
+
+    resp = session.post(
+        LOGIN_URL,
+        data={"_token": parser.token, "email": email, "password": password},
+        headers=headers,
+        timeout=30,
+        allow_redirects=True,
     )
-    if not token:
-        raise RuntimeError(f"[{area_name}] 登入成功但回傳無 token，請確認 API 格式：{str(data)[:300]}")
-    return token
+    resp.raise_for_status()
+    if "login" in resp.url.lower():
+        raise RuntimeError(f"[{area_name}] 後台登入失敗")
+    return session
 
 
-def _fetch_members(token: str, area_name: str) -> list[dict]:
-    """用 token 抓取會員清單。"""
-    url = BACKEND_BASE + MEMBER_PATH
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(url, headers=headers, timeout=60)
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"[{area_name}] 抓取會員資料失敗 HTTP {resp.status_code}: {resp.text[:200]}"
-        )
-    data = resp.json()
-    # 常見結構：list / {"data": list} / {"members": list}
-    if isinstance(data, list):
-        return data
-    for key in ("data", "members", "items", "results"):
-        if isinstance(data.get(key), list):
-            return data[key]
-    raise RuntimeError(f"[{area_name}] 無法解析會員 API 回傳結構：{str(data)[:300]}")
+def _download_stored_value_export(session: requests.Session, area_name: str) -> bytes:
+    """下載執行當下最新的儲值金結算 Excel。"""
+    resp = session.get(
+        STORED_VALUE_EXPORT_URL,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=120,
+        allow_redirects=True,
+    )
+    resp.raise_for_status()
+    preview = resp.content[:300].decode("utf-8", errors="ignore").lower()
+    if "<html" in preview or "login" in resp.url.lower():
+        raise RuntimeError(f"[{area_name}] 儲值金結算下載失敗：登入已失效或後台回傳 HTML")
+    if not resp.content:
+        raise RuntimeError(f"[{area_name}] 儲值金結算下載結果為空")
+    return resp.content
 
 
-def _members_to_rows(members: list[dict]) -> tuple[list[str], list[list]]:
-    """
-    把 API 回傳的 member list 轉成 (headers, rows) 準備寫入試算表。
-    欄位對應 GAS 版「儲值金表」：
-      B=客戶姓名 C=地址 D=電話 E=LINE帳號 F=LINE@ N=剩餘儲值金 O=剩餘購物金
-    這裡直接把所有欄位攤開，讓使用者看到完整資料。
-    """
-    if not members:
-        return [], []
+def _excel_to_rows(content: bytes, area_name: str) -> list[list[Any]]:
+    """將下載的第一張 Excel 工作表轉成可貼入 Google Sheets 的二維資料。"""
+    try:
+        frame = pd.read_excel(BytesIO(content), engine="openpyxl", dtype=object)
+    except Exception as exc:
+        raise RuntimeError(f"[{area_name}] 儲值金結算檔轉檔失敗：{exc}") from exc
 
-    # 先收集所有 key（保持順序）
-    all_keys: list[str] = []
-    seen: set[str] = set()
-    for m in members:
-        for k in m.keys():
-            if k not in seen:
-                all_keys.append(k)
-                seen.add(k)
-
-    # 中文欄位對應（盡量對齊 GAS 版格式）
-    KEY_LABEL: dict[str, str] = {
-        "name":            "客戶姓名",
-        "customer_name":   "客戶姓名",
-        "address":         "地址",
-        "phone":           "電話",
-        "mobile":          "電話",
-        "line_id":         "LINE帳號",
-        "line_url":        "LINE@",
-        "stored_value":    "剩餘儲值金",
-        "stored_balance":  "剩餘儲值金",
-        "shopping_value":  "剩餘購物金",
-        "shopping_balance":"剩餘購物金",
-        "email":           "Email",
-        "created_at":      "建立時間",
-        "updated_at":      "更新時間",
-    }
-
-    headers = [KEY_LABEL.get(k, k) for k in all_keys]
-    rows = []
-    for m in members:
-        row = [str(m.get(k, "")) for k in all_keys]
-        rows.append(row)
-
-    return headers, rows
+    frame = frame.fillna("")
+    values: list[list[Any]] = [list(map(str, frame.columns.tolist()))]
+    for row in frame.itertuples(index=False, name=None):
+        converted = []
+        for value in row:
+            if isinstance(value, (datetime, date)):
+                converted.append(value.strftime("%Y-%m-%d %H:%M:%S"))
+            elif hasattr(value, "item"):
+                converted.append(value.item())
+            else:
+                converted.append(value)
+        values.append(converted)
+    return values
 
 
 def _write_stored_value_sheet(
     gc: gspread.Client,
     area_name: str,
-    headers: list[str],
-    rows: list[list],
-    area_target_id: str = "",
+    values: list[list[Any]],
 ) -> gspread.Worksheet:
-    """寫入地區目標試算表「儲值金_{地區}」。"""
-    target_id = area_target_id or _load_target_file_id()
+    """覆寫各區固定試算表中的同一張儲值金結算分頁，並更新日期名稱。"""
+    target_id = STORED_VALUE_SPREADSHEET_IDS.get(area_name, "")
     if not target_id:
-        raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
+        raise EnvironmentError(f"[{area_name}] 尚未設定儲值金結算目的試算表")
 
     ss = gc.open_by_key(target_id)
-    sheet_name = f"儲值金_{area_name}"
+    sheet_name = f"{area_name}儲值金結算_{fmt(now_tp(), '%Y%m%d')}"
+    pattern = re.compile(rf"^{re.escape(area_name)}儲值金結算_\d{{8}}$")
+    candidates = [worksheet for worksheet in ss.worksheets() if pattern.fullmatch(worksheet.title)]
 
-    try:
-        sh = ss.worksheet(sheet_name)
+    if candidates:
+        # 同一區原則上只會有一張；若歷史上有多張，沿用最末日期的一張。
+        sh = max(candidates, key=lambda worksheet: worksheet.title)
+        if sh.title != sheet_name:
+            sh.update_title(sheet_name)
         sh.clear()
-    except gspread.WorksheetNotFound:
-        sh = ss.add_worksheet(title=sheet_name, rows=max(len(rows) + 10, 500), cols=len(headers) + 5)
+    else:
+        # 首次執行沿用使用者指定網址中的既有 gid，不另外新增分頁。
+        worksheet_gid = STORED_VALUE_WORKSHEET_GIDS.get(area_name)
+        sh = ss.get_worksheet_by_id(worksheet_gid) if worksheet_gid is not None else None
+        if sh is None:
+            raise gspread.WorksheetNotFound(
+                f"[{area_name}] 找不到指定工作表 gid={worksheet_gid}"
+            )
+        sh.update_title(sheet_name)
+        sh.clear()
 
-    if headers:
-        sh.update(values=[headers] + rows, range_name="A1", value_input_option="USER_ENTERED")
+    if values:
+        required_rows = max(len(values) + 10, 500)
+        required_cols = max(max(len(row) for row in values) + 5, 10)
+        if sh.row_count < required_rows or sh.col_count < required_cols:
+            sh.resize(rows=max(sh.row_count, required_rows), cols=max(sh.col_count, required_cols))
+        sh.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
         sh.freeze(rows=1)
 
-    log.info("[%s] 儲值金寫入完成：%d 筆 → 工作表「%s」", area_name, len(rows), sheet_name)
+    log.info("[%s] 儲值金結算寫入完成：%d 筆 → 工作表「%s」", area_name, max(len(values) - 1, 0), sheet_name)
     return sh
 
 
@@ -461,17 +487,16 @@ def step1_fetch_stored_value(
         log.info("=== [%s] 抓取儲值金 ===", area_name)
         try:
             email, password = get_area_credentials(area_name)
-            token   = _login_backend(email, password, area_name)
-            members = _fetch_members(token, area_name)
-            log.info("[%s] 取得 %d 筆會員資料", area_name, len(members))
+            session = _login_backend_session(email, password, area_name)
+            content = _download_stored_value_export(session, area_name)
+            values = _excel_to_rows(content, area_name)
+            worksheet = _write_stored_value_sheet(gc, area_name, values)
 
-            headers, rows = _members_to_rows(members)
-            _write_stored_value_sheet(
-                gc, area_name, headers, rows,
-                area_target_id=area.get("target_spreadsheet_id", ""),
-            )
-
-            results[area_name] = {"count": len(members), "ok": True}
+            results[area_name] = {
+                "count": max(len(values) - 1, 0),
+                "sheet": worksheet.title,
+                "ok": True,
+            }
         except Exception as e:
             log.error("[%s] 儲值金抓取失敗：%s", area_name, e)
             errors.append(f"{area_name}: {e}")
@@ -562,14 +587,21 @@ def to_number_safe(value: Any) -> float:
 
 def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: str = "") -> dict[str, dict]:
     """
-    從「儲值金_{地區}」讀取姓名 → {totalBalance, lineValue}。
+    從各區固定試算表內最新的「{地區}儲值金結算_YYYYMMDD」讀取
+    姓名 → {totalBalance, lineValue}。
     """
-    target_id = area_target_id or _load_target_file_id()
+    target_id = STORED_VALUE_SPREADSHEET_IDS.get(area_name, "")
     if not target_id:
         return {}
     try:
-        ss      = gc.open_by_key(target_id)
-        sh      = ss.worksheet(f"儲值金_{area_name}")
+        ss = gc.open_by_key(target_id)
+        pattern = re.compile(rf"^{re.escape(area_name)}儲值金結算_\d{{8}}$")
+        candidates = [worksheet for worksheet in ss.worksheets() if pattern.fullmatch(worksheet.title)]
+        if not candidates:
+            raise gspread.WorksheetNotFound(
+                f"找不到 {area_name}儲值金結算_YYYYMMDD 工作表"
+            )
+        sh = max(candidates, key=lambda worksheet: worksheet.title)
         records = sh.get_all_records()
     except Exception as e:
         log.warning("[%s] 讀取儲值金資料失敗（非致命）：%s", area_name, e)
@@ -886,7 +918,7 @@ def main() -> None:
                         help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
     args = parser.parse_args()
 
-    if not (_load_target_file_id()):
+    if args.step in (0, 2) and not (_load_target_file_id()):
         sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     # 日期範圍
