@@ -1,14 +1,14 @@
+# 檔案：toolapp.py
+# 版本：0812_v2
+# 最後更新：2026-08-12
+#
+# Change Log：
+# - 2026-08-12：將檔頭版本資訊與 Change Log 改為程式註解，避免 Streamlit 顯示於網頁。
+# - 2026-08-12：儲值完整實作正式移至 stored_value.py；crm_export.py 僅保留舊版相容入口。
+# - 2026-08-12：拆分客服 CRM 與儲值功能入口，排班／CRM／儲值皆支援全區、台北、台中。
+# - 2026-07-04：建立 0704_v3 版本。
+
 from __future__ import annotations
-
-"""
-檔案：toolapp.py
-版本：0704_v3
-最後更新：2026-08-12
-
-Change Log：
-- 2026-08-12：拆分客服 CRM 與儲值功能入口，排班／CRM／儲值皆支援全區、台北、台中。
-- 2026-07-04：建立 0704_v3 版本。
-"""
 import html
 import base64
 import json
