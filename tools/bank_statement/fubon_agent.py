@@ -137,6 +137,36 @@ def logout_and_close(context: BrowserContext, page: Page) -> None:
         if not clicked:
             raise RuntimeError("富邦找不到右上角登出按鈕")
 
+        confirmation_clicked = False
+        confirmation_deadline = time.monotonic() + 6
+        while time.monotonic() < confirmation_deadline and not confirmation_clicked:
+            for bank_page in list(context.pages):
+                if bank_page.is_closed() or "ebank.taipeifubon.com.tw" not in bank_page.url:
+                    continue
+                for frame in [bank_page, *bank_page.frames]:
+                    try:
+                        controls = frame.get_by_text("直接登出", exact=True)
+                        for index in range(controls.count()):
+                            control = controls.nth(index)
+                            if not control.is_visible():
+                                continue
+                            try:
+                                control.click(timeout=5_000)
+                            except Exception:
+                                control.evaluate("element => element.click()")
+                            confirmation_clicked = True
+                            break
+                    except Exception:
+                        continue
+                    if confirmation_clicked:
+                        break
+                if confirmation_clicked:
+                    break
+            if not confirmation_clicked:
+                time.sleep(0.2)
+        if not confirmation_clicked:
+            raise RuntimeError("已按右上角登出，但找不到彈窗的「直接登出」")
+
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             active_pages = [
