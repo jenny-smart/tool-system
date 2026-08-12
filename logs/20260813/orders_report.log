@@ -1,0 +1,55 @@
+開始執行：當月次月訂單
+⚠️ 一鍵日排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 一鍵日排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_daily/orders_report.py
+[2026-08-13 02:09:58] ====================================================
+[2026-08-13 02:09:58] orders_report.py 開始執行
+[2026-08-13 02:09:58] GITHUB_ACTIONS = true
+[2026-08-13 02:09:58] PWD = /home/runner/work/tool-system/tool-system
+[2026-08-13 02:09:58] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/訂單資料
+[2026-08-13 02:09:58] LOCAL_OUTPUT_DIR exists = False
+[2026-08-13 02:09:58] can_use_local_output_dir = False
+[2026-08-13 02:09:58] root folder_id = 11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc
+[2026-08-13 02:09:58] ====================================================
+[2026-08-13 02:09:58] Google Drive 初始化成功
+[2026-08-13 02:09:59] 📁 使用既有資料夾：訂單資料
+[2026-08-13 02:09:59] 服務日期：2026-08-01 ~ 2026-09-30
+[2026-08-13 02:09:59] file_date = 20260813
+[2026-08-13 02:09:59] 訂單資料 folder_id = 1o6ROTdseIRKOivgYQt50cNuCZLT3Rpug
+[2026-08-13 02:09:59] 帳號數量 = 2
+[2026-08-13 02:09:59] 
+[2026-08-13 02:09:59] === 開始處理 台北 ===
+[2026-08-13 02:09:59] 開始登入：jenny@lemonclean.com.tw
+[2026-08-13 02:10:01] 登入成功：jenny@lemonclean.com.tw
+[2026-08-13 02:10:01] 開始下載：city=台北 / export_url=https://backend.lemonclean.com.tw/purchase/export_order?clean_date_s=2026-08-01&clean_date_e=2026-09-30&purchase_status=1
+[2026-08-13 02:10:14] ✅ 已下載到暫存：/tmp/tmp3cfxn51r/20260813訂單-台北.xls
+[2026-08-13 02:10:14] 📦 檔案大小：1472512 bytes
+[2026-08-13 02:10:14] 📂 暫存目錄存在：True
+[2026-08-13 02:10:14] 📄 暫存檔案存在：True
+[2026-08-13 02:10:14] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-13 02:10:14] Google Drive 初始化成功
+[2026-08-13 02:10:15] 準備上傳到 Google Drive：20260813訂單-台北.xls
+[2026-08-13 02:10:16] ☁️ 已上傳新檔：20260813訂單-台北.xls (file_id=1b7e7dar3kHfxEP0O2byAb7-3vfd1qJCz) https://docs.google.com/spreadsheets/d/1b7e7dar3kHfxEP0O2byAb7-3vfd1qJCz/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-13 02:10:16] ✅ 完成處理：20260813訂單-台北.xls
+[2026-08-13 02:10:16] ✅ 台北 完成
+[2026-08-13 02:10:16] 
+[2026-08-13 02:10:16] === 開始處理 台中 ===
+[2026-08-13 02:10:16] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-08-13 02:10:18] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-08-13 02:10:18] 開始下載：city=台中 / export_url=https://backend.lemonclean.com.tw/purchase/export_order?clean_date_s=2026-08-01&clean_date_e=2026-09-30&purchase_status=1
+[2026-08-13 02:10:20] ✅ 已下載到暫存：/tmp/tmp0bcxxmgn/20260813訂單-台中.xls
+[2026-08-13 02:10:20] 📦 檔案大小：108544 bytes
+[2026-08-13 02:10:20] 📂 暫存目錄存在：True
+[2026-08-13 02:10:20] 📄 暫存檔案存在：True
+[2026-08-13 02:10:20] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-13 02:10:20] Google Drive 初始化成功
+[2026-08-13 02:10:20] 準備上傳到 Google Drive：20260813訂單-台中.xls
+[2026-08-13 02:10:21] ☁️ 已上傳新檔：20260813訂單-台中.xls (file_id=1bOLUh5BSI83bORApsR8LKBtu2g3DT11s) https://docs.google.com/spreadsheets/d/1bOLUh5BSI83bORApsR8LKBtu2g3DT11s/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-13 02:10:21] ✅ 完成處理：20260813訂單-台中.xls
+[2026-08-13 02:10:21] ✅ 台中 完成
+[2026-08-13 02:10:21] 🎉 orders_report.py 全部完成
+
+完成執行：當月次月訂單
+scheduled_daily scheduler 全部完成
