@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import smtplib
 from datetime import datetime
@@ -24,8 +25,17 @@ EXPECTED_JOBS = [
     ("field_staff_schedule", "外場專員班表"),
     ("field_orders", "外場訂單"),
     ("field_staff_profile", "外場專員個資"),
+    ("service_schedule_stats", "客服排班統計表"),
+    ("service_daily_report", "客服每日回報"),
+    ("service_revenue", "客服營業分數及營業額"),
 ]
 JOB_LABELS = dict(EXPECTED_JOBS)
+
+SERVICE_JOB_NAMES = {
+    "service_schedule_stats",
+    "service_daily_report",
+    "service_revenue",
+}
 
 
 def today_text() -> str:
@@ -103,8 +113,50 @@ def important_lines(content: str, limit: int = 8) -> list[str]:
         "登入失敗",
         "略過寄信",
     ]
-    matched = [line for line in lines if any(keyword in line for keyword in keywords)]
-    return (matched or lines)[-limit:]
+    benign_fragments = [
+        "secrets TOML 注入失敗：No secrets found",
+        "secrets env 注入失敗：No secrets found",
+    ]
+    useful_lines = [
+        line for line in lines
+        if not any(fragment in line for fragment in benign_fragments)
+    ]
+    matched = [
+        line for line in useful_lines
+        if any(keyword in line for keyword in keywords)
+    ]
+    return (matched or useful_lines)[-limit:]
+
+
+def read_job_metadata(log_dir: Path, job_name: str) -> dict[str, object]:
+    metadata_path = log_dir / f"{job_name}.json"
+    if not metadata_path.exists():
+        return {}
+    try:
+        data = json.loads(read_text(metadata_path))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def metadata_summary(metadata: dict[str, object], status_key: str) -> str:
+    started_at = str(metadata.get("started_at") or "").strip()
+    finished_at = str(metadata.get("finished_at") or "").strip()
+    duration = metadata.get("duration_seconds")
+    parts: list[str] = []
+    if started_at:
+        parts.append(f"開始 {started_at}")
+    if finished_at:
+        parts.append(f"完成 {finished_at}")
+    if duration not in (None, ""):
+        parts.append(f"耗時 {duration} 秒")
+    if parts:
+        return " / ".join(parts)
+    if status_key == "FAILED":
+        return "執行失敗；詳細錯誤請至 GitHub Actions 或 Tools App 查看"
+    if status_key == "MISSING":
+        return "尚未產生執行紀錄"
+    return "執行成功（程式未輸出文字 Log）"
 
 
 def build_status_rows(log_dir: Path) -> list[dict[str, str]]:
@@ -113,7 +165,16 @@ def build_status_rows(log_dir: Path) -> list[dict[str, str]]:
     for job_name, label in EXPECTED_JOBS:
         exit_code = get_exit_code(log_dir, job_name)
         content = read_text(log_dir / f"{job_name}.log")
+        metadata = read_job_metadata(log_dir, job_name)
         status_text, color, status_key = status_for_exit(exit_code)
+        important = important_lines(content, limit=2)
+
+        if job_name in SERVICE_JOB_NAMES:
+            summary = metadata_summary(metadata, status_key)
+        elif important:
+            summary = " / ".join(important)[:500]
+        else:
+            summary = metadata_summary(metadata, status_key)
 
         rows.append(
             {
@@ -124,7 +185,7 @@ def build_status_rows(log_dir: Path) -> list[dict[str, str]]:
                 "color": color,
                 "exit_code": exit_code,
                 "content": content,
-                "summary": " / ".join(important_lines(content, limit=2))[:500],
+                "summary": summary,
             }
         )
 
@@ -163,8 +224,11 @@ def build_plain_body(date_str: str, rows: list[dict[str, str]]) -> str:
         lines.append("")
         lines.append(f"【{row['label']}】{row['status']} / exit={row['exit_code']}")
         lines.append("-" * 60)
-        content = row["content"] or "無 log"
-        lines.append(content[-6000:])
+        if row["job_name"] in SERVICE_JOB_NAMES:
+            lines.append("客服原始 Log 不附於 Email；詳細內容請至 GitHub Actions 或 Tools App 查看。")
+        else:
+            content = row["content"] or "無 log"
+            lines.append(content[-6000:])
 
     return "\n".join(lines)
 
