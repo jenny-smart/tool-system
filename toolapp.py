@@ -1,14 +1,10 @@
-# 檔案：toolapp.py
-# 版本：0812_v2
-# 最後更新：2026-08-12
-#
-# Change Log：
-# - 2026-08-12：將檔頭版本資訊與 Change Log 改為程式註解，避免 Streamlit 顯示於網頁。
-# - 2026-08-12：儲值完整實作正式移至 stored_value.py；crm_export.py 僅保留舊版相容入口。
-# - 2026-08-12：拆分客服 CRM 與儲值功能入口，排班／CRM／儲值皆支援全區、台北、台中。
-# - 2026-07-04：建立 0704_v3 版本。
-
 from __future__ import annotations
+
+"""
+檔案：toolapp.py
+版本：0704_v3
+更新日期：2026-07-04
+"""
 import html
 import base64
 import json
@@ -1007,9 +1003,9 @@ def available_areas_for_system(system: dict) -> list[str]:
                 return list(value.keys())
         return ["台北", "台中"]
 
-    # 客服排班／CRM／儲值統一提供全區、台北、台中。
+    # ── ★ 新增：客服排程系統固定全區 ──────────────────────
     if system_type == "service_schedule":
-        return ["全區", "台北", "台中"]
+        return ["全區"]
     # ────────────────────────────────────────────────────────
 
     if system_type == "finance_management":
@@ -1742,6 +1738,15 @@ def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, 
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_newebpay_refund_pending(*, month="", start_date=None, end_date=None, area="全區"):
+    task = create_local_agent_task(
+        "newebpay.refund_pending",
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 def queue_fubon_login(*, month="", start_date=None, end_date=None, area="全區"):
     mobile = st.session_state.get("fubon_verification_mode") == "手機輸入驗證碼"
     task = create_local_agent_task(
@@ -1864,6 +1869,7 @@ FINANCE_TASKS = [
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
+    {"name": "【藍新金流】藍新信用卡待退款", "handler": queue_newebpay_refund_pending, "enabled": True},
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
@@ -1989,15 +1995,13 @@ SERVICE_STEP_MAP = {
     "【排班】三步驟全部執行":           "0",
 }
 
-# 儲值功能獨立走 stored_value.py。
-SERVICE_STORED_VALUE_MAP = {
+# ── ★ CRM：功能 → crm_export.py --step 對應表 ───────────────
+SERVICE_CRM_MAP = {
+    # 儲值金服務排程管理
     "【儲值】抓儲值金":                  "1",
     "【儲值】匯出VIP日曆對帳":           "2",
     "【儲值】全跑（抓儲值金＋匯出VIP）":  "0",
-}
-
-# CRM 保持獨立功能表，不與儲值共用名稱或執行入口。
-SERVICE_CRM_MAP = {
+    # CRM 排程管理
     "【CRM】更新排程決策報表":           "4",
     "【CRM】更新三個月未排名單":         "5",
     "【CRM】重新排序Raw":               "6",
@@ -2206,6 +2210,9 @@ with date_col:
         elif selected_function == "【元大銀行】檢查薪資付款狀態":
             st.markdown('<div class="field-label">📆 付款日期</div>', unsafe_allow_html=True)
             st.info("固定查詢最近一週", icon="📅")
+        elif selected_function == "【藍新金流】藍新信用卡待退款":
+            st.markdown('<div class="field-label">📆 查詢期間</div>', unsafe_allow_html=True)
+            st.info("固定查詢今天起往前 85 天", icon="📅")
         elif selected_function == "【富邦銀行】富邦明細下載":
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -3004,29 +3011,17 @@ if run_clicked:
                     if _target_id:
                         _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _target_id
 
-                # ── 儲值功能 ──────────────────────────────────
-                if selected_function in SERVICE_STORED_VALUE_MAP:
-                    step = SERVICE_STORED_VALUE_MAP[selected_function]
+                # ── CRM 功能 ──────────────────────────────────
+                if selected_function in SERVICE_CRM_MAP:
+                    step = SERVICE_CRM_MAP[selected_function]
                     cmd = [
                         sys.executable, "-u", "-m",
-                        "tools.service_management.stored_value",
+                        "tools.service_management.crm_export",
                         "--step", step,
                     ]
                     if step != "1" and start_date_value and end_date_value:
                         cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
                                 "--end",   end_date_value.strftime("%Y-%m-%d")]
-                    if selected_area_value and selected_area_value != "全區":
-                        cmd += ["--area", selected_area_value]
-                    add_log(f"儲值執行：{selected_function}（step={step}）", "info")
-
-                # ── CRM 功能（獨立入口）───────────────────────
-                elif selected_function in SERVICE_CRM_MAP:
-                    step = SERVICE_CRM_MAP[selected_function]
-                    cmd = [
-                        sys.executable, "-u", "-m",
-                        "tools.service_management.crm",
-                        "--step", step,
-                    ]
                     if selected_area_value and selected_area_value != "全區":
                         cmd += ["--area", selected_area_value]
                     add_log(f"CRM 執行：{selected_function}（step={step}）", "info")
