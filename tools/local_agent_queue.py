@@ -329,7 +329,12 @@ def claim_next_task(
     ]
     if not pending:
         return None
-    task = pending[0]
+    # 驗證碼有時效，優先處理擷取及送出任務。
+    priority = {"fubon.verify": 0, "fubon.captcha": 1}
+    task = min(
+        enumerate(pending),
+        key=lambda item: (priority.get(item[1].get("action", ""), 2), item[0]),
+    )[1]
     row_number = int(task["_row"])
     update_task(
         row_number,
