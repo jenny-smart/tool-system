@@ -211,7 +211,7 @@ def login_portal(page: Page, accounts: dict[str, Any]) -> None:
         print("\n[第一層] 尚未設定入口帳密，請在網頁輸入統編、帳號、密碼、驗證碼並登入。")
         print("登入後可把 portal_company_id / portal_account / portal_password 加到帳密檔 common。")
 
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
             find_ei_link(page)
@@ -281,7 +281,7 @@ def login_second(page: Page, credentials: EICredentials) -> None:
     page.locator("#pwd").fill(credentials.password)
     print(f"[{credentials.label}] 第二層帳密已預填，請在網頁輸入驗證碼並點擊「登入」。")
 
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + 30
     last_message = ""
     while time.monotonic() < deadline:
         login_field = page.locator("#userid")
