@@ -1,1 +1,1 @@
-{"job_name":"service_revenue","status":"failed","exit_code":2,"started_at":"2026-08-12 06:36:53","finished_at":"2026-08-12 06:36:53","duration_seconds":0}
+{"job_name":"service_revenue","status":"success","exit_code":0,"started_at":"2026-08-12 08:03:15","finished_at":"2026-08-12 08:04:02","duration_seconds":47}

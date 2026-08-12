@@ -1,1 +1,1 @@
-{"job_name":"service_daily_report","status":"failed","exit_code":1,"started_at":"2026-08-12 06:36:52","finished_at":"2026-08-12 06:36:53","duration_seconds":1}
+{"job_name":"service_daily_report","status":"success","exit_code":0,"started_at":"2026-08-12 08:02:56","finished_at":"2026-08-12 08:03:15","duration_seconds":19}
