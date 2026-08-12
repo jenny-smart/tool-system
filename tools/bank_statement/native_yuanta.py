@@ -176,7 +176,7 @@ def fill_yuanta_login(account: object, timeout: float = 30.0) -> None:
     raise RuntimeError("找不到元大登入欄位，無法預填帳密")
 
 
-def wait_for_yuanta_login(account: object, timeout: float = 300.0) -> dict[str, object]:
+def wait_for_yuanta_login(account: object, timeout: float = 30.0) -> dict[str, object]:
     try:
         state = page_state()
     except RuntimeError as exc:
@@ -200,7 +200,7 @@ def wait_for_yuanta_login(account: object, timeout: float = 300.0) -> dict[str, 
         print("元大目前已登入，沿用現有工作階段。")
         return state
     fill_yuanta_login(account)
-    print("等待你在 Chrome 輸入驗證碼並登入元大（最長 5 分鐘）……")
+    print("等待你在 Chrome 輸入驗證碼並登入元大（最長 30 秒）……")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:

@@ -230,7 +230,7 @@ def wait_fubon_page_with_text(
 
 
 def wait_fubon_login(
-    context: BrowserContext, page: Page, timeout_ms: int = 600_000
+    context: BrowserContext, page: Page, timeout_ms: int = 30_000
 ) -> Page:
     """富邦登入可能關閉原分頁並開新分頁，因此每輪都重新鎖定有效頁面。"""
     waited = 0

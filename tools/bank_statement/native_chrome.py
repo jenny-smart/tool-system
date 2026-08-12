@@ -166,7 +166,7 @@ def fill_fubon_login(account: object, timeout: float = 30.0) -> None:
     raise RuntimeError("找不到富邦登入欄位，無法預填帳密")
 
 
-def wait_for_manual_login(account: object, timeout: float = 300.0) -> dict[str, object]:
+def wait_for_manual_login(account: object, timeout: float = 30.0) -> dict[str, object]:
     try:
         state = page_state()
     except RuntimeError as exc:
@@ -206,7 +206,7 @@ def wait_for_manual_login(account: object, timeout: float = 300.0) -> dict[str, 
             print("已偵測到富邦登入成功，開始擷取明細。")
             return state
         if not announced:
-            print("等待你在 Chrome 完成富邦登入（最長 5 分鐘）……")
+            print("等待你在 Chrome 完成富邦登入（最長 30 秒）……")
             announced = True
         time.sleep(1)
     raise RuntimeError("等待富邦登入逾時，請重新執行指令")
