@@ -321,7 +321,7 @@ def login(page: Page, account: AreaAccount) -> list[str]:
     print("請直接在網頁輸入驗證碼，並點擊「企業會員登入」。")
     print("若被退回登入頁，終端機會顯示藍新的錯誤訊息，並可重新輸入新驗證碼。")
 
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + 30
     refilled_after_failure = False
     while time.monotonic() < deadline:
         if "/sale/Sell_center/search_transaction" in page.url:

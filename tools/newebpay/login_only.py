@@ -22,7 +22,7 @@ from tools.newebpay.download_reports import (
 )
 
 
-def wait_for_login(page: Page, account: AreaAccount, timeout: float = 300.0) -> None:
+def wait_for_login(page: Page, account: AreaAccount, timeout: float = 30.0) -> None:
     messages: list[str] = []
 
     def handle_dialog(dialog: object) -> None:

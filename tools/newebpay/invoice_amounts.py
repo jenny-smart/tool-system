@@ -174,7 +174,7 @@ def login(page: Page, account: AreaAccount) -> None:
     fill_enterprise_login(page, account)
     print(f"\n[{account.area}] 帳密已填入，請在 Chrome 輸入驗證碼並按企業會員登入。")
 
-    deadline = time.monotonic() + 300
+    deadline = time.monotonic() + 30
     unexpected_page_since: float | None = None
     while time.monotonic() < deadline:
         # 失效訊息的優先度高於網址；藍新可能先短暫進後台，再彈出 MEM50012。
