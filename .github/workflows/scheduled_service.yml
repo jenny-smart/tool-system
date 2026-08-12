@@ -26,7 +26,6 @@ jobs:
     timeout-minutes: 60
 
     env:
-      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
@@ -83,7 +82,6 @@ jobs:
             echo "✅ 已設定：$NAME"
           }
 
-          check_secret "GOOGLE_SERVICE_ACCOUNT" "$GOOGLE_SERVICE_ACCOUNT"
           check_secret "GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_ID"
           check_secret "GOOGLE_OAUTH_CLIENT_SECRET" "$GOOGLE_OAUTH_CLIENT_SECRET"
           check_secret "GOOGLE_OAUTH_REFRESH_TOKEN" "$GOOGLE_OAUTH_REFRESH_TOKEN"
@@ -193,21 +191,21 @@ jobs:
           if [ "$TASK" = "service_schedule_stats" ] || [ "$TASK" = "service_all" ]; then
             run_one \
               "service_schedule_stats" \
-              python -u -m service_management.lemon_schedule_sync \
+              python -u -m tools.service_management.service_schedule \
               --step 1
           fi
 
           if [ "$TASK" = "service_daily_report" ] || [ "$TASK" = "service_all" ]; then
             run_one \
               "service_daily_report" \
-              python -u -m service_management.lemon_schedule_sync \
+              python -u -m tools.service_management.service_schedule \
               --step 2
           fi
 
           if [ "$TASK" = "service_revenue" ] || [ "$TASK" = "service_all" ]; then
             run_one \
               "service_revenue" \
-              python -u -m service_management.lemon_schedule_sync \
+              python -u -m tools.service_management.service_schedule \
               --step 3
           fi
 
