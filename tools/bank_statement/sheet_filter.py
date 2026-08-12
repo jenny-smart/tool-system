@@ -105,6 +105,12 @@ def table_target_rows(table: CapturedTable) -> list[list[str]]:
     return rows
 
 
+def yuanta_target_rows(table: CapturedTable) -> list[list[str]]:
+    if len(table.headers) != 8:
+        raise ValueError(f"元大明細預期 8 欄，實際為 {len(table.headers)} 欄：{table.headers}")
+    return [[str(value).strip() for value in row] for row in table.rows if len(row) == 8]
+
+
 def filter_existing_rows(
     table: CapturedTable,
     existing_rows: list[list[str]],
@@ -161,9 +167,9 @@ def filter_yuanta_report_rows(
         key for value in report_values if (key := _accounting_date_key(value))
     )
     new_rows: list[list[str]] = []
-    for row in table_target_rows(table):
-        time_key = transaction_time_key(row)
-        key = _accounting_date_key(row[0])
+    for row in yuanta_target_rows(table):
+        time_key = _report_transaction_time_key(row[0])
+        key = _accounting_date_key(row[1])
         if existing_times[time_key] > 0:
             existing_times[time_key] -= 1
             report_date = time_key[:10]
@@ -184,8 +190,8 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     if bank == "yuanta":
         # 財報 B 欄（交易日期時間）的日期對應「元大銀行-區域」A 欄。
         return filter_yuanta_report_rows(table, worksheet.get("B2:B"))
-    # 財報 B 欄是交易時間；轉成銀行清單的 A/B 結構後比對。
-    existing_rows = [["", row[0]] for row in worksheet.get("B2:B") if row]
+    # 富邦財報 B 欄是帳務日期、C 欄是完整交易時間。
+    existing_rows = [["", row[0]] for row in worksheet.get("C2:C") if row]
     return filter_existing_rows(table, existing_rows)
 
 
@@ -208,23 +214,38 @@ def build_financial_report_rows(
 ) -> list[list[Any]]:
     """銀行 A:G 轉為財報：序號、交易日、帳務日、說明、行庫、支出、存入、餘額、備註。"""
     output: list[list[Any]] = []
-    for offset, row in enumerate(table_target_rows(table)):
+    for offset, row in enumerate(yuanta_target_rows(table)):
         values: list[Any] = [
             first_sequence + offset,
-            row[1],
             row[0],
+            row[1],
             row[2],
+            row[3],
         ]
-        if include_bank_column:
-            values.append("")
         values.extend([
+            _report_amount(row[4]),
+            _report_amount(row[5]),
+            _report_amount(row[6]),
+            row[7],
+        ])
+        output.append(values)
+    return output
+
+
+def build_fubon_financial_report_rows(table: CapturedTable) -> list[list[Any]]:
+    """富邦財報 B:H；A 欄核取方塊由試算表保留。"""
+    return [
+        [
+            row[0],
+            row[1],
+            row[2],
             _report_amount(row[3]),
             _report_amount(row[4]),
             _report_amount(row[5]),
             row[6],
-        ])
-        output.append(values)
-    return output
+        ]
+        for row in table_target_rows(table)
+    ]
 
 
 def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
@@ -241,7 +262,7 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
     existing = worksheet.get("A:I")
     headers = existing[0] if existing else []
     normalized_headers = [_normalize_text(value).replace("\n", "") for value in headers]
-    include_bank_column = any("交易行庫" in value for value in normalized_headers)
+    include_bank_column = bank == "yuanta" or any("交易行庫" in value for value in normalized_headers)
     transaction_column = 1
     last_row = 1
     sequences: list[int] = []
@@ -250,15 +271,19 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
             last_row = row_number
         if row and str(row[0]).strip().isdigit():
             sequences.append(int(str(row[0]).strip()))
-    rows = build_financial_report_rows(
-        table,
-        first_sequence=(max(sequences, default=0) + 1),
-        include_bank_column=include_bank_column,
-    )
-    end_column = "I" if include_bank_column else "H"
+    if bank == "fubon":
+        rows = build_fubon_financial_report_rows(table)
+        start_column, end_column = "B", "H"
+    else:
+        rows = build_financial_report_rows(
+            table,
+            first_sequence=(max(sequences, default=0) + 1),
+            include_bank_column=include_bank_column,
+        )
+        start_column, end_column = "A", "I"
     start_row = last_row + 1
     worksheet.update(
-        range_name=f"A{start_row}:{end_column}{start_row + len(rows) - 1}",
+        range_name=f"{start_column}{start_row}:{end_column}{start_row + len(rows) - 1}",
         values=rows,
         value_input_option="RAW",
     )
@@ -308,12 +333,12 @@ def sync_bank_master_sheet(
         title = f"{bank_name}-{name}"
         current = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!A1:G1",
+            range=f"'{title}'!A1:H1",
         ).execute().get("values", [])
-        if not current:
+        if not current or bank == "yuanta":
             service.spreadsheets().values().update(
                 spreadsheetId=spreadsheet_id,
-                range=f"'{title}'!A1:G1",
+                range=f"'{title}'!A1:H1",
                 valueInputOption="RAW",
                 body={"values": [table.headers]},
             ).execute()
@@ -321,7 +346,7 @@ def sync_bank_master_sheet(
     # 此分頁是「目前未登記清單」而非歷史資料，每次以最新比對結果重建。
     service.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
-        range=f"'{title}'!A2:G",
+        range=f"'{title}'!A2:H",
         body={},
     ).execute()
     write_rows = [list(row) for row in table.rows]
@@ -332,7 +357,7 @@ def sync_bank_master_sheet(
     if write_rows:
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!A2:G{len(write_rows) + 1}",
+            range=f"'{title}'!A2:{'H' if bank == 'yuanta' else 'G'}{len(write_rows) + 1}",
             # 保留銀行原始日期文字，避免 A/B 欄被轉成 2026/8/6 與 46240.36983。
             valueInputOption="RAW",
             body={"values": write_rows},
@@ -345,8 +370,8 @@ def sync_bank_master_sheet(
                     "range": {
                         "sheetId": sheet_ids[title],
                         "startRowIndex": 1,
-                        "startColumnIndex": 3,
-                        "endColumnIndex": 6,
+                        "startColumnIndex": 4 if bank == "yuanta" else 3,
+                        "endColumnIndex": 7 if bank == "yuanta" else 6,
                     },
                     "cell": {"userEnteredFormat": {"horizontalAlignment": "RIGHT"}},
                     "fields": "userEnteredFormat.horizontalAlignment",

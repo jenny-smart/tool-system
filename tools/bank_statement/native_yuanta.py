@@ -446,6 +446,7 @@ def normalize_yuanta_matrix(matrix: list[list[str]]) -> CapturedTable:
     if time_index is None:
         time_index = _find_header(source_headers, ("交易日",))
     summary_index = _find_header(source_headers, ("摘要", "交易說明", "說明"))
+    bank_index = _find_header(source_headers, ("交易行庫", "行庫"))
     debit_index = _find_header(source_headers, ("支出", "提款", "借方"))
     credit_index = _find_header(source_headers, ("存入", "存款", "貸方"))
     balance_index = _find_header(source_headers, ("餘額",))
@@ -469,9 +470,10 @@ def normalize_yuanta_matrix(matrix: list[list[str]]) -> CapturedTable:
             transaction_time = time_text or date_text
         accounting_date = date_text.split()[0]
         rows.append([
-            accounting_date,
             transaction_time,
+            accounting_date,
             cell(source, summary_index),
+            cell(source, bank_index),
             cell(source, debit_index),
             cell(source, credit_index),
             cell(source, balance_index),
@@ -480,7 +482,7 @@ def normalize_yuanta_matrix(matrix: list[list[str]]) -> CapturedTable:
     if not rows:
         raise RuntimeError("元大查詢結果沒有可擷取的交易資料")
     return CapturedTable(
-        headers=["帳務日期", "交易時間", "摘要", "支出金額", "存入金額", "即時餘額", "附註"],
+        headers=["交易日", "帳務日", "交易說明", "交易行庫", "支出金額", "存入金額", "帳面餘額", "備註"],
         rows=rows,
     )
 
