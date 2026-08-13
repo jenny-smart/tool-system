@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import time
+from pathlib import Path
 from typing import Iterable
 from urllib.request import urlopen
 
@@ -14,36 +17,46 @@ CHROME_START_COMMAND = (
 )
 
 
+def _read_targets(cdp_url: str) -> list[dict]:
+    with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _start_agent_chrome(cdp_url: str) -> None:
+    if cdp_url.rstrip("/") != DEFAULT_CDP_URL:
+        return
+    profile = Path.home() / "EI account" / "chrome_profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["open", "-na", "Google Chrome", "--args", "--remote-debugging-port=9222", f"--user-data-dir={profile}"],
+        check=False,
+    )
+
+
 def connect_existing_chrome(
     playwright: Playwright,
     cdp_url: str = DEFAULT_CDP_URL,
 ) -> tuple[Browser, BrowserContext]:
-    try:
-        with urlopen(f"{cdp_url.rstrip('/')}/json/list", timeout=3) as response:
-            targets = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError(
-            f"無法連接目前 Chrome（{cdp_url}）。\n請先啟動：{CHROME_START_COMMAND}"
-        ) from exc
-    if not targets:
-        raise RuntimeError(
-            "Chrome 9222 已開啟，但沒有可控制的分頁。\n"
-            f"請關閉目前空的 9222 Chrome 後啟動：{CHROME_START_COMMAND}"
-        )
-    try:
-        browser = playwright.chromium.connect_over_cdp(cdp_url)
-    except Exception as exc:
-        raise RuntimeError(
-            f"無法連接目前 Chrome（{cdp_url}）。\n"
-            f"請先啟動：{CHROME_START_COMMAND}"
-        ) from exc
+    last_error: Exception | None = None
+    started = False
+    for _ in range(30):
+        try:
+            if not _read_targets(cdp_url):
+                raise RuntimeError("Chrome 沒有可用分頁")
+            browser = playwright.chromium.connect_over_cdp(cdp_url, timeout=5000)
+            if browser.contexts:
+                return browser, browser.contexts[0]
+            last_error = RuntimeError("Chrome 沒有可用 browser context")
+        except Exception as exc:
+            last_error = exc
+            if not started:
+                _start_agent_chrome(cdp_url)
+                started = True
+            time.sleep(0.5)
 
-    if not browser.contexts:
-        raise RuntimeError(
-            f"Chrome 已連接但沒有可用 browser context（{cdp_url}）。\n"
-            f"請重新啟動：{CHROME_START_COMMAND}"
-        )
-    return browser, browser.contexts[0]
+    raise RuntimeError(
+        f"無法連接目前 Chrome（{cdp_url}）。\n請先啟動：{CHROME_START_COMMAND}"
+    ) from last_error
 
 
 def find_existing_page(context: BrowserContext, url_parts: Iterable[str]) -> Page | None:
