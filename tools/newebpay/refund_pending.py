@@ -4,7 +4,7 @@ import argparse
 import re
 import time
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from typing import Iterable
 from zoneinfo import ZoneInfo
@@ -13,6 +13,7 @@ from playwright.sync_api import Locator, Page, sync_playwright
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
 from tools.memo_system.change_order import get_worksheet
+from tools.newebpay.refund_filter import pending_credit_card_refunds
 from tools.newebpay.download_reports import (
     DEFAULT_ACCOUNTS_FILE,
     LOGIN_URL,
@@ -24,27 +25,6 @@ from tools.newebpay.download_reports import (
     set_date,
     write_date,
 )
-
-
-def _cell(row: list[str], column: int) -> str:
-    return str(row[column] if len(row) > column else "").strip()
-
-
-def pending_credit_card_refunds(values: list[list[str]]) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for row_number, row in enumerate(values[1:], start=2):
-        status, order_no, payway, amount = _cell(row, 1), _cell(row, 6), _cell(row, 17), _cell(row, 18)
-        if status != "待退款" or payway != "信用卡" or not order_no or not amount:
-            continue
-        normalized = re.sub(r"[^0-9.]", "", amount)
-        try:
-            parsed_amount = Decimal(normalized)
-        except InvalidOperation:
-            continue
-        if parsed_amount <= 0:
-            continue
-        rows.append({"sheet_row": row_number, "order_no": order_no, "amount": normalized})
-    return rows
 
 
 def _visible(locator: Locator) -> Locator | None:
