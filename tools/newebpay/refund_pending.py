@@ -91,18 +91,22 @@ def _set_order_query(page: Page, order_no: str, start: str, end: str) -> None:
         raise RuntimeError("找不到訂單編號輸入欄位")
     candidates[-1].fill(order_no)
     _click_text(page, "開始查詢", exact=True)
-    page.get_by_text(order_no, exact=True).first.wait_for(state="visible", timeout=30_000)
+    page.locator("tr", has_text=order_no).filter(
+        has=page.locator("button[onclick*='change_card_status']")
+    ).first.wait_for(state="visible", timeout=30_000)
 
 
 def _submit_refund(page: Page, order_no: str, amount: str) -> None:
-    row = page.get_by_text(order_no, exact=True).first.locator("xpath=ancestor::tr[1]")
-    refund = _visible(row.get_by_text("退款", exact=True))
+    row = page.locator("tr", has_text=order_no).filter(
+        has=page.locator("button[onclick*='change_card_status']")
+    ).first
+    refund = _visible(row.locator("button[onclick*='change_card_status']"))
     if refund is None:
         raise RuntimeError(f"{order_no} 找不到退款按鈕")
     refund.click()
-    modal = page.locator('.modal:visible, [role="dialog"]:visible').last
+    modal = page.locator("#card_process_modal")
     modal.wait_for(state="visible", timeout=15_000)
-    amount_field = first_visible(modal, ('input[name*="amount" i]', 'input[id*="amount" i]', 'input[type="text"]'))
+    amount_field = modal.locator("#apply_amt")
     parsed_amount = Decimal(amount)
     amount_field.fill(str(int(parsed_amount)) if parsed_amount == parsed_amount.to_integral() else str(parsed_amount))
     submitted = False
@@ -114,12 +118,10 @@ def _submit_refund(page: Page, order_no: str, amount: str) -> None:
 
     page.on("dialog", accept_dialog)
     try:
-        for text in ("送出", "確定"):
-            button = _visible(modal.get_by_text(text, exact=True))
-            if button is not None:
-                button.click()
-                submitted = True
-                break
+        button = _visible(modal.locator('input[type="button"][value="送出"], button:has-text("送出")'))
+        if button is not None:
+            button.click()
+            submitted = True
         if not submitted:
             raise RuntimeError("找不到退款送出按鈕")
         page.wait_for_timeout(1_500)
@@ -132,8 +134,8 @@ def _submit_refund(page: Page, order_no: str, amount: str) -> None:
 
 
 def _refund_requested_at(page: Page, order_no: str) -> str:
-    row = page.get_by_text(order_no, exact=True).first.locator("xpath=ancestor::tr[1]")
-    links = row.locator("a")
+    row = page.locator("tr", has_text=order_no).first
+    links = row.locator("a[onclick*='search_card_detail']")
     transaction_link = links.first if links.count() else None
     if transaction_link is None:
         raise RuntimeError(f"{order_no} 找不到藍新金流交易序號")
