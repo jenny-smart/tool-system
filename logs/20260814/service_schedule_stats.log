@@ -1,0 +1,65 @@
+2026-08-13 22:36:53 [INFO] === 客服排程系統 run_id=101e88c2 step=1 台北時間=2026-08-14 06:36:53 ===
+2026-08-13 22:36:53 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-08-13 22:36:53 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-13 22:37:03 [INFO] --- Step1_更新排班統計表 ---
+2026-08-13 22:37:03 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-13 22:37:04 [INFO] Drive 資料夾找到 36 個檔案
+2026-08-13 22:37:04 [INFO]   找到檔案：20260914排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260814排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260914排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260814排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260913排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260913排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260813排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260813排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260913排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260813排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260913排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260813排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260912排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260912排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260812排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260812排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260912排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260812排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260912排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260812排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260911排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260911排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260811排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260811排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260911排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260811排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260911排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260811排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260910排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260910排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260810排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260810排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260910排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260810排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260910排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO]   找到檔案：20260810排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-08-13 22:37:04 [INFO] 排班檔確認 OK：{'202608': {'taipei': '20260814排班統計表-台北.xlsx', 'taichung': '20260814排班統計表-台中.xlsx'}, '202609': {'taipei': '20260914排班統計表-台北.xlsx', 'taichung': '20260914排班統計表-台中.xlsx'}}
+2026-08-13 22:37:04 [INFO]   匯入：20260814排班統計表-台北.xlsx
+2026-08-13 22:37:04 [INFO]   xlsx → Google Sheets：20260814排班統計表-台北
+2026-08-13 22:37:05 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-13 22:37:12 [INFO]   轉換完成，新 Google Sheets ID：1qIET30rROnqnSIEcv-8-_GbrgxIDwqHpA0WpLYlEpeI
+2026-08-13 22:37:13 [INFO]   匯入：20260814排班統計表-台中.xlsx
+2026-08-13 22:37:13 [INFO]   xlsx → Google Sheets：20260814排班統計表-台中
+2026-08-13 22:37:13 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-13 22:37:20 [INFO]   轉換完成，新 Google Sheets ID：1T4bqobH2zSm2GnQzHmol7CB8brVO6j7kh8YbRnUwLyY
+2026-08-13 22:37:21 [INFO]   → 寫入 82 列（起始 R3C7）
+2026-08-13 22:37:22 [INFO]   → 寫入 16 列（起始 R3C82）
+2026-08-13 22:37:22 [INFO]   匯入：20260914排班統計表-台北.xlsx
+2026-08-13 22:37:22 [INFO]   xlsx → Google Sheets：20260914排班統計表-台北
+2026-08-13 22:37:22 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-13 22:37:28 [INFO]   轉換完成，新 Google Sheets ID：1taAwDOEcI11gZqzT25e45hqeV947UvdKH8JZ6QUo-BI
+2026-08-13 22:37:29 [INFO]   匯入：20260914排班統計表-台中.xlsx
+2026-08-13 22:37:29 [INFO]   xlsx → Google Sheets：20260914排班統計表-台中
+2026-08-13 22:37:29 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-13 22:37:34 [INFO]   轉換完成，新 Google Sheets ID：1vrUEuXxOkNJ5BoUDQ9KNnYWCaXXqNqpBGpe6meIVzGs
+2026-08-13 22:37:36 [INFO]   → 寫入 57 列（起始 R3C22）
+2026-08-13 22:37:36 [INFO]   → 寫入 8 列（起始 R3C97）
+2026-08-13 22:37:37 [INFO] Step 1 完成（33.8s）
+2026-08-13 22:37:38 [INFO] === 全部完成 run_id=101e88c2（34.5s）===
