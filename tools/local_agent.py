@@ -11,6 +11,7 @@ import time
 import traceback
 from pathlib import Path
 from typing import Any, Callable
+from urllib.request import urlopen
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.local_agent_queue import (
@@ -28,6 +29,38 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CommandBuilder = Callable[[dict[str, Any]], list[str]]
 ACTION_HANDLERS: dict[str, CommandBuilder] = {}
 AGENT_VERSION = "1"
+AGENT_CDP_URL = "http://127.0.0.1:9222"
+AGENT_CHROME_PROFILE = Path.home() / "EI account" / "chrome_profile"
+
+
+def agent_chrome_online() -> bool:
+    try:
+        with urlopen(f"{AGENT_CDP_URL}/json/version", timeout=2) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def start_agent_chrome() -> None:
+    if agent_chrome_online():
+        return
+    AGENT_CHROME_PROFILE.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["open", "-na", "Google Chrome", "--args", "--remote-debugging-port=9222",
+         f"--user-data-dir={AGENT_CHROME_PROFILE}"], check=False,
+    )
+    for _ in range(30):
+        if agent_chrome_online():
+            print("Agent Chrome ready: http://127.0.0.1:9222", flush=True)
+            return
+        time.sleep(0.5)
+    print("Agent Chrome 啟動失敗；請在 Mac 開啟 Chrome", file=sys.stderr, flush=True)
+
+
+def chrome_watchdog(stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        start_agent_chrome()
+        stop_event.wait(5)
 
 
 def register_action(action: str, builder: CommandBuilder) -> None:
@@ -81,6 +114,17 @@ def build_cetustek_download(params: dict[str, Any]) -> list[str]:
     if area and area != "全區":
         command.extend(["--area", area])
     return command
+
+
+def build_cetustek_allowance(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    selected_rows = params.get("selected_rows") or []
+    if not area or area == "全區":
+        raise ValueError("開立折讓單請選擇單一區域")
+    if not selected_rows:
+        raise ValueError("請先勾選要開立折讓單的資料")
+    return [sys.executable, "-m", "tools.invoice_center.allowance_create", "--area", area,
+            "--cdp-url", cdp_url, "--rows", ",".join(str(int(row)) for row in selected_rows)]
 
 
 def build_newebpay_login(params: dict[str, Any]) -> list[str]:
@@ -277,6 +321,7 @@ def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
 
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
+register_action("cetustek.allowance", build_cetustek_allowance)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
@@ -474,6 +519,7 @@ def main() -> int:
         flush=True,
     )
     stop_event = threading.Event()
+    start_agent_chrome()
 
     def request_stop(_signum: int, _frame: Any) -> None:
         stop_event.set()
@@ -487,6 +533,10 @@ def main() -> int:
         daemon=True,
     )
     heartbeat.start()
+    chrome_monitor = threading.Thread(
+        target=chrome_watchdog, args=(stop_event,), name="agent-chrome-watchdog", daemon=True,
+    )
+    chrome_monitor.start()
     while not stop_event.is_set():
         try:
             task = claim_next_task(
