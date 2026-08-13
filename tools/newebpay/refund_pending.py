@@ -187,9 +187,11 @@ def _close_detail_by_backdrop(page: Page) -> None:
     page.wait_for_timeout(400)
 
 
-def run(area: str, accounts_file: Path, cdp_url: str) -> int:
+def run(area: str, accounts_file: Path, cdp_url: str, selected_rows: set[int] | None = None) -> int:
     worksheet = get_worksheet(area)
     pending = pending_credit_card_refunds(worksheet.get_all_values())
+    if selected_rows is not None:
+        pending = [item for item in pending if int(item["sheet_row"]) in selected_rows]
     print(f"{area}：待退款＋信用卡共 {len(pending)} 筆。")
     if not pending:
         return 0
@@ -231,8 +233,16 @@ def main() -> int:
     parser.add_argument("--area", required=True)
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
+    parser.add_argument("--rows", help="勾選的工作表列號，以逗號分隔")
     args = parser.parse_args()
-    return run(args.area, args.accounts_file, args.cdp_url)
+    selected_rows = (
+        {int(value) for value in args.rows.split(",") if value.strip().isdigit()}
+        if args.rows is not None
+        else None
+    )
+    if selected_rows == set():
+        raise ValueError("沒有勾選退款資料")
+    return run(args.area, args.accounts_file, args.cdp_url, selected_rows)
 
 
 if __name__ == "__main__":
