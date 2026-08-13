@@ -1689,6 +1689,13 @@ def queue_cetustek_download(*, month="", start_date=None, end_date=None, area="�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_cetustek_allowance(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    if not selected_rows:
+        raise ValueError("請先勾選要開立折讓單的資料")
+    task = create_local_agent_task("cetustek.allowance", {"area": area, "selected_rows": selected_rows, "cdp_url": "http://127.0.0.1:9222"}, created_by=st.session_state.get("username", "Tool System"))
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 def queue_newebpay_login(*, month="", start_date=None, end_date=None, area="全區"):
     task = create_local_agent_task(
         "newebpay.login",
@@ -1869,6 +1876,7 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】開立發票", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
+    {"name": "【鯨躍發票】開立折讓單", "handler": queue_cetustek_allowance, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
@@ -2452,6 +2460,7 @@ with area_col:
     if selected_function in (
         "【藍新金流】藍新登入",
         "【藍新金流】藍新信用卡待退款",
+        "【鯨躍發票】開立折讓單",
         "【富邦銀行】富邦登入",
         "【富邦銀行】富邦明細下載",
         "【元大銀行】元大登入",
@@ -2507,6 +2516,18 @@ if system_type == "finance_management" and selected_function == "【藍新金流
         st.caption(f"待退款＋信用卡：{len(_refund_candidates)} 筆；已勾選：{len(refund_selected_rows)} 筆")
     except Exception as exc:
         st.error(f"讀取清潔異動表失敗：{exc}")
+
+allowance_selected_rows = []
+if system_type == "finance_management" and selected_function == "【鯨躍發票】開立折讓單":
+    try:
+        from tools.memo_system.change_order import get_worksheet
+        from tools.invoice_center.allowance_filter import pending_allowances
+        _allowance_candidates = pending_allowances(get_worksheet(selected_area_value).get_all_values())
+        _allowance_editor = st.data_editor(pd.DataFrame([{"執行": False, "列數": item["sheet_row"], "訂單編號": item["order_no"], "發票號碼": item["invoice_no"], "折讓未稅價": item["untaxed_amount"]} for item in _allowance_candidates]), hide_index=True, use_container_width=True, disabled=["列數", "訂單編號", "發票號碼", "折讓未稅價"], column_config={"執行": st.column_config.CheckboxColumn("執行")}, key=f"cetustek_allowance_editor_{selected_area_value}")
+        allowance_selected_rows = [int(row["列數"]) for _, row in _allowance_editor.iterrows() if bool(row["執行"])]
+        st.caption(f"待退款折讓：{len(_allowance_candidates)} 筆；已勾選：{len(allowance_selected_rows)} 筆")
+    except Exception as exc:
+        st.error(f"讀取折讓資料失敗：{exc}")
 
 run_clicked = st.button("▶ 執行", use_container_width=True)
 
@@ -2858,6 +2879,8 @@ if run_clicked:
             }
             if selected_function == "【藍新金流】藍新信用卡待退款":
                 finance_kwargs["selected_rows"] = refund_selected_rows
+            if selected_function == "【鯨躍發票】開立折讓單":
+                finance_kwargs["selected_rows"] = allowance_selected_rows
             result = finance_handler(**finance_kwargs)
             if result is not None:
                 add_log(str(result), "success")
