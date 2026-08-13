@@ -31,14 +31,9 @@ except ImportError:
     def list_local_agent_status(*, max_age_seconds=30, **_kwargs):
         return []
 
-@st.cache_resource(show_spinner=False)
-def _get_sheets_service_cached():
-    """Service Account Sheets service — 整個 app 生命週期共用一個實例。"""
-    return _get_sheets_service_raw()
-
-# 讓其他地方仍可直接呼叫 get_sheets_service()
 def get_sheets_service():  # noqa: F811
-    return _get_sheets_service_cached()
+    """每次建立 Sheets 連線，避免雲端長連線失效造成 Broken pipe。"""
+    return _get_sheets_service_raw()
 
 from utils.auth import authenticate
 from utils.permissions import (
@@ -147,6 +142,11 @@ DEFAULT_CONFIG = {
         {
             "name": "財務管理",
             "type": "finance_management",
+            "enabled": True,
+        },
+        {
+            "name": "訂單系統",
+            "type": "orders_memo_system",
             "enabled": True,
         },
     ]
@@ -1108,6 +1108,7 @@ def get_system_type_label(system_type: str) -> str:
         "gmail_401": "Gmail 401歸檔",
         "invoice_center": "發票中心",
         "finance_management": "財務管理",
+        "orders_memo_system": "訂單系統",
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -1738,10 +1739,12 @@ def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, 
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
-def queue_newebpay_refund_pending(*, month="", start_date=None, end_date=None, area="全區"):
+def queue_newebpay_refund_pending(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    if not selected_rows:
+        raise ValueError("請先勾選要退款的資料")
     task = create_local_agent_task(
         "newebpay.refund_pending",
-        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        {"area": area, "selected_rows": selected_rows, "cdp_url": "http://127.0.0.1:9222"},
         created_by=st.session_state.get("username", "Tool System"),
     )
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
@@ -1873,6 +1876,11 @@ FINANCE_TASKS = [
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
+    "orders_memo_system": [
+        "批次建單", "舊客建單", "新客建單", "儲值金建單", "訂單轉換",
+        "儲值金補價差", "排班管理", "LINE通知訊息", "訂單備註", "對帳管理",
+        "異動管理", "評估工具", "雙向訂單檢查", "查詢無LINE連結訂單", "儲值獎金備註",
+    ],
     "vip": [
         "建立當月彙整檔",
         "轉檔＋高雄/新竹彙整",
@@ -2088,10 +2096,14 @@ except Exception:
 # ═══════════════════════════════════════════════════════════
 st.markdown('<div class="card">', unsafe_allow_html=True)
 
-head_left, head_report, head_log = st.columns([2.2, 1, 1])
+head_left, head_orders, head_report, head_log = st.columns([1.7, 1, 1, 1])
 
 with head_left:
     st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
+
+with head_orders:
+    if can_access_system("orders_memo_system"):
+        st.page_link("pages/訂單系統.py", label="🧹 訂單系統", use_container_width=True)
 
 with head_report:
     if can_access_page("report"):
@@ -2146,6 +2158,37 @@ if system_type == "finance_management" and selected_function == "【鯨躍發票
     from tools.invoice_center.ui import render_invoice_create
 
     render_invoice_create()
+    st.stop()
+
+if system_type == "orders_memo_system":
+    from tools.memo_system.ui import render_memo_system
+    from tools.orders_system.ui import render_orders_system
+
+    _orders_map = {
+        "批次建單": ("orders", "批次建單（Google Sheet）"), "舊客建單": ("orders", "舊客快速建單"),
+        "新客建單": ("orders", "新客資料拆解"), "儲值金建單": ("orders", "儲值金購買"),
+        "訂單轉換": ("orders", "訂單轉換"), "儲值金補價差": ("orders", "儲值金補價差"),
+        "排班管理": ("memo", "📅 排班管理"), "LINE通知訊息": ("orders", "LINE 通知產生器"),
+        "訂單備註": ("memo", "📋 客服作業"), "對帳管理": ("memo", "💰 財務對帳"),
+        "異動管理": ("memo", "🔄 服務異動"), "評估工具": ("memo", "📐 評估文字工具"),
+        "雙向訂單檢查": ("orders", "雙向訂單檢查"),
+        "查詢無LINE連結訂單": ("orders", "查詢無LINE連結訂單"),
+        "儲值獎金備註": ("orders", "儲值獎金備註"),
+    }
+    _login_a, _login_b, _login_c = st.columns([3, 3, 1])
+    with _login_a:
+        _backend_email = st.text_input("後台帳號", key="orders_backend_email")
+    with _login_b:
+        _backend_password = st.text_input("後台密碼", type="password", key="orders_backend_password")
+    with _login_c:
+        _backend_env = st.selectbox("環境", ["prod", "dev"], key="orders_backend_env")
+    _kind, _mode = _orders_map[selected_function]
+    if _kind == "orders":
+        render_orders_system(forced_mode=_mode, shared_backend_email=_backend_email,
+                             shared_backend_password=_backend_password, shared_env=_backend_env)
+    else:
+        render_memo_system(forced_main_section=_mode, shared_backend_email=_backend_email,
+                           shared_backend_password=_backend_password, shared_env=_backend_env)
     st.stop()
 
 monthly_order_functions = ["上半月訂單", "下半月訂單"]
@@ -2408,6 +2451,7 @@ with area_col:
     area_select_options = ["全區"] + [area for area in area_options if area != "全區"]
     if selected_function in (
         "【藍新金流】藍新登入",
+        "【藍新金流】藍新信用卡待退款",
         "【富邦銀行】富邦登入",
         "【富邦銀行】富邦明細下載",
         "【元大銀行】元大登入",
@@ -2430,6 +2474,39 @@ with area_col:
         st.caption("將執行全部已啟用地區")
     else:
         st.caption(f"只執行：{selected_area_value}")
+
+refund_selected_rows = []
+if system_type == "finance_management" and selected_function == "【藍新金流】藍新信用卡待退款":
+    try:
+        from tools.memo_system.change_order import get_worksheet
+        from tools.newebpay.refund_pending import pending_credit_card_refunds
+
+        _refund_values = get_worksheet(selected_area_value).get_all_values()
+        _refund_candidates = pending_credit_card_refunds(_refund_values)
+        _refund_editor = st.data_editor(
+            pd.DataFrame([
+                {
+                    "執行": False,
+                    "列數": item["sheet_row"],
+                    "訂單編號": item["order_no"],
+                    "退款金額": item["amount"],
+                }
+                for item in _refund_candidates
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            disabled=["列數", "訂單編號", "退款金額"],
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
+            key=f"newebpay_refund_editor_{selected_area_value}",
+        )
+        refund_selected_rows = [
+            int(row["列數"])
+            for _, row in _refund_editor.iterrows()
+            if bool(row["執行"])
+        ]
+        st.caption(f"待退款＋信用卡：{len(_refund_candidates)} 筆；已勾選：{len(refund_selected_rows)} 筆")
+    except Exception as exc:
+        st.error(f"讀取清潔異動表失敗：{exc}")
 
 run_clicked = st.button("▶ 執行", use_container_width=True)
 
@@ -2773,12 +2850,15 @@ if run_clicked:
         if not finance_task or not finance_task.get("enabled") or not callable(finance_handler):
             add_log("此功能尚未接入本機 Agent", "warning")
         else:
-            result = finance_handler(
-                month=period,
-                start_date=start_date_value,
-                end_date=end_date_value,
-                area=selected_area_value,
-            )
+            finance_kwargs = {
+                "month": period,
+                "start_date": start_date_value,
+                "end_date": end_date_value,
+                "area": selected_area_value,
+            }
+            if selected_function == "【藍新金流】藍新信用卡待退款":
+                finance_kwargs["selected_rows"] = refund_selected_rows
+            result = finance_handler(**finance_kwargs)
             if result is not None:
                 add_log(str(result), "success")
         st.rerun()
