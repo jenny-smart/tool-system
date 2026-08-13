@@ -2479,7 +2479,7 @@ refund_selected_rows = []
 if system_type == "finance_management" and selected_function == "【藍新金流】藍新信用卡待退款":
     try:
         from tools.memo_system.change_order import get_worksheet
-        from tools.newebpay.refund_pending import pending_credit_card_refunds
+        from tools.newebpay.refund_filter import pending_credit_card_refunds
 
         _refund_values = get_worksheet(selected_area_value).get_all_values()
         _refund_candidates = pending_credit_card_refunds(_refund_values)
