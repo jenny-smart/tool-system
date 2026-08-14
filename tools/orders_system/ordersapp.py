@@ -887,15 +887,42 @@ _MEMO_SECTION_MAP = {
     "服務異動": "🔄 服務異動",
 }
 
+# v8.76：在下拉選單裡插入「大類標題列」（不可真的選取，純粹視覺分隔），
+# 讓 A~F 六大類在畫面上看得出分界，不用另外拆成兩層選單。標題列前面加
+# 「──」跟一般編號選項區分；萬一使用者真的選到標題列，下面會擋下並提示
+# 改選功能項目，不會誤跑到任何功能。
+_CATEGORY_HEADERS_BY_INDEX = {
+    0: "A. 建單／成單流程",
+    6: "B. 訂單附屬功能",
+    12: "C. 稽核比對工具",
+    15: "D. LINE 通知／提醒",
+    18: "E. 會員／客戶管理",
+    21: "F. 財務功能",
+}
+_menu_display_options = []
+_menu_option_targets = []  # 與 _menu_display_options 一一對應；None 代表該列是標題列
+_menu_counter = 0
+for _opt_idx, _opt in enumerate(FUNCTION_OPTIONS):
+    if _opt_idx in _CATEGORY_HEADERS_BY_INDEX:
+        _menu_display_options.append(f"── {_CATEGORY_HEADERS_BY_INDEX[_opt_idx]} ──")
+        _menu_option_targets.append(None)
+    _menu_counter += 1
+    _menu_display_options.append(f"{_menu_counter}. {_opt[0]}")
+    _menu_option_targets.append(_opt_idx)
+_menu_default_index = next(i for i, t in enumerate(_menu_option_targets) if t is not None)
+
 selected_label = st.selectbox(
     "功能選單",
-    [f"{i}. {label}" for i, (label, _, _) in enumerate(FUNCTION_OPTIONS, start=1)],
+    _menu_display_options,
+    index=_menu_default_index,
     key="unified_function_select",
 )
-_selected_option = next(
-    item for i, item in enumerate(FUNCTION_OPTIONS, start=1)
-    if f"{i}. {item[0]}" == selected_label
-)
+_selected_pos = _menu_display_options.index(selected_label)
+_selected_target = _menu_option_targets[_selected_pos]
+if _selected_target is None:
+    st.info("這是分類標題，請改選下面的功能項目。")
+    st.stop()
+_selected_option = FUNCTION_OPTIONS[_selected_target]
 _system_key, mode = _selected_option[1], _selected_option[2]
 
 st.markdown("<hr>", unsafe_allow_html=True)
