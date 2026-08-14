@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import time
 from pathlib import Path
 from typing import Union
@@ -134,15 +135,78 @@ def _choose_source_account(page: Page, area: str) -> None:
 
 def _choose_manual_destination(page: Page) -> None:
     row = _row_for_label(page, "轉入帳號")
-    manual = _visible(row.get_by_text("自行輸入", exact=True))
+    # 「自行輸入」是第二個 radio；點擊後銀行下拉框與帳號欄才會生成。
+    radios = [
+        row.locator('input[type="radio"]').nth(index)
+        for index in range(row.locator('input[type="radio"]').count())
+        if row.locator('input[type="radio"]').nth(index).is_visible()
+    ]
+    manual = radios[1] if len(radios) >= 2 else None
     if manual is None:
-        manual = _visible(page.get_by_text("自行輸入", exact=True))
+        for context in _contexts(page):
+            candidate = _visible(context.get_by_text("自行輸入", exact=True))
+            if candidate is not None:
+                manual = candidate
+                break
     if manual is None:
-        raise RuntimeError("轉入帳號找不到「自行輸入」")
+        raise RuntimeError("轉入帳號找不到「自行輸入」選項")
     try:
-        manual.click()
+        manual.click(force=True)
     except Exception:
         manual.evaluate("element => element.click()")
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        row = _row_for_label(page, "轉入帳號", timeout=1_000)
+        visible_selects = [
+            row.locator("select").nth(index)
+            for index in range(row.locator("select").count())
+            if row.locator("select").nth(index).is_visible()
+        ]
+        visible_inputs = row.locator(
+            'input:visible:not([type="hidden"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
+        )
+        if len(visible_selects) >= 2 and visible_inputs.count() >= 1:
+            return
+        page.wait_for_timeout(200)
+    raise RuntimeError("已點選「自行輸入」，但銀行下拉框與帳號欄未出現")
+
+
+def _option_has_bank_code(option_text: str, bank_code: str) -> bool:
+    return bool(re.search(rf"(^|\D){re.escape(bank_code)}(\D|$)", option_text.strip()))
+
+
+def _fill_manual_destination(page: Page, bank_code: str, account_number: str) -> None:
+    row = _row_for_label(page, "轉入帳號")
+    selects = [
+        row.locator("select").nth(index)
+        for index in range(row.locator("select").count())
+        if row.locator("select").nth(index).is_visible()
+    ]
+    if len(selects) < 2:
+        raise RuntimeError("自行輸入找不到銀行下拉框")
+    bank_select = selects[-1]
+    selected = False
+    options = bank_select.locator("option")
+    for index in range(options.count()):
+        option = options.nth(index)
+        if not _option_has_bank_code(option.inner_text(), bank_code):
+            continue
+        bank_select.select_option(option.get_attribute("value") or "")
+        selected = True
+        break
+    if not selected:
+        raise RuntimeError(f"銀行下拉框找不到代碼 {bank_code}")
+
+    inputs = row.locator(
+        'input:visible:not([type="hidden"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
+    )
+    if not inputs.count():
+        raise RuntimeError("自行輸入找不到轉入帳號欄")
+    account_input = inputs.last
+    account_input.click()
+    account_input.press("Meta+A")
+    account_input.fill(account_number)
 
 
 def _wait_confirmation(page: Page, timeout: int = 30_000) -> None:
@@ -180,7 +244,9 @@ def fill_refund(page: Page, area: str, item: dict[str, object]) -> None:
     page = _open_transfer_form(page)
     _choose_source_account(page, area)
     _choose_manual_destination(page)
-    _fill_row_inputs(page, "轉入帳號", [str(item["bank_code"]), str(item["account_number"])])
+    _fill_manual_destination(
+        page, str(item["bank_code"]), str(item["account_number"])
+    )
     _fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
     _click_text(page, "立即", exact=True)
     _fill_row_inputs(page, "給自己", [f"清潔{item['customer']}退款"])
