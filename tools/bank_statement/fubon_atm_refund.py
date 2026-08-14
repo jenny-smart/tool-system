@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from typing import Union
 
 from playwright.sync_api import Frame, Locator, Page, sync_playwright
 
@@ -14,7 +15,7 @@ from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_ch
 from tools.memo_system.change_order import get_worksheet
 
 
-Context = Frame | Page
+Context = Union[Frame, Page]
 
 
 def _contexts(page: Page) -> list[Context]:
