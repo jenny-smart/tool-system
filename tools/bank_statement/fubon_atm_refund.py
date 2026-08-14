@@ -10,7 +10,11 @@ from playwright.sync_api import Frame, Locator, Page, sync_playwright
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login
 from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
-from tools.bank_statement.open_login import current_fubon_page, dismiss_fubon_idle_dialog
+from tools.bank_statement.open_login import (
+    current_fubon_page,
+    dismiss_fubon_idle_dialog,
+    visible_in_viewport,
+)
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 from tools.memo_system.change_order import get_worksheet
 
@@ -92,7 +96,20 @@ def _open_transfer_form(page: Page) -> Page:
         except Exception:
             continue
     if not form_is_open:
-        _click_text(page, "台幣轉帳")
+        print("點擊首頁『臺幣轉帳』功能磚。")
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+        try:
+            # 與明細下載點「我的存款」相同：排除輪播中畫面外的複本，
+            # 再直接觸發真正位於視窗內的功能磚連結。
+            tile = visible_in_viewport(
+                page, 'a:has-text("臺幣轉帳")', timeout_ms=8_000
+            )
+            tile.evaluate("el => el.click()")
+        except Exception as exc:
+            raise RuntimeError(f"找不到可點擊的『臺幣轉帳』：{exc}") from exc
         _click_text(page, "立即/預約轉帳")
     _row_for_label(page, "轉出帳號", timeout=30_000)
     return current_fubon_page(page.context, page) or page
