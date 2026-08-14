@@ -5,8 +5,12 @@ from decimal import Decimal, InvalidOperation
 
 
 STATUS_CONFIG = {
-    "待扣儲值金": {"action": "扣款", "amount_column": 13, "suffix": "已扣"},  # N
-    "待退儲值金": {"action": "入帳", "amount_column": 18, "suffix": "已返"},  # S
+    "待扣儲值金": {
+        "action": "扣款", "amount_column": 13, "time_column": 12, "suffix": "已扣"
+    },  # N 金額、M 時間
+    "待退儲值金": {
+        "action": "入帳", "amount_column": 18, "time_column": 28, "suffix": "已返"
+    },  # S 金額、AC 時間
 }
 
 
@@ -46,6 +50,8 @@ def pending_stored_value_adjustments(values: list[list[str]]) -> list[dict[str, 
                 "amount": amount,
                 "action": config["action"],
                 "suffix": config["suffix"],
+                "time_column": int(config["time_column"]) + 1,
+                "completed_at": _cell(row, int(config["time_column"])),
             }
         )
     return rows

@@ -176,7 +176,8 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
 
 
 def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
-    pending = pending_stored_value_adjustments(get_worksheet(area).get_all_values())
+    worksheet = get_worksheet(area)
+    pending = pending_stored_value_adjustments(worksheet.get_all_values())
     pending = [item for item in pending if int(item["sheet_row"]) in selected_rows]
     if not pending:
         raise ValueError("勾選列已不是待扣／待退儲值金，或缺少訂單編號／金額")
@@ -190,7 +191,14 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
             for item in pending:
                 print(f"處理第 {item['sheet_row']} 列：{item['order_no']}／{item['action']} NT$ {item['amount']}")
                 page = _open_history(page, str(item["order_no"]))
-                if _submit_adjustment(page, item, date_text):
+                created = _submit_adjustment(page, item, date_text)
+                if not str(item["completed_at"]).strip():
+                    completed_at = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d %H:%M:%S")
+                    worksheet.update_cell(
+                        int(item["sheet_row"]), int(item["time_column"]), completed_at
+                    )
+                    print(f"已回寫第 {item['sheet_row']} 列時間：{completed_at}")
+                if created:
                     completed += 1
                     print(f"完成：{item['order_no']}／{date_text}{item['suffix']}")
         finally:
