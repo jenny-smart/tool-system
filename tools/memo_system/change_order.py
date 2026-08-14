@@ -43,6 +43,7 @@ import requests
 from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
+from tools.common.config_loader import get_service_account_info
 
 try:
     import streamlit as st
@@ -163,13 +164,11 @@ def _get_gspread_client():
     if _gspread_client is not None:
         return _gspread_client
 
-    if st is None:
-        raise RuntimeError("找不到 streamlit，無法讀取 st.secrets 取得 Google 憑證")
-
     sa_info = None
 
     # 依序嘗試這幾個 key（實際命名以 memo.py 為準：GOOGLE_SERVICE_ACCOUNT 是 TOML 區塊）
-    for key in ("GOOGLE_SERVICE_ACCOUNT", "gcp_service_account"):
+    # 與 memo.py 保持一致，避免同時存在兩組憑證時選到未被分享 Sheet 的帳號。
+    for key in ("gcp_service_account", "GOOGLE_SERVICE_ACCOUNT"):
         try:
             block = st.secrets.get(key, None)
         except Exception:
@@ -188,10 +187,7 @@ def _get_gspread_client():
         break
 
     if not sa_info:
-        raise RuntimeError(
-            "找不到 Google 服務帳號憑證，請確認 secrets.toml 裡有 [GOOGLE_SERVICE_ACCOUNT] "
-            "區塊或 GOOGLE_SERVICE_ACCOUNT（JSON 字串），命名請跟 memo.py 現有設定一致"
-        )
+        sa_info = get_service_account_info()
 
     creds = Credentials.from_service_account_info(sa_info, scopes=_SCOPES)
     _gspread_client = gspread.authorize(creds)
@@ -208,7 +204,12 @@ def get_worksheet(region: str, tab_name: str = "清潔異動"):
         raise ValueError(f"不支援的地區：{region}（目前支援：{list(SHEET_IDS.keys())}）")
 
     client = _get_gspread_client()
-    sh = client.open_by_key(SHEET_IDS[region])
+    try:
+        sh = client.open_by_key(SHEET_IDS[region])
+    except gspread.exceptions.SpreadsheetNotFound as exc:
+        raise RuntimeError(
+            f"無法開啟「{region}」清潔異動試算表。請確認試算表已分享給目前的 Google 服務帳號（編輯者權限）。"
+        ) from exc
 
     gid = SHEET_GIDS.get(region)
     if gid is not None:
