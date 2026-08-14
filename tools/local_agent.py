@@ -199,6 +199,20 @@ def build_newebpay_refund_pending(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_lemon_stored_value_adjustment(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    selected_rows = params.get("selected_rows") or []
+    if not area or area == "全區":
+        raise ValueError("異動儲值金請選擇單一區域")
+    if not selected_rows:
+        raise ValueError("請先勾選要異動儲值金的資料")
+    return [
+        sys.executable, "-m", "tools.lemon_backend.stored_value_adjustment",
+        "--area", area, "--cdp-url", cdp_url,
+        "--rows", ",".join(str(int(row)) for row in selected_rows),
+    ]
+
+
 def build_fubon_login(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
@@ -241,6 +255,27 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
         cdp_url,
         "--output",
         str(output),
+    ]
+
+
+def build_fubon_atm_refund(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    selected_rows = params.get("selected_rows") or []
+    if area not in ("台北", "台中"):
+        raise ValueError("富邦 ATM 退款目前只支援台北、台中")
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的 ATM 退款資料")
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_atm_refund",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+        "--rows",
+        ",".join(str(int(row)) for row in selected_rows),
     ]
 
 
@@ -326,8 +361,10 @@ register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
 register_action("newebpay.refund_pending", build_newebpay_refund_pending)
+register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjustment)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
+register_action("fubon.atm_refund", build_fubon_atm_refund)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
