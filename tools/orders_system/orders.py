@@ -4259,6 +4259,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
     day_end = datetime.strptime(date_range_end, "%Y-%m-%d").replace(tzinfo=tz) + timedelta(days=1)
 
     calendar_events_by_region = {}
+    all_events_by_region = {}
     for r in regions_to_check:
         calendar_id = GOOGLE_CALENDAR_MAP[r]
         events = service.events().list(
@@ -4269,6 +4270,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             orderBy="startTime",
             maxResults=2500,
         ).execute().get("items", [])
+        all_events_by_region[r] = events
         calendar_events_by_region[r] = [e for e in events if str(e.get("colorId", "")) == COLOR_YELLOW]
 
     def _event_local_range(event):
@@ -4315,6 +4317,22 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             if e.get("id") not in matched_event_ids and _event_time_match(order, e)
         ]
         if not candidates:
+            # v2026.08.14：找不到黃色事件時，額外查同時段／同區域是否有「其他顏色
+            # （或根本沒設色）」的事件——這樣才分得出「日曆真的完全沒排」跟
+            # 「其實有排、只是顏色沒被標成黃色」這兩種不同狀況，避免只看到
+            # 「找不到黃色事件」這句籠統訊息、卻無從判斷是漏排還是顏色問題。
+            same_time_any_color = [
+                e for e in all_events_by_region.get(order["region"], [])
+                if _event_time_match(order, e)
+            ]
+            if same_time_any_color:
+                color_names = "、".join(
+                    (color_name_from_id(e.get("colorId")) if e.get("colorId") else "（未設定顏色，使用日曆預設色）")
+                    for e in same_time_any_color
+                )
+                extra = f"同時段在日曆上找到 {len(same_time_any_color)} 筆事件，但顏色是「{color_names}」，不是黃色。"
+            else:
+                extra = "同時段在日曆上完全找不到任何事件。"
             result["backend_missing_in_calendar"].append({
                 "order_no": order["order_no"],
                 "phone": order["phone"],
@@ -4325,7 +4343,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
                 "issue": (
                     f"後台訂單 {order['order_no']}（{order['region']}，服務日期 "
                     f"{order['service_date']} {order['service_time']}）在 Google 日曆找不到"
-                    f"對應的黃色事件，請確認日曆是否漏排或顏色不對。"
+                    f"對應的黃色事件。{extra}請確認日曆是否漏排或顏色不對。"
                 ),
             })
             continue
