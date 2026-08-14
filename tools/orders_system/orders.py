@@ -4428,6 +4428,19 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             ),
         })
 
+    def _event_name_phone(event):
+        """從日曆事件的 summary／description 解析出姓名／電話。實測事件內容
+        常見格式是「<已確認>姓名,電話」，姓名緊接在電話前面。"""
+        blob = " ".join([event.get("summary", "") or "", event.get("description", "") or ""])
+        phone_m = re.search(r"(09\d{8})", blob)
+        phone = phone_m.group(1) if phone_m else ""
+        name = ""
+        if phone_m:
+            before = blob[:phone_m.start()]
+            name_m = re.search(r"([\u4e00-\u9fffA-Za-z]+)[,，]?\s*$", before)
+            name = name_m.group(1) if name_m else ""
+        return name, phone
+
     # ---------- 方向二：日曆有、後台沒有 ----------
     for r, events in calendar_events_by_region.items():
         for event in events:
@@ -4440,15 +4453,20 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
                 if start_local and end_local else ""
             )
             summary = event.get("summary", "") or "（無標題）"
+            event_name, event_phone = _event_name_phone(event)
             result["calendar_missing_in_backend"].append({
                 "event_summary": summary,
+                "name": event_name,
+                "phone": event_phone,
                 "address": event.get("location", "") or "",
                 "region": r,
                 "service_date": service_date,
                 "service_time": service_time,
                 "event_link": event.get("htmlLink", ""),
                 "issue": (
-                    f"{r}日曆有一筆黃色事件「{summary}」（{service_date} {service_time}），"
+                    f"{r}日曆有一筆黃色事件「{summary}」"
+                    f"（{event_name or '姓名不明'}，{event_phone or '電話不明'}，"
+                    f"{service_date} {service_time}），"
                     f"但後台這段期間的已付款訂單裡找不到服務日期／時段相符的訂單，"
                     f"請確認是否漏成單或日期時段對不上。"
                 ),
