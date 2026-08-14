@@ -4307,50 +4307,94 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         core = addr_norm[:10] if len(addr_norm) >= 10 else addr_norm
         return bool(core) and core in blob
 
+    def _phone_in_any_event(phone, events):
+        phone_norm = normalize_phone(phone) if phone else ""
+        if not phone_norm:
+            return False
+        for event in events:
+            blob = re.sub(r"\s+", "", " ".join([
+                event.get("summary", "") or "",
+                event.get("description", "") or "",
+                event.get("location", "") or "",
+            ]))
+            if phone_norm in blob:
+                return True
+        return False
+
     matched_event_ids = set()
     result = {"backend_missing_in_calendar": [], "calendar_missing_in_backend": []}
 
     # ---------- 方向一：後台有、日曆沒有 ----------
+    # v2026.08.14：改成兩階段配對。這個系統很多訂單共用同一組標準時段
+    # （例如 09:00-11:00），同一天、同一區域常常會有好幾筆不同地址的訂單／
+    # 事件落在同一個時段。如果只用「單一輪、地址對不上就退回第一筆可用事件」
+    # 的貪婪配對，地址真的核對不上的訂單可能搶先把地址明明對得上的另一筆
+    # 訂單該用的事件用掉，導致那一筆反而被誤判成「日曆沒有」（LC00212341
+    # 就是這樣被誤判：日曆上確實有一筆顏色正確、時段正確的事件，只是被同
+    # 時段另一筆訂單先搶走）。
+    #
+    # 第一輪：只鎖定「地址核心片段確實有對上」的組合，優先配對，绝不會被
+    # 之後任何訂單搶走。
     for order in backend_orders:
+        for event in calendar_events_by_region.get(order["region"], []):
+            event_id = event.get("id")
+            if event_id in matched_event_ids:
+                continue
+            if _event_time_match(order, event) and _event_addr_core_match(order["address"], event):
+                matched_event_ids.add(event_id)
+                order["_matched"] = True
+                break
+
+    # 第二輪：地址核對不上（或事件內容根本沒有地址資訊）的訂單，才用「同
+    # 時段還沒被配走的事件」補配——此時才可能發生名不符實的配對，但至少
+    # 不會搶走第一輪已經確認地址相符的配對。
+    for order in backend_orders:
+        if order.get("_matched"):
+            continue
         candidates = [
             e for e in calendar_events_by_region.get(order["region"], [])
             if e.get("id") not in matched_event_ids and _event_time_match(order, e)
         ]
-        if not candidates:
-            # v2026.08.14：找不到黃色事件時，額外查同時段／同區域是否有「其他顏色
-            # （或根本沒設色）」的事件——這樣才分得出「日曆真的完全沒排」跟
-            # 「其實有排、只是顏色沒被標成黃色」這兩種不同狀況，避免只看到
-            # 「找不到黃色事件」這句籠統訊息、卻無從判斷是漏排還是顏色問題。
-            same_time_any_color = [
-                e for e in all_events_by_region.get(order["region"], [])
-                if _event_time_match(order, e)
-            ]
-            if same_time_any_color:
-                color_names = "、".join(
-                    (color_name_from_id(e.get("colorId")) if e.get("colorId") else "（未設定顏色，使用日曆預設色）")
-                    for e in same_time_any_color
-                )
-                extra = f"同時段在日曆上找到 {len(same_time_any_color)} 筆事件，但顏色是「{color_names}」，不是黃色。"
-            else:
-                extra = "同時段在日曆上完全找不到任何事件。"
-            result["backend_missing_in_calendar"].append({
-                "order_no": order["order_no"],
-                "phone": order["phone"],
-                "address": order["address"],
-                "region": order["region"],
-                "service_date": order["service_date"],
-                "service_time": order["service_time"],
-                "issue": (
-                    f"後台訂單 {order['order_no']}（{order['region']}，服務日期 "
-                    f"{order['service_date']} {order['service_time']}）在 Google 日曆找不到"
-                    f"對應的黃色事件。{extra}請確認日曆是否漏排或顏色不對。"
-                ),
-            })
+        if candidates:
+            matched_event_ids.add(candidates[0].get("id"))
             continue
-        # 同一個時段可能有多筆候選事件，優先挑地址核心片段有對上的那一筆，
-        # 避免同時段多筆訂單時把配對關係搞混。
-        chosen = next((e for e in candidates if _event_addr_core_match(order["address"], e)), candidates[0])
-        matched_event_ids.add(chosen.get("id"))
+
+        # v2026.08.14：後台有這筆訂單，但這支電話整段期間內完全沒出現在該區域
+        # 日曆的任何一筆事件裡（不限時段、不限顏色）——代表這位客人根本不是走
+        # 日曆管理流程（例如電話沒登記進日曆、或這類客人本來就不會排進這個
+        # 日曆），不列入比對範圍，避免誤報成「日曆沒有」。
+        if not _phone_in_any_event(order["phone"], all_events_by_region.get(order["region"], [])):
+            continue
+
+        # v2026.08.14：找不到黃色事件時，額外查同時段／同區域是否有「其他顏色
+        # （或根本沒設色）」的事件——這樣才分得出「日曆真的完全沒排」跟
+        # 「其實有排、只是顏色沒被標成黃色」這兩種不同狀況，避免只看到
+        # 「找不到黃色事件」這句籠統訊息、卻無從判斷是漏排還是顏色問題。
+        same_time_any_color = [
+            e for e in all_events_by_region.get(order["region"], [])
+            if _event_time_match(order, e)
+        ]
+        if same_time_any_color:
+            color_names = "、".join(
+                (color_name_from_id(e.get("colorId")) if e.get("colorId") else "（未設定顏色，使用日曆預設色）")
+                for e in same_time_any_color
+            )
+            extra = f"同時段在日曆上找到 {len(same_time_any_color)} 筆事件，但顏色是「{color_names}」，不是黃色。"
+        else:
+            extra = "同時段在日曆上完全找不到任何事件。"
+        result["backend_missing_in_calendar"].append({
+            "order_no": order["order_no"],
+            "phone": order["phone"],
+            "address": order["address"],
+            "region": order["region"],
+            "service_date": order["service_date"],
+            "service_time": order["service_time"],
+            "issue": (
+                f"後台訂單 {order['order_no']}（{order['region']}，服務日期 "
+                f"{order['service_date']} {order['service_time']}）在 Google 日曆找不到"
+                f"對應的黃色事件。{extra}請確認日曆是否漏排或顏色不對。"
+            ),
+        })
 
     # ---------- 方向二：日曆有、後台沒有 ----------
     for r, events in calendar_events_by_region.items():
