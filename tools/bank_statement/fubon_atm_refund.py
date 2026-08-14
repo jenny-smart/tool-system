@@ -201,12 +201,9 @@ def _choose_source_account(page: Page, area: str, source_account: str) -> None:
 def _choose_manual_destination(page: Page) -> None:
     row = _row_for_label(page, "轉入帳號")
     # 「自行輸入」是第二個 radio；點擊後銀行下拉框與帳號欄才會生成。
-    radios = [
-        row.locator('input[type="radio"]').nth(index)
-        for index in range(row.locator('input[type="radio"]').count())
-        if row.locator('input[type="radio"]').nth(index).is_visible()
-    ]
-    manual = radios[1] if len(radios) >= 2 else None
+    # 富邦用 CSS 隱藏原生 radio，因此不能以 is_visible() 過濾。
+    radios = row.locator('input[type="radio"]')
+    manual = radios.nth(1) if radios.count() >= 2 else None
     if manual is None:
         for context in _contexts(page):
             candidate = _visible(context.get_by_text("自行輸入", exact=True))
@@ -216,9 +213,10 @@ def _choose_manual_destination(page: Page) -> None:
     if manual is None:
         raise RuntimeError("轉入帳號找不到「自行輸入」選項")
     try:
-        manual.click(force=True)
-    except Exception:
+        # 直接觸發 DOM click 才會執行富邦 onchange 並產生後續欄位。
         manual.evaluate("element => element.click()")
+    except Exception:
+        manual.click(force=True)
 
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
