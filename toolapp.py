@@ -2485,7 +2485,7 @@ with area_col:
     ):
         area_select_options = [area for area in area_options if area != "全區"]
     if selected_function == "【檸檬後台】異動儲值金":
-        area_select_options = [area for area in ("台北", "台中") if area in area_options]
+        area_select_options = [area for area in ("台北", "台中", "桃園", "新竹", "高雄") if area in area_options]
 
     selected_area_value = st.selectbox(
         "執行區域",
@@ -2538,7 +2538,7 @@ if system_type == "finance_management" and selected_function == "【藍新金流
 stored_value_selected_rows = []
 if system_type == "finance_management" and selected_function == "【檸檬後台】異動儲值金":
     try:
-        from tools.memo_system.change_order import get_worksheet
+        from tools.lemon_backend.stored_value_sheet import get_worksheet
         from tools.lemon_backend.stored_value_filter import pending_stored_value_adjustments
 
         _stored_value_candidates = pending_stored_value_adjustments(get_worksheet(selected_area_value).get_all_values())
