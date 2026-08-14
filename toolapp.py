@@ -1757,6 +1757,17 @@ def queue_newebpay_refund_pending(*, month="", start_date=None, end_date=None, a
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_lemon_stored_value_adjustment(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    if not selected_rows:
+        raise ValueError("請先勾選要異動儲值金的資料")
+    task = create_local_agent_task(
+        "lemon.stored_value_adjustment",
+        {"area": area, "selected_rows": selected_rows, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 def queue_fubon_login(*, month="", start_date=None, end_date=None, area="全區"):
     mobile = st.session_state.get("fubon_verification_mode") == "手機輸入驗證碼"
     task = create_local_agent_task(
@@ -1868,6 +1879,7 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
 
 FINANCE_TASKS = [
     {"name": "【本機 Agent】啟動", "handler": start_local_agent_service, "enabled": True},
+    {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
@@ -2264,6 +2276,9 @@ with date_col:
         elif selected_function == "【藍新金流】藍新信用卡待退款":
             st.markdown('<div class="field-label">📆 查詢期間</div>', unsafe_allow_html=True)
             st.info("固定查詢今天起往前 85 天", icon="📅")
+        elif selected_function == "【檸檬後台】異動儲值金":
+            st.markdown('<div class="field-label">📆 異動日期</div>', unsafe_allow_html=True)
+            st.info("備註日期使用今天（台北時間）", icon="📅")
         elif selected_function == "【富邦銀行】富邦明細下載":
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -2458,6 +2473,7 @@ with area_col:
 
     area_select_options = ["全區"] + [area for area in area_options if area != "全區"]
     if selected_function in (
+        "【檸檬後台】異動儲值金",
         "【藍新金流】藍新登入",
         "【藍新金流】藍新信用卡待退款",
         "【鯨躍發票】開立折讓單",
@@ -2468,6 +2484,8 @@ with area_col:
         "【元大銀行】檢查薪資付款狀態",
     ):
         area_select_options = [area for area in area_options if area != "全區"]
+    if selected_function == "【檸檬後台】異動儲值金":
+        area_select_options = [area for area in ("台北", "台中") if area in area_options]
 
     selected_area_value = st.selectbox(
         "執行區域",
@@ -2517,6 +2535,41 @@ if system_type == "finance_management" and selected_function == "【藍新金流
     except Exception as exc:
         st.error(f"讀取清潔異動表失敗：{exc}")
 
+stored_value_selected_rows = []
+if system_type == "finance_management" and selected_function == "【檸檬後台】異動儲值金":
+    try:
+        from tools.memo_system.change_order import get_worksheet
+        from tools.lemon_backend.stored_value_filter import pending_stored_value_adjustments
+
+        _stored_value_candidates = pending_stored_value_adjustments(get_worksheet(selected_area_value).get_all_values())
+        _stored_value_editor = st.data_editor(
+            pd.DataFrame([
+                {
+                    "執行": False,
+                    "列數": item["sheet_row"],
+                    "狀態": item["status"],
+                    "訂單編號": item["order_no"],
+                    "異動類型": item["action"],
+                    "異動金額": item["amount"],
+                    "備註": item["note"],
+                }
+                for item in _stored_value_candidates
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            disabled=["列數", "狀態", "訂單編號", "異動類型", "異動金額", "備註"],
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
+            key=f"lemon_stored_value_editor_{selected_area_value}",
+        )
+        stored_value_selected_rows = [
+            int(row["列數"])
+            for _, row in _stored_value_editor.iterrows()
+            if bool(row["執行"])
+        ]
+        st.caption(f"待扣／待退儲值金：{len(_stored_value_candidates)} 筆；已勾選：{len(stored_value_selected_rows)} 筆")
+    except Exception as exc:
+        st.error(f"讀取儲值金異動資料失敗：{exc}")
+
 allowance_selected_rows = []
 if system_type == "finance_management" and selected_function == "【鯨躍發票】開立折讓單":
     try:
@@ -2539,12 +2592,12 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ═══════════════════════════════════════════════════════════
 render_log()
 
-if system_type == "finance_management" and selected_function.startswith(("【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】")):
+if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】")):
     try:
         agent_tasks = [
             task
             for task in list_local_agent_tasks(limit=10)
-            if task.get("action", "").startswith(("cetustek.", "newebpay.", "fubon.", "yuanta."))
+            if task.get("action", "").startswith(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta."))
         ]
         if agent_tasks:
             st.markdown("#### 本機 Agent 任務 Log")
@@ -2879,6 +2932,8 @@ if run_clicked:
             }
             if selected_function == "【藍新金流】藍新信用卡待退款":
                 finance_kwargs["selected_rows"] = refund_selected_rows
+            if selected_function == "【檸檬後台】異動儲值金":
+                finance_kwargs["selected_rows"] = stored_value_selected_rows
             if selected_function == "【鯨躍發票】開立折讓單":
                 finance_kwargs["selected_rows"] = allowance_selected_rows
             result = finance_handler(**finance_kwargs)
