@@ -1794,6 +1794,21 @@ def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_fubon_atm_refund(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的 ATM 退款資料")
+    task = create_local_agent_task(
+        "fubon.atm_refund",
+        {
+            "area": area,
+            "selected_rows": selected_rows,
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 @st.fragment(run_every="2s")
 def render_fubon_mobile_verification():
     try:
@@ -1882,6 +1897,7 @@ FINANCE_TASKS = [
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
+    {"name": "【富邦銀行】異動 ATM 退款", "handler": queue_fubon_atm_refund, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -2479,6 +2495,7 @@ with area_col:
         "【鯨躍發票】開立折讓單",
         "【富邦銀行】富邦登入",
         "【富邦銀行】富邦明細下載",
+        "【富邦銀行】異動 ATM 退款",
         "【元大銀行】元大登入",
         "【元大銀行】元大明細下載",
         "【元大銀行】檢查薪資付款狀態",
@@ -2486,6 +2503,8 @@ with area_col:
         area_select_options = [area for area in area_options if area != "全區"]
     if selected_function == "【檸檬後台】異動儲值金":
         area_select_options = [area for area in ("台北", "台中", "桃園", "新竹", "高雄") if area in area_options]
+    if selected_function == "【富邦銀行】異動 ATM 退款":
+        area_select_options = [area for area in ("台北", "台中") if area in area_options]
 
     selected_area_value = st.selectbox(
         "執行區域",
@@ -2581,6 +2600,46 @@ if system_type == "finance_management" and selected_function == "【鯨躍發票
         st.caption(f"待退款折讓：{len(_allowance_candidates)} 筆；已勾選：{len(allowance_selected_rows)} 筆")
     except Exception as exc:
         st.error(f"讀取折讓資料失敗：{exc}")
+
+fubon_refund_selected_rows = []
+if system_type == "finance_management" and selected_function == "【富邦銀行】異動 ATM 退款":
+    try:
+        from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
+        from tools.memo_system.change_order import get_worksheet
+
+        _fubon_refund_candidates = pending_atm_refunds(
+            get_worksheet(selected_area_value).get_all_values()
+        )
+        _fubon_refund_editor = st.data_editor(
+            pd.DataFrame([
+                {
+                    "執行": False,
+                    "列數": item["sheet_row"],
+                    "訂單編號": item["order_no"],
+                    "客人姓名": item["customer"],
+                    "轉入銀行": item["bank_code"],
+                    "轉入帳號": item["account_number"],
+                    "退款金額": item["amount"],
+                }
+                for item in _fubon_refund_candidates
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            disabled=["列數", "訂單編號", "客人姓名", "轉入銀行", "轉入帳號", "退款金額"],
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
+            key=f"fubon_atm_refund_editor_{selected_area_value}",
+        )
+        fubon_refund_selected_rows = [
+            int(row["列數"])
+            for _, row in _fubon_refund_editor.iterrows()
+            if bool(row["執行"])
+        ]
+        st.caption(
+            f"待退款＋ATM：{len(_fubon_refund_candidates)} 筆；"
+            f"已勾選：{len(fubon_refund_selected_rows)} 筆"
+        )
+    except Exception as exc:
+        st.error(f"讀取富邦 ATM 退款資料失敗：{exc}")
 
 run_clicked = st.button("▶ 執行", use_container_width=True)
 
@@ -2936,6 +2995,8 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = stored_value_selected_rows
             if selected_function == "【鯨躍發票】開立折讓單":
                 finance_kwargs["selected_rows"] = allowance_selected_rows
+            if selected_function == "【富邦銀行】異動 ATM 退款":
+                finance_kwargs["selected_rows"] = fubon_refund_selected_rows
             result = finance_handler(**finance_kwargs)
             if result is not None:
                 add_log(str(result), "success")
