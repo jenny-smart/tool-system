@@ -136,32 +136,23 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
     adjust_button = page.locator('button[data-target="#basicModal"]', has_text="異動儲值金")
     adjust_button.wait_for(state="visible", timeout=30_000)
     adjust_button.click()
-    modal = _first_visible(page, ('.modal:visible', '[role="dialog"]:visible'))
-    scope = modal if modal is not None else page.locator("body")
-    selects = scope.locator("select:visible")
-    order_select = None
-    action_select = None
-    item_select = None
-    for index in range(selects.count()):
-        select = selects.nth(index)
-        labels = [select.locator("option").nth(i).inner_text().strip() for i in range(select.locator("option").count())]
-        if any(order_no in label for label in labels):
-            order_select = select
-        elif str(item["action"]) in labels:
-            action_select = select
-        elif "異動費" in labels:
-            item_select = select
-    if order_select is None or action_select is None or item_select is None:
-        raise RuntimeError(f"{order_no} 異動視窗的下拉欄位不完整")
+    modal = page.locator("#basicModal")
+    modal.wait_for(state="visible", timeout=15_000)
+    selects = modal.locator("select")
+    if selects.count() < 3:
+        raise RuntimeError(f"{order_no} 異動視窗只有 {selects.count()} 個下拉欄位")
+    order_select, action_select, item_select = selects.nth(0), selects.nth(1), selects.nth(2)
+    order_select.locator("option", has_text=order_no).first.wait_for(state="attached", timeout=15_000)
+    item_select.locator("option", has_text="異動費").first.wait_for(state="attached", timeout=15_000)
     _select_option(order_select, order_no, contains=True)
     _select_option(action_select, str(item["action"]))
     _select_option(item_select, "異動費")
 
     amount_field = _first_visible(
         page,
-        ('input[name*="amount"]:visible', 'input[id*="amount"]:visible', '.modal input[type="number"]:visible'),
+        ('#basicModal input[type="number"]:visible',),
     )
-    note_field = _first_visible(page, ('.modal textarea:visible', 'textarea:visible'))
+    note_field = _first_visible(page, ('#basicModal textarea:visible',))
     if amount_field is None or note_field is None:
         raise RuntimeError(f"{order_no} 找不到異動金額或備註欄位")
     amount_field.fill(amount)
