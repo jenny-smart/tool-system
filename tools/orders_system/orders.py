@@ -4102,6 +4102,15 @@ def _calchk_phone_from_lines(lines):
     return ""
 
 
+def _calchk_name_from_lines(lines):
+    """訂購人姓名固定緊接在電話號碼那一行之前（比照 weekend_reminders._name_
+    phone 的判斷方式）。"""
+    for idx, line in enumerate(lines):
+        if re.fullmatch(r"09\d{8}", str(line).strip()):
+            return str(lines[idx - 1]).strip() if idx else ""
+    return ""
+
+
 def _calchk_service_date_time_from_lines(lines):
     """
     抓服務日期／實際要跟日曆比對用的服務時段。
@@ -4246,6 +4255,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             continue
         backend_orders.append({
             "order_no": order_no,
+            "name": _calchk_name_from_lines(lines),
             "phone": _calchk_phone_from_lines(lines),
             "address": address,
             "region": order_region,
@@ -4297,6 +4307,17 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             and (end_local.hour, end_local.minute) == (eh, em)
         )
 
+    def _event_blob(event):
+        return re.sub(r"\s+", "", " ".join([
+            event.get("summary", "") or "",
+            event.get("description", "") or "",
+            event.get("location", "") or "",
+        ]))
+
+    def _event_phone_match(order_phone, event):
+        phone_norm = normalize_phone(order_phone) if order_phone else ""
+        return bool(phone_norm) and phone_norm in _event_blob(event)
+
     def _event_addr_core_match(order_address, event):
         blob = normalize_addr_for_match(" ".join([
             event.get("summary", "") or "",
@@ -4311,15 +4332,14 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         phone_norm = normalize_phone(phone) if phone else ""
         if not phone_norm:
             return False
-        for event in events:
-            blob = re.sub(r"\s+", "", " ".join([
-                event.get("summary", "") or "",
-                event.get("description", "") or "",
-                event.get("location", "") or "",
-            ]))
-            if phone_norm in blob:
-                return True
-        return False
+        return any(phone_norm in _event_blob(e) for e in events)
+
+    def _color_breakdown(events):
+        counts = {}
+        for e in events:
+            name = color_name_from_id(e.get("colorId")) if e.get("colorId") else "（未設定顏色，使用日曆預設色）"
+            counts[name] = counts.get(name, 0) + 1
+        return "、".join(f"{name}x{n}" for name, n in counts.items())
 
     matched_event_ids = set()
     result = {"backend_missing_in_calendar": [], "calendar_missing_in_backend": []}
@@ -4327,27 +4347,33 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
     # ---------- 方向一：後台有、日曆沒有 ----------
     # v2026.08.14：改成兩階段配對。這個系統很多訂單共用同一組標準時段
     # （例如 09:00-11:00），同一天、同一區域常常會有好幾筆不同地址的訂單／
-    # 事件落在同一個時段。如果只用「單一輪、地址對不上就退回第一筆可用事件」
-    # 的貪婪配對，地址真的核對不上的訂單可能搶先把地址明明對得上的另一筆
-    # 訂單該用的事件用掉，導致那一筆反而被誤判成「日曆沒有」（LC00212341
-    # 就是這樣被誤判：日曆上確實有一筆顏色正確、時段正確的事件，只是被同
-    # 時段另一筆訂單先搶走）。
+    # 事件落在同一個時段。如果只用「單一輪、對不上就退回第一筆可用事件」的
+    # 貪婪配對，會讓對不上的訂單搶先把明明對得上的另一筆訂單該用的事件用掉，
+    # 導致那一筆反而被誤判成「日曆沒有」（真實案例 LC00212341、LC00214313：
+    # 同時段其實有好幾筆顏色、時段都正確的候選事件，只是被同時段其他訂單
+    # 先搶走）。
     #
-    # 第一輪：只鎖定「地址核心片段確實有對上」的組合，優先配對，绝不會被
-    # 之後任何訂單搶走。
+    # 第一輪：優先用「電話」鎖定配對——實測日曆事件內容通常是
+    # 「<已確認>姓名,電話」，並不包含完整地址，用地址核對反而常常對不上；
+    # 電話是精確、不會誤判的識別碼，找到就直接鎖定，絕不會被之後任何訂單
+    # 搶走。地址核心片段吻合也一併當作可信配對（保留給日曆內容真的有寫
+    # 地址的情況）。
     for order in backend_orders:
         for event in calendar_events_by_region.get(order["region"], []):
             event_id = event.get("id")
             if event_id in matched_event_ids:
                 continue
-            if _event_time_match(order, event) and _event_addr_core_match(order["address"], event):
+            if _event_time_match(order, event) and (
+                _event_phone_match(order["phone"], event)
+                or _event_addr_core_match(order["address"], event)
+            ):
                 matched_event_ids.add(event_id)
                 order["_matched"] = True
                 break
 
-    # 第二輪：地址核對不上（或事件內容根本沒有地址資訊）的訂單，才用「同
-    # 時段還沒被配走的事件」補配——此時才可能發生名不符實的配對，但至少
-    # 不會搶走第一輪已經確認地址相符的配對。
+    # 第二輪：電話／地址都核對不上（或事件內容完全沒有可辨識資訊）的訂單，
+    # 才用「同時段還沒被配走的事件」補配——此時才可能發生名不符實的配對，
+    # 但至少不會搶走第一輪已經確認電話／地址相符的配對。
     for order in backend_orders:
         if order.get("_matched"):
             continue
@@ -4368,29 +4394,35 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
 
         # v2026.08.14：找不到黃色事件時，額外查同時段／同區域是否有「其他顏色
         # （或根本沒設色）」的事件——這樣才分得出「日曆真的完全沒排」跟
-        # 「其實有排、只是顏色沒被標成黃色」這兩種不同狀況，避免只看到
-        # 「找不到黃色事件」這句籠統訊息、卻無從判斷是漏排還是顏色問題。
+        # 「其實有排、只是顏色沒被標成黃色」這兩種不同狀況。顏色只彙總計數
+        # （例如「香蕉黃x6、葡萄紫x1」），不逐筆列出，避免同時段候選一多，
+        # 訊息裡出現同一個顏色名稱重複好幾次、反而不好讀。
         same_time_any_color = [
             e for e in all_events_by_region.get(order["region"], [])
             if _event_time_match(order, e)
         ]
         if same_time_any_color:
-            color_names = "、".join(
-                (color_name_from_id(e.get("colorId")) if e.get("colorId") else "（未設定顏色，使用日曆預設色）")
-                for e in same_time_any_color
-            )
-            extra = f"同時段在日曆上找到 {len(same_time_any_color)} 筆事件，但顏色是「{color_names}」，不是黃色。"
+            yellow_events = [e for e in same_time_any_color if str(e.get("colorId", "")) == COLOR_YELLOW]
+            other_events = [e for e in same_time_any_color if str(e.get("colorId", "")) != COLOR_YELLOW]
+            parts = []
+            if yellow_events:
+                parts.append(f"{len(yellow_events)} 筆是黃色，但同時段訂單數比黃色事件數多，已被其他訂單配走")
+            if other_events:
+                parts.append(f"{len(other_events)} 筆顏色不是黃色（{_color_breakdown(other_events)}）")
+            extra = f"同時段在日曆上共找到 {len(same_time_any_color)} 筆事件：" + "；".join(parts) + "。"
         else:
             extra = "同時段在日曆上完全找不到任何事件。"
         result["backend_missing_in_calendar"].append({
             "order_no": order["order_no"],
+            "name": order["name"],
             "phone": order["phone"],
             "address": order["address"],
             "region": order["region"],
             "service_date": order["service_date"],
             "service_time": order["service_time"],
             "issue": (
-                f"後台訂單 {order['order_no']}（{order['region']}，服務日期 "
+                f"後台訂單 {order['order_no']}（{order['name'] or '姓名不明'}，"
+                f"{order['phone'] or '電話不明'}，{order['region']}，服務日期 "
                 f"{order['service_date']} {order['service_time']}）在 Google 日曆找不到"
                 f"對應的黃色事件。{extra}請確認日曆是否漏排或顏色不對。"
             ),
