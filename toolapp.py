@@ -2566,7 +2566,7 @@ if system_type == "finance_management" and selected_function == "【檸檬後台
             for _, row in _stored_value_editor.iterrows()
             if bool(row["執行"])
         ]
-        st.caption(f"待扣／待退儲值金：{len(_stored_value_candidates)} 筆；已勾選：{len(stored_value_selected_rows)} 筆")
+        st.caption(f"待扣／待返儲值金：{len(_stored_value_candidates)} 筆；已勾選：{len(stored_value_selected_rows)} 筆")
     except Exception as exc:
         st.error(f"讀取儲值金異動資料失敗：{exc}")
 
