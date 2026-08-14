@@ -14,6 +14,7 @@ from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
 from tools.bank_statement.open_login import (
     current_fubon_page,
     dismiss_fubon_idle_dialog,
+    real_mouse_click_right_arrow,
     visible_in_viewport,
 )
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
@@ -25,6 +26,15 @@ Context = Union[Frame, Page]
 
 def _contexts(page: Page) -> list[Context]:
     return [page, *page.frames]
+
+
+def _all_fubon_contexts(page: Page) -> list[Context]:
+    contexts: list[Context] = []
+    for candidate_page in page.context.pages:
+        if candidate_page.is_closed() or "ebank.taipeifubon.com.tw" not in candidate_page.url:
+            continue
+        contexts.extend([candidate_page, *candidate_page.frames])
+    return contexts or _contexts(page)
 
 
 def _visible(locator: Locator) -> Locator | None:
@@ -39,7 +49,7 @@ def _click_text(page: Page, text: str, *, exact: bool = True, timeout: int = 15_
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
         dismiss_fubon_idle_dialog(page)
-        for context in _contexts(page):
+        for context in _all_fubon_contexts(page):
             try:
                 item = _visible(context.get_by_text(text, exact=exact))
                 if item is None:
@@ -129,7 +139,7 @@ def _click_source_account_choice(
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
         candidates: list[Locator] = []
-        for context in _contexts(page):
+        for context in _all_fubon_contexts(page):
             for text in (source_account, suffix, branch):
                 if not text:
                     continue
@@ -184,10 +194,8 @@ def _choose_source_account(page: Page, area: str, source_account: str) -> None:
                 if _source_selected(_row_for_label(page, "轉出帳號"), source_account):
                     return
 
-    try:
-        control.click()
-    except Exception:
-        control.evaluate("element => element.click()")
+    # 富邦的帳號選擇器需要完整滑鼠事件；DOM click 只會出現灰色遮罩。
+    real_mouse_click_right_arrow(page, control)
     _click_source_account_choice(page, source_account, "松高分行")
 
     deadline = time.monotonic() + 10
