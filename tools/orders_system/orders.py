@@ -1,10 +1,17 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.07.20-1
+# 版本：v2026.08.14-1
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
-# 最後更新：2026-07-20
+# 最後更新：2026-08-14
 #
 # Change Log
+# v2026.08.14-1
+# - 新增 run_backend_calendar_consistency_check：獨立的「後台訂單／Google 日曆
+#   雙向比對」工具，比照 run_standalone_consistency_check 的雙向比對精神，把
+#   比對對象從 Google Sheet 成單工作表換成 Google 日曆。以日曆事件的時間與
+#   顏色為基準（沿用既有慣例：黃色＝已安排／應該已成單），只有黃色事件才拿來
+#   跟後台已付款訂單互相比對，找出「後台有、日曆沒有」或「日曆有、後台沒有」
+#   的訂單。供 ordersapp.py 新增的「後台／Google 日曆雙向比對」功能使用。
 # v2026.07.20-1
 # - 批次建單恢復「自動補檸檬人」可選開關。底層安全保護維持：
 #   專員當日已有任何班別時一律跳過，不動到其他客人已配班人員。
@@ -4057,6 +4064,248 @@ def run_standalone_consistency_check(env_name, backend_email, backend_password, 
             })
 
     return problems
+
+
+def _calchk_address_from_lines(lines):
+    """從訂單卡片文字行裡取出地址（比照 weekend_reminders._address 的判斷方式：
+    找第一行含有『市/縣』+『區/鄉/鎮/市』且不是電話/LINE 這種雜項的行）。"""
+    for line in lines:
+        text = str(line or "").strip()
+        if not text or "@" in text or text.upper() == "LINE":
+            continue
+        if re.search(
+            r"(台|臺|新北|桃園|台中|臺中|台南|臺南|高雄|基隆|新竹|嘉義|苗栗|彰化|"
+            r"南投|雲林|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|連江).*(市|縣).*(區|鄉|鎮|市)",
+            text,
+        ):
+            return text
+    return ""
+
+
+def _calchk_phone_from_lines(lines):
+    for line in lines:
+        if re.fullmatch(r"09\d{8}", str(line).strip()):
+            return str(line).strip()
+    return ""
+
+
+def _calchk_service_time_from_lines(lines, service_date):
+    if not service_date:
+        return ""
+    for idx, line in enumerate(lines):
+        if str(line).strip().startswith(service_date):
+            for nxt in lines[idx + 1: idx + 5]:
+                m = re.search(r"(\d{2}:\d{2})[-~～](\d{2}:\d{2})", str(nxt).replace(" ", ""))
+                if m:
+                    return f"{m.group(1)}-{m.group(2)}"
+            break
+    return ""
+
+
+def run_backend_calendar_consistency_check(env_name, backend_email, backend_password,
+                                            date_range_start, date_range_end, region=None,
+                                            purchase_status="1"):
+    """
+    v2026.08.14：後台訂單／Google 日曆雙向比對，比照 run_standalone_consistency_check
+    （後台 vs. Google Sheet 成單工作表）的雙向比對精神，只是把比對對象換成
+    Google 日曆事件。
+
+    比對基準是日曆事件的「時間」與「顏色」：沿用 VIP 訂單／日曆同步既有的顏色
+    慣例（紫色＝未安排、黃色＝已安排、綠色＝暫停），只有黃色事件代表「已安排／
+    應該已經成單」，才拿來跟後台已付款訂單互相比對；紫色（尚未成單）、綠色
+    （已暫停）等其他顏色的事件不列入比對範圍，避免把本來就還沒成單或已暫停的
+    日曆事件誤判成異常。
+
+    方向一（後台有、日曆沒有）：後台在 date_range_start~date_range_end 這段
+    服務日期區間內的已付款訂單，逐筆用區域＋服務日期＋時段去該區域日曆找
+    對應的黃色事件（時間需完全一致），找不到就列為異常。
+
+    方向二（日曆有、後台沒有）：日曆在同一段期間內的黃色事件，逐筆核對是否
+    有後台已付款訂單的服務日期＋時段能對應上，對不上就列為異常。
+
+    region：可選，限定只比對 GOOGLE_CALENDAR_MAP 裡的其中一個區域；不指定則
+    比對 GOOGLE_CALENDAR_MAP 裡已設定日曆 ID 的全部區域。
+
+    回傳 dict：
+        {
+            "backend_missing_in_calendar": [{"order_no", "phone", "address",
+                "region", "service_date", "service_time", "issue"}, ...],
+            "calendar_missing_in_backend": [{"event_summary", "address",
+                "region", "service_date", "service_time", "event_link",
+                "issue"}, ...],
+        }
+    """
+    global BASE_URL, ORDER_PREFIX
+    if env_name == "dev":
+        BASE_URL = BASE_URL_DEV
+        ORDER_PREFIX = ORDER_PREFIX_DEV
+    else:
+        BASE_URL = BASE_URL_PROD
+        ORDER_PREFIX = ORDER_PREFIX_PROD
+
+    global LOGIN_URL, BOOKING_URL, PURCHASE_URL, GET_MEMBER_URL
+    global CHECK_CONTAIN_URL, CALCULATE_HOUR_URL, GET_SECTION_URL, MAIL_SUCCESS_URL
+
+    LOGIN_URL = f"{BASE_URL}/login"
+    BOOKING_URL = f"{BASE_URL}/booking/stored_value_routine"
+    PURCHASE_URL = f"{BASE_URL}/purchase"
+    GET_MEMBER_URL = f"{BASE_URL}/ajax/get_member"
+    CHECK_CONTAIN_URL = f"{BASE_URL}/ajax/check_contain"
+    CALCULATE_HOUR_URL = f"{BASE_URL}/ajax/calculate_hour"
+    GET_SECTION_URL = f"{BASE_URL}/ajax/get_section"
+    MAIL_SUCCESS_URL = f"{BASE_URL}/purchase/mail_success/{{order_no}}"
+
+    if region and region not in GOOGLE_CALENDAR_MAP:
+        raise Exception(f"{region} 尚未設定 Google Calendar ID，無法比對")
+    regions_to_check = [region] if region else list(GOOGLE_CALENDAR_MAP.keys())
+    if not regions_to_check:
+        raise Exception("尚未設定任何 Google Calendar ID（GOOGLE_CALENDAR_MAP 是空的）")
+
+    service = build_gcal_service()
+    if service is None:
+        raise Exception("Google 日曆同步目前未啟用")
+
+    session = requests.Session()
+    if not login(session, backend_email, backend_password):
+        raise Exception("後台登入失敗，請確認帳號密碼")
+
+    # ---------- 後台：抓這段服務日期區間內的全部已付款訂單，解析區域/地址/服務日期時段 ----------
+    blocks = _fetch_all_purchase_blocks_by_date_range(
+        session, date_range_start, date_range_end, purchase_status=purchase_status
+    )
+    backend_orders = []
+    for block in blocks:
+        order_no = str(block.get("order_no", "") or "").strip()
+        lines = block.get("lines", [])
+        if not order_no:
+            continue
+        address = _calchk_address_from_lines(lines)
+        if not address:
+            continue
+        order_region = get_region_by_address(address, ACCOUNTS)
+        if order_region not in regions_to_check:
+            continue
+        _, service_date, _ = _extract_order_dates_from_block_lines(lines)
+        service_time = _calchk_service_time_from_lines(lines, service_date)
+        if not service_date or not service_time:
+            continue
+        backend_orders.append({
+            "order_no": order_no,
+            "phone": _calchk_phone_from_lines(lines),
+            "address": address,
+            "region": order_region,
+            "service_date": service_date,
+            "service_time": service_time,
+        })
+
+    # ---------- 日曆：抓這段期間內每個區域的黃色事件 ----------
+    tz = timezone(timedelta(hours=8))
+    day_start = datetime.strptime(date_range_start, "%Y-%m-%d").replace(tzinfo=tz)
+    day_end = datetime.strptime(date_range_end, "%Y-%m-%d").replace(tzinfo=tz) + timedelta(days=1)
+
+    calendar_events_by_region = {}
+    for r in regions_to_check:
+        calendar_id = GOOGLE_CALENDAR_MAP[r]
+        events = service.events().list(
+            calendarId=calendar_id,
+            timeMin=day_start.isoformat(),
+            timeMax=day_end.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=2500,
+        ).execute().get("items", [])
+        calendar_events_by_region[r] = [e for e in events if str(e.get("colorId", "")) == COLOR_YELLOW]
+
+    def _event_local_range(event):
+        start_raw = event.get("start", {}).get("dateTime") or event.get("start", {}).get("date")
+        end_raw = event.get("end", {}).get("dateTime") or event.get("end", {}).get("date")
+        start_dt = parse_event_time(start_raw)
+        end_dt = parse_event_time(end_raw)
+        if not start_dt or not end_dt:
+            return None, None
+        return start_dt.astimezone(tz), end_dt.astimezone(tz)
+
+    def _event_time_match(order, event):
+        start_local, end_local = _event_local_range(event)
+        if not start_local or not end_local:
+            return False
+        try:
+            start_s, end_s = order["service_time"].split("-")
+            sh, sm, eh, em = parse_time_slot(start_s, end_s)
+        except Exception:
+            return False
+        return (
+            start_local.strftime("%Y-%m-%d") == order["service_date"]
+            and (start_local.hour, start_local.minute) == (sh, sm)
+            and (end_local.hour, end_local.minute) == (eh, em)
+        )
+
+    def _event_addr_core_match(order_address, event):
+        blob = normalize_addr_for_match(" ".join([
+            event.get("summary", "") or "",
+            event.get("description", "") or "",
+            event.get("location", "") or "",
+        ]))
+        addr_norm = normalize_addr_for_match(order_address)
+        core = addr_norm[:10] if len(addr_norm) >= 10 else addr_norm
+        return bool(core) and core in blob
+
+    matched_event_ids = set()
+    result = {"backend_missing_in_calendar": [], "calendar_missing_in_backend": []}
+
+    # ---------- 方向一：後台有、日曆沒有 ----------
+    for order in backend_orders:
+        candidates = [
+            e for e in calendar_events_by_region.get(order["region"], [])
+            if e.get("id") not in matched_event_ids and _event_time_match(order, e)
+        ]
+        if not candidates:
+            result["backend_missing_in_calendar"].append({
+                "order_no": order["order_no"],
+                "phone": order["phone"],
+                "address": order["address"],
+                "region": order["region"],
+                "service_date": order["service_date"],
+                "service_time": order["service_time"],
+                "issue": (
+                    f"後台訂單 {order['order_no']}（{order['region']}，服務日期 "
+                    f"{order['service_date']} {order['service_time']}）在 Google 日曆找不到"
+                    f"對應的黃色事件，請確認日曆是否漏排或顏色不對。"
+                ),
+            })
+            continue
+        # 同一個時段可能有多筆候選事件，優先挑地址核心片段有對上的那一筆，
+        # 避免同時段多筆訂單時把配對關係搞混。
+        chosen = next((e for e in candidates if _event_addr_core_match(order["address"], e)), candidates[0])
+        matched_event_ids.add(chosen.get("id"))
+
+    # ---------- 方向二：日曆有、後台沒有 ----------
+    for r, events in calendar_events_by_region.items():
+        for event in events:
+            if event.get("id") in matched_event_ids:
+                continue
+            start_local, end_local = _event_local_range(event)
+            service_date = start_local.strftime("%Y-%m-%d") if start_local else ""
+            service_time = (
+                f"{start_local.strftime('%H:%M')}-{end_local.strftime('%H:%M')}"
+                if start_local and end_local else ""
+            )
+            summary = event.get("summary", "") or "（無標題）"
+            result["calendar_missing_in_backend"].append({
+                "event_summary": summary,
+                "address": event.get("location", "") or "",
+                "region": r,
+                "service_date": service_date,
+                "service_time": service_time,
+                "event_link": event.get("htmlLink", ""),
+                "issue": (
+                    f"{r}日曆有一筆黃色事件「{summary}」（{service_date} {service_time}），"
+                    f"但後台這段期間的已付款訂單裡找不到服務日期／時段相符的訂單，"
+                    f"請確認是否漏成單或日期時段對不上。"
+                ),
+            })
+
+    return result
 
 
 def run_batch_consistency_check(env_name, region, backend_email, backend_password, sheet_name, target_rows, logger=print):
