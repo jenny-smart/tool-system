@@ -1644,9 +1644,6 @@ def render_log_page() -> None:
 # 系統 / 功能設定
 # ═══════════════════════════════════════════════════════════
 def start_local_agent_service(*, month="", start_date=None, end_date=None, area="全區"):
-    online_agents = [row for row in list_local_agent_status(max_age_seconds=30) if row.get("online")]
-    if online_agents:
-        return f"本機 Agent 已在線：{online_agents[0].get('agent_id', '')}"
     script = BASE_DIR / "scripts" / "local_agent_service.sh"
     if sys.platform != "darwin" or not script.exists():
         raise RuntimeError("Mac 目前離線；請先在 Mac 安裝 launchd 服務")
@@ -1659,7 +1656,7 @@ def start_local_agent_service(*, month="", start_date=None, end_date=None, area=
     )
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "Agent 啟動失敗").strip())
-    return "本機 Agent 已啟動"
+    return "本機 Agent 已同步最新版並啟動"
 
 
 def queue_cetustek_login(*, month="", start_date=None, end_date=None, area="全區"):
@@ -1893,7 +1890,7 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
 
 
 FINANCE_TASKS = [
-    {"name": "【本機 Agent】啟動", "handler": start_local_agent_service, "enabled": True},
+    {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
