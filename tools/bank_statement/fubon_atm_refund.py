@@ -182,40 +182,50 @@ def _choose_source_account(page: Page, area: str, source_account: str) -> None:
 
 
 def _choose_manual_destination(page: Page) -> None:
-    row = _row_for_label(page, "轉入帳號")
-    # 「自行輸入」是第二個 radio；點擊後銀行下拉框與帳號欄才會生成。
-    # 富邦用 CSS 隱藏原生 radio，因此不能以 is_visible() 過濾。
-    radios = row.locator('input[type="radio"]')
-    manual = radios.nth(1) if radios.count() >= 2 else None
-    if manual is None:
-        for context in _contexts(page):
-            candidate = _visible(context.get_by_text("自行輸入", exact=True))
-            if candidate is not None:
-                manual = candidate
-                break
-    if manual is None:
-        raise RuntimeError("轉入帳號找不到「自行輸入」選項")
-    try:
-        # 直接觸發 DOM click 才會執行富邦 onchange 並產生後續欄位。
-        manual.evaluate("element => element.click()")
-    except Exception:
-        manual.click(force=True)
-
+    manual = None
+    seen_ids: list[str] = []
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        row = _row_for_label(page, "轉入帳號", timeout=1_000)
-        visible_selects = [
-            row.locator("select").nth(index)
-            for index in range(row.locator("select").count())
-            if row.locator("select").nth(index).is_visible()
-        ]
-        visible_inputs = row.locator(
-            'input:visible:not([type="hidden"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
+    while time.monotonic() < deadline and manual is None:
+        for context in _all_fubon_contexts(page):
+            candidates = context.locator('[id*="inAcctType"], [name*="inAcctType"]')
+            for index in range(candidates.count()):
+                candidate = candidates.nth(index)
+                candidate_id = candidate.get_attribute("id") or ""
+                candidate_name = candidate.get_attribute("name") or ""
+                marker = candidate_id or candidate_name
+                if marker and marker not in seen_ids:
+                    seen_ids.append(marker)
+                if candidate_id == "form1:inAcctTypeInput":
+                    manual = candidate
+                    break
+            if manual is not None:
+                break
+        if manual is None:
+            page.wait_for_timeout(200)
+    if manual is None:
+        raise RuntimeError(
+            "轉入帳號找不到自行輸入控制項；候選：" + ", ".join(filter(None, seen_ids))
         )
-        if len(visible_selects) >= 2 and visible_inputs.count() >= 1:
+
+    manual.evaluate(
+        """element => {
+          element.checked = true;
+          const win = element.ownerDocument.defaultView;
+          if (win.jQuery) win.jQuery(element).prop('checked', true).trigger('click');
+          else element.click();
+          if (typeof win.removeMask === 'function') win.removeMask();
+        }"""
+    )
+
+    ready_deadline = time.monotonic() + 10
+    while time.monotonic() < ready_deadline:
+        bank_select = manual.locator(
+            'xpath=ancestor::tr[1]//select[@id="form1:bankList"]'
+        )
+        if bank_select.count() and bank_select.is_enabled():
             return
         page.wait_for_timeout(200)
-    raise RuntimeError("已點選「自行輸入」，但銀行下拉框與帳號欄未出現")
+    raise RuntimeError("已點選「自行輸入」，但銀行選單仍為停用")
 
 
 def _option_has_bank_code(option_text: str, bank_code: str) -> bool:
@@ -224,25 +234,40 @@ def _option_has_bank_code(option_text: str, bank_code: str) -> bool:
 
 def _fill_manual_destination(page: Page, bank_code: str, account_number: str) -> None:
     row = _row_for_label(page, "轉入帳號")
-    selects = [
-        row.locator("select").nth(index)
-        for index in range(row.locator("select").count())
-        if row.locator("select").nth(index).is_visible()
-    ]
-    if len(selects) < 2:
+    bank_select = row.locator('select[id="form1:bankList"]')
+    if not bank_select.count():
         raise RuntimeError("自行輸入找不到銀行下拉框")
-    bank_select = selects[-1]
-    selected = False
     options = bank_select.locator("option")
+    target_index = None
+    target_value = ""
     for index in range(options.count()):
         option = options.nth(index)
         if not _option_has_bank_code(option.inner_text(), bank_code):
             continue
-        bank_select.select_option(option.get_attribute("value") or "")
-        selected = True
+        target_index = index
+        target_value = option.get_attribute("value") or ""
         break
-    if not selected:
+    if target_index is None or not target_value:
         raise RuntimeError(f"銀行下拉框找不到代碼 {bank_code}")
+
+    bank_select.evaluate(
+        """(element, payload) => {
+          const win = element.ownerDocument.defaultView;
+          if (typeof win.selectComboBoxTableItem === 'function') {
+            win.selectComboBoxTableItem(
+              'form1:bankList', payload.value, false, false, false, payload.index
+            );
+          } else {
+            element.disabled = false;
+            element.value = payload.value;
+            element.dispatchEvent(new Event('change', {bubbles: true}));
+          }
+          if (typeof win.removeMask === 'function') win.removeMask();
+        }""",
+        {"index": target_index, "value": target_value},
+    )
+    if bank_select.input_value() != target_value:
+        raise RuntimeError(f"銀行代碼 {bank_code} 選取後未生效")
 
     inputs = row.locator(
         'input:visible:not([type="hidden"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
