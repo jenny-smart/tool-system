@@ -116,21 +116,86 @@ def _open_transfer_form(page: Page) -> Page:
     return current_fubon_page(page.context, page) or page
 
 
-def _choose_source_account(page: Page, area: str) -> None:
+def _source_selected(row: Locator, source_account: str) -> bool:
+    text_digits = re.sub(r"\D", "", row.inner_text())
+    source_digits = re.sub(r"\D", "", source_account)
+    return bool(source_digits and source_digits[-5:] in text_digits)
+
+
+def _click_source_account_choice(
+    page: Page, source_account: str, branch: str, timeout: int = 15_000
+) -> None:
+    suffix = re.sub(r"\D", "", source_account)[-5:]
+    deadline = time.monotonic() + timeout / 1000
+    while time.monotonic() < deadline:
+        candidates: list[Locator] = []
+        for context in _contexts(page):
+            for text in (source_account, suffix, branch):
+                if not text:
+                    continue
+                try:
+                    locator = context.get_by_text(text, exact=False)
+                    for index in range(locator.count()):
+                        item = locator.nth(index)
+                        if item.is_visible():
+                            candidates.append(item)
+                except Exception:
+                    continue
+        if candidates:
+            # 避免點到包含整頁文字的外層容器，優先最短的帳號卡片文字。
+            candidates.sort(key=lambda item: len(item.inner_text()))
+            item = candidates[0]
+            item.evaluate(
+                """element => {
+                  const target = element.closest('a,button,[onclick],tr,li') || element;
+                  target.click();
+                }"""
+            )
+            return
+        page.wait_for_timeout(200)
+    raise RuntimeError(f"轉出帳號彈窗找不到 {branch}／{source_account}")
+
+
+def _choose_source_account(page: Page, area: str, source_account: str) -> None:
     if area != "台北":
         return
     # 台北登入有兩個轉出帳號；點選轉出帳號欄位後指定松高分行。
     row = _row_for_label(page, "轉出帳號")
-    if "松高分行" in row.inner_text():
+    if _source_selected(row, source_account):
         return
-    control = _visible(row.locator("select, button, input, [role='button'], [onclick]"))
+    controls = row.locator("select, button, input, [role='button'], [onclick]")
+    control = _visible(controls)
     if control is None:
         raise RuntimeError("台北轉出帳號找不到選擇按鈕")
+
+    # 若是原生 select，優先直接選帳號／松高分行，避免開啟後彈窗停住。
+    if control.evaluate("element => element.tagName") == "SELECT":
+        source_digits = re.sub(r"\D", "", source_account)
+        options = control.locator("option")
+        for index in range(options.count()):
+            option = options.nth(index)
+            option_text = option.inner_text()
+            account_matches = bool(
+                source_digits and source_digits[-5:] in re.sub(r"\D", "", option_text)
+            )
+            if account_matches or "松高分行" in option_text:
+                control.select_option(option.get_attribute("value") or "")
+                page.wait_for_timeout(300)
+                if _source_selected(_row_for_label(page, "轉出帳號"), source_account):
+                    return
+
     try:
         control.click()
     except Exception:
         control.evaluate("element => element.click()")
-    _click_text(page, "松高分行", exact=False)
+    _click_source_account_choice(page, source_account, "松高分行")
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if _source_selected(_row_for_label(page, "轉出帳號", timeout=1_000), source_account):
+            return
+        page.wait_for_timeout(200)
+    raise RuntimeError(f"已點松高分行，但轉出帳號未變成 {source_account}")
 
 
 def _choose_manual_destination(page: Page) -> None:
@@ -240,9 +305,11 @@ def _wait_user_completed_transfer(page: Page, timeout: int = 600_000) -> None:
     raise RuntimeError("等待人工完成富邦交易逾時；尚未準備下一筆")
 
 
-def fill_refund(page: Page, area: str, item: dict[str, object]) -> None:
+def fill_refund(
+    page: Page, area: str, source_account: str, item: dict[str, object]
+) -> None:
     page = _open_transfer_form(page)
-    _choose_source_account(page, area)
+    _choose_source_account(page, area, source_account)
     _choose_manual_destination(page)
     _fill_manual_destination(
         page, str(item["bank_code"]), str(item["account_number"])
@@ -269,9 +336,9 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
             for index, item in enumerate(selected):
                 print(
                     f"準備第 {item['sheet_row']} 列：{item['customer']}／"
-                    f"{item['bank_code']}-{str(item['account_number'])[-5:]}／NT$ {item['amount']}"
+                    f"P={item['bank_code']}／Q={item['account_number']}／NT$ {item['amount']}"
                 )
-                fill_refund(page, area, item)
+                fill_refund(page, area, account.bank_account, item)
                 print("已進入富邦確認資料頁。")
                 if index + 1 < len(selected):
                     _wait_user_completed_transfer(page)
