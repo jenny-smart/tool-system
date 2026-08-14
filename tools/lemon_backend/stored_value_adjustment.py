@@ -161,10 +161,10 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
     dialog_messages: list[str] = []
     page.once("dialog", lambda dialog: (dialog_messages.append(dialog.message), dialog.accept()))
     send = (
-        _visible(scope.get_by_role("button", name="送出", exact=True))
-        or _visible(scope.get_by_role("button", name="確定", exact=True))
-        or _visible(scope.get_by_text("送出", exact=True))
-        or _visible(scope.get_by_text("確定", exact=True))
+        _visible(modal.get_by_role("button", name="送出", exact=True))
+        or _visible(modal.get_by_role("button", name="確定", exact=True))
+        or _visible(modal.get_by_text("送出", exact=True))
+        or _visible(modal.get_by_text("確定", exact=True))
     )
     if send is None:
         raise RuntimeError(f"{order_no} 找不到送出按鈕")
