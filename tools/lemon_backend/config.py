@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 try:
@@ -111,6 +113,48 @@ def _mapping_get(mapping: Any, key: str) -> Any:
         return None
 
 
+@lru_cache(maxsize=1)
+def _local_secrets() -> dict[str, Any]:
+    paths = []
+    explicit = os.getenv("TOOLS_APP_SECRETS_FILE", "").strip()
+    if explicit:
+        paths.append(Path(explicit).expanduser())
+    paths.extend((Path.cwd() / ".streamlit" / "secrets.toml", Path.home() / ".streamlit" / "secrets.toml"))
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            import toml
+
+            data = toml.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    return {}
+
+
+def _local_account_secret(area: str, field: str) -> str:
+    area_key = normalize_area(area)
+    accounts = _mapping_get(_local_secrets(), "accounts")
+    for candidate in (area_key, AREA_ENV[area_key][0]):
+        value = _mapping_get(_mapping_get(accounts, candidate), field)
+        if _secret_value(value):
+            return _secret_value(value)
+    return ""
+
+
+def _project_account_secret(area: str, field: str) -> str:
+    """Use the existing local Lemon backend account file without copying secrets into tasks."""
+    try:
+        from tools.lemon_backend.accounts import ACCOUNTS
+
+        value = _mapping_get(_mapping_get(ACCOUNTS, AREA_ENV[normalize_area(area)][0]), field)
+        return _secret_value(value)
+    except Exception:
+        return ""
+
+
 def _streamlit_account_secret(area: str, field: str) -> str:
     """Read existing Streamlit secrets: accounts.<area>.email/password."""
     if st is None:
@@ -145,8 +189,14 @@ def normalize_area(area: str) -> str:
 
 
 def get_account_secret(area: str, field: str, fallback_env: str) -> str:
-    """Read Lemon Backend credentials from accounts.<area> first, then flat env/secrets."""
-    return _streamlit_account_secret(area, field) or get_secret(fallback_env)
+    """Read the same accounts.<area> credentials used by scheduled backend jobs."""
+    return (
+        os.getenv(fallback_env, "").strip()
+        or _local_account_secret(area, field)
+        or _streamlit_account_secret(area, field)
+        or _streamlit_secret(fallback_env)
+        or _project_account_secret(area, field)
+    )
 
 
 def get_credentials(area: str, required: bool = True) -> BackendCredentials | None:
