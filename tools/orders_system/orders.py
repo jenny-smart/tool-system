@@ -1,10 +1,23 @@
 # ============================================================
 # 檔名：orders.py
-# 版本：v2026.08.14-1
+# 版本：v2026.08.14-2
 # 模組：批次建單核心引擎（Google Sheet → 後台訂單，供 ordersapp.py 呼叫）
 # 最後更新：2026-08-14
 #
 # Change Log
+# v2026.08.14-2
+# - 修正「後台／Google 日曆雙向比對」的兩個誤判漏洞（真實訂單 LC00213191、
+#   LC00212665 驗證過）：
+#   1. 原本用 _extract_order_dates_from_block_lines 抓服務日期，要求先出現
+#      「訂購日期（建立時間，YYYY-MM-DD HH:MM:SS）」這一行才承認服務日期；
+#      代客預訂類訂單卡片沒有這一行，導致服務日期永遠抓不到、整筆訂單被跳過
+#      比對，誤判成「日曆有、後台沒有」。改成新的 _calchk_service_date_time_
+#      from_lines：不依賴訂購日期是否出現，直接定位「HH:MM-HH:MM」服務時段
+#      這一行，往回找最近的純日期行當服務日期。
+#   2. 非標準時段（例如客人約 10:00-12:00，系統送 09:00-11:00 佔位）的訂單，
+#      日期旁顯示的是系統時段，真正跟客人約定、也是 Google 日曆實際顯示的
+#      時間記在「簡訊實際服務時間」標籤後面。原本只看系統時段，永遠跟日曆
+#      對不上；現在偵測到這個標籤時改用標籤後面的時段比對。
 # v2026.08.14-1
 # - 新增 run_backend_calendar_consistency_check：獨立的「後台訂單／Google 日曆
 #   雙向比對」工具，比照 run_standalone_consistency_check 的雙向比對精神，把
@@ -4089,17 +4102,60 @@ def _calchk_phone_from_lines(lines):
     return ""
 
 
-def _calchk_service_time_from_lines(lines, service_date):
-    if not service_date:
-        return ""
+def _calchk_service_date_time_from_lines(lines):
+    """
+    抓服務日期／實際要跟日曆比對用的服務時段。
+
+    v2026.08.14 修正：原本用 _extract_order_dates_from_block_lines 抓服務日期，
+    但那個函式要求先找到「訂購日期（建立時間，格式 YYYY-MM-DD HH:MM:SS）」這
+    一行，才承認後面的日期行是服務日期。代客預訂類訂單卡片沒有這一行建立時間
+    戳記，導致服務日期永遠抓不到、整筆訂單被跳過比對，誤判成「日曆有、後台
+    沒有」。改成不依賴訂購日期是否出現：直接找「HH:MM-HH:MM」服務時段這一行
+    （格式獨特，訂單卡片裡只會出現一次系統時段），往回找最接近、且不是完整
+    建立時間戳記（帶秒數）的純日期行，當作服務日期。
+
+    另外，非標準時段（例如客人約 10:00-12:00，後台系統送 09:00-11:00 佔位）
+    的訂單卡片，日期旁邊顯示的是系統時段，真正跟客人約定、也是 Google 日曆
+    實際會顯示的時間，記在「簡訊實際服務時間」這個標籤後面。若卡片上有這個
+    標籤，比對時要改用它後面的時段，不能只看系統時段，否則永遠跟日曆對不上。
+
+    回傳 (service_date, service_time)，都抓不到時回傳 ("", "")。
+    """
+    time_idx = None
+    system_time = ""
     for idx, line in enumerate(lines):
-        if str(line).strip().startswith(service_date):
-            for nxt in lines[idx + 1: idx + 5]:
-                m = re.search(r"(\d{2}:\d{2})[-~～](\d{2}:\d{2})", str(nxt).replace(" ", ""))
-                if m:
-                    return f"{m.group(1)}-{m.group(2)}"
+        compact = str(line).strip().replace(" ", "")
+        m = re.match(r"^(\d{2}:\d{2})[-~～](\d{2}:\d{2})$", compact)
+        if m:
+            time_idx = idx
+            system_time = f"{m.group(1)}-{m.group(2)}"
             break
-    return ""
+    if time_idx is None:
+        return "", ""
+
+    service_date = ""
+    for j in range(time_idx - 1, max(-1, time_idx - 5), -1):
+        text = str(lines[j]).strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", text):
+            continue  # 這是訂購日期（建立時間），不是服務日期
+        m2 = re.match(r"^(\d{4}-\d{2}-\d{2})", text)
+        if m2:
+            service_date = m2.group(1)
+            break
+    if not service_date:
+        return "", ""
+
+    service_time = system_time
+    for idx, line in enumerate(lines):
+        if "簡訊實際服務時間" in str(line):
+            for nxt in lines[idx + 1: idx + 3]:
+                m3 = re.match(r"^(\d{2}:\d{2})[-~～](\d{2}:\d{2})$", str(nxt).strip().replace(" ", ""))
+                if m3:
+                    service_time = f"{m3.group(1)}-{m3.group(2)}"
+                    break
+            break
+
+    return service_date, service_time
 
 
 def run_backend_calendar_consistency_check(env_name, backend_email, backend_password,
@@ -4185,8 +4241,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         order_region = get_region_by_address(address, ACCOUNTS)
         if order_region not in regions_to_check:
             continue
-        _, service_date, _ = _extract_order_dates_from_block_lines(lines)
-        service_time = _calchk_service_time_from_lines(lines, service_date)
+        service_date, service_time = _calchk_service_date_time_from_lines(lines)
         if not service_date or not service_time:
             continue
         backend_orders.append({
