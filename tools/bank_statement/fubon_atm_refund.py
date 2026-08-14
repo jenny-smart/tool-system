@@ -14,7 +14,6 @@ from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
 from tools.bank_statement.open_login import (
     current_fubon_page,
     dismiss_fubon_idle_dialog,
-    real_mouse_click_right_arrow,
     visible_in_viewport,
 )
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
@@ -132,78 +131,54 @@ def _source_selected(row: Locator, source_account: str) -> bool:
     return bool(source_digits and source_digits[-5:] in text_digits)
 
 
-def _click_source_account_choice(
-    page: Page, source_account: str, branch: str, timeout: int = 15_000
-) -> None:
-    suffix = re.sub(r"\D", "", source_account)[-5:]
-    deadline = time.monotonic() + timeout / 1000
-    while time.monotonic() < deadline:
-        candidates: list[Locator] = []
-        for context in _all_fubon_contexts(page):
-            for text in (source_account, suffix, branch):
-                if not text:
-                    continue
-                try:
-                    locator = context.get_by_text(text, exact=False)
-                    for index in range(locator.count()):
-                        item = locator.nth(index)
-                        if item.is_visible():
-                            candidates.append(item)
-                except Exception:
-                    continue
-        if candidates:
-            # 避免點到包含整頁文字的外層容器，優先最短的帳號卡片文字。
-            candidates.sort(key=lambda item: len(item.inner_text()))
-            item = candidates[0]
-            item.evaluate(
-                """element => {
-                  const target = element.closest('a,button,[onclick],tr,li') || element;
-                  target.click();
-                }"""
-            )
-            return
-        page.wait_for_timeout(200)
-    raise RuntimeError(f"轉出帳號彈窗找不到 {branch}／{source_account}")
-
-
 def _choose_source_account(page: Page, area: str, source_account: str) -> None:
     if area != "台北":
         return
-    # 台北登入有兩個轉出帳號；點選轉出帳號欄位後指定松高分行。
+    # 富邦畫面使用自製下拉框：真正的 select 永遠 display:none，點外觀元件
+    # 有時只會留下遮罩。直接依 option 索引呼叫帳號卡片原本的 onclick 函式。
     row = _row_for_label(page, "轉出帳號")
-    if _source_selected(row, source_account):
-        return
-    controls = row.locator("select, button, input, [role='button'], [onclick]")
-    control = _visible(controls)
-    if control is None:
-        raise RuntimeError("台北轉出帳號找不到選擇按鈕")
+    select = row.locator('select[id="form1:outAccountList"]')
+    if not select.count():
+        raise RuntimeError("轉出帳號找不到富邦隱藏選單")
+    options = select.locator("option")
+    target_index = None
+    target_value = ""
+    for index in range(options.count()):
+        option = options.nth(index)
+        if "松高分行" not in option.inner_text():
+            continue
+        target_index = index
+        target_value = option.get_attribute("value") or ""
+        break
+    if target_index is None or not target_value:
+        raise RuntimeError("轉出帳號隱藏選單找不到松高分行")
 
-    # 若是原生 select，優先直接選帳號／松高分行，避免開啟後彈窗停住。
-    if control.evaluate("element => element.tagName") == "SELECT":
-        source_digits = re.sub(r"\D", "", source_account)
-        options = control.locator("option")
-        for index in range(options.count()):
-            option = options.nth(index)
-            option_text = option.inner_text()
-            account_matches = bool(
-                source_digits and source_digits[-5:] in re.sub(r"\D", "", option_text)
-            )
-            if account_matches or "松高分行" in option_text:
-                control.select_option(option.get_attribute("value") or "")
-                page.wait_for_timeout(300)
-                if _source_selected(_row_for_label(page, "轉出帳號"), source_account):
-                    return
-
-    # 富邦的帳號選擇器需要完整滑鼠事件；DOM click 只會出現灰色遮罩。
-    real_mouse_click_right_arrow(page, control)
-    _click_source_account_choice(page, source_account, "松高分行")
+    select.evaluate(
+        """(element, payload) => {
+          const win = element.ownerDocument.defaultView;
+          if (typeof win.closeComboDIV === 'function') {
+            win.closeComboDIV('form1:outAccountList');
+          }
+          if (typeof win.selectComboBoxDivItem === 'function') {
+            win.selectComboBoxDivItem(
+              'form1:outAccountList', payload.index, false, true
+            );
+          } else {
+            element.value = payload.value;
+            element.dispatchEvent(new Event('change', {bubbles: true}));
+          }
+          if (typeof win.removeMask === 'function') win.removeMask();
+        }""",
+        {"index": target_index, "value": target_value},
+    )
 
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        if _source_selected(_row_for_label(page, "轉出帳號", timeout=1_000), source_account):
+        if select.input_value() == target_value:
+            print("轉出帳號已選擇：松高分行。")
             return
         page.wait_for_timeout(200)
-    raise RuntimeError(f"已點松高分行，但轉出帳號未變成 {source_account}")
+    raise RuntimeError("已呼叫松高分行帳號卡片，但隱藏選單未更新")
 
 
 def _choose_manual_destination(page: Page) -> None:
