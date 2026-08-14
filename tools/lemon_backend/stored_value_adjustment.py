@@ -4,6 +4,7 @@ import argparse
 import re
 import time
 from datetime import datetime
+from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Locator, Page, sync_playwright
@@ -74,7 +75,7 @@ def _login(page: Page, area: str) -> None:
         raise RuntimeError(f"{area}後台登入失敗")
 
 
-def _open_history(page: Page, order_no: str) -> None:
+def _open_history(page: Page, order_no: str) -> Page:
     page.goto(f"{BASE_URL}/purchase?orderNo={order_no}", wait_until="domcontentloaded", timeout=60_000)
     search = _first_visible(page, ('button:has-text("搜尋")', 'input[value="搜尋"]'))
     if search is not None:
@@ -87,8 +88,18 @@ def _open_history(page: Page, order_no: str) -> None:
         history = _first_visible(page, ('a:has-text("儲值金歷程")', 'button:has-text("儲值金歷程")'))
     if history is None:
         raise RuntimeError(f"{order_no} 找不到儲值金歷程")
-    history.click()
-    page.wait_for_load_state("domcontentloaded")
+    href = history.get_attribute("href")
+    if href:
+        page.goto(urljoin(BASE_URL, href), wait_until="domcontentloaded", timeout=60_000)
+    else:
+        history.click()
+        page.wait_for_timeout(800)
+        if "/stored_value_histories" not in page.url:
+            matching_pages = [candidate for candidate in page.context.pages if "/stored_value_histories" in candidate.url]
+            if matching_pages:
+                page = matching_pages[-1]
+    page.wait_for_url("**/stored_value_histories", timeout=30_000)
+    return page
 
 
 def _select_option(select: Locator, text: str, *, contains: bool = False) -> None:
@@ -122,7 +133,9 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
         print(f"略過重複異動：{order_no}／{amount}／{note}")
         return False
 
-    _click_text(page, "異動儲值金")
+    adjust_button = page.locator('button[data-target="#basicModal"]', has_text="異動儲值金")
+    adjust_button.wait_for(state="visible", timeout=30_000)
+    adjust_button.click()
     modal = _first_visible(page, ('.modal:visible', '[role="dialog"]:visible'))
     scope = modal if modal is not None else page.locator("body")
     selects = scope.locator("select:visible")
@@ -164,10 +177,10 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
     )
     if send is None:
         raise RuntimeError(f"{order_no} 找不到送出按鈕")
-    send.click()
-    page.wait_for_timeout(1_500)
-    if _visible(scope) is not None and _visible(scope.get_by_role("button", name="送出", exact=True)) is not None:
-        raise RuntimeError(f"{order_no} 異動未成功，請人工確認")
+    with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
+        send.click()
+    if not _already_done(page, order_no, amount, note):
+        raise RuntimeError(f"{order_no} 送出後查無新增紀錄，請人工確認")
     return True
 
 
@@ -185,7 +198,7 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
         try:
             for item in pending:
                 print(f"處理第 {item['sheet_row']} 列：{item['order_no']}／{item['action']} NT$ {item['amount']}")
-                _open_history(page, str(item["order_no"]))
+                page = _open_history(page, str(item["order_no"]))
                 if _submit_adjustment(page, item, date_text):
                     completed += 1
                     print(f"完成：{item['order_no']}／{date_text}{item['suffix']}")
