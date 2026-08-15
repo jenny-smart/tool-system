@@ -183,15 +183,32 @@ def _select_account_card(
     # 選完帳號卡片後富邦會 AJAX 重建下一個欄位；尖峰時可能超過 20 秒。
     # 畫面偶爾會在選到的瞬間又蓋上「系統偵測到重覆交易」並把這欄重置，
     # 所以先短暫停頓後要再次確認選擇真的還在，而不是抓到那個瞬間就當作成功。
+    #
+    # 轉出帳號選定後，欄位本身的顯示文字就是「松高分行」，可以直接在 row
+    # 裡找到；但轉入帳號選定後，欄位只顯示帳號（如「012(台北富邦)-...」），
+    # 名字改顯示在旁邊另一列的「暱稱/轉入戶名」，不在同一個 row 裡。因此
+    # 除了確認 row 不再顯示「==請選擇==」，還要在整個頁面找 target_text，
+    # 不能只侷限在原本的 row。
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
-        if target_text in row.inner_text() and "==請選擇==" not in row.inner_text():
+        row = _row_for_label(page, row_label)
+        if "==請選擇==" not in row.inner_text():
             page.wait_for_timeout(800)
             if _has_duplicate_warning(page):
                 raise DuplicateTransactionWarning(
                     f"富邦顯示「系統偵測到重覆交易，請重新執行」（{row_label}）"
                 )
-            if target_text in row.inner_text() and "==請選擇==" not in row.inner_text():
+            row = _row_for_label(page, row_label)
+            confirmed = target_text in row.inner_text()
+            if not confirmed:
+                for context in _all_fubon_contexts(page):
+                    try:
+                        if _visible(context.get_by_text(target_text, exact=False)) is not None:
+                            confirmed = True
+                            break
+                    except Exception:
+                        continue
+            if confirmed and "==請選擇==" not in row.inner_text():
                 print(f"{row_label}已選擇：{label}。")
                 page.wait_for_timeout(1_500)
                 return
