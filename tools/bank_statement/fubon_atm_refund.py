@@ -327,7 +327,7 @@ def fill_refund(
     )
     _fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
     _click_text(page, "立即", exact=True)
-    _fill_row_inputs(page, "給自己", [f"清潔{item['customer']}退款"])
+    _fill_row_inputs(page, "給自己", [f"清潔{item['customer']}退"])
     _fill_row_inputs(page, "給對方", ["檸檬家事"])
     _click_text(page, "確認", exact=True)
     _wait_confirmation(page)
@@ -339,6 +339,17 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
     if not selected:
         raise ValueError("勾選列中沒有符合 B=待退款、R=ATM 且 P/Q/T 完整的資料")
+
+    zero_amount = [item for item in selected if item["amount"] == "0"]
+    if zero_amount:
+        rows_desc = "、".join(
+            f"第{item['sheet_row']}列（{item['customer']}）" for item in zero_amount
+        )
+        print(f"⚠️ 轉帳金額（T欄）為 0，已略過：{rows_desc}")
+    selected = [item for item in selected if item["amount"] != "0"]
+    if not selected:
+        raise ValueError("勾選列的轉帳金額（T欄）皆為 0，請先確認金額後再執行")
+
     account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)

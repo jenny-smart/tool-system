@@ -29,7 +29,7 @@ def pending_atm_refunds(values: list[list[str]]) -> list[dict[str, object]]:
             amount = Decimal(amount_text)
         except InvalidOperation:
             continue
-        if amount <= 0:
+        if amount < 0:
             continue
         normalized_amount = (
             str(int(amount)) if amount == amount.to_integral() else format(amount, "f")
