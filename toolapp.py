@@ -2525,6 +2525,8 @@ with area_col:
         "【富邦銀行】富邦登入",
         "【富邦銀行】富邦明細下載",
         "【富邦銀行】異動 ATM 退款",
+        "【富邦銀行】請款記錄",
+        "【富邦銀行】工具包押金退款",
         "【元大銀行】元大登入",
         "【元大銀行】元大明細下載",
         "【元大銀行】檢查薪資付款狀態",
@@ -2532,7 +2534,11 @@ with area_col:
         area_select_options = [area for area in area_options if area != "全區"]
     if selected_function == "【檸檬後台】異動儲值金":
         area_select_options = [area for area in ("台北", "台中", "桃園", "新竹", "高雄") if area in area_options]
-    if selected_function == "【富邦銀行】異動 ATM 退款":
+    if selected_function in (
+        "【富邦銀行】異動 ATM 退款",
+        "【富邦銀行】請款記錄",
+        "【富邦銀行】工具包押金退款",
+    ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
 
     selected_area_value = st.selectbox(
