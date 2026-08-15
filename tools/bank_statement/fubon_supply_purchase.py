@@ -9,8 +9,10 @@ from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login
 from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
 from tools.bank_statement.fubon_transfer_common import (
+    SavedAccountNotFound,
     choose_immediate_date,
     choose_manual_destination,
+    choose_saved_destination,
     choose_source_account,
     fill_manual_destination,
     fill_row_inputs,
@@ -24,24 +26,28 @@ from tools.bank_statement.internal_payment_registry import (
 from tools.bank_statement.open_login import current_fubon_page
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
-# 目前假設：轉入帳號直接用 N/O 欄自行輸入（不先查常用轉入帳號清單），
-# 交易日期選立即，給自己／給對方留空，且跟另外兩支一樣不自動按確認。
-# 如果實際測試發現應該不一樣，請告知再調整。
+
+def _month_display(month: str) -> str:
+    """把 YYYYMM 轉成留言用的月份顯示（取月份兩碼，例如 "202608" -> "08"）。"""
+    digits = "".join(ch for ch in month if ch.isdigit())
+    return digits[-2:] if len(digits) >= 2 else digits
 
 
 def fill_supply_purchase(
-    page: Page, area: str, source_account: str, item: dict[str, object]
+    page: Page, area: str, source_account: str, month: str, item: dict[str, object]
 ) -> None:
     page = open_transfer_form(page)
     choose_source_account(page, area, source_account)
 
-    choose_manual_destination(page)
-    page.wait_for_timeout(800)
-
-    fill_manual_destination(
-        page, str(item["bank_code"]), str(item["account_number"])
-    )
-    print(f"轉入帳號已填入：{item['bank_code']}／{item['account_number']}")
+    try:
+        choose_saved_destination(page, str(item["account_number"]))
+    except SavedAccountNotFound:
+        print(f"常用轉入帳號清單找不到帳號「{item['account_number']}」，改用自行輸入。")
+        choose_manual_destination(page)
+        fill_manual_destination(
+            page, str(item["bank_code"]), str(item["account_number"])
+        )
+        print(f"轉入帳號已填入：{item['bank_code']}／{item['account_number']}")
     page.wait_for_timeout(800)
 
     fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
@@ -50,6 +56,12 @@ def fill_supply_purchase(
 
     choose_immediate_date(page)
     print("交易日期已選擇：立即。")
+    page.wait_for_timeout(800)
+
+    month_display = _month_display(month)
+    fill_row_inputs(page, "給自己", [f"{month_display}月清潔用品"])
+    fill_row_inputs(page, "給對方", [f"{month_display}月檸檬家事"])
+    print("留言欄位已填寫完成。")
     page.wait_for_timeout(800)
 
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
@@ -73,7 +85,7 @@ def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str
                     f"準備第 {rows_desc} 列（{item['supplier']}）／"
                     f"{item['bank_code']}／{item['account_number']}／NT$ {item['amount']}"
                 )
-                fill_supply_purchase(page, area, account.bank_account, item)
+                fill_supply_purchase(page, area, account.bank_account, month, item)
                 if index + 1 < len(selected):
                     wait_user_completed_transfer(page)
                     page = current_fubon_page(context, page) or page
