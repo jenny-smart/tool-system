@@ -150,7 +150,14 @@ def _choose_source_account_once(page: Page, area: str, source_account: str) -> N
 
     # 富邦轉出帳號在有多筆帳號時，會跳出「共找到 N 筆帳號」的卡片選擇視窗；
     # 呼叫內部 onclick 函式在改版後已不可靠，改為真的點開再點卡片。
-    trigger = _visible(row.get_by_text("==請選擇==", exact=False))
+    # 這個觸發元件有時要等頁面 JS 跑完才會出現，所以要輪詢，不能只查一次。
+    trigger = None
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and trigger is None:
+        row = _row_for_label(page, "轉出帳號")
+        trigger = _visible(row.get_by_text("==請選擇==", exact=False))
+        if trigger is None:
+            page.wait_for_timeout(200)
     if trigger is None:
         raise RuntimeError("轉出帳號找不到可點開的下拉框")
     click_nearest_control(trigger)
