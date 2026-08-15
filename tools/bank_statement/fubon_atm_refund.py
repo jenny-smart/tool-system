@@ -172,7 +172,8 @@ def _choose_source_account(page: Page, area: str, source_account: str) -> None:
         {"index": target_index, "value": target_value},
     )
 
-    deadline = time.monotonic() + 10
+    # 富邦選完轉出帳號後會 AJAX 重建轉入帳號列；尖峰時可能超過 20 秒。
+    deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         if select.input_value() == target_value:
             print("轉出帳號已選擇：松高分行。")
@@ -184,7 +185,8 @@ def _choose_source_account(page: Page, area: str, source_account: str) -> None:
 def _choose_manual_destination(page: Page) -> None:
     manual = None
     seen_ids: list[str] = []
-    deadline = time.monotonic() + 10
+    # 選完轉出帳號後，富邦會以 AJAX 延遲重建這個控制項。
+    deadline = time.monotonic() + 45
     while time.monotonic() < deadline and manual is None:
         for context in _all_fubon_contexts(page):
             candidates = context.locator('[id*="inAcctType"], [name*="inAcctType"]')
@@ -217,13 +219,16 @@ def _choose_manual_destination(page: Page) -> None:
         }"""
     )
 
-    ready_deadline = time.monotonic() + 10
+    # 點「自行輸入」會送出 doInAccountChanged AJAX，再產生銀行與帳號欄位。
+    ready_deadline = time.monotonic() + 45
     while time.monotonic() < ready_deadline:
-        bank_select = manual.locator(
-            'xpath=ancestor::tr[1]//select[@id="form1:bankList"]'
-        )
-        if bank_select.count() and bank_select.is_enabled():
-            return
+        for context in _all_fubon_contexts(page):
+            try:
+                bank_select = context.locator('select[id="form1:bankList"]')
+                if bank_select.count() and bank_select.is_enabled():
+                    return
+            except Exception:
+                continue
         page.wait_for_timeout(200)
     raise RuntimeError("已點選「自行輸入」，但銀行選單仍為停用")
 
