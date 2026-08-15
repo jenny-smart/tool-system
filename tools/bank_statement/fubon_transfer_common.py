@@ -125,6 +125,10 @@ class DuplicateTransactionWarning(RuntimeError):
     """富邦顯示「系統偵測到重覆交易，請重新執行」，需要重新選一次該欄位。"""
 
 
+class SavedAccountNotFound(RuntimeError):
+    """帳號選擇彈出視窗裡找不到指定名稱的卡片（可能還沒被加入常用轉入帳號）。"""
+
+
 def _has_duplicate_warning(page: Page) -> bool:
     for context in _contexts(page):
         try:
@@ -173,7 +177,7 @@ def _select_account_card(
         if card is None:
             page.wait_for_timeout(200)
     if card is None:
-        raise RuntimeError(f"{row_label}的帳號選擇視窗找不到「{target_text}」")
+        raise SavedAccountNotFound(f"{row_label}的帳號選擇視窗找不到「{target_text}」")
     click_nearest_control(card)
 
     # 選完帳號卡片後富邦會 AJAX 重建下一個欄位；尖峰時可能超過 20 秒。

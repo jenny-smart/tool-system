@@ -9,9 +9,12 @@ from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login
 from tools.bank_statement.fubon_payment_request_filter import pending_payment_requests
 from tools.bank_statement.fubon_transfer_common import (
+    SavedAccountNotFound,
     choose_immediate_date,
+    choose_manual_destination,
     choose_saved_destination,
     choose_source_account,
+    fill_manual_destination,
     fill_row_inputs,
     open_transfer_form,
     wait_user_completed_transfer,
@@ -30,7 +33,19 @@ def fill_payment_request(
     page = open_transfer_form(page)
     choose_source_account(page, area, source_account)
 
-    choose_saved_destination(page, str(item["name"]))
+    try:
+        choose_saved_destination(page, str(item["name"]))
+    except SavedAccountNotFound:
+        bank_name = str(item.get("bank_name") or "").strip()
+        account_number = str(item.get("account_number") or "").strip()
+        if not bank_name or not account_number:
+            raise RuntimeError(
+                f"常用轉入帳號清單找不到「{item['name']}」，"
+                "且 H/I 欄缺少銀行名稱或帳號可自行輸入"
+            ) from None
+        print(f"常用轉入帳號清單找不到「{item['name']}」，改用自行輸入：{bank_name}／{account_number}")
+        choose_manual_destination(page)
+        fill_manual_destination(page, bank_name, account_number)
     page.wait_for_timeout(800)
 
     fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
