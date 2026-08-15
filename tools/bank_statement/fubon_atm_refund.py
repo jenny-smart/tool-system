@@ -126,7 +126,21 @@ def _open_transfer_form(page: Page) -> Page:
     return current_fubon_page(page.context, page) or page
 
 
-def _choose_source_account(page: Page, area: str, source_account: str) -> None:
+class DuplicateTransactionWarning(RuntimeError):
+    """富邦顯示「系統偵測到重覆交易，請重新執行」，需要重新選一次轉出帳號。"""
+
+
+def _has_duplicate_warning(page: Page) -> bool:
+    for context in _contexts(page):
+        try:
+            if "系統偵測到重覆交易" in context.locator("body").inner_text(timeout=800):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _choose_source_account_once(page: Page, area: str, source_account: str) -> None:
     if area != "台北":
         return
     row = _row_for_label(page, "轉出帳號")
@@ -159,16 +173,40 @@ def _choose_source_account(page: Page, area: str, source_account: str) -> None:
     click_nearest_control(card)
 
     # 選完帳號卡片後富邦會 AJAX 重建轉入帳號列；尖峰時可能超過 20 秒。
+    # 但畫面偶爾會在選到的瞬間又蓋上「系統偵測到重覆交易」並把這欄重置，
+    # 所以先短暫停頓後要再次確認選擇真的還在，而不是抓到那個瞬間就當作成功。
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         if "松高分行" in row.inner_text() and "==請選擇==" not in row.inner_text():
-            print("轉出帳號已選擇：松高分行。")
-            # 轉出帳號欄本身的文字先更新，轉入帳號的「自行輸入」是另一個
-            # AJAX 才會重建；先停一下再找，避免點到重建前的殘留舊元素。
-            page.wait_for_timeout(1_500)
-            return
+            page.wait_for_timeout(800)
+            if _has_duplicate_warning(page):
+                raise DuplicateTransactionWarning("富邦顯示「系統偵測到重覆交易，請重新執行」")
+            if "松高分行" in row.inner_text() and "==請選擇==" not in row.inner_text():
+                print("轉出帳號已選擇：松高分行。")
+                # 轉出帳號欄本身的文字先更新，轉入帳號的「自行輸入」是另一個
+                # AJAX 才會重建；先停一下再找，避免點到重建前的殘留舊元素。
+                page.wait_for_timeout(1_500)
+                return
         page.wait_for_timeout(200)
     raise RuntimeError("已點選松高分行帳號卡片，但轉出帳號畫面未更新")
+
+
+def _choose_source_account(
+    page: Page, area: str, source_account: str, max_attempts: int = 3
+) -> None:
+    # 富邦這個「重覆交易」提示本身就是指示使用者重新執行一次；
+    # 依畫面指示忽略警告、重新選一次轉出帳號即可，不需要整頁重新載入。
+    for attempt in range(1, max_attempts + 1):
+        try:
+            _choose_source_account_once(page, area, source_account)
+            return
+        except DuplicateTransactionWarning:
+            if attempt == max_attempts:
+                raise RuntimeError(
+                    f"富邦重覆顯示「系統偵測到重覆交易」，已重試 {max_attempts} 次仍未成功，請人工確認畫面。"
+                )
+            print(f"富邦顯示「系統偵測到重覆交易」，依畫面指示重新執行（第 {attempt + 1} 次嘗試）。")
+            page.wait_for_timeout(3_000)
 
 
 def _choose_manual_destination(page: Page) -> None:
