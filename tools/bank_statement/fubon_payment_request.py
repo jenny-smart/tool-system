@@ -41,7 +41,7 @@ def fill_payment_request(
         if not bank_name or not account_number:
             raise RuntimeError(
                 f"常用轉入帳號清單找不到「{item['name']}」，"
-                "且 H/I 欄缺少銀行名稱或帳號可自行輸入"
+                "且 I 欄缺少可解析的銀行名稱或帳號可自行輸入"
             ) from None
         print(f"常用轉入帳號清單找不到「{item['name']}」，改用自行輸入：{bank_name}／{account_number}")
         choose_manual_destination(page)
