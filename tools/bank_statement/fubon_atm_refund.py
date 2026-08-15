@@ -312,15 +312,32 @@ def fill_refund(
 ) -> None:
     page = _open_transfer_form(page)
     _choose_source_account(page, area, source_account)
+
     _choose_manual_destination(page)
+    print("轉入帳號已切換為自行輸入。")
+    page.wait_for_timeout(800)
+
     _fill_manual_destination(
         page, str(item["bank_code"]), str(item["account_number"])
     )
+    print(f"轉入帳號已填入：P={item['bank_code']}／Q={item['account_number']}")
+    page.wait_for_timeout(800)
+
     _fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
+    print(f"轉帳金額已填入：{item['amount']}")
+    page.wait_for_timeout(800)
+
     _choose_immediate_date(page)
+    print("交易日期已選擇：立即。")
+    page.wait_for_timeout(800)
+
     _fill_row_inputs(page, "給自己", [f"清潔{item['customer']}退"])
     _fill_row_inputs(page, "給對方", ["檸檬家事"])
+    print("留言欄位已填寫完成。")
+    page.wait_for_timeout(800)
+
     _click_text(page, "確認", exact=True)
+    print("已點擊確認，等待進入確認資料頁。")
     _wait_confirmation(page)
 
 
