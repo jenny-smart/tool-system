@@ -279,6 +279,48 @@ def build_fubon_atm_refund(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_fubon_payment_request(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    selected_rows = params.get("selected_rows") or []
+    if area not in ("台北", "台中"):
+        raise ValueError("富邦請款記錄目前只支援台北、台中")
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的請款記錄資料")
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_payment_request",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+        "--rows",
+        ",".join(str(int(row)) for row in selected_rows),
+    ]
+
+
+def build_fubon_deposit_refund(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    selected_rows = params.get("selected_rows") or []
+    if area not in ("台北", "台中"):
+        raise ValueError("富邦工具包押金退款目前只支援台北、台中")
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的工具包押金退款資料")
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_deposit_refund",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+        "--rows",
+        ",".join(str(int(row)) for row in selected_rows),
+    ]
+
+
 def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     resume = str(params.get("resume") or "login").strip()
@@ -365,6 +407,8 @@ register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjust
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
 register_action("fubon.atm_refund", build_fubon_atm_refund)
+register_action("fubon.payment_request", build_fubon_payment_request)
+register_action("fubon.deposit_refund", build_fubon_deposit_refund)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)

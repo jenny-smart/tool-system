@@ -1806,6 +1806,36 @@ def queue_fubon_atm_refund(*, month="", start_date=None, end_date=None, area="�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_fubon_payment_request(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的請款記錄資料")
+    task = create_local_agent_task(
+        "fubon.payment_request",
+        {
+            "area": area,
+            "selected_rows": selected_rows,
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
+def queue_fubon_deposit_refund(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的工具包押金退款資料")
+    task = create_local_agent_task(
+        "fubon.deposit_refund",
+        {
+            "area": area,
+            "selected_rows": selected_rows,
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 @st.fragment(run_every="2s")
 def render_fubon_mobile_verification():
     try:
@@ -1895,6 +1925,8 @@ FINANCE_TASKS = [
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
     {"name": "【富邦銀行】異動 ATM 退款", "handler": queue_fubon_atm_refund, "enabled": True},
+    {"name": "【富邦銀行】請款記錄", "handler": queue_fubon_payment_request, "enabled": True},
+    {"name": "【富邦銀行】工具包押金退款", "handler": queue_fubon_deposit_refund, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -2638,6 +2670,86 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
     except Exception as exc:
         st.error(f"讀取富邦 ATM 退款資料失敗：{exc}")
 
+fubon_payment_request_selected_rows = []
+if system_type == "finance_management" and selected_function == "【富邦銀行】請款記錄":
+    try:
+        from tools.bank_statement.fubon_payment_request_filter import pending_payment_requests
+        from tools.bank_statement.internal_payment_registry import (
+            PAYMENT_REQUEST_TYPE,
+            read_report_values,
+        )
+
+        _payment_request_candidates = pending_payment_requests(
+            read_report_values(PAYMENT_REQUEST_TYPE, selected_area_value)
+        )
+        _payment_request_editor = st.data_editor(
+            pd.DataFrame([
+                {
+                    "執行": False,
+                    "列數": item["sheet_row"],
+                    "轉入帳號名字": item["name"],
+                    "請款金額": item["amount"],
+                }
+                for item in _payment_request_candidates
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            disabled=["列數", "轉入帳號名字", "請款金額"],
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
+            key=f"fubon_payment_request_editor_{selected_area_value}",
+        )
+        fubon_payment_request_selected_rows = [
+            int(row["列數"])
+            for _, row in _payment_request_editor.iterrows()
+            if bool(row["執行"])
+        ]
+        st.caption(
+            f"待付款請款記錄：{len(_payment_request_candidates)} 筆；"
+            f"已勾選：{len(fubon_payment_request_selected_rows)} 筆"
+        )
+    except Exception as exc:
+        st.error(f"讀取請款記錄資料失敗：{exc}")
+
+fubon_deposit_refund_selected_rows = []
+if system_type == "finance_management" and selected_function == "【富邦銀行】工具包押金退款":
+    try:
+        from tools.bank_statement.fubon_deposit_refund_filter import pending_deposit_refunds
+        from tools.bank_statement.internal_payment_registry import (
+            DEPOSIT_REFUND_TYPE,
+            read_report_values,
+        )
+
+        _deposit_refund_candidates = pending_deposit_refunds(
+            read_report_values(DEPOSIT_REFUND_TYPE, selected_area_value)
+        )
+        _deposit_refund_editor = st.data_editor(
+            pd.DataFrame([
+                {
+                    "執行": False,
+                    "列數": item["sheet_row"],
+                    "備註": item["memo"],
+                    "退款金額": item["amount"],
+                }
+                for item in _deposit_refund_candidates
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            disabled=["列數", "備註", "退款金額"],
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
+            key=f"fubon_deposit_refund_editor_{selected_area_value}",
+        )
+        fubon_deposit_refund_selected_rows = [
+            int(row["列數"])
+            for _, row in _deposit_refund_editor.iterrows()
+            if bool(row["執行"])
+        ]
+        st.caption(
+            f"待退款工具包押金：{len(_deposit_refund_candidates)} 筆；"
+            f"已勾選：{len(fubon_deposit_refund_selected_rows)} 筆"
+        )
+    except Exception as exc:
+        st.error(f"讀取工具包押金退款資料失敗：{exc}")
+
 run_clicked = st.button("▶ 執行", use_container_width=True)
 
 st.markdown("</div>", unsafe_allow_html=True)
@@ -2994,6 +3106,10 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = allowance_selected_rows
             if selected_function == "【富邦銀行】異動 ATM 退款":
                 finance_kwargs["selected_rows"] = fubon_refund_selected_rows
+            if selected_function == "【富邦銀行】請款記錄":
+                finance_kwargs["selected_rows"] = fubon_payment_request_selected_rows
+            if selected_function == "【富邦銀行】工具包押金退款":
+                finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             result = finance_handler(**finance_kwargs)
             if result is not None:
                 add_log(str(result), "success")
