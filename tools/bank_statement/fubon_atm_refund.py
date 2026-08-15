@@ -12,6 +12,7 @@ from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login
 from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
 from tools.bank_statement.open_login import (
+    click_nearest_control,
     current_fubon_page,
     dismiss_fubon_idle_dialog,
     visible_in_viewport,
@@ -125,99 +126,53 @@ def _open_transfer_form(page: Page) -> Page:
     return current_fubon_page(page.context, page) or page
 
 
-def _source_selected(row: Locator, source_account: str) -> bool:
-    text_digits = re.sub(r"\D", "", row.inner_text())
-    source_digits = re.sub(r"\D", "", source_account)
-    return bool(source_digits and source_digits[-5:] in text_digits)
-
-
 def _choose_source_account(page: Page, area: str, source_account: str) -> None:
     if area != "台北":
         return
-    # 富邦畫面使用自製下拉框：真正的 select 永遠 display:none，點外觀元件
-    # 有時只會留下遮罩。直接依 option 索引呼叫帳號卡片原本的 onclick 函式。
     row = _row_for_label(page, "轉出帳號")
-    select = row.locator('select[id="form1:outAccountList"]')
-    if not select.count():
-        raise RuntimeError("轉出帳號找不到富邦隱藏選單")
-    options = select.locator("option")
-    target_index = None
-    target_value = ""
-    for index in range(options.count()):
-        option = options.nth(index)
-        if "松高分行" not in option.inner_text():
-            continue
-        target_index = index
-        target_value = option.get_attribute("value") or ""
-        break
-    if target_index is None or not target_value:
-        raise RuntimeError("轉出帳號隱藏選單找不到松高分行")
+    if "松高分行" in row.inner_text() and "==請選擇==" not in row.inner_text():
+        print("轉出帳號已選擇：松高分行。")
+        return
 
-    select.evaluate(
-        """(element, payload) => {
-          const win = element.ownerDocument.defaultView;
-          if (typeof win.closeComboDIV === 'function') {
-            win.closeComboDIV('form1:outAccountList');
-          }
-          if (typeof win.selectComboBoxDivItem === 'function') {
-            win.selectComboBoxDivItem(
-              'form1:outAccountList', payload.index, false, true
-            );
-          } else {
-            element.value = payload.value;
-            element.dispatchEvent(new Event('change', {bubbles: true}));
-          }
-          if (typeof win.removeMask === 'function') win.removeMask();
-        }""",
-        {"index": target_index, "value": target_value},
-    )
+    # 富邦轉出帳號在有多筆帳號時，會跳出「共找到 N 筆帳號」的卡片選擇視窗；
+    # 呼叫內部 onclick 函式在改版後已不可靠，改為真的點開再點卡片。
+    trigger = _visible(row.get_by_text("==請選擇==", exact=False))
+    if trigger is None:
+        raise RuntimeError("轉出帳號找不到可點開的下拉框")
+    click_nearest_control(trigger)
 
-    # 富邦選完轉出帳號後會 AJAX 重建轉入帳號列；尖峰時可能超過 20 秒。
+    card = None
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and card is None:
+        for context in _all_fubon_contexts(page):
+            try:
+                node = _visible(context.get_by_text("松高分行", exact=False))
+            except Exception:
+                node = None
+            if node is not None:
+                card = node
+                break
+        if card is None:
+            page.wait_for_timeout(200)
+    if card is None:
+        raise RuntimeError("轉出帳號的帳號選擇視窗找不到「松高分行」")
+    click_nearest_control(card)
+
+    # 選完帳號卡片後富邦會 AJAX 重建轉入帳號列；尖峰時可能超過 20 秒。
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
-        if select.input_value() == target_value:
+        if "松高分行" in row.inner_text() and "==請選擇==" not in row.inner_text():
             print("轉出帳號已選擇：松高分行。")
             return
         page.wait_for_timeout(200)
-    raise RuntimeError("已呼叫松高分行帳號卡片，但隱藏選單未更新")
+    raise RuntimeError("已點選松高分行帳號卡片，但轉出帳號畫面未更新")
 
 
 def _choose_manual_destination(page: Page) -> None:
-    manual = None
-    seen_ids: list[str] = []
-    # 選完轉出帳號後，富邦會以 AJAX 延遲重建這個控制項。
-    deadline = time.monotonic() + 45
-    while time.monotonic() < deadline and manual is None:
-        for context in _all_fubon_contexts(page):
-            candidates = context.locator('[id*="inAcctType"], [name*="inAcctType"]')
-            for index in range(candidates.count()):
-                candidate = candidates.nth(index)
-                candidate_id = candidate.get_attribute("id") or ""
-                candidate_name = candidate.get_attribute("name") or ""
-                marker = candidate_id or candidate_name
-                if marker and marker not in seen_ids:
-                    seen_ids.append(marker)
-                if candidate_id == "form1:inAcctTypeInput":
-                    manual = candidate
-                    break
-            if manual is not None:
-                break
-        if manual is None:
-            page.wait_for_timeout(200)
-    if manual is None:
-        raise RuntimeError(
-            "轉入帳號找不到自行輸入控制項；候選：" + ", ".join(filter(None, seen_ids))
-        )
-
-    manual.evaluate(
-        """element => {
-          element.checked = true;
-          const win = element.ownerDocument.defaultView;
-          if (win.jQuery) win.jQuery(element).prop('checked', true).trigger('click');
-          else element.click();
-          if (typeof win.removeMask === 'function') win.removeMask();
-        }"""
-    )
+    # 內部 id（如 inAcctTypeInput）在改版後可能變動，改用畫面上唯一穩定的
+    # 「自行輸入」文字；選完轉出帳號後富邦會以 AJAX 延遲重建這個控制項，
+    # _click_text 內建輪詢會等到它出現再點。
+    _click_text(page, "自行輸入", exact=True, timeout=45_000)
 
     # 點「自行輸入」會送出 doInAccountChanged AJAX，再產生銀行與帳號欄位。
     ready_deadline = time.monotonic() + 45
