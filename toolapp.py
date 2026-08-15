@@ -1836,6 +1836,24 @@ def queue_fubon_deposit_refund(*, month="", start_date=None, end_date=None, area
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_fubon_supply_purchase(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    if not month:
+        raise ValueError("請先輸入採購月份")
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的清潔用品採購資料")
+    task = create_local_agent_task(
+        "fubon.supply_purchase",
+        {
+            "area": area,
+            "month": month,
+            "selected_rows": selected_rows,
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 @st.fragment(run_every="2s")
 def render_fubon_mobile_verification():
     try:
@@ -1927,6 +1945,7 @@ FINANCE_TASKS = [
     {"name": "【富邦銀行】異動 ATM 退款", "handler": queue_fubon_atm_refund, "enabled": True},
     {"name": "【富邦銀行】請款記錄", "handler": queue_fubon_payment_request, "enabled": True},
     {"name": "【富邦銀行】工具包押金退款", "handler": queue_fubon_deposit_refund, "enabled": True},
+    {"name": "【富邦銀行】清潔用品採購", "handler": queue_fubon_supply_purchase, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -2411,6 +2430,16 @@ with date_col:
                         value=today_date,
                         key="finance_newebpay_end_date",
                     )
+        elif selected_function == "【富邦銀行】清潔用品採購":
+            st.markdown('<div class="field-label">📆 採購月份</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "採購月份",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202608",
+                label_visibility="collapsed",
+                key="finance_supply_purchase_month",
+            )
+            st.caption("格式：YYYYMM；比對報表 B 欄的進貨日期月份")
         else:
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -2527,6 +2556,7 @@ with area_col:
         "【富邦銀行】異動 ATM 退款",
         "【富邦銀行】請款記錄",
         "【富邦銀行】工具包押金退款",
+        "【富邦銀行】清潔用品採購",
         "【元大銀行】元大登入",
         "【元大銀行】元大明細下載",
         "【元大銀行】檢查薪資付款狀態",
@@ -2538,6 +2568,7 @@ with area_col:
         "【富邦銀行】異動 ATM 退款",
         "【富邦銀行】請款記錄",
         "【富邦銀行】工具包押金退款",
+        "【富邦銀行】清潔用品採購",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
 
@@ -2756,6 +2787,49 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
         )
     except Exception as exc:
         st.error(f"讀取工具包押金退款資料失敗：{exc}")
+
+fubon_supply_purchase_selected_rows = []
+if system_type == "finance_management" and selected_function == "【富邦銀行】清潔用品採購":
+    try:
+        from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
+        from tools.bank_statement.internal_payment_registry import (
+            SUPPLY_PURCHASE_TYPE,
+            read_report_values,
+        )
+
+        _supply_purchase_candidates = pending_supply_purchases(
+            read_report_values(SUPPLY_PURCHASE_TYPE, selected_area_value), period
+        )
+        _supply_purchase_editor = st.data_editor(
+            pd.DataFrame([
+                {
+                    "執行": False,
+                    "列數": item["sheet_row"],
+                    "涵蓋列": "、".join(str(r) for r in item["rows"]),
+                    "廠商": item["supplier"],
+                    "銀行代碼": item["bank_code"],
+                    "帳號": item["account_number"],
+                    "合計金額": item["amount"],
+                }
+                for item in _supply_purchase_candidates
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            disabled=["列數", "涵蓋列", "廠商", "銀行代碼", "帳號", "合計金額"],
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
+            key=f"fubon_supply_purchase_editor_{selected_area_value}_{period}",
+        )
+        fubon_supply_purchase_selected_rows = [
+            int(row["列數"])
+            for _, row in _supply_purchase_editor.iterrows()
+            if bool(row["執行"])
+        ]
+        st.caption(
+            f"待匯款採購（依銀行帳號合併）：{len(_supply_purchase_candidates)} 筆；"
+            f"已勾選：{len(fubon_supply_purchase_selected_rows)} 筆"
+        )
+    except Exception as exc:
+        st.error(f"讀取清潔用品採購資料失敗：{exc}")
 
 run_clicked = st.button("▶ 執行", use_container_width=True)
 
@@ -3117,6 +3191,8 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_payment_request_selected_rows
             if selected_function == "【富邦銀行】工具包押金退款":
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
+            if selected_function == "【富邦銀行】清潔用品採購":
+                finance_kwargs["selected_rows"] = fubon_supply_purchase_selected_rows
             result = finance_handler(**finance_kwargs)
             if result is not None:
                 add_log(str(result), "success")

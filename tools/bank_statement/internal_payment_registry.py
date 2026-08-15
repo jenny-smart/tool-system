@@ -1,4 +1,4 @@
-"""內部請款處理（請款記錄／工具包押金退款）的登記表查詢。
+"""內部請款處理（請款記錄／工具包押金退款／清潔用品採購）的登記表查詢。
 
 登記表放在主控試算表（Jenny's Lemonhometools）的「內部請款設定」分頁，
 欄位為：類型、地區、試算表ID、GID、轉入帳號名稱。
@@ -18,6 +18,7 @@ REGISTRY_SHEET_NAME = "內部請款設定"
 
 PAYMENT_REQUEST_TYPE = "請款記錄"
 DEPOSIT_REFUND_TYPE = "工具包押金退款"
+SUPPLY_PURCHASE_TYPE = "清潔用品採購"
 
 
 def _sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:

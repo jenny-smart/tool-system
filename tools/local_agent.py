@@ -321,6 +321,32 @@ def build_fubon_deposit_refund(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_fubon_supply_purchase(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    month = str(params.get("month") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    selected_rows = params.get("selected_rows") or []
+    if area not in ("台北", "台中"):
+        raise ValueError("富邦清潔用品採購目前只支援台北、台中")
+    if not month:
+        raise ValueError("請先輸入採購月份")
+    if not selected_rows:
+        raise ValueError("請先勾選要處理的清潔用品採購資料")
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_supply_purchase",
+        "--area",
+        area,
+        "--month",
+        month,
+        "--cdp-url",
+        cdp_url,
+        "--rows",
+        ",".join(str(int(row)) for row in selected_rows),
+    ]
+
+
 def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     resume = str(params.get("resume") or "login").strip()
@@ -409,6 +435,7 @@ register_action("fubon.download", build_fubon_download)
 register_action("fubon.atm_refund", build_fubon_atm_refund)
 register_action("fubon.payment_request", build_fubon_payment_request)
 register_action("fubon.deposit_refund", build_fubon_deposit_refund)
+register_action("fubon.supply_purchase", build_fubon_supply_purchase)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
