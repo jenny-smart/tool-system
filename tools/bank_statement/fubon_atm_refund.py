@@ -163,6 +163,9 @@ def _choose_source_account(page: Page, area: str, source_account: str) -> None:
     while time.monotonic() < deadline:
         if "松高分行" in row.inner_text() and "==請選擇==" not in row.inner_text():
             print("轉出帳號已選擇：松高分行。")
+            # 轉出帳號欄本身的文字先更新，轉入帳號的「自行輸入」是另一個
+            # AJAX 才會重建；先停一下再找，避免點到重建前的殘留舊元素。
+            page.wait_for_timeout(1_500)
             return
         page.wait_for_timeout(200)
     raise RuntimeError("已點選松高分行帳號卡片，但轉出帳號畫面未更新")
@@ -198,36 +201,48 @@ def _fill_manual_destination(page: Page, bank_code: str, account_number: str) ->
     if not bank_select.count():
         raise RuntimeError("自行輸入找不到銀行下拉框")
     options = bank_select.locator("option")
-    target_index = None
     target_value = ""
     for index in range(options.count()):
         option = options.nth(index)
-        if not _option_has_bank_code(option.inner_text(), bank_code):
-            continue
-        target_index = index
-        target_value = option.get_attribute("value") or ""
-        break
-    if target_index is None or not target_value:
+        if _option_has_bank_code(option.inner_text(), bank_code):
+            target_value = option.get_attribute("value") or ""
+            break
+    if not target_value:
         raise RuntimeError(f"銀行下拉框找不到代碼 {bank_code}")
 
-    bank_select.evaluate(
-        """(element, payload) => {
-          const win = element.ownerDocument.defaultView;
-          if (typeof win.selectComboBoxTableItem === 'function') {
-            win.selectComboBoxTableItem(
-              'form1:bankList', payload.value, false, false, false, payload.index
-            );
-          } else {
-            element.disabled = false;
-            element.value = payload.value;
-            element.dispatchEvent(new Event('change', {bubbles: true}));
-          }
-          if (typeof win.removeMask === 'function') win.removeMask();
-        }""",
-        {"index": target_index, "value": target_value},
-    )
-    if bank_select.input_value() != target_value:
-        raise RuntimeError(f"銀行代碼 {bank_code} 選取後未生效")
+    # 銀行代碼欄同樣是自製彈出視窗（點開後跳出「銀行代碼」方塊清單），
+    # 不是可信賴的隱藏 select；呼叫內部函式在改版後已不可靠，改為真的
+    # 點開再點代碼方塊，並用隱藏 select 的實際值（點擊後由網站自己寫入）
+    # 來驗證是否真的選取成功，而不是驗證我們自己寫入的值。
+    trigger = _visible(row.get_by_text("=請選擇=", exact=True))
+    if trigger is None:
+        raise RuntimeError("轉入帳號找不到可點開的銀行代碼下拉框")
+    click_nearest_control(trigger)
+
+    code_pattern = re.compile(rf"(^|\D){re.escape(bank_code)}(\D|$)")
+    code_button = None
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline and code_button is None:
+        for context in _all_fubon_contexts(page):
+            try:
+                code_button = _visible(context.get_by_text(code_pattern, exact=False))
+            except Exception:
+                code_button = None
+            if code_button is not None:
+                break
+        if code_button is None:
+            page.wait_for_timeout(200)
+    if code_button is None:
+        raise RuntimeError(f"銀行代碼清單找不到代碼 {bank_code}")
+    click_nearest_control(code_button)
+
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if bank_select.input_value() == target_value:
+            break
+        page.wait_for_timeout(200)
+    else:
+        raise RuntimeError(f"已點選銀行代碼 {bank_code}，但畫面未更新")
 
     inputs = row.locator(
         'input:visible:not([type="hidden"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
@@ -238,6 +253,27 @@ def _fill_manual_destination(page: Page, bank_code: str, account_number: str) ->
     account_input.click()
     account_input.press("Meta+A")
     account_input.fill(account_number)
+
+
+def _choose_immediate_date(page: Page) -> None:
+    # 「立即」與當天日期同屬一個文字節點（例如「立即 2026/08/15」），
+    # exact 文字比對永遠找不到單獨的「立即」；交易日期第一個單選鈕
+    # 就是立即，直接點它比對文字更穩定。
+    row = _row_for_label(page, "交易日期")
+    radio = _visible(row.locator('input[type="radio"]'))
+    if radio is None:
+        raise RuntimeError("交易日期找不到可選的立即選項")
+    if not radio.is_checked():
+        try:
+            radio.check(timeout=2_000)
+        except Exception:
+            radio.evaluate("el => el.click()")
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if radio.is_checked():
+            return
+        page.wait_for_timeout(100)
+    raise RuntimeError("已點選交易日期的立即選項，但未成功勾選")
 
 
 def _wait_confirmation(page: Page, timeout: int = 30_000) -> None:
@@ -281,7 +317,7 @@ def fill_refund(
         page, str(item["bank_code"]), str(item["account_number"])
     )
     _fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
-    _click_text(page, "立即", exact=True)
+    _choose_immediate_date(page)
     _fill_row_inputs(page, "給自己", [f"清潔{item['customer']}退"])
     _fill_row_inputs(page, "給對方", ["檸檬家事"])
     _click_text(page, "確認", exact=True)
