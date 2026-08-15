@@ -1,0 +1,93 @@
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+📁 月排程年度資料夾：2026專員承攬服務費 (1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK)
+📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
+📂 本次使用年度：2026
+📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+📝 月排程打卡：上半月訂單 / running
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+📌 期別：202608-1
+📌 日期：2026-08-01 ~ 2026-08-15
+📌 執行區域：all
+📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+
+=== 處理 台北 ===
+✅ 登入成功：jenny@lemonclean.com.tw
+📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 使用既有資料夾：202608-1 / 1C3S31Xg20QUC3FBJ62KXbYaQirLScKyl
+📁 期別資料夾：202608-1 / 1C3S31Xg20QUC3FBJ62KXbYaQirLScKyl
+✅ 已下載：/tmp/tmp8rito_t2/202608-1訂單-台北.xlsx
+🗑️ 已刪除重複舊檔：202608-1訂單-台北.xlsx
+☁️ 已上傳新檔：202608-1訂單-台北.xlsx → folder_id=1C3S31Xg20QUC3FBJ62KXbYaQirLScKyl https://docs.google.com/spreadsheets/d/19JaLmKQxY0n4HFeZgksgT-2WPSKASkHm/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202608-1/202608-1訂單-台北.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202608-1 / 1HRsp6_6gMkudA252mF7-gT9GuqLG6Ixn
+📁 期別資料夾：202608-1 / 1HRsp6_6gMkudA252mF7-gT9GuqLG6Ixn
+✅ 已下載：/tmp/tmpddhszqtc/202608-1訂單-台中.xlsx
+🗑️ 已刪除重複舊檔：202608-1訂單-台中.xlsx
+☁️ 已上傳新檔：202608-1訂單-台中.xlsx → folder_id=1HRsp6_6gMkudA252mF7-gT9GuqLG6Ixn https://docs.google.com/spreadsheets/d/1rTCzxQqHoX184cqGtPEPqDk4ufr5EUQC/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202608-1/202608-1訂單-台中.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202608-1 / 1GPrQqXoDFKa8mABgfC87lEQNd78bcTtW
+📁 期別資料夾：202608-1 / 1GPrQqXoDFKa8mABgfC87lEQNd78bcTtW
+✅ 已下載：/tmp/tmpkecz3j92/202608-1訂單-桃園.xlsx
+🗑️ 已刪除重複舊檔：202608-1訂單-桃園.xlsx
+☁️ 已上傳新檔：202608-1訂單-桃園.xlsx → folder_id=1GPrQqXoDFKa8mABgfC87lEQNd78bcTtW https://docs.google.com/spreadsheets/d/1cysd1ZHr39oy_ql_0v4N2BujFRj2B_RQ/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202608-1/202608-1訂單-桃園.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202608-1 / 1r4O2Zva4PH_zx79yIaYS9AGIOwiZAhow
+📁 期別資料夾：202608-1 / 1r4O2Zva4PH_zx79yIaYS9AGIOwiZAhow
+✅ 已下載：/tmp/tmp8665w8rl/202608-1訂單-新竹.xlsx
+🗑️ 已刪除重複舊檔：202608-1訂單-新竹.xlsx
+☁️ 已上傳新檔：202608-1訂單-新竹.xlsx → folder_id=1r4O2Zva4PH_zx79yIaYS9AGIOwiZAhow https://docs.google.com/spreadsheets/d/1bq2fXIoSDv6ZMhi8DLQvRNYMYp0jGK5N/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202608-1/202608-1訂單-新竹.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202608-1 / 1D86A2YlC8rKkaXbEGgyXYzZ4ifDXYlmD
+📁 期別資料夾：202608-1 / 1D86A2YlC8rKkaXbEGgyXYzZ4ifDXYlmD
+👉 抓 高雄
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 3 2 
+✅ 高雄 抓到 12 筆
+👉 抓 台南
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 3 2 
+✅ 台南 抓到 1 筆
+✅ 高雄合併完成：13 筆 → /tmp/tmp8h18kw6y/202608-1訂單-高雄.xlsx
+🗑️ 已刪除重複舊檔：202608-1訂單-高雄.xlsx
+☁️ 已上傳新檔：202608-1訂單-高雄.xlsx → folder_id=1D86A2YlC8rKkaXbEGgyXYzZ4ifDXYlmD https://docs.google.com/spreadsheets/d/1bj4vNtzgaeuYDKxm-w66sDpwv0ytE-wt/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202608-1/202608-1訂單-高雄.xlsx
+✅ 已寫入月排程 Log
+
+✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄
+🎉 half_month_orders.py 全部完成
+
+📝 月排程打卡：上半月訂單 / success
+scheduled_monthly scheduler 全部完成
