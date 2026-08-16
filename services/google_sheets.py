@@ -67,6 +67,53 @@ class SheetsService:
         range_name = f"{rowcol_to_a1(start_row, start_col)}:{rowcol_to_a1(end_row, end_col)}"
         ws.update(range_name, values, value_input_option="USER_ENTERED")
 
+    def copy_formula_down(
+        self,
+        ws: Worksheet,
+        start_row: int,
+        col: int,
+        last_row: int,
+        formula_text: str,
+    ) -> None:
+        """
+        寫入公式到 start_row，再用 Sheets 原生的 copyPaste 往下複製到
+        last_row（跟原本 Apps Script 的 range.copyTo() 行為一致）：
+        相對參照（例如 B2、E2）會依列數自動遞增成 B3、E3...；
+        絕對參照（例如 W$1）不會被改動。這裡刻意不用「先組好每一列公式
+        字串再一次寫入」的做法，因為那樣等於每一列都寫死同一個公式，
+        不會有相對參照自動遞增的效果。
+        """
+        ws.update_cell(start_row, col, formula_text)
+
+        if last_row <= start_row:
+            return
+
+        sheet_id = ws.id
+        body = {
+            "requests": [
+                {
+                    "copyPaste": {
+                        "source": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": start_row - 1,
+                            "endRowIndex": start_row,
+                            "startColumnIndex": col - 1,
+                            "endColumnIndex": col,
+                        },
+                        "destination": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": start_row - 1,
+                            "endRowIndex": last_row,
+                            "startColumnIndex": col - 1,
+                            "endColumnIndex": col,
+                        },
+                        "pasteType": "PASTE_FORMULA",
+                    }
+                }
+            ]
+        }
+        ws.spreadsheet.batch_update(body)
+
     def read_all_values(self, ws: Worksheet) -> List[List[Any]]:
         return ws.get_all_values()
 

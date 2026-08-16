@@ -439,8 +439,7 @@ class VipStoredValueWorkflow:
                     formula_text = "=" + formula_text
 
                 count = last_row - start_row + 1
-                formulas = [[formula_text] for _ in range(count)]
-                self.sheets.write_values(ws, start_row, col_num, formulas)
+                self.sheets.copy_formula_down(ws, start_row, col_num, last_row, formula_text)
 
                 self.formulas.stamp_formula_result(item["_row"], count)
                 result.add_message(f"{target_sheet_name} {target_col} 欄公式完成：{count} 筆")
