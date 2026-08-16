@@ -514,6 +514,7 @@ class VipStoredValueWorkflow:
 
                 if target_sheet_name not in ws_cache:
                     ws_cache[target_sheet_name] = self.sheets.get_or_create_ws(summary, target_sheet_name)
+                    self.sheets.clear_basic_filter(ws_cache[target_sheet_name])
                     last_row_cache[target_sheet_name] = len(ws_cache[target_sheet_name].col_values(1))
 
                 ws = ws_cache[target_sheet_name]

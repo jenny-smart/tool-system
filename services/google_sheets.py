@@ -67,6 +67,21 @@ class SheetsService:
         range_name = f"{rowcol_to_a1(start_row, start_col)}:{rowcol_to_a1(end_row, end_col)}"
         ws.update(range_name, values, value_input_option="USER_ENTERED")
 
+    def clear_basic_filter(self, ws: Worksheet) -> None:
+        """
+        清掉工作表殘留的篩選器（篩選器可能是 xlsx 轉檔時從來源檔的
+        Excel 自動篩選帶過來的，或是我們自己清空重寫資料後留下的舊篩選
+        範圍）。Sheets 的 copyPaste 不支援操作含有已篩除列的範圍，套公式
+        前先清乾淨可以避免「這項操作不支援含有已篩除列的範圍」的錯誤。
+        原本就沒有篩選器時呼叫也不影響，失敗就忽略即可。
+        """
+        try:
+            ws.spreadsheet.batch_update(
+                {"requests": [{"clearBasicFilter": {"sheetId": ws.id}}]}
+            )
+        except Exception:
+            pass
+
     def copy_formula_down(
         self,
         ws: Worksheet,

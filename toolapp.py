@@ -1051,6 +1051,9 @@ def tw_now_text(fmt: str = "%H:%M:%S") -> str:
     return datetime.now(TW_TZ).strftime(fmt)
 
 
+LOG_PLACEHOLDER = None
+
+
 def add_log(message: str, level: str = "info") -> None:
     now = tw_now_text("%H:%M:%S")
     icons = {
@@ -1064,6 +1067,14 @@ def add_log(message: str, level: str = "info") -> None:
 
     if len(st.session_state.logs) > 200:
         st.session_state.logs = st.session_state.logs[-200:]
+
+    # 執行按鈕按下後，後面可能會接著跑很久（例如套用公式要跑幾十秒到
+    # 幾分鐘），這段期間畫面上的日誌框早就畫好了、不會自動更新。這裡
+    # 只要日誌框已經畫出來（LOG_PLACEHOLDER 有值），每次 add_log 就立刻
+    # 重畫一次同一個 placeholder，讓「開始執行」跟後續每一步的結果能
+    # 即時反映在畫面上，不用等整支流程跑完、頁面重新整理才看得到。
+    if LOG_PLACEHOLDER is not None:
+        render_log()
 
 
 def render_log() -> None:
@@ -1088,7 +1099,9 @@ def render_log() -> None:
         log_html += f'<div class="{css}">{html.escape(entry)}</div>'
 
     log_html += "</div></div>"
-    st.markdown(log_html, unsafe_allow_html=True)
+
+    target = LOG_PLACEHOLDER if LOG_PLACEHOLDER is not None else st
+    target.markdown(log_html, unsafe_allow_html=True)
 
 
 def mask_id(value: str) -> str:
@@ -3057,6 +3070,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ═══════════════════════════════════════════════════════════
 # UI — 日誌
 # ═══════════════════════════════════════════════════════════
+LOG_PLACEHOLDER = st.empty()
 render_log()
 
 if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】")):
