@@ -2032,7 +2032,7 @@ def run_vip_copy_period_file(*, month="", start_date=None, end_date=None, area="
     return _format_step_results(result)
 
 
-def run_vip_update_and_apply_formulas(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+def run_vip_update_period_data(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     period = (month or "").strip()
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
@@ -2040,9 +2040,17 @@ def run_vip_update_and_apply_formulas(*, month="", start_date=None, end_date=Non
     results = [
         workflow.convert_files(period),
         workflow.move_files(period),
-        workflow.apply_formulas(period),
     ]
     return _format_step_results(results)
+
+
+def run_vip_apply_formulas(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    period = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    workflow = _get_vip_workflow()
+    result = workflow.apply_formulas(period)
+    return _format_step_results(result)
 
 
 FINANCE_TASKS = [
@@ -2071,7 +2079,8 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
-    {"name": "【儲值金】期別資料更新＋公式套用", "handler": run_vip_update_and_apply_formulas, "enabled": True},
+    {"name": "【儲值金】期別資料更新（轉檔＋搬運）", "handler": run_vip_update_period_data, "enabled": True},
+    {"name": "【儲值金】套用公式", "handler": run_vip_apply_formulas, "enabled": True},
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
@@ -2606,7 +2615,7 @@ with date_col:
                 key="finance_vip_copy_period",
             )
             st.caption("格式：YYYYMM；從上一期複製出當期的「{期別}儲值金彙整」")
-        elif selected_function == "【儲值金】期別資料更新＋公式套用":
+        elif selected_function == "【儲值金】期別資料更新（轉檔＋搬運）":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
@@ -2615,7 +2624,17 @@ with date_col:
                 label_visibility="collapsed",
                 key="finance_vip_update_period",
             )
-            st.caption("執行前請先把該期資料夾內的來源檔（.xlsx）都放好；程式會自動轉成 Google Sheet、搬運、套公式")
+            st.caption("執行前請先把該期資料夾內的來源檔（.xlsx）都放好；程式會自動轉成 Google Sheet、搬運到彙整檔（不含套公式）")
+        elif selected_function == "【儲值金】套用公式":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_vip_formulas_period",
+            )
+            st.caption("只套用「儲值金公式設定」裡啟用的公式，不會重跑轉檔／搬運；可以重複執行來除錯")
         else:
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)

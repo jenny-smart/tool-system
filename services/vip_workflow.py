@@ -237,12 +237,24 @@ class VipStoredValueWorkflow:
                 # Drive 轉檔後稍等，避免 Sheets 端尚未可讀
                 time.sleep(2.5)
 
-                try:
-                    count = self.count_valid_rows(converted["id"])
-                except Exception:
-                    # 剛轉好偶爾需要再等一下
-                    time.sleep(8)
-                    count = self.count_valid_rows(converted["id"])
+                count = None
+                count_error = None
+                for wait_seconds in (0, 8, 15):
+                    if wait_seconds:
+                        time.sleep(wait_seconds)  # 剛轉好偶爾需要再等一下
+                    try:
+                        count = self.count_valid_rows(converted["id"])
+                        break
+                    except Exception as count_exc:
+                        count_error = count_exc
+
+                if count is None:
+                    # 讀不到筆數不代表真的是 0 筆，兩者要分開標記，
+                    # 不然桃園這種明明有資料的頁籤，log 會誤顯示 0。
+                    self.log.stamp_count_time(period, area, typ, "轉檔", f"讀取失敗：{count_error}")
+                    result.add_error(f"{base_name} 轉檔完成但讀取筆數失敗：{count_error}")
+                    time.sleep(1.5)
+                    continue
 
                 self.log.stamp_count_time(period, area, typ, "轉檔", count)
                 replaced = converted.get("replaced_count", 0)
@@ -254,7 +266,7 @@ class VipStoredValueWorkflow:
                 time.sleep(1.5)
 
             except Exception as e:
-                self.log.stamp_count_time(period, area, typ, "轉檔", 0)
+                self.log.stamp_count_time(period, area, typ, "轉檔", f"轉檔失敗：{e}")
                 result.add_error(f"{file['name']} 轉檔失敗：{e}")
 
         # 高雄 / 新竹結算資料整理
