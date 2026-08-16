@@ -26,6 +26,13 @@ from tools.local_agent_queue import create_task as create_local_agent_task
 from tools.local_agent_queue import list_tasks as list_local_agent_tasks
 from tools.local_agent_queue import read_task_log as read_local_agent_task_log
 
+from services.google_api_retry import install_gspread_retry
+
+# gspread（儲值金功能用）遇到 429 Quota exceeded 時自動重試＋退避，
+# 避免像 convert_files/move_files/apply_formulas 這種一次跑很多 API
+# 呼叫的流程，被 Sheets API 的「每分鐘讀取次數」限制擋下來直接失敗。
+install_gspread_retry()
+
 try:
     from tools.local_agent_queue import list_agent_status as list_local_agent_status
 except ImportError:

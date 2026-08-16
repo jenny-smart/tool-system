@@ -405,6 +405,13 @@ class VipStoredValueWorkflow:
             result.add_message("公式設定無啟用項目（請確認「儲值金公式設定」的啟用欄已填 TRUE）")
             return self._finish_log(period, "計算", result)
 
+        # 同一個頁籤常常會有好幾列公式設定（不同欄位），worksheet 物件跟
+        # 最後一列列數只要抓一次、快取起來重複用，避免每一列公式設定都
+        # 重新打一次 API（40 列設定＝原本要 80 次讀取，很容易撞到 Sheets
+        # API 的「每分鐘讀取次數」限制）。
+        ws_cache: dict[str, Any] = {}
+        last_row_cache: dict[str, int] = {}
+
         for item in rows:
             try:
                 target_sheet_name = item.get("目標頁籤") or f"{item.get('區域','')}{item.get('類型','')}"
@@ -415,8 +422,12 @@ class VipStoredValueWorkflow:
                 if not target_sheet_name or not target_col or not formula:
                     continue
 
-                ws = self.sheets.get_or_create_ws(summary, target_sheet_name)
-                last_row = len(ws.col_values(1))
+                if target_sheet_name not in ws_cache:
+                    ws_cache[target_sheet_name] = self.sheets.get_or_create_ws(summary, target_sheet_name)
+                    last_row_cache[target_sheet_name] = len(ws_cache[target_sheet_name].col_values(1))
+
+                ws = ws_cache[target_sheet_name]
+                last_row = last_row_cache[target_sheet_name]
                 if last_row < start_row:
                     count = 0
                     self.formulas.stamp_formula_result(item["_row"], count)
