@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0704_v3
+版本：0816_v1
 更新日期：2026-07-04
 """
 import html
@@ -1687,6 +1687,30 @@ def queue_cetustek_download(*, month="", start_date=None, end_date=None, area="�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_cetustek_paper_update(*, month="", start_date=None, end_date=None, area="全區"):
+    month_text = str(month or "").strip()
+    if not month_text:
+        raise ValueError("紙本發票更新請輸入月份 YYYYMM")
+    task = create_local_agent_task(
+        "cetustek.paper_update",
+        {"month": month_text, "area": area},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
+def queue_cetustek_prize_update(*, month="", start_date=None, end_date=None, area="全區"):
+    month_text = str(month or "").strip()
+    if not month_text:
+        raise ValueError("中獎發票更新請輸入單月月份 YYYYMM")
+    task = create_local_agent_task(
+        "cetustek.prize_update",
+        {"month": month_text, "area": area},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 def queue_cetustek_allowance(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     if not selected_rows:
         raise ValueError("請先勾選要開立折讓單的資料")
@@ -2002,6 +2026,8 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】開立發票", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
+    {"name": "【鯨躍發票】紙本發票更新", "handler": queue_cetustek_paper_update, "enabled": True},
+    {"name": "【鯨躍發票】中獎發票更新", "handler": queue_cetustek_prize_update, "enabled": True},
     {"name": "【鯨躍發票】開立折讓單", "handler": queue_cetustek_allowance, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
@@ -2447,6 +2473,22 @@ with date_col:
                         value=today_date,
                         key="finance_invoice_end_date",
                     )
+        elif selected_function in (
+            "【鯨躍發票】紙本發票更新",
+            "【鯨躍發票】中獎發票更新",
+        ):
+            st.markdown('<div class="field-label">📆 更新月份</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "月份",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key=f"finance_invoice_update_month_{selected_function}",
+            )
+            if selected_function == "【鯨躍發票】中獎發票更新":
+                st.caption("只接受單月；例如 202607 會更新 20260506 中獎發票")
+            else:
+                st.caption("格式：YYYYMM；更新該月份紙本發票")
         elif selected_function == "【藍新金流】藍新收退款下載":
             st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
             newebpay_date_mode = st.radio(
