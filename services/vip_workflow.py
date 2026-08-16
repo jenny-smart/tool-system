@@ -124,7 +124,9 @@ class VipStoredValueWorkflow:
     def get_monthly_summary(self, period: str):
         file = self.find_monthly_summary_file(period)
         if not file:
-            raise FileNotFoundError(f"找不到 {self.summary_file_name(period)}")
+            raise FileNotFoundError(
+                f"找不到 {self.summary_file_name(period)}，請先執行「複製期別檔案」建立當期彙整檔"
+            )
         return self.sheets.open_by_id(file["id"])
 
     # ============================================================
