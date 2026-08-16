@@ -763,7 +763,7 @@ if "logs" not in st.session_state:
     st.session_state.logs = ["[--:--:--] 系統已就緒，請選擇作業..."]
 
 if "selected_system_name" not in st.session_state:
-    st.session_state.selected_system_name = "儲值金管理"
+    st.session_state.selected_system_name = "財務管理"
 
 if "adding_system" not in st.session_state:
     st.session_state.adding_system = False
@@ -2229,6 +2229,7 @@ if _log_id and not os.getenv("TOOLS_APP_LOG_SPREADSHEET_ID"):
 systems = [
     s for s in get_enabled_systems(config)
     if can_access_system(s.get("type", ""))
+    and s.get("type", "") != "vip"  # 儲值金管理已收進財務管理，不再獨立顯示
 ]
 system_names = [s.get("name", "") for s in systems if s.get("name")]
 
