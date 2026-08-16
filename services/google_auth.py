@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2.credentials import Credentials
+
 from googleapiclient.discovery import build
 
-from tools.common.config_loader import get_service_account_info
+from tools.common.google_auth import get_google_credentials
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -13,8 +14,10 @@ SCOPES = [
 
 
 def get_credentials() -> Credentials:
-    info = get_service_account_info()
-    return Credentials.from_service_account_info(info, scopes=SCOPES)
+    """儲值金功能改用 OAuth（jenny@lemonclean.com.tw 的 refresh token），
+    因為 service account 自己沒有 Drive 儲存空間額度，複製/建立檔案會
+    直接 403 storageQuotaExceeded。"""
+    return get_google_credentials()
 
 
 def get_gspread_client() -> gspread.Client:
