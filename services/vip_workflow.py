@@ -369,9 +369,9 @@ class VipStoredValueWorkflow:
             new_name=kaohsiung_name,
             parent_folder_id=folder["id"],
         )
-        time.sleep(2.0)
+        time.sleep(3.0)
 
-        hsinchu_count, original_count = self.filter_rows_by_h_column(
+        hsinchu_count, original_count = self._filter_with_retry(
             spreadsheet_id=hsinchu_files[0]["id"],
             keep_matching=False,
         )
@@ -379,7 +379,12 @@ class VipStoredValueWorkflow:
 
         time.sleep(1.5)
 
-        kaohsiung_count, _ = self.filter_rows_by_h_column(
+        # 高雄這份是剛複製出來的新檔案，Drive/Sheets 剛複製完偶爾還沒完全
+        # 就緒（尤其原始資料有幾百列時），這裡跟其他轉檔步驟一樣用重試
+        # 機制，避免「複製完但讀不到/寫不進去」導致高雄整份還停在複製
+        # 當下、完全沒篩選過的狀態（篩選失敗的例外會直接往外丟，高雄的
+        # 內容就會停在複製時的原始快照，看起來就像完全沒篩選）。
+        kaohsiung_count, _ = self._filter_with_retry(
             spreadsheet_id=kaohsiung_file["id"],
             keep_matching=True,
         )
@@ -447,6 +452,21 @@ class VipStoredValueWorkflow:
         total = kaohsiung_existing_rows + len(tainan_rows)
         self.log.stamp_count_time(period, "高雄", "儲值金預收", "轉檔", total)
         return len(tainan_rows)
+
+    def _filter_with_retry(self, spreadsheet_id: str, keep_matching: bool) -> Tuple[int, int]:
+        """剛複製出來的 Google Sheet，Drive/Sheets 端偶爾需要幾秒才會完全
+        就緒，直接讀寫容易失敗。跟轉檔讀筆數一樣用重試機制包一層，避免
+        單次失敗就整個丟例外、讓表格停在複製當下、完全沒篩選過的狀態。
+        """
+        last_error: Optional[Exception] = None
+        for wait_seconds in (0, 5, 10, 20):
+            if wait_seconds:
+                time.sleep(wait_seconds)
+            try:
+                return self.filter_rows_by_h_column(spreadsheet_id, keep_matching)
+            except Exception as exc:
+                last_error = exc
+        raise RuntimeError(f"篩選失敗（已重試多次）：{last_error}") from last_error
 
     def filter_rows_by_h_column(self, spreadsheet_id: str, keep_matching: bool) -> Tuple[int, int]:
         """
