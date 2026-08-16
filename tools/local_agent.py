@@ -116,31 +116,6 @@ def build_cetustek_download(params: dict[str, Any]) -> list[str]:
     return command
 
 
-def build_cetustek_invoice_update(mode: str, params: dict[str, Any]) -> list[str]:
-    month = str(params.get("month") or "").strip()
-    area = str(params.get("area") or "全區").strip()
-    if not month:
-        raise ValueError("發票更新任務缺少月份")
-    command = [
-        sys.executable,
-        "-m",
-        "tools.invoice_center.invoice_archive",
-        mode,
-        month,
-    ]
-    if area and area != "全區":
-        command.extend(["--area", area])
-    return command
-
-
-def build_cetustek_paper_update(params: dict[str, Any]) -> list[str]:
-    return build_cetustek_invoice_update("paper", params)
-
-
-def build_cetustek_prize_update(params: dict[str, Any]) -> list[str]:
-    return build_cetustek_invoice_update("prize", params)
-
-
 def build_cetustek_allowance(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     selected_rows = params.get("selected_rows") or []
@@ -449,8 +424,6 @@ def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
 
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
-register_action("cetustek.paper_update", build_cetustek_paper_update)
-register_action("cetustek.prize_update", build_cetustek_prize_update)
 register_action("cetustek.allowance", build_cetustek_allowance)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
