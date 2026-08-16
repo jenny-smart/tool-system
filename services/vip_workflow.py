@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import time
 
@@ -65,12 +65,20 @@ class StepResult:
     step: str
     messages: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    # 選填：每次 add_message/add_error 都會立刻呼叫一次，讓呼叫端（例如
+    # UI 的執行日誌）可以在流程還在跑的當下就即時顯示每一小步的結果，
+    # 不用等整個 StepResult 跑完才看得到。
+    on_progress: Optional[Callable[[str, str], None]] = field(default=None, repr=False, compare=False)
 
     def add_message(self, msg: str) -> None:
         self.messages.append(msg)
+        if self.on_progress:
+            self.on_progress(msg, "info")
 
     def add_error(self, msg: str) -> None:
         self.errors.append(msg)
+        if self.on_progress:
+            self.on_progress(msg, "error")
 
 
 class VipStoredValueWorkflow:
@@ -201,8 +209,8 @@ class VipStoredValueWorkflow:
             self.execution_log.append(period, step, "完成", "；".join(result.messages) or "無訊息")
         return result
 
-    def convert_files(self, period: str) -> StepResult:
-        result = StepResult("轉檔")
+    def convert_files(self, period: str, on_progress: Optional[Callable[[str, str], None]] = None) -> StepResult:
+        result = StepResult("轉檔", on_progress=on_progress)
         self.execution_log.append(period, "轉檔", "開始", "")
         folder = self.get_period_folder(period)
         files = self.drive.list_children(folder["id"])
@@ -425,8 +433,8 @@ class VipStoredValueWorkflow:
     # ============================================================
     # 3. 搬運
     # ============================================================
-    def move_files(self, period: str) -> StepResult:
-        result = StepResult("搬運")
+    def move_files(self, period: str, on_progress: Optional[Callable[[str, str], None]] = None) -> StepResult:
+        result = StepResult("搬運", on_progress=on_progress)
         self.execution_log.append(period, "搬運", "開始", "")
         folder = self.get_period_folder(period)
         summary = self.get_monthly_summary(period)
@@ -485,8 +493,8 @@ class VipStoredValueWorkflow:
     # ============================================================
     # 4. 計算 / 套公式
     # ============================================================
-    def apply_formulas(self, period: str) -> StepResult:
-        result = StepResult("計算")
+    def apply_formulas(self, period: str, on_progress: Optional[Callable[[str, str], None]] = None) -> StepResult:
+        result = StepResult("計算", on_progress=on_progress)
         self.execution_log.append(period, "計算", "開始", "")
         summary = self.get_monthly_summary(period)
 

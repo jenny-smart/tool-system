@@ -2045,30 +2045,30 @@ def run_vip_copy_period_file(*, month="", start_date=None, end_date=None, area="
     return _format_step_results(result)
 
 
-def run_vip_convert_files(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+def run_vip_convert_files(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     period = (month or "").strip()
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
     workflow = _get_vip_workflow()
-    result = workflow.convert_files(period)
+    result = workflow.convert_files(period, on_progress=on_progress)
     return _format_step_results(result)
 
 
-def run_vip_move_files(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+def run_vip_move_files(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     period = (month or "").strip()
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
     workflow = _get_vip_workflow()
-    result = workflow.move_files(period)
+    result = workflow.move_files(period, on_progress=on_progress)
     return _format_step_results(result)
 
 
-def run_vip_apply_formulas(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+def run_vip_apply_formulas(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     period = (month or "").strip()
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
     workflow = _get_vip_workflow()
-    result = workflow.apply_formulas(period)
+    result = workflow.apply_formulas(period, on_progress=on_progress)
     return _format_step_results(result)
 
 
@@ -3427,6 +3427,11 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             if selected_function == "【富邦銀行】清潔用品採購":
                 finance_kwargs["selected_rows"] = fubon_supply_purchase_selected_rows
+            if selected_function in ("【儲值金】轉檔", "【儲值金】搬運", "【儲值金】套用公式"):
+                # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
+                # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完
+                # 才看到彙總結果。
+                finance_kwargs["on_progress"] = lambda msg, level="info": add_log(msg, level)
             with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
                 try:
                     result = finance_handler(**finance_kwargs)
