@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+
+from tools.common.config_loader import get_service_account_info
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -12,7 +13,7 @@ SCOPES = [
 
 
 def get_credentials() -> Credentials:
-    info = dict(st.secrets["gcp_service_account"])
+    info = get_service_account_info()
     return Credentials.from_service_account_info(info, scopes=SCOPES)
 
 

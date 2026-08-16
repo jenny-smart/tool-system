@@ -20,7 +20,7 @@ MASTER_SYSTEM_SHEET = "系統設定"
 MASTER_FORMULA_SHEET = "儲值金公式設定"
 MASTER_MONTHLY_LOG_SHEET = "儲值金月度作業紀錄"
 MASTER_AMOUNT_SHEET = "金額統整設定"
-MASTER_EXECUTION_LOG_SHEET = "執行紀錄"
+MASTER_EXECUTION_LOG_SHEET = "儲值金執行記錄"
 
 # 搬運資料時每種資料來源要讀取的最後欄位
 LAST_COL_BY_TYPE = {

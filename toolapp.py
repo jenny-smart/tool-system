@@ -3368,9 +3368,13 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             if selected_function == "【富邦銀行】清潔用品採購":
                 finance_kwargs["selected_rows"] = fubon_supply_purchase_selected_rows
-            result = finance_handler(**finance_kwargs)
-            if result is not None:
-                add_log(str(result), "success")
+            try:
+                result = finance_handler(**finance_kwargs)
+                if result is not None:
+                    add_log(str(result), "success")
+            except Exception as e:
+                add_log(f"執行失敗：{e}", "error")
+                add_log(traceback.format_exc(), "error")
         st.rerun()
 
     master_id = selected_system.get("master_spreadsheet_id", "")
