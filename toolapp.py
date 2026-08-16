@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0816_v2
+版本：0816_v3
 更新日期：2026-08-16
 """
 import html
