@@ -46,6 +46,11 @@ KAOHSIUNG_FILTER_VALUES = {
 # （這樣共用方案名稱如儲值金50000 也能靠地址判斷歸到高雄）。
 KAOHSIUNG_ADDRESS_COLUMN = "E"
 KAOHSIUNG_ADDRESS_KEYWORDS = ["高雄", "台南"]
+
+# 篩選新竹/高雄結算前，先留一份新竹過濾前的完整備份（檔名帶這個字尾），
+# 方便事後回頭核對篩選結果對不對。這份備份不能被搬運/套公式當成正常
+# 的地區資料處理，所以檔名刻意不會被 parse_area_type 誤判。
+HSINCHU_PRE_FILTER_BACKUP_SUFFIX = "-篩選前備份"
 KAOHSIUNG_DERIVED_FILE_TEMPLATE = "{period}儲值金結算-高雄"
 
 # 月度作業紀錄會依此順序打卡：轉檔 -> 搬運 -> 計算 -> 彙整金額

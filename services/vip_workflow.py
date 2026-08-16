@@ -30,6 +30,7 @@ import time
 
 from config.vip_config import (
     AREAS,
+    HSINCHU_PRE_FILTER_BACKUP_SUFFIX,
     KAOHSIUNG_ADDRESS_KEYWORDS,
     KAOHSIUNG_FILTER_VALUES,
     LAST_COL_BY_TYPE,
@@ -330,6 +331,16 @@ class VipStoredValueWorkflow:
         if not hsinchu_files:
             raise FileNotFoundError(f"找不到 {hsinchu_name}")
 
+        # 篩選前先留一份新竹當下完整內容的備份，不會被後面的篩選動到，
+        # 方便事後回頭核對篩選結果對不對。
+        backup_name = f"{hsinchu_name}{HSINCHU_PRE_FILTER_BACKUP_SUFFIX}"
+        self.drive.trash_google_sheet_by_name(folder["id"], backup_name)
+        self.drive.copy_file(
+            file_id=hsinchu_files[0]["id"],
+            new_name=backup_name,
+            parent_folder_id=folder["id"],
+        )
+
         self.drive.trash_google_sheet_by_name(folder["id"], kaohsiung_name)
         kaohsiung_file = self.drive.copy_file(
             file_id=hsinchu_files[0]["id"],
@@ -476,6 +487,13 @@ class VipStoredValueWorkflow:
             name = file["name"]
 
             if name == self.summary_file_name(period):
+                continue
+
+            # 新竹篩選前備份只是留著回頭核對用，檔名仍帶「新竹」「儲值金
+            # 結算」字樣會被 parse_area_type 誤判成正常來源，這裡要明確
+            # 排除，不然會把備份也搬進新竹儲值金結算頁籤，跟已經搬過的
+            # 正式資料重複。
+            if name.endswith(HSINCHU_PRE_FILTER_BACKUP_SUFFIX):
                 continue
 
             area, typ = self.parse_area_type(name)
