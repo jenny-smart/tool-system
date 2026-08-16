@@ -5,6 +5,13 @@ TIMEZONE = "Asia/Taipei"
 AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 TYPES = ["儲值金結算", "儲值金預收"]
 
+# 搬運／套用公式可以選擇只跑單一地區，或是這裡定義的地區組合（下拉選單
+# 會多一個「新竹＋高雄」的選項）。key 是下拉選單顯示的名稱，value 是
+# 實際要跑的地區清單。
+AREA_GROUPS = {
+    "新竹＋高雄": ["新竹", "高雄"],
+}
+
 # 主控表：Jenny's Lemonhometools
 MASTER_SPREADSHEET_ID = "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
 

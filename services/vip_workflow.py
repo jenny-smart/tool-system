@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import time
 
 from config.vip_config import (
+    AREA_GROUPS,
     AREAS,
     HSINCHU_PRE_FILTER_BACKUP_SUFFIX,
     KAOHSIUNG_ADDRESS_KEYWORDS,
@@ -210,11 +211,25 @@ class VipStoredValueWorkflow:
             self.execution_log.append(period, step, "完成", "；".join(result.messages) or "無訊息")
         return result
 
-    def convert_files(self, period: str, on_progress: Optional[Callable[[str, str], None]] = None) -> StepResult:
+    def resolve_target_areas(self, area: str) -> Optional[set]:
+        """把下拉選單選到的地區（單一地區、地區組合如「新竹＋高雄」、或
+        「全區」）轉成實際要處理的地區集合。回傳 None 代表不過濾（全區）。
+        """
+        if not area or area == "全區":
+            return None
+        return set(AREA_GROUPS.get(area, [area]))
+
+    def convert_files(
+        self,
+        period: str,
+        area: str = "全區",
+        on_progress: Optional[Callable[[str, str], None]] = None,
+    ) -> StepResult:
         result = StepResult("轉檔", on_progress=on_progress)
         self.execution_log.append(period, "轉檔", "開始", "")
         folder = self.get_period_folder(period)
         files = self.drive.list_children(folder["id"])
+        target_areas = self.resolve_target_areas(area)
 
         # 只處理 xlsx/xls/csv，不處理已轉好的 Google Sheet。
         source_files = [f for f in files if is_source_spreadsheet_file(f)]
@@ -224,8 +239,10 @@ class VipStoredValueWorkflow:
         source_by_base: Dict[str, Dict[str, Any]] = {}
         for file in source_files:
             base_name = strip_spreadsheet_extension(file["name"])
-            area, typ = self.parse_area_type(base_name)
-            if not area or not typ:
+            file_area, typ = self.parse_area_type(base_name)
+            if not file_area or not typ:
+                continue
+            if target_areas is not None and file_area not in target_areas:
                 continue
             source_by_base[base_name] = file
 
@@ -234,8 +251,8 @@ class VipStoredValueWorkflow:
             return self._finish_log(period, "轉檔", result)
 
         for base_name, file in source_by_base.items():
-            area, typ = self.parse_area_type(base_name)
-            if not area or not typ:
+            file_area, typ = self.parse_area_type(base_name)
+            if not file_area or not typ:
                 continue
 
             try:
@@ -263,12 +280,12 @@ class VipStoredValueWorkflow:
                 if count is None:
                     # 讀不到筆數不代表真的是 0 筆，兩者要分開標記，
                     # 不然桃園這種明明有資料的頁籤，log 會誤顯示 0。
-                    self.log.stamp_count_time(period, area, typ, "轉檔", f"讀取失敗：{count_error}")
+                    self.log.stamp_count_time(period, file_area, typ, "轉檔", f"讀取失敗：{count_error}")
                     result.add_error(f"{base_name} 轉檔完成但讀取筆數失敗：{count_error}")
                     time.sleep(1.5)
                     continue
 
-                self.log.stamp_count_time(period, area, typ, "轉檔", count)
+                self.log.stamp_count_time(period, file_area, typ, "轉檔", count)
                 replaced = converted.get("replaced_count", 0)
                 if replaced:
                     result.add_message(f"{base_name} 轉檔完成：{count} 筆，已覆蓋舊檔 {replaced} 個")
@@ -278,25 +295,30 @@ class VipStoredValueWorkflow:
                 time.sleep(1.5)
 
             except Exception as e:
-                self.log.stamp_count_time(period, area, typ, "轉檔", f"轉檔失敗：{e}")
+                self.log.stamp_count_time(period, file_area, typ, "轉檔", f"轉檔失敗：{e}")
                 result.add_error(f"{file['name']} 轉檔失敗：{e}")
 
-        # 高雄 / 新竹結算資料整理
-        try:
-            reconcile_msg = self.adjust_hsinchu_kaohsiung_settlement(period)
-            result.add_message(reconcile_msg)
-        except Exception as e:
-            result.add_error(f"高雄/新竹結算資料整理失敗：{e}")
+        # 高雄/新竹結算彼此是連動的（高雄結算完全從新竹篩出來），只要其中
+        # 一個在這次選的地區範圍內，就要跑這一步；只選跟新竹/高雄都無關
+        # 的地區（例如只選台北）就不用跑。
+        if target_areas is None or "新竹" in target_areas or "高雄" in target_areas:
+            try:
+                reconcile_msg = self.adjust_hsinchu_kaohsiung_settlement(period)
+                result.add_message(reconcile_msg)
+            except Exception as e:
+                result.add_error(f"高雄/新竹結算資料整理失敗：{e}")
 
-        # 高雄儲值金預收 = 高雄自己的來源檔 + 台南來源檔合併
-        try:
-            tainan_merged = self.merge_tainan_into_kaohsiung_prepaid(period)
-            if tainan_merged is None:
-                result.add_message("沒有找到台南來源檔，高雄儲值金預收不需要合併")
-            else:
-                result.add_message(f"已把台南 {tainan_merged} 筆資料合併進高雄儲值金預收")
-        except Exception as e:
-            result.add_error(f"合併台南到高雄儲值金預收失敗：{e}")
+        # 高雄儲值金預收 = 高雄自己的來源檔 + 台南來源檔合併，只選跟高雄
+        # 無關的地區就不用跑。
+        if target_areas is None or "高雄" in target_areas:
+            try:
+                tainan_merged = self.merge_tainan_into_kaohsiung_prepaid(period)
+                if tainan_merged is None:
+                    result.add_message("沒有找到台南來源檔，高雄儲值金預收不需要合併")
+                else:
+                    result.add_message(f"已把台南 {tainan_merged} 筆資料合併進高雄儲值金預收")
+            except Exception as e:
+                result.add_error(f"合併台南到高雄儲值金預收失敗：{e}")
 
         return self._finish_log(period, "轉檔", result)
 
@@ -474,11 +496,17 @@ class VipStoredValueWorkflow:
     # ============================================================
     # 3. 搬運
     # ============================================================
-    def move_files(self, period: str, on_progress: Optional[Callable[[str, str], None]] = None) -> StepResult:
+    def move_files(
+        self,
+        period: str,
+        area: str = "全區",
+        on_progress: Optional[Callable[[str, str], None]] = None,
+    ) -> StepResult:
         result = StepResult("搬運", on_progress=on_progress)
         self.execution_log.append(period, "搬運", "開始", "")
         folder = self.get_period_folder(period)
         summary = self.get_monthly_summary(period)
+        target_areas = self.resolve_target_areas(area)
 
         files = self.drive.list_children(folder["id"])
         google_files = [f for f in files if f.get("mimeType") == GOOGLE_SHEET_MIME]
@@ -496,8 +524,10 @@ class VipStoredValueWorkflow:
             if name.endswith(HSINCHU_PRE_FILTER_BACKUP_SUFFIX):
                 continue
 
-            area, typ = self.parse_area_type(name)
-            if not area or not typ:
+            file_area, typ = self.parse_area_type(name)
+            if not file_area or not typ:
+                continue
+            if target_areas is not None and file_area not in target_areas:
                 continue
 
             try:
@@ -506,7 +536,7 @@ class VipStoredValueWorkflow:
                 values = source_ws.get_all_values()
 
                 if len(values) <= 1:
-                    self.log.stamp_count_time(period, area, typ, "搬運", 0)
+                    self.log.stamp_count_time(period, file_area, typ, "搬運", 0)
                     result.add_message(f"{name} 無資料可搬運")
                     continue
 
@@ -519,7 +549,7 @@ class VipStoredValueWorkflow:
                         trimmed = trimmed + [""] * (end_col - len(trimmed))
                         data.append(trimmed)
 
-                target_sheet_name = f"{area}{typ}"
+                target_sheet_name = f"{file_area}{typ}"
                 target_ws = self.sheets.get_or_create_ws(summary, target_sheet_name)
 
                 self.sheets.clear_from_row(target_ws, start_row=2, start_col=1, end_col=end_col)
@@ -527,13 +557,13 @@ class VipStoredValueWorkflow:
                 if data:
                     self.sheets.write_values(target_ws, 2, 1, data)
 
-                self.log.stamp_count_time(period, area, typ, "搬運", len(data))
+                self.log.stamp_count_time(period, file_area, typ, "搬運", len(data))
                 result.add_message(f"{target_sheet_name} 搬運完成：{len(data)} 筆")
 
                 time.sleep(1.2)
 
             except Exception as e:
-                self.log.stamp_count_time(period, area, typ, "搬運", 0)
+                self.log.stamp_count_time(period, file_area, typ, "搬運", 0)
                 result.add_error(f"{name} 搬運失敗：{e}")
 
         return self._finish_log(period, "搬運", result)
@@ -541,14 +571,22 @@ class VipStoredValueWorkflow:
     # ============================================================
     # 4. 計算 / 套公式
     # ============================================================
-    def apply_formulas(self, period: str, on_progress: Optional[Callable[[str, str], None]] = None) -> StepResult:
+    def apply_formulas(
+        self,
+        period: str,
+        area: str = "全區",
+        on_progress: Optional[Callable[[str, str], None]] = None,
+    ) -> StepResult:
         result = StepResult("計算", on_progress=on_progress)
         self.execution_log.append(period, "計算", "開始", "")
         summary = self.get_monthly_summary(period)
+        target_areas = self.resolve_target_areas(area)
 
         rows = self.formulas.read_enabled()
+        if target_areas is not None:
+            rows = [r for r in rows if r.get("區域") in target_areas]
         if not rows:
-            result.add_message("公式設定無啟用項目（請確認「儲值金公式設定」的啟用欄已填 TRUE）")
+            result.add_message("公式設定無啟用項目（請確認「儲值金公式設定」的啟用欄已填 TRUE，且選的地區有對應的公式設定）")
             return self._finish_log(period, "計算", result)
 
         # 同一個頁籤常常會有好幾列公式設定（不同欄位），worksheet 物件跟
