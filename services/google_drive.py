@@ -66,7 +66,7 @@ class DriveService:
                 self.service.files()
                 .list(
                     q=f"'{folder_id}' in parents and trashed = false",
-                    fields="nextPageToken, files(id,name,mimeType,webViewLink,parents)",
+                    fields="nextPageToken, files(id,name,mimeType,webViewLink,parents,modifiedTime)",
                     pageToken=page_token,
                     supportsAllDrives=True,
                     includeItemsFromAllDrives=True,
@@ -150,7 +150,7 @@ class DriveService:
             self.service.files()
             .list(
                 q=q,
-                fields="files(id,name,mimeType,webViewLink,parents)",
+                fields="files(id,name,mimeType,webViewLink,parents,modifiedTime)",
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
                 pageSize=100,

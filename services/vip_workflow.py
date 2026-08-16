@@ -353,6 +353,18 @@ class VipStoredValueWorkflow:
         if not hsinchu_files:
             raise FileNotFoundError(f"找不到 {hsinchu_name}")
 
+        duplicate_warning = ""
+        if len(hsinchu_files) > 1:
+            # 理論上同名只會有一份，但如果資料夾裡真的重複了，挑錯份會讓
+            # 高雄/新竹的篩選跟後面搬運看到的內容對不起來、卻又查不出
+            # 原因。這裡明確挑「最後修改時間最新」的一份，並把警告帶進
+            # 回傳訊息，讓使用者知道資料夾需要手動清一下重複檔案。
+            hsinchu_files = sorted(hsinchu_files, key=lambda f: f.get("modifiedTime", ""), reverse=True)
+            duplicate_warning = (
+                f"⚠️ {hsinchu_name} 在資料夾裡有 {len(hsinchu_files)} 份重複檔案，"
+                f"已改用最後修改時間最新的那份，其餘的請手動檢查/刪除；"
+            )
+
         # 篩選前先留一份新竹當下完整內容的備份，不會被後面的篩選動到，
         # 方便事後回頭核對篩選結果對不對。
         backup_name = f"{hsinchu_name}{HSINCHU_PRE_FILTER_BACKUP_SUFFIX}"
@@ -398,7 +410,7 @@ class VipStoredValueWorkflow:
             )
 
         return (
-            f"新竹/高雄結算筆數核對正確：新竹 {hsinchu_count} 筆 + 高雄 "
+            f"{duplicate_warning}新竹/高雄結算筆數核對正確：新竹 {hsinchu_count} 筆 + 高雄 "
             f"{kaohsiung_count} 筆 = 原始新竹 {original_count} 筆"
         )
 
@@ -531,7 +543,26 @@ class VipStoredValueWorkflow:
         files = self.drive.list_children(folder["id"])
         google_files = [f for f in files if f.get("mimeType") == GOOGLE_SHEET_MIME]
 
+        # 同一個檔名理論上不該同時存在兩份（轉檔/衍生步驟都是先 trash 舊檔
+        # 再建新檔），但如果真的重複了（例如舊流程留下的殘留檔案、trash
+        # 沒清乾淨），這裡不去重的話兩份都會被搬，順序不保證，最後搬進
+        # 頁籤的內容就會不知道是哪一份、看起來像篩選完全沒生效。改成同
+        # 檔名只留 modifiedTime 最新的一份，其餘的明確警告出來。
+        files_by_name: Dict[str, List[Dict[str, Any]]] = {}
         for file in google_files:
+            files_by_name.setdefault(file["name"], []).append(file)
+
+        deduped_files = []
+        for name, dupes in files_by_name.items():
+            if len(dupes) > 1:
+                dupes.sort(key=lambda f: f.get("modifiedTime", ""), reverse=True)
+                result.add_error(
+                    f"{name} 在資料夾裡有 {len(dupes)} 份重複檔案，"
+                    f"已改用最後修改時間最新的那份，其餘的請手動檢查/刪除"
+                )
+            deduped_files.append(dupes[0])
+
+        for file in deduped_files:
             name = file["name"]
 
             if name == self.summary_file_name(period):
