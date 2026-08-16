@@ -303,12 +303,19 @@ class VipStoredValueWorkflow:
     # 高雄 / 新竹結算整理
     # ============================================================
     def adjust_hsinchu_kaohsiung_settlement(self, period: str) -> None:
-        """新竹儲值金結算移除高雄方案的列，高雄儲值金結算只保留高雄方案的列（來源固定是新竹）。
+        """高雄儲值金結算沒有自己的來源檔，完全是從新竹儲值金結算篩出來的：
+        符合高雄條件（方案名稱或地址）的列歸高雄，其餘留在新竹。
+
+        做法：先把新竹當下的完整內容複製一份當作高雄結算（覆蓋舊檔），
+        複製完成後再分別過濾——新竹移除符合高雄條件的列、高雄的複製本
+        只保留符合高雄條件的列。因為兩邊是從「同一份複製時間點的新竹
+        資料」各自篩出互斥的子集，新竹被篩掉的列一定會完整出現在高雄，
+        不會有資料整筆不見的問題（先前的寫法是分別過濾新竹跟一個必須
+        預先存在的高雄檔案，兩者互不相通，新竹篩掉的列從沒被寫進高雄）。
 
         這步是「轉檔」main loop 之後才跑的最終覆蓋，所以完成後要重新把新竹／
         高雄的筆數／時間打卡蓋掉之前 main loop 留下的數字，不然主控表看起來
-        會像「高雄沒有轉檔」（因為原本這裡完全沒打卡，只有 main loop 剛好有
-        高雄自己的來源檔時才會有一筆很快就過期的數字）。
+        會像「高雄沒有轉檔」。
         """
         folder = self.get_period_folder(period)
 
@@ -316,12 +323,16 @@ class VipStoredValueWorkflow:
         kaohsiung_name = f"{period}儲值金結算-高雄"
 
         hsinchu_files = self.drive.find_google_sheet_by_name(folder["id"], hsinchu_name)
-        kaohsiung_files = self.drive.find_google_sheet_by_name(folder["id"], kaohsiung_name)
-
         if not hsinchu_files:
             raise FileNotFoundError(f"找不到 {hsinchu_name}")
-        if not kaohsiung_files:
-            raise FileNotFoundError(f"找不到 {kaohsiung_name}")
+
+        self.drive.trash_google_sheet_by_name(folder["id"], kaohsiung_name)
+        kaohsiung_file = self.drive.copy_file(
+            file_id=hsinchu_files[0]["id"],
+            new_name=kaohsiung_name,
+            parent_folder_id=folder["id"],
+        )
+        time.sleep(2.0)
 
         hsinchu_count = self.filter_rows_by_h_column(
             spreadsheet_id=hsinchu_files[0]["id"],
@@ -332,7 +343,7 @@ class VipStoredValueWorkflow:
         time.sleep(1.5)
 
         kaohsiung_count = self.filter_rows_by_h_column(
-            spreadsheet_id=kaohsiung_files[0]["id"],
+            spreadsheet_id=kaohsiung_file["id"],
             keep_matching=True,
         )
         self.log.stamp_count_time(period, "高雄", "儲值金結算", "轉檔", kaohsiung_count)
