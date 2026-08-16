@@ -276,12 +276,29 @@ class VipStoredValueWorkflow:
         except Exception as e:
             result.add_error(f"高雄/新竹結算資料整理失敗：{e}")
 
+        # 高雄儲值金預收 = 高雄自己的來源檔 + 台南來源檔合併
+        try:
+            tainan_merged = self.merge_tainan_into_kaohsiung_prepaid(period)
+            if tainan_merged is None:
+                result.add_message("沒有找到台南來源檔，高雄儲值金預收不需要合併")
+            else:
+                result.add_message(f"已把台南 {tainan_merged} 筆資料合併進高雄儲值金預收")
+        except Exception as e:
+            result.add_error(f"合併台南到高雄儲值金預收失敗：{e}")
+
         return self._finish_log(period, "轉檔", result)
 
     # ============================================================
     # 高雄 / 新竹結算整理
     # ============================================================
     def adjust_hsinchu_kaohsiung_settlement(self, period: str) -> None:
+        """新竹儲值金結算移除高雄方案的列，高雄儲值金結算只保留高雄方案的列（來源固定是新竹）。
+
+        這步是「轉檔」main loop 之後才跑的最終覆蓋，所以完成後要重新把新竹／
+        高雄的筆數／時間打卡蓋掉之前 main loop 留下的數字，不然主控表看起來
+        會像「高雄沒有轉檔」（因為原本這裡完全沒打卡，只有 main loop 剛好有
+        高雄自己的來源檔時才會有一筆很快就過期的數字）。
+        """
         folder = self.get_period_folder(period)
 
         hsinchu_name = f"{period}儲值金結算-新竹"
@@ -295,17 +312,70 @@ class VipStoredValueWorkflow:
         if not kaohsiung_files:
             raise FileNotFoundError(f"找不到 {kaohsiung_name}")
 
-        self.filter_rows_by_h_column(
+        hsinchu_count = self.filter_rows_by_h_column(
             spreadsheet_id=hsinchu_files[0]["id"],
             keep_matching=False,
         )
+        self.log.stamp_count_time(period, "新竹", "儲值金結算", "轉檔", hsinchu_count)
 
         time.sleep(1.5)
 
-        self.filter_rows_by_h_column(
+        kaohsiung_count = self.filter_rows_by_h_column(
             spreadsheet_id=kaohsiung_files[0]["id"],
             keep_matching=True,
         )
+        self.log.stamp_count_time(period, "高雄", "儲值金結算", "轉檔", kaohsiung_count)
+
+    # ============================================================
+    # 高雄儲值金預收 = 高雄自己的來源檔 + 台南來源檔合併
+    # ============================================================
+    def merge_tainan_into_kaohsiung_prepaid(self, period: str) -> Optional[int]:
+        """把台南儲值金預收的資料合併進高雄儲值金預收（列疊加）。
+
+        台南不是正式地區（不會出現在搬運/套公式的地區清單），只在這裡當作
+        高雄儲值金預收的合併來源。資料夾裡沒有台南來源檔時就跳過，不算錯誤。
+        """
+        folder = self.get_period_folder(period)
+        tainan_name = f"{period}儲值金預收-台南"
+        kaohsiung_name = f"{period}儲值金預收-高雄"
+
+        # 台南來源檔可能還是 xlsx/xls/csv（未轉檔），也可能已經轉成
+        # Google Sheet，檔名不會帶副檔名，所以不能用精確比對，要用
+        # list_children 掃資料夾比對「去掉副檔名後的檔名」。
+        tainan_file = None
+        for file in self.drive.list_children(folder["id"]):
+            if strip_spreadsheet_extension(file["name"]) == tainan_name:
+                tainan_file = file
+                break
+        if not tainan_file:
+            return None
+
+        if tainan_file.get("mimeType") != GOOGLE_SHEET_MIME:
+            tainan_file = self.drive.replace_google_sheet_from_source(
+                source_file_id=tainan_file["id"],
+                source_name=tainan_file["name"],
+                parent_folder_id=folder["id"],
+            )
+            time.sleep(2.5)
+
+        tainan_ws = self.sheets.open_by_id(tainan_file["id"]).worksheets()[0]
+        tainan_values = tainan_ws.get_all_values()
+        tainan_rows = tainan_values[1:] if len(tainan_values) > 1 else []
+        if not tainan_rows:
+            return 0
+
+        kaohsiung_files = self.drive.find_google_sheet_by_name(folder["id"], kaohsiung_name)
+        if not kaohsiung_files:
+            raise FileNotFoundError(f"找不到 {kaohsiung_name}（無法合併台南資料，高雄儲值金預收自己的來源檔可能還沒轉檔）")
+
+        kaohsiung_ws = self.sheets.open_by_id(kaohsiung_files[0]["id"]).worksheets()[0]
+        kaohsiung_existing_rows = max(len(kaohsiung_ws.col_values(1)) - 1, 0)
+
+        self.sheets.write_values(kaohsiung_ws, kaohsiung_existing_rows + 2, 1, tainan_rows)
+
+        total = kaohsiung_existing_rows + len(tainan_rows)
+        self.log.stamp_count_time(period, "高雄", "儲值金預收", "轉檔", total)
+        return len(tainan_rows)
 
     def filter_rows_by_h_column(self, spreadsheet_id: str, keep_matching: bool) -> int:
         """
