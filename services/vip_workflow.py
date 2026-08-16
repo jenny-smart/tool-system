@@ -30,6 +30,7 @@ import time
 
 from config.vip_config import (
     AREAS,
+    KAOHSIUNG_ADDRESS_KEYWORDS,
     KAOHSIUNG_FILTER_VALUES,
     LAST_COL_BY_TYPE,
     MASTER_EXECUTION_LOG_SHEET,
@@ -379,9 +380,11 @@ class VipStoredValueWorkflow:
 
     def filter_rows_by_h_column(self, spreadsheet_id: str, keep_matching: bool) -> int:
         """
-        H 欄是第 8 欄。
-        - keep_matching=False：移除 H 欄符合高雄方案的列（新竹）
-        - keep_matching=True：只保留 H 欄符合高雄方案的列（高雄）
+        H 欄（第 8 欄，方案名稱）符合高雄方案名單，或是 E 欄（第 5 欄，地址）
+        包含「高雄」「台南」關鍵字，都算高雄的列（像 儲值金50000 這種各地
+        共用的方案名稱，就是靠地址才分得出來是不是高雄）。
+        - keep_matching=False：移除符合高雄的列（新竹）
+        - keep_matching=True：只保留符合高雄的列（高雄）
         """
         ss = self.sheets.open_by_id(spreadsheet_id)
         ws = ss.worksheets()[0]
@@ -396,7 +399,10 @@ class VipStoredValueWorkflow:
         filtered = []
         for row in rows:
             h_value = row[7].strip() if len(row) >= 8 else ""
-            matched = h_value in KAOHSIUNG_PLAN_NAMES
+            e_value = row[4].strip() if len(row) >= 5 else ""
+            matched = h_value in KAOHSIUNG_PLAN_NAMES or any(
+                keyword in e_value for keyword in KAOHSIUNG_ADDRESS_KEYWORDS
+            )
 
             if keep_matching and matched:
                 filtered.append(row)

@@ -29,11 +29,23 @@ LAST_COL_BY_TYPE = {
 }
 
 # H 欄符合這些內容時：新竹儲值金結算移除，高雄儲值金結算只保留
+# 注意：儲值金50000 這個方案名稱在新竹/高雄/其他地區共用，光看 H 欄名稱
+# 分不出來是不是高雄的，所以不放進這個集合，改用下面的 E 欄地址關鍵字判斷。
 KAOHSIUNG_FROM_HSINCHU_SOURCE_TYPE = "儲值金結算"
 KAOHSIUNG_FROM_HSINCHU_SOURCE_AREA = "新竹"
 KAOHSIUNG_DERIVED_AREA = "高雄"
 KAOHSIUNG_FILTER_COLUMN = "H"
-KAOHSIUNG_FILTER_VALUES = {"儲值金18900", "儲值金36000", "儲值金9900"}
+KAOHSIUNG_FILTER_VALUES = {
+    "儲值金18900",
+    "儲值金36000",
+    "儲值金9900",
+    "儲值金17000",
+    "儲值金19400",
+}
+# E 欄（地址）只要包含這些關鍵字，不管 H 欄方案名稱是什麼都算高雄
+# （這樣共用方案名稱如儲值金50000 也能靠地址判斷歸到高雄）。
+KAOHSIUNG_ADDRESS_COLUMN = "E"
+KAOHSIUNG_ADDRESS_KEYWORDS = ["高雄", "台南"]
 KAOHSIUNG_DERIVED_FILE_TEMPLATE = "{period}儲值金結算-高雄"
 
 # 月度作業紀錄會依此順序打卡：轉檔 -> 搬運 -> 計算 -> 彙整金額
