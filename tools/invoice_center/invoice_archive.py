@@ -7,7 +7,6 @@ import json
 import math
 import os
 import re
-import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -19,6 +18,8 @@ import pandas as pd
 
 CONFIG_SHEET = "鯨躍發票根目錄設定"
 CONFIG_HEADERS = ["地區", "財務根目錄ID", "承攬費總根目錄ID", "啟用", "備註"]
+UPDATE_LOG_SHEET = "鯨躍發票更新Log"
+UPDATE_LOG_HEADERS = ["執行時間", "功能", "地區", "期別", "狀態", "筆數", "訊息"]
 MONTHLY_ROOT_FOLDER_ID = "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
 DEFAULT_CONFIG = [
     ["台北", "17EQNG8VM9N4YgxXGb23CNZxYT3HsDkQ2", MONTHLY_ROOT_FOLDER_ID, "TRUE", "紙本／中獎存財務路徑"],
@@ -83,6 +84,29 @@ def previous_prize_period(yyyymm: str) -> str | None:
 
 def _secret_values() -> dict[str, Any]:
     values: dict[str, Any] = dict(os.environ)
+    required = ("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REFRESH_TOKEN")
+
+    def find_nested(mapping: Any, target: str) -> str:
+        if not hasattr(mapping, "items"):
+            return ""
+        for key, value in mapping.items():
+            if str(key) == target and str(value or "").strip():
+                return str(value).strip()
+            found = find_nested(value, target)
+            if found:
+                return found
+        return ""
+
+    try:
+        import streamlit as st
+
+        for key in required:
+            if not str(values.get(key) or "").strip():
+                found = find_nested(st.secrets, key)
+                if found:
+                    values[key] = found
+    except Exception:
+        pass
     path_text = os.getenv("TOOLS_APP_SECRETS_FILE", "").strip()
     candidates = [Path(path_text).expanduser()] if path_text else []
     candidates.extend([Path.home() / "lemon" / ".streamlit" / "secrets.toml", Path.home() / ".streamlit" / "secrets.toml"])
@@ -95,9 +119,11 @@ def _secret_values() -> dict[str, Any]:
             data = toml.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        for key in ("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REFRESH_TOKEN"):
-            if not str(values.get(key) or "").strip() and str(data.get(key) or "").strip():
-                values[key] = data[key]
+        for key in required:
+            if not str(values.get(key) or "").strip():
+                found = find_nested(data, key)
+                if found:
+                    values[key] = found
         break
     return values
 
@@ -410,7 +436,8 @@ def import_prize(sheets: Any, spreadsheet_id: str, period: str, path: Path) -> i
 class InvoiceArchiveProcessor:
     def __init__(self) -> None:
         self.drive, self.sheets = get_google_services()
-        self.configs = ensure_config_sheet(self.sheets)
+        self.master_spreadsheet_id = _master_spreadsheet_id()
+        self.configs = ensure_config_sheet(self.sheets, self.master_spreadsheet_id)
 
     def _config_and_folders(self, area: str, yyyymm: str) -> tuple[AreaRootConfig, ArchiveFolders]:
         config = self.configs.get(area)
@@ -455,31 +482,141 @@ class InvoiceArchiveProcessor:
             spreadsheet_id = _find_or_create_annual_spreadsheet(self.drive, folders.prize_annual_parent, prize_period[:4], area)
             return import_prize(self.sheets, spreadsheet_id, prize_period, path)
 
+    def update_prize_period(self, *, area: str, period8: str) -> int:
+        if not re.fullmatch(r"\d{8}", period8):
+            raise ValueError("中獎期別請輸入 8 碼，例如 20260506")
+        start_month, end_month = int(period8[4:6]), int(period8[6:8])
+        if start_month not in {1, 3, 5, 7, 9, 11} or end_month != start_month + 1:
+            raise ValueError("中獎期別需為 0102、0304、0506、0708、0910 或 1112")
+        config = self.configs.get(area)
+        if not config:
+            raise RuntimeError(f"{CONFIG_SHEET} 找不到已啟用的 {area} 設定")
+        name = f"{period8}中獎發票-{area}.zip"
+        if config.finance_root_id:
+            annual_parent = get_or_create_folder(self.drive, config.finance_root_id, period8[:4])
+            folder_id = get_or_create_folder(self.drive, annual_parent, period8[4:])
+            file_id = self._find_named(folder_id, name)
+        else:
+            if not config.contractor_root_id:
+                raise RuntimeError(f"{area} 尚未設定承攬費總根目錄ID")
+            contractor_year = get_or_create_folder(
+                self.drive, config.contractor_root_id, f"{period8[:4]}專員承攬服務費"
+            )
+            annual_parent = get_or_create_folder(self.drive, contractor_year, AREA_FOLDER_NAMES[area])
+            file_id = self._find_named_anywhere(name)
+        with tempfile.TemporaryDirectory(prefix="ei_prize_update_") as temp_dir:
+            path = self._download_file(file_id, Path(temp_dir) / name)
+            spreadsheet_id = _find_or_create_annual_spreadsheet(
+                self.drive, annual_parent, period8[:4], area
+            )
+            return import_prize(self.sheets, spreadsheet_id, period8, path)
+
+    def _find_named(self, folder_id: str, name: str) -> str:
+        query = f"'{_escape(folder_id)}' in parents and name='{_escape(name)}' and trashed=false"
+        files = self.drive.files().list(
+            q=query, fields="files(id,name)", pageSize=10,
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+        if not files:
+            raise RuntimeError(f"Google Drive 找不到檔案：{name}")
+        return files[0]["id"]
+
+    def _find_named_anywhere(self, name: str) -> str:
+        query = f"name='{_escape(name)}' and trashed=false"
+        files = self.drive.files().list(
+            q=query, fields="files(id,name,parents)", pageSize=20,
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+        if len(files) != 1:
+            raise RuntimeError(f"Google Drive 找到 {len(files)} 個同名檔案：{name}，請確認歸檔位置")
+        return files[0]["id"]
+
+    def _download_file(self, file_id: str, destination: Path) -> Path:
+        request = self.drive.files().get_media(fileId=file_id, supportsAllDrives=True)
+        destination.write_bytes(request.execute())
+        return destination
+
+    def write_update_log(
+        self, *, function_name: str, area: str, period: str, status: str,
+        count: int = 0, message: str = "",
+    ) -> None:
+        _ensure_sheet(self.sheets, self.master_spreadsheet_id, UPDATE_LOG_SHEET)
+        current = self.sheets.spreadsheets().values().get(
+            spreadsheetId=self.master_spreadsheet_id,
+            range=f"'{UPDATE_LOG_SHEET}'!A1:G1",
+        ).execute().get("values", [])
+        if not current:
+            self.sheets.spreadsheets().values().update(
+                spreadsheetId=self.master_spreadsheet_id,
+                range=f"'{UPDATE_LOG_SHEET}'!A1",
+                valueInputOption="RAW",
+                body={"values": [UPDATE_LOG_HEADERS]},
+            ).execute()
+        self.sheets.spreadsheets().values().append(
+            spreadsheetId=self.master_spreadsheet_id,
+            range=f"'{UPDATE_LOG_SHEET}'!A:G",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [[
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), function_name,
+                area, period, status, count, message,
+            ]]},
+        ).execute()
+
+
+def _master_spreadsheet_id() -> str:
+    from tools.common.config_loader import get_master_spreadsheet_id
+
+    return get_master_spreadsheet_id()
+
+
+def run_invoice_update(mode: str, period: str, area: str = "全區") -> str:
+    period = str(period or "").strip()
+    if mode == "paper" and (
+        not re.fullmatch(r"\d{6}", period) or not 1 <= int(period[4:]) <= 12
+    ):
+        raise ValueError("紙本發票月份請輸入 6 碼，例如 202607")
+    if mode == "prize" and not re.fullmatch(r"\d{8}", period):
+        raise ValueError("中獎發票期別請輸入 8 碼，例如 20260506")
+    processor = InvoiceArchiveProcessor()
+    areas = list(processor.configs) if area in {"", "全區", "all"} else [area]
+    label = "紙本發票更新" if mode == "paper" else "中獎發票更新"
+    failures: list[str] = []
+    total = 0
+    for area_name in areas:
+        try:
+            count = (
+                processor.update_paper(area=area_name, yyyymm=period)
+                if mode == "paper"
+                else processor.update_prize_period(area=area_name, period8=period)
+            )
+            total += count
+            processor.write_update_log(
+                function_name=label, area=area_name, period=period,
+                status="成功", count=count, message="更新完成",
+            )
+        except Exception as exc:
+            failures.append(f"{area_name}: {exc}")
+            processor.write_update_log(
+                function_name=label, area=area_name, period=period,
+                status="失敗", message=str(exc),
+            )
+    if failures:
+        raise RuntimeError("；".join(failures))
+    return f"{label}完成：{len(areas)} 區，共 {total} 筆"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="更新年度紙本／中獎發票 Google Sheet")
     parser.add_argument("mode", choices=("paper", "prize"))
-    parser.add_argument("month", help="下載月份 YYYYMM")
+    parser.add_argument("period", help="紙本 YYYYMM；中獎 YYYYMMNN")
     parser.add_argument("--area", default="全區")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    if not re.fullmatch(r"\d{6}", args.month) or not 1 <= int(args.month[4:]) <= 12:
-        raise ValueError("月份請輸入 YYYYMM")
-    processor = InvoiceArchiveProcessor()
-    areas = list(processor.configs) if args.area in {"", "全區", "all"} else [args.area]
-    failures: list[str] = []
-    for area in areas:
-        try:
-            count = processor.update_paper(area=area, yyyymm=args.month) if args.mode == "paper" else processor.update_prize(area=area, yyyymm=args.month)
-            print(f"{area}：{'紙本' if args.mode == 'paper' else '中獎'}發票更新完成（{count} 筆）", flush=True)
-        except Exception as exc:
-            failures.append(f"{area}: {exc}")
-            print(f"{area}：更新失敗：{exc}", file=sys.stderr, flush=True)
-    if failures:
-        raise RuntimeError("；".join(failures))
+    print(run_invoice_update(args.mode, args.period, args.area), flush=True)
     return 0
 
 
