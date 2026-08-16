@@ -3339,6 +3339,8 @@ if run_clicked:
     system_type = selected_system.get("type", "vip")
 
     if system_type == "finance_management":
+        add_log(f"開始執行：{system_name} / {selected_function}")
+
         finance_task = next(
             (task for task in FINANCE_TASKS if task["name"] == selected_function),
             None,
