@@ -19,6 +19,7 @@ REGISTRY_SHEET_NAME = "內部請款設定"
 PAYMENT_REQUEST_TYPE = "請款記錄"
 DEPOSIT_REFUND_TYPE = "工具包押金退款"
 SUPPLY_PURCHASE_TYPE = "清潔用品採購"
+DEPOSIT_REPORT_TYPE = "工具包押金財報"
 
 
 def _sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:
@@ -62,6 +63,25 @@ def read_report_values(report_type: str, area: str) -> list[list[str]]:
         spreadsheetId=spreadsheet_id, range=f"'{title}'!A:Z"
     ).execute()
     return res.get("values", [])
+
+
+def resolve_report_location(report_type: str, area: str) -> tuple[str, str]:
+    """依登記表找到指定類型／地區的報表，回傳 (試算表ID, 分頁標題)。
+
+    給需要直接用 Sheets API 讀寫（而非只讀 values）的呼叫方使用，
+    例如財報統計／打勾／異常標記需要寫回原分頁。
+    """
+    record = _find_registry_row(report_type, area)
+    spreadsheet_id = record.get("試算表ID", "").strip()
+    gid = record.get("GID", "").strip()
+    if not spreadsheet_id or not gid:
+        raise RuntimeError(
+            f"「{REGISTRY_SHEET_NAME}」{report_type}／{area} 缺少試算表ID或GID"
+        )
+
+    service = get_sheets_service()
+    title = _sheet_title_for_gid(service, spreadsheet_id, gid)
+    return spreadsheet_id, title
 
 
 def read_destination_name(report_type: str, area: str) -> str:

@@ -9,6 +9,7 @@ import html
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -1937,6 +1938,52 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from tools.finance_management.deposit_report import aggregate_month_to_uy
+
+    if area not in ("台北", "台中"):
+        raise ValueError("請選擇台北或台中")
+    year_month = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month):
+        raise ValueError("請輸入 6 位數月份（YYYYMM），例如 202608")
+    written = aggregate_month_to_uy(area, year_month)
+    return (
+        f"完成：{area} {year_month} 已新增 {written} 列到 U–X"
+        if written
+        else f"完成：{area} {year_month} 無資料可輸出"
+    )
+
+
+def run_deposit_report_mark_from_notes(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from tools.finance_management.deposit_report import mark_from_notes
+
+    if area not in ("台北", "台中"):
+        raise ValueError("請選擇台北或台中")
+    range_input = st.session_state.get("finance_deposit_note_range", "").strip()
+    if not range_input:
+        raise ValueError("請輸入備註範圍，例如：U22:U25")
+    result = mark_from_notes(area, range_input)
+    message = (
+        f"完成：處理 {result['processed_rows']} 行，"
+        f"有效備註 {result['valid_notes']} 筆，打勾 {result['marked']} 個"
+    )
+    missing = result.get("missing_names") or []
+    if missing:
+        preview = "、".join(missing[:5])
+        more = f"…等共 {len(missing)} 個" if len(missing) > 5 else ""
+        message += f"；找不到姓名：{preview}{more}"
+    return message
+
+
+def run_deposit_report_flag_discrepancies(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from tools.finance_management.deposit_report import flag_discrepancies
+
+    if area not in ("台北", "台中"):
+        raise ValueError("請選擇台北或台中")
+    result = flag_discrepancies(area)
+    return f"完成：檢查 {result['checked']} 人（今年已上課），標記異常 {result['flagged']} 筆"
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
@@ -1946,6 +1993,9 @@ FINANCE_TASKS = [
     {"name": "【富邦銀行】請款記錄", "handler": queue_fubon_payment_request, "enabled": True},
     {"name": "【富邦銀行】工具包押金退款", "handler": queue_fubon_deposit_refund, "enabled": True},
     {"name": "【富邦銀行】清潔用品採購", "handler": queue_fubon_supply_purchase, "enabled": True},
+    {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
+    {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
+    {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -2440,6 +2490,29 @@ with date_col:
                 key="finance_supply_purchase_month",
             )
             st.caption("格式：YYYYMM；比對報表 B 欄的進貨日期月份")
+        elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
+            st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "統計月份",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202608",
+                label_visibility="collapsed",
+                key="finance_deposit_aggregate_month",
+            )
+            st.caption("格式：YYYYMM；統計該月上課/退還/已退/不退，追加寫入 U–X（接在既有資料之後，不覆蓋）")
+        elif selected_function == "【財報】工具包押金｜批次依備註打勾（J–M）":
+            st.markdown('<div class="field-label">📝 備註範圍</div>', unsafe_allow_html=True)
+            st.text_input(
+                "備註範圍",
+                value="",
+                placeholder="例如：U22:U25",
+                label_visibility="collapsed",
+                key="finance_deposit_note_range",
+            )
+            st.caption("同一欄位的儲存格範圍；會先清空整張表的 J–M 欄，再依範圍內的備註文字重新打勾")
+        elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
+            st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
+            st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
         else:
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -2560,6 +2633,9 @@ with area_col:
         "【元大銀行】元大登入",
         "【元大銀行】元大明細下載",
         "【元大銀行】檢查薪資付款狀態",
+        "【財報】工具包押金｜統計月份彙整（U–X）",
+        "【財報】工具包押金｜批次依備註打勾（J–M）",
+        "【財報】工具包押金｜比對異常標記（N欄）",
     ):
         area_select_options = [area for area in area_options if area != "全區"]
     if selected_function == "【檸檬後台】異動儲值金":
@@ -2569,6 +2645,9 @@ with area_col:
         "【富邦銀行】請款記錄",
         "【富邦銀行】工具包押金退款",
         "【富邦銀行】清潔用品採購",
+        "【財報】工具包押金｜統計月份彙整（U–X）",
+        "【財報】工具包押金｜批次依備註打勾（J–M）",
+        "【財報】工具包押金｜比對異常標記（N欄）",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
 
