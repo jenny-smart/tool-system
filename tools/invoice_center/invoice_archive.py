@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -43,6 +44,7 @@ NEW_PERIOD_HEADER = [
 ]
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 @dataclass(frozen=True)
@@ -226,20 +228,70 @@ def get_or_create_folder(drive: Any, parent_id: str, name: str) -> str:
     return created["id"]
 
 
+def _child_folders_starting_with(drive: Any, parent_id: str, prefix: str) -> list[dict[str, Any]]:
+    query = (
+        f"'{_escape(parent_id)}' in parents and name contains '{_escape(prefix)}' "
+        f"and mimeType='{FOLDER_MIME}' and trashed=false"
+    )
+    files = drive.files().list(
+        q=query, fields="files(id,name)", pageSize=100,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute().get("files", [])
+    return [item for item in files if str(item.get("name") or "").startswith(prefix)]
+
+
+def get_or_create_finance_year_folder(drive: Any, parent_id: str, year: str, area: str) -> str:
+    candidates = _child_folders_starting_with(drive, parent_id, year)
+    if candidates:
+        candidates.sort(
+            key=lambda item: (
+                area in str(item.get("name") or ""),
+                "發票" in str(item.get("name") or ""),
+                str(item.get("name") or "") != year,
+            ),
+            reverse=True,
+        )
+        return candidates[0]["id"]
+    return get_or_create_folder(drive, parent_id, year)
+
+
+def get_or_create_period_folder(drive: Any, parent_id: str, period4: str) -> str:
+    aliases = {period4, f"{period4[:2]}-{period4[2:]}"}
+    query = f"'{_escape(parent_id)}' in parents and mimeType='{FOLDER_MIME}' and trashed=false"
+    files = drive.files().list(
+        q=query, fields="files(id,name)", pageSize=100,
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute().get("files", [])
+    candidates = [item for item in files if str(item.get("name") or "") in aliases]
+    for item in candidates:
+        children = drive.files().list(
+            q=f"'{_escape(item['id'])}' in parents and trashed=false",
+            fields="files(id)", pageSize=1,
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute().get("files", [])
+        if children:
+            return item["id"]
+    if candidates:
+        return candidates[0]["id"]
+    return get_or_create_folder(drive, parent_id, period4)
+
+
 def resolve_archive_folders(drive: Any, config: AreaRootConfig, yyyymm: str) -> ArchiveFolders:
     year = yyyymm[:4]
     contractor_year = get_or_create_folder(drive, config.contractor_root_id, f"{year}專員承攬服務費")
     area_parent = get_or_create_folder(drive, contractor_year, AREA_FOLDER_NAMES[config.area])
     contractor_period = get_or_create_folder(drive, area_parent, f"{yyyymm}-2")
     if config.finance_root_id:
-        finance_year = get_or_create_folder(drive, config.finance_root_id, year)
-        finance_pair = get_or_create_folder(drive, finance_year, bi_month_period(yyyymm)[4:])
+        finance_year = get_or_create_finance_year_folder(drive, config.finance_root_id, year, config.area)
+        finance_pair = get_or_create_period_folder(drive, finance_year, bi_month_period(yyyymm)[4:])
         paper = finance_pair
         annual_parent = finance_year
         prize_period = previous_prize_period(yyyymm)
         if prize_period:
-            prize_year = get_or_create_folder(drive, config.finance_root_id, prize_period[:4])
-            prize_folder = get_or_create_folder(drive, prize_year, prize_period[4:])
+            prize_year = get_or_create_finance_year_folder(
+                drive, config.finance_root_id, prize_period[:4], config.area
+            )
+            prize_folder = get_or_create_period_folder(drive, prize_year, prize_period[4:])
             prize_annual_parent = prize_year
         else:
             prize_folder = finance_pair
@@ -374,7 +426,7 @@ def _write_import_log(sheets: Any, spreadsheet_id: str, kind: str, period: str, 
         ).execute()
     sheets.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id, range="'_鯨躍匯入Log'!A:E", valueInputOption="RAW", insertDataOption="INSERT_ROWS",
-        body={"values": [[kind, period, path.name, checksum, f"{datetime.now():%Y-%m-%d %H:%M:%S} / {count}"]]},
+        body={"values": [[kind, period, path.name, checksum, f"{datetime.now(TAIPEI_TZ):%Y-%m-%d %H:%M:%S} / {count}"]]},
     ).execute()
 
 
@@ -493,8 +545,10 @@ class InvoiceArchiveProcessor:
             raise RuntimeError(f"{CONFIG_SHEET} 找不到已啟用的 {area} 設定")
         name = f"{period8}中獎發票-{area}.zip"
         if config.finance_root_id:
-            annual_parent = get_or_create_folder(self.drive, config.finance_root_id, period8[:4])
-            folder_id = get_or_create_folder(self.drive, annual_parent, period8[4:])
+            annual_parent = get_or_create_finance_year_folder(
+                self.drive, config.finance_root_id, period8[:4], area
+            )
+            folder_id = get_or_create_period_folder(self.drive, annual_parent, period8[4:])
             file_id = self._find_named(folder_id, name)
         else:
             if not config.contractor_root_id:
@@ -552,16 +606,40 @@ class InvoiceArchiveProcessor:
                 valueInputOption="RAW",
                 body={"values": [UPDATE_LOG_HEADERS]},
             ).execute()
-        self.sheets.spreadsheets().values().append(
+        appended = self.sheets.spreadsheets().values().append(
             spreadsheetId=self.master_spreadsheet_id,
             range=f"'{UPDATE_LOG_SHEET}'!A:G",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": [[
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), function_name,
+                datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d %H:%M:%S"), function_name,
                 area, period, status, count, message,
             ]]},
         ).execute()
+        updated_range = str(appended.get("updates", {}).get("updatedRange") or "")
+        match = re.search(r"!A(\d+):G\d+$", updated_range)
+        if match:
+            row_index = int(match.group(1)) - 1
+            sheet_id = _sheet_id(self.sheets, self.master_spreadsheet_id, UPDATE_LOG_SHEET)
+            if sheet_id is not None:
+                self.sheets.spreadsheets().batchUpdate(
+                    spreadsheetId=self.master_spreadsheet_id,
+                    body={"requests": [{"repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id, "startRowIndex": row_index,
+                            "endRowIndex": row_index + 1, "startColumnIndex": 0,
+                            "endColumnIndex": len(UPDATE_LOG_HEADERS),
+                        },
+                        "cell": {"userEnteredFormat": {
+                            "backgroundColorStyle": {"rgbColor": {"red": 1, "green": 1, "blue": 1}},
+                            "textFormat": {
+                                "bold": False,
+                                "foregroundColorStyle": {"rgbColor": {"red": 0, "green": 0, "blue": 0}},
+                            },
+                        }},
+                        "fields": "userEnteredFormat(backgroundColorStyle,textFormat)",
+                    }}]},
+                ).execute()
 
 
 def _master_spreadsheet_id() -> str:
