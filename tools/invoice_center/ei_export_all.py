@@ -4,6 +4,7 @@ import argparse
 import calendar
 import json
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -18,9 +19,11 @@ if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
     from invoice_center.config import AREA_ENV, EICredentials, normalize_area
     from invoice_center.query import to_roc_date
+    from invoice_center.invoice_archive import InvoiceArchiveProcessor, previous_prize_period
 else:
     from .config import AREA_ENV, EICredentials, normalize_area
     from .query import to_roc_date
+    from .invoice_archive import InvoiceArchiveProcessor, previous_prize_period
 
 from tools.invoice_center.chrome_cdp import (
     DEFAULT_CDP_URL,
@@ -34,6 +37,7 @@ PORTAL_MEMBER_URL = "https://www.cetustek.com.tw/member.php"
 EI_LOGIN_URL = "https://www.ei.com.tw/InvoiceRent/index.jsp"
 EI_HOME_URL = "https://www.ei.com.tw/InvoiceRent/welcome.jsp"
 EI_EXPORT_URL = "https://www.ei.com.tw/InvoiceRent/invoiceexport.jsp"
+EI_PRIZE_EXPORT_URL = "https://www.ei.com.tw/InvoiceRent/prizeexport.jsp"
 DEFAULT_ACCOUNT_PATHS = [
     Path.home() / "EI account" / "ei_accounts.json",
     Path.home() / "EI_account" / "ei_accounts.json",
@@ -90,7 +94,7 @@ def normalize_date_range(start: str, end: str) -> tuple[str, str]:
 def bi_month_folder(yyyymm: str) -> str:
     month = int(normalize_month(yyyymm)[4:])
     start = month if month % 2 == 1 else month - 1
-    return f"{start:02d}-{start + 1:02d}"
+    return f"{start:02d}{start + 1:02d}"
 
 
 def load_accounts(path: Path | None = None) -> dict[str, Any]:
@@ -443,6 +447,98 @@ def export_invoices(
     return final_path
 
 
+def archive_as_zip(downloaded: Path, archive_path: Path) -> Path:
+    """鯨躍原檔可能是 CSV/XLS/ZIP；對外一律保存為指定 ZIP 名稱。"""
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    if downloaded.resolve() == archive_path.resolve() and zipfile.is_zipfile(downloaded):
+        return archive_path
+    if archive_path.exists():
+        archive_path.unlink()
+    if zipfile.is_zipfile(downloaded):
+        shutil.move(str(downloaded), str(archive_path))
+        return archive_path
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.write(downloaded, arcname=downloaded.name)
+    downloaded.unlink(missing_ok=True)
+    return archive_path
+
+
+def _select_prize_period(page: Page, period8: str) -> None:
+    year = int(period8[:4])
+    roc_year = year - 1911
+    pair = period8[4:]
+    start_month, end_month = int(pair[:2]), int(pair[2:])
+    year_tokens = (str(roc_year), str(year))
+    pair_tokens = (
+        pair,
+        f"{start_month:02d}-{end_month:02d}",
+        f"{start_month:02d}~{end_month:02d}",
+        f"{start_month}-{end_month}",
+    )
+    selected_year = False
+    selected_pair = False
+    selects = page.locator("select")
+    for index in range(selects.count()):
+        select = selects.nth(index)
+        options = select.locator("option")
+        option_rows = [
+            ((options.nth(i).inner_text() or "").strip(), options.nth(i).get_attribute("value") or "")
+            for i in range(options.count())
+        ]
+        if not selected_year:
+            match = next(((text, value) for text, value in option_rows if any(token in text for token in year_tokens)), None)
+            if match:
+                select.select_option(value=match[1])
+                selected_year = True
+                continue
+        if not selected_pair:
+            match = next(((text, value) for text, value in option_rows if any(token in text.replace(" ", "") for token in pair_tokens)), None)
+            if match:
+                select.select_option(value=match[1])
+                selected_pair = True
+    if not selected_year or not selected_pair:
+        raise RuntimeError(f"中獎清冊找不到查詢期別選項：{period8}")
+
+
+def export_prize_invoices(page: Page, period8: str, target: Path) -> Path:
+    page.goto(EI_PRIZE_EXPORT_URL, wait_until="domcontentloaded")
+    if page.locator("#userid").count() and page.locator("#userid").first.is_visible():
+        raise RuntimeError("第二層登入已失效")
+    _select_prize_period(page, period8)
+
+    # 依畫面設定：未列印、Excel。不同帳號頁面的 input id 可能不同，
+    # 以同列文字定位並直接勾選 radio。
+    page.evaluate(
+        """() => {
+          const radios = Array.from(document.querySelectorAll('input[type=radio]'));
+          const choose = (word) => {
+            const hit = radios.find(r => ((r.closest('tr') || r.parentElement)?.innerText || '').includes(word));
+            if (hit) { hit.checked = true; hit.dispatchEvent(new Event('change', {bubbles:true})); }
+          };
+          choose('未列印'); choose('Excel');
+        }"""
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with page.expect_download(timeout=60_000) as info:
+        page.get_by_text("直接匯出", exact=False).click()
+    download = info.value
+    with tempfile.TemporaryDirectory(prefix="ei_prize_") as temp_dir:
+        suggested = download.suggested_filename or "prize.xls"
+        temp_path = Path(temp_dir) / suggested
+        download.save_as(temp_path)
+        detected = detect_download_format(temp_path)
+        if detected == "unknown":
+            raise RuntimeError(f"無法辨識中獎發票下載格式：{suggested}")
+        normalized = final_download_path(target.with_suffix(Path(suggested).suffix or ".xls"), detected, suggested)
+        temp_copy = target.parent / normalized.name
+        if temp_copy.exists():
+            temp_copy.unlink()
+        temp_path.replace(temp_copy)
+        result = archive_as_zip(temp_copy, target.with_suffix(".zip"))
+    print(f"  已匯出中獎發票：{result}")
+    return result
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="用瀏覽器下載 EI 各區整月發票資料")
     parser.add_argument("month", nargs="?", help="年月 YYYYMM，例如 202606")
@@ -484,8 +580,10 @@ def main() -> int:
     print(f"日期：{start} ～ {end}")
     print(f"區域：{', '.join(AREA_ENV[area]['label'] for area in areas)}")
 
+    processor = InvoiceArchiveProcessor() if not range_mode and args.output_root is None else None
+
     failures: list[str] = []
-    with sync_playwright() as playwright:
+    with tempfile.TemporaryDirectory(prefix="ei_invoice_month_") as temp_root, sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
         portal_page, existing_ei_page = find_invoice_pages(context)
@@ -510,8 +608,12 @@ def main() -> int:
                         portal_page = context.new_page()
                         portal_page.goto(PORTAL_MEMBER_URL, wait_until="domcontentloaded")
                     login_second(ei_page, credentials)
-                    area_dir = output_dir(area, accounts, yyyymm, args.output_root)
-                    export_invoices(
+                    area_dir = (
+                        output_dir(area, accounts, yyyymm, args.output_root)
+                        if range_mode or args.output_root is not None
+                        else Path(temp_root) / credentials.label
+                    )
+                    full_download = export_invoices(
                         ei_page,
                         start,
                         end,
@@ -524,7 +626,7 @@ def main() -> int:
                             else f"{yyyymm}-2發票-{credentials.label}{extension}"
                         ),
                     )
-                    export_invoices(
+                    paper_download = export_invoices(
                         ei_page,
                         start,
                         end,
@@ -533,6 +635,31 @@ def main() -> int:
                         detail=args.detail,
                         target=area_dir / f"{export_key}紙本發票-{credentials.label}{extension}",
                     )
+                    prize_download = None
+                    if not range_mode:
+                        full_archive = archive_as_zip(
+                            full_download,
+                            area_dir / f"{yyyymm}-2發票-{credentials.label}.zip",
+                        )
+                        paper_archive = archive_as_zip(
+                            paper_download,
+                            area_dir / f"{yyyymm}紙本發票-{credentials.label}.zip",
+                        )
+                        prize_period = previous_prize_period(yyyymm)
+                        if prize_period:
+                            prize_download = export_prize_invoices(
+                                ei_page,
+                                prize_period,
+                                area_dir / f"{prize_period}中獎發票-{credentials.label}.zip",
+                            )
+                        if processor is not None:
+                            processor.archive_month(
+                                area=credentials.label,
+                                yyyymm=yyyymm,
+                                full_path=full_archive,
+                                paper_path=paper_archive,
+                                prize_path=prize_download,
+                            )
                     logout_second(ei_page, credentials.label)
                     if ei_page is not portal_page and not reused_existing_ei:
                         ei_page.close()
@@ -563,7 +690,7 @@ def main() -> int:
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
         return 1
-    print("\n全部發票匯出完成")
+    print("\n全月、紙本及單月中獎發票處理完成")
     return 0
 
 

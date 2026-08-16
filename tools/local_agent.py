@@ -28,7 +28,7 @@ from tools.local_agent_queue import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CommandBuilder = Callable[[dict[str, Any]], list[str]]
 ACTION_HANDLERS: dict[str, CommandBuilder] = {}
-AGENT_VERSION = "1"
+AGENT_VERSION = "2"
 AGENT_CDP_URL = "http://127.0.0.1:9222"
 AGENT_CHROME_PROFILE = Path.home() / "EI account" / "chrome_profile"
 
