@@ -40,9 +40,13 @@ COL_U, COL_V, COL_W, COL_X = 21, 22, 23, 24
 
 _TYPE_TO_JKLM_COL = {"上課": COL_J, "退還": COL_K, "已退": COL_L, "不退": COL_M}
 _NOTE_HEAD_RE = re.compile(r"^(上課|退還|已退|不退)\s*[:：]\s*(.+)")
-_LEADING_DATE_RE = re.compile(r"^(\d{4}/\d{1,2}/\d{1,2})(.*)$")
-_DATE_ONLY_RE = re.compile(r"^\d{4}/\d{1,2}/\d{1,2}$")
-_CELL_REF_RE = re.compile(r"^([A-Z]+)(\d+)$")
+# 日期欄位在不同欄位可能用「-」或「/」分隔（例如 C/D 欄的日期型別儲存格會顯示
+# 為 2026-09-04，F/G 欄手動輸入的備註則是 2026/07/27已匯款），兩種都要能比對到。
+_LEADING_DATE_RE = re.compile(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(.*)$")
+_DATE_ONLY_RE = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
+_CELL_REF_RE = re.compile(r"^([A-Z]*)(\d+)$")
+_RANGE_SEP_RE = re.compile(r"[:\-]")
+DEFAULT_NOTE_COLUMN = "U"
 
 
 def _col_letter_to_index(letters: str) -> int:
@@ -75,10 +79,15 @@ def _cell(row: list[object], col: int) -> object:
 
 
 def _year_month(date_text: str) -> str:
-    match = re.match(r"^(\d{4})/(\d{1,2})/(\d{1,2})", date_text)
+    match = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", date_text)
     if not match:
         return ""
     return f"{int(match.group(1)):04d}{int(match.group(2)):02d}"
+
+
+def _date_year(date_text: str) -> str:
+    match = re.match(r"^(\d{4})[-/]\d{1,2}[-/]\d{1,2}$", date_text)
+    return match.group(1) if match else ""
 
 
 def _aggregate(values: list[list[object]], type_: str, year_month: str) -> tuple[list[str], int]:
@@ -111,8 +120,9 @@ def _aggregate(values: list[list[object]], type_: str, year_month: str) -> tuple
             match = _LEADING_DATE_RE.match(text)
             if not match:
                 continue
-            date_part, note_part = match.group(1), match.group(2)
-            if _year_month(date_part) != year_month:
+            note_part = match.group(4)
+            date_year_month = f"{int(match.group(1)):04d}{int(match.group(2)):02d}"
+            if date_year_month != year_month:
                 continue
             if type_ == "已退" and "已匯款" in note_part:
                 names.append(name)
@@ -198,21 +208,28 @@ def _parse_note(note_text: str) -> tuple[str, list[str]] | None:
 
 
 def mark_from_notes(area: str, range_input: str) -> dict[str, object]:
-    """依備註欄位批次打勾 J–M（比照原 processCustomNotesRange，每次執行會先清空 J:M）。"""
+    """依備註欄位批次打勾 J–M（比照原 processCustomNotesRange，每次執行會先清空 J:M）。
+
+    範圍可以寫完整儲存格範圍（例如 U18:U23），也可以只給列號（例如 18-23
+    或 18:23）——只給列號時預設抓 U 欄（統計月份彙整寫入備註的欄位）。
+    """
     spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
     range_input = range_input.strip().upper()
-    if ":" not in range_input:
-        raise ValueError("請輸入正確的範圍格式，例如：O6:O12")
+    parts = _RANGE_SEP_RE.split(range_input, maxsplit=1)
+    if len(parts) != 2:
+        raise ValueError("請輸入正確的範圍格式，例如：U18:U23 或 18-23（不寫欄位代號預設抓 U 欄）")
 
-    start_cell, end_cell = range_input.split(":", 1)
-    start_match = _CELL_REF_RE.match(start_cell)
-    end_match = _CELL_REF_RE.match(end_cell)
+    start_match = _CELL_REF_RE.match(parts[0].strip())
+    end_match = _CELL_REF_RE.match(parts[1].strip())
     if not start_match or not end_match:
-        raise ValueError("請輸入正確的範圍格式，例如：O6:O12")
-    if start_match.group(1) != end_match.group(1):
-        raise ValueError("請輸入同一欄位的範圍，例如：O6:O12")
+        raise ValueError("請輸入正確的範圍格式，例如：U18:U23 或 18-23（不寫欄位代號預設抓 U 欄）")
 
-    note_col = _col_letter_to_index(start_match.group(1))
+    start_col_letters = start_match.group(1) or DEFAULT_NOTE_COLUMN
+    end_col_letters = end_match.group(1) or start_col_letters
+    if start_col_letters != end_col_letters:
+        raise ValueError("請輸入同一欄位的範圍，例如：U18:U23")
+
+    note_col = _col_letter_to_index(start_col_letters)
     start_row = min(int(start_match.group(2)), int(end_match.group(2)))
     end_row = max(int(start_match.group(2)), int(end_match.group(2)))
     if start_row < 1:
@@ -270,7 +287,7 @@ def mark_from_notes(area: str, range_input: str) -> dict[str, object]:
                 marks.setdefault(target_row, {})[target_col] = True
                 total_marked += 1
             else:
-                missing_names.append(f"{name}（在 {start_match.group(1)}{start_row + i}）")
+                missing_names.append(f"{name}（在 {start_col_letters}{start_row + i}）")
 
     if marks:
         data = []
@@ -323,7 +340,7 @@ def flag_discrepancies(area: str) -> dict[str, int]:
         l = _cell(row, COL_L) is True
         m = _cell(row, COL_M) is True
 
-        is_this_year = bool(_DATE_ONLY_RE.match(c_text)) and c_text.split("/")[0] == str(year)
+        is_this_year = _date_year(c_text) == str(year)
 
         mark = ""
         if is_this_year and j:

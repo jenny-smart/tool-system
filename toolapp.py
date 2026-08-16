@@ -1961,7 +1961,7 @@ def run_deposit_report_mark_from_notes(*, month="", start_date=None, end_date=No
         raise ValueError("請選擇台北或台中")
     range_input = st.session_state.get("finance_deposit_note_range", "").strip()
     if not range_input:
-        raise ValueError("請輸入備註範圍，例如：U22:U25")
+        raise ValueError("請輸入備註範圍，例如：U22:U25 或 22-25")
     result = mark_from_notes(area, range_input)
     message = (
         f"完成：處理 {result['processed_rows']} 行，"
@@ -2505,11 +2505,11 @@ with date_col:
             st.text_input(
                 "備註範圍",
                 value="",
-                placeholder="例如：U22:U25",
+                placeholder="例如：U22:U25，或只給列號 22-25（預設抓 U 欄）",
                 label_visibility="collapsed",
                 key="finance_deposit_note_range",
             )
-            st.caption("同一欄位的儲存格範圍；會先清空整張表的 J–M 欄，再依範圍內的備註文字重新打勾")
+            st.caption("同一欄位的儲存格範圍；只寫列號（例如 22-25）預設抓 U 欄。會先清空整張表的 J–M 欄，再依範圍內的備註文字重新打勾")
         elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
