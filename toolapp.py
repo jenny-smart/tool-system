@@ -1115,7 +1115,7 @@ def get_system_type_label(system_type: str) -> str:
 
 
 def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
-    from services.auth import get_gspread_client, get_drive_service
+    from services.google_auth import get_gspread_client, get_drive_service
     from services.google_drive import DriveService
     from services.google_sheets import SheetsService
     from services.vip_workflow import VipStoredValueWorkflow
@@ -1123,21 +1123,13 @@ def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
     sheets = SheetsService(get_gspread_client())
     drive = DriveService(get_drive_service())
 
-    try:
-        return VipStoredValueWorkflow(
-            drive,
-            sheets,
-            master_id,
-            folder_id,
-            system_name,
-        )
-    except TypeError:
-        return VipStoredValueWorkflow(
-            drive,
-            sheets,
-            master_id,
-            folder_id,
-        )
+    return VipStoredValueWorkflow(
+        drive,
+        sheets,
+        master_id,
+        folder_id,
+        system_name,
+    )
 
 
 def run_script(script_path: str, args: list[str] | None = None) -> str:
@@ -1984,6 +1976,50 @@ def run_deposit_report_flag_discrepancies(*, month="", start_date=None, end_date
     return f"完成：檢查 {result['checked']} 人（今年已上課），標記異常 {result['flagged']} 筆"
 
 
+def _get_vip_workflow():
+    from config.vip_config import MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID
+    from services.google_auth import get_drive_service, get_gspread_client
+    from services.google_drive import DriveService
+    from services.google_sheets import SheetsService
+    from services.vip_workflow import VipStoredValueWorkflow
+
+    sheets = SheetsService(get_gspread_client())
+    drive = DriveService(get_drive_service())
+    return VipStoredValueWorkflow(drive, sheets, MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID)
+
+
+def _format_step_results(results) -> str:
+    parts = []
+    for res in results if isinstance(results, list) else [results]:
+        text = "、".join(res.messages) if res.messages else ""
+        if res.errors:
+            text = (text + "；" if text else "") + "❌ " + "；".join(res.errors)
+        parts.append(f"{res.step}：{text or '無訊息'}")
+    return " ｜ ".join(parts)
+
+
+def run_vip_copy_period_file(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    period = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    workflow = _get_vip_workflow()
+    result = workflow.create_monthly_summary(period)
+    return _format_step_results(result)
+
+
+def run_vip_update_and_apply_formulas(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    period = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    workflow = _get_vip_workflow()
+    results = [
+        workflow.convert_files(period),
+        workflow.move_files(period),
+        workflow.apply_formulas(period),
+    ]
+    return _format_step_results(results)
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
@@ -1996,6 +2032,8 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
+    {"name": "儲值金-複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
+    {"name": "儲值金-期別資料更新＋公式套用", "handler": run_vip_update_and_apply_formulas, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -2513,6 +2551,26 @@ with date_col:
         elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
+        elif selected_function == "儲值金-複製期別檔案":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_vip_copy_period",
+            )
+            st.caption("格式：YYYYMM；從上一期複製出當期的「{期別}儲值金彙整」")
+        elif selected_function == "儲值金-期別資料更新＋公式套用":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_vip_update_period",
+            )
+            st.caption("執行前請先把該期資料夾內的來源檔（.xlsx）都放好；程式會自動轉成 Google Sheet、搬運、套公式")
         else:
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)

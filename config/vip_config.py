@@ -5,13 +5,20 @@ TIMEZONE = "Asia/Taipei"
 AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 TYPES = ["儲值金結算", "儲值金預收"]
 
-SUMMARY_SHEET_PREFIX = "VIP預收款彙整"
-SUMMARY_FILE_NAME_TEMPLATE = "{period}VIP預收款彙整"
+# 主控表：Jenny's Lemonhometools
+MASTER_SPREADSHEET_ID = "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
+
+# Drive 根目錄：「02.VIP儲值金」，底下依序是年度資料夾（例如 2026）、
+# 再底下才是期別資料夾（例如 202606），共三層。
+ROOT_FOLDER_ID = "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv"
+
+SUMMARY_SHEET_PREFIX = "儲值金彙整"
+SUMMARY_FILE_NAME_TEMPLATE = "{period}儲值金彙整"
 PERIOD_FOLDER_TEMPLATE = "{period}"
 
 MASTER_SYSTEM_SHEET = "系統設定"
-MASTER_FORMULA_SHEET = "公式設定"
-MASTER_MONTHLY_LOG_SHEET = "月度作業紀錄"
+MASTER_FORMULA_SHEET = "儲值金公式設定"
+MASTER_MONTHLY_LOG_SHEET = "儲值金月度作業紀錄"
 MASTER_AMOUNT_SHEET = "金額統整設定"
 MASTER_EXECUTION_LOG_SHEET = "執行紀錄"
 

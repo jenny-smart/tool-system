@@ -28,29 +28,35 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import time
 
+from config.vip_config import (
+    AREAS,
+    KAOHSIUNG_FILTER_VALUES,
+    LAST_COL_BY_TYPE,
+    MASTER_EXECUTION_LOG_SHEET,
+    MASTER_FORMULA_SHEET,
+    MASTER_MONTHLY_LOG_SHEET,
+    SUMMARY_FILE_NAME_TEMPLATE,
+    TYPES,
+)
 from services.google_drive import (
     GOOGLE_SHEET_MIME,
     DriveService,
     is_source_spreadsheet_file,
     strip_spreadsheet_extension,
 )
-from services.google_sheets import SheetsService, MasterLog, FormulaSettings, now_tw, col_to_num
+from services.google_sheets import (
+    ExecutionLog,
+    FormulaSettings,
+    MasterLog,
+    SheetsService,
+    col_to_num,
+    now_tw,
+)
 
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 
-MASTER_MONTHLY_LOG_SHEET = "月度作業紀錄"
-MASTER_FORMULA_SHEET = "公式設定"
-
-AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
-TYPES = ["儲值金結算", "儲值金預收"]
-
-KAOHSIUNG_PLAN_NAMES = {"儲值金18900", "儲值金36000", "儲值金9900"}
-
-LAST_COL_BY_TYPE = {
-    "儲值金結算": "T",
-    "儲值金預收": "BJ",
-}
+KAOHSIUNG_PLAN_NAMES = KAOHSIUNG_FILTER_VALUES
 
 
 @dataclass
@@ -87,6 +93,9 @@ class VipStoredValueWorkflow:
         formula_ws = sheets.get_or_create_ws(self.master, MASTER_FORMULA_SHEET)
         self.formulas = FormulaSettings(formula_ws)
 
+        execution_ws = sheets.get_or_create_ws(self.master, MASTER_EXECUTION_LOG_SHEET)
+        self.execution_log = ExecutionLog(execution_ws)
+
     # ============================================================
     # Period helpers
     # ============================================================
@@ -98,18 +107,23 @@ class VipStoredValueWorkflow:
         return f"{year}{month - 1:02d}"
 
     def get_period_folder(self, period: str) -> Dict[str, Any]:
-        return self.drive.get_or_create_folder(self.root_folder_id, period)
+        """根目錄（02.VIP儲值金）→ 年度資料夾（例如 2026）→ 期別資料夾（例如 202606），共三層。"""
+        year_folder = self.drive.get_or_create_folder(self.root_folder_id, period[:4])
+        return self.drive.get_or_create_folder(year_folder["id"], period)
+
+    def summary_file_name(self, period: str) -> str:
+        return SUMMARY_FILE_NAME_TEMPLATE.format(period=period)
 
     def find_monthly_summary_file(self, period: str) -> Optional[Dict[str, Any]]:
         folder = self.get_period_folder(period)
-        name = f"{period}VIP預收款彙整"
+        name = self.summary_file_name(period)
         files = self.drive.find_google_sheet_by_name(folder["id"], name)
         return files[0] if files else None
 
     def get_monthly_summary(self, period: str):
         file = self.find_monthly_summary_file(period)
         if not file:
-            raise FileNotFoundError(f"找不到 {period}VIP預收款彙整")
+            raise FileNotFoundError(f"找不到 {self.summary_file_name(period)}")
         return self.sheets.open_by_id(file["id"])
 
     # ============================================================
@@ -117,25 +131,28 @@ class VipStoredValueWorkflow:
     # ============================================================
     def create_monthly_summary(self, period: str) -> StepResult:
         result = StepResult("建立當月彙整檔")
+        self.execution_log.append(period, "複製期別檔案", "開始", "")
 
         folder = self.get_period_folder(period)
-        new_name = f"{period}VIP預收款彙整"
+        new_name = self.summary_file_name(period)
 
         existing = self.drive.find_google_sheet_by_name(folder["id"], new_name)
         if existing:
             self.log.stamp(period, "當月彙整檔", existing[0].get("webViewLink", existing[0]["id"]))
             result.add_message(f"{new_name} 已存在，不重複建立")
+            self.execution_log.append(period, "複製期別檔案", "完成", f"{new_name} 已存在，不重複建立")
             return result
 
         prev = self.prev_period(period)
         prev_folder = self.get_period_folder(prev)
-        prev_name = f"{prev}VIP預收款彙整"
+        prev_name = self.summary_file_name(prev)
         prev_files = self.drive.find_google_sheet_by_name(prev_folder["id"], prev_name)
 
         if not prev_files:
             msg = f"找不到前月彙整檔：{prev_name}"
             self.log.stamp(period, "彙整檔建立錯誤", msg)
             result.add_error(msg)
+            self.execution_log.append(period, "複製期別檔案", "失敗", msg)
             return result
 
         file = self.drive.copy_file(prev_files[0]["id"], new_name, folder["id"])
@@ -144,6 +161,7 @@ class VipStoredValueWorkflow:
         self.log.stamp(period, "當月彙整檔", file.get("webViewLink", file["id"]))
 
         result.add_message(f"已建立 {new_name}")
+        self.execution_log.append(period, "複製期別檔案", "完成", f"已建立 {new_name}")
         return result
 
     # ============================================================
@@ -174,8 +192,16 @@ class VipStoredValueWorkflow:
     # ============================================================
     # 2. 轉檔＋高雄/新竹彙整
     # ============================================================
+    def _finish_log(self, period: str, step: str, result: StepResult) -> StepResult:
+        if result.errors:
+            self.execution_log.append(period, step, "失敗", "；".join(result.errors))
+        else:
+            self.execution_log.append(period, step, "完成", "；".join(result.messages) or "無訊息")
+        return result
+
     def convert_files(self, period: str) -> StepResult:
         result = StepResult("轉檔")
+        self.execution_log.append(period, "轉檔", "開始", "")
         folder = self.get_period_folder(period)
         files = self.drive.list_children(folder["id"])
 
@@ -194,7 +220,7 @@ class VipStoredValueWorkflow:
 
         if not source_by_base:
             result.add_message("沒有找到需要轉檔的 xlsx/xls/csv")
-            return result
+            return self._finish_log(period, "轉檔", result)
 
         for base_name, file in source_by_base.items():
             area, typ = self.parse_area_type(base_name)
@@ -239,7 +265,7 @@ class VipStoredValueWorkflow:
         except Exception as e:
             result.add_error(f"高雄/新竹結算資料整理失敗：{e}")
 
-        return result
+        return self._finish_log(period, "轉檔", result)
 
     # ============================================================
     # 高雄 / 新竹結算整理
@@ -312,6 +338,7 @@ class VipStoredValueWorkflow:
     # ============================================================
     def move_files(self, period: str) -> StepResult:
         result = StepResult("搬運")
+        self.execution_log.append(period, "搬運", "開始", "")
         folder = self.get_period_folder(period)
         summary = self.get_monthly_summary(period)
 
@@ -321,7 +348,7 @@ class VipStoredValueWorkflow:
         for file in google_files:
             name = file["name"]
 
-            if name == f"{period}VIP預收款彙整":
+            if name == self.summary_file_name(period):
                 continue
 
             area, typ = self.parse_area_type(name)
@@ -364,19 +391,20 @@ class VipStoredValueWorkflow:
                 self.log.stamp_count_time(period, area, typ, "搬運", 0)
                 result.add_error(f"{name} 搬運失敗：{e}")
 
-        return result
+        return self._finish_log(period, "搬運", result)
 
     # ============================================================
     # 4. 計算 / 套公式
     # ============================================================
     def apply_formulas(self, period: str) -> StepResult:
         result = StepResult("計算")
+        self.execution_log.append(period, "計算", "開始", "")
         summary = self.get_monthly_summary(period)
 
         rows = self.formulas.read_enabled()
         if not rows:
-            result.add_message("公式設定無啟用項目")
-            return result
+            result.add_message("公式設定無啟用項目（請確認「儲值金公式設定」的啟用欄已填 TRUE）")
+            return self._finish_log(period, "計算", result)
 
         for item in rows:
             try:
@@ -413,7 +441,7 @@ class VipStoredValueWorkflow:
                 result.add_error(f"公式套用失敗：{item} / {e}")
 
         self.log.stamp(period, "計算完成時間", now_tw())
-        return result
+        return self._finish_log(period, "計算", result)
 
     # ============================================================
     # 5. 彙整金額
@@ -427,4 +455,4 @@ class VipStoredValueWorkflow:
         result = StepResult("彙整金額")
         self.log.stamp(period, "彙整金額完成時間", now_tw())
         result.add_message("彙整金額完成時間已打卡")
-        return result
+        return self._finish_log(period, "彙整金額", result)

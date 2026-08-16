@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 import streamlit as st
 
-from services.google_auth import get_drive_service, get_gspread_client, get_sheets_service
+from config.vip_config import MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID
+from services.google_auth import get_drive_service, get_gspread_client
 from services.google_drive import DriveService
 from services.google_sheets import SheetsService
 from services.vip_workflow import VipStoredValueWorkflow
@@ -14,14 +15,9 @@ def valid_period(period: str) -> bool:
 
 
 def get_workflow() -> VipStoredValueWorkflow:
-    master_id = st.secrets.get("MASTER_SPREADSHEET_ID", "")
-    root_folder_id = st.secrets.get("ROOT_FOLDER_ID", "")
-    if not master_id or not root_folder_id:
-        st.error("請先在 .streamlit/secrets.toml 設定 MASTER_SPREADSHEET_ID 與 ROOT_FOLDER_ID")
-        st.stop()
     drive = DriveService(get_drive_service())
-    sheets = SheetsService(get_gspread_client(), get_sheets_service())
-    return VipStoredValueWorkflow(drive, sheets, master_id, root_folder_id)
+    sheets = SheetsService(get_gspread_client())
+    return VipStoredValueWorkflow(drive, sheets, MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID)
 
 
 def show_results(results):
@@ -64,7 +60,7 @@ def render():
             show_results(wf().convert_files(period))
     with col3:
         if st.button("搬運資料", use_container_width=True):
-            show_results(wf().move_data(period))
+            show_results(wf().move_files(period))
     with col4:
         if st.button("套用公式 / 計算", use_container_width=True):
             show_results(wf().apply_formulas(period))
