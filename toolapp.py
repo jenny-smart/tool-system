@@ -769,6 +769,13 @@ st.markdown(
 if "logs" not in st.session_state:
     st.session_state.logs = ["[--:--:--] 系統已就緒，請選擇作業..."]
 
+if "area_log" not in st.session_state:
+    # 儲值金轉檔/搬運/套用公式常常一次跑十幾個地區×類型，逐筆訊息會把
+    # 一般日誌洗得很長。這幾個功能地區/類型相關的訊息改成每個地區×類型
+    # 只保留「最新一筆」，用 key（例如「新竹儲值金結算」）覆蓋更新，
+    # 用一個固定表格顯示，不會無限往下長。
+    st.session_state.area_log = {}
+
 if "selected_system_name" not in st.session_state:
     st.session_state.selected_system_name = "財務管理"
 
@@ -1053,6 +1060,39 @@ def tw_now_text(fmt: str = "%H:%M:%S") -> str:
 
 LOG_PLACEHOLDER = None
 
+# 儲值金轉檔/搬運/套用公式的訊息大多是「{地區}{類型}」或
+# 「{期別}{類型}-{地區}」開頭（例如「新竹儲值金結算 搬運完成：...」
+# 「202607儲值金結算-新竹 轉檔完成：...」），用這兩個 pattern 抓出地區/
+# 類型，把同一個地區×類型的訊息收斂成表格裡的一列，取代逐筆往下長的
+# 日誌，不然一次十幾個地區×類型跑下來根本看不完。
+_AREA_NAMES = "台北|台中|桃園|新竹|高雄|台南"
+_TYPE_NAMES = "儲值金結算|儲值金預收"
+_AREA_TYPE_RE_SOURCE_STYLE = re.compile(rf"^\d{{6}}({_TYPE_NAMES})-({_AREA_NAMES})")
+_AREA_TYPE_RE_TARGET_STYLE = re.compile(rf"^({_AREA_NAMES})({_TYPE_NAMES})")
+_AREA_SORT_ORDER = ["台北", "台中", "桃園", "新竹", "高雄", "台南"]
+_TYPE_SORT_ORDER = ["儲值金結算", "儲值金預收"]
+
+
+def _extract_area_type_key(message: str) -> str | None:
+    m = _AREA_TYPE_RE_SOURCE_STYLE.match(message)
+    if m:
+        typ, area = m.group(1), m.group(2)
+        return f"{area}{typ}"
+    m = _AREA_TYPE_RE_TARGET_STYLE.match(message)
+    if m:
+        area, typ = m.group(1), m.group(2)
+        return f"{area}{typ}"
+    return None
+
+
+def _area_log_sort_key(key: str) -> tuple[int, int]:
+    for area_index, area in enumerate(_AREA_SORT_ORDER):
+        if key.startswith(area):
+            typ = key[len(area):]
+            type_index = _TYPE_SORT_ORDER.index(typ) if typ in _TYPE_SORT_ORDER else 99
+            return (area_index, type_index)
+    return (99, 99)
+
 
 def add_log(message: str, level: str = "info") -> None:
     now = tw_now_text("%H:%M:%S")
@@ -1063,10 +1103,16 @@ def add_log(message: str, level: str = "info") -> None:
         "warning": "⚠️",
     }
     icon = icons.get(level, "🔵")
-    st.session_state.logs.append(f"[{now}] {icon} {message}")
+    line = f"[{now}] {icon} {message}"
 
-    if len(st.session_state.logs) > 200:
-        st.session_state.logs = st.session_state.logs[-200:]
+    area_key = _extract_area_type_key(message)
+    if area_key:
+        # 同一個地區×類型只保留最新一筆，用 key 直接覆蓋，不會愈跑愈長。
+        st.session_state.area_log[area_key] = line
+    else:
+        st.session_state.logs.append(line)
+        if len(st.session_state.logs) > 200:
+            st.session_state.logs = st.session_state.logs[-200:]
 
     # 執行按鈕按下後，後面可能會接著跑很久（例如套用公式要跑幾十秒到
     # 幾分鐘），這段期間畫面上的日誌框早就畫好了、不會自動更新。這裡
@@ -1078,7 +1124,30 @@ def add_log(message: str, level: str = "info") -> None:
 
 
 def render_log() -> None:
-    log_html = (
+    html_parts = []
+
+    if st.session_state.area_log:
+        html_parts.append(
+            '<div class="log-box">'
+            '<div class="log-header">'
+            '<span>📍 依地區進度</span>'
+            '<span style="background:#1e4757;padding:3px 10px;border-radius:20px;font-size:0.75rem;">每個地區×類型只顯示最新一筆</span>'
+            '</div><div class="log-scroll">'
+        )
+        sorted_keys = sorted(st.session_state.area_log.keys(), key=_area_log_sort_key)
+        for key in sorted_keys:
+            entry = st.session_state.area_log[key]
+            css = "log-entry"
+            if "✅" in entry:
+                css += " success"
+            elif "❌" in entry:
+                css += " error"
+            elif "⚠️" in entry:
+                css += " warning"
+            html_parts.append(f'<div class="{css}">{html.escape(entry)}</div>')
+        html_parts.append("</div></div>")
+
+    html_parts.append(
         '<div class="log-box">'
         '<div class="log-header">'
         '<span>📋 執行日誌</span>'
@@ -1096,12 +1165,12 @@ def render_log() -> None:
         elif "⚠️" in entry:
             css += " warning"
 
-        log_html += f'<div class="{css}">{html.escape(entry)}</div>'
+        html_parts.append(f'<div class="{css}">{html.escape(entry)}</div>')
 
-    log_html += "</div></div>"
+    html_parts.append("</div></div>")
 
     target = LOG_PLACEHOLDER if LOG_PLACEHOLDER is not None else st
-    target.markdown(log_html, unsafe_allow_html=True)
+    target.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
 def mask_id(value: str) -> str:
@@ -2050,7 +2119,7 @@ def run_vip_convert_files(*, month="", start_date=None, end_date=None, area="全
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
     workflow = _get_vip_workflow()
-    result = workflow.convert_files(period, on_progress=on_progress)
+    result = workflow.convert_files(period, area=area, on_progress=on_progress)
     return _format_step_results(result)
 
 
@@ -2059,7 +2128,7 @@ def run_vip_move_files(*, month="", start_date=None, end_date=None, area="全區
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
     workflow = _get_vip_workflow()
-    result = workflow.move_files(period, on_progress=on_progress)
+    result = workflow.move_files(period, area=area, on_progress=on_progress)
     return _format_step_results(result)
 
 
@@ -2068,7 +2137,7 @@ def run_vip_apply_formulas(*, month="", start_date=None, end_date=None, area="�
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
     workflow = _get_vip_workflow()
-    result = workflow.apply_formulas(period, on_progress=on_progress)
+    result = workflow.apply_formulas(period, area=area, on_progress=on_progress)
     return _format_step_results(result)
 
 
@@ -2802,6 +2871,10 @@ with area_col:
         "【財報】工具包押金｜比對異常標記（N欄）",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
+    if selected_function in ("【儲值金】轉檔", "【儲值金】搬運", "【儲值金】套用公式"):
+        # 高雄結算/高雄儲值金預收都是從新竹/台南資料算出來的，兩個地區
+        # 常常要一起重跑，所以多一個組合選項，不用切兩次分開跑。
+        area_select_options = area_select_options + ["新竹＋高雄"]
 
     selected_area_value = st.selectbox(
         "執行區域",
@@ -3111,6 +3184,7 @@ clear_col, _ = st.columns([1, 3])
 with clear_col:
     if st.button("🗑️ 清除日誌"):
         st.session_state.logs = ["[--:--:--] 日誌已清除"]
+        st.session_state.area_log = {}
         st.rerun()
 
 
@@ -3389,6 +3463,10 @@ if can_access_page("settings"):
 # 執行邏輯
 # ═══════════════════════════════════════════════════════════
 if run_clicked:
+    # 每次按執行都是新的一輪，依地區進度板從空的開始，不會混到上一輪
+    # 不相關的地區×類型殘留紀錄。
+    st.session_state.area_log = {}
+
     if not selected_system:
         add_log("請先新增或啟用系統設定", "error")
         st.rerun()
