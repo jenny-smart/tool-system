@@ -2050,8 +2050,8 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
-    {"name": "儲值金-複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
-    {"name": "儲值金-期別資料更新＋公式套用", "handler": run_vip_update_and_apply_formulas, "enabled": True},
+    {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
+    {"name": "【儲值金】期別資料更新＋公式套用", "handler": run_vip_update_and_apply_formulas, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -2589,7 +2589,7 @@ with date_col:
         elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
-        elif selected_function == "儲值金-複製期別檔案":
+        elif selected_function == "【儲值金】複製期別檔案":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
@@ -2599,7 +2599,7 @@ with date_col:
                 key="finance_vip_copy_period",
             )
             st.caption("格式：YYYYMM；從上一期複製出當期的「{期別}儲值金彙整」")
-        elif selected_function == "儲值金-期別資料更新＋公式套用":
+        elif selected_function == "【儲值金】期別資料更新＋公式套用":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
