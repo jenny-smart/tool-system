@@ -282,8 +282,8 @@ class VipStoredValueWorkflow:
 
         # 高雄 / 新竹結算資料整理
         try:
-            self.adjust_hsinchu_kaohsiung_settlement(period)
-            result.add_message("高雄/新竹結算資料整理完成")
+            reconcile_msg = self.adjust_hsinchu_kaohsiung_settlement(period)
+            result.add_message(reconcile_msg)
         except Exception as e:
             result.add_error(f"高雄/新竹結算資料整理失敗：{e}")
 
@@ -302,7 +302,7 @@ class VipStoredValueWorkflow:
     # ============================================================
     # 高雄 / 新竹結算整理
     # ============================================================
-    def adjust_hsinchu_kaohsiung_settlement(self, period: str) -> None:
+    def adjust_hsinchu_kaohsiung_settlement(self, period: str) -> str:
         """高雄儲值金結算沒有自己的來源檔，完全是從新竹儲值金結算篩出來的：
         符合高雄條件（方案名稱或地址）的列歸高雄，其餘留在新竹。
 
@@ -312,6 +312,10 @@ class VipStoredValueWorkflow:
         資料」各自篩出互斥的子集，新竹被篩掉的列一定會完整出現在高雄，
         不會有資料整筆不見的問題（先前的寫法是分別過濾新竹跟一個必須
         預先存在的高雄檔案，兩者互不相通，新竹篩掉的列從沒被寫進高雄）。
+
+        過濾完成後會核對「新竹留下的筆數 + 高雄留下的筆數」是否等於
+        「複製當下新竹的原始筆數」，對不起來就直接丟例外，不會默默放過
+        資料不見或重複的狀況。
 
         這步是「轉檔」main loop 之後才跑的最終覆蓋，所以完成後要重新把新竹／
         高雄的筆數／時間打卡蓋掉之前 main loop 留下的數字，不然主控表看起來
@@ -334,7 +338,7 @@ class VipStoredValueWorkflow:
         )
         time.sleep(2.0)
 
-        hsinchu_count = self.filter_rows_by_h_column(
+        hsinchu_count, original_count = self.filter_rows_by_h_column(
             spreadsheet_id=hsinchu_files[0]["id"],
             keep_matching=False,
         )
@@ -342,11 +346,23 @@ class VipStoredValueWorkflow:
 
         time.sleep(1.5)
 
-        kaohsiung_count = self.filter_rows_by_h_column(
+        kaohsiung_count, _ = self.filter_rows_by_h_column(
             spreadsheet_id=kaohsiung_file["id"],
             keep_matching=True,
         )
         self.log.stamp_count_time(period, "高雄", "儲值金結算", "轉檔", kaohsiung_count)
+
+        if hsinchu_count + kaohsiung_count != original_count:
+            raise ValueError(
+                f"新竹/高雄結算筆數對不起來：新竹 {hsinchu_count} 筆 + 高雄 "
+                f"{kaohsiung_count} 筆 = {hsinchu_count + kaohsiung_count} 筆，"
+                f"但原始新竹筆數是 {original_count} 筆"
+            )
+
+        return (
+            f"新竹/高雄結算筆數核對正確：新竹 {hsinchu_count} 筆 + 高雄 "
+            f"{kaohsiung_count} 筆 = 原始新竹 {original_count} 筆"
+        )
 
     # ============================================================
     # 高雄儲值金預收 = 高雄自己的來源檔 + 台南來源檔合併
@@ -399,23 +415,28 @@ class VipStoredValueWorkflow:
         self.log.stamp_count_time(period, "高雄", "儲值金預收", "轉檔", total)
         return len(tainan_rows)
 
-    def filter_rows_by_h_column(self, spreadsheet_id: str, keep_matching: bool) -> int:
+    def filter_rows_by_h_column(self, spreadsheet_id: str, keep_matching: bool) -> Tuple[int, int]:
         """
         H 欄（第 8 欄，方案名稱）符合高雄方案名單，或是 E 欄（第 5 欄，地址）
         包含「高雄」「台南」關鍵字，都算高雄的列（像 儲值金50000 這種各地
         共用的方案名稱，就是靠地址才分得出來是不是高雄）。
         - keep_matching=False：移除符合高雄的列（新竹）
         - keep_matching=True：只保留符合高雄的列（高雄）
+
+        回傳 (過濾後留下的筆數, 過濾前的原始筆數)，讓呼叫端可以核對
+        「新竹留下的 + 高雄留下的」是否等於「原始筆數」，確保沒有資料
+        在過濾過程中憑空消失或重複。
         """
         ss = self.sheets.open_by_id(spreadsheet_id)
         ws = ss.worksheets()[0]
         values = ws.get_all_values()
 
         if len(values) <= 1:
-            return 0
+            return 0, 0
 
         header = values[0]
         rows = values[1:]
+        original_count = len(rows)
 
         filtered = []
         for row in rows:
@@ -435,11 +456,9 @@ class VipStoredValueWorkflow:
         ws.update("A1", [header], value_input_option="USER_ENTERED")
 
         if filtered:
-            end_col = len(header)
-            start = "A2"
             self.sheets.write_values(ws, 2, 1, filtered)
 
-        return len(filtered)
+        return len(filtered), original_count
 
     # ============================================================
     # 3. 搬運
