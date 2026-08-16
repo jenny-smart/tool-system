@@ -28,7 +28,7 @@ from tools.local_agent_queue import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CommandBuilder = Callable[[dict[str, Any]], list[str]]
 ACTION_HANDLERS: dict[str, CommandBuilder] = {}
-AGENT_VERSION = "1"
+AGENT_VERSION = "2"
 AGENT_CDP_URL = "http://127.0.0.1:9222"
 AGENT_CHROME_PROFILE = Path.home() / "EI account" / "chrome_profile"
 
@@ -114,6 +114,31 @@ def build_cetustek_download(params: dict[str, Any]) -> list[str]:
     if area and area != "全區":
         command.extend(["--area", area])
     return command
+
+
+def build_cetustek_invoice_update(mode: str, params: dict[str, Any]) -> list[str]:
+    month = str(params.get("month") or "").strip()
+    area = str(params.get("area") or "全區").strip()
+    if not month:
+        raise ValueError("發票更新任務缺少月份")
+    command = [
+        sys.executable,
+        "-m",
+        "tools.invoice_center.invoice_archive",
+        mode,
+        month,
+    ]
+    if area and area != "全區":
+        command.extend(["--area", area])
+    return command
+
+
+def build_cetustek_paper_update(params: dict[str, Any]) -> list[str]:
+    return build_cetustek_invoice_update("paper", params)
+
+
+def build_cetustek_prize_update(params: dict[str, Any]) -> list[str]:
+    return build_cetustek_invoice_update("prize", params)
 
 
 def build_cetustek_allowance(params: dict[str, Any]) -> list[str]:
@@ -424,6 +449,8 @@ def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
 
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
+register_action("cetustek.paper_update", build_cetustek_paper_update)
+register_action("cetustek.prize_update", build_cetustek_prize_update)
 register_action("cetustek.allowance", build_cetustek_allowance)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
