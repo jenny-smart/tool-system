@@ -136,12 +136,11 @@ class VipStoredValueWorkflow:
         folder = self.get_period_folder(period)
         new_name = self.summary_file_name(period)
 
-        existing = self.drive.find_google_sheet_by_name(folder["id"], new_name)
-        if existing:
-            self.log.stamp(period, "當月彙整檔", existing[0].get("webViewLink", existing[0]["id"]))
-            result.add_message(f"{new_name} 已存在，不重複建立")
-            self.execution_log.append(period, "複製期別檔案", "完成", f"{new_name} 已存在，不重複建立")
-            return result
+        # 覆蓋式建立：同名檔案（含重複的舊檔）先全部移到垃圾桶，再建立新的一份，
+        # 避免同一期別留下多份同名彙整檔。
+        trashed = self.drive.trash_google_sheet_by_name(folder["id"], new_name)
+        if trashed:
+            result.add_message(f"{new_name} 已存在（{trashed} 份），先移到垃圾桶再重新建立")
 
         prev = self.prev_period(period)
         prev_folder = self.get_period_folder(prev)
