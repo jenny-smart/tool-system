@@ -31,11 +31,49 @@ from tools.bank_statement.internal_payment_registry import (
     DEPOSIT_REPORT_TYPE,
     resolve_report_location,
 )
-from tools.common.config_loader import get_sheets_service
+from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 
 DEPOSIT_AMOUNT = 2000
+
+EXECUTION_LOG_SHEET = "工具包押金執行記錄"
+
+
+def _ensure_execution_log_sheet(service, spreadsheet_id: str) -> None:
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets.properties.title"
+    ).execute()
+    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+    if EXECUTION_LOG_SHEET in titles:
+        return
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{"addSheet": {"properties": {"title": EXECUTION_LOG_SHEET}}}]},
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{EXECUTION_LOG_SHEET}'!A1:E1",
+        valueInputOption="RAW",
+        body={"values": [["時間", "地區", "步驟", "狀態", "訊息"]]},
+    ).execute()
+
+
+def _log_execution(area: str, step: str, status: str, message: str) -> None:
+    """打卡記錄：寫進 Jenny's Lemonhometools 的「工具包押金執行記錄」分頁。"""
+    service = get_sheets_service()
+    master_id = get_master_spreadsheet_id()
+    _ensure_execution_log_sheet(service, master_id)
+
+    now_text = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
+    service.spreadsheets().values().append(
+        spreadsheetId=master_id,
+        range=f"'{EXECUTION_LOG_SHEET}'!A:E",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[now_text, area, step, status, message]]},
+    ).execute()
 
 COL_A, COL_B, COL_C, COL_D = 1, 2, 3, 4
 COL_F, COL_G = 6, 7
@@ -158,6 +196,17 @@ def aggregate_month_to_uy(area: str, year_month: str) -> int:
 
     每新增一列都會同步在 Z 欄註記當天日期（台北時區），回傳新增列數。
     """
+    _log_execution(area, "統計月份彙整", "開始", year_month)
+    try:
+        written = _aggregate_month_to_uy(area, year_month)
+    except Exception as exc:
+        _log_execution(area, "統計月份彙整", "失敗", f"{year_month}：{exc}")
+        raise
+    _log_execution(area, "統計月份彙整", "完成", f"{year_month}：新增 {written} 列")
+    return written
+
+
+def _aggregate_month_to_uy(area: str, year_month: str) -> int:
     spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
     values = _read_values(spreadsheet_id, title)
     if not values:
@@ -227,6 +276,22 @@ def mark_from_notes(area: str, range_input: str) -> dict[str, object]:
     範圍可以寫完整儲存格範圍（例如 U18:U23），也可以只給列號（例如 18-23
     或 18:23）——只給列號時預設抓 U 欄（統計月份彙整寫入備註的欄位）。
     """
+    _log_execution(area, "批次依備註打勾", "開始", range_input)
+    try:
+        result = _mark_from_notes(area, range_input)
+    except Exception as exc:
+        _log_execution(area, "批次依備註打勾", "失敗", f"{range_input}：{exc}")
+        raise
+    _log_execution(
+        area,
+        "批次依備註打勾",
+        "完成",
+        f"{range_input}：打勾 {result['marked']} 個，找不到姓名 {len(result.get('missing_names') or [])} 個",
+    )
+    return result
+
+
+def _mark_from_notes(area: str, range_input: str) -> dict[str, object]:
     spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
     range_input = range_input.strip().upper()
     parts = _RANGE_SEP_RE.split(range_input, maxsplit=1)
@@ -329,6 +394,20 @@ def mark_from_notes(area: str, range_input: str) -> dict[str, object]:
 
 def flag_discrepancies(area: str) -> dict[str, int]:
     """比對 J–M 與 B 欄，僅檢查「今年 + 已上課（J已勾）」的列，異常在 N 欄標記 X。"""
+    _log_execution(area, "比對異常標記", "開始", "")
+    try:
+        result = _flag_discrepancies(area)
+    except Exception as exc:
+        _log_execution(area, "比對異常標記", "失敗", str(exc))
+        raise
+    _log_execution(
+        area, "比對異常標記", "完成",
+        f"檢查 {result['checked']} 人，標記異常 {result['flagged']} 筆",
+    )
+    return result
+
+
+def _flag_discrepancies(area: str) -> dict[str, int]:
     spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
     values = _read_values(spreadsheet_id, title)
     last_row = len(values)

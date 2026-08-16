@@ -2047,11 +2047,6 @@ FINANCE_TASKS = [
     {"name": "【富邦銀行】請款記錄", "handler": queue_fubon_payment_request, "enabled": True},
     {"name": "【富邦銀行】工具包押金退款", "handler": queue_fubon_deposit_refund, "enabled": True},
     {"name": "【富邦銀行】清潔用品採購", "handler": queue_fubon_supply_purchase, "enabled": True},
-    {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
-    {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
-    {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
-    {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
-    {"name": "【儲值金】期別資料更新＋公式套用", "handler": run_vip_update_and_apply_formulas, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -2065,6 +2060,11 @@ FINANCE_TASKS = [
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
     {"name": "【藍新金流】藍新信用卡待退款", "handler": queue_newebpay_refund_pending, "enabled": True},
+    {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
+    {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
+    {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
+    {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
+    {"name": "【儲值金】期別資料更新＋公式套用", "handler": run_vip_update_and_apply_formulas, "enabled": True},
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
