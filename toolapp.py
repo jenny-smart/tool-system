@@ -2141,6 +2141,20 @@ def run_vip_apply_formulas(*, month="", start_date=None, end_date=None, area="�
     return _format_step_results(result)
 
 
+def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    period = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    workflow = _get_vip_workflow()
+    results = [
+        workflow.create_monthly_summary(period),
+        workflow.convert_files(period, area=area, on_progress=on_progress),
+        workflow.move_files(period, area=area, on_progress=on_progress),
+        workflow.apply_formulas(period, area=area, on_progress=on_progress),
+    ]
+    return _format_step_results(results)
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
@@ -2170,6 +2184,7 @@ FINANCE_TASKS = [
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
     {"name": "【儲值金】套用公式", "handler": run_vip_apply_formulas, "enabled": True},
+    {"name": "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）", "handler": run_vip_full_pipeline, "enabled": True},
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
@@ -2701,7 +2716,7 @@ with date_col:
                 value=today_date.strftime("%Y%m"),
                 placeholder="例如：202607",
                 label_visibility="collapsed",
-                key="finance_vip_copy_period",
+                key="finance_vip_shared_period",
             )
             st.caption("格式：YYYYMM；從上一期複製出當期的「{期別}儲值金彙整」")
         elif selected_function == "【儲值金】轉檔":
@@ -2711,7 +2726,7 @@ with date_col:
                 value=today_date.strftime("%Y%m"),
                 placeholder="例如：202607",
                 label_visibility="collapsed",
-                key="finance_vip_convert_period",
+                key="finance_vip_shared_period",
             )
             st.caption("執行前請先把該期資料夾內的來源檔（.xlsx）都放好；程式會自動轉成 Google Sheet（含高雄/新竹彙整、台南合併進高雄儲值金預收），不含搬運、不含套公式")
         elif selected_function == "【儲值金】搬運":
@@ -2721,7 +2736,7 @@ with date_col:
                 value=today_date.strftime("%Y%m"),
                 placeholder="例如：202607",
                 label_visibility="collapsed",
-                key="finance_vip_move_period",
+                key="finance_vip_shared_period",
             )
             st.caption("請先完成「轉檔」再執行搬運；會把已轉檔的 Google Sheet 內容搬到當期彙整檔對應頁籤（不含套公式）")
         elif selected_function == "【儲值金】套用公式":
@@ -2731,9 +2746,19 @@ with date_col:
                 value=today_date.strftime("%Y%m"),
                 placeholder="例如：202607",
                 label_visibility="collapsed",
-                key="finance_vip_formulas_period",
+                key="finance_vip_shared_period",
             )
             st.caption("只套用「儲值金公式設定」裡啟用的公式，不會重跑轉檔／搬運；可以重複執行來除錯")
+        elif selected_function == "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_vip_shared_period",
+            )
+            st.caption("依序執行：複製期別檔案 → 轉檔 → 搬運 → 套用公式，四步驟一次跑完")
         else:
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
             d1, d2 = st.columns(2)
@@ -2871,7 +2896,12 @@ with area_col:
         "【財報】工具包押金｜比對異常標記（N欄）",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
-    if selected_function in ("【儲值金】轉檔", "【儲值金】搬運", "【儲值金】套用公式"):
+    if selected_function in (
+        "【儲值金】轉檔",
+        "【儲值金】搬運",
+        "【儲值金】套用公式",
+        "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）",
+    ):
         # 高雄結算/高雄儲值金預收都是從新竹/台南資料算出來的，兩個地區
         # 常常要一起重跑，所以多一個組合選項，不用切兩次分開跑。
         area_select_options = area_select_options + ["新竹＋高雄"]
@@ -3505,7 +3535,12 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             if selected_function == "【富邦銀行】清潔用品採購":
                 finance_kwargs["selected_rows"] = fubon_supply_purchase_selected_rows
-            if selected_function in ("【儲值金】轉檔", "【儲值金】搬運", "【儲值金】套用公式"):
+            if selected_function in (
+                "【儲值金】轉檔",
+                "【儲值金】搬運",
+                "【儲值金】套用公式",
+                "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）",
+            ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完
                 # 才看到彙總結果。
