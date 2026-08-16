@@ -14,6 +14,7 @@
   J=10 上課　K=11 退還　L=12 已退　M=13 不退（打勾狀態）
   N=14 異常標記（本模組的比對結果）
   U=21 備註　V=22 期別　W=23 收入　X=24 支出　Y=25 餘額（本模組不寫入 Y）
+  Z=26 更新日期（每次寫入 U 欄新列時，同步在 Z 欄註記當天日期）
 
 要讓這裡的功能找得到試算表，需要先在主控試算表（Jenny's Lemonhometools）的
 「內部請款設定」分頁，替台北／台中各新增一列：
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from tools.bank_statement.internal_payment_registry import (
     DEPOSIT_REPORT_TYPE,
@@ -31,12 +33,14 @@ from tools.bank_statement.internal_payment_registry import (
 )
 from tools.common.config_loader import get_sheets_service
 
+TW_TZ = ZoneInfo("Asia/Taipei")
+
 DEPOSIT_AMOUNT = 2000
 
 COL_A, COL_B, COL_C, COL_D = 1, 2, 3, 4
 COL_F, COL_G = 6, 7
 COL_J, COL_K, COL_L, COL_M, COL_N = 10, 11, 12, 13, 14
-COL_U, COL_V, COL_W, COL_X = 21, 22, 23, 24
+COL_U, COL_V, COL_W, COL_X, COL_Z = 21, 22, 23, 24, 26
 
 _TYPE_TO_JKLM_COL = {"上課": COL_J, "退還": COL_K, "已退": COL_L, "不退": COL_M}
 _NOTE_HEAD_RE = re.compile(r"^(上課|退還|已退|不退)\s*[:：]\s*(.+)")
@@ -150,7 +154,10 @@ def _last_non_empty_row(values: list[list[object]], col: int) -> int:
 
 
 def aggregate_month_to_uy(area: str, year_month: str) -> int:
-    """統計上課/退還/已退/不退，追加寫入 U–X（Y 欄不動，沿用表內公式）。回傳新增列數。"""
+    """統計上課/退還/已退/不退，追加寫入 U–X（Y 欄不動，沿用表內公式）。
+
+    每新增一列都會同步在 Z 欄註記當天日期（台北時區），回傳新增列數。
+    """
     spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
     values = _read_values(spreadsheet_id, title)
     if not values:
@@ -160,6 +167,7 @@ def aggregate_month_to_uy(area: str, year_month: str) -> int:
     results = [_aggregate(values, t, year_month) for t in types]
 
     start_row = max(_last_non_empty_row(values, COL_U) + 1, 2)
+    updated_date = datetime.now(TW_TZ).strftime("%Y-%m-%d")
     data = []
     out_row = start_row
     written = 0
@@ -176,6 +184,12 @@ def aggregate_month_to_uy(area: str, year_month: str) -> int:
             {
                 "range": f"'{title}'!U{out_row}:X{out_row}",
                 "values": [[note, period_text, income, expense]],
+            }
+        )
+        data.append(
+            {
+                "range": f"'{title}'!Z{out_row}",
+                "values": [[updated_date]],
             }
         )
         out_row += 1
@@ -321,7 +335,7 @@ def flag_discrepancies(area: str) -> dict[str, int]:
     if last_row < 2:
         return {"flagged": 0, "checked": 0}
 
-    year = datetime.now().year
+    year = datetime.now(TW_TZ).year
     total_rows = last_row - 1
     n_values: list[list[str]] = []
     flagged = 0
