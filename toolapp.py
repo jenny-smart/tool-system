@@ -2409,7 +2409,7 @@ except Exception:
 # ═══════════════════════════════════════════════════════════
 st.markdown('<div class="card">', unsafe_allow_html=True)
 
-head_left, head_orders, head_report, head_log = st.columns([1.7, 1, 1, 1])
+head_left, head_orders, head_field, head_report, head_log = st.columns([1.4, 1, 1, 1, 1])
 
 with head_left:
     st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
@@ -2417,6 +2417,10 @@ with head_left:
 with head_orders:
     if can_access_system("orders_memo_system"):
         st.page_link("pages/訂單系統.py", label="🧹 訂單系統", use_container_width=True)
+
+with head_field:
+    if can_access_system("field_daily_schedule"):
+        st.page_link("pages/外場排程系統.py", label="📋 名冊 / 調薪 / 履歷", use_container_width=True)
 
 with head_report:
     if can_access_page("report"):
