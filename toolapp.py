@@ -2096,9 +2096,9 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
     try:
         agent_tasks = [
             task
-            for task in list_local_agent_tasks(limit=10)
+            for task in list_local_agent_tasks(limit=200)
             if task.get("action", "").startswith(relevant_prefixes)
-        ]
+        ][:10]
     except Exception as exc:
         st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
         return
