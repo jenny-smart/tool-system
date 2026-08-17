@@ -20,9 +20,18 @@ roles:
 
   field_only:
     systems:
+      - daily_scheduler
       - field_daily_schedule
+      - orders_memo_system
     pages:
       - main
       - log
     logs:
       - field_daily_schedule
+  cs:
+    systems:
+      - daily_scheduler
+      - orders_memo_system
+    pages:
+      - main
+    logs: []
