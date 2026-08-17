@@ -60,6 +60,45 @@ def click_text(page: Page, text: str, *, exact: bool = True, timeout: int = 15_0
     raise RuntimeError(f"富邦頁面找不到「{text}」")
 
 
+BREADCRUMB_TRANSFER_PATTERN = re.compile(r"存款/外匯/轉帳.*臺幣轉帳.*立即/預約轉帳")
+
+
+def click_breadcrumb_transfer_link(page: Page, timeout: int = 15_000) -> None:
+    """點畫面中間那排麵包屑「存款/外匯/轉帳 > 臺幣轉帳 > 立即/預約轉帳」最後一段的
+    「立即/預約轉帳」連結，藉此重新載入空白的 STEP 1 表單。
+
+    不能直接用 click_text 找「立即/預約轉帳」文字，因為下方分頁籤列
+    （立即/預約轉帳｜轉入帳號設定｜開啟轉帳服務）也有同名文字；當畫面還
+    停留在上一筆的確認資料／交易結果頁時，那個分頁只是標示目前所在分頁的
+    文字，不是可以點擊重置表單的連結，點了不會有反應，導致接不到下一筆。
+    這裡改成先鎖定同時包含「存款/外匯/轉帳」與「臺幣轉帳」的麵包屑那一列，
+    再只在這一列裡面找「立即/預約轉帳」並點擊，就不會誤點到分頁籤列。
+    """
+    deadline = time.monotonic() + timeout / 1000
+    while time.monotonic() < deadline:
+        dismiss_fubon_idle_dialog(page)
+        for context in _all_fubon_contexts(page):
+            try:
+                crumb = _visible(context.get_by_text(BREADCRUMB_TRANSFER_PATTERN))
+            except Exception:
+                crumb = None
+            if crumb is None:
+                continue
+            try:
+                link = _visible(crumb.get_by_text("立即/預約轉帳", exact=True))
+            except Exception:
+                link = None
+            if link is None:
+                continue
+            try:
+                link.click(timeout=2_000)
+            except Exception:
+                link.evaluate("element => element.click()")
+            return
+        page.wait_for_timeout(200)
+    raise RuntimeError("富邦頁面找不到麵包屑的『立即/預約轉帳』連結")
+
+
 def _row_for_label(page: Page, label: str, timeout: int = 15_000) -> Locator:
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
@@ -130,10 +169,15 @@ def open_transfer_form(page: Page) -> Page:
                 tile.evaluate("el => el.click()")
             except Exception as exc:
                 raise RuntimeError(f"找不到可點擊的『臺幣轉帳』：{exc}") from exc
-        # 已停留在臺幣轉帳分頁（含上一筆的確認資料／交易結果頁）時，分頁籤
-        # 仍在畫面上，只需要重新點一次『立即/預約轉帳』就會回到空白表單，
-        # 不必也不能再點一次首頁功能磚。
-        click_text(page, "立即/預約轉帳")
+            # 剛從首頁功能磚進入，中間那排麵包屑通常還沒出現「立即/預約轉帳」
+            # 這一段，畫面上只有下方分頁籤列這一個同名文字，直接點文字即可。
+            click_text(page, "立即/預約轉帳")
+        else:
+            # 已停留在臺幣轉帳分頁（含上一筆的確認資料／交易結果頁）時，中間
+            # 那排麵包屑與下方分頁籤列會同時出現同名的「立即/預約轉帳」文字；
+            # 分頁籤列此時只是標示目前所在分頁，不是可點擊重置表單的連結，
+            # 點了不會有反應，必須改點麵包屑最後一段的連結才能重新載入空白表單。
+            click_breadcrumb_transfer_link(page)
     _row_for_label(page, "轉出帳號", timeout=30_000)
     return current_fubon_page(page.context, page) or page
 
