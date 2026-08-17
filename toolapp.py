@@ -9,9 +9,12 @@ import html
 import base64
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
+import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1221,12 +1224,103 @@ def build_vip_workflow(master_id: str, folder_id: str, system_name: str):
     )
 
 
+def stream_subprocess(
+    cmd: list[str],
+    *,
+    cwd=None,
+    env=None,
+    timeout: float | None = None,
+    stdout_level: str = "info",
+    stderr_level: str = "error",
+    classify_stderr_line=None,
+) -> subprocess.CompletedProcess:
+    """
+    以 Popen 逐行讀取 stdout/stderr，每讀到一行就立刻呼叫 add_log 寫進
+    執行日誌並即時重畫畫面，不用等子程序整支跑完才一次把輸出貼出來。
+
+    stdout 與 stderr 各自用一條 thread 讀，避免其中一個管線塞滿卡住
+    另一個（比 subprocess.run(capture_output=True) 的「整包等完再讀」
+    多了「邊跑邊看」的即時性，同時避免自己手動輪流讀兩個管線可能造成
+    的死結）。
+    """
+    process = subprocess.Popen(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        env=env,
+        bufsize=1,
+    )
+
+    line_queue: "queue.Queue[tuple[str, str] | None]" = queue.Queue()
+
+    def _pump(stream, origin):
+        try:
+            for raw_line in iter(stream.readline, ""):
+                line_queue.put((origin, raw_line.rstrip("\n")))
+        finally:
+            stream.close()
+            line_queue.put(None)
+
+    threads = [
+        threading.Thread(target=_pump, args=(process.stdout, "stdout"), daemon=True),
+        threading.Thread(target=_pump, args=(process.stderr, "stderr"), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    pending = len(threads)
+    deadline = time.monotonic() + timeout if timeout is not None else None
+
+    while pending > 0:
+        remaining = None
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                process.wait()
+                raise subprocess.TimeoutExpired(cmd, timeout)
+        try:
+            item = line_queue.get(timeout=remaining)
+        except queue.Empty:
+            process.kill()
+            process.wait()
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        if item is None:
+            pending -= 1
+            continue
+        origin, line = item
+        if not line:
+            continue
+        if origin == "stdout":
+            stdout_lines.append(line)
+            add_log(line, stdout_level)
+        else:
+            stderr_lines.append(line)
+            level = classify_stderr_line(line) if classify_stderr_line is not None else stderr_level
+            add_log(line, level)
+
+    for t in threads:
+        t.join()
+    process.wait()
+
+    return subprocess.CompletedProcess(
+        cmd,
+        process.returncode,
+        stdout="\n".join(stdout_lines),
+        stderr="\n".join(stderr_lines),
+    )
+
+
 def run_script(script_path: str, args: list[str] | None = None) -> str:
     args = args or []
 
     if script_path.startswith("module:"):
         module_name = script_path.replace("module:", "", 1)
-        cmd = [sys.executable, "-m", module_name, *args]
+        cmd = [sys.executable, "-u", "-m", module_name, *args]
         display_name = module_name
     else:
         script = BASE_DIR / script_path
@@ -1234,27 +1328,13 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
         if not script.exists():
             raise RuntimeError(f"找不到執行檔：{script_path}")
 
-        cmd = [sys.executable, str(script), *args]
+        cmd = [sys.executable, "-u", str(script), *args]
         display_name = script_path
 
     # Streamlit Secrets 不會自動傳給子程序，必須明確注入環境變數。
     env = _build_subprocess_env()
 
-    completed = subprocess.run(
-        cmd,
-        text=True,
-        capture_output=True,
-        cwd=BASE_DIR,
-        env=env,
-    )
-
-    if completed.stdout:
-        for line in completed.stdout.splitlines()[-120:]:
-            add_log(line, "info")
-
-    if completed.stderr:
-        for line in completed.stderr.splitlines()[-120:]:
-            add_log(line, "error")
+    completed = stream_subprocess(cmd, cwd=BASE_DIR, env=env)
 
     if completed.returncode != 0:
         raise RuntimeError(
@@ -1954,6 +2034,115 @@ def queue_fubon_supply_purchase(*, month="", start_date=None, end_date=None, are
         created_by=st.session_state.get("username", "Tool System"),
     )
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
+_AGENT_TASK_STATUS_LEVELS = {
+    "pending": "info",
+    "queued": "info",
+    "running": "info",
+    "completed": "success",
+    "failed": "error",
+}
+
+
+def _classify_agent_log_line(line: str) -> str:
+    if "[ERROR]" in line or "❌" in line or "失敗" in line:
+        return "error"
+    if "[WARNING]" in line or "⚠" in line:
+        return "warning"
+    if "✅" in line or "完成" in line:
+        return "success"
+    return "info"
+
+
+def _push_new_agent_log_lines(task_id: str) -> None:
+    """
+    本機 Agent 執行過程中會用 append_task_log() 把細部步驟（例如登入中、
+    正在下載第幾筆…）逐段寫進 Google Sheet 的「本機Agent任務Log」分頁。
+    這裡把還沒顯示過的新內容抓出來，逐行補進主要的執行日誌，讓使用者
+    不用點開「最新完整 Log」也能在執行日誌裡即時看到 Agent 端的細節，
+    不是只看到「排隊中／執行中／完成」這種粗略狀態。
+    """
+    offsets = st.session_state.setdefault("agent_task_log_offset", {})
+    try:
+        full_log = read_local_agent_task_log(task_id)
+    except Exception:
+        return
+    if not full_log:
+        return
+    lines = full_log.splitlines()
+    already_shown = offsets.get(task_id, 0)
+    new_lines = lines[already_shown:]
+    if not new_lines:
+        return
+    offsets[task_id] = len(lines)
+    for line in new_lines:
+        line = line.strip()
+        if not line:
+            continue
+        add_log(f"本機 Agent Log：{line}", _classify_agent_log_line(line))
+
+
+@st.fragment(run_every="3s")
+def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
+    """
+    本機 Agent（富邦／元大／藍新／鯨躍／檸檬）的任務是丟進 Google Sheet
+    佇列、由本機端另一支程式領走執行，不是本頁面同步跑的子程序，
+    所以沒辦法像 run_script 那樣直接串流 stdout。這裡改成每 3 秒自動
+    輪詢一次任務狀態與 Agent 寫回的細部 log，狀態一有變化（排隊中→
+    執行中→完成/失敗）以及執行中產生的新 log 內容，都會即時寫進主要
+    的執行日誌，不用手動按重新整理才看得到後續進度。
+    """
+    try:
+        agent_tasks = [
+            task
+            for task in list_local_agent_tasks(limit=10)
+            if task.get("action", "").startswith(relevant_prefixes)
+        ]
+    except Exception as exc:
+        st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
+        return
+
+    seen_status = st.session_state.setdefault("agent_task_seen_status", {})
+    for task in agent_tasks:
+        task_id = task.get("task_id", "")
+        status = task.get("status", "")
+        if not task_id:
+            continue
+        prev_status = seen_status.get(task_id)
+        if prev_status != status:
+            seen_status[task_id] = status
+            detail = task.get("message", "") or task.get("agent_id", "") or "-"
+            add_log(
+                f"本機 Agent：{task.get('action', '')} → {status}（{detail}）",
+                _AGENT_TASK_STATUS_LEVELS.get(status, "info"),
+            )
+
+        # 執行中持續抓新 log；剛轉成完成/失敗時再補抓最後一批，避免
+        # Agent 在狀態更新前最後寫入的幾行被漏掉。
+        if status == "running" or (prev_status is not None and prev_status != status and status in ("completed", "failed")):
+            _push_new_agent_log_lines(task_id)
+
+    if agent_tasks:
+        st.markdown("#### 本機 Agent 任務 Log")
+        st.dataframe(
+            [
+                {
+                    "建立時間": task.get("created_at", ""),
+                    "任務": task.get("action", ""),
+                    "區域/參數": task.get("params_json", ""),
+                    "狀態": task.get("status", ""),
+                    "Agent": task.get("agent_id", ""),
+                    "訊息": task.get("message", ""),
+                }
+                for task in agent_tasks
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+        with st.expander("最新完整 Log", expanded=agent_tasks[0].get("status") == "failed"):
+            full_log = read_local_agent_task_log(agent_tasks[0].get("task_id", ""))
+            st.code(full_log or agent_tasks[0].get("log") or "等待本機 Agent", language="text")
 
 
 @st.fragment(run_every="2s")
@@ -3215,34 +3404,7 @@ LOG_PLACEHOLDER = st.empty()
 render_log()
 
 if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】")):
-    try:
-        agent_tasks = [
-            task
-            for task in list_local_agent_tasks(limit=10)
-            if task.get("action", "").startswith(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta."))
-        ]
-        if agent_tasks:
-            st.markdown("#### 本機 Agent 任務 Log")
-            st.dataframe(
-                [
-                    {
-                        "建立時間": task.get("created_at", ""),
-                        "任務": task.get("action", ""),
-                        "區域/參數": task.get("params_json", ""),
-                        "狀態": task.get("status", ""),
-                        "Agent": task.get("agent_id", ""),
-                        "訊息": task.get("message", ""),
-                    }
-                    for task in agent_tasks
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-            with st.expander("最新完整 Log", expanded=agent_tasks[0].get("status") == "failed"):
-                full_log = read_local_agent_task_log(agent_tasks[0].get("task_id", ""))
-                st.code(full_log or agent_tasks[0].get("log") or "等待本機 Agent", language="text")
-    except Exception as exc:
-        st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
+    render_agent_task_progress(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta."))
 
     if selected_function in ("【富邦銀行】富邦登入", "【富邦銀行】富邦明細下載"):
         render_fubon_mobile_verification()
@@ -3542,7 +3704,13 @@ if run_clicked:
     system_type = selected_system.get("type", "vip")
 
     if system_type == "finance_management":
-        add_log(f"開始執行：{system_name} / {selected_function} / {period or '（未輸入期別）'} / {selected_area_value}")
+        if period:
+            date_display = period
+        elif start_date_value and end_date_value:
+            date_display = f"{start_date_value.strftime('%Y-%m-%d')} ~ {end_date_value.strftime('%Y-%m-%d')}"
+        else:
+            date_display = "（未輸入期別／日期）"
+        add_log(f"開始執行：{system_name} / {selected_function} / 執行日期：{date_display} / 執行地區：{selected_area_value}")
 
         finance_task = next(
             (task for task in FINANCE_TASKS if task["name"] == selected_function),
@@ -3674,7 +3842,14 @@ if run_clicked:
         add_log("請至少選擇一個執行區域", "error")
         st.rerun()
 
-    add_log(f"開始執行：{system_name} / {selected_function}")
+    if not date_keys:
+        date_display = period or "（未輸入期別）"
+    elif len(date_keys) <= 2:
+        date_display = "、".join(date_keys)
+    else:
+        date_display = f"{date_keys[0]} ~ {date_keys[-1]}（共 {len(date_keys)} 天）"
+    area_display = "、".join(selected_areas) if selected_areas else (selected_area_value or "全區")
+    add_log(f"開始執行：{system_name} / {selected_function} / 執行日期：{date_display} / 執行地區：{area_display}")
 
     with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
         try:
@@ -3905,30 +4080,20 @@ if run_clicked:
                         cmd += ["--date", start_date_value.strftime("%Y-%m-%d")]
                     add_log(f"客服排程執行：{selected_function}（--step {step}）", "info")
 
-                completed = subprocess.run(
+                def _classify_service_stderr(line: str) -> str:
+                    if "[ERROR]" in line or "[CRITICAL]" in line:
+                        return "error"
+                    if "[WARNING]" in line:
+                        return "warning"
+                    return "info"
+
+                completed = stream_subprocess(
                     cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
                     cwd=BASE_DIR,
                     env=_svc_env,
+                    timeout=600,
+                    classify_stderr_line=_classify_service_stderr,
                 )
-
-                if completed.stdout:
-                    for line in completed.stdout.strip().splitlines()[-120:]:
-                        add_log(line, "info")
-
-                if completed.stderr:
-                    for line in completed.stderr.strip().splitlines()[-60:]:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if "[ERROR]" in line or "[CRITICAL]" in line:
-                            add_log(line, "error")
-                        elif "[WARNING]" in line:
-                            add_log(line, "warning")
-                        else:
-                            add_log(line, "info")
 
                 # 解析各 Step 結果，顯示部分成功
                 stdout_text = completed.stdout or ""
