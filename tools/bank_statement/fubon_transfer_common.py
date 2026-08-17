@@ -259,6 +259,17 @@ def _select_account_card(
         if card is None:
             page.wait_for_timeout(200)
     if card is None:
+        # 呼叫端（choose_saved_destination）在接到 SavedAccountNotFound 後
+        # 會改走「自行輸入」；但這裡點「==請選擇==」開出來的帳號選擇彈出視窗
+        # 還開著，沒有卡片可點也不會自己關閉。若放著不管，「自行輸入」與
+        # 銀行代碼下拉框後續的文字/元件查詢，可能會誤抓到還留在畫面上的
+        # 這個舊彈出視窗，導致找不到『自行輸入』後續產生的銀行代碼下拉框。
+        # 用 Escape 關閉，讓畫面回到乾淨狀態再交給自行輸入流程。
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+        page.wait_for_timeout(300)
         raise SavedAccountNotFound(f"{row_label}的帳號選擇視窗找不到「{target_text}」")
     click_nearest_control(card)
 
