@@ -3094,15 +3094,17 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
                 {
                     "執行": False,
                     "列數": item["sheet_row"],
+                    "費用說明": item["memo"],
                     "請款人": item["requester"],
                     "收款對象（轉入帳號）": item["name"],
+                    "收款帳號": item["account_text"],
                     "請款金額": item["amount"],
                 }
                 for item in _payment_request_candidates
             ]),
             hide_index=True,
             use_container_width=True,
-            disabled=["列數", "請款人", "收款對象（轉入帳號）", "請款金額"],
+            disabled=["列數", "費用說明", "請款人", "收款對象（轉入帳號）", "收款帳號", "請款金額"],
             column_config={"執行": st.column_config.CheckboxColumn("執行")},
             key=f"fubon_payment_request_editor_{selected_area_value}",
         )

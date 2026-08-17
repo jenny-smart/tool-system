@@ -33,16 +33,18 @@ def pending_payment_requests(values: list[list[str]]) -> list[dict[str, object]]
     轉入帳號依 H 欄（收款對象＝實際收款人，跟 G 欄請款人不一定是同一人）
     比對富邦已存的常用轉入帳號；如果常用轉入帳號清單裡找不到，改用 I 欄
     （收款帳號，格式「銀行名稱-帳號」）自行輸入。G 欄（請款人）僅供人工
-    核對用，不參與比對。轉帳金額為 F 欄。
+    核對用，不參與比對。轉帳金額為 F 欄，E 欄（費用說明）僅供人工核對用。
     """
     result: list[dict[str, object]] = []
     for sheet_row, row in enumerate(values[1:], start=2):
         status = _cell(row, 0)
         if status != "待付款":
             continue
+        memo = _cell(row, 4)
         requester = _cell(row, 6)
         payee = _cell(row, 7)
-        bank_identifier, account_number = _split_bank_and_account(_cell(row, 8))
+        account_text = _cell(row, 8)
+        bank_identifier, account_number = _split_bank_and_account(account_text)
         amount_text = re.sub(r"[^0-9.]", "", _cell(row, 5))
         if not payee or not amount_text:
             continue
@@ -58,10 +60,12 @@ def pending_payment_requests(values: list[list[str]]) -> list[dict[str, object]]
         result.append(
             {
                 "sheet_row": sheet_row,
+                "memo": memo,
                 "name": payee,
                 "requester": requester,
                 "bank_name": bank_identifier,
                 "account_number": account_number,
+                "account_text": account_text,
                 "amount": normalized_amount,
             }
         )
