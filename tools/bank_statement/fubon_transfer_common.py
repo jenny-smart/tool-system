@@ -93,29 +93,46 @@ def fill_row_inputs(page: Page, label: str, values: list[str]) -> None:
 
 
 def open_transfer_form(page: Page) -> Page:
-    form_is_open = False
+    """開啟臺幣轉帳的「立即/預約轉帳」表單。
+
+    多筆連續轉帳時，上一筆完成後停留的 STEP 2（確認資料）／STEP 3（交易
+    結果）頁面同樣會顯示「轉出帳號」字樣，只看這個字判斷表單是否已開啟，
+    會誤把結果頁當成可直接填寫的新表單，導致沒有點『立即/預約轉帳』就
+    直接嘗試選轉出／轉入帳號，接不到下一筆。只有還沒選擇帳號的全新 STEP 1
+    表單才會出現「==請選擇==」下拉占位字，用它來分辨表單是否真的可填寫。
+    """
+    in_transfer_section = False
+    fresh_form_open = False
     for context in _contexts(page):
         try:
-            if "轉出帳號" in context.locator("body").inner_text(timeout=1_000):
-                form_is_open = True
-                break
+            body_text = context.locator("body").inner_text(timeout=1_000)
         except Exception:
             continue
-    if not form_is_open:
-        print("點擊首頁『臺幣轉帳』功能磚。")
-        try:
-            page.keyboard.press("Escape")
-        except Exception:
-            pass
-        try:
-            # 與明細下載點「我的存款」相同：排除輪播中畫面外的複本，
-            # 再直接觸發真正位於視窗內的功能磚連結。
-            tile = visible_in_viewport(
-                page, 'a:has-text("臺幣轉帳")', timeout_ms=8_000
-            )
-            tile.evaluate("el => el.click()")
-        except Exception as exc:
-            raise RuntimeError(f"找不到可點擊的『臺幣轉帳』：{exc}") from exc
+        if "轉出帳號" in body_text:
+            in_transfer_section = True
+            if "==請選擇==" in body_text:
+                fresh_form_open = True
+            break
+
+    if not fresh_form_open:
+        if not in_transfer_section:
+            print("點擊首頁『臺幣轉帳』功能磚。")
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            try:
+                # 與明細下載點「我的存款」相同：排除輪播中畫面外的複本，
+                # 再直接觸發真正位於視窗內的功能磚連結。
+                tile = visible_in_viewport(
+                    page, 'a:has-text("臺幣轉帳")', timeout_ms=8_000
+                )
+                tile.evaluate("el => el.click()")
+            except Exception as exc:
+                raise RuntimeError(f"找不到可點擊的『臺幣轉帳』：{exc}") from exc
+        # 已停留在臺幣轉帳分頁（含上一筆的確認資料／交易結果頁）時，分頁籤
+        # 仍在畫面上，只需要重新點一次『立即/預約轉帳』就會回到空白表單，
+        # 不必也不能再點一次首頁功能磚。
         click_text(page, "立即/預約轉帳")
     _row_for_label(page, "轉出帳號", timeout=30_000)
     return current_fubon_page(page.context, page) or page
