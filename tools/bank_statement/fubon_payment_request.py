@@ -45,6 +45,12 @@ def fill_payment_request(
             ) from None
         print(f"常用轉入帳號清單找不到「{item['name']}」，改用自行輸入：{bank_name}／{account_number}")
         choose_manual_destination(page)
+        # 跟 fubon_atm_refund.py 一樣：點「自行輸入」後銀行代碼下拉框是另外
+        # AJAX 產生的元件，比底層 select 晚出現；choose_manual_destination
+        # 只確認 select 已可用就返回，這裡少了這個緩衝會讓 fill_manual_destination
+        # 太早去找還沒渲染出來的下拉框，出現「轉入帳號找不到可點開的銀行代碼
+        # 下拉框」。
+        page.wait_for_timeout(800)
         fill_manual_destination(page, bank_name, account_number)
     page.wait_for_timeout(800)
 
