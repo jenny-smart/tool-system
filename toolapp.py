@@ -2045,14 +2045,53 @@ _AGENT_TASK_STATUS_LEVELS = {
 }
 
 
+def _classify_agent_log_line(line: str) -> str:
+    if "[ERROR]" in line or "❌" in line or "失敗" in line:
+        return "error"
+    if "[WARNING]" in line or "⚠" in line:
+        return "warning"
+    if "✅" in line or "完成" in line:
+        return "success"
+    return "info"
+
+
+def _push_new_agent_log_lines(task_id: str) -> None:
+    """
+    本機 Agent 執行過程中會用 append_task_log() 把細部步驟（例如登入中、
+    正在下載第幾筆…）逐段寫進 Google Sheet 的「本機Agent任務Log」分頁。
+    這裡把還沒顯示過的新內容抓出來，逐行補進主要的執行日誌，讓使用者
+    不用點開「最新完整 Log」也能在執行日誌裡即時看到 Agent 端的細節，
+    不是只看到「排隊中／執行中／完成」這種粗略狀態。
+    """
+    offsets = st.session_state.setdefault("agent_task_log_offset", {})
+    try:
+        full_log = read_local_agent_task_log(task_id)
+    except Exception:
+        return
+    if not full_log:
+        return
+    lines = full_log.splitlines()
+    already_shown = offsets.get(task_id, 0)
+    new_lines = lines[already_shown:]
+    if not new_lines:
+        return
+    offsets[task_id] = len(lines)
+    for line in new_lines:
+        line = line.strip()
+        if not line:
+            continue
+        add_log(f"本機 Agent Log：{line}", _classify_agent_log_line(line))
+
+
 @st.fragment(run_every="3s")
 def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
     """
     本機 Agent（富邦／元大／藍新／鯨躍／檸檬）的任務是丟進 Google Sheet
     佇列、由本機端另一支程式領走執行，不是本頁面同步跑的子程序，
     所以沒辦法像 run_script 那樣直接串流 stdout。這裡改成每 3 秒自動
-    輪詢一次任務狀態，狀態一有變化（排隊中→執行中→完成/失敗）就寫進
-    主要的執行日誌並即時顯示，不用手動按重新整理才看得到後續進度。
+    輪詢一次任務狀態與 Agent 寫回的細部 log，狀態一有變化（排隊中→
+    執行中→完成/失敗）以及執行中產生的新 log 內容，都會即時寫進主要
+    的執行日誌，不用手動按重新整理才看得到後續進度。
     """
     try:
         agent_tasks = [
@@ -2068,14 +2107,21 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
     for task in agent_tasks:
         task_id = task.get("task_id", "")
         status = task.get("status", "")
-        if not task_id or seen_status.get(task_id) == status:
+        if not task_id:
             continue
-        seen_status[task_id] = status
-        detail = task.get("message", "") or task.get("agent_id", "") or "-"
-        add_log(
-            f"本機 Agent：{task.get('action', '')} → {status}（{detail}）",
-            _AGENT_TASK_STATUS_LEVELS.get(status, "info"),
-        )
+        prev_status = seen_status.get(task_id)
+        if prev_status != status:
+            seen_status[task_id] = status
+            detail = task.get("message", "") or task.get("agent_id", "") or "-"
+            add_log(
+                f"本機 Agent：{task.get('action', '')} → {status}（{detail}）",
+                _AGENT_TASK_STATUS_LEVELS.get(status, "info"),
+            )
+
+        # 執行中持續抓新 log；剛轉成完成/失敗時再補抓最後一批，避免
+        # Agent 在狀態更新前最後寫入的幾行被漏掉。
+        if status == "running" or (prev_status is not None and prev_status != status and status in ("completed", "failed")):
+            _push_new_agent_log_lines(task_id)
 
     if agent_tasks:
         st.markdown("#### 本機 Agent 任務 Log")
