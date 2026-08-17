@@ -4274,8 +4274,74 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
 
     calendar_events_by_region = {}
     all_events_by_region = {}
+    calendar_label_names = {}
+    recurring_event_cache = {}
+
+    def _load_calendar_label_names(calendar_id):
+        try:
+            calendar = service.calendars().get(calendarId=calendar_id).execute()
+        except Exception as exc:
+            raise Exception(
+                f"無法讀取 Google 日曆 {calendar_id} 的事件標籤，無法判斷安排狀態：{exc}"
+            ) from exc
+
+        raw_labels = (calendar.get("labelProperties") or {}).get("eventLabels")
+        names = {}
+        if isinstance(raw_labels, dict):
+            label_items = raw_labels.items()
+        elif isinstance(raw_labels, list):
+            label_items = ((item.get("id"), item) for item in raw_labels if isinstance(item, dict))
+        elif raw_labels is None:
+            label_items = ()
+        else:
+            raise Exception(f"Google 日曆 {calendar_id} 回傳無法解析的 eventLabels 格式")
+
+        for label_id, label in label_items:
+            if isinstance(label, str):
+                name = label
+            elif isinstance(label, dict):
+                label_id = label_id or label.get("id") or label.get("eventLabelId")
+                name = label.get("name") or label.get("label") or label.get("displayName")
+            else:
+                continue
+            if label_id and name:
+                names[str(label_id)] = str(name).strip()
+        return names
+
+    def _event_status(event, calendar_id):
+        """回傳 (是否已安排, 顯示名稱)，新版標籤優先、舊版黃色相容。"""
+        status_event = event
+        if not event.get("eventLabelId") and not event.get("colorId") and event.get("recurringEventId"):
+            cache_key = (calendar_id, event["recurringEventId"])
+            if cache_key not in recurring_event_cache:
+                try:
+                    recurring_event_cache[cache_key] = service.events().get(
+                        calendarId=calendar_id, eventId=event["recurringEventId"]
+                    ).execute()
+                except Exception as exc:
+                    raise Exception(
+                        f"無法讀取重複事件母事件 {event['recurringEventId']} 的安排狀態：{exc}"
+                    ) from exc
+            status_event = recurring_event_cache[cache_key]
+
+        label_id = status_event.get("eventLabelId")
+        if label_id:
+            label_name = calendar_label_names.get(calendar_id, {}).get(str(label_id))
+            if not label_name:
+                raise Exception(
+                    f"Google 日曆 {calendar_id} 的 eventLabelId={label_id} 無法解析，"
+                    "已停止比對以避免誤判"
+                )
+            return label_name == "已預約", label_name
+
+        color_id = str(status_event.get("colorId", ""))
+        if color_id:
+            return color_id == COLOR_YELLOW, color_name_from_id(color_id)
+        return False, "（未設定安排狀態）"
+
     for r in regions_to_check:
         calendar_id = GOOGLE_CALENDAR_MAP[r]
+        calendar_label_names[calendar_id] = _load_calendar_label_names(calendar_id)
         events = service.events().list(
             calendarId=calendar_id,
             timeMin=day_start.isoformat(),
@@ -4285,7 +4351,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             maxResults=2500,
         ).execute().get("items", [])
         all_events_by_region[r] = events
-        calendar_events_by_region[r] = [e for e in events if str(e.get("colorId", "")) == COLOR_YELLOW]
+        calendar_events_by_region[r] = [e for e in events if _event_status(e, calendar_id)[0]]
 
     def _event_local_range(event):
         start_raw = event.get("start", {}).get("dateTime") or event.get("start", {}).get("date")
@@ -4338,10 +4404,10 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             return False
         return any(phone_norm in _event_blob(e) for e in events)
 
-    def _color_breakdown(events):
+    def _color_breakdown(events, calendar_id):
         counts = {}
         for e in events:
-            name = color_name_from_id(e.get("colorId")) if e.get("colorId") else "（未設定顏色，使用日曆預設色）"
+            name = _event_status(e, calendar_id)[1]
             counts[name] = counts.get(name, 0) + 1
         return "、".join(f"{name}x{n}" for name, n in counts.items())
 
@@ -4406,13 +4472,14 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             if _event_time_match(order, e)
         ]
         if same_time_any_color:
-            yellow_events = [e for e in same_time_any_color if str(e.get("colorId", "")) == COLOR_YELLOW]
-            other_events = [e for e in same_time_any_color if str(e.get("colorId", "")) != COLOR_YELLOW]
+            calendar_id = GOOGLE_CALENDAR_MAP[order["region"]]
+            yellow_events = [e for e in same_time_any_color if _event_status(e, calendar_id)[0]]
+            other_events = [e for e in same_time_any_color if not _event_status(e, calendar_id)[0]]
             parts = []
             if yellow_events:
-                parts.append(f"{len(yellow_events)} 筆是黃色，但同時段訂單數比黃色事件數多，已被其他訂單配走")
+                parts.append(f"{len(yellow_events)} 筆是已安排，但同時段訂單數比已安排事件數多，已被其他訂單配走")
             if other_events:
-                parts.append(f"{len(other_events)} 筆顏色不是黃色（{_color_breakdown(other_events)}）")
+                parts.append(f"{len(other_events)} 筆不是已安排（{_color_breakdown(other_events, calendar_id)}）")
             extra = f"同時段在日曆上共找到 {len(same_time_any_color)} 筆事件：" + "；".join(parts) + "。"
         else:
             extra = "同時段在日曆上完全找不到任何事件。"
