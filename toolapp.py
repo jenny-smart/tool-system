@@ -1047,7 +1047,7 @@ def sync_view_from_query_params() -> None:
     except Exception:
         view = None
 
-    if view in ["report", "log"]:
+    if view in ["report", "log", "field_extra"]:
         st.session_state.view = view
 
 
@@ -1722,6 +1722,39 @@ def render_log_page() -> None:
                         st.code(row["content"] or "空 log", language="text")
 
 
+def render_field_extra_tools() -> None:
+    """外場排程系統的手動工具：新增名冊及調薪、履歷系統。
+    對應原本「新增名冊及調薪.gs」「履歷系統.gs」的選單功能，直接嵌在主控台裡
+    （用 view 切換，不另外開分頁），跟業績報表 / Log 頁面同一套模式。"""
+    from tools.field_management.ui import render_resume_system, render_roster_raise_system
+
+    top_cols = st.columns([1, 1, 1, 1])
+    with top_cols[0]:
+        if st.button("← 返回主控台", use_container_width=True):
+            set_view("main")
+            st.rerun()
+
+    st.markdown(
+        '<div class="app-title">📋 外場排程系統｜名冊 / 調薪 / 履歷</div>',
+        unsafe_allow_html=True,
+    )
+
+    function_choice = st.radio(
+        "選擇功能",
+        ["新增名冊及調薪", "履歷系統"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="field_extra_function_choice",
+    )
+
+    st.markdown("---")
+
+    if function_choice == "新增名冊及調薪":
+        render_roster_raise_system()
+    else:
+        render_resume_system()
+
+
 # ═══════════════════════════════════════════════════════════
 # 系統 / 功能設定
 # ═══════════════════════════════════════════════════════════
@@ -2371,6 +2404,13 @@ if st.session_state.view == "log":
     render_log_page()
     st.stop()
 
+if st.session_state.view == "field_extra":
+    if not can_access_system("field_daily_schedule"):
+        st.error("你沒有權限使用外場排程系統")
+        st.stop()
+    render_field_extra_tools()
+    st.stop()
+
 # ── ★ Gmail 401歸檔 ──────────────────────────────────────
 selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
 if selected_system_cfg.get("type") == "gmail_401":
@@ -2420,7 +2460,9 @@ with head_orders:
 
 with head_field:
     if can_access_system("field_daily_schedule"):
-        st.page_link("pages/外場排程系統.py", label="📋 名冊 / 調薪 / 履歷", use_container_width=True)
+        if st.button("📋 名冊 / 調薪 / 履歷", use_container_width=True):
+            set_view("field_extra")
+            st.rerun()
 
 with head_report:
     if can_access_page("report"):

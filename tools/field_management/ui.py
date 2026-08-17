@@ -37,6 +37,20 @@ def _is_valid_ym(ym: str) -> bool:
     return bool(_YM_PATTERN.fullmatch(ym.strip()))
 
 
+def _show_mail_diagnostics(result: dict) -> None:
+    """顯示這次連線的信箱帳號、IMAP 搜尋條件與命中封數。
+    新增 0 筆時最常見的原因是接錯信箱（RESUME_GMAIL_USER 沒設定，退回用
+    GMAIL_USER 連到別的帳號）——這裡直接把命中封數跟帳號顯示出來，
+    不用另外去看伺服器 log 才能判斷是「真的沒有信」還是「連錯帳號」。"""
+    mailbox = result.get("mailbox")
+    if not mailbox:
+        return
+    with st.expander("連線與搜尋明細", expanded=result.get("matched", 0) == 0 and result.get("count", 0) == 0):
+        st.caption(f"信箱：{mailbox}")
+        st.caption(f"IMAP 命中：{result.get('matched', '-')} 封")
+        st.code(result.get("criteria", ""), language="text")
+
+
 # ────────────────────────────────────────────────────────────
 # 新增名冊及調薪
 # ────────────────────────────────────────────────────────────
@@ -139,6 +153,7 @@ def render_resume_system() -> None:
                     with st.spinner("擷取中..."):
                         result = resume_system.fetch_resumes_range(area, start_dt, end_dt)
                     st.success(f"✅ 完成擷取，共新增 {result['count']} 筆")
+                    _show_mail_diagnostics(result)
                 except Exception as exc:
                     st.error(f"❌ 擷取失敗：{exc}")
 
@@ -151,6 +166,7 @@ def render_resume_system() -> None:
                 with st.spinner("擷取中..."):
                     result = resume_system.fetch_lemon_home_replies(area)
                 st.success(f"✅ 完成擷取，共新增 {result['count']} 筆")
+                _show_mail_diagnostics(result)
             except Exception as exc:
                 st.error(f"❌ 擷取 104 回覆信失敗：{exc}")
 
@@ -170,5 +186,6 @@ def render_resume_system() -> None:
                     with st.spinner("擷取中..."):
                         result = resume_system.extract_latest_resumes(area, sheet_name.strip())
                     st.success(f"✅ 成功擷取 {result['count']} 筆未讀履歷")
+                    _show_mail_diagnostics(result)
                 except Exception as exc:
                     st.error(f"❌ 擷取最新雙北履歷失敗：{exc}")
