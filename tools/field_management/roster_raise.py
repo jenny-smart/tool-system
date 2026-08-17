@@ -10,7 +10,8 @@ from __future__ import annotations
 #
 # GAS 用 SpreadsheetApp 的 UI（ui.prompt / sheet.copyTo）操作試算表；
 # 這裡改用 Google Sheets API（batchUpdate duplicateSheet / values），
-# 由 tools/field_management/ui.py 提供 Streamlit 介面呼叫。
+# 由 toolapp.py 主控台「🗂️ 執行系統＝外場排程系統」下的
+# 【月排程】新增專員名冊／新增專員調薪 直接呼叫。
 # ============================================================
 
 import argparse
@@ -505,7 +506,7 @@ def convert_raise_sheet_to_values(area: str, ym: str, run_type: str = "手動") 
 
 
 # ────────────────────────────────────────────────────────────
-# CLI（手動測試用；主要介面在 tools/field_management/ui.py）
+# CLI（手動測試用；主要介面在 toolapp.py 主控台）
 # ────────────────────────────────────────────────────────────
 
 def main() -> None:
