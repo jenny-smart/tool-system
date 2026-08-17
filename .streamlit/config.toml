@@ -1,0 +1,4 @@
+[client]
+# 主頁（toolapp.py）已用 st.page_link 卡片列出各分頁（訂單系統、外場排程系統…），
+# 不需要再重複顯示 Streamlit 自動產生的側邊欄分頁選單。
+showSidebarNavigation = false
