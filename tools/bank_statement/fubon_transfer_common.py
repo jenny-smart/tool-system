@@ -394,30 +394,44 @@ def fill_manual_destination(page: Page, bank_code: str, account_number: str) -> 
         raise RuntimeError("轉入帳號找不到可點開的銀行代碼下拉框")
     click_nearest_control(trigger)
 
+    # 銀行代碼清單裡符合這個代碼的文字可能不只一筆（例如同代碼有多個分行
+    # 名稱、或畫面上剛好有另一個不相關但文字也含這個代碼的節點）；只點第
+    # 一個找到的視覺可見節點，點到的不一定是真正能觸發選取的那個方塊，
+    # 隱藏 select 就不會更新。改成把每個符合的候選都點過一輪，點完立刻
+    # 確認 select 有沒有變成 target_value，點對了就停止，都試過還是沒變
+    # 才真的當作失敗。
     code_pattern = re.compile(rf"(^|\D){re.escape(bank_code)}(\D|$)")
-    code_button = None
+    matched = False
     deadline = time.monotonic() + 15
-    while time.monotonic() < deadline and code_button is None:
+    while time.monotonic() < deadline and not matched:
         for context in _all_fubon_contexts(page):
             try:
-                code_button = _visible(context.get_by_text(code_pattern, exact=False))
+                candidates = context.get_by_text(code_pattern, exact=False)
+                candidate_count = candidates.count()
             except Exception:
-                code_button = None
-            if code_button is not None:
+                continue
+            for index in range(candidate_count):
+                candidate = candidates.nth(index)
+                try:
+                    if not candidate.is_visible():
+                        continue
+                    click_nearest_control(candidate)
+                except Exception:
+                    continue
+                click_deadline = time.monotonic() + 3
+                while time.monotonic() < click_deadline:
+                    if bank_select.input_value() == target_value:
+                        matched = True
+                        break
+                    page.wait_for_timeout(150)
+                if matched:
+                    break
+            if matched:
                 break
-        if code_button is None:
+        if not matched:
             page.wait_for_timeout(200)
-    if code_button is None:
-        raise RuntimeError(f"銀行代碼清單找不到代碼 {bank_code}")
-    click_nearest_control(code_button)
-
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if bank_select.input_value() == target_value:
-            break
-        page.wait_for_timeout(200)
-    else:
-        raise RuntimeError(f"已點選銀行代碼 {bank_code}，但畫面未更新")
+    if not matched:
+        raise RuntimeError(f"已嘗試點選銀行代碼 {bank_code} 清單裡符合的項目，但畫面未更新")
 
     inputs = row.locator(
         'input:visible:not([type="hidden"]):not([type="radio"]):not([type="button"]):not([type="submit"])'
