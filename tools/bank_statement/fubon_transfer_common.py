@@ -370,6 +370,61 @@ def _option_has_bank_code(option_text: str, bank_code: str) -> bool:
     return bool(re.search(rf"(^|\D){re.escape(bank_code)}(\D|$)", option_text.strip()))
 
 
+def _scroll_bank_code_dialog(page: Page) -> bool:
+    """『銀行代碼』彈出視窗是好幾百家銀行／農漁會的完整清單，畫面一次只
+    顯示看得到的部分；找不到目標代碼時，主動把清單容器往下捲動一段，
+    讓還沒進入可視範圍（甚至還沒渲染）的項目跑出來，再重新查詢。"""
+    for context in _all_fubon_contexts(page):
+        try:
+            heading = _visible(context.get_by_text("銀行代碼", exact=True))
+        except Exception:
+            heading = None
+        if heading is None:
+            continue
+        try:
+            scrolled = heading.evaluate(
+                """el => {
+                  let node = el;
+                  while (node && node !== document.body) {
+                    if (node.scrollHeight > node.clientHeight + 4) {
+                      const before = node.scrollTop;
+                      node.scrollTop = Math.min(
+                        node.scrollTop + node.clientHeight,
+                        node.scrollHeight
+                      );
+                      return node.scrollTop !== before;
+                    }
+                    node = node.parentElement;
+                  }
+                  return false;
+                }"""
+            )
+            if scrolled:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _is_inside(candidate: Locator, container: Locator) -> bool:
+    try:
+        container_handle = container.element_handle(timeout=500)
+    except Exception:
+        return False
+    if container_handle is None:
+        return False
+    try:
+        return bool(
+            candidate.evaluate(
+                "(el, containerEl) => containerEl.contains(el)", container_handle
+            )
+        )
+    except Exception:
+        # 跟 container 不同一個 frame 時無法比較，視為不在裡面即可
+        # （銀行代碼彈出視窗本來就不該跟轉入帳號欄位同一個 frame）。
+        return False
+
+
 def fill_manual_destination(page: Page, bank_code: str, account_number: str) -> None:
     row = _row_for_label(page, "轉入帳號")
     bank_select = row.locator('select[id="form1:bankList"]')
@@ -400,6 +455,13 @@ def fill_manual_destination(page: Page, bank_code: str, account_number: str) -> 
     # 隱藏 select 就不會更新。改成把每個符合的候選都點過一輪，點完立刻
     # 確認 select 有沒有變成 target_value，點對了就停止，都試過還是沒變
     # 才真的當作失敗。
+    #
+    # 安全限制：轉入帳號欄本身（row）常用帳號那顆下拉鈕，顯示的帳號字串
+    # 開頭就可能剛好是這個銀行代碼（例如常用清單殘留一筆「806(元大銀行)
+    # -0021...」，跟目標代碼 806 撞號但帳號完全不同），絕對不能把它當成
+    # 銀行代碼清單裡的項目點下去，否則會把轉入帳號誤填成完全不相干的帳號。
+    # 銀行代碼彈出視窗一定是另一個獨立的浮層，不會是 row 底下的元素，
+    # 候選一律排除 row 裡面的節點。
     code_pattern = re.compile(rf"(^|\D){re.escape(bank_code)}(\D|$)")
     matched = False
     deadline = time.monotonic() + 15
@@ -415,6 +477,8 @@ def fill_manual_destination(page: Page, bank_code: str, account_number: str) -> 
                 try:
                     if not candidate.is_visible():
                         continue
+                    if _is_inside(candidate, row):
+                        continue
                     click_nearest_control(candidate)
                 except Exception:
                     continue
@@ -429,7 +493,10 @@ def fill_manual_destination(page: Page, bank_code: str, account_number: str) -> 
             if matched:
                 break
         if not matched:
-            page.wait_for_timeout(200)
+            # 這一輪畫面上完全找不到符合的候選，很可能是清單還沒捲到那裡；
+            # 主動捲動一段再重試，而不是原地等待同一段畫面。
+            if not _scroll_bank_code_dialog(page):
+                page.wait_for_timeout(200)
     if not matched:
         raise RuntimeError(f"已嘗試點選銀行代碼 {bank_code} 清單裡符合的項目，但畫面未更新")
 
@@ -442,6 +509,19 @@ def fill_manual_destination(page: Page, bank_code: str, account_number: str) -> 
     account_input.click()
     account_input.press("Meta+A")
     account_input.fill(account_number)
+
+    # 最後再次確認：銀行代碼仍是我們點選的那個、帳號欄位也真的填成我們
+    # 要的號碼，而不是相信中途每一步「沒有例外」就代表結果正確——避免
+    # 期間任何一次點擊誤觸了轉入帳號原本殘留的常用帳號，把欄位又換回
+    # 別的帳號。
+    if bank_select.input_value() != target_value:
+        raise RuntimeError(
+            f"填入帳號後銀行代碼又變動了（預期 {bank_code}），為安全起見停止，請人工檢查畫面"
+        )
+    if account_input.input_value() != account_number:
+        raise RuntimeError(
+            f"轉入帳號欄填入後內容不是 {account_number}，為安全起見停止，請人工檢查畫面"
+        )
 
 
 def choose_immediate_date(page: Page) -> None:
