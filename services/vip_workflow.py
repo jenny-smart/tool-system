@@ -205,10 +205,18 @@ class VipStoredValueWorkflow:
     # 2. 轉檔＋高雄/新竹彙整
     # ============================================================
     def _finish_log(self, period: str, step: str, result: StepResult) -> StepResult:
-        if result.errors:
-            self.execution_log.append(period, step, "失敗", "；".join(result.errors))
-        else:
-            self.execution_log.append(period, step, "完成", "；".join(result.messages) or "無訊息")
+        """主控表「執行紀錄」以前是整個步驟一列，全區跑十幾個地區×類型時
+        「訊息」欄會塞成一長串很難看。改成每一則訊息各自佔一列（一個
+        地區×類型一列），順便修掉「只要有任何一筆失敗，其他已經成功的
+        地區訊息就整個不寫進紀錄」的問題——現在成功／失敗都會各自留下
+        紀錄，不會因為部分失敗就整批看不到。
+        """
+        for msg in result.messages:
+            self.execution_log.append(period, step, "完成", msg)
+        for msg in result.errors:
+            self.execution_log.append(period, step, "失敗", msg)
+        if not result.messages and not result.errors:
+            self.execution_log.append(period, step, "完成", "無訊息")
         return result
 
     def resolve_target_areas(self, area: str) -> Optional[set]:
