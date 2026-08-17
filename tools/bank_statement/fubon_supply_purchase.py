@@ -9,10 +9,8 @@ from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login
 from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
 from tools.bank_statement.fubon_transfer_common import (
-    SavedAccountNotFound,
     choose_immediate_date,
     choose_manual_destination,
-    choose_saved_destination,
     choose_source_account,
     fill_manual_destination,
     fill_row_inputs,
@@ -39,15 +37,14 @@ def fill_supply_purchase(
     page = open_transfer_form(page)
     choose_source_account(page, area, source_account)
 
-    try:
-        choose_saved_destination(page, str(item["account_number"]))
-    except SavedAccountNotFound:
-        print(f"常用轉入帳號清單找不到帳號「{item['account_number']}」，改用自行輸入。")
-        choose_manual_destination(page)
-        fill_manual_destination(
-            page, str(item["bank_code"]), str(item["account_number"])
-        )
-        print(f"轉入帳號已填入：{item['bank_code']}／{item['account_number']}")
+    # N／O 欄（匯款銀行、帳號）本來就是這份報表的必填欄位，一律有值，
+    # 不需要也不要再去查常用轉入帳號清單：那套「點開彈出視窗、比對卡片
+    # 文字」的互動本身比較不穩定（多次實機測試出現彈出視窗沒關閉、銀行
+    # 代碼撞號誤點到不相干帳號等問題），既然報表已經明確指定銀行代碼與
+    # 帳號，直接自行輸入更可靠、也不會有選錯常用帳號的風險。
+    choose_manual_destination(page)
+    fill_manual_destination(page, str(item["bank_code"]), str(item["account_number"]))
+    print(f"轉入帳號已填入：{item['bank_code']}／{item['account_number']}")
     page.wait_for_timeout(800)
 
     fill_row_inputs(page, "轉帳金額", [str(item["amount"])])

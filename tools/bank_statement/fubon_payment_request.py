@@ -33,17 +33,16 @@ def fill_payment_request(
     page = open_transfer_form(page)
     choose_source_account(page, area, source_account)
 
-    try:
-        choose_saved_destination(page, str(item["name"]))
-    except SavedAccountNotFound:
-        bank_name = str(item.get("bank_name") or "").strip()
-        account_number = str(item.get("account_number") or "").strip()
-        if not bank_name or not account_number:
-            raise RuntimeError(
-                f"常用轉入帳號清單找不到「{item['name']}」，"
-                "且 I 欄缺少可解析的銀行名稱或帳號可自行輸入"
-            ) from None
-        print(f"常用轉入帳號清單找不到「{item['name']}」，改用自行輸入：{bank_name}／{account_number}")
+    bank_name = str(item.get("bank_name") or "").strip()
+    account_number = str(item.get("account_number") or "").strip()
+    if bank_name and account_number:
+        # I 欄（收款帳號）已經有可解析的銀行代碼＋帳號時，直接自行輸入，
+        # 不要再去查常用轉入帳號清單。常用帳號清單那套「點開彈出視窗、
+        # 比對卡片文字」的互動本身就比較不穩定（多次實機測試出現彈出視窗
+        # 沒關閉、銀行代碼撞號誤點到不相干帳號等問題），I 欄既然已經明確
+        # 指定要匯去哪個帳號，用它自行輸入既更可靠、也不會有選錯常用帳號
+        # 的風險。只有 I 欄缺資料、真的沒有其他依據時，才退回查常用帳號。
+        print(f"I 欄已提供收款帳號，直接自行輸入：{bank_name}／{account_number}")
         choose_manual_destination(page)
         # 跟 fubon_atm_refund.py 一樣：點「自行輸入」後銀行代碼下拉框是另外
         # AJAX 產生的元件，比底層 select 晚出現；choose_manual_destination
@@ -52,6 +51,14 @@ def fill_payment_request(
         # 下拉框」。
         page.wait_for_timeout(800)
         fill_manual_destination(page, bank_name, account_number)
+    else:
+        try:
+            choose_saved_destination(page, str(item["name"]))
+        except SavedAccountNotFound:
+            raise RuntimeError(
+                f"常用轉入帳號清單找不到「{item['name']}」，"
+                "且 I 欄缺少可解析的銀行名稱或帳號可自行輸入"
+            ) from None
     page.wait_for_timeout(800)
 
     fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
