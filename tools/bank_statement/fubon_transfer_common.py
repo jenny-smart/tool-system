@@ -99,6 +99,24 @@ def click_breadcrumb_transfer_link(page: Page, timeout: int = 15_000) -> None:
     raise RuntimeError("富邦頁面找不到麵包屑的『立即/預約轉帳』連結")
 
 
+def _row_text_in_context(context: Context, label: str) -> str | None:
+    """在單一 frame/page 裡找 label 所在列的文字；找不到就回傳 None。"""
+    try:
+        node = _visible(context.get_by_text(label, exact=True))
+    except Exception:
+        return None
+    if node is None:
+        return None
+    for xpath in ("ancestor::tr[1]", "ancestor::div[contains(@class,'row')][1]", "parent::*"):
+        row = node.locator(f"xpath={xpath}")
+        if row.count():
+            try:
+                return row.first.inner_text(timeout=1_000)
+            except Exception:
+                return None
+    return None
+
+
 def _row_for_label(page: Page, label: str, timeout: int = 15_000) -> Locator:
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
@@ -138,7 +156,9 @@ def open_transfer_form(page: Page) -> Page:
     結果）頁面同樣會顯示「轉出帳號」字樣，只看這個字判斷表單是否已開啟，
     會誤把結果頁當成可直接填寫的新表單，導致沒有點『立即/預約轉帳』就
     直接嘗試選轉出／轉入帳號，接不到下一筆。只有還沒選擇帳號的全新 STEP 1
-    表單才會出現「==請選擇==」下拉占位字，用它來分辨表單是否真的可填寫。
+    表單，「轉出帳號」欄位本身才會顯示「==請選擇==」下拉占位字；不能只看
+    整個頁面裡有沒有這個字串，結果頁上其他不相關、還沒填的欄位也可能剛好
+    殘留同樣的占位字，會誤判成表單已經是空白的。
     """
     in_transfer_section = False
     fresh_form_open = False
@@ -149,7 +169,8 @@ def open_transfer_form(page: Page) -> Page:
             continue
         if "轉出帳號" in body_text:
             in_transfer_section = True
-            if "==請選擇==" in body_text:
+            source_row_text = _row_text_in_context(context, "轉出帳號")
+            if source_row_text and "==請選擇==" in source_row_text:
                 fresh_form_open = True
             break
 
