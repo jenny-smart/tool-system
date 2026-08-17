@@ -2190,11 +2190,10 @@ FINANCE_TASKS = [
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
-    "orders_memo_system": [
-        "批次建單", "舊客建單", "新客建單", "儲值金建單", "訂單轉換",
-        "儲值金補價差", "排班管理", "LINE通知訊息", "訂單備註", "對帳管理",
-        "異動管理", "評估工具", "雙向訂單檢查", "查詢無LINE連結訂單", "儲值獎金備註",
-    ],
+    # orders_memo_system 不用這份清單：功能選單直接沿用 orders-system 原生的
+    # 分類選單（見下方 system_type == "orders_memo_system" 分支），避免跟
+    # pages/訂單系統.py 一樣，另外維護一份容易過時的攤平清單。
+    "orders_memo_system": ["（見下方原生功能選單）"],
     "vip": [
         "建立當月彙整檔",
         "轉檔＋高雄/新竹彙整",
@@ -2474,12 +2473,17 @@ system_type = selected_system.get("type", "vip")
 with func_col:
     st.markdown('<div class="field-label">🎯 執行功能</div>', unsafe_allow_html=True)
 
-    selected_function = st.selectbox(
-        "執行功能",
-        functions_for_system(selected_system),
-        label_visibility="collapsed",
-        key="selected_function",
-    )
+    if system_type == "orders_memo_system":
+        # 訂單系統改用下方 orders-system 原生的分類選單，這裡不用再選一次。
+        st.caption("👇 請在下方選單選擇功能")
+        selected_function = None
+    else:
+        selected_function = st.selectbox(
+            "執行功能",
+            functions_for_system(selected_system),
+            label_visibility="collapsed",
+            key="selected_function",
+        )
 
 if system_type == "finance_management" and selected_function == "【鯨躍發票】開立發票":
     st.markdown("</div>", unsafe_allow_html=True)
@@ -2489,20 +2493,8 @@ if system_type == "finance_management" and selected_function == "【鯨躍發票
     st.stop()
 
 if system_type == "orders_memo_system":
-    from tools.memo_system.ui import render_memo_system
     from tools.orders_system.ui import render_orders_system
 
-    _orders_map = {
-        "批次建單": ("orders", "批次建單（Google Sheet）"), "舊客建單": ("orders", "舊客快速建單"),
-        "新客建單": ("orders", "新客資料拆解"), "儲值金建單": ("orders", "儲值金購買"),
-        "訂單轉換": ("orders", "訂單轉換"), "儲值金補價差": ("orders", "儲值金補價差"),
-        "排班管理": ("memo", "📅 排班管理"), "LINE通知訊息": ("orders", "LINE 通知產生器"),
-        "訂單備註": ("memo", "📋 客服作業"), "對帳管理": ("memo", "💰 財務對帳"),
-        "異動管理": ("memo", "🔄 服務異動"), "評估工具": ("memo", "📐 評估文字工具"),
-        "雙向訂單檢查": ("orders", "雙向訂單檢查"),
-        "查詢無LINE連結訂單": ("orders", "查詢無LINE連結訂單"),
-        "儲值獎金備註": ("orders", "儲值獎金備註"),
-    }
     _login_a, _login_b, _login_c = st.columns([3, 3, 1])
     with _login_a:
         _backend_email = st.text_input("後台帳號", key="orders_backend_email")
@@ -2510,13 +2502,11 @@ if system_type == "orders_memo_system":
         _backend_password = st.text_input("後台密碼", type="password", key="orders_backend_password")
     with _login_c:
         _backend_env = st.selectbox("環境", ["prod", "dev"], key="orders_backend_env")
-    _kind, _mode = _orders_map[selected_function]
-    if _kind == "orders":
-        render_orders_system(forced_mode=_mode, shared_backend_email=_backend_email,
-                             shared_backend_password=_backend_password, shared_env=_backend_env)
-    else:
-        render_memo_system(forced_main_section=_mode, shared_backend_email=_backend_email,
-                           shared_backend_password=_backend_password, shared_env=_backend_env)
+    render_orders_system(
+        shared_backend_email=_backend_email,
+        shared_backend_password=_backend_password,
+        shared_env=_backend_env,
+    )
     st.stop()
 
 monthly_order_functions = ["上半月訂單", "下半月訂單"]

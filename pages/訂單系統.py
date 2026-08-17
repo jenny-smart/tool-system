@@ -2,14 +2,14 @@ from __future__ import annotations
 
 # ============================================================
 # 檔名：pages/訂單系統.py
-# 說明：整合 orders-system（訂單系統）與 memo-system（備忘系統），
-#       共用同一組「後台帳號/密碼/環境」，並攤平成單一功能選單。
+# 說明：整合 orders-system（訂單系統，內建已含備忘系統項目），
+#       共用同一組「後台帳號/密碼/環境」，直接沿用 orders-system 原生的
+#       分類功能選單（不再自行攤平維護一份清單）。
 # ============================================================
 
 import streamlit as st
 
 from tools.orders_system.ui import render_orders_system
-from tools.memo_system.ui import render_memo_system
 from utils.auth import authenticate
 from utils.permissions import can_access_system
 
@@ -68,48 +68,17 @@ with col_env:
 st.markdown("---")
 
 # ------------------------------------------------------------------
-# 攤平後的單一功能選單
+# v2：不再維護獨立的攤平功能清單（FUNCTION_MAP）。
+# orders-system 的「功能選單」本身就是完整分類清單（A~F，含每項說明，
+# 也已經內建把備忘系統項目——排班管理／訂單客服備註／財務對帳／服務異動／
+# 評估文字工具——路由到 tools/orders_system/memo_system 這個墊片，轉呼叫
+# tool-system 真正的備忘系統）。這裡直接沿用它原生畫出來的下拉選單，
+# 不再另外攤平或分流，日後 orders-system 新增／改名功能項目時，
+# 這裡會自動一起更新，不用手動同步兩份清單。
 # ------------------------------------------------------------------
 
-FUNCTION_MAP = {
-    "批次建單": ("orders", "批次建單（Google Sheet）"),
-    "舊客建單": ("orders", "舊客快速建單"),
-    "新客建單": ("orders", "新客資料拆解"),
-    "儲值金建單": ("orders", "儲值金購買"),
-    "訂單轉換": ("orders", "訂單轉換"),
-    "儲值金補價差": ("orders", "儲值金補價差"),
-    "排班管理": ("memo", "📅 排班管理"),
-    "LINE通知訊息": ("orders", "LINE 通知產生器"),
-    "訂單備註": ("memo", "📋 客服作業"),
-    "對帳管理": ("memo", "💰 財務對帳"),
-    "異動管理": ("memo", "🔄 服務異動"),
-    "評估工具": ("memo", "📐 評估文字工具"),
-    "雙向訂單檢查": ("orders", "雙向訂單檢查"),
-    "查詢無LINE連結訂單": ("orders", "查詢無LINE連結訂單"),
-    "儲值獎金備註": ("orders", "儲值獎金備註"),
-}
-
-function_choice = st.selectbox(
-    "選擇功能",
-    ["請選擇"] + list(FUNCTION_MAP.keys()),
-    label_visibility="collapsed",
-    key="orders_memo_function_choice",
+render_orders_system(
+    shared_backend_email=shared_backend_email,
+    shared_backend_password=shared_backend_password,
+    shared_env=shared_env,
 )
-
-if function_choice != "請選擇":
-    system_key, internal_mode = FUNCTION_MAP[function_choice]
-
-    if system_key == "orders":
-        render_orders_system(
-            forced_mode=internal_mode,
-            shared_backend_email=shared_backend_email,
-            shared_backend_password=shared_backend_password,
-            shared_env=shared_env,
-        )
-    else:
-        render_memo_system(
-            forced_main_section=internal_mode,
-            shared_backend_email=shared_backend_email,
-            shared_backend_password=shared_backend_password,
-            shared_env=shared_env,
-        )
