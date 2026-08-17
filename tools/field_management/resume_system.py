@@ -115,7 +115,18 @@ def _get_secret(key: str) -> str:
     return ""
 
 
-def _imap_connect() -> imaplib.IMAP4_SSL:
+_IMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _imap_date(dt: datetime) -> str:
+    """IMAP SINCE/BEFORE 只吃英文月份縮寫；strftime('%b') 會受伺服器 locale 影響
+    （非英文 locale 下組出來的日期字串會讓整個 SEARCH 條件失效，靜默回傳 0 筆），
+    所以這裡固定用英文月份表，不依賴系統 locale。
+    """
+    return f"{dt.day:02d}-{_IMAP_MONTHS[dt.month - 1]}-{dt.year:04d}"
+
+
+def _imap_connect() -> tuple[imaplib.IMAP4_SSL, str]:
     user = _get_secret("RESUME_GMAIL_USER") or _get_secret("GMAIL_USER")
     password = _get_secret("RESUME_GMAIL_APP_PASSWORD") or _get_secret("GMAIL_APP_PASSWORD")
 
@@ -124,19 +135,21 @@ def _imap_connect() -> imaplib.IMAP4_SSL:
 
     imap = imaplib.IMAP4_SSL("imap.gmail.com")
     imap.login(user, password)
-    return imap
+    return imap, user
 
 
 def _search(imap: imaplib.IMAP4_SSL, criteria: str) -> list[bytes]:
-    try:
-        typ, data = imap.search("UTF-8", criteria.encode("utf-8"))
-    except Exception:
-        try:
-            typ, data = imap.search(None, criteria)
-        except Exception:
-            return []
+    """執行 IMAP SEARCH。刻意不吞掉失敗：條件組錯（例如日期格式壞掉）在 Gmail
+    上通常不會拋例外，而是回傳 NO/BAD，若我們把這種情況也當成「沒有符合的信件」
+    直接回傳空陣列，使用畫面會顯示「成功、新增 0 筆」，但實際上是搜尋條件本身
+    出錯──這種情況必須讓呼叫端看到明確錯誤，而不是誤以為真的沒有符合的信。
+    """
+    typ, data = imap.search("UTF-8", criteria.encode("utf-8"))
 
-    if typ != "OK" or not data or not data[0]:
+    if typ != "OK":
+        raise RuntimeError(f"IMAP 搜尋失敗（回應：{typ}）｜條件：{criteria}")
+
+    if not data or not data[0]:
         return []
 
     return data[0].split()
@@ -298,12 +311,12 @@ def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_typ
         sheets = get_sheets_service()
         _ensure_sheet_exists(sheets, spreadsheet_id, RESUME_SHEET_NAME)
 
-        imap = _imap_connect()
+        imap, mailbox_user = _imap_connect()
         try:
             imap.select("INBOX")
 
-            since_str = start_dt.strftime("%d-%b-%Y")
-            before_str = (end_dt + timedelta(days=1)).strftime("%d-%b-%Y")
+            since_str = _imap_date(start_dt)
+            before_str = _imap_date(end_dt + timedelta(days=1))
             criteria = f'(SUBJECT "{RESUME_SUBJECT}" SINCE {since_str} BEFORE {before_str})'
             nums = _search(imap, criteria)
 
@@ -352,12 +365,12 @@ def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_typ
         count = len(rows)
         status = "成功"
         message = (
-            f"區間={start_dt.strftime('%Y/%m/%d %H:%M:%S')} ~ {end_dt.strftime('%Y/%m/%d %H:%M:%S')}"
-            f"｜新增 {count} 筆"
+            f"信箱={mailbox_user}｜區間={start_dt.strftime('%Y/%m/%d %H:%M:%S')} ~ {end_dt.strftime('%Y/%m/%d %H:%M:%S')}"
+            f"｜IMAP 命中 {len(nums)} 封／新增 {count} 筆"
         )
         log(f"完成擷取104履歷：{message}")
 
-        return {"area": area, "count": count}
+        return {"area": area, "count": count, "mailbox": mailbox_user, "matched": len(nums), "criteria": criteria}
 
     except Exception as exc:
         status = "失敗"
@@ -396,7 +409,7 @@ def fetch_lemon_home_replies(area: str, run_type: str = "手動") -> dict[str, A
         sheets = get_sheets_service()
         _ensure_sheet_exists(sheets, spreadsheet_id, REPLY_SHEET_NAME)
 
-        imap = _imap_connect()
+        imap, mailbox_user = _imap_connect()
         try:
             imap.select("INBOX")
 
@@ -446,10 +459,10 @@ def fetch_lemon_home_replies(area: str, run_type: str = "手動") -> dict[str, A
 
         count = len(rows)
         status = "成功"
-        message = f"新增 {count} 筆"
+        message = f"信箱={mailbox_user}｜IMAP 命中 {len(nums)} 封／新增 {count} 筆"
         log(f"完成擷取104回覆信：{message}")
 
-        return {"area": area, "count": count}
+        return {"area": area, "count": count, "mailbox": mailbox_user, "matched": len(nums), "criteria": criteria}
 
     except Exception as exc:
         status = "失敗"
@@ -503,7 +516,7 @@ def extract_latest_resumes(area: str, target_sheet_name: str, run_type: str = "�
             if name or phone:
                 existing_records.add(f"{name}|{phone}")
 
-        imap = _imap_connect()
+        imap, mailbox_user = _imap_connect()
         rows: list[list[Any]] = []
 
         try:
@@ -568,10 +581,10 @@ def extract_latest_resumes(area: str, target_sheet_name: str, run_type: str = "�
 
         count = len(rows)
         status = "成功"
-        message = f"新增 {count} 筆"
+        message = f"信箱={mailbox_user}｜未讀命中 {len(nums)} 封／新增 {count} 筆"
         log(f"完成擷取最新雙北履歷：{message}")
 
-        return {"area": area, "count": count}
+        return {"area": area, "count": count, "mailbox": mailbox_user, "matched": len(nums), "criteria": criteria}
 
     except Exception as exc:
         status = "失敗"
@@ -595,7 +608,7 @@ def extract_latest_resumes(area: str, target_sheet_name: str, run_type: str = "�
 
 
 # ────────────────────────────────────────────────────────────
-# CLI（手動測試用；主要介面在 tools/field_management/ui.py）
+# CLI（手動測試用；主要介面在 toolapp.py 主控台）
 # ────────────────────────────────────────────────────────────
 
 def main() -> None:
