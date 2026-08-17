@@ -559,6 +559,25 @@ def wait_confirmation(page: Page, timeout: int = 30_000) -> None:
     raise RuntimeError("已按確認，但未進入富邦確認資料頁")
 
 
+def _amount_field_still_editable(context: Context) -> bool:
+    """STEP 1 表單的『轉帳金額』是可編輯輸入框；一旦真的送出進入 STEP 2／3，
+    這個欄位會變成純文字。用這個差異確認畫面是否真的已經離開輸入表單。"""
+    try:
+        node = _visible(context.get_by_text("轉帳金額", exact=True))
+    except Exception:
+        return False
+    if node is None:
+        return False
+    for xpath in ("ancestor::tr[1]", "ancestor::div[contains(@class,'row')][1]", "parent::*"):
+        row = node.locator(f"xpath={xpath}")
+        if row.count():
+            try:
+                return row.first.locator('input:visible:not([type="hidden"])').count() > 0
+            except Exception:
+                return False
+    return False
+
+
 def wait_user_completed_transfer(page: Page, timeout: int = 600_000) -> None:
     """等待使用者手動核對並完成本筆最終交易，才準備下一筆。"""
     print("請人工核對並完成本筆最終交易；完成後會自動準備下一筆。")
@@ -570,7 +589,14 @@ def wait_user_completed_transfer(page: Page, timeout: int = 600_000) -> None:
                 text = context.locator("body").inner_text(timeout=800)
             except Exception:
                 continue
-            if any(marker in text for marker in ("交易成功", "轉帳成功", "交易已完成")):
-                return
+            if not any(marker in text for marker in ("交易成功", "轉帳成功", "交易已完成")):
+                continue
+            # 「交易成功」等字樣可能是頁面上其他不相關的殘留內容（例如通知
+            # 中心、瀏覽器快取著的前一筆交易結果），不能只看整頁有沒有出現
+            # 這幾個字就當作這一筆真的完成了，還要確認這一筆的表單真的已
+            # 經不是還沒送出的可編輯狀態。
+            if _amount_field_still_editable(context):
+                continue
+            return
         page.wait_for_timeout(500)
     raise RuntimeError("等待人工完成富邦交易逾時；尚未準備下一筆")
