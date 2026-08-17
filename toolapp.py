@@ -2423,14 +2423,10 @@ except Exception:
 # ═══════════════════════════════════════════════════════════
 st.markdown('<div class="card">', unsafe_allow_html=True)
 
-head_left, head_orders, head_report, head_log = st.columns([1.7, 1, 1, 1])
+head_left, head_report, head_log = st.columns([1.7, 1, 1])
 
 with head_left:
     st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
-
-with head_orders:
-    if can_access_system("orders_memo_system"):
-        st.page_link("pages/訂單系統.py", label="🧹 訂單系統", use_container_width=True)
 
 with head_report:
     if can_access_page("report"):
@@ -2495,18 +2491,8 @@ if system_type == "finance_management" and selected_function == "【鯨躍發票
 if system_type == "orders_memo_system":
     from tools.orders_system.ui import render_orders_system
 
-    _login_a, _login_b, _login_c = st.columns([3, 3, 1])
-    with _login_a:
-        _backend_email = st.text_input("後台帳號", key="orders_backend_email")
-    with _login_b:
-        _backend_password = st.text_input("後台密碼", type="password", key="orders_backend_password")
-    with _login_c:
-        _backend_env = st.selectbox("環境", ["prod", "dev"], key="orders_backend_env")
-    render_orders_system(
-        shared_backend_email=_backend_email,
-        shared_backend_password=_backend_password,
-        shared_env=_backend_env,
-    )
+    # 後台帳號/密碼/環境直接沿用 orders-system 原生畫出來的欄位，不在這裡重複收集。
+    render_orders_system()
     st.stop()
 
 monthly_order_functions = ["上半月訂單", "下半月訂單"]
