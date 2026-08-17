@@ -308,6 +308,14 @@ def has_visible_text_containing(page: Page, text: str) -> bool:
 
 def is_fubon_logged_in(page: Page) -> bool:
     frame_urls = [frame.url for frame in page.frames]
+    # 使用者按下登出後，富邦會把顯示「您已成功登出！」的確認畫面嵌在
+    # /Logout.faces 這個 frame 裡，但外層網址仍是 /common/Index.faces；
+    # 下面那條「畫面裡有 /Logout.faces frame 就當作已登入」的規則，剛好會
+    # 把這個登出後的確認畫面誤判成登入中，導致腳本以為工作階段還在，卡在
+    # 這一頁不會重新登入。必須先排除這個明確的已登出畫面，才能再看
+    # /Logout.faces frame 的規則。
+    if has_visible_text_containing(page, "您已成功登出"):
+        return False
     # 富邦未登入頁的共用頁首也會顯示「登出」，不能以該文字單獨判定。
     # 真正登入前會存在 PreLogin.faces；部分版本登入後仍保留舊 PreLogin frame，
     # 因此要先檢查登入後的正向訊號，不能看見 PreLogin 就立即回傳 False。
