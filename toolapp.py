@@ -1047,7 +1047,7 @@ def sync_view_from_query_params() -> None:
     except Exception:
         view = None
 
-    if view in ["report", "log", "field_extra"]:
+    if view in ["report", "log"]:
         st.session_state.view = view
 
 
@@ -1722,37 +1722,6 @@ def render_log_page() -> None:
                         st.code(row["content"] or "空 log", language="text")
 
 
-def render_field_extra_tools() -> None:
-    """外場排程系統的手動工具：新增名冊及調薪、履歷系統。
-    對應原本「新增名冊及調薪.gs」「履歷系統.gs」的選單功能，直接嵌在主控台裡
-    （用 view 切換，不另外開分頁），跟業績報表 / Log 頁面同一套模式。"""
-    from tools.field_management.ui import render_resume_system, render_roster_raise_system
-
-    top_cols = st.columns([1, 1, 1, 1])
-    with top_cols[0]:
-        if st.button("← 返回主控台", use_container_width=True):
-            set_view("main")
-            st.rerun()
-
-    st.markdown(
-        '<div class="app-title">📋 外場排程系統｜名冊 / 調薪 / 履歷</div>',
-        unsafe_allow_html=True,
-    )
-
-    function_choice = st.radio(
-        "選擇功能",
-        ["新增名冊及調薪", "履歷系統"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="field_extra_function_choice",
-    )
-
-    st.markdown("---")
-
-    if function_choice == "新增名冊及調薪":
-        render_roster_raise_system()
-    else:
-        render_resume_system()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2252,11 +2221,18 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "一鍵執行月排程",
     ],
     "field_daily_schedule": [
-        "外場排班統計表",
-        "外場專員班表",
-        "外場當月次月訂單",
-        "外場專員個資",
-        "一鍵執行外場日排程",
+        "【日排程】外場排班統計表",
+        "【日排程】外場專員班表",
+        "【日排程】外場當月次月訂單",
+        "【日排程】外場專員個資",
+        "【日排程】一鍵執行外場日排程",
+        "【月排程】新增專員名冊",
+        "【月排程】新增專員調薪",
+        "【新人排程】104履歷-All",
+        "【新人排程】104履歷回覆信",
+        "【新人排程】104履歷-雙北專員",
+        "【新人排程】新人訓練",
+        "【新人排程】新人入職",
     ],
     # ── ★ 新增：客服排程系統功能清單 ────────────────────────
     "service_schedule": [
@@ -2309,36 +2285,42 @@ DAILY_TARGET_MAP = {
 }
 
 FIELD_SCRIPT_MAP = {
-    "外場排班統計表": [
+    "【日排程】外場排班統計表": [
         "module:tools.field_management.scheduler",
         "--target",
         "schedule_stats",
     ],
 
-    "外場專員班表": [
+    "【日排程】外場專員班表": [
         "module:tools.field_management.scheduler",
         "--target",
         "staff_schedule",
     ],
 
-    "外場當月次月訂單": [
+    "【日排程】外場當月次月訂單": [
         "module:tools.field_management.scheduler",
         "--target",
         "orders",
     ],
 
-    "外場專員個資": [
+    "【日排程】外場專員個資": [
         "module:tools.field_management.scheduler",
         "--target",
         "staff_profile",
     ],
 
-    "一鍵執行外場日排程": [
+    "【日排程】一鍵執行外場日排程": [
         "module:tools.field_management.scheduler",
         "--target",
         "all",
     ],
 }
+
+# ── ★ 外場排程系統：月排程／新人排程功能（直接呼叫 Python，不走 subprocess）──
+FIELD_ROSTER_RAISE_FUNCTIONS = ("【月排程】新增專員名冊", "【月排程】新增專員調薪")
+FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】104履歷回覆信", "【新人排程】104履歷-雙北專員")
+FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
+FIELD_EXTRA_FUNCTIONS = FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_RESUME_FUNCTIONS + FIELD_PLACEHOLDER_FUNCTIONS
 
 # ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
 SERVICE_STEP_MAP = {
@@ -2404,13 +2386,6 @@ if st.session_state.view == "log":
     render_log_page()
     st.stop()
 
-if st.session_state.view == "field_extra":
-    if not can_access_system("field_daily_schedule"):
-        st.error("你沒有權限使用外場排程系統")
-        st.stop()
-    render_field_extra_tools()
-    st.stop()
-
 # ── ★ Gmail 401歸檔 ──────────────────────────────────────
 selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
 if selected_system_cfg.get("type") == "gmail_401":
@@ -2449,7 +2424,7 @@ except Exception:
 # ═══════════════════════════════════════════════════════════
 st.markdown('<div class="card">', unsafe_allow_html=True)
 
-head_left, head_orders, head_field, head_report, head_log = st.columns([1.4, 1, 1, 1, 1])
+head_left, head_orders, head_report, head_log = st.columns([1.7, 1, 1, 1])
 
 with head_left:
     st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
@@ -2457,12 +2432,6 @@ with head_left:
 with head_orders:
     if can_access_system("orders_memo_system"):
         st.page_link("pages/訂單系統.py", label="🧹 訂單系統", use_container_width=True)
-
-with head_field:
-    if can_access_system("field_daily_schedule"):
-        if st.button("📋 名冊 / 調薪 / 履歷", use_container_width=True):
-            set_view("field_extra")
-            st.rerun()
 
 with head_report:
     if can_access_page("report"):
@@ -2556,6 +2525,7 @@ period = ""
 start_date_value = None
 end_date_value = None
 monthly_date_mode = "期別"
+resume_target_sheet = ""
 
 date_col, area_col = st.columns([2, 1])
 
@@ -2889,6 +2859,50 @@ with date_col:
             st.caption(f"系統將處理 {start_date_value} 的排班及前一天的營業額")
             end_date_value = None
 
+    elif system_type == "field_daily_schedule" and selected_function in FIELD_EXTRA_FUNCTIONS:
+        today_date = datetime.now(TW_TZ).date()
+
+        if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
+            st.markdown('<div class="field-label">📆 期別（YYYYMM）</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=tw_now_text("%Y%m"),
+                placeholder="例如：202609",
+                label_visibility="collapsed",
+                key=f"field_roster_raise_ym_{selected_function}",
+            )
+            if selected_function == "【月排程】新增專員名冊":
+                st.caption("複製上期「YYYYMM專員名冊」為新期別，並把離職人員移到「離職名冊」")
+            else:
+                st.caption("複製上期「YYYYMM調薪資料」為新期別，重建 B3 IMPORTRANGE、K 欄、N 欄公式")
+
+        elif selected_function == "【新人排程】104履歷-All":
+            st.markdown('<div class="field-label">📆 履歷日期區間</div>', unsafe_allow_html=True)
+            d1, d2 = st.columns(2)
+            with d1:
+                start_date_value = st.date_input("開始日期", value=today_date, key="resume_all_start_date")
+            with d2:
+                end_date_value = st.date_input("結束日期", value=today_date, key="resume_all_end_date")
+            st.caption("依日期區間（含當天全天）從 Gmail 擷取「104應徵履歷」信件，寫入「104應徵履歷」工作表")
+
+        elif selected_function == "【新人排程】104履歷回覆信":
+            st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
+            st.info("擷取所有 LEMON HOME 回覆信，不需要選日期", icon="✉️")
+
+        elif selected_function == "【新人排程】104履歷-雙北專員":
+            st.markdown('<div class="field-label">📄 寫入的工作表名稱</div>', unsafe_allow_html=True)
+            resume_target_sheet = st.text_input(
+                "工作表名稱",
+                placeholder="例如：202608專員名冊",
+                label_visibility="collapsed",
+                key="resume_latest_sheet_name",
+            )
+            st.caption("掃描未讀且主旨含雙北地區關鍵字的「104應徵履歷」信件，過濾內勤/助理等職缺後寫入此工作表")
+
+        else:
+            st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
+            st.info("功能開發中，尚未接上實際執行邏輯。", icon="🚧")
+
     else:
         st.markdown('<div class="field-label">📆 執行日期區間</div>', unsafe_allow_html=True)
         d1, d2 = st.columns(2)
@@ -2928,7 +2942,7 @@ with area_col:
         "【財報】工具包押金｜統計月份彙整（U–X）",
         "【財報】工具包押金｜批次依備註打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
-    ):
+    ) or selected_function in FIELD_EXTRA_FUNCTIONS:
         area_select_options = [area for area in area_options if area != "全區"]
     if selected_function == "【檸檬後台】異動儲值金":
         area_select_options = [area for area in ("台北", "台中", "桃園", "新竹", "高雄") if area in area_options]
@@ -3599,6 +3613,62 @@ if run_clicked:
                 except Exception as e:
                     add_log(f"執行失敗：{e}", "error")
                     add_log(traceback.format_exc(), "error")
+        st.rerun()
+
+    if system_type == "field_daily_schedule" and selected_function in FIELD_EXTRA_FUNCTIONS:
+        add_log(f"開始執行：{system_name} / {selected_function} / {selected_area_value}")
+
+        if selected_function in FIELD_PLACEHOLDER_FUNCTIONS:
+            add_log(f"「{selected_function}」尚未開發，敬請期待。", "warning")
+            st.rerun()
+
+        from tools.field_management import resume_system, roster_raise
+
+        with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
+            try:
+                if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
+                    ym = (period or "").strip()
+                    if not re.fullmatch(r"\d{6}", ym):
+                        raise ValueError("請輸入正確期別，格式：YYYYMM")
+
+                    if selected_function == "【月排程】新增專員名冊":
+                        result = roster_raise.create_roster_sheet(selected_area_value, ym)
+                        add_log(
+                            f"✅ 專員名冊完成｜{result['source']} → {result['new']}｜"
+                            f"離職名冊新增 {result['moved']} 筆",
+                            "success",
+                        )
+                    else:
+                        result = roster_raise.create_raise_sheet(selected_area_value, ym)
+                        add_log(f"✅ 調薪資料完成｜{result['source']} → {result['new']}", "success")
+
+                elif selected_function == "【新人排程】104履歷-All":
+                    if not start_date_value or not end_date_value:
+                        raise ValueError("請選擇日期區間")
+                    start_dt = datetime.combine(start_date_value, datetime.min.time()).replace(tzinfo=TW_TZ)
+                    end_dt = datetime.combine(end_date_value, datetime.max.time()).replace(tzinfo=TW_TZ)
+                    result = resume_system.fetch_resumes_range(selected_area_value, start_dt, end_dt)
+                    add_log(
+                        f"✅ 完成擷取，共新增 {result['count']} 筆"
+                        f"（信箱：{result.get('mailbox', '-')}／IMAP 命中 {result.get('matched', '-')} 封）",
+                        "success",
+                    )
+
+                elif selected_function == "【新人排程】104履歷回覆信":
+                    result = resume_system.fetch_lemon_home_replies(selected_area_value)
+                    add_log(f"✅ 完成擷取，共新增 {result['count']} 筆", "success")
+
+                elif selected_function == "【新人排程】104履歷-雙北專員":
+                    sheet_name = (resume_target_sheet or "").strip()
+                    if not sheet_name:
+                        raise ValueError("請輸入要寫入的工作表名稱")
+                    result = resume_system.extract_latest_resumes(selected_area_value, sheet_name)
+                    add_log(f"✅ 成功擷取 {result['count']} 筆未讀履歷", "success")
+
+            except Exception as e:
+                add_log(f"執行失敗：{e}", "error")
+                add_log(traceback.format_exc(), "error")
+
         st.rerun()
 
     master_id = selected_system.get("master_spreadsheet_id", "")

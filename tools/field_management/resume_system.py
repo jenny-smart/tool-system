@@ -608,7 +608,7 @@ def extract_latest_resumes(area: str, target_sheet_name: str, run_type: str = "�
 
 
 # ────────────────────────────────────────────────────────────
-# CLI（手動測試用；主要介面在 tools/field_management/ui.py）
+# CLI（手動測試用；主要介面在 toolapp.py 主控台）
 # ────────────────────────────────────────────────────────────
 
 def main() -> None:
