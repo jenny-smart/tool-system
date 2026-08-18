@@ -83,14 +83,25 @@ def _search_paper_invoices(page: Page, start_roc: str, end_roc: str) -> None:
         if locator.count():
             _set_readonly_value(locator.first, value)
     _check_paper_only(page)
-    search_button = page.get_by_text("搜尋", exact=False).first
-    search_button.wait_for(state="visible", timeout=10_000)
-    search_button.click()
-    page.wait_for_load_state("networkidle", timeout=15_000)
+    _click_search(page)
     # networkidle 常常在結果表格真的插入 DOM 之前就先回來（AJAX 局部更新，
     # 不算是一次完整導覽），直接接著讀表格容易撈到 0 筆。改成明確等到結果
     # 表格（含「訂單編號」表頭）真的出現，撈不到再補按一次搜尋重試。
     _wait_for_results_table(page)
+
+
+def _click_search(page: Page) -> None:
+    # 實測畫面文字比對容易點到別的「搜尋」（例如瀏覽器書籤列），
+    # 搜尋按鈕實際是 <a onclick="queryInvoiceList();">，直接用 onclick 屬性精準定位。
+    search_button = page.locator("a[onclick='queryInvoiceList();']")
+    if search_button.count():
+        search_button.first.wait_for(state="visible", timeout=10_000)
+        search_button.first.click()
+    else:
+        search_button = page.get_by_text("搜尋", exact=False).first
+        search_button.wait_for(state="visible", timeout=10_000)
+        search_button.click()
+    page.wait_for_load_state("networkidle", timeout=15_000)
 
 
 def _wait_for_results_table(page: Page, *, retry: bool = True) -> None:
@@ -103,11 +114,8 @@ def _wait_for_results_table(page: Page, *, retry: bool = True) -> None:
     except PlaywrightTimeoutError:
         if not retry:
             return
-        search_button = page.get_by_text("搜尋", exact=False).first
-        if search_button.count() and search_button.first.is_visible():
-            search_button.first.click()
-            page.wait_for_load_state("networkidle", timeout=15_000)
-            _wait_for_results_table(page, retry=False)
+        _click_search(page)
+        _wait_for_results_table(page, retry=False)
 
 
 def _row_texts(page: Page) -> tuple[list[str] | None, list[list[str]]]:
