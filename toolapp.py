@@ -1918,6 +1918,21 @@ def queue_cetustek_allowance(*, month="", start_date=None, end_date=None, area="
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_cetustek_full_pipeline(*, month="", start_date=None, end_date=None, area="全區", qyear="", qmonth=""):
+    if not area or area == "全區":
+        raise ValueError("請先選擇區域")
+    qyear = str(qyear or "").strip()
+    qmonth = str(qmonth or "").strip()
+    if not qyear or not qmonth:
+        raise ValueError("請輸入鯨躍配號查詢年份與查詢月份")
+    task = create_local_agent_task(
+        "cetustek.full_pipeline",
+        {"area": area, "month": str(month or "").strip(), "qyear": qyear, "qmonth": qmonth, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent；依序跑財政部字軌下載→鯨躍匯入→鯨躍配號，任何一步失敗就停止）"
+
+
 def queue_cetustek_serial_import(*, month="", start_date=None, end_date=None, area="全區"):
     if not area or area == "全區":
         raise ValueError("請先選擇區域")
@@ -2508,6 +2523,7 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】開立折讓單", "handler": queue_cetustek_allowance, "enabled": True},
     {"name": "【鯨躍發票】電子發票字軌號碼匯入", "handler": queue_cetustek_serial_import, "enabled": True},
     {"name": "【鯨躍發票】電子發票字軌號碼配號", "handler": queue_cetustek_serial_section_query, "enabled": True},
+    {"name": "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）", "handler": queue_cetustek_full_pipeline, "enabled": True},
     {"name": "【財政部電子發票】財政部登入", "handler": queue_mofei_login, "enabled": True},
     {"name": "【財政部電子發票】字軌取號下載", "handler": queue_mofei_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
@@ -3045,6 +3061,35 @@ with date_col:
                     "查詢月份", placeholder="下拉選單上的文字，例如 08", key="finance_cetustek_serial_qmonth"
                 )
             st.caption("請填畫面下拉選單實際顯示的文字；會依「鯨躍字軌配號設定」分頁的保留本數，自動拆成線上單張開立／API串接開立(虛)並儲存")
+        elif selected_function == "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）":
+            st.markdown('<div class="field-label">📆 財政部字軌期別／鯨躍查詢年月</div>', unsafe_allow_html=True)
+            _pipe_start_month = today_date.month if today_date.month % 2 else today_date.month - 1
+            _pipe_next_start_month = _pipe_start_month + 2
+            _pipe_next_year = today_date.year
+            if _pipe_next_start_month > 12:
+                _pipe_next_start_month = 1
+                _pipe_next_year += 1
+            period = st.text_input(
+                "財政部字軌期別",
+                value=f"{_pipe_next_year}{_pipe_next_start_month:02d}",
+                placeholder="例如：202609",
+                label_visibility="collapsed",
+                key="finance_cetustek_pipeline_period",
+            )
+            _pq1, _pq2 = st.columns(2)
+            with _pq1:
+                cetustek_serial_qyear = st.text_input(
+                    "鯨躍查詢年份", placeholder="下拉選單上的文字，例如 115", key="finance_cetustek_pipeline_qyear"
+                )
+            with _pq2:
+                cetustek_serial_qmonth = st.text_input(
+                    "鯨躍查詢月份", placeholder="下拉選單上的文字，例如 09-10", key="finance_cetustek_pipeline_qmonth"
+                )
+            st.caption(
+                "財政部字軌期別格式 YYYYMM；鯨躍查詢年月請填下拉選單實際顯示的文字。"
+                "依序執行財政部字軌下載→鯨躍匯入→鯨躍配號，任何一步失敗（例如財政部這期還沒有字軌）就整個停止，不會繼續跑後面步驟"
+            )
+            st.warning("配號會實際異動鯨躍發票號碼配置且無法回復，第一次執行請留意 Chrome 視窗確認結果", icon="⚠️")
         elif selected_function == "【財政部電子發票】財政部登入":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("開啟財政部電子發票平台登入頁並預填統一編號／帳號，驗證碼與登入請在跳出的 Chrome 視窗手動完成，不需選擇日期", icon="🟢")
@@ -3337,6 +3382,7 @@ with area_col:
         "【鯨躍發票】開立折讓單",
         "【鯨躍發票】電子發票字軌號碼匯入",
         "【鯨躍發票】電子發票字軌號碼配號",
+        "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）",
         "【財政部電子發票】財政部登入",
         "【財政部電子發票】字軌取號下載",
         "【鯨躍發票】紙本發票PDF建檔",
@@ -3978,7 +4024,10 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = stored_value_selected_rows
             if selected_function == "【鯨躍發票】開立折讓單":
                 finance_kwargs["selected_rows"] = allowance_selected_rows
-            if selected_function == "【鯨躍發票】電子發票字軌號碼配號":
+            if selected_function in (
+                "【鯨躍發票】電子發票字軌號碼配號",
+                "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）",
+            ):
                 finance_kwargs["qyear"] = cetustek_serial_qyear
                 finance_kwargs["qmonth"] = cetustek_serial_qmonth
             if selected_function == "【富邦銀行】異動 ATM 退款":
