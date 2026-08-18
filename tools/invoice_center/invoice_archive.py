@@ -273,7 +273,9 @@ def get_or_create_period_folder(drive: Any, parent_id: str, period4: str) -> str
             return item["id"]
     if candidates:
         return candidates[0]["id"]
-    return get_or_create_folder(drive, parent_id, period4)
+    # 兩種寫法都找不到既有資料夾時，新建的名稱要跟既有慣例（01-02／03-04／
+    # 05-06／07-08…）一致，用有連字號的版本，不要用沒有連字號的 period4。
+    return get_or_create_folder(drive, parent_id, f"{period4[:2]}-{period4[2:]}")
 
 
 def resolve_archive_folders(drive: Any, config: AreaRootConfig, yyyymm: str) -> ArchiveFolders:
