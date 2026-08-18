@@ -15,10 +15,12 @@ from bs4 import BeautifulSoup
 
 import cancel_order as co
 import quick_order as qo
-
+from reserve_sheet_log import append_log_rows
 
 RESERVE_PHONE_DEFAULT = "0939592628"
 SYSTEM_RESERVE_MEMO = "系統保留單"
+CUSTOMER_SERVICE_NOTE = "大掃除檸檬保留單"
+
 PERIOD_HOURS = {
     "08:30-12:30": 4,
     "09:00-11:00": 2,
@@ -62,7 +64,7 @@ class SlotSnapshot:
 def _assert_dev(env_name: str) -> None:
     env = str(env_name or "").strip().lower()
     if env not in {"dev", "test", "backend-dev"}:
-        raise RuntimeError("大掃除保留單第一版只允許在 dev 測試機執行，禁止送正式機。")
+        raise RuntimeError("大掃除保留單目前只允許在 dev 測試機執行，禁止送正式機。")
 
 
 def _purchase_id_from_order_no(order_no: str) -> str:
@@ -194,10 +196,7 @@ def parse_schedule_unassigned(html_text: str, service_date: str = "") -> Dict[st
                 text = cell.get_text(" ", strip=True)
                 m = re.search(r"未配班\s*(\d+)\s*人", text)
                 if m:
-                    result[periods[idx]] = {
-                        "unassigned_people": int(m.group(1)),
-                        "raw_text": text,
-                    }
+                    result[periods[idx]] = {"unassigned_people": int(m.group(1)), "raw_text": text}
 
     if not result:
         plain = soup.get_text(" ", strip=True)
@@ -205,7 +204,7 @@ def parse_schedule_unassigned(html_text: str, service_date: str = "") -> Dict[st
             pos = plain.find(period)
             if pos < 0:
                 continue
-            window = plain[pos: pos + 1600]
+            window = plain[pos:pos + 1600]
             m = re.search(r"未配班\s*(\d+)\s*人", window)
             if m:
                 result[period] = {"unassigned_people": int(m.group(1)), "raw_text": window[:500]}
@@ -245,28 +244,26 @@ def _build_batch_id() -> str:
     return f"reserve_{date.today().strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}"
 
 
+def _extract_amount(result: dict):
+    for key in ("total_amount", "amount", "price", "customer_due", "order_amount"):
+        value = result.get(key)
+        if value not in (None, ""):
+            return value
+    return 0
+
+
 def create_reserve_orders_for_slot(
-    *,
-    env_name: str,
-    lookup_result,
-    region: str,
-    address: str,
-    service_date: str,
-    period: str,
-    reserve_rate: float,
-    target_orders: int,
-    payway: str,
-    clean_type_id: str = "1",
-    batch_id: str = "",
-    stop_when_market_people_below: int = 2,
-    sleep_seconds: float = 1.0,
+    *, env_name: str, lookup_result, region: str, address: str,
+    service_date: str, period: str, reserve_rate: float, target_orders: int,
+    payway: str, clean_type_id: str = "1", batch_id: str = "",
+    stop_when_market_people_below: int = 2, sleep_seconds: float = 1.0,
 ) -> dict:
-    """真正建立某日某時段的保留單；每張前重新讀班表。"""
     _assert_dev(env_name)
     if period not in PERIOD_HOURS:
         raise ValueError(f"不支援時段：{period}")
     if not address:
         raise ValueError("請先選擇保留會員的服務地址")
+
     target_orders = max(0, int(target_orders or 0))
     batch_id = batch_id or _build_batch_id()
     results = []
@@ -276,11 +273,9 @@ def create_reserve_orders_for_slot(
         current_people = int((current.get(period) or {}).get("unassigned_people") or 0)
         if current_people < max(2, int(stop_when_market_people_below) + 2):
             results.append({
-                "success": False,
-                "stopped": True,
+                "success": False, "stopped": True,
                 "message": f"即時未配班只剩 {current_people} 人，已停止後續保留單，避免吃掉市場安全人力。",
-                "service_date": service_date,
-                "period": period,
+                "service_date": service_date, "period": period,
             })
             break
 
@@ -297,56 +292,62 @@ def create_reserve_orders_for_slot(
                 hour=str(PERIOD_HOURS[period]),
                 person="2",
                 allow_auto_lemon_shift=False,
-                extra_fields={"notice": f"大掃除檸檬保留單 {batch_id}"},
+                # 客服備註不再放 batch id，避免客服看到技術識別碼。
+                extra_fields={"notice": CUSTOMER_SERVICE_NOTE},
             )
             base_url = lookup_result.get("base_url") or qo._configure_environment(env_name)
 
-            customer_memo_ok = False
-            customer_memo_msg = ""
             try:
                 customer_memo_ok, customer_memo_msg = _mark_customer_memo_as_system_reserve(
                     result["session"], base_url, result["order_no"]
                 )
             except Exception as memo_exc:
+                customer_memo_ok = False
                 customer_memo_msg = f"客人備註註記失敗：{memo_exc}"
 
-            note_ok = False
-            note_msg = ""
             try:
                 note_ok, note_msg = qo._update_order_note(
-                    result["session"], base_url, result["order_no"],
-                    f"大掃除檸檬保留單｜batch={batch_id}｜保留率={int(round(normalize_rate(reserve_rate) * 100))}%｜{idx + 1}/{target_orders}",
+                    result["session"], base_url, result["order_no"], CUSTOMER_SERVICE_NOTE
                 )
             except Exception as note_exc:
+                note_ok = False
                 note_msg = f"訂單已成立，但客服備註寫入失敗：{note_exc}"
 
-            results.append({
+            row = {
                 "success": True,
                 "order_no": result.get("order_no"),
                 "staff": result.get("staff"),
                 "service_date": service_date,
                 "period": period,
+                "order_amount": _extract_amount(result),
+                "batch_id": batch_id,
                 "customer_memo_ok": customer_memo_ok,
                 "customer_memo": SYSTEM_RESERVE_MEMO if customer_memo_ok else "",
                 "customer_memo_message": customer_memo_msg,
                 "note_ok": note_ok,
                 "note_message": note_msg,
-            })
+            }
 
-            # 系統保留單一定要有客人備註標記；若寫入失敗，訂單已成立但停止後續批次，
-            # 避免大量產生無法安全辨識的保留單。
+            try:
+                row["sheet_log_count"] = append_log_rows("成立", [row], batch_id=batch_id)
+                row["sheet_log_error"] = ""
+            except Exception as log_exc:
+                row["sheet_log_count"] = 0
+                row["sheet_log_error"] = str(log_exc)
+
+            results.append(row)
+
             if not customer_memo_ok:
                 results.append({
-                    "success": False,
-                    "stopped": True,
-                    "service_date": service_date,
-                    "period": period,
+                    "success": False, "stopped": True,
+                    "service_date": service_date, "period": period,
                     "message": f"訂單 {result.get('order_no')} 已成立，但客人備註未成功寫入『{SYSTEM_RESERVE_MEMO}』，已停止此時段後續建立。",
                 })
                 break
         except Exception as exc:
             results.append({"success": False, "message": str(exc), "service_date": service_date, "period": period})
             break
+
         if sleep_seconds:
             time.sleep(float(sleep_seconds))
 
@@ -361,16 +362,9 @@ def create_reserve_orders_for_slot(
 
 
 def create_reserve_orders_for_plan(
-    *,
-    env_name: str,
-    lookup_result,
-    region: str,
-    address: str,
-    plan_rows: Sequence[dict],
-    payway: str,
-    clean_type_id: str = "1",
-    continue_after_slot_error: bool = True,
-    sleep_seconds: float = 1.0,
+    *, env_name: str, lookup_result, region: str, address: str,
+    plan_rows: Sequence[dict], payway: str, clean_type_id: str = "1",
+    continue_after_slot_error: bool = True, sleep_seconds: float = 1.0,
 ) -> dict:
     _assert_dev(env_name)
     batch_id = _build_batch_id()
@@ -408,12 +402,7 @@ def create_reserve_orders_for_plan(
                 "period": period,
                 "target_orders": target_orders,
                 "success_count": 0,
-                "results": [{
-                    "success": False,
-                    "service_date": service_date,
-                    "period": period,
-                    "message": str(exc),
-                }],
+                "results": [{"success": False, "service_date": service_date, "period": period, "message": str(exc)}],
             }
         slot_results.append(slot_result)
         flat_results.extend(slot_result.get("results") or [])
