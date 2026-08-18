@@ -295,10 +295,10 @@ def main() -> int:
         page = find_mof_page(context)
         if page is None:
             page = context.new_page()
-        if "/accounts/login" in page.url or not page.url:
-            login_mof(page, credentials)
-        else:
-            print("[財政部電子發票] 沿用目前登入狀態")
+        # 一律導到登入頁：session 還有效的話網站本身會自動轉回登入後的頁面，
+        # login_mof() 的輪詢會偵測到網址離開 /accounts/login 而視為登入成功；
+        # 不在這裡自行判斷「已經登入」，避免誤判剛開出來的空白分頁而整個跳過導覽。
+        login_mof(page, credentials)
 
         if args.login_only:
             return 0
