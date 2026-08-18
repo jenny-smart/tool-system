@@ -224,11 +224,14 @@ def allocate_serial_numbers(page: Page, area: str, qyear_label: str, qmonth_labe
     回傳 (總本數, 線上單張開立本數, API串接開立本數)。"""
     _search_serial_section(page, qyear_label, qmonth_label)
 
-    row = page.locator("tr").filter(has_text=qyear_label).filter(has_text=qmonth_label)
+    # 不能用年份／月份文字比對來找結果列：搜尋表單那一列本身也「包含」
+    # 115、09-10 這些文字（下拉選單目前選的值），會誤抓到表單列而不是
+    # 真正的結果列。改成用「這一列有配號扳手圖示」來定位。
+    row = page.locator("tr").filter(has=page.locator("img[title='配號']"))
     try:
         row.first.wait_for(state="visible", timeout=10_000)
     except Exception as e:
-        raise RuntimeError(f"查詢結果找不到「{qyear_label} {qmonth_label}」這一列；目前頁面：{page.url}") from e
+        raise RuntimeError(f"查詢結果找不到可配號的列（{qyear_label} {qmonth_label}）；目前頁面：{page.url}") from e
 
     cells = row.first.locator("td")
     cell_count = cells.count()
