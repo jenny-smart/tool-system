@@ -204,8 +204,10 @@ def _search_serial_section(page: Page, qyear_label: str, qmonth_label: str) -> N
     except Exception as e:
         raise RuntimeError(f"「查詢月份」選不到「{qmonth_label}」；目前頁面：{page.url}") from e
 
+    # 按鈕裡除了「搜尋」文字，還有一個 <span class="icon">›</span>，整個元素
+    # 的文字其實是「搜尋›」，exact=True 反而比對不到，改用寬鬆比對。
     try:
-        page.get_by_text("搜尋", exact=True).first.click(timeout=10_000, force=True)
+        page.get_by_text("搜尋", exact=False).first.click(timeout=10_000, force=True)
     except Exception as e:
         raise RuntimeError(f"找不到「搜尋」按鈕；目前頁面：{page.url}") from e
     page.wait_for_timeout(2000)
