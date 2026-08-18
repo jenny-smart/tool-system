@@ -1,0 +1,77 @@
+開始執行：排班統計表
+⚠️ 一鍵日排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 一鍵日排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_daily/schedule_report.py
+[2026-08-19 01:19:31] ====================================================
+[2026-08-19 01:19:31] schedule_report.py 開始執行
+[2026-08-19 01:19:31] GITHUB_ACTIONS = true
+[2026-08-19 01:19:31] PWD = /home/runner/work/tool-system/tool-system
+[2026-08-19 01:19:31] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/.shortcut-targets-by-id/1zbu45AG1adMzz24HPdi_tLfh2Tncw_Br/排班統計表
+[2026-08-19 01:19:31] LOCAL_OUTPUT_DIR exists = False
+[2026-08-19 01:19:31] can_use_local_output_dir = False
+[2026-08-19 01:19:31] root folder_id = 11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc
+[2026-08-19 01:19:31] ====================================================
+[2026-08-19 01:19:31] Google Drive 初始化成功
+[2026-08-19 01:19:32] 📁 使用既有資料夾：排班統計表
+[2026-08-19 01:19:32] this_month = 2026-08
+[2026-08-19 01:19:32] next_month = 2026-09
+[2026-08-19 01:19:32] today_stamp = 20260819
+[2026-08-19 01:19:32] next_month_stamp = 20260919
+[2026-08-19 01:19:32] 排班統計表 folder_id = 18XDXdrCSsLYwSzz1Da9pQh-jGm2h2Ed8
+[2026-08-19 01:19:32] 帳號數量 = 2
+[2026-08-19 01:19:32] 
+[2026-08-19 01:19:32] === 開始處理 台北 ===
+[2026-08-19 01:19:32] 開始登入：jenny@lemonclean.com.tw
+[2026-08-19 01:19:35] 登入成功：jenny@lemonclean.com.tw
+[2026-08-19 01:19:35] 開始下載：month=2026-08 / filename=20260819排班統計表-台北.xlsx
+[2026-08-19 01:19:37] ✅ 已下載到暫存：/tmp/tmpy7hjx419/20260819排班統計表-台北.xlsx
+[2026-08-19 01:19:37] 📦 檔案大小：17920 bytes
+[2026-08-19 01:19:37] 📂 暫存目錄存在：True
+[2026-08-19 01:19:37] 📄 暫存檔案存在：True
+[2026-08-19 01:19:37] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-19 01:19:37] Google Drive 初始化成功
+[2026-08-19 01:19:37] 準備上傳到 Google Drive：20260819排班統計表-台北.xlsx
+[2026-08-19 01:19:38] ☁️ 已上傳新檔：20260819排班統計表-台北.xlsx (file_id=1iXJpIVMHFo3m8u-zgqwu0KLD7smlBc1b) https://docs.google.com/spreadsheets/d/1iXJpIVMHFo3m8u-zgqwu0KLD7smlBc1b/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-19 01:19:38] ✅ 完成處理：20260819排班統計表-台北.xlsx
+[2026-08-19 01:19:38] 開始下載：month=2026-09 / filename=20260919排班統計表-台北.xlsx
+[2026-08-19 01:19:40] ✅ 已下載到暫存：/tmp/tmpztv7cvnv/20260919排班統計表-台北.xlsx
+[2026-08-19 01:19:40] 📦 檔案大小：14336 bytes
+[2026-08-19 01:19:40] 📂 暫存目錄存在：True
+[2026-08-19 01:19:40] 📄 暫存檔案存在：True
+[2026-08-19 01:19:40] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-19 01:19:40] Google Drive 初始化成功
+[2026-08-19 01:19:40] 準備上傳到 Google Drive：20260919排班統計表-台北.xlsx
+[2026-08-19 01:19:42] ☁️ 已上傳新檔：20260919排班統計表-台北.xlsx (file_id=1QD87-kn823cqHhACwSGzQLqNRV1OUTy_) https://docs.google.com/spreadsheets/d/1QD87-kn823cqHhACwSGzQLqNRV1OUTy_/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-19 01:19:42] ✅ 完成處理：20260919排班統計表-台北.xlsx
+[2026-08-19 01:19:42] ✅ 台北 全部完成
+[2026-08-19 01:19:42] 
+[2026-08-19 01:19:42] === 開始處理 台中 ===
+[2026-08-19 01:19:42] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-08-19 01:19:43] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-08-19 01:19:43] 開始下載：month=2026-08 / filename=20260819排班統計表-台中.xlsx
+[2026-08-19 01:19:44] ✅ 已下載到暫存：/tmp/tmpdwiz6xt4/20260819排班統計表-台中.xlsx
+[2026-08-19 01:19:44] 📦 檔案大小：7168 bytes
+[2026-08-19 01:19:44] 📂 暫存目錄存在：True
+[2026-08-19 01:19:44] 📄 暫存檔案存在：True
+[2026-08-19 01:19:44] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-19 01:19:44] Google Drive 初始化成功
+[2026-08-19 01:19:44] 準備上傳到 Google Drive：20260819排班統計表-台中.xlsx
+[2026-08-19 01:19:45] ☁️ 已上傳新檔：20260819排班統計表-台中.xlsx (file_id=1dYAAfzwV5a1g_eP3B_KzboBB1XU4RCbW) https://docs.google.com/spreadsheets/d/1dYAAfzwV5a1g_eP3B_KzboBB1XU4RCbW/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-19 01:19:45] ✅ 完成處理：20260819排班統計表-台中.xlsx
+[2026-08-19 01:19:45] 開始下載：month=2026-09 / filename=20260919排班統計表-台中.xlsx
+[2026-08-19 01:19:46] ✅ 已下載到暫存：/tmp/tmpel19drzs/20260919排班統計表-台中.xlsx
+[2026-08-19 01:19:46] 📦 檔案大小：5632 bytes
+[2026-08-19 01:19:46] 📂 暫存目錄存在：True
+[2026-08-19 01:19:46] 📄 暫存檔案存在：True
+[2026-08-19 01:19:46] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-19 01:19:46] Google Drive 初始化成功
+[2026-08-19 01:19:46] 準備上傳到 Google Drive：20260919排班統計表-台中.xlsx
+[2026-08-19 01:19:48] ☁️ 已上傳新檔：20260919排班統計表-台中.xlsx (file_id=1U7bXcffLX5u8TyY1fDwocZch_F40VYKf) https://docs.google.com/spreadsheets/d/1U7bXcffLX5u8TyY1fDwocZch_F40VYKf/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-19 01:19:48] ✅ 完成處理：20260919排班統計表-台中.xlsx
+[2026-08-19 01:19:48] ✅ 台中 全部完成
+[2026-08-19 01:19:48] 🎉 schedule_report.py 全部完成
+
+完成執行：排班統計表
+scheduled_daily scheduler 全部完成
