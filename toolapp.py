@@ -2172,9 +2172,19 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
                 _AGENT_TASK_STATUS_LEVELS.get(status, "info"),
             ))
 
-        # 執行中持續抓新 log；剛轉成完成/失敗時再補抓最後一批，避免
-        # Agent 在狀態更新前最後寫入的幾行被漏掉。
-        if status == "running" or (prev_status is not None and prev_status != status and status in ("completed", "failed")):
+        # 執行中持續抓新 log，完成/失敗時也要抓一次補齊剩下的內容。
+        #
+        # 這裡不能限定「狀態剛好在這次輪詢才轉變」才去抓 log：如果任務
+        # 跑得夠快（例如幾秒內就從 pending 直接變 completed），我們的
+        # 3 秒輪詢很可能完全沒機會看到中間的 running 狀態，第一次看到
+        # 這個 task_id 時它就已經是 completed／failed 了。這種情況下
+        # prev_status 會是 None（我們本來就還沒看過這個任務），如果條
+        # 件寫成「狀態剛好變化」就會整個跳過抓 log，導致這個任務的細部
+        # 過程完全沒顯示、畫面上只看得到「任務已建立」這種粗略訊息。
+        # 所以只要狀態是這三種、有可能已經產生 log 內容，就一律嘗試抓
+        # 一次；_collect_new_agent_log_lines 內部有用 offset 追蹤，沒有
+        # 新內容就直接回傳空清單，重複呼叫也不會有副作用。
+        if status in ("running", "completed", "failed"):
             feed.extend(_collect_new_agent_log_lines(task_id))
 
     if len(feed) > 50:
