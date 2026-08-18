@@ -228,6 +228,12 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
             page.locator("button[title='下載']").last.click(timeout=8000, force=True)
         except Exception as e:
             raise RuntimeError(f"找不到「下載」按鈕；目前頁面：{page.url}") from e
+        # 按下下載後會跳一個「注意事項」燈箱（提醒下載檔案編碼為 UTF-8），
+        # 要按「是」才會真的觸發下載；沒跳出來就算了，直接略過。
+        try:
+            page.locator("button[title='是']").first.click(timeout=8000)
+        except Exception:
+            pass
     download = download_info.value
     destination.parent.mkdir(parents=True, exist_ok=True)
     download.save_as(str(destination))
