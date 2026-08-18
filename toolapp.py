@@ -1941,7 +1941,7 @@ def queue_cetustek_serial_section_query(*, month="", start_date=None, end_date=N
         {"area": area, "qyear": qyear, "qmonth": qmonth, "cdp_url": "http://127.0.0.1:9222"},
         created_by=st.session_state.get("username", "Tool System"),
     )
-    return f"任務已建立：{task['task_id']}（等待本機 Agent；查完後續勾選／確認／送出請在畫面上手動完成）"
+    return f"任務已建立：{task['task_id']}（等待本機 Agent；會自動查詢、配號並儲存）"
 
 
 def queue_mofei_login(*, month="", start_date=None, end_date=None, area="全區"):
@@ -3044,7 +3044,7 @@ with date_col:
                 cetustek_serial_qmonth = st.text_input(
                     "查詢月份", placeholder="下拉選單上的文字，例如 08", key="finance_cetustek_serial_qmonth"
                 )
-            st.caption("請填畫面下拉選單實際顯示的文字；查詢後續的勾選／確認／送出請在畫面上手動完成，本功能不會自動送出")
+            st.caption("請填畫面下拉選單實際顯示的文字；會依「鯨躍字軌配號設定」分頁的保留本數，自動拆成線上單張開立／API串接開立(虛)並儲存")
         elif selected_function == "【財政部電子發票】財政部登入":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("開啟財政部電子發票平台登入頁並預填統一編號／帳號，驗證碼與登入請在跳出的 Chrome 視窗手動完成，不需選擇日期", icon="🟢")
