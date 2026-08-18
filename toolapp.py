@@ -1897,6 +1897,20 @@ def run_cetustek_prize_update(*, month="", start_date=None, end_date=None, area=
     return run_invoice_update("prize", month_text, area)
 
 
+def queue_cetustek_paper_invoice_pdf(*, month="", start_date=None, end_date=None, area="全區"):
+    month_text = str(month or "").strip()
+    if not month_text:
+        raise ValueError("紙本發票 PDF 建檔請輸入月份 YYYYMM")
+    if not area or area == "全區":
+        raise ValueError("紙本發票 PDF 建檔請選擇單一區域")
+    task = create_local_agent_task(
+        "cetustek.paper_invoice_pdf",
+        {"month": month_text, "area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 def queue_cetustek_allowance(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     if not selected_rows:
         raise ValueError("請先勾選要開立折讓單的資料")
@@ -2463,6 +2477,7 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【鯨躍發票】紙本發票更新", "handler": run_cetustek_paper_update, "enabled": True},
+    {"name": "【鯨躍發票】紙本發票PDF建檔", "handler": queue_cetustek_paper_invoice_pdf, "enabled": True},
     {"name": "【鯨躍發票】中獎發票更新", "handler": run_cetustek_prize_update, "enabled": True},
     {"name": "【鯨躍發票】開立折讓單", "handler": queue_cetustek_allowance, "enabled": True},
     {"name": "【財政部電子發票】財政部登入", "handler": queue_mofei_login, "enabled": True},
@@ -2927,6 +2942,16 @@ with date_col:
                 st.caption("格式：YYYYMMNN；例如 20260506")
             else:
                 st.caption("格式：YYYYMM；更新該月份紙本發票")
+        elif selected_function == "【鯨躍發票】紙本發票PDF建檔":
+            st.markdown('<div class="field-label">📆 建檔月份</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "月份",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_invoice_pdf_month",
+            )
+            st.caption("格式：YYYYMM；逐筆下載該月份紙本發票的 B2B預覽(A5) PDF 並歸檔到 Google Drive")
         elif selected_function == "【財政部電子發票】財政部登入":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("開啟財政部電子發票平台登入頁並預填統一編號／帳號，驗證碼與登入請在跳出的 Chrome 視窗手動完成，不需選擇日期", icon="🟢")
@@ -3219,6 +3244,7 @@ with area_col:
         "【鯨躍發票】開立折讓單",
         "【財政部電子發票】財政部登入",
         "【財政部電子發票】字軌取號下載",
+        "【鯨躍發票】紙本發票PDF建檔",
         "【富邦銀行】富邦登入",
         "【富邦銀行】富邦明細下載",
         "【富邦銀行】異動 ATM 退款",
