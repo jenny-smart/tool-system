@@ -116,6 +116,13 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
     驗證碼與送出登入一律留給使用者手動操作。"""
     page.goto(MOF_LOGIN_URL, wait_until="domcontentloaded")
 
+    # session 還有效時，網站會直接把 /accounts/login 轉走到已登入的
+    # dashboard，這裡就不用再走身分別／欄位那一整套（dashboard 上本來就
+    # 沒有這些元素，硬找只會逾時報錯）。
+    if "/accounts/login" not in page.url:
+        print(f"[財政部電子發票] 沿用目前登入狀態（{page.url}）")
+        return
+
     # 這是前端 SPA：domcontentloaded 只代表原始 HTML 載完，畫面（含身分別
     # 圖示）是等 JS 執行完才動態渲染出來的。不能像傳統網頁那樣馬上用
     # count() 判斷元素在不在——這個時間點幾乎一定是 0，導致整段判斷被跳過、
@@ -173,42 +180,49 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
 
 
 def _open_serial_query(page: Page, year: int, label: str) -> None:
-    menu_item = page.get_by_text("電子發票字軌號碼取號", exact=False)
-    count = menu_item.count()
-    if count == 0:
-        raise RuntimeError("左側選單找不到「電子發票字軌號碼取號」，請確認目前頁面／登入狀態。")
-    # 這個選單常見是「大分類→子項目」都用同一段文字，逐一點擊展開到底。
-    for index in range(count):
-        try:
-            item = menu_item.nth(index)
-            if item.is_visible():
-                item.click(timeout=3000)
-                page.wait_for_timeout(500)
-        except Exception:
-            continue
+    # 跟登入頁一樣是 SPA，選單／頁籤／欄位都要等真的渲染出來才點得到，
+    # 一律用 click()／wait_for() 的內建 auto-wait，不用 count() 立刻判斷。
+    menu_locator = page.get_by_text("電子發票字軌號碼取號", exact=False)
+    try:
+        menu_locator.first.wait_for(state="visible", timeout=15_000)
+    except Exception:
+        raise RuntimeError(f"左側選單找不到「電子發票字軌號碼取號」；目前頁面：{page.url}")
 
-    query_tab = page.get_by_role("tab", name="查詢")
-    if not query_tab.count():
-        query_tab = page.get_by_text("查詢", exact=True)
-    if not query_tab.count():
-        raise RuntimeError("找不到「查詢」頁籤，選單可能還沒導到「電子發票字軌號碼取號」頁面。")
-    query_tab.first.click(timeout=5000)
+    # 這個選單常見是「大分類→子項目」都用同一段文字，逐一點擊展開到底；
+    # 每次點擊後項目數可能改變，重新抓 locator 再點下一個。
+    for click_index in range(4):
+        current = page.get_by_text("電子發票字軌號碼取號", exact=False)
+        if click_index >= current.count():
+            break
+        try:
+            current.nth(click_index).click(timeout=3000)
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+    try:
+        page.get_by_role("tab", name="查詢").first.click(timeout=8000)
+    except Exception:
+        try:
+            page.get_by_text("查詢", exact=True).first.click(timeout=8000)
+        except Exception:
+            raise RuntimeError(f"找不到「查詢」頁籤，選單可能還沒導到「電子發票字軌號碼取號」頁面；目前頁面：{page.url}")
     page.wait_for_timeout(500)
 
     period_text = f"{year}年{label}期"
     # 發票期別是一組「起～迄」的期別選擇器；起訖都選同一期，只查這一期。
     period_label = page.get_by_text("發票期別", exact=False)
-    if not period_label.count():
-        raise RuntimeError("找不到「發票期別」欄位，無法設定查詢期別。")
+    try:
+        period_label.first.wait_for(state="visible", timeout=8000)
+    except Exception:
+        raise RuntimeError(f"找不到「發票期別」欄位，無法設定查詢期別；目前頁面：{page.url}")
     pickers = period_label.first.locator("xpath=following::input[1] | following::*[contains(@class,'picker')][1]")
     opened_any = False
     for picker_index in range(min(pickers.count(), 2)):
         try:
             pickers.nth(picker_index).click(timeout=3000)
-            option = page.get_by_text(period_text, exact=True)
-            if option.count():
-                option.first.click(timeout=3000)
-                opened_any = True
+            page.get_by_text(period_text, exact=True).first.click(timeout=3000)
+            opened_any = True
             page.wait_for_timeout(300)
         except Exception:
             continue
@@ -218,10 +232,10 @@ def _open_serial_query(page: Page, year: int, label: str) -> None:
             "再重新執行下載任務（或直接手動查詢下載，改用系統的檔案上傳流程）。"
         )
 
-    search_button = page.get_by_role("button", name="查詢")
-    if not search_button.count():
-        search_button = page.get_by_text("查詢", exact=True)
-    search_button.last.click(timeout=5000)
+    try:
+        page.get_by_role("button", name="查詢").last.click(timeout=8000)
+    except Exception:
+        page.get_by_text("查詢", exact=True).last.click(timeout=8000)
     page.wait_for_timeout(1500)
 
 
@@ -230,19 +244,22 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
 
     period_text = f"{year}年{label}期"
     row = page.get_by_text(period_text, exact=False).locator("xpath=ancestor::tr[1]")
-    if not row.count():
-        raise RuntimeError(f"查詢結果找不到「{period_text}」這一列，可能尚未取號或期別不存在。")
+    try:
+        row.first.wait_for(state="visible", timeout=10_000)
+    except Exception:
+        raise RuntimeError(f"查詢結果找不到「{period_text}」這一列，可能尚未取號或期別不存在；目前頁面：{page.url}")
+
     checkbox = row.first.locator("input[type='checkbox']")
     if checkbox.count():
         checkbox.first.check(timeout=3000)
     else:
         row.first.click(timeout=3000)
 
-    download_button = page.get_by_role("button", name="下載")
-    if not download_button.count():
-        download_button = page.get_by_text("下載", exact=True)
     with page.expect_download(timeout=60_000) as download_info:
-        download_button.last.click(timeout=5000)
+        try:
+            page.get_by_role("button", name="下載").last.click(timeout=8000)
+        except Exception:
+            page.get_by_text("下載", exact=True).last.click(timeout=8000)
     download = download_info.value
     destination.parent.mkdir(parents=True, exist_ok=True)
     download.save_as(str(destination))
