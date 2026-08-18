@@ -3,12 +3,13 @@
 # 帳密只存在本機（不進 git），格式與既有 ~/EI account/ei_accounts.json 相同慣例：
 #
 # {
-#   "台北": {"ubn": "42627791", "password": "..."},
-#   "台中": {"ubn": "82830399", "password": "..."}
+#   "台北": {"ubn": "42627791", "account": "42627791", "password": "..."},
+#   "台中": {"ubn": "82830399", "account": "82830399", "password": "..."}
 # }
 #
-# 統一編號欄位與登入頁的「帳號」欄位相同值，登入頁只需再輸入密碼與圖形驗證碼。
-# 未設定 password 時，程式只會預填統一編號／帳號，密碼與驗證碼由使用者手動輸入。
+# 登入頁「統一編號」「帳號」是兩個各自獨立的欄位（畫面上剛好常常同值，但不保證一定
+# 相同），未設定 account 時才會回退用 ubn 頂替。未設定 password 時，程式只會預填
+# 統一編號／帳號，密碼與圖形驗證碼一律由使用者手動輸入。
 from __future__ import annotations
 
 import json
@@ -29,6 +30,7 @@ DEFAULT_ACCOUNT_PATHS = [
 class MOFCredentials:
     area: str
     ubn: str
+    account: str
     password: str = ""
 
     @property
@@ -54,8 +56,9 @@ def credentials_for(area: str, accounts: dict[str, Any]) -> MOFCredentials:
     ubn = str(row.get("ubn") or row.get("userid") or row.get("user") or "").strip()
     if not ubn:
         raise RuntimeError(f"{area} 缺財政部統一編號（ubn）")
+    account = str(row.get("account") or "").strip() or ubn
     password = str(row.get("password") or "")
-    return MOFCredentials(area=area, ubn=ubn, password=password)
+    return MOFCredentials(area=area, ubn=ubn, account=account, password=password)
 
 
 def configured_areas(accounts: dict[str, Any]) -> list[str]:

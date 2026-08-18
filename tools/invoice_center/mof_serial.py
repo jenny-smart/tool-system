@@ -127,7 +127,7 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
                 pass
 
     filled_ubn = fill_if_present(page, "input[name='LoginUBN'], input[placeholder*='統一編號']", credentials.ubn)
-    filled_account = fill_if_present(page, "input[name='LoginAccount'], input[placeholder*='帳號']", credentials.ubn)
+    filled_account = fill_if_present(page, "input[name='LoginAccount'], input[placeholder*='帳號']", credentials.account)
     if not filled_ubn and not filled_account:
         print("[財政部電子發票] 找不到統一編號／帳號欄位，請直接在網頁手動輸入。", file=sys.stderr)
 
