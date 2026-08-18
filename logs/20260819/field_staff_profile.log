@@ -1,0 +1,59 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場專員個資 / running
+Command: /opt/hostedtoolcache/Python/3.11.15/x64/bin/python -u -m tools.field_management.staff_profile --date 20260819 --system-name 外場排程系統 --run-type 排程
+[2026-08-19 05:12:23] 開始處理專員個資：20260819專員個資-台北
+[2026-08-19 05:12:23] 失敗：20260819專員個資-台北 / 找不到來源檔案：20260819專員個資-台北 / 20260819專員個資-台北.xlsx / 20260819專員個資-台北.xls / 20260819專員系統個資-台北 / 20260819專員系統個資-台北.xlsx / 20260819專員系統個資-台北.xls；資料夾內目前檔案：20260809專員個資-台中.xlsx、20260809專員個資-台北.xlsx、20260809專員系統個資-台中.xlsx_temp_1786223964、20260809專員系統個資-台北.xlsx_temp_1786223949、20260809專員系統個資-台中.xlsx、20260809專員系統個資-台北.xlsx、20260808專員系統個資-台中.xlsx_temp_1786138094、20260808專員系統個資-台北.xlsx_temp_1786138073、20260808專員系統個資-台中.xlsx、20260808專員系統個資-台北.xlsx、20260807專員個資-台中.xlsx_temp_1786113706、20260807專員個資-台中.xlsx_temp_1786113703、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台中.xlsx、20260807專員個資-台北.xlsx、20260806專員系統個資-台中.xlsx_temp_1785967457、20260806專員系統個資-台北.xlsx_temp_1785967441、20260806專員系統個資-台中.xlsx、20260806專員系統個資-台北.xlsx、20260805專員系統個資-台中.xlsx_temp_1785880994、20260805專員系統個資-台北.xlsx_temp_1785880972、20260805專員系統個資-台中.xlsx、20260805專員系統個資-台北.xlsx、20260804專員系統個資-台中.xlsx_temp_1785794299、20260804專員系統個資-台北.xlsx_temp_1785794277、20260804專員系統個資-台中.xlsx、20260804專員系統個資-台北.xlsx、20260803專員系統個資-台中.xlsx_temp_1785707068、20260803專員系統個資-台北.xlsx_temp_1785707050、20260803專員系統個資-台中.xlsx、20260803專員系統個資-台北.xlsx、20260802專員系統個資-台中.xlsx_temp_1785620722、20260802專員系統個資-台北.xlsx_temp_1785620706、20260802專員系統個資-台中.xlsx、20260802專員系統個資-台北.xlsx、20260801專員系統個資-台中.xlsx_temp_1785534990、20260801專員系統個資-台北.xlsx_temp_1785534972、20260801專員系統個資-台中.xlsx、20260801專員系統個資-台北.xlsx
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 496, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 482, in main
+    run_staff_profile_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 466, in run_staff_profile_for_area
+    run_staff_profile_only(cfg, area, date_key, run_type)           # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 309, in run_staff_profile_only
+    file = find_file_by_possible_names(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 214, in find_file_by_possible_names
+    raise RuntimeError(
+RuntimeError: 找不到來源檔案：20260819專員個資-台北 / 20260819專員個資-台北.xlsx / 20260819專員個資-台北.xls / 20260819專員系統個資-台北 / 20260819專員系統個資-台北.xlsx / 20260819專員系統個資-台北.xls；資料夾內目前檔案：20260809專員個資-台中.xlsx、20260809專員個資-台北.xlsx、20260809專員系統個資-台中.xlsx_temp_1786223964、20260809專員系統個資-台北.xlsx_temp_1786223949、20260809專員系統個資-台中.xlsx、20260809專員系統個資-台北.xlsx、20260808專員系統個資-台中.xlsx_temp_1786138094、20260808專員系統個資-台北.xlsx_temp_1786138073、20260808專員系統個資-台中.xlsx、20260808專員系統個資-台北.xlsx、20260807專員個資-台中.xlsx_temp_1786113706、20260807專員個資-台中.xlsx_temp_1786113703、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台中.xlsx、20260807專員個資-台北.xlsx、20260806專員系統個資-台中.xlsx_temp_1785967457、20260806專員系統個資-台北.xlsx_temp_1785967441、20260806專員系統個資-台中.xlsx、20260806專員系統個資-台北.xlsx、20260805專員系統個資-台中.xlsx_temp_1785880994、20260805專員系統個資-台北.xlsx_temp_1785880972、20260805專員系統個資-台中.xlsx、20260805專員系統個資-台北.xlsx、20260804專員系統個資-台中.xlsx_temp_1785794299、20260804專員系統個資-台北.xlsx_temp_1785794277、20260804專員系統個資-台中.xlsx、20260804專員系統個資-台北.xlsx、20260803專員系統個資-台中.xlsx_temp_1785707068、20260803專員系統個資-台北.xlsx_temp_1785707050、20260803專員系統個資-台中.xlsx、20260803專員系統個資-台北.xlsx、20260802專員系統個資-台中.xlsx_temp_1785620722、20260802專員系統個資-台北.xlsx_temp_1785620706、20260802專員系統個資-台中.xlsx、20260802專員系統個資-台北.xlsx、20260801專員系統個資-台中.xlsx_temp_1785534990、20260801專員系統個資-台北.xlsx_temp_1785534972、20260801專員系統個資-台中.xlsx、20260801專員系統個資-台北.xlsx
+
+📝 外場排程打卡：外場專員個資 / failed
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
+    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
+    results.append(run_job(job_name, date_key, area, system_name))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
+    raise RuntimeError(message)
+RuntimeError: 外場專員個資 執行失敗，exit=1
+STDOUT:
+[2026-08-19 05:12:23] 開始處理專員個資：20260819專員個資-台北
+[2026-08-19 05:12:23] 失敗：20260819專員個資-台北 / 找不到來源檔案：20260819專員個資-台北 / 20260819專員個資-台北.xlsx / 20260819專員個資-台北.xls / 20260819專員系統個資-台北 / 20260819專員系統個資-台北.xlsx / 20260819專員系統個資-台北.xls；資料夾內目前檔案：20260809專員個資-台中.xlsx、20260809專員個資-台北.xlsx、20260809專員系統個資-台中.xlsx_temp_1786223964、20260809專員系統個資-台北.xlsx_temp_1786223949、20260809專員系統個資-台中.xlsx、20260809專員系統個資-台北.xlsx、20260808專員系統個資-台中.xlsx_temp_1786138094、20260808專員系統個資-台北.xlsx_temp_1786138073、20260808專員系統個資-台中.xlsx、20260808專員系統個資-台北.xlsx、20260807專員個資-台中.xlsx_temp_1786113706、20260807專員個資-台中.xlsx_temp_1786113703、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台中.xlsx、20260807專員個資-台北.xlsx、20260806專員系統個資-台中.xlsx_temp_1785967457、20260806專員系統個資-台北.xlsx_temp_1785967441、20260806專員系統個資-台中.xlsx、20260806專員系統個資-台北.xlsx、20260805專員系統個資-台中.xlsx_temp_1785880994、20260805專員系統個資-台北.xlsx_temp_1785880972、20260805專員系統個資-台中.xlsx、20260805專員系統個資-台北.xlsx、20260804專員系統個資-台中.xlsx_temp_1785794299、20260804專員系統個資-台北.xlsx_temp_1785794277、20260804專員系統個資-台中.xlsx、20260804專員系統個資-台北.xlsx、20260803專員系統個資-台中.xlsx_temp_1785707068、20260803專員系統個資-台北.xlsx_temp_1785707050、20260803專員系統個資-台中.xlsx、20260803專員系統個資-台北.xlsx、20260802專員系統個資-台中.xlsx_temp_1785620722、20260802專員系統個資-台北.xlsx_temp_1785620706、20260802專員系統個資-台中.xlsx、20260802專員系統個資-台北.xlsx、20260801專員系統個資-台中.xlsx_temp_1785534990、20260801專員系統個資-台北.xlsx_temp_1785534972、20260801專員系統個資-台中.xlsx、20260801專員系統個資-台北.xlsx
+
+STDERR:
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 496, in <module>
+    main(
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 482, in main
+    run_staff_profile_for_area(cfg, current_area, date_key, run_type)  # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 466, in run_staff_profile_for_area
+    run_staff_profile_only(cfg, area, date_key, run_type)           # ★
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 309, in run_staff_profile_only
+    file = find_file_by_possible_names(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_profile.py", line 214, in find_file_by_possible_names
+    raise RuntimeError(
+RuntimeError: 找不到來源檔案：20260819專員個資-台北 / 20260819專員個資-台北.xlsx / 20260819專員個資-台北.xls / 20260819專員系統個資-台北 / 20260819專員系統個資-台北.xlsx / 20260819專員系統個資-台北.xls；資料夾內目前檔案：20260809專員個資-台中.xlsx、20260809專員個資-台北.xlsx、20260809專員系統個資-台中.xlsx_temp_1786223964、20260809專員系統個資-台北.xlsx_temp_1786223949、20260809專員系統個資-台中.xlsx、20260809專員系統個資-台北.xlsx、20260808專員系統個資-台中.xlsx_temp_1786138094、20260808專員系統個資-台北.xlsx_temp_1786138073、20260808專員系統個資-台中.xlsx、20260808專員系統個資-台北.xlsx、20260807專員個資-台中.xlsx_temp_1786113706、20260807專員個資-台中.xlsx_temp_1786113703、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台北.xlsx_temp_1786113687、20260807專員個資-台中.xlsx、20260807專員個資-台北.xlsx、20260806專員系統個資-台中.xlsx_temp_1785967457、20260806專員系統個資-台北.xlsx_temp_1785967441、20260806專員系統個資-台中.xlsx、20260806專員系統個資-台北.xlsx、20260805專員系統個資-台中.xlsx_temp_1785880994、20260805專員系統個資-台北.xlsx_temp_1785880972、20260805專員系統個資-台中.xlsx、20260805專員系統個資-台北.xlsx、20260804專員系統個資-台中.xlsx_temp_1785794299、20260804專員系統個資-台北.xlsx_temp_1785794277、20260804專員系統個資-台中.xlsx、20260804專員系統個資-台北.xlsx、20260803專員系統個資-台中.xlsx_temp_1785707068、20260803專員系統個資-台北.xlsx_temp_1785707050、20260803專員系統個資-台中.xlsx、20260803專員系統個資-台北.xlsx、20260802專員系統個資-台中.xlsx_temp_1785620722、20260802專員系統個資-台北.xlsx_temp_1785620706、20260802專員系統個資-台中.xlsx、20260802專員系統個資-台北.xlsx、20260801專員系統個資-台中.xlsx_temp_1785534990、20260801專員系統個資-台北.xlsx_temp_1785534972、20260801專員系統個資-台中.xlsx、20260801專員系統個資-台北.xlsx
+
