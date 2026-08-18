@@ -116,15 +116,36 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
     驗證碼與送出登入一律留給使用者手動操作。"""
     page.goto(MOF_LOGIN_URL, wait_until="domcontentloaded")
 
-    # 身分別預設就是「營業人/扣繳單位」、登入方式預設就是「帳號」，這裡用文字
-    # 點擊只是保險，萬一之前被切到別的分頁。
-    for label in ("營業人", "帳號"):
-        candidate = page.get_by_text(label, exact=False)
-        if candidate.count() and candidate.first.is_visible():
-            try:
-                candidate.first.click(timeout=2000)
-            except Exception:
-                pass
+    # 登入頁預設身分別不保證是「營業人/扣繳單位」（實測會落在消費者/手機條碼），
+    # 一定要先切過去，並且「確認真的切成功」（統一編號欄位真的出現）才繼續，
+    # 不然會誤填到手機條碼登入表單的欄位。
+    identity_tab = page.get_by_text("扣繳單位", exact=False)
+    if not identity_tab.count():
+        identity_tab = page.get_by_text("營業人", exact=False)
+    if identity_tab.count() and identity_tab.first.is_visible():
+        try:
+            identity_tab.first.click(timeout=3000)
+        except Exception:
+            pass
+
+    ubn_input = page.locator("input[name='LoginUBN'], input[placeholder*='統一編號']")
+    try:
+        ubn_input.first.wait_for(state="visible", timeout=8000)
+    except Exception:
+        raise RuntimeError(
+            "已嘗試切換到「營業人/扣繳單位」身分，但還是找不到統一編號欄位；"
+            f"目前頁面：{page.url}。可能是畫面預設身分或欄位結構跟預期不同，"
+            "請截圖回報以便調整。"
+        )
+
+    # 身分別切成功後，登入方式預設就是「帳號」，這裡用文字點擊只是保險，
+    # 萬一之前被切到「憑證」分頁。
+    account_mode_tab = page.get_by_text("帳號", exact=True)
+    if account_mode_tab.count() and account_mode_tab.first.is_visible():
+        try:
+            account_mode_tab.first.click(timeout=2000)
+        except Exception:
+            pass
 
     filled_ubn = fill_if_present(page, "input[name='LoginUBN'], input[placeholder*='統一編號']", credentials.ubn)
     filled_account = fill_if_present(page, "input[name='LoginAccount'], input[placeholder*='帳號']", credentials.account)
