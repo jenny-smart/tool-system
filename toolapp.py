@@ -1509,6 +1509,37 @@ def render_report() -> None:
         unsafe_allow_html=True,
     )
 
+    def update_performance_report() -> None:
+        """依目前兩個頁籤的篩選條件重新產生所有業績報表。"""
+        selected_order_start = st.session_state.get("performance_order_start_date", default_order_start)
+        selected_order_end = st.session_state.get("performance_order_end_date", default_order_end)
+        selected_month_start = st.session_state.get("performance_report_start_month", default_start_date)
+        selected_month_end = st.session_state.get("performance_report_end_month", default_end_date)
+        if selected_order_start > selected_order_end:
+            st.error("訂購日期迄日不可早於起日")
+            return
+        if selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
+            st.error("結束月份不可早於起始月份")
+            return
+
+        try:
+            add_log("開始更新業績報表", "info")
+            run_script(
+                "tools/scheduled_daily/performance_report.py",
+                [
+                    "dashboard", "true",
+                    "--order-start-date", selected_order_start.strftime("%Y-%m-%d"),
+                    "--order-end-date", selected_order_end.strftime("%Y-%m-%d"),
+                    "--start-month", selected_month_start.strftime("%Y-%m"),
+                    "--end-month", selected_month_end.strftime("%Y-%m"),
+                ],
+            )
+            add_log("業績報表更新完成", "success")
+            st.rerun()
+        except Exception as e:
+            add_log(f"業績報表更新失敗：{e}", "error")
+            st.error(f"業績報表更新失敗：{e}")
+
     top_cols = st.columns([1, 1, 1, 1])
     with top_cols[0]:
         if st.button("← 返回主控台", use_container_width=True):
@@ -1516,33 +1547,8 @@ def render_report() -> None:
             st.rerun()
 
     with top_cols[1]:
-        if st.button("🔄 更新業績報表", use_container_width=True):
-            selected_order_start = st.session_state.get("performance_order_start_date", default_order_start)
-            selected_order_end = st.session_state.get("performance_order_end_date", default_order_end)
-            selected_month_start = st.session_state.get("performance_report_start_month", default_start_date)
-            selected_month_end = st.session_state.get("performance_report_end_month", default_end_date)
-            if selected_order_start > selected_order_end:
-                st.error("訂購日期迄日不可早於起日")
-            elif selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
-                st.error("結束月份不可早於起始月份")
-            else:
-                try:
-                    add_log("開始更新業績報表", "info")
-                    run_script(
-                        "tools/scheduled_daily/performance_report.py",
-                        [
-                            "dashboard", "true",
-                            "--order-start-date", selected_order_start.strftime("%Y-%m-%d"),
-                            "--order-end-date", selected_order_end.strftime("%Y-%m-%d"),
-                            "--start-month", selected_month_start.strftime("%Y-%m"),
-                            "--end-month", selected_month_end.strftime("%Y-%m"),
-                        ],
-                    )
-                    add_log("業績報表更新完成", "success")
-                    st.rerun()
-                except Exception as e:
-                    add_log(f"業績報表更新失敗：{e}", "error")
-                    st.error(f"業績報表更新失敗：{e}")
+        if st.button("🔄 更新全部報表", use_container_width=True):
+            update_performance_report()
 
     with top_cols[2]:
         if st.button("📂 重新讀取資料", use_container_width=True):
@@ -1620,6 +1626,12 @@ def render_report() -> None:
                 key="performance_order_end_date",
             )
         st.caption("預設起迄日皆為當日；結果依地區彙總未付款、已付款及合計業績。")
+        if st.button(
+            "✅ 確定並套用訂購日期區間",
+            key="apply_performance_order_dates",
+            use_container_width=True,
+        ):
+            update_performance_report()
         render_html_table(order_date_df)
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1646,7 +1658,13 @@ def render_report() -> None:
         if not month_range_valid:
             st.error("結束月份不可早於起始月份")
 
-        st.caption("設定完成後，請按頁面上方的『更新業績報表』套用全部區間。")
+        st.caption("選好起迄月份後，按下方確定鍵重新統整該區間資料（日期只取年月）。")
+        if st.button(
+            "✅ 確定並套用月份區間",
+            key="apply_performance_month_range",
+            use_container_width=True,
+        ):
+            update_performance_report()
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="card"><div class="card-title">➖ 該月業績－該月保留單業績</div>', unsafe_allow_html=True)
@@ -1654,6 +1672,8 @@ def render_report() -> None:
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="card"><div class="card-title">📊 該月業績報表</div>', unsafe_allow_html=True)
+        if month_performance_df.empty:
+            st.warning("此資料尚未產生，請選好月份後按『確定並套用月份區間』。")
         render_html_table(month_performance_df)
         st.markdown("</div>", unsafe_allow_html=True)
 

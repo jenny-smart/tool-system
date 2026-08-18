@@ -65,3 +65,9 @@ def test_reserve_hours_and_net_performance():
     assert taipei_net["2026/08業績－保留單業績"] == 5200
     assert taichung_net["2026/08業績－保留單業績"] == 4400
     assert performance_df[performance_df["地區"] == "加總"].iloc[0]["2026/08業績"] == 18000
+
+    for city in [*report.CITY_ORDER, "加總"]:
+        gross = performance_df[performance_df["地區"] == city].iloc[0]["2026/08業績"]
+        reserve = reserve_df[reserve_df["地區"] == city].iloc[0]["2026/08保留單業績"]
+        net = net_df[net_df["地區"] == city].iloc[0]["2026/08業績－保留單業績"]
+        assert gross - reserve == net
