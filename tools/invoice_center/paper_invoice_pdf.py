@@ -87,6 +87,27 @@ def _search_paper_invoices(page: Page, start_roc: str, end_roc: str) -> None:
     search_button.wait_for(state="visible", timeout=10_000)
     search_button.click()
     page.wait_for_load_state("networkidle", timeout=15_000)
+    # networkidle 常常在結果表格真的插入 DOM 之前就先回來（AJAX 局部更新，
+    # 不算是一次完整導覽），直接接著讀表格容易撈到 0 筆。改成明確等到結果
+    # 表格（含「訂單編號」表頭）真的出現，撈不到再補按一次搜尋重試。
+    _wait_for_results_table(page)
+
+
+def _wait_for_results_table(page: Page, *, retry: bool = True) -> None:
+    try:
+        page.wait_for_function(
+            "() => Array.from(document.querySelectorAll('table'))"
+            ".some(t => t.innerText.includes('訂單編號'))",
+            timeout=10_000,
+        )
+    except PlaywrightTimeoutError:
+        if not retry:
+            return
+        search_button = page.get_by_text("搜尋", exact=False).first
+        if search_button.count() and search_button.first.is_visible():
+            search_button.first.click()
+            page.wait_for_load_state("networkidle", timeout=15_000)
+            _wait_for_results_table(page, retry=False)
 
 
 def _row_texts(page: Page) -> tuple[list[str] | None, list[list[str]]]:
