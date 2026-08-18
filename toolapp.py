@@ -26,8 +26,17 @@ import yaml
 
 from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
 from tools.local_agent_queue import create_task as create_local_agent_task
-from tools.local_agent_queue import list_tasks as list_local_agent_tasks
-from tools.local_agent_queue import read_task_log as read_local_agent_task_log
+from tools.local_agent_queue import list_tasks as _list_local_agent_tasks_raw
+from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_raw
+
+# render_agent_task_progress／render_fubon_mobile_verification 都是每 2~3 秒
+# 自動輪詢一次的 st.fragment，各自還會再呼叫 read_task_log；不加短期快取的話，
+# 同一份「本機Agent任務」佇列表在多個分頁/多個 fragment 疊加輪詢下，很容易
+# 超過 Sheets API 每人每分鐘 60 次讀取的配額，導致 429 Quota exceeded、整個
+# 任務 Log 面板讀取失敗。快取 5 秒對「即時」顯示的實際影響可忽略，但能把
+# 讀取次數壓到配額以內。
+list_local_agent_tasks = st.cache_data(ttl=5, show_spinner=False)(_list_local_agent_tasks_raw)
+read_local_agent_task_log = st.cache_data(ttl=5, show_spinner=False)(_read_local_agent_task_log_raw)
 
 from services.google_api_retry import install_gspread_retry
 
