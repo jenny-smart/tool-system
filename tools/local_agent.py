@@ -195,6 +195,34 @@ def build_cetustek_serial_section_query(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_cetustek_import_and_allocate(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    if not area or area == "全區":
+        raise ValueError("匯入＋配號任務必須指定區域")
+    qyear = str(params.get("qyear") or "").strip()
+    qmonth = str(params.get("qmonth") or "").strip()
+    if not qyear or not qmonth:
+        raise ValueError("匯入＋配號需要提供鯨躍配號查詢年份與查詢月份")
+    command = [
+        sys.executable,
+        "-m",
+        "tools.invoice_center.cetustek_serial",
+        "import-and-allocate",
+        "--area",
+        area,
+        "--qyear",
+        qyear,
+        "--qmonth",
+        qmonth,
+        "--cdp-url",
+        cdp_url,
+    ]
+    period = str(params.get("month") or "").strip()
+    if period:
+        command.extend(["--period", period])
+    return command
+
+
 def build_cetustek_full_pipeline(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     if not area or area == "全區":
@@ -551,6 +579,7 @@ register_action("cetustek.paper_invoice_pdf", build_cetustek_paper_invoice_pdf)
 register_action("cetustek.serial_import", build_cetustek_serial_import)
 register_action("cetustek.serial_section_query", build_cetustek_serial_section_query)
 register_action("cetustek.full_pipeline", build_cetustek_full_pipeline)
+register_action("cetustek.import_and_allocate", build_cetustek_import_and_allocate)
 register_action("mofei.login", build_mofei_login)
 register_action("mofei.download", build_mofei_download)
 register_action("newebpay.login", build_newebpay_login)

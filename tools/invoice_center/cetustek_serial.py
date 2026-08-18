@@ -295,7 +295,7 @@ def allocate_serial_numbers(page: Page, area: str, qyear_label: str, qmonth_labe
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="鯨躍電子發票字軌號碼匯入／配號")
-    parser.add_argument("action", choices=["import", "section-query", "allocate"])
+    parser.add_argument("action", choices=["import", "section-query", "allocate", "import-and-allocate"])
     parser.add_argument("--area", required=True, help="區域，例如：台北、台中")
     parser.add_argument("--period", default="", help="匯入用：財政部字軌期別 YYYYMM（起始月），未輸入預設下一期")
     parser.add_argument("--qyear", default="", help="配號用：查詢年份下拉選單上的可見文字")
@@ -304,9 +304,32 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _do_import(page, area: str, period_arg: str) -> tuple[str, str]:
+    """執行匯入，回傳 (功能名稱, 期別顯示文字) 供呼叫端後續寫 Log 用。"""
+    year, label = parse_period_arg(period_arg)
+    period_display = f"{year}年{label}期"
+    with tempfile.TemporaryDirectory(prefix="mof_serial_fetch_") as temp_dir:
+        csv_path = fetch_mof_serial_csv(area, year, label, Path(temp_dir) / period_filename(year, label, area))
+        print(f"已從 Google Drive 抓回：{csv_path.name}")
+        import_serial_numbers(page, csv_path)
+    return period_display, csv_path.name
+
+
+def _do_allocate(page, area: str, qyear: str, qmonth: str, sheets, spreadsheet_id: str) -> tuple[str, str]:
+    if not qyear or not qmonth:
+        raise ValueError("配號需要 --qyear 與 --qmonth")
+    period_display = f"{qyear} {qmonth}"
+    reserve_map = ensure_allocation_config(sheets, spreadsheet_id)
+    reserve_count = reserve_map.get(area, 3)
+    total, reserve, api_count = allocate_serial_numbers(page, area, qyear, qmonth, reserve_count)
+    message = f"總本數 {total} = 線上單張開立 {reserve} + API串接開立 {api_count}"
+    return period_display, message
+
+
 def main() -> int:
     args = parse_args()
     period_display = ""
+    failing_function = ""
     sheets = None
     spreadsheet_id = ""
     try:
@@ -318,50 +341,55 @@ def main() -> int:
                 page = context.new_page()
 
             if args.action == "import":
-                year, label = parse_period_arg(args.period)
-                period_display = f"{year}年{label}期"
-                with tempfile.TemporaryDirectory(prefix="mof_serial_fetch_") as temp_dir:
-                    csv_path = fetch_mof_serial_csv(
-                        args.area, year, label, Path(temp_dir) / period_filename(year, label, args.area)
-                    )
-                    print(f"已從 Google Drive 抓回：{csv_path.name}")
-                    import_serial_numbers(page, csv_path)
+                failing_function = "電子發票字軌號碼匯入"
+                period_display, csv_name = _do_import(page, args.area, args.period)
                 _, sheets = get_google_services()
                 spreadsheet_id = _master_spreadsheet_id()
                 write_serial_log(
-                    sheets, spreadsheet_id, function_name="電子發票字軌號碼匯入",
-                    area=args.area, period=period_display, status="成功", message=f"已上傳 {csv_path.name}",
+                    sheets, spreadsheet_id, function_name=failing_function,
+                    area=args.area, period=period_display, status="成功", message=f"已上傳 {csv_name}",
                 )
             elif args.action == "section-query":
                 if not args.qyear or not args.qmonth:
                     raise ValueError("配號查詢需要 --qyear 與 --qmonth")
                 period_display = f"{args.qyear} {args.qmonth}"
                 open_serial_section_query(page, args.qyear, args.qmonth)
-            else:
-                if not args.qyear or not args.qmonth:
-                    raise ValueError("配號需要 --qyear 與 --qmonth")
-                period_display = f"{args.qyear} {args.qmonth}"
+            elif args.action == "allocate":
+                failing_function = "電子發票字軌號碼配號"
                 _, sheets = get_google_services()
                 spreadsheet_id = _master_spreadsheet_id()
-                reserve_map = ensure_allocation_config(sheets, spreadsheet_id)
-                reserve_count = reserve_map.get(args.area, 3)
-                total, reserve, api_count = allocate_serial_numbers(
-                    page, args.area, args.qyear, args.qmonth, reserve_count
-                )
+                period_display, message = _do_allocate(page, args.area, args.qyear, args.qmonth, sheets, spreadsheet_id)
                 write_serial_log(
-                    sheets, spreadsheet_id, function_name="電子發票字軌號碼配號",
-                    area=args.area, period=period_display, status="成功",
-                    message=f"總本數 {total} = 線上單張開立 {reserve} + API串接開立 {api_count}",
+                    sheets, spreadsheet_id, function_name=failing_function,
+                    area=args.area, period=period_display, status="成功", message=message,
                 )
+            else:  # import-and-allocate
+                _, sheets = get_google_services()
+                spreadsheet_id = _master_spreadsheet_id()
+
+                failing_function = "電子發票字軌號碼匯入"
+                period_display, csv_name = _do_import(page, args.area, args.period)
+                write_serial_log(
+                    sheets, spreadsheet_id, function_name=failing_function,
+                    area=args.area, period=period_display, status="成功", message=f"已上傳 {csv_name}",
+                )
+                print(f"[1/2] 已匯入：{csv_name}")
+
+                failing_function = "電子發票字軌號碼配號"
+                period_display, message = _do_allocate(page, args.area, args.qyear, args.qmonth, sheets, spreadsheet_id)
+                write_serial_log(
+                    sheets, spreadsheet_id, function_name=failing_function,
+                    area=args.area, period=period_display, status="成功", message=message,
+                )
+                print(f"[2/2] 已配號：{message}")
     except Exception as e:
-        if args.action in ("import", "allocate"):
+        if failing_function:
             try:
                 if sheets is None:
                     _, sheets = get_google_services()
                     spreadsheet_id = _master_spreadsheet_id()
                 write_serial_log(
-                    sheets, spreadsheet_id,
-                    function_name="電子發票字軌號碼匯入" if args.action == "import" else "電子發票字軌號碼配號",
+                    sheets, spreadsheet_id, function_name=failing_function,
                     area=args.area, period=period_display, status="失敗", message=str(e),
                 )
             except Exception:
