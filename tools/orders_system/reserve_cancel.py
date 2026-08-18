@@ -7,6 +7,7 @@ import re
 from typing import List, Optional
 
 import cancel_order as co
+from reserve_sheet_log import append_log_rows
 
 SYSTEM_RESERVE_MEMO = "系統保留單"
 
@@ -21,31 +22,17 @@ def _purchase_id_from_order_no(order_no: str) -> str:
     return str(int(digits)) if digits else ""
 
 
-def mark_system_reserve_order(
-    env_name: str,
-    backend_email: str,
-    backend_password: str,
-    order_no: str,
-) -> dict:
-    """Write 客人備註=系統保留單 on a newly created reserve order."""
+def mark_system_reserve_order(env_name: str, backend_email: str, backend_password: str, order_no: str) -> dict:
     _assert_dev(env_name)
     purchase_id = _purchase_id_from_order_no(order_no)
     if not purchase_id:
         return {"ok": False, "order_no": order_no, "message": "無法取得 purchase_id"}
     session, base_url = co._new_logged_in_session(env_name, backend_email, backend_password)
     ok, msg = co._update_cancel_notes(
-        session,
-        base_url,
-        purchase_id,
-        customer_memo=SYSTEM_RESERVE_MEMO,
-        charge_note="",
-        refund_note="",
+        session, base_url, purchase_id,
+        customer_memo=SYSTEM_RESERVE_MEMO, charge_note="", refund_note="",
     )
-    return {
-        "ok": bool(ok),
-        "order_no": order_no,
-        "message": msg or ("客人備註已註記系統保留單" if ok else "客人備註註記失敗"),
-    }
+    return {"ok": bool(ok), "order_no": order_no, "message": msg or ("客人備註已註記系統保留單" if ok else "客人備註註記失敗")}
 
 
 def _memo_matches_filter(memo: str, memo_filter: str) -> bool:
@@ -62,20 +49,10 @@ def _memo_matches_filter(memo: str, memo_filter: str) -> bool:
 
 
 def find_reserve_orders(
-    env_name: str,
-    backend_email: str,
-    backend_password: str,
-    phone: str,
-    clean_date_s: str,
-    clean_date_e: str,
-    memo_filter: str = "系統保留單或空白",
-    periods: Optional[List[str]] = None,
+    env_name: str, backend_email: str, backend_password: str, phone: str,
+    clean_date_s: str, clean_date_e: str,
+    memo_filter: str = "系統保留單或空白", periods: Optional[List[str]] = None,
 ) -> List[dict]:
-    """Find reserve-phone orders in a service date range and expose customer memo.
-
-    Search both 已付款/待付款. The caller may filter by period and customer memo.
-    Non-matching memo rows are not returned unless memo_filter=全部（僅供查看）.
-    """
     _assert_dev(env_name)
     periods_set = {str(p).replace(" ", "") for p in (periods or []) if str(p).strip()}
     candidates = []
@@ -83,13 +60,8 @@ def find_reserve_orders(
 
     for payment_status in ("已付款", "待付款"):
         rows = co.find_orders_for_cancel(
-            env_name,
-            backend_email,
-            backend_password,
-            phone,
-            clean_date_s,
-            clean_date_e,
-            payment_status=payment_status,
+            env_name, backend_email, backend_password, phone,
+            clean_date_s, clean_date_e, payment_status=payment_status,
         )
         for row in rows:
             pid = str(row.get("purchase_id") or "")
@@ -119,13 +91,15 @@ def find_reserve_orders(
             continue
 
         memo = str(detail.get("memo") or "").strip()
-        matches = _memo_matches_filter(memo, memo_filter)
-        if not matches:
+        if not _memo_matches_filter(memo, memo_filter):
             continue
         item = dict(row)
         item["customer_memo"] = memo
-        # 真正可取消的安全條件固定只有：系統保留單 or 空白。
         item["cancel_eligible"] = (memo == "" or SYSTEM_RESERVE_MEMO in memo)
+        # 把取消前可取得的金額/專員資料保留給 Sheet 紀錄。
+        for key in ("amount", "total_amount", "order_amount", "price", "staff", "staff_names", "service_staff"):
+            if key not in item and detail.get(key) not in (None, ""):
+                item[key] = detail.get(key)
         found.append(item)
 
     found.sort(key=lambda x: (x.get("service_date", ""), x.get("period", ""), x.get("order_no", "")))
@@ -133,17 +107,9 @@ def find_reserve_orders(
 
 
 def cancel_reserve_orders(
-    env_name: str,
-    backend_email: str,
-    backend_password: str,
-    reserve_orders: List[dict],
-    cancel_count: int,
+    env_name: str, backend_email: str, backend_password: str,
+    reserve_orders: List[dict], cancel_count: int,
 ) -> List[dict]:
-    """Cancel first N chronological rows, rechecking 客人備註 immediately before cancel.
-
-    Safety rule: only cancel when current 客人備註 is blank or contains 系統保留單.
-    If someone has added any other customer-reservation note, skip it.
-    """
     _assert_dev(env_name)
     count = max(0, int(cancel_count or 0))
     if count <= 0:
@@ -169,9 +135,7 @@ def cancel_reserve_orders(
             continue
         if current_memo and SYSTEM_RESERVE_MEMO not in current_memo:
             skipped.append({
-                **row,
-                "ok": False,
-                "customer_memo": current_memo,
+                **row, "ok": False, "customer_memo": current_memo,
                 "message": "客人備註已有其他內容，判定可能是人工替客人保留，已跳過不取消。",
             })
             continue
@@ -180,13 +144,25 @@ def cancel_reserve_orders(
     cancelled = []
     if safe_rows:
         cancelled = co.cancel_orders(
-            env_name,
-            backend_email,
-            backend_password,
-            safe_rows,
-            cancel_status="不需退款",
-            customer_memo="取消系統保留單",
-            charge_note="",
-            refund_note="",
+            env_name, backend_email, backend_password, safe_rows,
+            cancel_status="不需退款", customer_memo="取消系統保留單",
+            charge_note="", refund_note="",
         )
+
+        # cancel_orders 回傳欄位可能比查詢列少，因此依訂單編號補回日期/時段/金額/專員。
+        source_by_order = {str(r.get("order_no") or ""): r for r in safe_rows}
+        enriched = []
+        for result in cancelled:
+            source = source_by_order.get(str(result.get("order_no") or ""), {})
+            item = dict(source)
+            item.update(result)
+            enriched.append(item)
+        cancelled = enriched
+
+        try:
+            append_log_rows("取消", cancelled)
+        except Exception as log_exc:
+            for row in cancelled:
+                row["sheet_log_error"] = str(log_exc)
+
     return cancelled + skipped
