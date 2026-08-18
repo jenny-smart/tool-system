@@ -127,6 +127,22 @@ def build_cetustek_allowance(params: dict[str, Any]) -> list[str]:
             "--cdp-url", cdp_url, "--rows", ",".join(str(int(row)) for row in selected_rows)]
 
 
+def build_cetustek_paper_invoice_pdf(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    month = str(params.get("month") or "").strip()
+    if not area or area == "全區":
+        raise ValueError("紙本發票 PDF 建檔請選擇單一區域")
+    if not month:
+        raise ValueError("請輸入要建檔的月份")
+    command = [
+        sys.executable, "-m", "tools.invoice_center.paper_invoice_pdf", month,
+        "--area", area, "--cdp-url", cdp_url,
+    ]
+    if not bool(params.get("upload", True)):
+        command.append("--no-upload")
+    return command
+
+
 def build_newebpay_login(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     if not area or area == "全區":
@@ -425,6 +441,7 @@ def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
 register_action("cetustek.allowance", build_cetustek_allowance)
+register_action("cetustek.paper_invoice_pdf", build_cetustek_paper_invoice_pdf)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
