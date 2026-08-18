@@ -272,6 +272,14 @@ def allocate_serial_numbers(page: Page, area: str, qyear_label: str, qmonth_labe
         page.locator("#tdsave2").click(timeout=10_000, force=True)
     except Exception as e:
         raise RuntimeError(f"找不到「儲存」按鈕；目前頁面：{page.url}") from e
+    page.wait_for_timeout(1000)
+
+    # 按下儲存後會再跳一個 alertify 確認視窗（「您確定要儲存!?」），要按
+    # 「確定」才會真的送出。
+    try:
+        page.locator("#alertify-ok").click(timeout=8000)
+    except Exception as e:
+        raise RuntimeError(f"找不到「您確定要儲存!?」確認視窗的「確定」按鈕；目前頁面：{page.url}") from e
     page.wait_for_timeout(2000)
 
     error_banner = page.get_by_text("本數不符合此區間配號", exact=False)
