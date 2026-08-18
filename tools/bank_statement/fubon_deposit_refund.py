@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -20,8 +22,10 @@ from tools.bank_statement.internal_payment_registry import (
     DEPOSIT_REFUND_TYPE,
     read_destination_name,
     read_report_values,
+    resolve_report_location,
 )
 from tools.bank_statement.open_login import current_fubon_page
+from tools.common.config_loader import get_sheets_service
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
 
@@ -63,17 +67,29 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
 
     destination_name = read_destination_name(DEPOSIT_REFUND_TYPE, area)
     account = load_account("fubon", area, accounts_file.expanduser())
+    spreadsheet_id, sheet_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
+    service = get_sheets_service()
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
         try:
-            for index, item in enumerate(selected):
+            for item in selected:
                 print(f"準備第 {item['sheet_row']} 列：NT$ {item['amount']}／備註：{item['memo']}")
                 fill_deposit_refund(page, area, account.bank_account, destination_name, item)
-                if index + 1 < len(selected):
-                    wait_user_completed_transfer(page)
-                    page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已準備完成；每一筆都請人工核對並自行按「確認」送出。")
+                # 每一筆都要等人工按「確認」真的送出後才回填，最後一筆也不
+                # 例外——不然腳本沒等最後一筆完成就結束，S 欄就不會回填，
+                # 這筆下次掃描還是會被當成待處理。
+                wait_user_completed_transfer(page)
+                payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
+                service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=f"'{sheet_title}'!S{item['sheet_row']}",
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [[payment_date]]},
+                ).execute()
+                print(f"已回填第 {item['sheet_row']} 列 S 欄：{payment_date}")
+                page = current_fubon_page(context, page) or page
+            print("全部勾選資料均已完成付款並回填 S 欄。")
         except Exception:
             # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
             raise
