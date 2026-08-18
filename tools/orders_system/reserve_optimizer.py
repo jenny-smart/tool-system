@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """大掃除保留單規劃與測試機批次建單。
 
-第一版目標：
+流程：
 1. 從後台 /schedule 讀指定日期各時段的「未配班」人數。
 2. 依日期區間 AM/PM 保留率計算應建立的 2 人保留單張數。
 3. 使用既有 quick_order.quick_create_order 真正建立訂單。
 4. 每張送出前重新讀班表；成功後寫入客服備註並留下批次 log。
-5. 第一版只允許 dev 測試機，避免誤送正式機。
+5. 可一次執行整段日期範圍；每個日期/時段仍各自保留市場安全人數。
+6. 第一版只允許 dev 測試機，避免誤送正式機。
 
 注意：
 - 定期客「檸檬人換真人」需在執行本功能前完成；本模組不會自動動既有客戶訂單。
@@ -165,11 +166,7 @@ def _period_from_text(text: str) -> str:
 
 
 def parse_schedule_unassigned(html_text: str, service_date: str = "") -> Dict[str, Dict[str, object]]:
-    """解析 schedule table 每個時段的「未配班 N 人」。
-
-    後台班表是 table 欄位式版面。以表頭時間對應同欄儲存格；若 DOM 結構
-    之後調整，另有全文近距離 regex 備援。回傳 period -> {unassigned_people, raw_text}。
-    """
+    """解析 schedule table 每個時段的「未配班 N 人」。"""
     soup = BeautifulSoup(html_text or "", "html.parser")
     result: Dict[str, Dict[str, object]] = {}
 
@@ -263,11 +260,7 @@ def create_reserve_orders_for_slot(
     stop_when_market_people_below: int = 2,
     sleep_seconds: float = 1.0,
 ) -> dict:
-    """真正建立某日某時段的保留單。
-
-    每張前都重新讀 schedule 的未配班人數，避免批次開始後班表已變動還繼續盲送。
-    target_orders 是預覽時算出的上限；若即時人力不足會提前停止。
-    """
+    """真正建立某日某時段的保留單；每張前重新讀班表。"""
     _assert_dev(env_name)
     if period not in PERIOD_HOURS:
         raise ValueError(f"不支援時段：{period}")
@@ -285,6 +278,8 @@ def create_reserve_orders_for_slot(
                 "success": False,
                 "stopped": True,
                 "message": f"即時未配班只剩 {current_people} 人，已停止後續保留單，避免吃掉市場安全人力。",
+                "service_date": service_date,
+                "period": period,
             })
             break
 
@@ -336,4 +331,80 @@ def create_reserve_orders_for_slot(
         "target_orders": target_orders,
         "success_count": sum(1 for r in results if r.get("success")),
         "results": results,
+    }
+
+
+def create_reserve_orders_for_plan(
+    *,
+    env_name: str,
+    lookup_result,
+    region: str,
+    address: str,
+    plan_rows: Sequence[dict],
+    payway: str,
+    clean_type_id: str = "1",
+    continue_after_slot_error: bool = True,
+    sleep_seconds: float = 1.0,
+) -> dict:
+    """依預覽計畫一次建立整段期間的保留單。
+
+    每個日期/時段使用該列自己的 reserve_order_target 與 market_people_target。
+    某一時段因人力變動提前停止時，預設仍繼續下一個日期/時段，並完整回報結果。
+    """
+    _assert_dev(env_name)
+    batch_id = _build_batch_id()
+    slot_results = []
+    flat_results = []
+    total_target = 0
+
+    for row in plan_rows or []:
+        target_orders = max(0, int(row.get("reserve_order_target") or 0))
+        if target_orders <= 0:
+            continue
+        total_target += target_orders
+        service_date = str(row.get("service_date") or "")
+        period = str(row.get("period") or "")
+        try:
+            slot_result = create_reserve_orders_for_slot(
+                env_name=env_name,
+                lookup_result=lookup_result,
+                region=region,
+                address=address,
+                service_date=service_date,
+                period=period,
+                reserve_rate=float(row.get("reserve_rate") or 0),
+                target_orders=target_orders,
+                payway=payway,
+                clean_type_id=clean_type_id,
+                batch_id=batch_id,
+                stop_when_market_people_below=int(row.get("market_people_target") or 0),
+                sleep_seconds=sleep_seconds,
+            )
+        except Exception as exc:
+            slot_result = {
+                "batch_id": batch_id,
+                "service_date": service_date,
+                "period": period,
+                "target_orders": target_orders,
+                "success_count": 0,
+                "results": [{
+                    "success": False,
+                    "service_date": service_date,
+                    "period": period,
+                    "message": str(exc),
+                }],
+            }
+        slot_results.append(slot_result)
+        flat_results.extend(slot_result.get("results") or [])
+        has_failure = any(not r.get("success") for r in (slot_result.get("results") or []))
+        if has_failure and not continue_after_slot_error:
+            break
+
+    return {
+        "batch_id": batch_id,
+        "target_orders": total_target,
+        "success_count": sum(1 for r in flat_results if r.get("success")),
+        "slot_count": len(slot_results),
+        "slot_results": slot_results,
+        "results": flat_results,
     }
