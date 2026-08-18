@@ -1,19 +1,5 @@
 # -*- coding: utf-8 -*-
-"""大掃除保留單規劃與測試機批次建單。
-
-流程：
-1. 從後台 /schedule 讀指定日期各時段的「未配班」人數。
-2. 依日期區間 AM/PM 保留率計算應建立的 2 人保留單張數。
-3. 使用既有 quick_order.quick_create_order 真正建立訂單。
-4. 每張送出前重新讀班表；成功後寫入客服備註並留下批次 log。
-5. 可一次執行整段日期範圍；每個日期/時段仍各自保留市場安全人數。
-6. 第一版只允許 dev 測試機，避免誤送正式機。
-
-注意：
-- 定期客「檸檬人換真人」需在執行本功能前完成；本模組不會自動動既有客戶訂單。
-- 第一版讓後台依地址/班表自動選合法專員，不強制指定配對；等測試機確認
-  schedule/edit 的「可服務此區」標記 HTML 後，再加入最佳化指定真人配對。
-"""
+"""大掃除保留單規劃與測試機批次建單。"""
 
 from __future__ import annotations
 
@@ -27,10 +13,12 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from bs4 import BeautifulSoup
 
+import cancel_order as co
 import quick_order as qo
 
 
 RESERVE_PHONE_DEFAULT = "0939592628"
+SYSTEM_RESERVE_MEMO = "系統保留單"
 PERIOD_HOURS = {
     "08:30-12:30": 4,
     "09:00-11:00": 2,
@@ -77,6 +65,25 @@ def _assert_dev(env_name: str) -> None:
         raise RuntimeError("大掃除保留單第一版只允許在 dev 測試機執行，禁止送正式機。")
 
 
+def _purchase_id_from_order_no(order_no: str) -> str:
+    digits = re.sub(r"\D", "", str(order_no or ""))
+    return str(int(digits)) if digits else ""
+
+
+def _mark_customer_memo_as_system_reserve(session, base_url: str, order_no: str) -> Tuple[bool, str]:
+    purchase_id = _purchase_id_from_order_no(order_no)
+    if not purchase_id:
+        return False, "無法由訂單編號取得 purchase_id"
+    return co._update_cancel_notes(
+        session,
+        base_url,
+        purchase_id,
+        customer_memo=SYSTEM_RESERVE_MEMO,
+        charge_note="",
+        refund_note="",
+    )
+
+
 def daterange(start: date, end: date) -> Iterable[date]:
     if end < start:
         raise ValueError("結束日期不可早於開始日期")
@@ -104,11 +111,6 @@ def resolve_rate(service_date: date, period: str, rules: Sequence[ReserveRule], 
 
 
 def calculate_reserve_target(unassigned_people: int, reserve_rate: float) -> Tuple[int, int, int]:
-    """回傳 (保留人數, 2人保留單張數, 對外剩餘人數)。
-
-    保留單固定 2 人，所以先用 floor 保守取整，避免為了湊比例多鎖一組。
-    奇數人會留在市場側，不會硬湊保留單。
-    """
     people = max(0, int(unassigned_people or 0))
     rate = normalize_rate(reserve_rate)
     reserve_orders = int(math.floor((people * rate) / 2.0))
@@ -166,7 +168,6 @@ def _period_from_text(text: str) -> str:
 
 
 def parse_schedule_unassigned(html_text: str, service_date: str = "") -> Dict[str, Dict[str, object]]:
-    """解析 schedule table 每個時段的「未配班 N 人」。"""
     soup = BeautifulSoup(html_text or "", "html.parser")
     result: Dict[str, Dict[str, object]] = {}
 
@@ -298,16 +299,26 @@ def create_reserve_orders_for_slot(
                 allow_auto_lemon_shift=False,
                 extra_fields={"notice": f"大掃除檸檬保留單 {batch_id}"},
             )
+            base_url = lookup_result.get("base_url") or qo._configure_environment(env_name)
+
+            customer_memo_ok = False
+            customer_memo_msg = ""
+            try:
+                customer_memo_ok, customer_memo_msg = _mark_customer_memo_as_system_reserve(
+                    result["session"], base_url, result["order_no"]
+                )
+            except Exception as memo_exc:
+                customer_memo_msg = f"客人備註註記失敗：{memo_exc}"
+
             note_ok = False
             note_msg = ""
             try:
-                base_url = lookup_result.get("base_url") or qo._configure_environment(env_name)
                 note_ok, note_msg = qo._update_order_note(
                     result["session"], base_url, result["order_no"],
                     f"大掃除檸檬保留單｜batch={batch_id}｜保留率={int(round(normalize_rate(reserve_rate) * 100))}%｜{idx + 1}/{target_orders}",
                 )
             except Exception as note_exc:
-                note_msg = f"訂單已成立，但備註寫入失敗：{note_exc}"
+                note_msg = f"訂單已成立，但客服備註寫入失敗：{note_exc}"
 
             results.append({
                 "success": True,
@@ -315,9 +326,24 @@ def create_reserve_orders_for_slot(
                 "staff": result.get("staff"),
                 "service_date": service_date,
                 "period": period,
+                "customer_memo_ok": customer_memo_ok,
+                "customer_memo": SYSTEM_RESERVE_MEMO if customer_memo_ok else "",
+                "customer_memo_message": customer_memo_msg,
                 "note_ok": note_ok,
                 "note_message": note_msg,
             })
+
+            # 系統保留單一定要有客人備註標記；若寫入失敗，訂單已成立但停止後續批次，
+            # 避免大量產生無法安全辨識的保留單。
+            if not customer_memo_ok:
+                results.append({
+                    "success": False,
+                    "stopped": True,
+                    "service_date": service_date,
+                    "period": period,
+                    "message": f"訂單 {result.get('order_no')} 已成立，但客人備註未成功寫入『{SYSTEM_RESERVE_MEMO}』，已停止此時段後續建立。",
+                })
+                break
         except Exception as exc:
             results.append({"success": False, "message": str(exc), "service_date": service_date, "period": period})
             break
@@ -346,11 +372,6 @@ def create_reserve_orders_for_plan(
     continue_after_slot_error: bool = True,
     sleep_seconds: float = 1.0,
 ) -> dict:
-    """依預覽計畫一次建立整段期間的保留單。
-
-    每個日期/時段使用該列自己的 reserve_order_target 與 market_people_target。
-    某一時段因人力變動提前停止時，預設仍繼續下一個日期/時段，並完整回報結果。
-    """
     _assert_dev(env_name)
     batch_id = _build_batch_id()
     slot_results = []
