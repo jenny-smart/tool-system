@@ -132,7 +132,7 @@ def render_reserve_create(backend_email: str, backend_password: str, env: str) -
 
 def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -> None:
     st.markdown("### 🗑️ 檸檬保留單取消")
-    st.caption("依期間、複選時段與客人備註篩選保留單，再指定取消張數。取消前會重新檢查最新客人備註。")
+    st.caption("依期間、複選時段與客人備註篩選保留單，再勾選實際要取消的訂單。取消前會重新檢查最新客人備註。")
     if not _require_supported_env(env):
         return
     phone, lookup = _common_member_header(env, backend_email, backend_password)
@@ -149,6 +149,7 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
     if st.button("查詢可取消保留單", width="stretch", key="reserve_cancel_search"):
         st.session_state.reserve_menu_cancel_rows = []
         st.session_state.reserve_menu_cancel_debug = {}
+        st.session_state.reserve_cancel_selected_order_nos = []
         try:
             with st.spinner("正在查詢保留單：先抓近期訂單，再逐筆確認客人備註..."):
                 rows, debug = find_reserve_orders(
@@ -190,6 +191,7 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
     preview = df[cols].copy()
     preview.rename(columns={"service_date": "日期", "period": "時段", "order_no": "訂單編號", "customer_memo": "客人備註", "cancel_eligible": "安全可取消"}, inplace=True)
     st.dataframe(preview, width="stretch", hide_index=True)
+
     safe_rows = [r for r in rows if r.get("cancel_eligible")]
     st.write(f"查到 **{len(rows)} 張**；目前符合安全取消條件 **{len(safe_rows)} 張**。")
     if st.session_state.get("reserve_menu_cancel_filter") == "全部（僅供查看）":
@@ -197,22 +199,80 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
         return
     if not safe_rows:
         return
-    count = st.number_input("這次要取消幾張", min_value=1, max_value=len(safe_rows), value=1, step=1, key="reserve_cancel_count")
-    selected = safe_rows[: int(count)]
-    selected_df = pd.DataFrame(selected)
-    cols2 = [c for c in ["service_date", "period", "order_no", "customer_memo"] if c in selected_df.columns]
-    st.caption("依日期、時段、訂單編號排序，將取消下列最前面的訂單：")
-    st.dataframe(selected_df[cols2], width="stretch", hide_index=True)
+
+    st.markdown("#### 選擇要取消的保留單")
+    order_map = {str(r.get("order_no") or ""): r for r in safe_rows if str(r.get("order_no") or "")}
+    order_nos = list(order_map.keys())
+
+    # 清理舊查詢留下、已不存在於目前結果的選取值。
+    current_selected = [
+        x for x in st.session_state.get("reserve_cancel_selected_order_nos", [])
+        if x in order_map
+    ]
+    st.session_state.reserve_cancel_selected_order_nos = current_selected
+
+    b1, b2, _ = st.columns([1, 1, 3])
+    with b1:
+        if st.button("✅ 全選可取消單", width="stretch", key="reserve_cancel_select_all"):
+            st.session_state.reserve_cancel_selected_order_nos = order_nos[:]
+    with b2:
+        if st.button("⬜ 全部取消選取", width="stretch", key="reserve_cancel_clear_all"):
+            st.session_state.reserve_cancel_selected_order_nos = []
+
+    def _format_cancel_option(order_no: str) -> str:
+        row = order_map.get(order_no, {})
+        memo = str(row.get("customer_memo") or "").strip() or "空白"
+        return f"{row.get('service_date', '')}｜{row.get('period', '')}｜{order_no}｜客人備註：{memo}"
+
+    selected_order_nos = st.multiselect(
+        "勾選實際要取消的訂單（可複選）",
+        options=order_nos,
+        format_func=_format_cancel_option,
+        key="reserve_cancel_selected_order_nos",
+        placeholder="請選擇要取消的保留單",
+    )
+    selected_rows = [order_map[order_no] for order_no in selected_order_nos if order_no in order_map]
+    st.info(f"目前已選 **{len(selected_rows)} 張**；可取消總數 {len(safe_rows)} 張。")
+
+    if selected_rows:
+        selected_df = pd.DataFrame(selected_rows)
+        cols2 = [c for c in ["service_date", "period", "order_no", "customer_memo"] if c in selected_df.columns]
+        selected_preview = selected_df[cols2].copy()
+        selected_preview.rename(columns={"service_date": "日期", "period": "時段", "order_no": "訂單編號", "customer_memo": "客人備註"}, inplace=True)
+        st.caption("本次將取消以下訂單：")
+        st.dataframe(selected_preview, width="stretch", hide_index=True)
+
     machine = _env_label(env)
-    confirm = st.checkbox(f"我確認要在{machine}取消以上 {int(count)} 張檸檬保留單", key="reserve_cancel_confirm")
-    if st.button("確認取消檸檬保留單", type="primary", width="stretch", disabled=not confirm, key="reserve_cancel_execute"):
+    selected_count = len(selected_rows)
+    confirm = st.checkbox(
+        f"我確認要在{machine}取消以上 {selected_count} 張檸檬保留單",
+        key="reserve_cancel_confirm",
+        disabled=selected_count <= 0,
+    )
+    if st.button(
+        "確認取消檸檬保留單",
+        type="primary",
+        width="stretch",
+        disabled=not confirm or selected_count <= 0,
+        key="reserve_cancel_execute",
+    ):
         try:
             with st.spinner(f"正在{machine}逐張重新檢查客人備註並取消..."):
-                results = cancel_reserve_orders(env, backend_email.strip(), backend_password.strip(), safe_rows, int(count))
+                # 只把使用者實際勾選的 rows 傳入；count 等於所選張數，因此
+                # cancel_reserve_orders 不會碰到未選取的安全可取消單。
+                results = cancel_reserve_orders(
+                    env,
+                    backend_email.strip(),
+                    backend_password.strip(),
+                    selected_rows,
+                    selected_count,
+                )
             st.session_state.reserve_menu_cancel_result = results
+            st.session_state.reserve_cancel_selected_order_nos = []
             st.success("取消流程執行完成；若備註已被改成人工客人保留內容，該筆會自動跳過。")
         except Exception as exc:
             st.error(str(exc))
+
     results = st.session_state.get("reserve_menu_cancel_result") or []
     if results:
         st.dataframe(pd.DataFrame(results), width="stretch", hide_index=True)
