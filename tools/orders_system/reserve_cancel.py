@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Helpers for system reserve-order tagging and safe cancellation (dev only)."""
+"""Helpers for system reserve-order tagging and safe cancellation."""
 
 from __future__ import annotations
 
@@ -12,9 +12,10 @@ from reserve_sheet_log import append_log_rows
 SYSTEM_RESERVE_MEMO = "系統保留單"
 
 
-def _assert_dev(env_name: str) -> None:
-    if str(env_name or "").strip().lower() != "dev":
-        raise RuntimeError("保留單功能目前只允許 dev 測試機。")
+def _assert_supported_env(env_name: str) -> None:
+    env = str(env_name or "").strip().lower()
+    if env not in {"dev", "prod"}:
+        raise RuntimeError("保留單功能只支援 prod 正式機或 dev 測試機。")
 
 
 def _purchase_id_from_order_no(order_no: str) -> str:
@@ -23,7 +24,7 @@ def _purchase_id_from_order_no(order_no: str) -> str:
 
 
 def mark_system_reserve_order(env_name: str, backend_email: str, backend_password: str, order_no: str) -> dict:
-    _assert_dev(env_name)
+    _assert_supported_env(env_name)
     purchase_id = _purchase_id_from_order_no(order_no)
     if not purchase_id:
         return {"ok": False, "order_no": order_no, "message": "無法取得 purchase_id"}
@@ -53,7 +54,7 @@ def find_reserve_orders(
     clean_date_s: str, clean_date_e: str,
     memo_filter: str = "系統保留單或空白", periods: Optional[List[str]] = None,
 ) -> List[dict]:
-    _assert_dev(env_name)
+    _assert_supported_env(env_name)
     periods_set = {str(p).replace(" ", "") for p in (periods or []) if str(p).strip()}
     candidates = []
     seen = set()
@@ -96,7 +97,6 @@ def find_reserve_orders(
         item = dict(row)
         item["customer_memo"] = memo
         item["cancel_eligible"] = (memo == "" or SYSTEM_RESERVE_MEMO in memo)
-        # 把取消前可取得的金額/專員資料保留給 Sheet 紀錄。
         for key in ("amount", "total_amount", "order_amount", "price", "staff", "staff_names", "service_staff"):
             if key not in item and detail.get(key) not in (None, ""):
                 item[key] = detail.get(key)
@@ -110,7 +110,7 @@ def cancel_reserve_orders(
     env_name: str, backend_email: str, backend_password: str,
     reserve_orders: List[dict], cancel_count: int,
 ) -> List[dict]:
-    _assert_dev(env_name)
+    _assert_supported_env(env_name)
     count = max(0, int(cancel_count or 0))
     if count <= 0:
         raise ValueError("取消張數必須大於 0")
@@ -149,7 +149,6 @@ def cancel_reserve_orders(
             charge_note="", refund_note="",
         )
 
-        # cancel_orders 回傳欄位可能比查詢列少，因此依訂單編號補回日期/時段/金額/專員。
         source_by_order = {str(r.get("order_no") or ""): r for r in safe_rows}
         enriched = []
         for result in cancelled:
