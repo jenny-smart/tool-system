@@ -7,6 +7,7 @@ import re
 from typing import List, Optional
 
 import cancel_order as co
+import orders
 from reserve_sheet_log import append_log_rows
 
 SYSTEM_RESERVE_MEMO = "系統保留單"
@@ -49,45 +50,127 @@ def _memo_matches_filter(memo: str, memo_filter: str) -> bool:
     raise ValueError(f"未知客人備註篩選：{memo_filter}")
 
 
+def _fetch_phone_orders_fast(
+    env_name: str,
+    backend_email: str,
+    backend_password: str,
+    phone: str,
+    clean_date_s: str,
+    clean_date_e: str,
+    max_pages: int = 12,
+) -> tuple[List[dict], dict]:
+    """Fetch recent phone orders newest-first and stop after passing requested range.
+
+    Reserve orders can be zero-dollar/processed, so payment status cannot be used.
+    The previous implementation scanned up to 50 pages oldest-first, which could look
+    like a frozen button. This version requests newest-first and normally needs only
+    the first few pages for a recent service-date window.
+    """
+    session, base_url = co._new_logged_in_session(env_name, backend_email, backend_password)
+    purchase_url = f"{base_url}/purchase"
+    found: List[dict] = []
+    seen = set()
+    pages_scanned = 0
+    cards_scanned = 0
+
+    for page in range(1, max_pages + 1):
+        params = dict(co.PURCHASE_FILTER_PARAMS_TEMPLATE)
+        params.update({
+            "phone": phone,
+            "page": str(page),
+            "orderBy": "date_clean:desc",
+        })
+        resp = session.get(
+            purchase_url,
+            params=params,
+            headers=orders.HEADERS,
+            allow_redirects=True,
+            timeout=12,
+        )
+        pages_scanned += 1
+        if resp.status_code != 200:
+            raise RuntimeError(f"保留單搜尋失敗：HTTP {resp.status_code}")
+
+        blocks = orders.extract_order_cards_from_purchase_html(resp.text)
+        cards_scanned += len(blocks)
+        if not blocks:
+            break
+
+        page_dates = []
+        for block in blocks:
+            item = co._order_from_block(block)
+            if not item:
+                continue
+            pid = str(item.get("purchase_id") or "")
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            service_date = str(item.get("service_date") or "")
+            if service_date:
+                page_dates.append(service_date)
+            found.append(item)
+
+        if len(blocks) < 20:
+            break
+
+        # Newest-first: once a full page is entirely older than requested start,
+        # later pages cannot contain matches.
+        dated = [d for d in page_dates if d]
+        if dated and max(dated) < clean_date_s:
+            break
+
+    return found, {
+        "pages_scanned": pages_scanned,
+        "cards_scanned": cards_scanned,
+        "orders_parsed": len(found),
+    }
+
+
 def find_reserve_orders(
     env_name: str, backend_email: str, backend_password: str, phone: str,
     clean_date_s: str, clean_date_e: str,
     memo_filter: str = "系統保留單或空白", periods: Optional[List[str]] = None,
-) -> List[dict]:
+    return_debug: bool = False,
+):
     _assert_supported_env(env_name)
-    periods_set = {str(p).replace(" ", "") for p in (periods or []) if str(p).strip()}
-    candidates = []
-    seen = set()
+    phone = re.sub(r"\D", "", str(phone or ""))
+    if not re.fullmatch(r"09\d{8}", phone):
+        raise ValueError("手機號碼需為 09 開頭共 10 碼")
+    if not clean_date_s or not clean_date_e or clean_date_s > clean_date_e:
+        raise ValueError("請輸入正確服務日期區間")
 
-    for payment_status in ("已付款", "待付款"):
-        rows = co.find_orders_for_cancel(
-            env_name, backend_email, backend_password, phone,
-            clean_date_s, clean_date_e, payment_status=payment_status,
-        )
-        for row in rows:
-            pid = str(row.get("purchase_id") or "")
-            if not pid or pid in seen:
+    periods_set = {re.sub(r"\s+", "", str(p)) for p in (periods or []) if str(p).strip()}
+    all_rows, debug = _fetch_phone_orders_fast(
+        env_name, backend_email, backend_password, phone, clean_date_s, clean_date_e
+    )
+
+    candidates = []
+    for row in all_rows:
+        row_phone = re.sub(r"\D", "", str(row.get("phone") or ""))
+        if row_phone and row_phone != phone:
+            continue
+        service_date = str(row.get("service_date") or "")
+        if not service_date or not (clean_date_s <= service_date <= clean_date_e):
+            continue
+        if periods_set:
+            period = re.sub(r"\s+", "", str(row.get("period") or ""))
+            if period not in periods_set:
                 continue
-            if periods_set:
-                period = str(row.get("period") or "").replace(" ", "")
-                if period not in periods_set:
-                    continue
-            seen.add(pid)
-            item = dict(row)
-            item["payment_status"] = payment_status
-            candidates.append(item)
+        candidates.append(row)
 
     session, base_url = co._new_logged_in_session(env_name, backend_email, backend_password)
     found = []
+    detail_errors = 0
     for row in candidates:
         try:
             detail = co.fetch_order_cancel_details(session, base_url, row["purchase_id"])
         except Exception as exc:
-            item = dict(row)
-            item["customer_memo"] = ""
-            item["memo_read_error"] = str(exc)
-            item["cancel_eligible"] = False
+            detail_errors += 1
             if memo_filter == "全部（僅供查看）":
+                item = dict(row)
+                item["customer_memo"] = ""
+                item["memo_read_error"] = str(exc)
+                item["cancel_eligible"] = False
                 found.append(item)
             continue
 
@@ -97,12 +180,22 @@ def find_reserve_orders(
         item = dict(row)
         item["customer_memo"] = memo
         item["cancel_eligible"] = (memo == "" or SYSTEM_RESERVE_MEMO in memo)
-        for key in ("amount", "total_amount", "order_amount", "price", "staff", "staff_names", "service_staff"):
-            if key not in item and detail.get(key) not in (None, ""):
+        for key in (
+            "amount", "total_amount", "order_amount", "price", "fare", "car_fare",
+            "traffic_fee", "trafficFee", "staff", "staff_names", "service_staff",
+        ):
+            if item.get(key) in (None, "") and detail.get(key) not in (None, ""):
                 item[key] = detail.get(key)
         found.append(item)
 
     found.sort(key=lambda x: (x.get("service_date", ""), x.get("period", ""), x.get("order_no", "")))
+    debug.update({
+        "date_period_candidates": len(candidates),
+        "memo_matches": len(found),
+        "detail_errors": detail_errors,
+    })
+    if return_debug:
+        return found, debug
     return found
 
 
@@ -148,7 +241,6 @@ def cancel_reserve_orders(
             cancel_status="不需退款", customer_memo="取消系統保留單",
             charge_note="", refund_note="",
         )
-
         source_by_order = {str(r.get("order_no") or ""): r for r in safe_rows}
         enriched = []
         for result in cancelled:
@@ -157,7 +249,6 @@ def cancel_reserve_orders(
             item.update(result)
             enriched.append(item)
         cancelled = enriched
-
         try:
             append_log_rows("取消", cancelled)
         except Exception as log_exc:
