@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0816_v3
-更新日期：2026-08-16
+版本：0818_v5
+更新日期：2026-08-18
 """
 import html
 import base64
@@ -1392,7 +1392,14 @@ def render_html_table(df: pd.DataFrame) -> None:
                 .map(lambda x: f"{x:.2%}")
             )
             numeric_cols.append(col)
-        elif any(x in col_text for x in ["業績", "加總", "家電", "儲值金", "金額", "總額"]):
+        elif "時數" in col_text:
+            show[col] = (
+                pd.to_numeric(show[col], errors="coerce")
+                .fillna(0)
+                .map(lambda x: f"{int(x):,}" if float(x).is_integer() else f"{x:,.1f}")
+            )
+            numeric_cols.append(col)
+        elif any(x in col_text for x in ["業績", "加總", "家電", "儲值金", "金額", "總額", "付款"]):
             show[col] = (
                 pd.to_numeric(show[col], errors="coerce")
                 .fillna(0)
@@ -1408,7 +1415,7 @@ def render_html_table(df: pd.DataFrame) -> None:
     out.append("</tr></thead><tbody>")
 
     for _, row in show.iterrows():
-        is_total = str(row.get("城市", "")) == "加總"
+        is_total = str(row.get("城市", row.get("地區", ""))) == "加總"
         cls = ' class="total-row"' if is_total else ""
         out.append(f"<tr{cls}>")
 
@@ -1433,6 +1440,9 @@ def render_report() -> None:
     month_end_path = latest_dir / "month_end_summary.csv"
     meta_path = latest_dir / "meta.json"
     html_path = latest_dir / "email_preview.html"
+    order_date_path = latest_dir / "order_date_summary.csv"
+    reserve_path = latest_dir / "reserve_summary.csv"
+    net_performance_path = latest_dir / "net_performance_summary.csv"
 
     def load_csv(path: Path) -> pd.DataFrame:
         if not path.exists():
@@ -1453,6 +1463,22 @@ def render_report() -> None:
             return money(total_row.iloc[0][col])
         return money(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
 
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+
+    default_start_date = datetime.now(TW_TZ).date().replace(day=1)
+    saved_start_month = str(meta.get("report_start_month") or "").replace("/", "-")
+    if saved_start_month:
+        try:
+            default_start_date = datetime.strptime(saved_start_month, "%Y-%m").date()
+        except ValueError:
+            pass
+    default_month_count = max(1, min(12, int(meta.get("report_month_count") or 4)))
+
     st.markdown(
         """
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
@@ -1469,6 +1495,28 @@ def render_report() -> None:
         unsafe_allow_html=True,
     )
 
+    st.markdown('<div class="card"><div class="card-title">⚙️ 報表月份設定</div>', unsafe_allow_html=True)
+    setting_cols = st.columns(2)
+    with setting_cols[0]:
+        report_start_date = st.date_input(
+            "起始月份（日期只取年月）",
+            value=default_start_date,
+            key="performance_report_start_month",
+        )
+    with setting_cols[1]:
+        report_month_count = st.number_input(
+            "顯示月數",
+            min_value=1,
+            max_value=12,
+            value=default_month_count,
+            step=1,
+            key="performance_report_month_count",
+        )
+    st.caption("按『更新業績報表』後，訂購日期、保留單與扣除後業績會依這個月份範圍重新產生。")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    report_start_month = report_start_date.strftime("%Y-%m")
+
     top_cols = st.columns([1, 1, 1, 1])
     with top_cols[0]:
         if st.button("← 返回主控台", use_container_width=True):
@@ -1479,7 +1527,14 @@ def render_report() -> None:
         if st.button("🔄 更新業績報表", use_container_width=True):
             try:
                 add_log("開始更新業績報表", "info")
-                run_script("tools/scheduled_daily/performance_report.py", ["dashboard", "true"])
+                run_script(
+                    "tools/scheduled_daily/performance_report.py",
+                    [
+                        "dashboard", "true",
+                        "--start-month", report_start_month,
+                        "--month-count", str(int(report_month_count)),
+                    ],
+                )
                 add_log("業績報表更新完成", "success")
                 st.rerun()
             except Exception as e:
@@ -1501,15 +1556,18 @@ def render_report() -> None:
     daily_df = load_csv(daily_path)
     next_df = load_csv(next_path)
     month_end_df = load_csv(month_end_path)
+    order_date_df = load_csv(order_date_path)
+    reserve_df = load_csv(reserve_path)
+    net_performance_df = load_csv(net_performance_path)
 
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            st.info(f"📅 最新更新時間：{meta.get('updated_at', '-')}")
-            if meta.get("error"):
-                st.warning(meta.get("error"))
-        except Exception:
-            pass
+    if meta:
+        st.info(
+            f"📅 最新更新時間：{meta.get('updated_at', '-')}　｜　"
+            f"報表起始月份：{meta.get('report_start_month', '-')}　｜　"
+            f"顯示月數：{meta.get('report_month_count', '-')}"
+        )
+        if meta.get("error"):
+            st.warning(meta.get("error"))
 
     if df4.empty:
         st.warning("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
@@ -1527,6 +1585,20 @@ def render_report() -> None:
 
     st.markdown('<div class="card"><div class="card-title">📍 各區月度摘要</div>', unsafe_allow_html=True)
     render_html_table(df4)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="card"><div class="card-title">🧾 訂購日期付款彙總</div>', unsafe_allow_html=True)
+    st.caption("依所選月份的訂購日期與地區彙總未付款、已付款及合計金額；最新日期在最上方。")
+    render_html_table(order_date_df)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="card"><div class="card-title">🕒 自訂月份保留單統計</div>', unsafe_allow_html=True)
+    st.caption("保留單時數以『人數 × 每人服務時數』計算。")
+    render_html_table(reserve_df)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="card"><div class="card-title">📊 自訂月份扣除保留單後業績</div>', unsafe_allow_html=True)
+    render_html_table(net_performance_df)
     st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("🔎 Debug：查看 df2 / raw_df", expanded=False):
