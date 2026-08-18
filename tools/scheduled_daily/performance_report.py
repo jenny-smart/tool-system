@@ -163,16 +163,26 @@ def get_ranges():
     return (this_start, this_end), (next_start, next_end)
 
 
-def get_report_month_ranges(start_month: Optional[str] = None, month_count: int = 4):
-    """依畫面設定回傳月份標籤與完整月份起訖日，最多 12 個月。"""
-    month_count = max(1, min(12, int(month_count or 4)))
-    if start_month:
-        try:
-            base = datetime.strptime(str(start_month), "%Y-%m")
-        except ValueError as exc:
-            raise ValueError("起始月份格式必須為 YYYY-MM") from exc
-    else:
-        base = now_dt()
+def get_report_month_ranges(start_month: Optional[str] = None, end_month: Optional[str] = None):
+    """依畫面設定回傳起訖月份（含首尾）的標籤與完整月份起訖日。"""
+    try:
+        base = datetime.strptime(str(start_month), "%Y-%m") if start_month else now_dt().replace(day=1)
+        if end_month:
+            end_base = datetime.strptime(str(end_month), "%Y-%m")
+        else:
+            end_index = base.month
+            end_base = base.replace(
+                year=base.year + end_index // 12,
+                month=end_index % 12 + 1,
+            )
+    except ValueError as exc:
+        raise ValueError("起訖月份格式必須為 YYYY-MM") from exc
+
+    month_count = (end_base.year - base.year) * 12 + end_base.month - base.month + 1
+    if month_count < 1:
+        raise ValueError("結束月份不可早於起始月份")
+    if month_count > 24:
+        raise ValueError("月份區間最多 24 個月")
     ranges = []
     for offset in range(month_count):
         month_index = base.month - 1 + offset
@@ -311,36 +321,61 @@ def _purchase_person_hours(item) -> float:
 
 
 def build_order_date_summary(records) -> pd.DataFrame:
-    cols = ["訂購日期", "地區", "未付款", "已付款", "未付款＋已付款"]
+    cols = ["地區", "未付款", "已付款", "未付款＋已付款"]
     rows = []
     for item in records:
         if _purchase_is_cancelled(item):
             continue
-        created_date = _purchase_created_date(item)
         city = str(item.get("__city") or "")
-        if not created_date or not city:
+        if not city:
             continue
         amount = _purchase_amount(item)
         rows.append({
-            "訂購日期": created_date,
             "地區": city,
             "未付款": 0 if _purchase_is_paid(item) else amount,
             "已付款": amount if _purchase_is_paid(item) else 0,
         })
     if not rows:
         return pd.DataFrame(columns=cols)
-    out = pd.DataFrame(rows).groupby(["訂購日期", "地區"], as_index=False)[["未付款", "已付款"]].sum()
+    out = pd.DataFrame(rows).groupby(["地區"], as_index=False)[["未付款", "已付款"]].sum()
     out["未付款＋已付款"] = out["未付款"] + out["已付款"]
     out["地區"] = pd.Categorical(out["地區"], CITY_ORDER, ordered=True)
-    out = out.sort_values(["訂購日期", "地區"], ascending=[False, True]).reset_index(drop=True)
+    out = out.sort_values(["地區"]).reset_index(drop=True)
     out["地區"] = out["地區"].astype(str)
+    total = pd.DataFrame([{
+        "地區": "加總",
+        "未付款": out["未付款"].sum(),
+        "已付款": out["已付款"].sum(),
+        "未付款＋已付款": out["未付款＋已付款"].sum(),
+    }])
+    out = pd.concat([out, total], ignore_index=True)
     return out[cols]
+
+
+def build_month_performance_summary(raw_df: pd.DataFrame, month_ranges) -> pd.DataFrame:
+    cols = ["地區"] + [f"{label}業績" for label, _, _ in month_ranges]
+    work = raw_df.copy()
+    work["類別"] = work.apply(lambda r: to_category(r["服務"], r["收入類型"]), axis=1)
+    work = work[work["類別"] == "清潔"].copy()
+    work["業績"] = pd.to_numeric(work["已付款"], errors="coerce").fillna(0) + pd.to_numeric(work["待付款"], errors="coerce").fillna(0)
+
+    rows = []
+    for city in CITY_ORDER:
+        row = {"地區": city}
+        for label, _, _ in month_ranges:
+            row[f"{label}業績"] = work[(work["城市"] == city) & (work["月份"] == label)]["業績"].sum()
+        rows.append(row)
+    total = {"地區": "加總"}
+    for col in cols[1:]:
+        total[col] = sum(row[col] for row in rows)
+    rows.append(total)
+    return pd.DataFrame(rows, columns=cols)
 
 
 def build_reserve_summary(records, month_ranges) -> pd.DataFrame:
     cols = ["地區"]
     for label, _, _ in month_ranges:
-        cols.extend([f"{label}保留單時數", f"{label}保留單金額"])
+        cols.extend([f"{label}保留單時數", f"{label}保留單業績"])
     rows = []
     for city in CITY_ORDER:
         row = {col: 0 for col in cols}
@@ -349,7 +384,7 @@ def build_reserve_summary(records, month_ranges) -> pd.DataFrame:
         for display_label, start, end in month_ranges:
             selected = [x for x in city_records if start <= str(x.get("date_clean") or x.get("service_date") or "")[:10] <= end]
             row[f"{display_label}保留單時數"] = sum(_purchase_person_hours(x) for x in selected)
-            row[f"{display_label}保留單金額"] = sum(_purchase_amount(x) for x in selected)
+            row[f"{display_label}保留單業績"] = sum(_purchase_amount(x) for x in selected)
         rows.append(row)
     total = {"地區": "加總"}
     for col in cols[1:]:
@@ -359,39 +394,26 @@ def build_reserve_summary(records, month_ranges) -> pd.DataFrame:
 
 
 def build_net_performance_summary(raw_df: pd.DataFrame, reserve_df: pd.DataFrame, month_ranges) -> pd.DataFrame:
-    cols = ["地區"]
-    for label, _, _ in month_ranges:
-        cols.extend([f"{label}扣除{label}保留單加總", f"{label}佔比"])
-
-    work = raw_df.copy()
-    work["類別"] = work.apply(lambda r: to_category(r["服務"], r["收入類型"]), axis=1)
-    work = work[work["類別"] == "清潔"].copy()
-    work["業績"] = pd.to_numeric(work["已付款"], errors="coerce").fillna(0) + pd.to_numeric(work["待付款"], errors="coerce").fillna(0)
+    cols = ["地區"] + [f"{label}業績－保留單業績" for label, _, _ in month_ranges]
+    performance_df = build_month_performance_summary(raw_df, month_ranges)
 
     rows = []
     for city in CITY_ORDER:
         row = {"地區": city}
         reserve_row = reserve_df[reserve_df["地區"].astype(str) == city]
+        performance_row = performance_df[performance_df["地區"].astype(str) == city]
         for display_label, _, _ in month_ranges:
-            gross = work[(work["城市"] == city) & (work["月份"] == display_label)]["業績"].sum()
-            reserve_col = f"{display_label}保留單金額"
+            performance_col = f"{display_label}業績"
+            reserve_col = f"{display_label}保留單業績"
+            gross = 0 if performance_row.empty else safe_int(performance_row.iloc[0].get(performance_col, 0))
             reserve_amount = 0 if reserve_row.empty else safe_int(reserve_row.iloc[0].get(reserve_col, 0))
-            row[f"{display_label}扣除{display_label}保留單加總"] = gross - reserve_amount
+            row[f"{display_label}業績－保留單業績"] = gross - reserve_amount
         rows.append(row)
-
-    for display_label, _, _ in month_ranges:
-        amount_col = f"{display_label}扣除{display_label}保留單加總"
-        ratio_col = f"{display_label}佔比"
-        total = sum(row[amount_col] for row in rows)
-        for row in rows:
-            row[ratio_col] = 0 if total == 0 else row[amount_col] / total
 
     total_row = {"地區": "加總"}
     for display_label, _, _ in month_ranges:
-        amount_col = f"{display_label}扣除{display_label}保留單加總"
-        ratio_col = f"{display_label}佔比"
+        amount_col = f"{display_label}業績－保留單業績"
         total_row[amount_col] = sum(row[amount_col] for row in rows)
-        total_row[ratio_col] = 1 if total_row[amount_col] else 0
     rows.append(total_row)
     return pd.DataFrame(rows, columns=cols)
 
@@ -1251,10 +1273,13 @@ def persist_dashboard_payload(
     month_end_df: pd.DataFrame,
     email_html: str,
     order_date_df: Optional[pd.DataFrame] = None,
+    month_performance_df: Optional[pd.DataFrame] = None,
     reserve_df: Optional[pd.DataFrame] = None,
     net_performance_df: Optional[pd.DataFrame] = None,
     report_start_month: Optional[str] = None,
-    report_month_count: int = 4,
+    report_end_month: Optional[str] = None,
+    order_start_date: Optional[str] = None,
+    order_end_date: Optional[str] = None,
     error_msg: Optional[str] = None,
     trigger: str = "dashboard",
 ):
@@ -1272,6 +1297,7 @@ def persist_dashboard_payload(
     latest_html = os.path.join(LATEST_DIR, "email_preview.html")
     latest_meta = os.path.join(LATEST_DIR, "meta.json")
     latest_order_date = os.path.join(LATEST_DIR, "order_date_summary.csv")
+    latest_month_performance = os.path.join(LATEST_DIR, "month_performance_summary.csv")
     latest_reserve = os.path.join(LATEST_DIR, "reserve_summary.csv")
     latest_net_performance = os.path.join(LATEST_DIR, "net_performance_summary.csv")
 
@@ -1298,6 +1324,7 @@ def persist_dashboard_payload(
 
     for report_df, report_path in [
         (order_date_df, latest_order_date),
+        (month_performance_df, latest_month_performance),
         (reserve_df, latest_reserve),
         (net_performance_df, latest_net_performance),
     ]:
@@ -1326,10 +1353,13 @@ def persist_dashboard_payload(
         "next_month_daily_rows": int(len(next_month_daily_df)),
         "month_end_rows": int(len(month_end_df)),
         "order_date_rows": int(len(order_date_df)) if order_date_df is not None else 0,
+        "month_performance_rows": int(len(month_performance_df)) if month_performance_df is not None else 0,
         "reserve_rows": int(len(reserve_df)) if reserve_df is not None else 0,
         "net_performance_rows": int(len(net_performance_df)) if net_performance_df is not None else 0,
         "report_start_month": report_start_month,
-        "report_month_count": int(report_month_count),
+        "report_end_month": report_end_month,
+        "order_start_date": order_start_date,
+        "order_end_date": order_end_date,
         "error": error_msg,
         "trigger": trigger,
     }
@@ -1374,13 +1404,20 @@ def generate_sales_report(
     trigger="dashboard",
     strict_accounts=False,
     report_start_month: Optional[str] = None,
-    report_month_count: int = 4,
+    report_end_month: Optional[str] = None,
+    order_start_date: Optional[str] = None,
+    order_end_date: Optional[str] = None,
 ):
     log("🔥 開始業績報表")
 
     ensure_dirs()
     (m_start, m_end), (n_start, n_end) = get_ranges()
-    report_month_ranges = get_report_month_ranges(report_start_month, report_month_count)
+    report_month_ranges = get_report_month_ranges(report_start_month, report_end_month)
+    today_text = now_dt().strftime("%Y-%m-%d")
+    order_start_date = order_start_date or today_text
+    order_end_date = order_end_date or today_text
+    if order_end_date < order_start_date:
+        raise ValueError("訂購日期迄日不可早於起日")
     current_month_label = m_start[:7].replace("-", "/")
     next_month_label = n_start[:7].replace("-", "/")
     fetch_month_ranges = []
@@ -1495,8 +1532,8 @@ def generate_sales_report(
             try:
                 month_order_items = _fetch_purchase_items(
                     session,
-                    date_s=report_month_ranges[0][1],
-                    date_e=report_month_ranges[-1][2],
+                    date_s=order_start_date,
+                    date_e=order_end_date,
                 )
                 for item in month_order_items:
                     item["__city"] = city
@@ -1564,6 +1601,7 @@ def generate_sales_report(
     df3 = build_region3_df(df2)
     df4 = build_region4_df(df2)
     order_date_df = build_order_date_summary(order_date_records)
+    month_performance_df = build_month_performance_summary(report_raw_df, report_month_ranges)
     reserve_df = build_reserve_summary(reserve_records, report_month_ranges)
     net_performance_df = build_net_performance_summary(report_raw_df, reserve_df, report_month_ranges)
 
@@ -1603,6 +1641,7 @@ def generate_sales_report(
     log(f"next_month_daily_df rows = {len(next_month_daily_df)}")
     log(f"month_end_df rows = {len(month_end_df)}")
     log(f"order_date_df rows = {len(order_date_df)}")
+    log(f"month_performance_df rows = {len(month_performance_df)}")
     log(f"reserve_df rows = {len(reserve_df)}")
     log(f"net_performance_df rows = {len(net_performance_df)}")
 
@@ -1613,10 +1652,13 @@ def generate_sales_report(
         persist_dashboard_payload(
             df4, daily_df, next_month_daily_df, month_end_df, email_html,
             order_date_df=order_date_df,
+            month_performance_df=month_performance_df,
             reserve_df=reserve_df,
             net_performance_df=net_performance_df,
             report_start_month=report_month_ranges[0][0],
-            report_month_count=len(report_month_ranges),
+            report_end_month=report_month_ranges[-1][0],
+            order_start_date=order_start_date,
+            order_end_date=order_end_date,
             error_msg=error_msg,
             trigger=trigger,
         )
@@ -1635,10 +1677,13 @@ def generate_sales_report(
         "next_month_daily_df": next_month_daily_df,
         "month_end_df": month_end_df,
         "order_date_df": order_date_df,
+        "month_performance_df": month_performance_df,
         "reserve_df": reserve_df,
         "net_performance_df": net_performance_df,
         "report_start_month": report_month_ranges[0][0],
-        "report_month_count": len(report_month_ranges),
+        "report_end_month": report_month_ranges[-1][0],
+        "order_start_date": order_start_date,
+        "order_end_date": order_end_date,
         "month_end_history_df": load_month_end_history(),
         "email_html": email_html,
         "updated_at": now_dt().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1653,7 +1698,9 @@ def main():
     trigger = "schedule"
     send_email = False
     report_start_month = None
-    report_month_count = 4
+    report_end_month = None
+    order_start_date = None
+    order_end_date = None
 
     # 若 toolapp 誤傳 --folder-id <id>，業績報表不需要雲端資料夾，直接忽略。
     cleaned_args = []
@@ -1661,12 +1708,16 @@ def main():
     index = 0
     while index < len(raw_args):
         arg = raw_args[index]
-        if arg in {"--folder-id", "--start-month", "--month-count"}:
+        if arg in {"--folder-id", "--start-month", "--end-month", "--order-start-date", "--order-end-date"}:
             value = raw_args[index + 1] if index + 1 < len(raw_args) else ""
             if arg == "--start-month":
                 report_start_month = value
-            elif arg == "--month-count":
-                report_month_count = int(value or 4)
+            elif arg == "--end-month":
+                report_end_month = value
+            elif arg == "--order-start-date":
+                order_start_date = value
+            elif arg == "--order-end-date":
+                order_end_date = value
             index += 2
             continue
         cleaned_args.append(arg)
@@ -1686,7 +1737,9 @@ def main():
         trigger=trigger,
         strict_accounts=strict_accounts,
         report_start_month=report_start_month,
-        report_month_count=report_month_count,
+        report_end_month=report_end_month,
+        order_start_date=order_start_date,
+        order_end_date=order_end_date,
     )
 
     if result.get("error"):
