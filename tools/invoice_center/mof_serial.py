@@ -194,11 +194,14 @@ def _open_serial_query(page: Page, year: int, label: str) -> None:
     # 要抓的目標期別，所以不去動期別選擇器（那是目前唯一沒拿到真實 HTML、
     # 純猜測的部分，風險最高）；直接按查詢，抓不到目標期別那一列再由
     # download_serial_csv() 丟出清楚錯誤，請人手動調整範圍。
-    try:
-        page.locator("button[title='查詢']").first.click(timeout=10_000)
-    except Exception:
-        raise RuntimeError(f"找不到「查詢」按鈕；目前頁面：{page.url}")
-    page.wait_for_timeout(1500)
+    # 跟左側選單一樣，查詢按鈕實測要點兩次才會真的送出查詢（第一次疑似只
+    # 是確認/套用目前的期別範圍）。
+    for _ in range(2):
+        try:
+            page.locator("button[title='查詢']").first.click(timeout=10_000)
+        except Exception:
+            raise RuntimeError(f"找不到「查詢」按鈕；目前頁面：{page.url}")
+        page.wait_for_timeout(1500)
 
 
 def download_serial_csv(page: Page, year: int, label: str, destination: Path) -> Path:
