@@ -3942,6 +3942,15 @@ if can_access_page("settings"):
                 else:
                     new_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID")
                     new_monthly_areas_df = None
+
+                new_crm_stored_value_target_id = ""
+                if new_type == "service_schedule":
+                    new_crm_stored_value_target_id = st.text_input(
+                        "CRM／儲值目標試算表 ID",
+                        help="【儲值】【CRM】功能（儲值金表、定期VIP日曆對帳、CRM 報表）寫入這裡；"
+                             "與上方「共用雲端資料夾 ID」（客服排班用）分開設定，避免儲值／CRM 報表誤寫進排班試算表。"
+                             "留空則沿用共用雲端資料夾 ID 或 Secret LEMON_TARGET_FILE_ID。",
+                    )
                 new_enabled = st.checkbox("啟用", value=True)
 
                 f1, f2 = st.columns(2)
@@ -3988,7 +3997,7 @@ if can_access_page("settings"):
 
                         # ★ 客服排程系統預設結構
                         if new_type == "service_schedule":
-                            new_system["target_file_id"] = ""
+                            new_system["target_file_id"] = new_crm_stored_value_target_id
                             new_system["folder_ids"] = {
                                 "schedule_stats": "1V0IjoJqHlnkGb3Oq70Cil63pQ9j8r2Xv",
                             }
@@ -4049,6 +4058,16 @@ if can_access_page("settings"):
                     else:
                         e_folder_id = st.text_input("設定共用雲端資料夾 ID / 根目錄 ID", value=folder_id)
                         e_monthly_areas_df = None
+
+                    e_crm_stored_value_target_id = sys_cfg.get("target_file_id", "")
+                    if e_type == "service_schedule":
+                        e_crm_stored_value_target_id = st.text_input(
+                            "CRM／儲值目標試算表 ID",
+                            value=sys_cfg.get("target_file_id", ""),
+                            help="【儲值】【CRM】功能（儲值金表、定期VIP日曆對帳、CRM 報表）寫入這裡；"
+                                 "與上方「共用雲端資料夾 ID」（客服排班用）分開設定，避免儲值／CRM 報表誤寫進排班試算表。"
+                                 "留空則沿用共用雲端資料夾 ID 或 Secret LEMON_TARGET_FILE_ID。",
+                        )
                     e_enabled = st.checkbox("啟用", value=enabled)
 
                     e1, e2 = st.columns(2)
@@ -4078,6 +4097,10 @@ if can_access_page("settings"):
                             if e_type == "field_daily_schedule":
                                 updated.setdefault("folder_ids", {})
                                 updated.setdefault("spreadsheet_ids", {})
+
+                            if e_type == "service_schedule":
+                                updated["target_file_id"] = e_crm_stored_value_target_id
+                                updated.setdefault("folder_ids", {"schedule_stats": ""})
 
                             config["systems"][i] = updated
                             save_config(config)
@@ -4519,15 +4542,21 @@ if run_clicked:
                 except Exception:
                     pass
 
-                # 確保目標試算表 ID 有注入（從設定管理讀取）
+                _svc_sys_cfg = get_system_by_name(config, system_name)
+
+                # 確保目標試算表 ID 有注入（從設定管理讀取，客服排班預設用）
                 if not _svc_env.get("SERVICE_TARGET_SPREADSHEET_ID"):
-                    _target_id = get_system_by_name(config, system_name).get("folder_id", "").strip()
+                    _target_id = _svc_sys_cfg.get("folder_id", "").strip()
                     if _target_id:
                         _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _target_id
 
                 # ── 儲值功能 ──────────────────────────────────
                 if selected_function in SERVICE_STORED_VALUE_MAP:
                     step = SERVICE_STORED_VALUE_MAP[selected_function]
+                    # 儲值／CRM 有專屬目標試算表設定，避免寫進客服排班的共用資料夾
+                    _crm_sv_target_id = _svc_sys_cfg.get("target_file_id", "").strip()
+                    if _crm_sv_target_id:
+                        _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _crm_sv_target_id
                     cmd = [
                         sys.executable, "-u", "-m",
                         "tools.service_management.stored_value",
@@ -4543,6 +4572,10 @@ if run_clicked:
                 # ── CRM 功能 ──────────────────────────────────
                 elif selected_function in SERVICE_CRM_MAP:
                     step = SERVICE_CRM_MAP[selected_function]
+                    # 儲值／CRM 有專屬目標試算表設定，避免寫進客服排班的共用資料夾
+                    _crm_sv_target_id = _svc_sys_cfg.get("target_file_id", "").strip()
+                    if _crm_sv_target_id:
+                        _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _crm_sv_target_id
                     cmd = [
                         sys.executable, "-u", "-m",
                         "tools.service_management.crm",
