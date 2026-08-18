@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""大掃除保留單規劃與測試機批次建單。"""
+"""大掃除保留單規劃與批次建單。"""
 
 from __future__ import annotations
 
@@ -61,10 +61,10 @@ class SlotSnapshot:
     raw_text: str = ""
 
 
-def _assert_dev(env_name: str) -> None:
+def _assert_supported_env(env_name: str) -> None:
     env = str(env_name or "").strip().lower()
-    if env not in {"dev", "test", "backend-dev"}:
-        raise RuntimeError("大掃除保留單目前只允許在 dev 測試機執行，禁止送正式機。")
+    if env not in {"dev", "prod"}:
+        raise RuntimeError("檸檬保留單只支援 prod 正式機或 dev 測試機。")
 
 
 def _purchase_id_from_order_no(order_no: str) -> str:
@@ -122,10 +122,11 @@ def calculate_reserve_target(unassigned_people: int, reserve_rate: float) -> Tup
 
 
 def login_reserve_member(env_name: str, backend_email: str, backend_password: str, phone: str = RESERVE_PHONE_DEFAULT):
-    _assert_dev(env_name)
+    _assert_supported_env(env_name)
     result = qo.quick_lookup_member(env_name, backend_email, backend_password, phone, clean_type_id="1")
     if not result.get("member_payload"):
-        raise RuntimeError(f"保留單手機 {phone} 查無會員，請先在測試機建立此會員。")
+        machine = "正式機" if str(env_name).lower() == "prod" else "測試機"
+        raise RuntimeError(f"保留單手機 {phone} 在{machine}查無會員，請先確認會員資料。")
     return result
 
 
@@ -258,7 +259,7 @@ def create_reserve_orders_for_slot(
     payway: str, clean_type_id: str = "1", batch_id: str = "",
     stop_when_market_people_below: int = 2, sleep_seconds: float = 1.0,
 ) -> dict:
-    _assert_dev(env_name)
+    _assert_supported_env(env_name)
     if period not in PERIOD_HOURS:
         raise ValueError(f"不支援時段：{period}")
     if not address:
@@ -292,7 +293,6 @@ def create_reserve_orders_for_slot(
                 hour=str(PERIOD_HOURS[period]),
                 person="2",
                 allow_auto_lemon_shift=False,
-                # 客服備註不再放 batch id，避免客服看到技術識別碼。
                 extra_fields={"notice": CUSTOMER_SERVICE_NOTE},
             )
             base_url = lookup_result.get("base_url") or qo._configure_environment(env_name)
@@ -366,7 +366,7 @@ def create_reserve_orders_for_plan(
     plan_rows: Sequence[dict], payway: str, clean_type_id: str = "1",
     continue_after_slot_error: bool = True, sleep_seconds: float = 1.0,
 ) -> dict:
-    _assert_dev(env_name)
+    _assert_supported_env(env_name)
     batch_id = _build_batch_id()
     slot_results = []
     flat_results = []
