@@ -1030,10 +1030,8 @@ def available_areas_for_system(system: dict) -> list[str]:
                 return list(value.keys())
         return ["台北", "台中"]
 
-    # ── ★ 新增：客服排程系統固定全區 ──────────────────────
     if system_type == "service_schedule":
-        return ["全區"]
-    # ────────────────────────────────────────────────────────
+        return ["全區", "台北", "台中"]
 
     if system_type == "finance_management":
         return ["全區", "台北", "台中", "桃園", "新竹", "高雄"]
@@ -2825,13 +2823,15 @@ SERVICE_STEP_MAP = {
     "【排班】三步驟全部執行":           "0",
 }
 
-# ── ★ CRM：功能 → crm_export.py --step 對應表 ───────────────
-SERVICE_CRM_MAP = {
-    # 儲值金服務排程管理
+# ── ★ 儲值：功能 → stored_value.py --step 對應表 ─────────────
+SERVICE_STORED_VALUE_MAP = {
     "【儲值】抓儲值金":                  "1",
     "【儲值】匯出VIP日曆對帳":           "2",
     "【儲值】全跑（抓儲值金＋匯出VIP）":  "0",
-    # CRM 排程管理
+}
+
+# ── ★ CRM：功能 → crm.py --step 對應表 ───────────────────────
+SERVICE_CRM_MAP = {
     "【CRM】更新排程決策報表":           "4",
     "【CRM】更新三個月未排名單":         "5",
     "【CRM】重新排序Raw":               "6",
@@ -4525,17 +4525,29 @@ if run_clicked:
                     if _target_id:
                         _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _target_id
 
-                # ── CRM 功能 ──────────────────────────────────
-                if selected_function in SERVICE_CRM_MAP:
-                    step = SERVICE_CRM_MAP[selected_function]
+                # ── 儲值功能 ──────────────────────────────────
+                if selected_function in SERVICE_STORED_VALUE_MAP:
+                    step = SERVICE_STORED_VALUE_MAP[selected_function]
                     cmd = [
                         sys.executable, "-u", "-m",
-                        "tools.service_management.crm_export",
+                        "tools.service_management.stored_value",
                         "--step", step,
                     ]
                     if step != "1" and start_date_value and end_date_value:
                         cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
                                 "--end",   end_date_value.strftime("%Y-%m-%d")]
+                    if selected_area_value and selected_area_value != "全區":
+                        cmd += ["--area", selected_area_value]
+                    add_log(f"儲值執行：{selected_function}（step={step}）", "info")
+
+                # ── CRM 功能 ──────────────────────────────────
+                elif selected_function in SERVICE_CRM_MAP:
+                    step = SERVICE_CRM_MAP[selected_function]
+                    cmd = [
+                        sys.executable, "-u", "-m",
+                        "tools.service_management.crm",
+                        "--step", step,
+                    ]
                     if selected_area_value and selected_area_value != "全區":
                         cmd += ["--area", selected_area_value]
                     add_log(f"CRM 執行：{selected_function}（step={step}）", "info")
