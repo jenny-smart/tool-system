@@ -277,8 +277,10 @@ def run(area: str, cdp_url: str, month: str, *, upload: bool = True) -> int:
         page = _login(context, area_key, accounts)
 
         _search_paper_invoices(page, start_roc, end_roc)
-        rows = _list_all_rows(page)
-        print(f"查到 {len(rows)} 筆紙本發票（{start} ～ {end}）")
+        all_rows = _list_all_rows(page)
+        rows = [row for row in all_rows if str(row.get("buyer_id", "")).strip()]
+        skipped_no_buyer_id = len(all_rows) - len(rows)
+        print(f"查到 {len(all_rows)} 筆紙本發票（{start} ～ {end}）；買方統編空白略過 {skipped_no_buyer_id} 筆，實際處理 {len(rows)} 筆")
 
         saved = 0
         for index, row in enumerate(rows, start=1):
