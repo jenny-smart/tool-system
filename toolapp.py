@@ -1097,7 +1097,13 @@ def _area_log_sort_key(key: str) -> tuple[int, int]:
     return (99, 99)
 
 
-def add_log(message: str, level: str = "info") -> None:
+def _append_log_entry(message: str, level: str = "info") -> str:
+    """
+    只把訊息寫進 st.session_state（logs / area_log），不碰任何畫面元件。
+    給需要在背景輪詢（st.fragment run_every）情境下更新日誌資料、但不能
+    去動主要 LOG_PLACEHOLDER 的地方用（見 render_agent_task_progress 的
+    說明）。回傳組好的那一行文字，方便呼叫端同時放進自己的畫面。
+    """
     now = tw_now_text("%H:%M:%S")
     icons = {
         "info": "🔵",
@@ -1117,16 +1123,30 @@ def add_log(message: str, level: str = "info") -> None:
         if len(st.session_state.logs) > 200:
             st.session_state.logs = st.session_state.logs[-200:]
 
+    return line
+
+
+def add_log(message: str, level: str = "info") -> None:
+    _append_log_entry(message, level)
+
     # 執行按鈕按下後，後面可能會接著跑很久（例如套用公式要跑幾十秒到
     # 幾分鐘），這段期間畫面上的日誌框早就畫好了、不會自動更新。這裡
     # 只要日誌框已經畫出來（LOG_PLACEHOLDER 有值），每次 add_log 就立刻
     # 重畫一次同一個 placeholder，讓「開始執行」跟後續每一步的結果能
     # 即時反映在畫面上，不用等整支流程跑完、頁面重新整理才看得到。
+    #
+    # 注意：這個函式只能在「本次完整頁面重跑」的過程中呼叫（例如按下
+    # 執行按鈕後的處理流程）。st.fragment(run_every=...) 背景自動重跑
+    # 時不可以呼叫這個函式去畫 LOG_PLACEHOLDER——那個 placeholder是在
+    # fragment 範圍外建立的，fragment 自己的重跑沒辦法安全地畫到外面
+    # 的元件，硬畫反而會讓整個日誌框消失。背景輪詢情境請改用
+    # _append_log_entry() 存資料，畫面另外用 fragment 自己建立的
+    # placeholder 呈現（見 render_agent_task_progress）。
     if LOG_PLACEHOLDER is not None:
         render_log()
 
 
-def render_log() -> None:
+def render_log(target=None) -> None:
     html_parts = []
 
     if st.session_state.area_log:
@@ -1172,8 +1192,8 @@ def render_log() -> None:
 
     html_parts.append("</div></div>")
 
-    target = LOG_PLACEHOLDER if LOG_PLACEHOLDER is not None else st
-    target.markdown("".join(html_parts), unsafe_allow_html=True)
+    render_target = target if target is not None else (LOG_PLACEHOLDER if LOG_PLACEHOLDER is not None else st)
+    render_target.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
 def mask_id(value: str) -> str:
@@ -2055,32 +2075,58 @@ def _classify_agent_log_line(line: str) -> str:
     return "info"
 
 
-def _push_new_agent_log_lines(task_id: str) -> None:
+def _collect_new_agent_log_lines(task_id: str) -> list[str]:
     """
     本機 Agent 執行過程中會用 append_task_log() 把細部步驟（例如登入中、
     正在下載第幾筆…）逐段寫進 Google Sheet 的「本機Agent任務Log」分頁。
-    這裡把還沒顯示過的新內容抓出來，逐行補進主要的執行日誌，讓使用者
-    不用點開「最新完整 Log」也能在執行日誌裡即時看到 Agent 端的細節，
-    不是只看到「排隊中／執行中／完成」這種粗略狀態。
+    這裡把還沒顯示過的新內容抓出來、寫進 session_state（供下次完整
+    重跑時主要執行日誌能看到），並把組好的行回傳給呼叫端，讓 fragment
+    自己的即時面板也能馬上顯示，不用等點開「最新完整 Log」。
     """
     offsets = st.session_state.setdefault("agent_task_log_offset", {})
     try:
         full_log = read_local_agent_task_log(task_id)
     except Exception:
-        return
+        return []
     if not full_log:
-        return
+        return []
     lines = full_log.splitlines()
     already_shown = offsets.get(task_id, 0)
     new_lines = lines[already_shown:]
     if not new_lines:
-        return
+        return []
     offsets[task_id] = len(lines)
+    formatted = []
     for line in new_lines:
         line = line.strip()
         if not line:
             continue
-        add_log(f"本機 Agent Log：{line}", _classify_agent_log_line(line))
+        formatted.append(_append_log_entry(f"本機 Agent Log：{line}", _classify_agent_log_line(line)))
+    return formatted
+
+
+def _render_agent_live_feed(target, lines: list[str]) -> None:
+    html_parts = [
+        '<div class="log-box">'
+        '<div class="log-header">'
+        '<span>📡 本機 Agent 即時進度</span>'
+        '<span style="background:#1e4757;padding:3px 10px;border-radius:20px;font-size:0.75rem;">每 3 秒自動更新</span>'
+        '</div><div class="log-scroll">'
+    ]
+    if lines:
+        for entry in reversed(lines):
+            css = "log-entry"
+            if "✅" in entry:
+                css += " success"
+            elif "❌" in entry:
+                css += " error"
+            elif "⚠️" in entry:
+                css += " warning"
+            html_parts.append(f'<div class="{css}">{html.escape(entry)}</div>')
+    else:
+        html_parts.append('<div class="log-entry">尚無本機 Agent 進度</div>')
+    html_parts.append("</div></div>")
+    target.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
 @st.fragment(run_every="3s")
@@ -2090,8 +2136,15 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
     佇列、由本機端另一支程式領走執行，不是本頁面同步跑的子程序，
     所以沒辦法像 run_script 那樣直接串流 stdout。這裡改成每 3 秒自動
     輪詢一次任務狀態與 Agent 寫回的細部 log，狀態一有變化（排隊中→
-    執行中→完成/失敗）以及執行中產生的新 log 內容，都會即時寫進主要
-    的執行日誌，不用手動按重新整理才看得到後續進度。
+    執行中→完成/失敗）以及執行中產生的新 log 內容，都會即時寫進
+    session_state 的 logs（下次完整重跑時主要執行日誌會看到），同時
+    也馬上畫進這個 fragment 自己的「本機 Agent 即時進度」面板。
+
+    注意：這裡不能呼叫 add_log()／render_log() 去畫最上面那個主要
+    「執行日誌」的 LOG_PLACEHOLDER——那個 placeholder 是在這個
+    fragment 外面建立的，fragment 因 run_every 自動重跑時只能安全地
+    畫自己建立的元件，硬畫外面的 placeholder 會讓整個執行日誌框消失
+    （之前上線就是因為這樣才整個不見）。
     """
     try:
         agent_tasks = [
@@ -2103,6 +2156,7 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
         st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
         return
 
+    feed = st.session_state.setdefault("agent_live_feed", [])
     seen_status = st.session_state.setdefault("agent_task_seen_status", {})
     for task in agent_tasks:
         task_id = task.get("task_id", "")
@@ -2113,15 +2167,21 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
         if prev_status != status:
             seen_status[task_id] = status
             detail = task.get("message", "") or task.get("agent_id", "") or "-"
-            add_log(
+            feed.append(_append_log_entry(
                 f"本機 Agent：{task.get('action', '')} → {status}（{detail}）",
                 _AGENT_TASK_STATUS_LEVELS.get(status, "info"),
-            )
+            ))
 
         # 執行中持續抓新 log；剛轉成完成/失敗時再補抓最後一批，避免
         # Agent 在狀態更新前最後寫入的幾行被漏掉。
         if status == "running" or (prev_status is not None and prev_status != status and status in ("completed", "failed")):
-            _push_new_agent_log_lines(task_id)
+            feed.extend(_collect_new_agent_log_lines(task_id))
+
+    if len(feed) > 50:
+        del feed[:-50]
+
+    agent_feed_placeholder = st.empty()
+    _render_agent_live_feed(agent_feed_placeholder, feed)
 
     if agent_tasks:
         st.markdown("#### 本機 Agent 任務 Log")
