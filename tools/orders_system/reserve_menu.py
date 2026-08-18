@@ -15,36 +15,40 @@ from reserve_optimizer import (
     ReserveRule,
     build_period_plan,
     create_reserve_orders_for_plan,
-    create_reserve_orders_for_slot,
     login_reserve_member,
     member_addresses,
 )
 
 
-def _require_dev(env: str) -> bool:
-    if env != "dev":
-        st.error("檸檬保留單目前只開放測試機 dev。請先把上方環境切換成 dev（測試機 backend-dev）。")
+def _require_supported_env(env: str) -> bool:
+    if str(env or "").strip().lower() not in {"prod", "dev"}:
+        st.error("檸檬保留單只支援 prod 正式機或 dev 測試機。")
         return False
     return True
 
 
-def _lookup(backend_email: str, backend_password: str, phone: str):
-    key = f"reserve_lookup::{phone}"
+def _env_label(env: str) -> str:
+    return "正式機 prod" if str(env).lower() == "prod" else "測試機 dev"
+
+
+def _lookup(env: str, backend_email: str, backend_password: str, phone: str):
+    key = f"reserve_lookup::{env}::{phone}"
     cached = st.session_state.get(key)
     if cached:
         return cached
-    result = login_reserve_member("dev", backend_email.strip(), backend_password.strip(), phone.strip())
+    result = login_reserve_member(env, backend_email.strip(), backend_password.strip(), phone.strip())
     st.session_state[key] = result
     return result
 
 
-def _common_member_header(backend_email: str, backend_password: str):
+def _common_member_header(env: str, backend_email: str, backend_password: str):
     phone = st.text_input("保留單會員手機", value=RESERVE_PHONE_DEFAULT, key="reserve_shared_phone")
+    st.info(f"目前執行環境：{_env_label(env)}")
     if not backend_email.strip() or not backend_password.strip():
         st.warning("請先在頁面上方輸入後台帳號與密碼。")
         return phone, None
     try:
-        lookup = _lookup(backend_email, backend_password, phone)
+        lookup = _lookup(env, backend_email, backend_password, phone)
     except Exception as exc:
         st.error(f"讀取保留會員失敗：{exc}")
         return phone, None
@@ -54,16 +58,16 @@ def _common_member_header(backend_email: str, backend_password: str):
 def render_reserve_create(backend_email: str, backend_password: str, env: str) -> None:
     st.markdown("### 🍋 檸檬保留單建單")
     st.caption("依期間統計未配班人力、設定 AM/PM 保留率，再選擇真正要成立訂單的日期範圍。")
-    if not _require_dev(env):
+    if not _require_supported_env(env):
         return
 
-    phone, lookup = _common_member_header(backend_email, backend_password)
+    phone, lookup = _common_member_header(env, backend_email, backend_password)
     if not lookup:
         return
 
     addresses = member_addresses(lookup)
     if not addresses:
-        st.error(f"保留會員 {phone} 在測試機沒有可用地址。")
+        st.error(f"保留會員 {phone} 在{_env_label(env)}沒有可用地址。")
         return
 
     c1, c2 = st.columns(2)
@@ -80,12 +84,7 @@ def render_reserve_create(backend_email: str, backend_password: str, env: str) -
         start = st.date_input("分析開始日期", value=date(2026, 9, 21), key="reserve_plan_start")
     with d2:
         end = st.date_input("分析結束日期", value=date(2026, 9, 30), key="reserve_plan_end")
-    periods = st.multiselect(
-        "要分析的時段",
-        list(PERIOD_HOURS.keys()),
-        default=["09:00-12:00", "14:00-17:00"],
-        key="reserve_plan_periods",
-    )
+    periods = st.multiselect("要分析的時段", list(PERIOD_HOURS.keys()), default=["09:00-12:00", "14:00-17:00"], key="reserve_plan_periods")
     r1, r2 = st.columns(2)
     with r1:
         am_rate = st.slider("AM 保留率", 0, 100, 70, 5, key="reserve_am_rate") / 100.0
@@ -116,24 +115,22 @@ def render_reserve_create(backend_email: str, backend_password: str, env: str) -
         execute_start = st.date_input("執行開始日期", value=start, min_value=start, max_value=end, key="reserve_execute_start")
     with e2:
         execute_end = st.date_input("執行結束日期", value=end, min_value=start, max_value=end, key="reserve_execute_end")
-
     if execute_end < execute_start:
         st.error("執行結束日期不可早於開始日期。")
         return
+
     selected_rows = [r for r in plan_rows if execute_start.isoformat() <= str(r.get("service_date") or "") <= execute_end.isoformat()]
     selected_df = pd.DataFrame(selected_rows)
     total_orders = int(selected_df["reserve_order_target"].sum()) if not selected_df.empty else 0
     total_people = int(selected_df["reserve_people_target"].sum()) if not selected_df.empty else 0
     st.info(f"{execute_start}～{execute_end} 預計建立 {total_orders} 張保留單，共保留 {total_people} 位人力。")
 
-    confirm = st.checkbox(f"我確認要在測試機建立以上 {total_orders} 張檸檬保留單", key="reserve_create_confirm")
+    machine = _env_label(env)
+    confirm = st.checkbox(f"我確認要在{machine}建立以上 {total_orders} 張檸檬保留單", key="reserve_create_confirm")
     if st.button("確認建立檸檬保留單", type="primary", width="stretch", disabled=not confirm or total_orders <= 0, key="reserve_create_execute"):
         try:
-            with st.spinner("正在逐張重新確認班表並建立保留單..."):
-                result = create_reserve_orders_for_plan(
-                    env_name="dev", lookup_result=lookup, region=region, address=address,
-                    plan_rows=selected_rows, payway=payway, continue_after_slot_error=True,
-                )
+            with st.spinner(f"正在{machine}逐張重新確認班表並建立保留單..."):
+                result = create_reserve_orders_for_plan(env_name=env, lookup_result=lookup, region=region, address=address, plan_rows=selected_rows, payway=payway, continue_after_slot_error=True)
             st.session_state.reserve_menu_last_create = result
             st.success(f"建立完成：成功 {result.get('success_count', 0)} / {result.get('target_orders', 0)} 張")
         except Exception as exc:
@@ -147,10 +144,10 @@ def render_reserve_create(backend_email: str, backend_password: str, env: str) -
 def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -> None:
     st.markdown("### 🗑️ 檸檬保留單取消")
     st.caption("依期間、複選時段與客人備註篩選保留單，再指定取消張數。取消前會重新檢查最新客人備註。")
-    if not _require_dev(env):
+    if not _require_supported_env(env):
         return
 
-    phone, lookup = _common_member_header(backend_email, backend_password)
+    phone, lookup = _common_member_header(env, backend_email, backend_password)
     if not lookup:
         return
 
@@ -160,26 +157,12 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
     with c2:
         cancel_end = st.date_input("取消查詢結束日期", value=date(2026, 9, 30), key="reserve_cancel_end")
 
-    cancel_periods = st.multiselect(
-        "取消查詢時段（可複選；不選代表全部時段）",
-        list(PERIOD_HOURS.keys()),
-        default=[],
-        key="reserve_cancel_periods",
-    )
-    memo_filter = st.selectbox(
-        "客人備註篩選",
-        ["僅系統保留單", "系統保留單或空白", "僅空白", "全部（僅供查看）"],
-        index=0,
-        key="reserve_cancel_memo_filter",
-    )
+    cancel_periods = st.multiselect("取消查詢時段（可複選；不選代表全部時段）", list(PERIOD_HOURS.keys()), default=[], key="reserve_cancel_periods")
+    memo_filter = st.selectbox("客人備註篩選", ["僅系統保留單", "系統保留單或空白", "僅空白", "全部（僅供查看）"], index=0, key="reserve_cancel_memo_filter")
 
     if st.button("查詢可取消保留單", width="stretch", key="reserve_cancel_search"):
         try:
-            rows = find_reserve_orders(
-                "dev", backend_email.strip(), backend_password.strip(), phone.strip(),
-                cancel_start.isoformat(), cancel_end.isoformat(),
-                memo_filter=memo_filter, periods=cancel_periods,
-            )
+            rows = find_reserve_orders(env, backend_email.strip(), backend_password.strip(), phone.strip(), cancel_start.isoformat(), cancel_end.isoformat(), memo_filter=memo_filter, periods=cancel_periods)
             st.session_state.reserve_menu_cancel_rows = rows
             st.session_state.reserve_menu_cancel_filter = memo_filter
         except Exception as exc:
@@ -195,8 +178,7 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
     df = pd.DataFrame(rows)
     cols = [c for c in ["service_date", "period", "order_no", "customer_memo", "cancel_eligible"] if c in df.columns]
     preview = df[cols].copy()
-    rename = {"service_date": "日期", "period": "時段", "order_no": "訂單編號", "customer_memo": "客人備註", "cancel_eligible": "安全可取消"}
-    preview.rename(columns=rename, inplace=True)
+    preview.rename(columns={"service_date": "日期", "period": "時段", "order_no": "訂單編號", "customer_memo": "客人備註", "cancel_eligible": "安全可取消"}, inplace=True)
     st.dataframe(preview, width="stretch", hide_index=True)
 
     safe_rows = [r for r in rows if r.get("cancel_eligible")]
@@ -214,11 +196,12 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
     st.caption("依日期、時段、訂單編號排序，將取消下列最前面的訂單：")
     st.dataframe(selected_df[cols2], width="stretch", hide_index=True)
 
-    confirm = st.checkbox(f"我確認要在測試機取消以上 {int(count)} 張檸檬保留單", key="reserve_cancel_confirm")
+    machine = _env_label(env)
+    confirm = st.checkbox(f"我確認要在{machine}取消以上 {int(count)} 張檸檬保留單", key="reserve_cancel_confirm")
     if st.button("確認取消檸檬保留單", type="primary", width="stretch", disabled=not confirm, key="reserve_cancel_execute"):
         try:
-            with st.spinner("正在逐張重新檢查客人備註並取消..."):
-                results = cancel_reserve_orders("dev", backend_email.strip(), backend_password.strip(), safe_rows, int(count))
+            with st.spinner(f"正在{machine}逐張重新檢查客人備註並取消..."):
+                results = cancel_reserve_orders(env, backend_email.strip(), backend_password.strip(), safe_rows, int(count))
             st.session_state.reserve_menu_cancel_result = results
             st.success("取消流程執行完成；若備註已被改成人工客人保留內容，該筆會自動跳過。")
         except Exception as exc:
