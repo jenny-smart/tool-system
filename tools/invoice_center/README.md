@@ -169,3 +169,38 @@ python3 -m tools.local_agent
 
 任務狀態會寫入「本機Agent任務」，完整 Log 會分段寫入「本機Agent任務Log」。
 Agent 採共用 action registry；後續富邦、元大、藍新只需註冊新的 action handler。
+
+## 財政部電子發票字軌號碼取號（`mof_serial.py`）
+
+跟鯨躍是不同的網站（`einvoice.nat.gov.tw`，字軌號碼配號用的官方平台，不是開立發票的鯨躍）。
+登入頁有圖形驗證碼，一律留給使用者手動輸入密碼與驗證碼、按「登入」；程式只負責預填
+統一編號／帳號，以及登入後的選單導覽、查詢、下載、歸檔。
+
+帳密只存在本機（不進 git），格式：
+
+```text
+~/MOF account/mof_accounts.json
+```
+
+```json
+{
+  "台北": {"ubn": "42627791", "password": "選填，沒填就手動輸入"},
+  "台中": {"ubn": "82830399"}
+}
+```
+
+Tool System 的「財務管理」新增以下本機任務：
+
+- `【財政部電子發票】財政部登入`：開啟登入頁並預填統一編號／帳號，驗證碼與登入由使用者在跳出的 Chrome 視窗手動完成。
+- `【財政部電子發票】字軌取號下載`：輸入期別（`YYYYMM`，該期別起始月，例如 09-10 期輸入 `202609`；不輸入預設抓下一期），導覽到「電子發票字軌號碼取號」→「查詢」、設定期別、查詢、下載 CSV，並直接歸檔到 Google Drive（跟鯨躍紙本發票共用同一套「鯨躍發票根目錄設定」地區設定與「紙本發票／期別」資料夾規則），寫入「財政部電子發票取號Log」。
+
+跟鯨躍共用同一個 Chrome（`--remote-debugging-port=9222`）與同一支 Local Agent，不需要另外啟動：
+
+```bash
+open -na "Google Chrome" --args --remote-debugging-port=9222 --user-data-dir="$HOME/EI account/chrome_profile"
+python3 -m tools.local_agent
+```
+
+**目前限制**：選單導覽／查詢期別／下載按鈕的操作是依畫面截圖寫的，第一次執行時請留意 Chrome
+視窗（不是 headless，本來就會顯示），若某一步找不到元素會直接在任務 Log 裡看到清楚的錯誤訊息
+（例如「找不到『查詢』頁籤」），不會靜默失敗或誤點其他東西；照錯誤訊息回報即可再調整選取器。

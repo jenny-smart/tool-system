@@ -1904,6 +1904,28 @@ def queue_cetustek_allowance(*, month="", start_date=None, end_date=None, area="
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_mofei_login(*, month="", start_date=None, end_date=None, area="全區"):
+    if not area or area == "全區":
+        raise ValueError("請先選擇區域")
+    task = create_local_agent_task(
+        "mofei.login",
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent；驗證碼與登入請在跳出的 Chrome 視窗手動完成）"
+
+
+def queue_mofei_download(*, month="", start_date=None, end_date=None, area="全區"):
+    if not area or area == "全區":
+        raise ValueError("請先選擇區域")
+    task = create_local_agent_task(
+        "mofei.download",
+        {"area": area, "month": str(month or "").strip(), "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 def queue_newebpay_login(*, month="", start_date=None, end_date=None, area="全區"):
     task = create_local_agent_task(
         "newebpay.login",
@@ -2443,6 +2465,8 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】紙本發票更新", "handler": run_cetustek_paper_update, "enabled": True},
     {"name": "【鯨躍發票】中獎發票更新", "handler": run_cetustek_prize_update, "enabled": True},
     {"name": "【鯨躍發票】開立折讓單", "handler": queue_cetustek_allowance, "enabled": True},
+    {"name": "【財政部電子發票】財政部登入", "handler": queue_mofei_login, "enabled": True},
+    {"name": "【財政部電子發票】字軌取號下載", "handler": queue_mofei_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
@@ -2903,6 +2927,25 @@ with date_col:
                 st.caption("格式：YYYYMMNN；例如 20260506")
             else:
                 st.caption("格式：YYYYMM；更新該月份紙本發票")
+        elif selected_function == "【財政部電子發票】財政部登入":
+            st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
+            st.info("開啟財政部電子發票平台登入頁並預填統一編號／帳號，驗證碼與登入請在跳出的 Chrome 視窗手動完成，不需選擇日期", icon="🟢")
+        elif selected_function == "【財政部電子發票】字軌取號下載":
+            st.markdown('<div class="field-label">📆 發票期別</div>', unsafe_allow_html=True)
+            _mof_start_month = today_date.month if today_date.month % 2 else today_date.month - 1
+            _mof_next_start_month = _mof_start_month + 2
+            _mof_next_year = today_date.year
+            if _mof_next_start_month > 12:
+                _mof_next_start_month = 1
+                _mof_next_year += 1
+            period = st.text_input(
+                "發票期別",
+                value=f"{_mof_next_year}{_mof_next_start_month:02d}",
+                placeholder="例如：202609",
+                label_visibility="collapsed",
+                key="finance_mofei_period",
+            )
+            st.caption("格式：YYYYMM（該期別起始月，例如 09-10 期輸入 202609）；預設帶入下一期，找不到該期別代表尚未取號")
         elif selected_function == "【藍新金流】藍新收退款下載":
             st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
             newebpay_date_mode = st.radio(
@@ -3174,6 +3217,8 @@ with area_col:
         "【藍新金流】藍新登入",
         "【藍新金流】藍新信用卡待退款",
         "【鯨躍發票】開立折讓單",
+        "【財政部電子發票】財政部登入",
+        "【財政部電子發票】字軌取號下載",
         "【富邦銀行】富邦登入",
         "【富邦銀行】富邦明細下載",
         "【富邦銀行】異動 ATM 退款",
@@ -3482,8 +3527,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 LOG_PLACEHOLDER = st.empty()
 render_log()
 
-if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】")):
-    render_agent_task_progress(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta."))
+if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】", "【財政部電子發票】")):
+    render_agent_task_progress(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta.", "mofei."))
 
     if selected_function in ("【富邦銀行】富邦登入", "【富邦銀行】富邦明細下載"):
         render_fubon_mobile_verification()

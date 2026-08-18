@@ -116,6 +116,41 @@ def build_cetustek_download(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_mofei_login(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    if not area or area == "全區":
+        raise ValueError("財政部電子發票登入任務必須指定區域")
+    return [
+        sys.executable,
+        "-m",
+        "tools.invoice_center.mof_serial",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+        "--login-only",
+    ]
+
+
+def build_mofei_download(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    if not area or area == "全區":
+        raise ValueError("財政部電子發票取號任務必須指定區域")
+    command = [
+        sys.executable,
+        "-m",
+        "tools.invoice_center.mof_serial",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+    ]
+    period = str(params.get("month") or "").strip()
+    if period:
+        command.extend(["--period", period])
+    return command
+
+
 def build_cetustek_allowance(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     selected_rows = params.get("selected_rows") or []
@@ -442,6 +477,8 @@ register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
 register_action("cetustek.allowance", build_cetustek_allowance)
 register_action("cetustek.paper_invoice_pdf", build_cetustek_paper_invoice_pdf)
+register_action("mofei.login", build_mofei_login)
+register_action("mofei.download", build_mofei_download)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
