@@ -81,7 +81,7 @@ def _create_one(page: Page, invoice_no: str, refund: str, untaxed: str) -> str:
     save_confirm = page.get_by_text("確定", exact=True)
     save_confirm.wait_for(state="visible")
     save_confirm.click()
-    notice = page.get_by_text(re.compile("折讓開立成功"))
+    notice = page.locator("#msg").filter(has_text=re.compile("折讓開立成功"))
     notice.wait_for(state="visible")
     text = notice.inner_text()
     matches = re.findall(r"[A-Z]{2}\d{8,}", text)
