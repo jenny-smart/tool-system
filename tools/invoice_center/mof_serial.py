@@ -211,15 +211,18 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
     except Exception:
         raise RuntimeError(f"查詢結果找不到「{period_text}」這一列，可能尚未取號或期別不存在；目前頁面：{page.url}")
 
+    # 左側選單是固定浮層，偶爾會蓋到表格內容，導致 Playwright 判定「被其他
+    # 元素擋住」而不敢點；這裡已經用 row 精準鎖定目標，用 force=True 直接
+    # 對著座標點擊，忽略浮層攔截判定。
     checkbox = row.first.locator("input[type='checkbox']")
     if checkbox.count():
-        checkbox.first.check(timeout=3000)
+        checkbox.first.check(timeout=8000, force=True)
     else:
-        row.first.click(timeout=3000)
+        row.first.click(timeout=8000, force=True)
 
     with page.expect_download(timeout=60_000) as download_info:
         try:
-            page.locator("button[title='下載']").last.click(timeout=8000)
+            page.locator("button[title='下載']").last.click(timeout=8000, force=True)
         except Exception as e:
             raise RuntimeError(f"找不到「下載」按鈕；目前頁面：{page.url}") from e
     download = download_info.value
