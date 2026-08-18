@@ -58,6 +58,7 @@ from tools.invoice_center.chrome_cdp import (
     find_existing_page,
 )
 
+MOF_SERIAL_QUERY_URL = "https://www.einvoice.nat.gov.tw/dashboard/btb/btb004w/search"
 MOF_LOG_SHEET = "財政部電子發票取號Log"
 MOF_LOG_HEADERS = ["執行時間", "功能", "地區", "期別", "狀態", "訊息"]
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
@@ -180,62 +181,23 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
 
 
 def _open_serial_query(page: Page, year: int, label: str) -> None:
-    # 跟登入頁一樣是 SPA，選單／頁籤／欄位都要等真的渲染出來才點得到，
-    # 一律用 click()／wait_for() 的內建 auto-wait，不用 count() 立刻判斷。
-    menu_locator = page.get_by_text("電子發票字軌號碼取號", exact=False)
-    try:
-        menu_locator.first.wait_for(state="visible", timeout=15_000)
-    except Exception:
-        raise RuntimeError(f"左側選單找不到「電子發票字軌號碼取號」；目前頁面：{page.url}")
+    # 實測這是 Vue SPA，左側選單要點兩次才會進到「電子發票字軌號碼取號」，
+    # 「查詢」頁籤（<a title="查詢">）再點一次才會顯示查詢表單——一路模擬
+    # 點擊很容易因為渲染時機踩雷。改成直接導到查詢頁的網址（跟畫面上
+    # 手動導覽後看到的網址一樣），簡單也穩定很多；已登入時 Vue Router
+    # 支援直接深連結進來。
+    page.goto(MOF_SERIAL_QUERY_URL, wait_until="domcontentloaded")
+    if "btb004w" not in page.url:
+        raise RuntimeError(f"導到「電子發票字軌號碼取號／查詢」頁失敗，目前頁面：{page.url}（可能尚未登入）")
 
-    # 這個選單常見是「大分類→子項目」都用同一段文字，逐一點擊展開到底；
-    # 每次點擊後項目數可能改變，重新抓 locator 再點下一個。
-    for click_index in range(4):
-        current = page.get_by_text("電子發票字軌號碼取號", exact=False)
-        if click_index >= current.count():
-            break
-        try:
-            current.nth(click_index).click(timeout=3000)
-            page.wait_for_timeout(500)
-        except Exception:
-            pass
-
+    # 實測畫面預設的發票期別範圍就是「這期～下一期」，剛好涵蓋我們平常
+    # 要抓的目標期別，所以不去動期別選擇器（那是目前唯一沒拿到真實 HTML、
+    # 純猜測的部分，風險最高）；直接按查詢，抓不到目標期別那一列再由
+    # download_serial_csv() 丟出清楚錯誤，請人手動調整範圍。
     try:
-        page.get_by_role("tab", name="查詢").first.click(timeout=8000)
+        page.locator("button[title='查詢']").first.click(timeout=10_000)
     except Exception:
-        try:
-            page.get_by_text("查詢", exact=True).first.click(timeout=8000)
-        except Exception:
-            raise RuntimeError(f"找不到「查詢」頁籤，選單可能還沒導到「電子發票字軌號碼取號」頁面；目前頁面：{page.url}")
-    page.wait_for_timeout(500)
-
-    period_text = f"{year}年{label}期"
-    # 發票期別是一組「起～迄」的期別選擇器；起訖都選同一期，只查這一期。
-    period_label = page.get_by_text("發票期別", exact=False)
-    try:
-        period_label.first.wait_for(state="visible", timeout=8000)
-    except Exception:
-        raise RuntimeError(f"找不到「發票期別」欄位，無法設定查詢期別；目前頁面：{page.url}")
-    pickers = period_label.first.locator("xpath=following::input[1] | following::*[contains(@class,'picker')][1]")
-    opened_any = False
-    for picker_index in range(min(pickers.count(), 2)):
-        try:
-            pickers.nth(picker_index).click(timeout=3000)
-            page.get_by_text(period_text, exact=True).first.click(timeout=3000)
-            opened_any = True
-            page.wait_for_timeout(300)
-        except Exception:
-            continue
-    if not opened_any:
-        raise RuntimeError(
-            f"無法自動設定發票期別為「{period_text}」，請手動在畫面上選好起訖期別後，"
-            "再重新執行下載任務（或直接手動查詢下載，改用系統的檔案上傳流程）。"
-        )
-
-    try:
-        page.get_by_role("button", name="查詢").last.click(timeout=8000)
-    except Exception:
-        page.get_by_text("查詢", exact=True).last.click(timeout=8000)
+        raise RuntimeError(f"找不到「查詢」按鈕；目前頁面：{page.url}")
     page.wait_for_timeout(1500)
 
 
@@ -257,9 +219,9 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
 
     with page.expect_download(timeout=60_000) as download_info:
         try:
-            page.get_by_role("button", name="下載").last.click(timeout=8000)
-        except Exception:
-            page.get_by_text("下載", exact=True).last.click(timeout=8000)
+            page.locator("button[title='下載']").last.click(timeout=8000)
+        except Exception as e:
+            raise RuntimeError(f"找不到「下載」按鈕；目前頁面：{page.url}") from e
     download = download_info.value
     destination.parent.mkdir(parents=True, exist_ok=True)
     download.save_as(str(destination))
