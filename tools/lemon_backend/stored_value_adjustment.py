@@ -7,7 +7,6 @@ from datetime import datetime
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
-from gspread.utils import rowcol_to_a1
 from playwright.sync_api import Locator, Page, sync_playwright
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
@@ -181,7 +180,7 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
     pending = pending_stored_value_adjustments(worksheet.get_all_values())
     pending = [item for item in pending if int(item["sheet_row"]) in selected_rows]
     if not pending:
-        raise ValueError("勾選列已不是待扣／待返儲值金，或缺少訂單編號／金額")
+        raise ValueError("勾選列已不是待扣／待退儲值金，或缺少訂單編號／金額")
     date_text = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%m/%d")
     completed = 0
     with sync_playwright() as playwright:
@@ -193,24 +192,12 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                 print(f"處理第 {item['sheet_row']} 列：{item['order_no']}／{item['action']} NT$ {item['amount']}")
                 page = _open_history(page, str(item["order_no"]))
                 created = _submit_adjustment(page, item, date_text)
-                completed_at = str(item["completed_at"]).strip() or datetime.now(
-                    ZoneInfo("Asia/Taipei")
-                ).strftime("%Y/%m/%d %H:%M:%S")
-                sheet_row = int(item["sheet_row"])
-                time_column = int(item["time_column"])
-                worksheet.batch_update(
-                    [
-                        {"range": f"B{sheet_row}", "values": [[item["completed_status"]]]},
-                        {
-                            "range": rowcol_to_a1(sheet_row, time_column),
-                            "values": [[completed_at]],
-                        },
-                    ],
-                    raw=True,
-                )
-                print(
-                    f"已回寫第 {sheet_row} 列：{item['completed_status']}／{completed_at}"
-                )
+                if not str(item["completed_at"]).strip():
+                    completed_at = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d %H:%M:%S")
+                    worksheet.update_cell(
+                        int(item["sheet_row"]), int(item["time_column"]), completed_at
+                    )
+                    print(f"已回寫第 {item['sheet_row']} 列時間：{completed_at}")
                 if created:
                     completed += 1
                     print(f"完成：{item['order_no']}／{date_text}{item['suffix']}")
