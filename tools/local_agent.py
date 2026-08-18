@@ -151,6 +151,50 @@ def build_mofei_download(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_cetustek_serial_import(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    if not area or area == "全區":
+        raise ValueError("鯨躍字軌匯入任務必須指定區域")
+    command = [
+        sys.executable,
+        "-m",
+        "tools.invoice_center.cetustek_serial",
+        "import",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+    ]
+    period = str(params.get("month") or "").strip()
+    if period:
+        command.extend(["--period", period])
+    return command
+
+
+def build_cetustek_serial_section_query(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    if not area or area == "全區":
+        raise ValueError("鯨躍字軌配號任務必須指定區域")
+    qyear = str(params.get("qyear") or "").strip()
+    qmonth = str(params.get("qmonth") or "").strip()
+    if not qyear or not qmonth:
+        raise ValueError("配號查詢任務必須提供查詢年份與查詢月份")
+    return [
+        sys.executable,
+        "-m",
+        "tools.invoice_center.cetustek_serial",
+        "section-query",
+        "--area",
+        area,
+        "--qyear",
+        qyear,
+        "--qmonth",
+        qmonth,
+        "--cdp-url",
+        cdp_url,
+    ]
+
+
 def build_cetustek_allowance(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     selected_rows = params.get("selected_rows") or []
