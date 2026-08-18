@@ -183,7 +183,7 @@ def build_cetustek_serial_section_query(params: dict[str, Any]) -> list[str]:
         sys.executable,
         "-m",
         "tools.invoice_center.cetustek_serial",
-        "section-query",
+        "allocate",
         "--area",
         area,
         "--qyear",
