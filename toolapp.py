@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0818_v5
+版本：0818_v6
 更新日期：2026-08-18
 """
 import html
@@ -1375,7 +1375,7 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
 
     return f"{display_name} 執行完成"
 
-def render_html_table(df: pd.DataFrame) -> None:
+def render_html_table(df: pd.DataFrame, max_height: int | None = None) -> None:
     if df.empty:
         st.info("尚無資料")
         return
@@ -1407,7 +1407,8 @@ def render_html_table(df: pd.DataFrame) -> None:
             )
             numeric_cols.append(col)
 
-    out = ['<div class="report-table-wrap"><table class="report-table"><thead><tr>']
+    height_style = f'max-height:{int(max_height)}px;overflow:auto;' if max_height else ''
+    out = [f'<div class="report-table-wrap" style="{height_style}"><table class="report-table"><thead><tr>']
 
     for col in show.columns:
         out.append(f"<th>{html.escape(str(col))}</th>")
@@ -1443,6 +1444,7 @@ def render_report() -> None:
     order_date_path = latest_dir / "order_date_summary.csv"
     reserve_path = latest_dir / "reserve_summary.csv"
     net_performance_path = latest_dir / "net_performance_summary.csv"
+    month_performance_path = latest_dir / "month_performance_summary.csv"
 
     def load_csv(path: Path) -> pd.DataFrame:
         if not path.exists():
@@ -1471,13 +1473,25 @@ def render_report() -> None:
             meta = {}
 
     default_start_date = datetime.now(TW_TZ).date().replace(day=1)
+    default_end_date = default_start_date
     saved_start_month = str(meta.get("report_start_month") or "").replace("/", "-")
     if saved_start_month:
         try:
             default_start_date = datetime.strptime(saved_start_month, "%Y-%m").date()
         except ValueError:
             pass
-    default_month_count = max(1, min(12, int(meta.get("report_month_count") or 4)))
+    saved_end_month = str(meta.get("report_end_month") or "").replace("/", "-")
+    if saved_end_month:
+        try:
+            default_end_date = datetime.strptime(saved_end_month, "%Y-%m").date()
+        except ValueError:
+            pass
+    else:
+        default_end_date = default_start_date
+
+    today_date = datetime.now(TW_TZ).date()
+    default_order_start = today_date
+    default_order_end = today_date
 
     st.markdown(
         """
@@ -1495,28 +1509,6 @@ def render_report() -> None:
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="card"><div class="card-title">⚙️ 報表月份設定</div>', unsafe_allow_html=True)
-    setting_cols = st.columns(2)
-    with setting_cols[0]:
-        report_start_date = st.date_input(
-            "起始月份（日期只取年月）",
-            value=default_start_date,
-            key="performance_report_start_month",
-        )
-    with setting_cols[1]:
-        report_month_count = st.number_input(
-            "顯示月數",
-            min_value=1,
-            max_value=12,
-            value=default_month_count,
-            step=1,
-            key="performance_report_month_count",
-        )
-    st.caption("按『更新業績報表』後，訂購日期、保留單與扣除後業績會依這個月份範圍重新產生。")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    report_start_month = report_start_date.strftime("%Y-%m")
-
     top_cols = st.columns([1, 1, 1, 1])
     with top_cols[0]:
         if st.button("← 返回主控台", use_container_width=True):
@@ -1525,21 +1517,32 @@ def render_report() -> None:
 
     with top_cols[1]:
         if st.button("🔄 更新業績報表", use_container_width=True):
-            try:
-                add_log("開始更新業績報表", "info")
-                run_script(
-                    "tools/scheduled_daily/performance_report.py",
-                    [
-                        "dashboard", "true",
-                        "--start-month", report_start_month,
-                        "--month-count", str(int(report_month_count)),
-                    ],
-                )
-                add_log("業績報表更新完成", "success")
-                st.rerun()
-            except Exception as e:
-                add_log(f"業績報表更新失敗：{e}", "error")
-                st.error(f"業績報表更新失敗：{e}")
+            selected_order_start = st.session_state.get("performance_order_start_date", default_order_start)
+            selected_order_end = st.session_state.get("performance_order_end_date", default_order_end)
+            selected_month_start = st.session_state.get("performance_report_start_month", default_start_date)
+            selected_month_end = st.session_state.get("performance_report_end_month", default_end_date)
+            if selected_order_start > selected_order_end:
+                st.error("訂購日期迄日不可早於起日")
+            elif selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
+                st.error("結束月份不可早於起始月份")
+            else:
+                try:
+                    add_log("開始更新業績報表", "info")
+                    run_script(
+                        "tools/scheduled_daily/performance_report.py",
+                        [
+                            "dashboard", "true",
+                            "--order-start-date", selected_order_start.strftime("%Y-%m-%d"),
+                            "--order-end-date", selected_order_end.strftime("%Y-%m-%d"),
+                            "--start-month", selected_month_start.strftime("%Y-%m"),
+                            "--end-month", selected_month_end.strftime("%Y-%m"),
+                        ],
+                    )
+                    add_log("業績報表更新完成", "success")
+                    st.rerun()
+                except Exception as e:
+                    add_log(f"業績報表更新失敗：{e}", "error")
+                    st.error(f"業績報表更新失敗：{e}")
 
     with top_cols[2]:
         if st.button("📂 重新讀取資料", use_container_width=True):
@@ -1559,12 +1562,13 @@ def render_report() -> None:
     order_date_df = load_csv(order_date_path)
     reserve_df = load_csv(reserve_path)
     net_performance_df = load_csv(net_performance_path)
+    month_performance_df = load_csv(month_performance_path)
 
     if meta:
         st.info(
             f"📅 最新更新時間：{meta.get('updated_at', '-')}　｜　"
-            f"報表起始月份：{meta.get('report_start_month', '-')}　｜　"
-            f"顯示月數：{meta.get('report_month_count', '-')}"
+            f"訂購日期：{meta.get('order_start_date', '-')}～{meta.get('order_end_date', '-')}　｜　"
+            f"月份：{meta.get('report_start_month', '-')}～{meta.get('report_end_month', '-')}"
         )
         if meta.get("error"):
             st.warning(meta.get("error"))
@@ -1573,33 +1577,90 @@ def render_report() -> None:
         st.warning("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
         return
 
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        st.metric("本月加總", get_total(df4, "本月加總"))
-    with k2:
-        st.metric("次月加總", get_total(df4, "次月加總"))
-    with k3:
-        st.metric("本月家電加總", get_total(df4, "本月家電加總"))
-    with k4:
-        st.metric("儲值金", get_total(df4, "儲值金"))
+    report_tabs = st.tabs(["📍 目前總表", "🧾 訂購日期付款彙總", "📅 月份業績統整"])
 
-    st.markdown('<div class="card"><div class="card-title">📍 各區月度摘要</div>', unsafe_allow_html=True)
-    render_html_table(df4)
-    st.markdown("</div>", unsafe_allow_html=True)
+    with report_tabs[0]:
+        k1, k2, k3, k4 = st.columns(4)
+        with k1:
+            st.metric("本月加總", get_total(df4, "本月加總"))
+        with k2:
+            st.metric("次月加總", get_total(df4, "次月加總"))
+        with k3:
+            st.metric("本月家電加總", get_total(df4, "本月家電加總"))
+        with k4:
+            st.metric("儲值金", get_total(df4, "儲值金"))
 
-    st.markdown('<div class="card"><div class="card-title">🧾 訂購日期付款彙總</div>', unsafe_allow_html=True)
-    st.caption("依所選月份的訂購日期與地區彙總未付款、已付款及合計金額；最新日期在最上方。")
-    render_html_table(order_date_df)
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('<div class="card"><div class="card-title">📍 目前總表</div>', unsafe_allow_html=True)
+        render_html_table(df4)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="card"><div class="card-title">🕒 自訂月份保留單統計</div>', unsafe_allow_html=True)
-    st.caption("保留單時數以『人數 × 每人服務時數』計算。")
-    render_html_table(reserve_df)
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('<div class="card"><div class="card-title">📈 目前月度追蹤</div>', unsafe_allow_html=True)
+        tracking_tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
+        with tracking_tabs[0]:
+            render_html_table(daily_df, max_height=360)
+        with tracking_tabs[1]:
+            render_html_table(next_df, max_height=360)
+        with tracking_tabs[2]:
+            render_html_table(month_end_df, max_height=360)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="card"><div class="card-title">📊 自訂月份扣除保留單後業績</div>', unsafe_allow_html=True)
-    render_html_table(net_performance_df)
-    st.markdown("</div>", unsafe_allow_html=True)
+    with report_tabs[1]:
+        st.markdown('<div class="card"><div class="card-title">🧾 訂購日期付款彙總</div>', unsafe_allow_html=True)
+        order_cols = st.columns(2)
+        with order_cols[0]:
+            order_start_date = st.date_input(
+                "訂購日期－起",
+                value=default_order_start,
+                key="performance_order_start_date",
+            )
+        with order_cols[1]:
+            order_end_date = st.date_input(
+                "訂購日期－迄",
+                value=default_order_end,
+                key="performance_order_end_date",
+            )
+        st.caption("預設起迄日皆為當日；結果依地區彙總未付款、已付款及合計業績。")
+        render_html_table(order_date_df)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with report_tabs[2]:
+        st.markdown('<div class="card"><div class="card-title">📅 月份業績統整</div>', unsafe_allow_html=True)
+        month_cols = st.columns(2)
+        with month_cols[0]:
+            report_start_date = st.date_input(
+                "起始月份（日期只取年月）",
+                value=default_start_date,
+                key="performance_report_start_month",
+            )
+        with month_cols[1]:
+            report_end_date = st.date_input(
+                "結束月份（日期只取年月）",
+                value=default_end_date,
+                key="performance_report_end_month",
+            )
+
+        date_range_valid = order_start_date <= order_end_date
+        month_range_valid = report_start_date.replace(day=1) <= report_end_date.replace(day=1)
+        if not date_range_valid:
+            st.error("訂購日期迄日不可早於起日")
+        if not month_range_valid:
+            st.error("結束月份不可早於起始月份")
+
+        st.caption("設定完成後，請按頁面上方的『更新業績報表』套用全部區間。")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="card"><div class="card-title">➖ 該月業績－該月保留單業績</div>', unsafe_allow_html=True)
+        render_html_table(net_performance_df)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="card"><div class="card-title">📊 該月業績報表</div>', unsafe_allow_html=True)
+        render_html_table(month_performance_df)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="card"><div class="card-title">🕒 該月保留單業績</div>', unsafe_allow_html=True)
+        st.caption("保留單時數以『人數 × 每人服務時數』計算。")
+        render_html_table(reserve_df)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("🔎 Debug：查看 df2 / raw_df", expanded=False):
         debug_dir = Path("dashboard_data/latest")
@@ -1631,30 +1692,6 @@ def render_report() -> None:
         else:
             st.warning("找不到 raw_df.csv")
     
-
-    st.markdown('<div class="card"><div class="card-title">📈 月度追蹤</div>', unsafe_allow_html=True)
-    tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
-
-    with tabs[0]:
-        render_html_table(daily_df)
-
-    if raw_path.exists():
-        raw_df = pd.read_csv(raw_path, encoding="utf-8-sig")
-        st.subheader("raw_df：台北原始資料")
-        st.dataframe(
-            raw_df[raw_df["城市"].astype(str) == "台北"],
-            use_container_width=True,
-        )
-    else:
-        st.warning("找不到 raw_df.csv，請先更新業績報表")
-
-    with tabs[1]:
-        render_html_table(next_df)
-
-    with tabs[2]:
-        render_html_table(month_end_df)
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("📧 信件預覽", expanded=False):
         if html_path.exists():
