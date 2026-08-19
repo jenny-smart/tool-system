@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -144,15 +145,38 @@ def _local_account_secret(area: str, field: str) -> str:
     return ""
 
 
+@lru_cache(maxsize=1)
+def _legacy_accounts() -> Any:
+    """Load the existing ~/lemon/accounts.py without copying credentials."""
+    path = Path(
+        os.getenv("LEMON_BACKEND_ACCOUNTS_FILE", str(Path.home() / "lemon" / "accounts.py"))
+    ).expanduser()
+    if not path.is_file():
+        return {}
+    try:
+        spec = importlib.util.spec_from_file_location("_lemon_backend_legacy_accounts", path)
+        if spec is None or spec.loader is None:
+            return {}
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return getattr(module, "ACCOUNTS", {})
+    except Exception:
+        return {}
+
+
 def _project_account_secret(area: str, field: str) -> str:
-    """Use the existing local Lemon backend account file without copying secrets into tasks."""
+    """Use an existing local Lemon backend account file without copying secrets into tasks."""
+    label = AREA_ENV[normalize_area(area)][0]
     try:
         from tools.lemon_backend.accounts import ACCOUNTS
 
-        value = _mapping_get(_mapping_get(ACCOUNTS, AREA_ENV[normalize_area(area)][0]), field)
-        return _secret_value(value)
+        value = _mapping_get(_mapping_get(ACCOUNTS, label), field)
+        if _secret_value(value):
+            return _secret_value(value)
     except Exception:
-        return ""
+        pass
+    value = _mapping_get(_mapping_get(_legacy_accounts(), label), field)
+    return _secret_value(value)
 
 
 def _streamlit_account_secret(area: str, field: str) -> str:
