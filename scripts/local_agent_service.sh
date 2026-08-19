@@ -7,11 +7,16 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE_PLIST="$PROJECT_DIR/services/$LABEL.plist"
 TARGET_PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$UID"
+RUNTIME_ROOT="$HOME/Library/Application Support/LemonToolsAgent"
+RUNTIME_DIR="$RUNTIME_ROOT/tool-system"
 LOG_DIR="$HOME/Library/Logs/LemonToolsAgent"
 
 case "${1:-status}" in
   install)
-    mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
+    mkdir -p "$HOME/Library/LaunchAgents" "$RUNTIME_DIR" "$LOG_DIR"
+    rm -rf "$RUNTIME_DIR/tools"
+    mkdir -p "$RUNTIME_DIR/tools"
+    cp -R "$PROJECT_DIR/tools/." "$RUNTIME_DIR/tools/"
     launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
     sleep 1
     cp "$SOURCE_PLIST" "$TARGET_PLIST"
@@ -30,7 +35,7 @@ case "${1:-status}" in
     fi
     launchctl enable "$DOMAIN/$LABEL"
     launchctl kickstart -k "$DOMAIN/$LABEL"
-    echo "installed: $LABEL (source: $PROJECT_DIR)"
+    echo "installed: $LABEL"
     ;;
   restart)
     if launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
@@ -48,6 +53,9 @@ case "${1:-status}" in
   uninstall)
     launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
     rm -f "$TARGET_PLIST"
+    if [[ "$RUNTIME_ROOT" == "$HOME/Library/Application Support/LemonToolsAgent" ]]; then
+      rm -rf "$RUNTIME_ROOT"
+    fi
     echo "uninstalled: $LABEL"
     ;;
   status)
@@ -65,10 +73,10 @@ case "${1:-status}" in
     fi
     ;;
   logs)
-    echo "stdout: $LOG_DIR/local_agent.launchd.out.log"
-    [[ ! -f "$LOG_DIR/local_agent.launchd.out.log" ]] || tail -n 100 "$LOG_DIR/local_agent.launchd.out.log"
-    echo "stderr: $LOG_DIR/local_agent.launchd.err.log"
-    [[ ! -f "$LOG_DIR/local_agent.launchd.err.log" ]] || tail -n 100 "$LOG_DIR/local_agent.launchd.err.log"
+    echo "stdout: $LOG_DIR/local-agent.out.log"
+    [[ ! -f "$LOG_DIR/local-agent.out.log" ]] || tail -n 100 "$LOG_DIR/local-agent.out.log"
+    echo "stderr: $LOG_DIR/local-agent.err.log"
+    [[ ! -f "$LOG_DIR/local-agent.err.log" ]] || tail -n 100 "$LOG_DIR/local-agent.err.log"
     ;;
   *)
     echo "usage: $0 {install|restart|status|logs|uninstall}" >&2
