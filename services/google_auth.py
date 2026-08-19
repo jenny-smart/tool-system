@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gspread
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
 from googleapiclient.discovery import build
@@ -30,3 +31,10 @@ def get_drive_service():
 
 def get_sheets_service():
     return build("sheets", "v4", credentials=get_credentials(), cache_discovery=False)
+
+
+def get_access_token() -> str:
+    """給需要直接呼叫 Sheets export 端點（例如內勤PDF產出）的地方用的 Bearer token。"""
+    credentials = get_credentials()
+    credentials.refresh(Request())
+    return credentials.token
