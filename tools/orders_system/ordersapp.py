@@ -1,10 +1,12 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.76
+# 版本：v8.77
 # 模組：服務訂單系統主畫面
 # 最後更新：2026-08-14
 #
 # Change Log
+# v8.77
+# - 補齊「批次建單優化」「檸檬保留單建單」「檸檬保留單取消」選單與路由。
 # v8.76
 # - 功能選單全面重新分組與精簡文字說明：原本 24 項依開發先後順序累積，
 #   讀起來凌亂，部分說明落落長。改成依使用情境分成 6 大類依序排列：
@@ -385,7 +387,7 @@
 # v7.7 - 儲值金補價差拆兩段按鈕
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.76"
+__version__ = "8.77"
 
 import html
 import re
@@ -405,6 +407,8 @@ from weekend_reminders import (
 from cleaner_reminders import find_paid_cleaner_reminders
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
+import batch_booking_optimized
+import reserve_menu
 
 try:
     import quick_order as qo
@@ -819,6 +823,10 @@ FUNCTION_OPTIONS = [
     # ---------- A. 建單／成單流程 ----------
     ("批次建單：從 Google Sheet 逐列建立訂單、寄確認信、同步日曆。",
      "orders", "批次建單（Google Sheet）"),
+    ("批次建單優化：會員一次選日期區間與多個時段，集中查班後批次建立訂單。",
+     "orders", "批次建單優化"),
+    ("檸檬保留單建單：依日期區間、時段與保留率分析班表並批次成立保留單。",
+     "orders", "檸檬保留單建單"),
     ("建立舊客訂單：電話查會員、帶入歷史資料建單；需求搜尋整合在此流程內。",
      "orders", "建立舊客訂單"),
     ("建立新客訂單：貼上制式文字拆成欄位，供客服修改後複製，不直接送單。",
@@ -832,6 +840,8 @@ FUNCTION_OPTIONS = [
     # ---------- B. 訂單附屬功能 ----------
     ("取消訂單：依電話、服務月份／日期區間與付款狀態搜尋訂單，處理退款與備註。",
      "orders", "取消訂單"),
+    ("檸檬保留單取消：依期間、複選時段與客人備註安全篩選並批次取消保留單。",
+     "orders", "檸檬保留單取消"),
     ("VIP 訂單／Google 日曆同步：同時查詢後台訂單與 Google 日曆，支援異動日期／時段、"
      "取消／暫停、新增或修改日曆事件。",
      "orders", "VIP 訂單／Google 日曆同步"),
@@ -893,11 +903,11 @@ _MEMO_SECTION_MAP = {
 # 改選功能項目，不會誤跑到任何功能。
 _CATEGORY_HEADERS_BY_INDEX = {
     0: "A. 建單／成單流程",
-    6: "B. 訂單附屬功能",
-    12: "C. 稽核比對工具",
-    15: "D. LINE 通知／提醒",
-    18: "E. 會員／客戶管理",
-    21: "F. 財務功能",
+    8: "B. 訂單附屬功能",
+    15: "C. 稽核比對工具",
+    18: "D. LINE 通知／提醒",
+    21: "E. 會員／客戶管理",
+    24: "F. 財務功能",
 }
 _menu_display_options = []
 _menu_option_targets = []  # 與 _menu_display_options 一一對應；None 代表該列是標題列
@@ -935,6 +945,18 @@ if _system_key == "memo":
         shared_backend_password=backend_password,
         shared_env=env,
     )
+    st.stop()
+
+if mode == "批次建單優化":
+    batch_booking_optimized.render(backend_email, backend_password, env)
+    st.stop()
+
+if mode == "檸檬保留單建單":
+    reserve_menu.render_reserve_create(backend_email, backend_password, env)
+    st.stop()
+
+if mode == "檸檬保留單取消":
+    reserve_menu.render_reserve_cancel(backend_email, backend_password, env)
     st.stop()
 
 # =========================================================
