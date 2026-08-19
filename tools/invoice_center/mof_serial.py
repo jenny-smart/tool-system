@@ -219,7 +219,36 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
     # 對著座標點擊，忽略浮層攔截判定。
     checkbox = row.first.locator("input[type='checkbox']")
     if checkbox.count():
-        checkbox.first.check(timeout=8000, force=True)
+        target = checkbox.first
+        if not target.is_checked():
+            checkbox_id = target.get_attribute("id") or ""
+            label_locator = page.locator(f'label[for="{checkbox_id}"]') if checkbox_id else None
+            if label_locator is not None and label_locator.count():
+                try:
+                    label_locator.first.click(timeout=8000, force=True)
+                except Exception:
+                    pass
+        if not target.is_checked():
+            try:
+                row.first.click(timeout=8000, force=True)
+            except Exception:
+                pass
+        if not target.is_checked():
+            # Vue-controlled checkboxes may immediately undo Playwright's synthetic click.
+            # Use the native checked setter and emit both events so v-model updates too.
+            target.evaluate(
+                """element => {
+                    const setter = Object.getOwnPropertyDescriptor(
+                        HTMLInputElement.prototype, "checked"
+                    ).set;
+                    setter.call(element, true);
+                    element.dispatchEvent(new Event("input", { bubbles: true }));
+                    element.dispatchEvent(new Event("change", { bubbles: true }));
+                }"""
+            )
+            page.wait_for_timeout(250)
+        if not target.is_checked():
+            raise RuntimeError(f"無法勾選「{period_text}」；請確認財政部頁面欄位是否改版")
     else:
         row.first.click(timeout=8000, force=True)
 
