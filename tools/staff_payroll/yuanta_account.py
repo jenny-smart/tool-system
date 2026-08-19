@@ -10,16 +10,16 @@
 新增或刪除」的提示列，row2 是表頭，資料從 row3 開始）：
 A＝轉帳日期(yyyymmdd)、B＝受款人身分證字號、C＝受款人帳號、D＝金額、E＝員工姓名
 
-流程：
+流程（E/B/C/D 四欄全部查地區自己的「YYYY地區薪資單總表」，不是固定查台北）：
 1. 元大工作表 E3:E：該地區自己「YYYY地區薪資單總表》薪資單」B3:B（姓名）
-2. 元大工作表 B3:B（受款人身分證字號）：E欄(姓名) 對到「台北」的
-   「YYYY台北薪資單總表》員工個資」B欄時，對應員工個資 C欄
-3. 元大工作表 C3:C（受款人帳號）：E欄(姓名) 對到「台北」的
-   「YYYY台北薪資單總表》員工個資」B欄時，對應員工個資 I欄
-4. 元大工作表 D3:D（金額）：E欄(姓名) 對到「台北」的「YYYY台北薪資單總表》YYYY薪資總表」
+2. 元大工作表 B3:B（受款人身分證字號）：E欄(姓名) 對到該地區「員工個資」B欄時，
+   對應員工個資 C欄
+3. 元大工作表 C3:C（受款人帳號）：E欄(姓名) 對到該地區「員工個資」B欄時，
+   對應員工個資 I欄
+4. 元大工作表 D3:D（金額）：E欄(姓名) 對到該地區「YYYY薪資總表」
    （獨立的工作表，不是「薪資單」）D欄，且該表 A欄＝YYYY.MM 時，對應同一列的 AH欄
-   （2026-08-20 已用截圖確認：分頁叫「YYYY薪資總表」，B/C/D 這三欄一律查「台北」
-   那份總表，不是查地區自己的——元大帳戶用的員工銀行資料／金額主表就只在台北那份）
+   （2026-08-20 用截圖確認分頁叫「YYYY薪資總表」；B/C/D 一開始誤植為固定查台北，
+   後來確認應該跟 E 一樣查地區自己的）
 5. 元大工作表 A3:A（轉帳日期）：YYYYMM 下個月的 5 日，整批填同一個日期，格式
    yyyymmdd（對應表頭要求）；只避開六日，往前挪到最近的工作日（目前沒有國定假日
    資料，只能避開週末，不是真正的「例假日」，遇到國定假日連假還是要人工核對）
@@ -154,13 +154,11 @@ def run_yuanta_account(drive: DriveService, sheets: SheetsService, area: str, yy
     year = yyyymm_to_year(yyyymm)
     dotted = yyyymm_to_dotted(yyyymm)
 
+    # E/B/C/D 欄全部查地區自己的總表（不是固定查台北）
     own_summary = open_area_summary(drive, sheets, year, area)
-    names = [v.strip() for v in own_summary.worksheet(PAYROLL_WS).col_values(2)[2:] if v.strip()]  # E欄來源：自己地區
-
-    # B/C/D 欄一律查「台北」那份總表（元大帳戶的員工銀行資料／金額主表只在台北）
-    taipei_summary = own_summary if area == SUMMARY_HOME_AREA else open_area_summary(drive, sheets, year, SUMMARY_HOME_AREA)
-    employee_values = taipei_summary.worksheet(EMPLOYEE_WS).get_all_values()
-    payroll_values = taipei_summary.worksheet(f"{year}薪資總表").get_all_values()
+    names = [v.strip() for v in own_summary.worksheet(PAYROLL_WS).col_values(2)[2:] if v.strip()]
+    employee_values = own_summary.worksheet(EMPLOYEE_WS).get_all_values()
+    payroll_values = own_summary.worksheet(f"{year}薪資總表").get_all_values()
 
     yuanta_spreadsheet, home_folder_id = _open_yuanta_sheet(drive, sheets, year, area)
     yuanta_ws = _get_yuanta_ws(yuanta_spreadsheet)
