@@ -3206,7 +3206,7 @@ def get_runtime_config(env_name: str):
     }
 
 
-def run_process_web(env_name, region, backend_email, backend_password, sheet_name, start_row, end_row, selected_actions=None, logger=print, allow_auto_lemon_shift=False):
+def run_process_web(env_name, region, backend_email, backend_password, sheet_name, start_row, end_row, selected_actions=None, logger=print, allow_auto_lemon_shift=False, selected_rows=None):
     global BASE_URL, ORDER_PREFIX
     if env_name == "dev":
         BASE_URL = BASE_URL_DEV
@@ -3255,7 +3255,12 @@ def run_process_web(env_name, region, backend_email, backend_password, sheet_nam
         if col not in df.columns:
             raise Exception(f"工作表缺少必要欄位: {col}")
 
-    df = df[(df["__sheet_row__"] >= start_row) & (df["__sheet_row__"] <= end_row)]
+    if selected_rows is None:
+        df = df[(df["__sheet_row__"] >= start_row) & (df["__sheet_row__"] <= end_row)]
+    else:
+        selected_row_set = {int(row) for row in selected_rows}
+        df = df[df["__sheet_row__"].isin(selected_row_set)]
+        logger("指定列號：" + "、".join(map(str, sorted(selected_row_set))))
     df = df[df.apply(should_process_row, axis=1)]
 
     if df.empty:
