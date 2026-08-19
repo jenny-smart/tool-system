@@ -30,10 +30,12 @@ from __future__ import annotations
 
 import calendar
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
 from bs4 import BeautifulSoup
+from googleapiclient.errors import HttpError
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.scheduled_monthly.prepaid_report import LOGIN_URL, HEADERS, load_accounts, login, choose_keyword
@@ -205,29 +207,51 @@ def _col_letter(index_1based: int) -> str:
     return letters
 
 
+def _execute_with_retry(request, *, max_retries: int = 6, base_delay: float = 5.0):
+    """Sheets API 有每分鐘配額限制，429（配額超過）或 503（暫時過載）時
+    用指數退避重試，避免跟其他工具同時打 API 就整批失敗。"""
+    for attempt in range(max_retries):
+        try:
+            return request.execute()
+        except HttpError as exc:
+            status = getattr(getattr(exc, "resp", None), "status", None)
+            if status not in (429, 503) or attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            log(f"⚠️ Sheets API 配額限制（{status}），{delay:.0f} 秒後重試（第 {attempt + 1}/{max_retries} 次）")
+            time.sleep(delay)
+    raise RuntimeError("重試次數用盡")
+
+
 def _find_or_create_block(service, spreadsheet_id: str, date_label: str) -> int:
     """回傳該月份區塊第一欄（台北欄）的欄位編號（1-based）。找不到就新增區塊。"""
-    meta = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id, fields="sheets.properties.title"
-    ).execute()
+    meta = _execute_with_retry(
+        service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties.title")
+    )
     titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
 
     if SHEET_NAME not in titles:
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"requests": [{"addSheet": {"properties": {"title": SHEET_NAME}}}]},
-        ).execute()
-        service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{SHEET_NAME}'!A1:A7",
-            valueInputOption="RAW",
-            body={"values": [[""], [""], *[[label] for label in ROW_LABELS]]},
-        ).execute()
+        _execute_with_retry(
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{"addSheet": {"properties": {"title": SHEET_NAME}}}]},
+            )
+        )
+        _execute_with_retry(
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{SHEET_NAME}'!A1:A7",
+                valueInputOption="RAW",
+                body={"values": [[""], [""], *[[label] for label in ROW_LABELS]]},
+            )
+        )
 
-    res = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{SHEET_NAME}'!B1:ZZ2",
-    ).execute()
+    res = _execute_with_retry(
+        service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{SHEET_NAME}'!B1:ZZ2",
+        )
+    )
     values = res.get("values", [])
     row1 = values[0] if len(values) > 0 else []
     row2 = values[1] if len(values) > 1 else []
@@ -247,12 +271,14 @@ def _find_or_create_block(service, spreadsheet_id: str, date_label: str) -> int:
 
     start_letter = _col_letter(new_block_start)
     end_letter = _col_letter(new_block_start + len(CITIES) - 1)
-    service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{SHEET_NAME}'!{start_letter}1:{end_letter}2",
-        valueInputOption="RAW",
-        body={"values": [CITIES, [date_label] * len(CITIES)]},
-    ).execute()
+    _execute_with_retry(
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{SHEET_NAME}'!{start_letter}1:{end_letter}2",
+            valueInputOption="RAW",
+            body={"values": [CITIES, [date_label] * len(CITIES)]},
+        )
+    )
     return new_block_start
 
 
@@ -260,12 +286,14 @@ def _write_area_column(service, spreadsheet_id: str, block_start: int, area: str
     col_index = block_start + CITIES.index(area)
     col_letter = _col_letter(col_index)
     values = [[amounts[label]] for label in ROW_LABELS]
-    service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{SHEET_NAME}'!{col_letter}3:{col_letter}7",
-        valueInputOption="RAW",
-        body={"values": values},
-    ).execute()
+    _execute_with_retry(
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{SHEET_NAME}'!{col_letter}3:{col_letter}7",
+            valueInputOption="RAW",
+            body={"values": values},
+        )
+    )
 
 
 def run(area: str, year_month: str, on_progress=None) -> str:
