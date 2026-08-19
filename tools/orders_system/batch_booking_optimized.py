@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import html
+import traceback
 from collections import OrderedDict
 from datetime import datetime
 
@@ -14,6 +15,26 @@ import pandas as pd
 import streamlit as st
 
 from accounts import ACCOUNTS
+
+
+def _punch_log(function_name, status, *, area="", date="", target="", message="", traceback_text="", run_type="手動"):
+    """訂單系統執行 log 打卡：寫入主控 Log 試算表「訂單系統執行Log」分頁。
+    打卡失敗只印警告，不影響主流程。"""
+    try:
+        from tools.common.log_to_sheet import write_job_log
+        write_job_log(
+            system_name="訂單系統",
+            job_name=function_name,
+            status=status,
+            area=area,
+            date=date,
+            target=target,
+            message=message,
+            run_type=run_type,
+            traceback_text=traceback_text,
+        )
+    except Exception as e:
+        print(f"[orders_system] 執行 log 打卡失敗：{e}")
 
 def step(num, title):
     st.markdown(f'<div class="step-pill"><span class="step-num">{num}</span>{title}</div>', unsafe_allow_html=True)
@@ -369,6 +390,11 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
         else:
             run_status.update(label=f"執行完成：成功 {total_success} 筆", state="complete", expanded=False)
             st.success(f"執行完成：成功 {total_success} 筆。")
+        _punch_log(
+            "批次建單優化", "成功" if not total_fail else "失敗",
+            date=sheet_name.strip(), target="、".join(map(str, requested_rows)),
+            message=f"執行項目：{'、'.join(selected_actions)}｜共處理 {total_processed} 筆，成功 {total_success} 筆，失敗 {total_fail} 筆",
+        )
     except Exception as exc:
         message = str(exc).strip() or f"{type(exc).__name__}: {exc!r}"
         if isinstance(exc, KeyError):
@@ -376,6 +402,12 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
         run_status.update(label="執行失敗", state="error", expanded=True)
         run_status.write(message)
         st.error(f"執行失敗：{message}")
+        _punch_log(
+            "批次建單優化", "失敗",
+            date=sheet_name.strip(), target="、".join(map(str, requested_rows)),
+            message=f"執行失敗：{message}",
+            traceback_text=traceback.format_exc(),
+        )
         return
 
     summary = st.session_state.get("batch_opt_summary") or {}

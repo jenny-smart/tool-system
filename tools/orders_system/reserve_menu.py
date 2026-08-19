@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """服務訂單系統內的檸檬保留單建單／取消 UI。"""
 
+import traceback
 from datetime import date
 
 import pandas as pd
@@ -18,6 +19,26 @@ from reserve_optimizer import (
     login_reserve_member,
     member_addresses,
 )
+
+
+def _punch_log(function_name, status, *, area="", date="", target="", message="", traceback_text="", run_type="手動"):
+    """訂單系統執行 log 打卡：寫入主控 Log 試算表「訂單系統執行Log」分頁。
+    打卡失敗只印警告，不影響主流程。"""
+    try:
+        from tools.common.log_to_sheet import write_job_log
+        write_job_log(
+            system_name="訂單系統",
+            job_name=function_name,
+            status=status,
+            area=area,
+            date=date,
+            target=target,
+            message=message,
+            run_type=run_type,
+            traceback_text=traceback_text,
+        )
+    except Exception as e:
+        print(f"[orders_system] 執行 log 打卡失敗：{e}")
 
 
 def _require_supported_env(env: str) -> bool:
@@ -171,11 +192,22 @@ def render_reserve_create(backend_email: str, backend_password: str, env: str) -
             st.session_state.reserve_menu_last_create = result
             execution_status.update(label=f"建立完成：成功 {result.get('success_count', 0)} / {result.get('target_orders', 0)} 張", state="complete", expanded=False)
             st.success(f"建立完成：成功 {result.get('success_count', 0)} / {result.get('target_orders', 0)} 張")
+            _punch_log(
+                "檸檬保留單建單", "成功",
+                area=region, target=address,
+                message=f"手機：{phone}｜成功 {result.get('success_count', 0)} / {result.get('target_orders', 0)} 張",
+            )
         except Exception as exc:
             message = str(exc).strip() or f"{type(exc).__name__}: {exc!r}"
             execution_status.update(label="建立失敗", state="error", expanded=True)
             execution_status.write(message)
             st.error(f"建立失敗：{message}")
+            _punch_log(
+                "檸檬保留單建單", "失敗",
+                area=region, target=address,
+                message=f"手機：{phone}｜建立失敗：{message}",
+                traceback_text=traceback.format_exc(),
+            )
     result = st.session_state.get("reserve_menu_last_create")
     if result and result.get("results"):
         st.dataframe(pd.DataFrame(result["results"]), width="stretch", hide_index=True)
@@ -331,11 +363,22 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
             st.session_state.reserve_cancel_selected_order_nos = []
             cancel_status.update(label=f"取消流程完成：處理 {len(results)} 張", state="complete", expanded=False)
             st.success("取消流程執行完成；若備註已被改成人工客人保留內容，該筆會自動跳過。")
+            _punch_log(
+                "檸檬保留單取消", "成功",
+                target="、".join(str(r.get('order_no') or '') for r in selected_rows),
+                message=f"手機：{phone}｜處理 {len(results)} 張",
+            )
         except Exception as exc:
             message = str(exc).strip() or f"{type(exc).__name__}: {exc!r}"
             cancel_status.update(label="取消失敗", state="error", expanded=True)
             cancel_status.write(message)
             st.error(f"取消失敗：{message}")
+            _punch_log(
+                "檸檬保留單取消", "失敗",
+                target="、".join(str(r.get('order_no') or '') for r in selected_rows),
+                message=f"手機：{phone}｜取消失敗：{message}",
+                traceback_text=traceback.format_exc(),
+            )
 
     results = st.session_state.get("reserve_menu_cancel_result") or []
     if results:

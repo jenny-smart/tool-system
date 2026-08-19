@@ -33,6 +33,9 @@ SHEET_BY_SYSTEM = {
     # ★ 客服排程系統
     "service": "客服排程執行Log",
     "客服排程系統": "客服排程執行Log",
+    # ★ 訂單系統
+    "orders": "訂單系統執行Log",
+    "訂單系統": "訂單系統執行Log",
 }
 
 ERROR_SHEET_NAME = "錯誤追蹤Log"
