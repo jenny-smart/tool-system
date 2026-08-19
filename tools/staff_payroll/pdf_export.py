@@ -27,9 +27,9 @@ import requests
 from services.google_drive import DriveService
 from services.google_sheets import SheetsService, rowcol_to_a1
 
-from . import ROOT_FOLDER_ID, area_summary_sheet_name, year_folder_name, yyyymm_to_year
+from . import yyyymm_to_year
+from ._shared import PAYROLL_WS, open_area_folder, open_area_summary, open_year_folder
 
-PAYROLL_WS = "薪資單"
 NAME_CELL = "AC2"
 EXPORT_RANGE = "AA1:AH15"
 
@@ -40,20 +40,15 @@ _DRIVE_FILE_ID_PATTERNS = [
 
 
 def _open_area_summary(drive: DriveService, sheets: SheetsService, year: int, area: str):
-    year_folder = drive.find_folder(ROOT_FOLDER_ID, year_folder_name(year))
-    if not year_folder:
-        raise FileNotFoundError(f"找不到資料夾：{year_folder_name(year)}")
-
-    area_folder = drive.find_folder(year_folder["id"], area)
-    if not area_folder:
-        raise FileNotFoundError(f"找不到地區資料夾：{area}")
-
-    sheet_name = area_summary_sheet_name(year, area)
-    matches = drive.find_google_sheet_by_name(area_folder["id"], sheet_name)
-    if not matches:
-        raise FileNotFoundError(f"找不到試算表：{sheet_name}")
-
-    return sheets.open_by_id(matches[0]["id"]), area_folder["id"]
+    """
+    回傳 (薪資單總表 Spreadsheet, 該地區自己的資料夾 id)。
+    薪資單總表本身收在「台北」資料夾底下（見 _shared.py），但 PDF 輸出用的
+    「薪資單」子資料夾仍然放在各地區自己的資料夾裡，兩者要分開取。
+    """
+    spreadsheet = open_area_summary(drive, sheets, year, area)
+    year_folder = open_year_folder(drive, year)
+    area_folder = open_area_folder(drive, year_folder["id"], area)
+    return spreadsheet, area_folder["id"]
 
 
 def _get_payroll_rows(spreadsheet) -> List[dict]:

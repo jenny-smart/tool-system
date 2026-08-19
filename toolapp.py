@@ -4362,6 +4362,8 @@ if run_clicked:
 
                     for r in yuanta_account.run_yuanta_account_all(drive, sheets, run_areas, ym):
                         add_log(f"✅ {r['area']} 元大帳戶完成，共 {r['count']} 人，已另存 {r['xlsx']['name']}", "success")
+                        if r.get("warning"):
+                            add_log(f"⚠️ {r['area']}：{r['warning']}", "warning")
 
                 else:
                     add_log(f"未知功能：{selected_function}", "warning")

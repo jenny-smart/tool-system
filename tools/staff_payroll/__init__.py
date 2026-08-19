@@ -44,9 +44,9 @@ def roster_sheet_name(year: int) -> str:
     return f"{year}內勤薪資名冊"
 
 
-def yuanta_sheet_name(year: int) -> str:
-    """YYYY元大帳戶 試算表名稱"""
-    return f"{year}元大帳戶"
+def yuanta_sheet_name(year: int, area: str) -> str:
+    """YYYY元大帳戶-地區 試算表名稱"""
+    return f"{year}元大帳戶-{area}"
 
 
 def yyyymm_to_dotted(yyyymm: str) -> str:

@@ -17,28 +17,8 @@ from typing import List
 from services.google_drive import DriveService
 from services.google_sheets import SheetsService
 
-from . import ROOT_FOLDER_ID, area_summary_sheet_name, year_folder_name, yyyymm_to_dotted, yyyymm_to_year
-
-PAYROLL_WS = "薪資單"
-EMPLOYEE_WS = "員工個資"
-
-
-def _open_area_summary(drive: DriveService, sheets: SheetsService, year: int, area: str):
-    """定位到 根目錄》YYYY薪資》地區》YYYY地區薪資單總表，回傳 Spreadsheet"""
-    year_folder = drive.find_folder(ROOT_FOLDER_ID, year_folder_name(year))
-    if not year_folder:
-        raise FileNotFoundError(f"找不到資料夾：{year_folder_name(year)}")
-
-    area_folder = drive.find_folder(year_folder["id"], area)
-    if not area_folder:
-        raise FileNotFoundError(f"找不到地區資料夾：{area}（於 {year_folder_name(year)} 內）")
-
-    sheet_name = area_summary_sheet_name(year, area)
-    matches = drive.find_google_sheet_by_name(area_folder["id"], sheet_name)
-    if not matches:
-        raise FileNotFoundError(f"找不到試算表：{sheet_name}")
-
-    return sheets.open_by_id(matches[0]["id"])
+from . import yyyymm_to_dotted, yyyymm_to_year
+from ._shared import PAYROLL_WS, EMPLOYEE_WS, open_area_summary as _open_area_summary
 
 
 def get_eligible_employees(spreadsheet, sheets: SheetsService) -> List[str]:
