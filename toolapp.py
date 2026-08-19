@@ -4377,25 +4377,38 @@ if run_clicked:
 
         from services.google_auth import get_access_token, get_drive_service, get_gspread_client
         from services.google_drive import DriveService
-        from services.google_sheets import SheetsService
+        from services.google_sheets import ExecutionLog, SheetsService
 
         drive = DriveService(get_drive_service())
         sheets = SheetsService(get_gspread_client())
+
+        def _log_staff_payroll(status: str, message: str) -> None:
+            """把每次執行結果寫進主控表新分頁「內勤薪資執行紀錄」（沒有就自動建立）。"""
+            try:
+                master = sheets.open_by_id(MASTER_CONFIG_SPREADSHEET_ID)
+                log_ws = sheets.get_or_create_ws(master, "內勤薪資執行紀錄")
+                ExecutionLog(log_ws).append(ym, f"{selected_function}／{'、'.join(run_areas)}", status, message)
+            except Exception as log_exc:
+                add_log(f"寫入執行紀錄失敗：{log_exc}", "warning")
 
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
                 if selected_function == "內勤結算":
                     from tools.staff_payroll import settlement
 
-                    for r in settlement.run_settlement_all(drive, sheets, run_areas, ym):
+                    results = settlement.run_settlement_all(drive, sheets, run_areas, ym)
+                    for r in results:
                         add_log(f"✅ {r['area']} 內勤結算完成，共 {r['count']} 人", "success")
+                    _log_staff_payroll("成功", "、".join(f"{r['area']} {r['count']}人" for r in results))
 
                 elif selected_function == "內勤PDF產出":
                     from tools.staff_payroll import pdf_export
 
                     access_token = get_access_token()
-                    for r in pdf_export.run_pdf_export_all(drive, sheets, access_token, run_areas, ym):
+                    results = pdf_export.run_pdf_export_all(drive, sheets, access_token, run_areas, ym)
+                    for r in results:
                         add_log(f"✅ {r['area']} PDF產出完成，共 {r['count']} 份", "success")
+                    _log_staff_payroll("成功", "、".join(f"{r['area']} {r['count']}份" for r in results))
 
                 elif selected_function == "內勤薪資單通知信":
                     from tools.staff_payroll import mail_notify
@@ -4406,14 +4419,25 @@ if run_clicked:
                         f"{result['month_tab']} 分頁 {result['month_tab_count']} 筆",
                         "success",
                     )
+                    _log_staff_payroll(
+                        "成功",
+                        f"mail {result['mail_count']}人｜{result['month_tab']} {result['month_tab_count']}筆",
+                    )
 
                 elif selected_function == "內勤元大帳戶":
                     from tools.staff_payroll import yuanta_account
 
-                    for r in yuanta_account.run_yuanta_account_all(drive, sheets, run_areas, ym):
+                    results = yuanta_account.run_yuanta_account_all(drive, sheets, run_areas, ym)
+                    warnings = []
+                    for r in results:
                         add_log(f"✅ {r['area']} 元大帳戶完成，共 {r['count']} 人，已另存 {r['xlsx']['name']}", "success")
                         if r.get("warning"):
                             add_log(f"⚠️ {r['area']}：{r['warning']}", "warning")
+                            warnings.append(f"{r['area']}：{r['warning']}")
+                    message = "、".join(f"{r['area']} {r['count']}人" for r in results)
+                    if warnings:
+                        message += "｜" + "；".join(warnings)
+                    _log_staff_payroll("警告" if warnings else "成功", message)
 
                 else:
                     add_log(f"未知功能：{selected_function}", "warning")
@@ -4421,6 +4445,7 @@ if run_clicked:
             except Exception as e:
                 add_log(f"執行失敗：{e}", "error")
                 add_log(traceback.format_exc(), "error")
+                _log_staff_payroll("失敗", str(e))
 
         st.rerun()
 
