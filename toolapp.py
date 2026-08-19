@@ -2553,7 +2553,9 @@ def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="
 
     messages = []
     failed = []
-    for city in targets:
+    for i, city in enumerate(targets):
+        if i > 0:
+            time.sleep(3)  # 地區之間稍微間隔，避免瞬間打太多 Sheets API 請求觸發配額限制
         try:
             messages.append(run_prepaid_amount(city, year_month, on_progress=on_progress))
         except Exception as exc:
