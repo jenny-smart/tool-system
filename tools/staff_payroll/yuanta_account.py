@@ -1,38 +1,51 @@
 """
 內勤元大帳戶
 
-根目錄》YYYY薪資》地區》YYYY元大帳戶
+根目錄》YYYY薪資》台北》YYYY元大帳戶-地區
+（元大帳戶試算表的檔名帶地區後綴，2026-08-20 確認；跟「YYYY地區薪資單總表」一樣，
+實際上是收在「台北」資料夾底下，不是各自的地區資料夾——如果實際上元大帳戶還是放在
+各地區自己的資料夾，只要改 `_open_yuanta_sheet` 用回 `open_area_folder(area)` 即可）
 
-流程（照規格逐欄實作，「元大工作表」規格沒說明確切分頁名稱，這裡假設是該試算表
-的預設／第一個工作表——如果之後改成固定分頁名稱，改 `_get_yuanta_ws` 即可）：
-1. 元大工作表 E3:E：YYYY地區薪資單總表》薪資單 B3:B（姓名）
-2. 元大工作表 B3:B：E欄(姓名)＝員工個資 B欄 時，對應員工個資 C欄
-3. 元大工作表 C3:C：E欄(姓名)＝員工個資 B欄 時，對應員工個資 I欄
-4. 元大工作表 D3:D：薪資單 D欄＝E欄(姓名) 且 薪資單 A欄＝YYYY.MM 時，對應薪資單 AH欄
-   （規格文字沒有指明這是薪資單哪個資料表的欄位，這裡照字面直接對「薪資單」工作表
-   整份資料的 A/D/AH 欄做比對；如果實際上薪資單另外有一份紀錄用的資料表跟 AA1:AH15
-   樣板不同，這段之後要對照真實表格再調整欄位索引）
-5. 另存 YYYYMM元大帳戶-地區.xlsx（存回同一個 Drive 資料夾）
+元大工作表實際欄位（2026-08-20 用實際截圖確認過表頭，row1 是「所有欄位請勿自行
+新增或刪除」的提示列，row2 是表頭，資料從 row3 開始）：
+A＝轉帳日期(yyyymmdd)、B＝受款人身分證字號、C＝受款人帳號、D＝金額、E＝員工姓名
+
+流程：
+1. 元大工作表 E3:E：該地區自己「YYYY地區薪資單總表》薪資單」B3:B（姓名）
+2. 元大工作表 B3:B（受款人身分證字號）：E欄(姓名) 對到「台北」的
+   「YYYY台北薪資單總表》員工個資」B欄時，對應員工個資 C欄
+3. 元大工作表 C3:C（受款人帳號）：E欄(姓名) 對到「台北」的
+   「YYYY台北薪資單總表》員工個資」B欄時，對應員工個資 I欄
+4. 元大工作表 D3:D（金額）：E欄(姓名) 對到「台北」的「YYYY台北薪資單總表》薪資單」
+   D欄，且薪資單 A欄＝YYYY.MM 時，對應薪資單 AH欄
+   （2026-08-20 已確認：B/C/D 這三欄一律查「台北」那份總表，不是查地區自己的——
+   元大帳戶用的員工銀行資料／金額主表就只在台北那份）
+5. 元大工作表 A3:A（轉帳日期）：YYYYMM 下個月的 5 日，整批填同一個日期，格式
+   yyyymmdd（對應表頭要求）；只避開六日，往前挪到最近的工作日（目前沒有國定假日
+   資料，只能避開週末，不是真正的「例假日」，遇到國定假日連假還是要人工核對）
+6. 元大工作表 K2：YYYY.MM；寫完後檢查 F3:F，若有任何非 0（或非數字）的值，
+   回傳結果會帶上 warning，請人工確認
+7. 另存 YYYYMM元大帳戶-地區.xlsx，存回跟元大帳戶試算表同一個 Drive 資料夾
 """
 
 from __future__ import annotations
 
-from typing import List, Tuple
+import datetime
+import time
+from typing import Dict, List, Optional, Tuple
 
 from services.google_drive import DriveService
 from services.google_sheets import SheetsService
 
-from . import (
-    ROOT_FOLDER_ID,
-    area_summary_sheet_name,
-    year_folder_name,
-    yuanta_sheet_name,
-    yyyymm_to_dotted,
-    yyyymm_to_year,
+from . import yuanta_sheet_name, yyyymm_to_dotted, yyyymm_to_year
+from ._shared import (
+    EMPLOYEE_WS,
+    PAYROLL_WS,
+    SUMMARY_HOME_AREA,
+    open_area_folder,
+    open_area_summary,
+    open_year_folder,
 )
-
-PAYROLL_WS = "薪資單"
-EMPLOYEE_WS = "員工個資"
 
 # 欄位索引（0-based，對應 get_all_values() 讀回來的整份資料）
 COL_A = 0
@@ -43,29 +56,17 @@ COL_I = 8
 COL_AH = 33  # A=1,...,Z=26,AA=27,...,AH=34 → 0-based 33
 
 
-def _open_area_summary(drive: DriveService, sheets: SheetsService, year: int, area: str):
-    year_folder = drive.find_folder(ROOT_FOLDER_ID, year_folder_name(year))
-    if not year_folder:
-        raise FileNotFoundError(f"找不到資料夾：{year_folder_name(year)}")
+def _open_yuanta_sheet(drive: DriveService, sheets: SheetsService, year: int, area: str):
+    """回傳 (元大帳戶 Spreadsheet, 所在資料夾 id)。"""
+    year_folder = open_year_folder(drive, year)
+    home_folder = open_area_folder(drive, year_folder["id"], SUMMARY_HOME_AREA)
 
-    area_folder = drive.find_folder(year_folder["id"], area)
-    if not area_folder:
-        raise FileNotFoundError(f"找不到地區資料夾：{area}")
-
-    sheet_name = area_summary_sheet_name(year, area)
-    matches = drive.find_google_sheet_by_name(area_folder["id"], sheet_name)
+    sheet_name = yuanta_sheet_name(year, area)
+    matches = drive.find_google_sheet_by_name(home_folder["id"], sheet_name)
     if not matches:
-        raise FileNotFoundError(f"找不到試算表：{sheet_name}")
+        raise FileNotFoundError(f"找不到試算表：{sheet_name}（資料夾：{SUMMARY_HOME_AREA}）")
 
-    return sheets.open_by_id(matches[0]["id"]), area_folder["id"]
-
-
-def _open_yuanta_sheet(drive: DriveService, sheets: SheetsService, area_folder_id: str, year: int):
-    sheet_name = yuanta_sheet_name(year)
-    matches = drive.find_google_sheet_by_name(area_folder_id, sheet_name)
-    if not matches:
-        raise FileNotFoundError(f"找不到試算表：{sheet_name}")
-    return sheets.open_by_id(matches[0]["id"])
+    return sheets.open_by_id(matches[0]["id"]), home_folder["id"]
 
 
 def _get_yuanta_ws(spreadsheet):
@@ -77,7 +78,11 @@ def _cell(row: List[str], idx: int) -> str:
 
 
 def _employee_lookup(employee_values: List[List[str]], name: str) -> Tuple[str, str]:
-    """員工個資 B欄=name 的那一列，回傳 (C欄值, I欄值)"""
+    """
+    員工個資 B欄=name 的那一列，回傳 (C欄值, I欄值)。
+    對應元大工作表實際欄位：C欄＝受款人身分證字號、I欄＝受款人帳號
+    （2026-08-20 用實際元大工作表截圖確認過表頭）。
+    """
     for row in employee_values[1:]:  # 跳過表頭
         if _cell(row, COL_B) == name:
             return _cell(row, COL_C), _cell(row, COL_I)
@@ -90,6 +95,35 @@ def _payroll_amount_lookup(payroll_values: List[List[str]], name: str, dotted_pe
         if _cell(row, COL_D) == name and _cell(row, COL_A) == dotted_period:
             return _cell(row, COL_AH)
     return ""
+
+
+def _next_month_payday(yyyymm: str) -> str:
+    """YYYYMM 下個月的 5 日；遇六日往前挪到最近的工作日（不含國定假日）。
+    回傳 yyyymmdd 格式的字串，對應元大工作表 A 欄「轉帳日期(yyyymmdd)」的表頭要求。"""
+    year = int(yyyymm[:4])
+    month = int(yyyymm[4:6]) + 1
+    if month == 13:
+        month = 1
+        year += 1
+
+    day = datetime.date(year, month, 5)
+    while day.weekday() >= 5:  # 5=六, 6=日
+        day -= datetime.timedelta(days=1)
+    return day.strftime("%Y%m%d")
+
+
+def _has_nonzero_f_column(yuanta_ws) -> bool:
+    """F3:F 若有任何非 0（或無法判讀成數字）的值，代表需要人工確認。"""
+    for raw in yuanta_ws.col_values(6)[2:]:
+        value = raw.strip()
+        if not value:
+            continue
+        try:
+            if float(value.replace(",", "")) != 0:
+                return True
+        except ValueError:
+            return True
+    return False
 
 
 def _export_and_save_xlsx(drive: DriveService, spreadsheet_id: str, folder_id: str, filename: str) -> dict:
@@ -116,43 +150,51 @@ def _export_and_save_xlsx(drive: DriveService, spreadsheet_id: str, folder_id: s
 
 
 def run_yuanta_account(drive: DriveService, sheets: SheetsService, area: str, yyyymm: str) -> dict:
-    """執行單一地區的內勤元大帳戶，回傳 {"area", "count", "xlsx"}"""
+    """執行單一地區的內勤元大帳戶，回傳 {"area", "count", "xlsx", "warning"}"""
     year = yyyymm_to_year(yyyymm)
     dotted = yyyymm_to_dotted(yyyymm)
 
-    summary, area_folder_id = _open_area_summary(drive, sheets, year, area)
-    payroll_ws = summary.worksheet(PAYROLL_WS)
-    employee_ws = summary.worksheet(EMPLOYEE_WS)
+    own_summary = open_area_summary(drive, sheets, year, area)
+    names = [v.strip() for v in own_summary.worksheet(PAYROLL_WS).col_values(2)[2:] if v.strip()]  # E欄來源：自己地區
 
-    names = [v.strip() for v in payroll_ws.col_values(2)[2:] if v.strip()]  # B3:B
-    payroll_values = payroll_ws.get_all_values()
-    employee_values = employee_ws.get_all_values()
+    # B/C/D 欄一律查「台北」那份總表（元大帳戶的員工銀行資料／金額主表只在台北）
+    taipei_summary = own_summary if area == SUMMARY_HOME_AREA else open_area_summary(drive, sheets, year, SUMMARY_HOME_AREA)
+    employee_values = taipei_summary.worksheet(EMPLOYEE_WS).get_all_values()
+    payroll_values = taipei_summary.worksheet(PAYROLL_WS).get_all_values()
 
-    yuanta_spreadsheet = _open_yuanta_sheet(drive, sheets, area_folder_id, year)
+    yuanta_spreadsheet, home_folder_id = _open_yuanta_sheet(drive, sheets, year, area)
     yuanta_ws = _get_yuanta_ws(yuanta_spreadsheet)
 
-    # 清空 B3:E（整欄清到最後一列）再重寫，避免舊資料疊加
-    sheets.clear_from_row(yuanta_ws, start_row=3, start_col=2, end_col=5)
+    # 清空 A3:E（整欄清到最後一列）再重寫，避免舊資料疊加
+    sheets.clear_from_row(yuanta_ws, start_row=3, start_col=1, end_col=5)
 
     if names:
-        b_values, c_values, d_values, e_values = [], [], [], []
+        payday = _next_month_payday(yyyymm)
+        a_values, b_values, c_values, d_values, e_values = [], [], [], [], []
         for name in names:
-            bank_code, bank_account = _employee_lookup(employee_values, name)
+            national_id, bank_account = _employee_lookup(employee_values, name)
             amount = _payroll_amount_lookup(payroll_values, name, dotted)
-            b_values.append([bank_code])
+            a_values.append([payday])
+            b_values.append([national_id])
             c_values.append([bank_account])
             d_values.append([amount])
             e_values.append([name])
 
+        sheets.write_values(yuanta_ws, start_row=3, start_col=1, values=a_values)
         sheets.write_values(yuanta_ws, start_row=3, start_col=2, values=b_values)
         sheets.write_values(yuanta_ws, start_row=3, start_col=3, values=c_values)
         sheets.write_values(yuanta_ws, start_row=3, start_col=4, values=d_values)
         sheets.write_values(yuanta_ws, start_row=3, start_col=5, values=e_values)
 
-    filename = f"{yyyymm}元大帳戶-{area}.xlsx"
-    xlsx_file = _export_and_save_xlsx(drive, yuanta_spreadsheet.id, area_folder_id, filename)
+    yuanta_ws.update_acell("K2", dotted)
+    time.sleep(1.5)  # 讓 F 欄（若是公式）有時間重新計算完成
 
-    return {"area": area, "count": len(names), "xlsx": xlsx_file}
+    warning = "F欄有非0值，請人工確認" if _has_nonzero_f_column(yuanta_ws) else None
+
+    filename = f"{yyyymm}元大帳戶-{area}.xlsx"
+    xlsx_file = _export_and_save_xlsx(drive, yuanta_spreadsheet.id, home_folder_id, filename)
+
+    return {"area": area, "count": len(names), "xlsx": xlsx_file, "warning": warning}
 
 
 def run_yuanta_account_all(drive: DriveService, sheets: SheetsService, areas: List[str], yyyymm: str) -> List[dict]:
