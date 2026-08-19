@@ -2,7 +2,7 @@ name: Scheduled Field Jobs
 
 on:
   schedule:
-    - cron: "0 21 * * *" # 台灣時間 05:00
+    - cron: "0 22 * * *" # 台灣時間 06:00
 
   workflow_dispatch:
     inputs:
