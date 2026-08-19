@@ -1,7 +1,7 @@
 # 鯨躍電子發票加值中心：電子發票字軌號碼匯入／配號
 #
-# 三個功能都假設鯨躍第二層（ei.com.tw/InvoiceRent）已經登入（跟其他鯨躍
-# 功能共用同一個 Chrome session，登入請先跑「鯨躍登入」）。
+# 三個功能會沿用「鯨躍登入」的完整兩層登入流程；若 Chrome 已登入則直接
+# 沿用 session，未登入時會從 EI 帳密檔預填帳號、密碼並等待人工輸入驗證碼。
 #
 # 「匯入」：把財政部字軌下載存到 Google Drive 的 CSV 抓回本機，上傳到鯨躍
 # 「發票號碼匯入」頁。
@@ -34,6 +34,13 @@ if __package__ in {None, ""}:
         resolve_archive_folders,
     )
     from invoice_center.mof_serial import parse_period_arg, period_filename
+    from invoice_center.ei_export_all import (
+        credentials_for as ei_credentials_for,
+        load_accounts as load_ei_accounts,
+        login_portal,
+        login_second,
+        open_second_login,
+    )
 else:
     from .invoice_archive import (
         _ensure_sheet,
@@ -44,8 +51,20 @@ else:
         resolve_archive_folders,
     )
     from .mof_serial import parse_period_arg, period_filename
+    from .ei_export_all import (
+        credentials_for as ei_credentials_for,
+        load_accounts as load_ei_accounts,
+        login_portal,
+        login_second,
+        open_second_login,
+    )
 
-from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
+from tools.invoice_center.chrome_cdp import (
+    DEFAULT_CDP_URL,
+    connect_existing_chrome,
+    find_existing_page,
+    find_invoice_pages,
+)
 
 EI_IMPORT_URL = "https://www.ei.com.tw/InvoiceRent/invoicenumberimport.jsp"
 EI_SECTION_URL = "https://www.ei.com.tw/InvoiceRent/invoicesection.jsp"
@@ -66,6 +85,24 @@ TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 def find_ei_page(context) -> Page | None:
     return find_existing_page(context, ("ei.com.tw/InvoiceRent",))
+
+
+def ensure_ei_login(context, area: str) -> Page:
+    """沿用「鯨躍登入」的完整流程，回傳已登入第二層的 EI 頁面。"""
+    accounts = load_ei_accounts()
+    credentials = ei_credentials_for(area, accounts)
+    portal_page, ei_page = find_invoice_pages(context)
+
+    if portal_page is not None:
+        login_portal(portal_page, accounts)
+        ei_page = open_second_login(context, portal_page)
+    elif ei_page is None:
+        portal_page = context.new_page()
+        login_portal(portal_page, accounts)
+        ei_page = open_second_login(context, portal_page)
+
+    login_second(ei_page, credentials)
+    return ei_page
 
 
 def _download_from_drive_by_name(drive: Any, folder_id: str, name: str, destination: Path) -> Path:
@@ -336,9 +373,7 @@ def main() -> int:
         with sync_playwright() as playwright:
             _browser, context = connect_existing_chrome(playwright, args.cdp_url)
             print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
-            page = find_ei_page(context)
-            if page is None:
-                page = context.new_page()
+            page = ensure_ei_login(context, args.area)
 
             if args.action == "import":
                 failing_function = "電子發票字軌號碼匯入"
