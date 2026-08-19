@@ -2536,6 +2536,17 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from tools.prepaid_amount.prepaid_amount import run as run_prepaid_amount
+
+    if area not in ("台北", "台中", "桃園", "新竹", "高雄"):
+        raise ValueError("請選擇台北／台中／桃園／新竹／高雄其中一個地區")
+    year_month = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month):
+        raise ValueError("請輸入 6 位數月份（YYYYMM），例如 202607")
+    return run_prepaid_amount(area, year_month)
+
+
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.deposit_report import aggregate_month_to_uy
 
@@ -2657,6 +2668,7 @@ def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
+    {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
     {"name": "【富邦銀行】異動 ATM 退款", "handler": queue_fubon_atm_refund, "enabled": True},
@@ -3342,6 +3354,21 @@ with date_col:
                 key="finance_supply_purchase_month",
             )
             st.caption("格式：YYYYMM；比對報表 B 欄的進貨日期月份")
+        elif selected_function == "【檸檬後台】預收款金額":
+            st.markdown('<div class="field-label">📆 查詢月份</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "查詢月份",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_lemon_prepaid_amount_month",
+            )
+            st.caption(
+                "格式：YYYYMM；付款日期＝該月 1 日～月底、服務日期-起＝次月 1 日、"
+                "付款狀態＝已付款。會分別查「藍新ATM／信用卡／ATM」付款方式與"
+                "「家電清潔／傢俱清潔」購買項目，寫入主控表「預收款金額」分頁"
+                "（找到該月份的欄位就覆蓋，找不到就在最右邊新增）。"
+            )
         elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
             st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -3601,7 +3628,7 @@ with area_col:
         "【財報】工具包押金｜比對異常標記（N欄）",
     ) or selected_function in FIELD_EXTRA_FUNCTIONS:
         area_select_options = [area for area in area_options if area != "全區"]
-    if selected_function == "【檸檬後台】異動儲值金":
+    if selected_function in ("【檸檬後台】異動儲值金", "【檸檬後台】預收款金額"):
         area_select_options = [area for area in ("台北", "台中", "桃園", "新竹", "高雄") if area in area_options]
     if selected_function in (
         "【富邦銀行】異動 ATM 退款",
