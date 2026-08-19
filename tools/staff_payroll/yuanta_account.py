@@ -26,7 +26,7 @@ A＝轉帳日期(yyyymmdd)、B＝受款人身分證字號、C＝受款人帳號�
 6. 元大工作表 K2：YYYY.MM；寫完後檢查 F3:F，若有任何非 0（或非數字）的值，
    回傳結果會帶上 warning，請人工確認
 7. 另存 YYYYMM元大帳戶-地區.xlsx，存回跟元大帳戶試算表同一個 Drive 資料夾；
-   存檔後刪除這份 xlsx 副本的 F:K 欄（F/G 是檢查用公式、H:K 是內部工作欄），
+   存檔後清空這份 xlsx 副本的 F3:G（F2 保留），並整欄刪除 H:K，
    只動 xlsx 副本，不會動到來源 Google Sheet 的公式
 """
 
@@ -130,7 +130,7 @@ def _has_nonzero_f_column(yuanta_ws) -> bool:
 
 def _strip_fk_columns(xlsx_bytes: bytes) -> bytes:
     """
-    刪除匯出 xlsx 副本裡的 F:K 欄（F/G 是檢查用公式、H:K 是內部工作欄，銀行不需要），
+    清空 F3:G（含以下所有列，F2 保留不動）的儲存格內容，並整欄刪除 H:K。
     只動這份匯出的 xlsx 副本，不會動到來源 Google Sheet 本身的公式。
     """
     import io
@@ -140,7 +140,12 @@ def _strip_fk_columns(xlsx_bytes: bytes) -> bytes:
     buffer = io.BytesIO(xlsx_bytes)
     wb = load_workbook(buffer)
     ws = wb.active
-    ws.delete_cols(6, 6)  # F=第6欄，一次刪 6 欄涵蓋 F:K
+
+    for row in ws.iter_rows(min_row=3, min_col=6, max_col=7):  # F3:G<最後一列>
+        for cell in row:
+            cell.value = None
+
+    ws.delete_cols(8, 4)  # H=第8欄，一次刪 4 欄涵蓋 H:K
 
     out = io.BytesIO()
     wb.save(out)
