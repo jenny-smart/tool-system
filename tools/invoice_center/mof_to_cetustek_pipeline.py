@@ -32,10 +32,11 @@ if __package__ in {None, ""}:
 else:
     from . import cetustek_serial, mof_serial
     from .ei_export_all import (
-        EI_LOGIN_URL,
         credentials_for as ei_credentials_for,
         load_accounts as load_ei_accounts,
+        login_portal,
         login_second,
+        open_second_login,
     )
     from .invoice_archive import get_google_services, _master_spreadsheet_id
     from .mof_config import credentials_for, load_accounts
