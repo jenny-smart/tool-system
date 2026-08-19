@@ -20,10 +20,22 @@ from playwright.sync_api import sync_playwright
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
     from invoice_center import cetustek_serial, mof_serial
+    from invoice_center.ei_export_all import (
+        EI_LOGIN_URL,
+        credentials_for as ei_credentials_for,
+        load_accounts as load_ei_accounts,
+        login_second,
+    )
     from invoice_center.invoice_archive import get_google_services, _master_spreadsheet_id
     from invoice_center.mof_config import credentials_for, load_accounts
 else:
     from . import cetustek_serial, mof_serial
+    from .ei_export_all import (
+        EI_LOGIN_URL,
+        credentials_for as ei_credentials_for,
+        load_accounts as load_ei_accounts,
+        login_second,
+    )
     from .invoice_archive import get_google_services, _master_spreadsheet_id
     from .mof_config import credentials_for, load_accounts
 
@@ -66,8 +78,14 @@ def main() -> int:
 
         # 2/3 鯨躍匯入
         ei_page = cetustek_serial.find_ei_page(context)
+        ei_accounts = load_ei_accounts()
+        ei_credentials = ei_credentials_for(args.area, ei_accounts)
         if ei_page is None:
             ei_page = context.new_page()
+            ei_page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
+        # Reuse an active EI session; otherwise prefill the configured account and
+        # password, then wait for the user to enter the image verification code.
+        login_second(ei_page, ei_credentials)
         with tempfile.TemporaryDirectory(prefix="mof_serial_fetch_") as temp_dir:
             csv_path = cetustek_serial.fetch_mof_serial_csv(
                 args.area, year, label, Path(temp_dir) / filename
