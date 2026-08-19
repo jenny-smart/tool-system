@@ -2536,7 +2536,7 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
-def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from tools.prepaid_amount.prepaid_amount import run as run_prepaid_amount
 
     year_month = (month or "").strip()
@@ -2555,9 +2555,11 @@ def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="
     failed = []
     for city in targets:
         try:
-            messages.append(run_prepaid_amount(city, year_month))
+            messages.append(run_prepaid_amount(city, year_month, on_progress=on_progress))
         except Exception as exc:
             failed.append(f"{city}：{exc}")
+            if on_progress:
+                on_progress(f"{city}：失敗 - {exc}", "error")
 
     result = "\n".join(messages)
     if failed:
@@ -4290,6 +4292,7 @@ if run_clicked:
                 "【儲值金】搬運",
                 "【儲值金】套用公式",
                 "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）",
+                "【檸檬後台】預收款金額",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完
