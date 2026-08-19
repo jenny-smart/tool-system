@@ -237,6 +237,19 @@ def get_credentials(area: str, required: bool = True) -> BackendCredentials | No
     return None
 
 
+def export_credentials_to_environment() -> list[str]:
+    """Expose configured regional backend credentials to Local Agent child processes."""
+    configured: list[str] = []
+    for key, (label, email_env, password_env) in AREA_ENV.items():
+        credentials = get_credentials(key, required=False)
+        if credentials is None:
+            continue
+        os.environ.setdefault(email_env, credentials.email)
+        os.environ.setdefault(password_env, credentials.password)
+        configured.append(label)
+    return configured
+
+
 def get_base_url(env_name: str | None = None) -> str:
     override = get_secret("LEMON_BACKEND_BASE_URL")
     if override:

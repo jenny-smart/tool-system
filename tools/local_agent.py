@@ -776,6 +776,18 @@ def heartbeat_loop(agent_id: str, stop_event: threading.Event, interval: float =
 
 
 def main() -> int:
+    try:
+        from tools.lemon_backend.config import export_credentials_to_environment
+
+        configured_areas = export_credentials_to_environment()
+        print(
+            "Lemon backend credentials loaded: "
+            + (", ".join(configured_areas) if configured_areas else "none"),
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"Lemon backend credentials load failed: {exc}", file=sys.stderr, flush=True)
+
     args = parse_args()
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
