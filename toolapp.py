@@ -2539,12 +2539,30 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
 def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.prepaid_amount.prepaid_amount import run as run_prepaid_amount
 
-    if area not in ("台北", "台中", "桃園", "新竹", "高雄"):
-        raise ValueError("請選擇台北／台中／桃園／新竹／高雄其中一個地區")
     year_month = (month or "").strip()
     if not re.fullmatch(r"\d{6}", year_month):
         raise ValueError("請輸入 6 位數月份（YYYYMM），例如 202607")
-    return run_prepaid_amount(area, year_month)
+
+    cities = ["台北", "台中", "桃園", "新竹", "高雄"]
+    if area == "全區":
+        targets = cities
+    elif area in cities:
+        targets = [area]
+    else:
+        raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
+
+    messages = []
+    failed = []
+    for city in targets:
+        try:
+            messages.append(run_prepaid_amount(city, year_month))
+        except Exception as exc:
+            failed.append(f"{city}：{exc}")
+
+    result = "\n".join(messages)
+    if failed:
+        result += "\n❌ 失敗：" + "；".join(failed)
+    return result
 
 
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
@@ -3628,7 +3646,7 @@ with area_col:
         "【財報】工具包押金｜比對異常標記（N欄）",
     ) or selected_function in FIELD_EXTRA_FUNCTIONS:
         area_select_options = [area for area in area_options if area != "全區"]
-    if selected_function in ("【檸檬後台】異動儲值金", "【檸檬後台】預收款金額"):
+    if selected_function == "【檸檬後台】異動儲值金":
         area_select_options = [area for area in ("台北", "台中", "桃園", "新竹", "高雄") if area in area_options]
     if selected_function in (
         "【富邦銀行】異動 ATM 退款",
