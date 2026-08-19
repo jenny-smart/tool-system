@@ -25,7 +25,9 @@ A＝轉帳日期(yyyymmdd)、B＝受款人身分證字號、C＝受款人帳號�
    資料，只能避開週末，不是真正的「例假日」，遇到國定假日連假還是要人工核對）
 6. 元大工作表 K2：YYYY.MM；寫完後檢查 F3:F，若有任何非 0（或非數字）的值，
    回傳結果會帶上 warning，請人工確認
-7. 另存 YYYYMM元大帳戶-地區.xlsx，存回跟元大帳戶試算表同一個 Drive 資料夾
+7. 另存 YYYYMM元大帳戶-地區.xlsx，存回跟元大帳戶試算表同一個 Drive 資料夾；
+   存檔後刪除這份 xlsx 副本的 F:K 欄（F/G 是檢查用公式、H:K 是內部工作欄），
+   只動 xlsx 副本，不會動到來源 Google Sheet 的公式
 """
 
 from __future__ import annotations
@@ -126,11 +128,31 @@ def _has_nonzero_f_column(yuanta_ws) -> bool:
     return False
 
 
+def _strip_fk_columns(xlsx_bytes: bytes) -> bytes:
+    """
+    刪除匯出 xlsx 副本裡的 F:K 欄（F/G 是檢查用公式、H:K 是內部工作欄，銀行不需要），
+    只動這份匯出的 xlsx 副本，不會動到來源 Google Sheet 本身的公式。
+    """
+    import io
+
+    from openpyxl import load_workbook
+
+    buffer = io.BytesIO(xlsx_bytes)
+    wb = load_workbook(buffer)
+    ws = wb.active
+    ws.delete_cols(6, 6)  # F=第6欄，一次刪 6 欄涵蓋 F:K
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
 def _export_and_save_xlsx(drive: DriveService, spreadsheet_id: str, folder_id: str, filename: str) -> dict:
     from googleapiclient.http import MediaInMemoryUpload
 
     xlsx_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     content = drive.service.files().export(fileId=spreadsheet_id, mimeType=xlsx_mime).execute()
+    content = _strip_fk_columns(content)
 
     # 同名先丟垃圾桶，避免重複檔案疊加
     for old in drive.find_files_by_name(folder_id, filename):
