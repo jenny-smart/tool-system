@@ -117,6 +117,13 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
     驗證碼與送出登入一律留給使用者手動操作。"""
     page.goto(MOF_LOGIN_URL, wait_until="domcontentloaded")
 
+    # The SPA may first render /accounts/login and redirect to the dashboard a few
+    # seconds later when an existing session is restored. Wait briefly for that
+    # asynchronous redirect before interacting with the login form.
+    redirect_deadline = time.monotonic() + 5
+    while time.monotonic() < redirect_deadline and "/accounts/login" in page.url:
+        page.wait_for_timeout(250)
+
     # session 還有效時，網站會直接把 /accounts/login 轉走到已登入的
     # dashboard，這裡就不用再走身分別／欄位那一整套（dashboard 上本來就
     # 沒有這些元素，硬找只會逾時報錯）。
@@ -148,6 +155,11 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
     try:
         ubn_input.first.wait_for(state="visible", timeout=10_000)
     except Exception:
+        # A valid session can finish redirecting while we are waiting for the
+        # login form. Treat that as success instead of reporting a missing field.
+        if "/accounts/login" not in page.url:
+            print(f"[財政部電子發票] 沿用目前登入狀態（{page.url}）")
+            return
         raise RuntimeError(
             "已點擊「營業人/扣繳單位」身分別，但還是找不到統一編號欄位；"
             f"目前頁面：{page.url}。可能是欄位結構跟預期不同，請截圖回報以便調整。"
