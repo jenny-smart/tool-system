@@ -8,6 +8,7 @@ roles:
       - service_schedule
       - finance_management
       - orders_memo_system
+      - staff_payroll
     pages:
       - report
       - log
