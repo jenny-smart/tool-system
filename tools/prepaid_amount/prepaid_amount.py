@@ -163,18 +163,25 @@ def _safe_int(value) -> int:
         return 0
 
 
-def _query_all_amounts(session: requests.Session, bounds: dict[str, str]) -> dict[str, int]:
+def _query_all_amounts(session: requests.Session, bounds: dict[str, str], on_progress=None) -> dict[str, int]:
     amounts: dict[str, int] = {}
 
+    def notify(msg: str, level: str = "info") -> None:
+        log(msg)
+        if on_progress:
+            on_progress(msg, level)
+
     for label, code in PAYWAY_CODE.items():
+        notify(f"查詢中：{label}")
         html = _fetch_purchase_html(session, payway=code, buy="", bounds=bounds)
         amounts[label] = _extract_paid_total(html, corner_label="現金收入")
-        log(f"✅ {label}：{amounts[label]:,}")
+        notify(f"{label}：{amounts[label]:,}", "success")
 
     for label, code in BUY_CODE.items():
+        notify(f"查詢中：{label}")
         html = _fetch_purchase_html(session, payway="", buy=code, bounds=bounds)
         amounts[label] = _extract_paid_total(html, corner_label=None)
-        log(f"✅ {label}：{amounts[label]:,}")
+        notify(f"{label}：{amounts[label]:,}", "success")
 
     return amounts
 
@@ -251,9 +258,14 @@ def _write_area_column(service, spreadsheet_id: str, block_start: int, area: str
     ).execute()
 
 
-def run(area: str, year_month: str) -> str:
+def run(area: str, year_month: str, on_progress=None) -> str:
     if area not in CITIES:
         raise ValueError(f"請選擇正確地區：{'／'.join(CITIES)}")
+
+    def notify(msg: str, level: str = "info") -> None:
+        log(msg)
+        if on_progress:
+            on_progress(msg, level)
 
     bounds = _year_month_bounds(year_month)
     accounts = load_accounts()
@@ -261,15 +273,18 @@ def run(area: str, year_month: str) -> str:
     if not acc.get("email") or not acc.get("password"):
         raise RuntimeError(f"找不到 {area} 的後台帳號設定")
 
+    notify(f"{area}：開始登入後台")
     session = requests.Session()
     login(session, acc["email"], acc["password"])
+    notify(f"{area}：登入成功，開始查詢 {year_month}")
 
-    amounts = _query_all_amounts(session, bounds)
+    amounts = _query_all_amounts(session, bounds, on_progress=lambda msg, level="info": notify(f"{area}：{msg}", level))
 
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
     block_start = _find_or_create_block(service, spreadsheet_id, bounds["date_label"])
     _write_area_column(service, spreadsheet_id, block_start, area, amounts)
+    notify(f"{area}：已寫入「{SHEET_NAME}」分頁", "success")
 
     summary = "、".join(f"{label}={amounts[label]:,}" for label in ROW_LABELS)
     return f"完成：{area} {year_month}（{bounds['date_label']}）已寫入「{SHEET_NAME}」分頁。{summary}"
