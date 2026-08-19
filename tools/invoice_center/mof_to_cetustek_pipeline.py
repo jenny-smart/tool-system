@@ -21,10 +21,11 @@ if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
     from invoice_center import cetustek_serial, mof_serial
     from invoice_center.ei_export_all import (
-        EI_LOGIN_URL,
         credentials_for as ei_credentials_for,
         load_accounts as load_ei_accounts,
+        login_portal,
         login_second,
+        open_second_login,
     )
     from invoice_center.invoice_archive import get_google_services, _master_spreadsheet_id
     from invoice_center.mof_config import credentials_for, load_accounts
@@ -39,7 +40,11 @@ else:
     from .invoice_archive import get_google_services, _master_spreadsheet_id
     from .mof_config import credentials_for, load_accounts
 
-from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
+from tools.invoice_center.chrome_cdp import (
+    DEFAULT_CDP_URL,
+    connect_existing_chrome,
+    find_invoice_pages,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,15 +82,21 @@ def main() -> int:
         print("[1/3] 已歸檔到 Google Drive，並寫入財政部電子發票取號Log")
 
         # 2/3 鯨躍匯入
-        ei_page = cetustek_serial.find_ei_page(context)
+        # Follow the same complete two-layer flow as 「鯨躍登入」.
         ei_accounts = load_ei_accounts()
         ei_credentials = ei_credentials_for(args.area, ei_accounts)
-        if ei_page is None:
-            ei_page = context.new_page()
-            ei_page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
-        # Reuse an active EI session; otherwise prefill the configured account and
-        # password, then wait for the user to enter the image verification code.
-        login_second(ei_page, ei_credentials)
+        portal_page, ei_page = find_invoice_pages(context)
+        if portal_page is not None:
+            login_portal(portal_page, ei_accounts)
+            ei_page = open_second_login(context, portal_page)
+            login_second(ei_page, ei_credentials)
+        elif ei_page is not None:
+            login_second(ei_page, ei_credentials)
+        else:
+            portal_page = context.new_page()
+            login_portal(portal_page, ei_accounts)
+            ei_page = open_second_login(context, portal_page)
+            login_second(ei_page, ei_credentials)
         with tempfile.TemporaryDirectory(prefix="mof_serial_fetch_") as temp_dir:
             csv_path = cetustek_serial.fetch_mof_serial_csv(
                 args.area, year, label, Path(temp_dir) / filename
