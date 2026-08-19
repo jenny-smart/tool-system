@@ -275,11 +275,15 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
         except Exception as e:
             raise RuntimeError(f"找不到「下載」按鈕；目前頁面：{page.url}") from e
         # 按下下載後會跳一個「注意事項」燈箱（提醒下載檔案編碼為 UTF-8），
-        # 要按「是」才會真的觸發下載；沒跳出來就算了，直接略過。
+        # 畫面上的確認按鈕只有可見文字「是」，沒有 title 屬性。
         try:
-            page.locator("button[title='是']").first.click(timeout=8000)
-        except Exception:
-            pass
+            notice = page.get_by_text("下載檔案編碼為UTF-8", exact=False)
+            notice.first.wait_for(state="visible", timeout=8000)
+            page.get_by_role("button", name="是", exact=True).first.click(
+                timeout=8000, force=True
+            )
+        except Exception as e:
+            raise RuntimeError("下載確認燈箱出現後，無法點擊「是」") from e
     download = download_info.value
     destination.parent.mkdir(parents=True, exist_ok=True)
     download.save_as(str(destination))
