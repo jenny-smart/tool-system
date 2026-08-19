@@ -392,6 +392,7 @@ __version__ = "8.77"
 import html
 import re
 import json
+import traceback
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta, datetime
@@ -462,6 +463,27 @@ if _missing_quick_order_names:
 
 for _name in _REQUIRED_QUICK_ORDER_NAMES:
     globals()[_name] = getattr(qo, _name)
+
+
+def _punch_log(function_name, status, *, area="", date="", target="", message="", traceback_text="", run_type="手動"):
+    """訂單系統執行 log 打卡：寫入主控 Log 試算表「訂單系統執行Log」分頁。
+    打卡失敗只印警告，不影響主流程。"""
+    try:
+        from tools.common.log_to_sheet import write_job_log
+        write_job_log(
+            system_name="訂單系統",
+            job_name=function_name,
+            status=status,
+            area=area,
+            date=date,
+            target=target,
+            message=message,
+            run_type=run_type,
+            traceback_text=traceback_text,
+        )
+    except Exception as e:
+        print(f"[orders_system] 執行 log 打卡失敗：{e}")
+
 
 st.set_page_config(page_title="服務訂單系統", page_icon="🧹", layout="wide")
 
@@ -1161,6 +1183,18 @@ if mode == "批次建單（Google Sheet）":
             except Exception as e:
                 total_fail += len(target_rows)
                 ui_log(f"❌ 批次執行失敗：{e}")
+                _punch_log(
+                    "批次建單（Google Sheet）", "失敗",
+                    area=region, date=sheet_name.strip(), target=row_label,
+                    message=f"執行項目：{'、'.join(selected_actions)}｜批次執行失敗：{e}",
+                    traceback_text=traceback.format_exc(),
+                )
+            else:
+                _punch_log(
+                    "批次建單（Google Sheet）", "成功",
+                    area=region, date=sheet_name.strip(), target=row_label,
+                    message=f"執行項目：{'、'.join(selected_actions)}｜共處理 {total_processed} 筆，成功 {total_success} 筆，失敗 {total_fail} 筆",
+                )
         ui_log("===== 建單流程執行完成 =====")
         ui_log("===== 全部執行完成 =====")
 
@@ -1543,15 +1577,35 @@ elif mode == "週末服務 LINE 提醒":
                             f"已儲存 {len(_selected)} 筆：新增 {_new_count} 筆、"
                             f"更新 {_updated_count} 筆；同訂單編號不會重複。"
                         )
+                        _punch_log(
+                            "週末服務提醒：儲存勾選名單", "成功",
+                            date=f"{wr_date_s}~{wr_date_e}",
+                            message=f"共儲存 {len(_selected)} 筆：新增 {_new_count}、更新 {_updated_count}",
+                        )
                     except Exception as e:
                         st.error(f"儲存失敗：{e}")
+                        _punch_log(
+                            "週末服務提醒：儲存勾選名單", "失敗",
+                            date=f"{wr_date_s}~{wr_date_e}",
+                            message=f"儲存失敗：{e}",
+                            traceback_text=traceback.format_exc(),
+                        )
 
             if st.button("💾 儲存通知／回覆狀態", use_container_width=True, key="wr_save"):
                 try:
                     count = save_tracking_rows(_edited_records)
                     st.success(f"已保存 {count} 筆追蹤狀態。")
+                    _punch_log(
+                        "週末服務提醒：儲存通知／回覆狀態", "成功",
+                        date=f"{wr_date_s}~{wr_date_e}", message=f"已保存 {count} 筆追蹤狀態",
+                    )
                 except Exception as e:
                     st.error(f"儲存失敗：{e}")
+                    _punch_log(
+                        "週末服務提醒：儲存通知／回覆狀態", "失敗",
+                        date=f"{wr_date_s}~{wr_date_e}", message=f"儲存失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
 
             copy_button(
                 "複製追蹤紀錄（貼到 Google Sheets 會自動分欄）",
@@ -1794,8 +1848,21 @@ elif mode == "儲值獎金備註":
                 try:
                     with st.spinner("寫入客服備註中…"):
                         apply_results = apply_bonus_notes(env, backend_email.strip(), backend_password.strip(), mapping)
+                    _ok_count = sum(1 for r in apply_results if r.get("ok"))
+                    _fail_count = len(apply_results) - _ok_count
+                    _punch_log(
+                        "儲值獎金備註", "成功" if not _fail_count else "失敗",
+                        target="、".join(m["order_no"] for m in mapping),
+                        message=f"套用 {len(mapping)} 筆，成功 {_ok_count} 筆，失敗 {_fail_count} 筆",
+                    )
                 except Exception as e:
                     st.error(f"套用失敗：{e}")
+                    _punch_log(
+                        "儲值獎金備註", "失敗",
+                        target="、".join(m["order_no"] for m in mapping),
+                        message=f"套用失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
             st.session_state.bn_apply_results = apply_results
             st.session_state.bn_parse_errors = parse_errors
 
@@ -1985,10 +2052,26 @@ else:
                             st.session_state.q_order_result = nc_result
                             if nc_result.get("lemon_assignment_ok") is False:
                                 st.error(nc_result.get("lemon_assignment_warning") or "訂單已建立，但樸檬人置換失敗，請先處理班表。")
+                                _punch_log(
+                                    "建立新客訂單", "失敗",
+                                    date=nc_date.strftime("%Y-%m-%d"), target=nc_result.get("order_no", ""),
+                                    message=nc_result.get("lemon_assignment_warning") or "訂單已建立，但樸檬人置換失敗",
+                                )
                             else:
                                 st.success(f"✅ 訂單建立成功：{nc_result['order_no']}")
+                                _punch_log(
+                                    "建立新客訂單", "成功",
+                                    date=nc_date.strftime("%Y-%m-%d"), target=nc_result.get("order_no", ""),
+                                    message=f"姓名：{nc_name.strip()}｜地址：{nc_address.strip()}",
+                                )
                         except Exception as e:
                             st.error(f"建單失敗：{e}")
+                            _punch_log(
+                                "建立新客訂單", "失敗",
+                                date=nc_date.strftime("%Y-%m-%d"),
+                                message=f"姓名：{nc_name.strip()}｜建單失敗：{e}",
+                                traceback_text=traceback.format_exc(),
+                            )
             else:
                 member = member_payload.get("member", {})
                 addr_list = member_payload.get("member", {}).get("memberAddressList", [])
@@ -2189,6 +2272,15 @@ else:
                             if len(_multi_results) == 1 and _multi_results[0]["ok"]:
                                 # 只有 1 筆時，沿用原本單筆的詳細結果卡呈現方式
                                 st.session_state.q_order_result = _multi_results[0]["result"]
+                            _old_ok_count = sum(1 for r in _multi_results if r.get("ok"))
+                            _old_fail_count = len(_multi_results) - _old_ok_count
+                            _old_order_nos = "、".join(r["result"].get("order_no", "") for r in _multi_results if r.get("ok"))
+                            _punch_log(
+                                "舊客快速建單", "成功" if not _old_fail_count else "失敗",
+                                target=_old_order_nos, date=old_entries[0]["date"].strftime("%Y-%m-%d") if old_entries else "",
+                                message=f"共建立 {len(_multi_results)} 筆，成功 {_old_ok_count} 筆，失敗 {_old_fail_count} 筆",
+                                traceback_text="\n".join(r.get("error", "") for r in _multi_results if not r.get("ok")),
+                            )
                     else:
                         info_panel("依需求搜尋使用說明", ["客人尚未指定日期時使用。", "可選平日 / 週末 / 不限，也可選上午 / 下午 / 不限。"])
                         a1, a2, a3, a4 = st.columns(4)
@@ -2480,9 +2572,23 @@ else:
                             if len(_nc_multi_results) == 1 and _nc_multi_results[0]["ok"]:
                                 # 只有 1 筆時，沿用原本單筆的詳細結果卡呈現方式
                                 st.session_state.nc_result = _nc_multi_results[0]["result"]
+                            _nc_ok = sum(1 for r in _nc_multi_results if r.get("ok"))
+                            _nc_fail = len(_nc_multi_results) - _nc_ok
+                            _nc_order_nos = "、".join(r["result"].get("order_no", "") for r in _nc_multi_results if r.get("ok"))
+                            _punch_log(
+                                "建立新客訂單", "成功" if not _nc_fail else "失敗",
+                                target=_nc_order_nos, date=nc_entries[0]["date"].strftime("%Y-%m-%d") if nc_entries else "",
+                                message=f"姓名：{_nc_name}｜共建立 {len(_nc_multi_results)} 筆，成功 {_nc_ok} 筆，失敗 {_nc_fail} 筆",
+                                traceback_text="\n".join(r.get("error", "") for r in _nc_multi_results if not r.get("ok")),
+                            )
                             st.rerun()
                         except Exception as e:
                             st.error(f"建單失敗：{e}")
+                            _punch_log(
+                                "建立新客訂單", "失敗",
+                                message=f"姓名：{_nc_name}｜建單失敗：{e}",
+                                traceback_text=traceback.format_exc(),
+                            )
 
         # v2026.07.07：查到既有會員時，顯示在「建立新客訂單」按鈕下方，
         # 提供一個按鈕直接改用舊客身份、帶著已收集的電話/地址/人時/付款/
@@ -2524,9 +2630,20 @@ else:
                             old_result["line_message"] = ""
                     st.session_state.nc_result = old_result
                     st.session_state.nc_pending_old = None
+                    _punch_log(
+                        "以舊客身份送出預約", "成功",
+                        target=old_result.get("order_no", ""), date=_nc_pending["date_s"],
+                        message=f"手機：{_nc_pending['phone']}｜地址：{_nc_pending['address']}",
+                    )
                     st.rerun()
                 except Exception as e:
                     st.error(f"以舊客身份建單失敗：{e}")
+                    _punch_log(
+                        "以舊客身份送出預約", "失敗",
+                        date=_nc_pending["date_s"],
+                        message=f"手機：{_nc_pending['phone']}｜以舊客身份建單失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
 
         # v2026.07.07：多筆訂單結果顯示（建立筆數 > 1，或有任何一筆失敗時）
         _nc_multi = st.session_state.get("nc_results_multi") or []
@@ -2581,11 +2698,27 @@ else:
                             _r["mail_sent"] = True
                             st.session_state.nc_result = _r
                             st.success("✅ 確認信已發送")
+                            _punch_log(
+                                "寄確認信", "成功",
+                                target=_r.get("order_no", ""), date=_r.get("date_s", ""),
+                                message="新客訂單確認信",
+                            )
                             st.rerun()
                         else:
                             st.error(f"確認信發送失敗：{msg_m2}")
+                            _punch_log(
+                                "寄確認信", "失敗",
+                                target=_r.get("order_no", ""), date=_r.get("date_s", ""),
+                                message=f"新客訂單確認信發送失敗：{msg_m2}",
+                            )
                     except Exception as e:
                         st.error(f"確認信發送失敗：{e}")
+                        _punch_log(
+                            "寄確認信", "失敗",
+                            target=_r.get("order_no", ""), date=_r.get("date_s", ""),
+                            message=f"新客訂單確認信發送失敗：{e}",
+                            traceback_text=traceback.format_exc(),
+                        )
             else:
                 st.success("✅ 確認信已發送")
             if _r.get("line_message"):
@@ -2645,9 +2778,21 @@ else:
                         )
                     st.session_state.conv_stage1 = stage1
                     st.session_state.conv_stage2 = {}
+                    _lr_a = stage1.get("lemon_result_a", {}) or {}
+                    _punch_log(
+                        "訂單轉換：第一段改日期換檸檬人", "成功" if _lr_a.get("success") else "失敗",
+                        target=conv_order_no_a.strip(), date=conv_target_date.strftime("%Y-%m-%d"),
+                        message=_lr_a.get("message", "") or "原訂單A改日期並換檸檬人完成",
+                    )
                 except Exception as e:
                     st.session_state.conv_stage1 = {}
                     st.error(f"第一段執行失敗：{e}")
+                    _punch_log(
+                        "訂單轉換：第一段改日期換檸檬人", "失敗",
+                        target=conv_order_no_a.strip(), date=conv_target_date.strftime("%Y-%m-%d"),
+                        message=f"第一段執行失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
 
         conv_stage1 = st.session_state.get("conv_stage1")
         if conv_stage1:
@@ -2725,9 +2870,23 @@ else:
                     with st.spinner("第二段執行中：建折價券 → 建新訂單 → 標記已付款 → 標註發票…"):
                         stage2 = convert_order_stage2_create_new_orders(conv_stage1, new_orders_input)
                     st.session_state.conv_stage2 = stage2
+                    _stage2_ok = [r for r in stage2.get("new_order_results", []) if r.get("order_no")]
+                    _stage2_fail = [r for r in stage2.get("new_order_results", []) if r.get("error")]
+                    _punch_log(
+                        "訂單轉換：第二段建新訂單", "成功" if not _stage2_fail else "失敗",
+                        target="、".join(r["order_no"] for r in _stage2_ok),
+                        message=f"原訂單：{conv_order_no_a.strip()}｜共建立 {len(_stage2_ok)} 筆，失敗 {len(_stage2_fail)} 筆",
+                        traceback_text="\n".join(r.get("error", "") for r in _stage2_fail),
+                    )
                 except Exception as e:
                     st.session_state.conv_stage2 = {}
                     st.error(f"第二段執行失敗：{e}")
+                    _punch_log(
+                        "訂單轉換：第二段建新訂單", "失敗",
+                        target=conv_order_no_a.strip(),
+                        message=f"第二段執行失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
 
         conv_stage2 = st.session_state.get("conv_stage2")
         if conv_stage2:
@@ -2882,8 +3041,20 @@ else:
                         )
                     st.session_state.sv_stored_stage = stored_stage
                     st.session_state.sv_paid_stage = {}
+                    _punch_log(
+                        "儲值金補價差：第一段建清零訂單", "成功",
+                        target=stored_stage.get("stored_order", {}).get("order_no", ""),
+                        date=sv_svc_date.strftime("%Y-%m-%d"),
+                        message=f"手機：{sv_phone.strip()}",
+                    )
                 except Exception as e:
                     st.error(f"第一段建立失敗：{e}")
+                    _punch_log(
+                        "儲值金補價差：第一段建清零訂單", "失敗",
+                        date=sv_svc_date.strftime("%Y-%m-%d"),
+                        message=f"手機：{sv_phone.strip()}｜第一段建立失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
         stored_stage = st.session_state.get("sv_stored_stage")
         if stored_stage:
             plan = stored_stage["plan"]
@@ -2933,8 +3104,18 @@ else:
                             allow_auto_lemon_shift=sv_allow_auto_lemon,
                         )
                     st.session_state.sv_paid_stage = paid_stage
+                    _punch_log(
+                        "儲值金補價差：第二段建補價差訂單", "成功",
+                        target=paid_stage.get("paid_order", {}).get("order_no", ""),
+                        message=f"手機：{sv_phone.strip()}",
+                    )
                 except Exception as e:
                     st.error(f"第二段建立失敗：{e}")
+                    _punch_log(
+                        "儲值金補價差：第二段建補價差訂單", "失敗",
+                        message=f"手機：{sv_phone.strip()}｜第二段建立失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
         paid_stage = st.session_state.get("sv_paid_stage")
         if paid_stage:
             po = paid_stage["paid_order"]
@@ -3019,8 +3200,22 @@ else:
                             notice=sv2_notice.strip(),
                         )
                     st.session_state.sv2_result = sv2_result
+                    _punch_log(
+                        "建立儲值金訂單", "成功" if sv2_result.get("success") else "失敗",
+                        target=sv2_result.get("order_no", ""),
+                        message=(
+                            f"手機：{sv2_phone.strip()}｜儲值金額：{sv2_amount}"
+                            if sv2_result.get("success")
+                            else f"手機：{sv2_phone.strip()}｜{sv2_result.get('message', '')}"
+                        ),
+                    )
                 except Exception as e:
                     st.error(f"建立失敗：{e}")
+                    _punch_log(
+                        "建立儲值金訂單", "失敗",
+                        message=f"手機：{sv2_phone.strip()}｜建立失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
 
         sv2_result = st.session_state.get("sv2_result") or {}
         if sv2_result:
@@ -3078,11 +3273,27 @@ else:
                                     sv2_result["mail_sent"] = True
                                     st.session_state.sv2_result = sv2_result
                                     st.success("✅ 確認信已發送")
+                                    _punch_log(
+                                        "寄確認信", "成功",
+                                        target=sv2_result.get("order_no", ""),
+                                        message="儲值金購買訂單確認信",
+                                    )
                                     st.rerun()
                                 else:
                                     st.error(f"確認信發送失敗：{msg_m}")
+                                    _punch_log(
+                                        "寄確認信", "失敗",
+                                        target=sv2_result.get("order_no", ""),
+                                        message=f"儲值金購買訂單確認信發送失敗：{msg_m}",
+                                    )
                             except Exception as e:
                                 st.error(f"確認信發送失敗：{e}")
+                                _punch_log(
+                                    "寄確認信", "失敗",
+                                    target=sv2_result.get("order_no", ""),
+                                    message=f"儲值金購買訂單確認信發送失敗：{e}",
+                                    traceback_text=traceback.format_exc(),
+                                )
                     else:
                         st.success("✅ 確認信已發送")
                 else:
@@ -3211,8 +3422,17 @@ else:
                                 _session, _spreadsheet_id, _gid, logger=_nsd_ui_log,
                             )
                     st.success(f"✅ 完成，共更新 {total_updated} 列。")
+                    _punch_log(
+                        "更新建議下次服務時間", "成功",
+                        target=nsd_sheet_choice, message=f"共更新 {total_updated} 列",
+                    )
                 except Exception as e:
                     st.error(f"執行失敗：{e}")
+                    _punch_log(
+                        "更新建議下次服務時間", "失敗",
+                        target=nsd_sheet_choice, message=f"執行失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
 
     elif single_feature == "會員喜好設定":
         info_panel("使用說明", [
@@ -3328,8 +3548,17 @@ else:
                             )
                         st.success("✅ 已更新會員喜好設定。")
                         st.session_state.mp_data = None
+                        _punch_log(
+                            "更新會員喜好設定", "成功",
+                            target=mp_phone.strip(), message=f"喜愛：{len(liked_ids)}｜不喜愛：{len(disliked_ids)}",
+                        )
                     except Exception as e:
                         st.error(f"更新失敗：{e}")
+                        _punch_log(
+                            "更新會員喜好設定", "失敗",
+                            target=mp_phone.strip(), message=f"更新失敗：{e}",
+                            traceback_text=traceback.format_exc(),
+                        )
 
     # --------------------------------------------------
     # 建立舊客訂單：多筆訂單結果顯示（建立筆數 > 1，或有任何一筆失敗時）
@@ -3387,11 +3616,27 @@ else:
                         order_result["mail_sent"] = True
                         st.session_state.q_order_result = order_result
                         st.success("✅ 確認信已發送")
+                        _punch_log(
+                            "寄確認信", "成功",
+                            target=order_result.get("order_no", ""), date=order_result.get("date_s", ""),
+                            message="舊客訂單確認信",
+                        )
                         st.rerun()
                     else:
                         st.error(f"確認信發送失敗：{msg_m}")
+                        _punch_log(
+                            "寄確認信", "失敗",
+                            target=order_result.get("order_no", ""), date=order_result.get("date_s", ""),
+                            message=f"舊客訂單確認信發送失敗：{msg_m}",
+                        )
                 except Exception as e:
                     st.error(f"確認信發送失敗：{e}")
+                    _punch_log(
+                        "寄確認信", "失敗",
+                        target=order_result.get("order_no", ""), date=order_result.get("date_s", ""),
+                        message=f"舊客訂單確認信發送失敗：{e}",
+                        traceback_text=traceback.format_exc(),
+                    )
         else:
             st.success("✅ 確認信已發送")
         line_message = build_line_message(order_result)
