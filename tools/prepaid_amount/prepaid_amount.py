@@ -155,6 +155,59 @@ def _extract_paid_total(html: str, *, corner_label: str | None) -> int:
     return total
 
 
+EXECUTION_LOG_SHEET = "預收款金額執行記錄"
+_execution_log_ready = False  # 同一次程式執行內快取，避免每次都打 metadata API 檢查分頁存不存在
+
+
+def _ensure_execution_log_sheet(service, spreadsheet_id: str) -> None:
+    global _execution_log_ready
+    if _execution_log_ready:
+        return
+
+    meta = _execute_with_retry(
+        service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties.title")
+    )
+    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+    if EXECUTION_LOG_SHEET not in titles:
+        _execute_with_retry(
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{"addSheet": {"properties": {"title": EXECUTION_LOG_SHEET}}}]},
+            )
+        )
+        _execute_with_retry(
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{EXECUTION_LOG_SHEET}'!A1:E1",
+                valueInputOption="RAW",
+                body={"values": [["時間", "地區", "月份", "狀態", "訊息"]]},
+            )
+        )
+    _execution_log_ready = True
+
+
+def _log_execution(area: str, year_month: str, status: str, message: str) -> None:
+    """記錄寫進 Jenny's Lemonhometools 的「預收款金額執行記錄」分頁（打卡用，重新整理畫面也查得到）。"""
+    try:
+        service = get_sheets_service()
+        master_id = get_master_spreadsheet_id()
+        _ensure_execution_log_sheet(service, master_id)
+
+        now_text = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
+        _execute_with_retry(
+            service.spreadsheets().values().append(
+                spreadsheetId=master_id,
+                range=f"'{EXECUTION_LOG_SHEET}'!A:E",
+                valueInputOption="USER_ENTERED",
+                insertDataOption="INSERT_ROWS",
+                body={"values": [[now_text, area, year_month, status, message]]},
+            )
+        )
+    except Exception as exc:
+        # 寫執行記錄失敗不應該讓整個查詢流程掛掉，記個警告就好。
+        log(f"⚠️ 寫入執行記錄失敗：{exc}")
+
+
 def _safe_int(value) -> int:
     text = str(value or "").strip().replace(",", "")
     if not text:
@@ -305,33 +358,40 @@ def run(area: str, year_month: str, on_progress=None) -> str:
         if on_progress:
             on_progress(msg, level)
 
-    bounds = _year_month_bounds(year_month)
-    accounts = load_accounts()
-    acc = accounts.get(area) or {}
-    if not acc.get("email") or not acc.get("password"):
-        raise RuntimeError(f"找不到 {area} 的後台帳號設定")
+    _log_execution(area, year_month, "開始", "")
 
-    notify(f"{area}：開始登入後台")
-    session = requests.Session()
-    login(session, acc["email"], acc["password"])
-    notify(f"{area}：登入成功，開始查詢 {year_month}")
+    try:
+        bounds = _year_month_bounds(year_month)
+        accounts = load_accounts()
+        acc = accounts.get(area) or {}
+        if not acc.get("email") or not acc.get("password"):
+            raise RuntimeError(f"找不到 {area} 的後台帳號設定")
 
-    keywords = _keywords_for_area(area)
-    amounts = {label: 0 for label in ROW_LABELS}
-    for keyword in keywords:
-        tag = f"{area}（關鍵字：{keyword}）" if keyword else area
-        part = _query_all_amounts(
-            session, bounds, keyword=keyword,
-            on_progress=lambda msg, level="info", tag=tag: notify(f"{tag}：{msg}", level),
-        )
-        for label in ROW_LABELS:
-            amounts[label] += part[label]
+        notify(f"{area}：開始登入後台")
+        session = requests.Session()
+        login(session, acc["email"], acc["password"])
+        notify(f"{area}：登入成功，開始查詢 {year_month}")
 
-    service = get_sheets_service()
-    spreadsheet_id = get_master_spreadsheet_id()
-    block_start = _find_or_create_block(service, spreadsheet_id, bounds["date_label"])
-    _write_area_column(service, spreadsheet_id, block_start, area, amounts)
-    notify(f"{area}：已寫入「{SHEET_NAME}」分頁", "success")
+        keywords = _keywords_for_area(area)
+        amounts = {label: 0 for label in ROW_LABELS}
+        for keyword in keywords:
+            tag = f"{area}（關鍵字：{keyword}）" if keyword else area
+            part = _query_all_amounts(
+                session, bounds, keyword=keyword,
+                on_progress=lambda msg, level="info", tag=tag: notify(f"{tag}：{msg}", level),
+            )
+            for label in ROW_LABELS:
+                amounts[label] += part[label]
 
-    summary = "、".join(f"{label}={amounts[label]:,}" for label in ROW_LABELS)
-    return f"完成：{area} {year_month}（{bounds['date_label']}）已寫入「{SHEET_NAME}」分頁。{summary}"
+        service = get_sheets_service()
+        spreadsheet_id = get_master_spreadsheet_id()
+        block_start = _find_or_create_block(service, spreadsheet_id, bounds["date_label"])
+        _write_area_column(service, spreadsheet_id, block_start, area, amounts)
+        notify(f"{area}：已寫入「{SHEET_NAME}」分頁", "success")
+
+        summary = "、".join(f"{label}={amounts[label]:,}" for label in ROW_LABELS)
+        _log_execution(area, year_month, "完成", summary)
+        return f"完成：{area} {year_month}（{bounds['date_label']}）已寫入「{SHEET_NAME}」分頁。{summary}"
+    except Exception as exc:
+        _log_execution(area, year_month, "失敗", str(exc))
+        raise
