@@ -25,6 +25,7 @@ import streamlit as st
 import yaml
 
 from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
+from tools.staff_payroll import AREAS as STAFF_PAYROLL_AREAS
 from tools.local_agent_queue import create_task as create_local_agent_task
 from tools.local_agent_queue import list_tasks as _list_local_agent_tasks_raw
 from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_raw
@@ -167,6 +168,11 @@ DEFAULT_CONFIG = {
         {
             "name": "訂單系統",
             "type": "orders_memo_system",
+            "enabled": True,
+        },
+        {
+            "name": "內勤薪資管理",
+            "type": "staff_payroll",
             "enabled": True,
         },
     ]
@@ -1036,6 +1042,9 @@ def available_areas_for_system(system: dict) -> list[str]:
     if system_type == "finance_management":
         return ["全區", "台北", "台中", "桃園", "新竹", "高雄"]
 
+    if system_type == "staff_payroll":
+        return list(STAFF_PAYROLL_AREAS)
+
     # 舊日排程目前腳本本身會跑全部區域，先提供全區。
     return ["全區"]
 
@@ -1229,6 +1238,7 @@ def get_system_type_label(system_type: str) -> str:
         "invoice_center": "發票中心",
         "finance_management": "財務管理",
         "orders_memo_system": "訂單系統",
+        "staff_payroll": "內勤薪資管理",
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -2750,6 +2760,12 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
     ],
     # ────────────────────────────────────────────────────────
     "finance_management": [task["name"] for task in FINANCE_TASKS],
+    "staff_payroll": [
+        "內勤結算",
+        "內勤PDF產出",
+        "內勤薪資單通知信",
+        "內勤元大帳戶",
+    ],
 }
 
 DAILY_SCRIPT_MAP = {
@@ -3527,6 +3543,16 @@ with date_col:
             st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
             st.info("功能開發中，尚未接上實際執行邏輯。", icon="🚧")
 
+    elif system_type == "staff_payroll":
+        st.markdown('<div class="field-label">📆 年月（YYYYMM）</div>', unsafe_allow_html=True)
+        period = st.text_input(
+            "年月",
+            value=tw_now_text("%Y%m"),
+            placeholder="例如：202608",
+            label_visibility="collapsed",
+            key="staff_payroll_period",
+        )
+
     else:
         st.markdown('<div class="field-label">📆 執行日期區間</div>', unsafe_allow_html=True)
         d1, d2 = st.columns(2)
@@ -4283,6 +4309,62 @@ if run_clicked:
                         raise ValueError("請輸入要寫入的工作表名稱")
                     result = resume_system.extract_latest_resumes(selected_area_value, sheet_name)
                     add_log(f"✅ 成功擷取 {result['count']} 筆未讀履歷", "success")
+
+            except Exception as e:
+                add_log(f"執行失敗：{e}", "error")
+                add_log(traceback.format_exc(), "error")
+
+        st.rerun()
+
+    if system_type == "staff_payroll":
+        ym = (period or "").strip()
+        if not re.fullmatch(r"\d{6}", ym):
+            add_log("請輸入正確年月，格式：YYYYMM", "error")
+            st.rerun()
+
+        run_areas = list(STAFF_PAYROLL_AREAS) if selected_area_value == "全區" else [selected_area_value]
+        add_log(f"開始執行：{system_name} / {selected_function} / {ym} / {'、'.join(run_areas)}")
+
+        from services.google_auth import get_access_token, get_drive_service, get_gspread_client
+        from services.google_drive import DriveService
+        from services.google_sheets import SheetsService
+
+        drive = DriveService(get_drive_service())
+        sheets = SheetsService(get_gspread_client())
+
+        with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
+            try:
+                if selected_function == "內勤結算":
+                    from tools.staff_payroll import settlement
+
+                    for r in settlement.run_settlement_all(drive, sheets, run_areas, ym):
+                        add_log(f"✅ {r['area']} 內勤結算完成，共 {r['count']} 人", "success")
+
+                elif selected_function == "內勤PDF產出":
+                    from tools.staff_payroll import pdf_export
+
+                    access_token = get_access_token()
+                    for r in pdf_export.run_pdf_export_all(drive, sheets, access_token, run_areas, ym):
+                        add_log(f"✅ {r['area']} PDF產出完成，共 {r['count']} 份", "success")
+
+                elif selected_function == "內勤薪資單通知信":
+                    from tools.staff_payroll import mail_notify
+
+                    result = mail_notify.run_mail_notify(drive, sheets, run_areas, ym)
+                    add_log(
+                        f"✅ 名冊更新完成｜mail 分頁 {result['mail_count']} 人｜"
+                        f"{result['month_tab']} 分頁 {result['month_tab_count']} 筆",
+                        "success",
+                    )
+
+                elif selected_function == "內勤元大帳戶":
+                    from tools.staff_payroll import yuanta_account
+
+                    for r in yuanta_account.run_yuanta_account_all(drive, sheets, run_areas, ym):
+                        add_log(f"✅ {r['area']} 元大帳戶完成，共 {r['count']} 人，已另存 {r['xlsx']['name']}", "success")
+
+                else:
+                    add_log(f"未知功能：{selected_function}", "warning")
 
             except Exception as e:
                 add_log(f"執行失敗：{e}", "error")

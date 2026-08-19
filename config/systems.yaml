@@ -57,3 +57,7 @@ systems:
   - name: 訂單系統
     type: orders_memo_system
     enabled: true
+
+  - name: 內勤薪資管理
+    type: staff_payroll
+    enabled: true
