@@ -36,7 +36,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
-from tools.scheduled_monthly.prepaid_report import LOGIN_URL, HEADERS, load_accounts, login
+from tools.scheduled_monthly.prepaid_report import LOGIN_URL, HEADERS, load_accounts, login, choose_keyword
 
 TZ = timezone(timedelta(hours=8))
 
@@ -81,9 +81,9 @@ def _year_month_bounds(year_month: str) -> dict[str, str]:
     }
 
 
-def _fetch_purchase_html(session: requests.Session, *, payway: str = "", buy: str = "", bounds: dict[str, str]) -> str:
+def _fetch_purchase_html(session: requests.Session, *, payway: str = "", buy: str = "", keyword: str = "", bounds: dict[str, str]) -> str:
     params = {
-        "keyword": "", "name": "", "phone": "", "orderNo": "",
+        "keyword": keyword, "name": "", "phone": "", "orderNo": "",
         "date_s": "", "date_e": "",
         "clean_date_s": bounds["clean_date_s"], "clean_date_e": "",
         "paid_at_s": bounds["paid_at_s"], "paid_at_e": bounds["paid_at_e"],
@@ -163,7 +163,7 @@ def _safe_int(value) -> int:
         return 0
 
 
-def _query_all_amounts(session: requests.Session, bounds: dict[str, str], on_progress=None) -> dict[str, int]:
+def _query_all_amounts(session: requests.Session, bounds: dict[str, str], *, keyword: str = "", on_progress=None) -> dict[str, int]:
     amounts: dict[str, int] = {}
 
     def notify(msg: str, level: str = "info") -> None:
@@ -173,17 +173,27 @@ def _query_all_amounts(session: requests.Session, bounds: dict[str, str], on_pro
 
     for label, code in PAYWAY_CODE.items():
         notify(f"查詢中：{label}")
-        html = _fetch_purchase_html(session, payway=code, buy="", bounds=bounds)
+        html = _fetch_purchase_html(session, payway=code, buy="", keyword=keyword, bounds=bounds)
         amounts[label] = _extract_paid_total(html, corner_label="現金收入")
         notify(f"{label}：{amounts[label]:,}", "success")
 
     for label, code in BUY_CODE.items():
         notify(f"查詢中：{label}")
-        html = _fetch_purchase_html(session, payway="", buy=code, bounds=bounds)
+        html = _fetch_purchase_html(session, payway="", buy=code, keyword=keyword, bounds=bounds)
         amounts[label] = _extract_paid_total(html, corner_label=None)
         notify(f"{label}：{amounts[label]:,}", "success")
 
     return amounts
+
+
+# 高雄帳號的後台資料同時涵蓋高雄／台南，兩個關鍵字都要各查一次再加總；
+# 新竹則要帶關鍵字「新竹」才篩得到正確資料（比照 prepaid_report.py 的規則）。
+def _keywords_for_area(area: str) -> list[str]:
+    if area == "高雄":
+        return ["高雄", "台南"]
+    if area == "新竹":
+        return ["新竹"]
+    return [""]
 
 
 def _col_letter(index_1based: int) -> str:
@@ -278,7 +288,16 @@ def run(area: str, year_month: str, on_progress=None) -> str:
     login(session, acc["email"], acc["password"])
     notify(f"{area}：登入成功，開始查詢 {year_month}")
 
-    amounts = _query_all_amounts(session, bounds, on_progress=lambda msg, level="info": notify(f"{area}：{msg}", level))
+    keywords = _keywords_for_area(area)
+    amounts = {label: 0 for label in ROW_LABELS}
+    for keyword in keywords:
+        tag = f"{area}（關鍵字：{keyword}）" if keyword else area
+        part = _query_all_amounts(
+            session, bounds, keyword=keyword,
+            on_progress=lambda msg, level="info", tag=tag: notify(f"{tag}：{msg}", level),
+        )
+        for label in ROW_LABELS:
+            amounts[label] += part[label]
 
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
