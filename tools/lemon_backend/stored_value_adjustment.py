@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Locator, Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
 from tools.lemon_backend.config import get_credentials
@@ -135,9 +136,17 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
 
     adjust_button = page.locator('button[data-target="#basicModal"]', has_text="異動儲值金")
     adjust_button.wait_for(state="visible", timeout=30_000)
-    adjust_button.click()
     modal = page.locator("#basicModal")
-    modal.wait_for(state="visible", timeout=15_000)
+    adjust_button.click()
+    try:
+        modal.wait_for(state="visible", timeout=15_000)
+    except PlaywrightTimeoutError:
+        # 頁面剛從上一筆訂單切換過來時，按鈕看起來可點但點擊事件有時候沒接
+        # 上，Bootstrap modal 不會真的開啟（沒有錯誤，只是彈窗一直是 hidden）。
+        # 重新點一次通常就能正常開啟，還是失敗才真的中止。
+        print(f"{order_no} 第一次點擊「異動儲值金」後彈窗沒開啟，重試一次")
+        adjust_button.click()
+        modal.wait_for(state="visible", timeout=15_000)
     selects = modal.locator("select")
     if selects.count() < 3:
         raise RuntimeError(f"{order_no} 異動視窗只有 {selects.count()} 個下拉欄位")
