@@ -2667,7 +2667,10 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
     def _fmt(value):
         return f"{value:,.0f}" if isinstance(value, (int, float)) else str(value)
 
-    lines = [f"{a}：現金餘額 {_fmt(r['BF14'])}" for a, r in results.items()]
+    lines = [
+        f"{a}：富邦餘額 {_fmt(r['富邦餘額'])}，元大餘額 {_fmt(r['元大餘額'])}"
+        for a, r in results.items()
+    ]
     return "已寫入「現金缺口試算」工作表：\n" + "\n".join(lines)
 
 
