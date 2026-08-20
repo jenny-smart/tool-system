@@ -43,6 +43,18 @@ def _cell(row: list[str], col: int) -> str:
     return str(row[idx]).strip() if idx < len(row) else ""
 
 
+def _extract_spreadsheet_id(raw: str) -> str:
+    """容錯：欄位裡貼成完整網址、或「ID,gid=...」這種格式時，只取出試算表ID本身。"""
+    text = raw.strip()
+    if "/d/" in text:
+        text = text.split("/d/", 1)[1]
+        text = text.split("/", 1)[0]
+    text = text.split(",", 1)[0]
+    text = text.split("#", 1)[0]
+    text = text.split("?", 1)[0]
+    return text.strip()
+
+
 def _read_registry() -> list[list[str]]:
     service = get_sheets_service()
     res = (
@@ -89,7 +101,7 @@ def resolve_statement_location(area: str, report: str) -> tuple[str, str]:
     if report not in REPORT_GID_COLUMN:
         raise ValueError(f"不支援的財報類型：{report}")
     row = _find_row(area)
-    spreadsheet_id = _cell(row, COL_SPREADSHEET_ID)
+    spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
     gid = _cell(row, REPORT_GID_COLUMN[report])
     if not spreadsheet_id or not gid:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area}／{report} 缺少試算表ID或GID")
@@ -101,7 +113,7 @@ def resolve_statement_location(area: str, report: str) -> tuple[str, str]:
 def resolve_standalone_spreadsheet_id(area: str) -> str:
     """回傳 2026-all／2026-現金 這類獨立試算表本身的ID（不含分頁 GID）。"""
     row = _find_row(area)
-    spreadsheet_id = _cell(row, COL_SPREADSHEET_ID)
+    spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少試算表ID")
     return spreadsheet_id
@@ -110,7 +122,7 @@ def resolve_standalone_spreadsheet_id(area: str) -> str:
 def marketing_expense_spreadsheet_id(area: str = "台北") -> str:
     """行銷費用檔案ID：各地區列共用同一個值，預設抓台北那一列。"""
     row = _find_row(area)
-    spreadsheet_id = _cell(row, COL_MARKETING_ID)
+    spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_MARKETING_ID))
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少行銷費用檔案ID")
     return spreadsheet_id
