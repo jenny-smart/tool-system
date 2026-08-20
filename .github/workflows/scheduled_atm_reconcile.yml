@@ -1,4 +1,4 @@
-name: Scheduled ATM Reconcile
+name: Scheduled ATM Pending List Add
 
 on:
   schedule:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  atm-reconcile:
+  atm-pending-add:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -49,5 +49,5 @@ jobs:
             echo "✅ 已設定：$name"
           done
 
-      - name: 台北／台中 ATM 對帳（僅處理新增列）
+      - name: 台北／台中 ATM 待付款清單新增（不執行系統對帳／寄信）
         run: python -u -m tools.scheduled_daily.atm_reconcile_auto

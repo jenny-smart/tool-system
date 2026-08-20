@@ -390,6 +390,7 @@
 __version__ = "8.77"
 
 import html
+import os
 import re
 import json
 import traceback
@@ -783,6 +784,17 @@ def find_missing_order_in_o_rows(sheet_name, region, candidate_rows=None):
     return rows
 
 
+def _login_default(key: str) -> str:
+    """依序查 st.secrets → 環境變數，讓後台帳密欄位可預先帶入（例如排程用的服務帳號），
+    介面上仍可手動覆蓋。"""
+    try:
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return os.getenv(key, "")
+
+
 def format_log_message(msg):
     text = str(msg)
     text = text.replace("\\n", "\n")
@@ -815,9 +827,9 @@ st.markdown("""
 step("1", "登入與環境設定")
 col_e, col_p, col_env = st.columns([3.2, 3.2, 1.2])
 with col_e:
-    backend_email = st.text_input("後台帳號")
+    backend_email = st.text_input("後台帳號", value=_login_default("LEMON_EMAIL"))
 with col_p:
-    backend_password = st.text_input("後台密碼", type="password")
+    backend_password = st.text_input("後台密碼", type="password", value=_login_default("LEMON_PASSWORD"))
 with col_env:
     env_label = st.selectbox("環境", ["prod（正式機 backend）", "dev（測試機 backend-dev）"], index=0)
     env = "dev" if env_label.startswith("dev") else "prod"

@@ -1031,7 +1031,8 @@ def render_memo_system(forced_main_section=None, shared_backend_email=None, shar
             st.markdown("---"); step("5", "貼上結果")
             pr = st.session_state.get("atm_list_paste_result")
             if pr.get("errors"): st.error("；".join(pr["errors"]))
-            else: st.success(f"✅ 已從第 {pr.get('start_row')} 列開始，貼上 {pr.get('pasted', 0)} 筆資料到 I~L 欄。")
+            elif pr.get("pasted", 0) == 0: st.info(f"沒有新資料需要貼上（略過 {pr.get('skipped_existing', 0)} 筆已存在的訂單）。")
+            else: st.success(f"✅ 已從第 {pr.get('start_row')} 列開始，貼上 {pr.get('pasted', 0)} 筆資料到 I~L 欄（略過 {pr.get('skipped_existing', 0)} 筆已存在）。")
 
     def render_atm_auto_match_mode():
         step("4", "配對銀行明細")
