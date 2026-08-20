@@ -9,8 +9,10 @@
   A 啟用（TRUE/FALSE）
   B 規則名稱（純備註用）
   C 條件1欄位（例如 D／H／L）
-  D 條件1比對（包含／等於）
-  E 條件1值（逗號分隔＝多值 OR，比對 C 欄那個財報欄位）
+  D 條件1比對（包含／等於／小於／小於等於／大於／大於等於，也接受 </></=/>= 這種寫法）
+  E 條件1值（逗號分隔＝多值 OR，比對 C 欄那個財報欄位；比對是小於/大於類時，
+           值可以填「10日」這種格式，比對 C 欄那個日期欄位的「日」，也可以
+           直接填日期）
   F 條件2欄位（留空表示沒有條件2；有值時跟條件1是 OR，例如 H含新訓 或 L含新訓）
   G 條件2比對
   H 條件2值
@@ -65,6 +67,15 @@ DEFAULT_RULES: list[list[object]] = [
 ]
 
 INSERT_ACTION = "插入新列"
+
+# 條件比對容錯：允許直接打符號，不用硬記中文名稱。
+_COMPARATOR_ALIASES = {
+    "<": "小於", "＜": "小於",
+    "<=": "小於等於", "≦": "小於等於", "=<": "小於等於",
+    ">": "大於", "＞": "大於",
+    ">=": "大於等於", "≧": "大於等於", "=>": "大於等於",
+    "=": "等於", "==": "等於",
+}
 
 
 def _letter_to_index(letter: str) -> int:
@@ -155,9 +166,36 @@ class Rule:
         if not col or not values:
             return False
         text = str(_cell_by_letter(row, col) or "").strip()
-        if cmp_ == "等於":
+        op = _COMPARATOR_ALIASES.get(cmp_.strip(), cmp_.strip())
+        if op == "等於":
             return text in values
-        return any(v in text for v in values)
+        if op in ("小於", "小於等於", "大於", "大於等於"):
+            row_date = _parse_date(text)
+            if row_date is None:
+                return False
+            for raw_value in values:
+                value = raw_value.strip()
+                if value.endswith("日"):
+                    try:
+                        day = int(value[:-1])
+                    except ValueError:
+                        continue
+                    lhs, rhs = row_date.day, day
+                else:
+                    threshold = _parse_date(value)
+                    if threshold is None:
+                        continue
+                    lhs, rhs = row_date, threshold
+                if op == "小於" and lhs < rhs:
+                    return True
+                if op == "小於等於" and lhs <= rhs:
+                    return True
+                if op == "大於" and lhs > rhs:
+                    return True
+                if op == "大於等於" and lhs >= rhs:
+                    return True
+            return False
+        return any(v in text for v in values)  # 包含（預設）
 
     def matches(self, row: list[object]) -> bool:
         cond1 = self._one_condition_matches(row, self.col1, self.cmp1, self.values1)
