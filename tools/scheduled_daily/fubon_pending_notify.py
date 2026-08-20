@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from tools.bank_statement.fubon_deposit_refund_filter import pending_deposit_refunds
@@ -14,26 +15,42 @@ from tools.bank_statement.internal_payment_registry import (
     PAYMENT_REQUEST_TYPE,
     read_report_values,
 )
-from tools.common.config_loader import get_service_account_info
 from tools.memo_system.change_order import get_worksheet
 
 AREAS = ["台北", "台中"]
 TZ = ZoneInfo("Asia/Taipei")
 CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
-CALENDAR_ID = "jenny@hers.com.tw"
 
 
 def create_calendar_reminder(summary: str, description: str) -> None:
     """用 Google Calendar 事件當提醒，取代寄信。
 
-    跟其他排程共用同一套 Google 認證：sitecustomize 在 GOOGLE_OAUTH_* 就緒時，
-    會把這裡建立的服務帳號憑證換成 Jenny 本人（jenny@lemonclean.com.tw）的
-    OAuth。事件寫進 CALENDAR_ID 指定的日曆，而不是這個 OAuth 身分自己的
-    主日曆——所以 CALENDAR_ID 這個日曆必須先分享給 jenny@lemonclean.com.tw
-    「變更活動」權限，不然這裡會收到權限錯誤。
+    jenny@hers.com.tw 所屬的 Google Workspace 不允許把日曆共用「變更活動」
+    權限授權給網域外帳號（jenny@lemonclean.com.tw），所以這裡不能沿用其他
+    排程共用的那組 GOOGLE_OAUTH_REFRESH_TOKEN（那組是 lemonclean 身分）。
+    改用一組獨立、直接以 jenny@hers.com.tw 本人身分授權的 refresh token
+    （GOOGLE_HERS_CALENDAR_REFRESH_TOKEN），寫進她自己的主日曆
+    （calendarId="primary"），不需要任何跨帳號共用設定。
     """
-    creds = service_account.Credentials.from_service_account_info(
-        get_service_account_info(), scopes=CALENDAR_SCOPES
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    refresh_token = os.getenv("GOOGLE_HERS_CALENDAR_REFRESH_TOKEN", "").strip()
+
+    missing = [name for name, value in [
+        ("GOOGLE_OAUTH_CLIENT_ID", client_id),
+        ("GOOGLE_OAUTH_CLIENT_SECRET", client_secret),
+        ("GOOGLE_HERS_CALENDAR_REFRESH_TOKEN", refresh_token),
+    ] if not value]
+    if missing:
+        raise RuntimeError("缺少日曆授權設定：" + "、".join(missing))
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=CALENDAR_SCOPES,
     )
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
@@ -46,7 +63,7 @@ def create_calendar_reminder(summary: str, description: str) -> None:
         "end": {"dateTime": end.isoformat(), "timeZone": "Asia/Taipei"},
         "reminders": {"useDefault": False, "overrides": [{"method": "popup", "minutes": 0}]},
     }
-    service.events().insert(calendarId=CALENDAR_ID, body=body).execute()
+    service.events().insert(calendarId="primary", body=body).execute()
 
 
 def describe(label: str, candidates: list[dict[str, object]], detail_key: str = "") -> str:
