@@ -2454,19 +2454,40 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
 
 
 @st.fragment(run_every="2s")
-def render_fubon_mobile_verification():
+def render_mobile_verification(
+    *,
+    system_label: str,
+    capture_action: str,
+    verify_action: str,
+    build_verify_params,
+    widget_key: str,
+) -> None:
+    """通用的手機驗證待命區塊。
+
+    任何系統只要本機 Agent 端實作了對應的「擷取驗證碼圖片＋暫停等待」
+    （capture_action）跟「收到驗證碼後繼續」（verify_action）這兩個
+    action（可參考 tools/bank_statement/fubon_mobile.py 的 capture／
+    verify 兩個模式），就能直接沿用這支渲染函式：輪詢佇列裡最新已完成
+    的 capture 任務、還沒被對應 verify 任務核銷過的驗證碼圖片，畫出圖片
+    跟輸入框，送出後建立 verify 任務——不用每個系統各自重寫一份一樣的
+    輪詢／UI 邏輯。
+
+    build_verify_params(payload, captcha_code) 回傳建立 verify 任務要用
+    的 params dict；不同系統 resume/session_token 等欄位名稱可能不同，
+    交給呼叫端自己組。
+    """
     try:
         captcha_tasks = list_local_agent_tasks(limit=40)
         verified_tokens = set()
         for item in captcha_tasks:
-            if item.get("action") == "fubon.verify":
+            if item.get("action") == verify_action:
                 try:
                     verified_tokens.add(json.loads(item.get("params_json") or "{}").get("session_token", ""))
                 except json.JSONDecodeError:
                     pass
         captcha_payload = None
         for item in captcha_tasks:
-            if item.get("action") != "fubon.captcha" or item.get("status") != "completed":
+            if item.get("action") != capture_action or item.get("status") != "completed":
                 continue
             try:
                 payload = json.loads(item.get("result_json") or "{}")
@@ -2476,32 +2497,45 @@ def render_fubon_mobile_verification():
                 captcha_payload = payload
                 break
         if not captcha_payload:
-            st.caption("驗證碼擷取中…")
+            st.caption(f"{system_label}驗證碼擷取中…")
             return
-        st.markdown("#### 富邦手機驗證")
+        st.markdown(f"#### {system_label}手機驗證")
         st.image(base64.b64decode(captcha_payload["image_base64"]))
-        captcha_code = st.text_input("輸入圖片驗證碼", max_chars=12, key="fubon_mobile_captcha")
-        if st.button("送出驗證碼並繼續", type="primary", use_container_width=True):
+        captcha_code = st.text_input("輸入圖片驗證碼", max_chars=12, key=widget_key)
+        if st.button("送出驗證碼並繼續", type="primary", use_container_width=True, key=f"{widget_key}_submit"):
             if not captcha_code.strip():
                 st.error("請輸入驗證碼")
                 return
             task = create_local_agent_task(
-                "fubon.verify",
-                {
-                    "area": captcha_payload.get("area", ""),
-                    "resume": captcha_payload.get("resume", "login"),
-                    "start_date": captcha_payload.get("start_date", ""),
-                    "end_date": captcha_payload.get("end_date", ""),
-                    "session_token": captcha_payload.get("session_token", ""),
-                    "captcha": captcha_code.strip(),
-                    "cdp_url": "http://127.0.0.1:9222",
-                },
+                verify_action,
+                build_verify_params(captcha_payload, captcha_code.strip()),
                 created_by=st.session_state.get("username", "Tool System"),
             )
             st.success(f"驗證任務已建立：{task['task_id']}")
             st.rerun()
     except Exception as exc:
-        st.warning(f"富邦手機驗證資料讀取失敗：{exc}")
+        st.warning(f"{system_label}手機驗證資料讀取失敗：{exc}")
+
+
+def render_fubon_mobile_verification():
+    def _build_fubon_verify_params(payload: dict, captcha_code: str) -> dict:
+        return {
+            "area": payload.get("area", ""),
+            "resume": payload.get("resume", "login"),
+            "start_date": payload.get("start_date", ""),
+            "end_date": payload.get("end_date", ""),
+            "session_token": payload.get("session_token", ""),
+            "captcha": captcha_code,
+            "cdp_url": "http://127.0.0.1:9222",
+        }
+
+    render_mobile_verification(
+        system_label="富邦",
+        capture_action="fubon.captcha",
+        verify_action="fubon.verify",
+        build_verify_params=_build_fubon_verify_params,
+        widget_key="fubon_mobile_captcha",
+    )
 
 
 def queue_yuanta_login(*, month="", start_date=None, end_date=None, area="全區"):
@@ -3204,6 +3238,10 @@ with date_col:
                     horizontal=True,
                     key="fubon_verification_mode",
                 )
+                if st.session_state.get("fubon_verification_mode") == "手機輸入驗證碼":
+                    # 選了手機驗證就把待命區塊往前提到這裡，不用等按了執行、
+                    # 滑到日誌下面才看得到；驗證碼一擷取到就能立刻看到並輸入。
+                    render_fubon_mobile_verification()
         elif selected_function == "【元大銀行】檢查薪資付款狀態":
             st.markdown('<div class="field-label">📆 付款日期</div>', unsafe_allow_html=True)
             st.info("固定查詢最近一週", icon="📅")
@@ -3234,6 +3272,8 @@ with date_col:
                 horizontal=True,
                 key="fubon_verification_mode",
             )
+            if st.session_state.get("fubon_verification_mode") == "手機輸入驗證碼":
+                render_fubon_mobile_verification()
         elif selected_function == "【鯨躍發票】鯨躍發票下載":
             st.markdown('<div class="field-label">📆 下載期間</div>', unsafe_allow_html=True)
             finance_invoice_date_mode = st.radio(
@@ -4022,9 +4062,9 @@ render_log()
 
 if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】", "【財政部電子發票】")):
     render_agent_task_progress(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta.", "mofei."))
-
-    if selected_function in ("【富邦銀行】富邦登入", "【富邦銀行】富邦明細下載"):
-        render_fubon_mobile_verification()
+    # 手機驗證的待命區塊已經提前顯示在畫面上方（選了「手機輸入驗證碼」
+    # 之後就會立刻出現），這裡不再重複渲染一次，避免同一個 key
+    # （fubon_mobile_captcha）在同一輪畫出兩個一樣的元件。
 
 clear_col, _ = st.columns([1, 3])
 
