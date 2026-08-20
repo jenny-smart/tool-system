@@ -221,19 +221,30 @@ def _next_month_cutoff(as_of: date, day: int) -> date:
     return date(year, month, day)
 
 
-def compute_cash_gap(area: str, as_of: date) -> dict[str, float]:
+def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
     """回傳 {'BF14', 'BF21', 'BF22', 'BF23', 'BF24'}，試算但不寫回試算表。
 
     as_of 是要試算的月份最後一天（例如 2026/7/31 傳 date(2026, 7, 31)）。
+
+    每一項獨立算、獨立擋錯：其中一項出錯（例如某份外部試算表還沒授權給
+    服務帳號）不會讓其他四項也算不出來，該項改填錯誤訊息，方便一眼看出
+    是哪一項、哪個地區出問題。
     """
     year_month = as_of.strftime("%Y.%m")
-    return {
-        "BF14": cash_balance(area, as_of),
-        "BF21": internal_staff_salary(area, year_month, _next_month_cutoff(as_of, 5)),
-        "BF22": specialist_salary(area, year_month, _next_month_cutoff(as_of, 10)),
-        "BF23": marketing_expense(area, as_of.month),
-        "BF24": finance_bimonthly_value(area, as_of.month),
+    computations = {
+        "BF14": lambda: cash_balance(area, as_of),
+        "BF21": lambda: internal_staff_salary(area, year_month, _next_month_cutoff(as_of, 5)),
+        "BF22": lambda: specialist_salary(area, year_month, _next_month_cutoff(as_of, 10)),
+        "BF23": lambda: marketing_expense(area, as_of.month),
+        "BF24": lambda: finance_bimonthly_value(area, as_of.month),
     }
+    result: dict[str, float | str] = {}
+    for key, compute in computations.items():
+        try:
+            result[key] = compute()
+        except Exception as exc:
+            result[key] = f"錯誤：{exc}"
+    return result
 
 
 def _ensure_cash_gap_sheet(service, spreadsheet_id: str) -> None:
@@ -269,7 +280,9 @@ def write_cash_gap_sheet(
     ]
     for label, key in CASH_GAP_ROWS:
         values = [results[area][key] for area in areas]
-        rows.append([label, *values, sum(values)])
+        numeric_values = [v for v in values if isinstance(v, (int, float))]
+        total = sum(numeric_values) if len(numeric_values) == len(values) else "—"
+        rows.append([label, *values, total])
 
     last_col = _column_letter(len(areas) + 2)
     service.spreadsheets().values().update(
