@@ -2616,7 +2616,7 @@ def run_deposit_report_flag_discrepancies(*, month="", start_date=None, end_date
 
 
 def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
-    from tools.finance_management.statement_update import apply_lc_remittance_filter
+    from tools.finance_management.statement_rules import apply_rules
 
     cities = ["台北", "台中", "桃園", "新竹", "高雄"]
     if area == "全區":
@@ -2632,10 +2632,9 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
         if i > 0:
             time.sleep(3)  # 地區之間稍微間隔，避免瞬間打太多 Sheets API 請求觸發配額限制
         try:
-            result = apply_lc_remittance_filter(city)
+            result = apply_rules(city)
             messages.append(
-                f"{city}：I 欄設為匯款收入 {result['remittance_marked']} 筆，"
-                f"LC客訴搬移金額 {result['complaint_moved']} 筆"
+                f"{city}：更新 {result['updated_rows']} 格，插入 {result['inserted_rows']} 列"
             )
             if on_progress:
                 on_progress(messages[-1], "success")
@@ -2772,7 +2771,7 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
-    {"name": "【財報】財報富邦更新｜LC匯款收入／客訴搬移", "handler": run_fubon_statement_lc_filter, "enabled": True},
+    {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
