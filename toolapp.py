@@ -2664,7 +2664,10 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
         raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
 
     results = write_cash_gap_sheet(as_of, areas=areas)
-    lines = [f"{a}：現金餘額 {r['BF14']:,.0f}" for a, r in results.items()]
+    def _fmt(value):
+        return f"{value:,.0f}" if isinstance(value, (int, float)) else str(value)
+
+    lines = [f"{a}：現金餘額 {_fmt(r['BF14'])}" for a, r in results.items()]
     return "已寫入「現金缺口試算」工作表：\n" + "\n".join(lines)
 
 
