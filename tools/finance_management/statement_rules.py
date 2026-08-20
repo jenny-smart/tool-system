@@ -20,6 +20,13 @@
   L 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F）
   M 列處理（更新原列／插入新列——插入新列時原列不動，複製一份新列在下面，
            只改新列的 I／L／E，其餘欄位照抄原列）
+  N 金額對半欄位（例如 E；有填時，這條規則跟同一列命中的「更新原列」規則
+           會各拿原始金額的一半——原始金額是整數且不能平分時，前面的規則
+           拿少 1 元的那一半、後面（插入新列）的規則拿多 1 元的那一半，
+           兩邊加起來等於原始金額，不會多算或少算。留空表示照抄原值，不分帳）
+
+新增欄位一律加在「列處理」之後（不要插在中間），避免手動插入分頁欄位時
+把既有欄位的資料位置擠掉、讓已經對好的規則跑錯。
 """
 
 from __future__ import annotations
@@ -34,23 +41,23 @@ RULES_SHEET_NAME = "財報篩選規則"
 RULES_HEADER = [
     "啟用", "規則名稱", "條件1欄位", "條件1比對", "條件1值",
     "條件2欄位", "條件2比對", "條件2值",
-    "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理",
+    "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理", "金額對半欄位",
 ]
 
 # 預設規則（第一次建立分頁時寫入，之後只從分頁讀取，不再看這份清單）。
 DEFAULT_RULES: list[list[object]] = [
-    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "匯款收入", "", "", False, "更新原列"],
-    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列"],
-    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "代收代付-收入", 0, "藍新科技", False, "更新原列"],
-    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "工具包押金", 0, "工具包押金", False, "更新原列"],
-    [True, "電信費", "D", "等於", "電信費", "", "", "", "電話費", 0, "電話費", False, "更新原列"],
-    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "利息收入", 0, "利息收入", False, "更新原列"],
-    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "內勤勞保費", -2, "內勤勞保費", False, "更新原列"],
-    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "內勤退休金", -3, "內勤退休金", False, "更新原列"],
-    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "水費", -2, "水費", False, "插入新列"],
-    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "水費", -1, "水費", False, "插入新列"],
-    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "電費", -2, "電費", False, "插入新列"],
-    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "電費", -1, "電費", False, "插入新列"],
+    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "匯款收入", "", "", False, "更新原列", ""],
+    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列", ""],
+    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "代收代付-收入", 0, "藍新科技", False, "更新原列", ""],
+    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "工具包押金", 0, "工具包押金", False, "更新原列", ""],
+    [True, "電信費", "D", "等於", "電信費", "", "", "", "電話費", 0, "電話費", False, "更新原列", ""],
+    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "利息收入", 0, "利息收入", False, "更新原列", ""],
+    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "內勤勞保費", -2, "內勤勞保費", False, "更新原列", ""],
+    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "內勤退休金", -3, "內勤退休金", False, "更新原列", ""],
+    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "水費", -2, "水費", False, "更新原列", "E"],
+    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "水費", -1, "水費", False, "插入新列", "E"],
+    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "電費", -2, "電費", False, "更新原列", "E"],
+    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "電費", -1, "電費", False, "插入新列", "E"],
 ]
 
 INSERT_ACTION = "插入新列"
@@ -135,6 +142,7 @@ class Rule:
         self.suffix = str(_cell(raw, 11) or "").strip()
         self.move_complaint_amount = _to_bool(_cell(raw, 12))
         self.action = str(_cell(raw, 13) or "").strip() or "更新原列"
+        self.split_column = str(_cell(raw, 14) or "").strip().upper()
 
     def _one_condition_matches(self, row: list[object], col: str, cmp_: str, values: list[str]) -> bool:
         if not col or not values:
@@ -168,6 +176,7 @@ def _ensure_rules_sheet(service, spreadsheet_id: str) -> None:
     ).execute()
     titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
     if RULES_SHEET_NAME in titles:
+        _migrate_rules_sheet(service, spreadsheet_id)
         return
     service.spreadsheets().batchUpdate(
         spreadsheetId=spreadsheet_id,
@@ -181,6 +190,49 @@ def _ensure_rules_sheet(service, spreadsheet_id: str) -> None:
         valueInputOption="RAW",
         body={"values": rows},
     ).execute()
+
+
+def _migrate_rules_sheet(service, spreadsheet_id: str) -> None:
+    """分頁已存在但欄位比目前 RULES_HEADER 少（例如程式新增了欄位）時，自動在
+    最後面補齊缺少的標題／預設值，不用手動去分頁裡插欄位。只會「往後補」，
+    不會動到既有欄位的位置或內容。"""
+    last_col = _column_letter(len(RULES_HEADER))
+    header_res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{RULES_SHEET_NAME}'!A1:{last_col}1"
+    ).execute()
+    existing_header = (header_res.get("values") or [[]])[0]
+    if len(existing_header) >= len(RULES_HEADER):
+        return
+
+    missing_start = len(existing_header) + 1  # 1-based，缺少欄位的起始欄
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{RULES_SHEET_NAME}'!{_column_letter(missing_start)}1:{last_col}1",
+        valueInputOption="RAW",
+        body={"values": [RULES_HEADER[missing_start - 1:]]},
+    ).execute()
+
+    rows_res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{RULES_SHEET_NAME}'!A2:B"
+    ).execute()
+    default_by_name = {str(r[1]).strip(): r for r in DEFAULT_RULES}
+    fill_updates = []
+    for row_idx, row in enumerate(rows_res.get("values") or [], start=2):
+        name = str(row[1]).strip() if len(row) > 1 else ""
+        default_row = default_by_name.get(name)
+        if not default_row:
+            continue
+        missing_values = default_row[missing_start - 1:]
+        if any(str(v) != "" for v in missing_values):
+            fill_updates.append({
+                "range": f"'{RULES_SHEET_NAME}'!{_column_letter(missing_start)}{row_idx}:{last_col}{row_idx}",
+                "values": [missing_values],
+            })
+    if fill_updates:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": fill_updates},
+        ).execute()
 
 
 def load_rules() -> list[Rule]:
@@ -216,8 +268,12 @@ def _sheet_id_for_title(service, spreadsheet_id: str, title: str) -> int:
     raise RuntimeError(f"試算表 {spreadsheet_id} 找不到分頁「{title}」")
 
 
-def apply_rules(area: str) -> dict[str, int]:
-    """套用「財報篩選規則」分頁裡的所有啟用規則到指定地區的財報富邦更新分頁。"""
+def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
+    """套用「財報篩選規則」分頁裡的所有啟用規則到指定地區的財報富邦更新分頁。
+
+    start_date／end_date（date 物件，兩者皆可留空）會依 B 欄（帳務日）限制只處理
+    該區間內的列；沒給日期區間就處理整張表。
+    """
     rules = [r for r in load_rules() if r.enabled]
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
     values = _read_values(spreadsheet_id, title)
@@ -230,6 +286,15 @@ def apply_rules(area: str) -> dict[str, int]:
     pending_inserts: list[tuple[int, list[list[object]]]] = []
 
     for row_idx, row in enumerate(values[1:], start=2):
+        if start_date or end_date:
+            row_date = _parse_date(_cell(row, 2))  # B欄＝帳務日
+            if row_date is None:
+                continue
+            if start_date and row_date < start_date:
+                continue
+            if end_date and row_date > end_date:
+                continue
+
         in_place_rule = None
         insert_rules = []
         for rule in rules:
@@ -239,6 +304,30 @@ def apply_rules(area: str) -> dict[str, int]:
                 insert_rules.append(rule)
             else:
                 in_place_rule = rule  # 同一列多條「更新原列」規則命中時，以最後一條為準
+
+        # 金額對半：同一列命中的「更新原列」規則＋「插入新列」規則，如果指定了
+        # 同一個金額對半欄位，就把原始金額拆成整數兩半（不能平分時，前面／
+        # 更新原列那份少 1、插入新列那份多 1），取代直接複製整筆金額。
+        split_targets: list[tuple[str, int | None]] = []
+        split_column = None
+        if in_place_rule is not None and in_place_rule.split_column:
+            split_column = in_place_rule.split_column
+            split_targets.append(("in_place", None))
+        for i, rule in enumerate(insert_rules):
+            if rule.split_column and (split_column is None or rule.split_column == split_column):
+                split_column = split_column or rule.split_column
+                split_targets.append(("insert", i))
+        split_values: dict[tuple[str, int | None], float] = {}
+        if split_column and len(split_targets) >= 2:
+            total = _to_number(_cell(row, _letter_to_index(split_column)))
+            parts = len(split_targets)
+            base = int(total // parts)
+            remainder = int(total - base * parts)
+            shares = [base] * parts
+            for i in range(parts - remainder, parts):
+                shares[i] += 1
+            for target, share in zip(split_targets, shares):
+                split_values[target] = share
 
         if in_place_rule is not None:
             if in_place_rule.set_i:
@@ -255,10 +344,15 @@ def apply_rules(area: str) -> dict[str, int]:
                 value_updates.append(
                     {"range": f"'{title}'!E{row_idx}", "values": [[-f_value]]}
                 )
+            if ("in_place", None) in split_values:
+                value_updates.append({
+                    "range": f"'{title}'!{split_column}{row_idx}",
+                    "values": [[split_values[("in_place", None)]]],
+                })
 
         if insert_rules:
             new_rows = []
-            for rule in insert_rules:
+            for i, rule in enumerate(insert_rules):
                 new_row = list(row)
                 if rule.set_i:
                     while len(new_row) < 9:
@@ -273,6 +367,11 @@ def apply_rules(area: str) -> dict[str, int]:
                     while len(new_row) < 5:
                         new_row.append("")
                     new_row[4] = -_to_number(_cell(row, 6))
+                if ("insert", i) in split_values:
+                    col_index = _letter_to_index(rule.split_column)
+                    while len(new_row) < col_index:
+                        new_row.append("")
+                    new_row[col_index - 1] = split_values[("insert", i)]
                 new_rows.append(new_row)
             pending_inserts.append((row_idx, new_rows))
 

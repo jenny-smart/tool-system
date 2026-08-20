@@ -2632,7 +2632,7 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
         if i > 0:
             time.sleep(3)  # 地區之間稍微間隔，避免瞬間打太多 Sheets API 請求觸發配額限制
         try:
-            result = apply_rules(city)
+            result = apply_rules(city, start_date=start_date, end_date=end_date)
             messages.append(
                 f"{city}：更新 {result['updated_rows']} 格，插入 {result['inserted_rows']} 列"
             )
