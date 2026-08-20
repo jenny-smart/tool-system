@@ -161,7 +161,7 @@ def _get_gspread_client():
         pass
 
     if service_account_info is None:
-        raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip() or os.getenv("GOOGLE_SERVICE_ACCOUNT", "").strip()
         if raw_json:
             service_account_info = json.loads(raw_json)
 

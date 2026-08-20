@@ -12,7 +12,8 @@ def pending_atm_refunds(values: list[list[str]]) -> list[dict[str, object]]:
     """Return 清潔異動 rows where B=待退款 and R=ATM.
 
     Sheet columns used by the transfer flow: H customer, P bank code,
-    Q destination account, and T refund amount.
+    Q destination account, and T refund amount. K (後台備註) is included
+    for display only.
     """
     result: list[dict[str, object]] = []
     for sheet_row, row in enumerate(values[1:], start=2):
@@ -39,6 +40,7 @@ def pending_atm_refunds(values: list[list[str]]) -> list[dict[str, object]]:
                 "sheet_row": sheet_row,
                 "order_no": _cell(row, 6),
                 "customer": _cell(row, 7),
+                "note": _cell(row, 10),
                 "bank_code": bank_code.zfill(3),
                 "account_number": account_number,
                 "amount": normalized_amount,

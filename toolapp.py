@@ -3777,13 +3777,16 @@ if system_type == "finance_management" and selected_function == "【藍新金流
                     "執行": False,
                     "列數": item["sheet_row"],
                     "訂單編號": item["order_no"],
+                    "客人姓名": item["customer"],
+                    "二聯三聯": item["invoice_type"],
+                    "後台備註": item["note"],
                     "退款金額": item["amount"],
                 }
                 for item in _refund_candidates
             ]),
             hide_index=True,
             use_container_width=True,
-            disabled=["列數", "訂單編號", "退款金額"],
+            disabled=["列數", "訂單編號", "客人姓名", "二聯三聯", "後台備註", "退款金額"],
             column_config={"執行": st.column_config.CheckboxColumn("執行")},
             key=f"newebpay_refund_editor_{selected_area_value}",
         )
@@ -3859,6 +3862,7 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
                     "列數": item["sheet_row"],
                     "訂單編號": item["order_no"],
                     "客人姓名": item["customer"],
+                    "後台備註": item["note"],
                     "轉入銀行": item["bank_code"],
                     "轉入帳號": item["account_number"],
                     "退款金額": item["amount"],
@@ -3867,7 +3871,7 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             ]),
             hide_index=True,
             use_container_width=True,
-            disabled=["列數", "訂單編號", "客人姓名", "轉入銀行", "轉入帳號", "退款金額"],
+            disabled=["列數", "訂單編號", "客人姓名", "後台備註", "轉入銀行", "轉入帳號", "退款金額"],
             column_config={"執行": st.column_config.CheckboxColumn("執行")},
             key=f"fubon_atm_refund_editor_{selected_area_value}",
         )

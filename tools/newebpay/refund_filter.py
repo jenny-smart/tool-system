@@ -20,5 +20,12 @@ def pending_credit_card_refunds(values: list[list[str]]) -> list[dict[str, objec
         except InvalidOperation:
             continue
         if parsed_amount > 0:
-            rows.append({"sheet_row": row_number, "order_no": order_no, "amount": normalized})
+            rows.append({
+                "sheet_row": row_number,
+                "order_no": order_no,
+                "customer": _cell(row, 7),
+                "note": _cell(row, 10),
+                "invoice_type": _cell(row, 24),
+                "amount": normalized,
+            })
     return rows
