@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import date
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
@@ -117,10 +118,12 @@ def _column_letter(index: int) -> str:
     return letters
 
 
-def _month_end_balance(area: str, report: str, balance_col: int, as_of: date) -> float:
-    """BF14 用：report 分頁裡帳務日 <= as_of 的最後一列，取 balance_col 欄的值。"""
+def _report_values(area: str, report: str) -> list[list[object]]:
     spreadsheet_id, title = resolve_statement_location(area, report)
-    values = _read_values(spreadsheet_id, title)
+    return _read_values(spreadsheet_id, title)
+
+
+def _month_end_balance_from_values(values: list[list[object]], balance_col: int, as_of: date) -> float:
     last_value = 0.0
     for row in values[1:]:
         row_date = _parse_date(_cell(row, COL_B))
@@ -130,19 +133,19 @@ def _month_end_balance(area: str, report: str, balance_col: int, as_of: date) ->
     return last_value
 
 
-def fubon_balance(area: str, as_of: date) -> float:
+def fubon_balance(area: str, as_of: date, values: list[list[object]] | None = None) -> float:
     """富邦餘額：富邦更新當月最後一筆的 G 欄餘額。"""
-    return _month_end_balance(area, "富邦更新", COL_G, as_of)
+    values = values if values is not None else _report_values(area, "富邦更新")
+    return _month_end_balance_from_values(values, COL_G, as_of)
 
 
-def yuanta_balance(area: str, as_of: date) -> float:
+def yuanta_balance(area: str, as_of: date, values: list[list[object]] | None = None) -> float:
     """元大餘額：元大更新當月最後一筆的 H 欄餘額。"""
-    return _month_end_balance(area, "元大更新", COL_H, as_of)
+    values = values if values is not None else _report_values(area, "元大更新")
+    return _month_end_balance_from_values(values, COL_H, as_of)
 
 
-def _label_amount_before(area: str, labels: list[str], before: date) -> float:
-    spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
-    values = _read_values(spreadsheet_id, title)
+def _label_amount_from_values(values: list[list[object]], labels: list[str], before: date) -> float:
     total = 0.0
     for row in values[1:]:
         row_date = _parse_date(_cell(row, COL_B))
@@ -154,16 +157,22 @@ def _label_amount_before(area: str, labels: list[str], before: date) -> float:
     return total
 
 
-def internal_staff_salary(area: str, year_month: str, before: date) -> float:
+def internal_staff_salary(
+    area: str, year_month: str, before: date, values: list[list[object]] | None = None
+) -> float:
     """BF21：富邦更新裡「{年月}-內勤薪資」、帳務日 < before 的那一列 M欄。"""
-    return _label_amount_before(area, [f"{year_month}-內勤薪資"], before)
+    values = values if values is not None else _report_values(area, "富邦更新")
+    return _label_amount_from_values(values, [f"{year_month}-內勤薪資"], before)
 
 
-def specialist_salary(area: str, year_month: str, before: date) -> float:
+def specialist_salary(
+    area: str, year_month: str, before: date, values: list[list[object]] | None = None
+) -> float:
     """專員承攬費：富邦更新裡「{年月}-專員薪資」或「{年月}-專員承攬費」、
     帳務日 < before 的列，加總 M欄。"""
+    values = values if values is not None else _report_values(area, "富邦更新")
     labels = [f"{year_month}-專員薪資", f"{year_month}-專員承攬費"]
-    return _label_amount_before(area, labels, before)
+    return _label_amount_from_values(values, labels, before)
 
 
 def marketing_expense(area: str, month: int) -> float:
@@ -237,11 +246,34 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
     是哪一項、哪個地區出問題。
     """
     year_month = as_of.strftime("%Y.%m")
+
+    # 富邦更新／元大更新各只讀一次、重複使用，避免同一份財報短時間內被讀
+    # 好幾次，觸發 Sheets API 的每分鐘讀取配額（跑「全區」很容易撞到）。
+    def _try_fetch(report: str):
+        try:
+            return _report_values(area, report), None
+        except Exception as exc:
+            return None, exc
+
+    fubon_values, fubon_error = _try_fetch("富邦更新")
+    yuanta_values, yuanta_error = _try_fetch("元大更新")
+
+    def _need(values, error, compute):
+        if error is not None:
+            raise error
+        return compute(values)
+
     computations = {
-        "富邦餘額": lambda: fubon_balance(area, as_of),
-        "元大餘額": lambda: yuanta_balance(area, as_of),
-        "內勤薪資": lambda: internal_staff_salary(area, year_month, _next_month_cutoff(as_of, 5)),
-        "專員承攬費": lambda: specialist_salary(area, year_month, _next_month_cutoff(as_of, 10)),
+        "富邦餘額": lambda: _need(fubon_values, fubon_error, lambda v: fubon_balance(area, as_of, v)),
+        "元大餘額": lambda: _need(yuanta_values, yuanta_error, lambda v: yuanta_balance(area, as_of, v)),
+        "內勤薪資": lambda: _need(
+            fubon_values, fubon_error,
+            lambda v: internal_staff_salary(area, year_month, _next_month_cutoff(as_of, 5), v),
+        ),
+        "專員承攬費": lambda: _need(
+            fubon_values, fubon_error,
+            lambda v: specialist_salary(area, year_month, _next_month_cutoff(as_of, 10), v),
+        ),
         "行銷費用": lambda: marketing_expense(area, as_of.month),
         "2%支出": lambda: finance_bimonthly_value(area, as_of.month),
     }
@@ -274,7 +306,11 @@ def write_cash_gap_sheet(
     「現金缺口試算」工作表（不動各地區財報原本的 BF 欄，也不需要在「財報設定」
     分頁另外設定試算表ID）。"""
     areas = areas or CASH_GAP_AREAS
-    results = {area: compute_cash_gap(area, as_of) for area in areas}
+    results = {}
+    for i, area in enumerate(areas):
+        if i > 0:
+            time.sleep(2)  # 地區之間留點間隔，避免瞬間打太多 Sheets API 請求觸發配額限制
+        results[area] = compute_cash_gap(area, as_of)
 
     spreadsheet_id = get_master_spreadsheet_id()
     service = get_sheets_service()

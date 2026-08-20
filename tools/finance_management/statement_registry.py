@@ -61,14 +61,26 @@ def _find_row(area: str) -> list[str]:
     raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」登記表找不到地區「{area}」")
 
 
+_SHEET_TITLE_CACHE: dict[tuple[str, str], str] = {}
+
+
 def sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:
+    """GID→分頁標題；同一次執行內快取，避免短時間內對同一份試算表重複打
+    metadata API，觸發 Sheets 每分鐘讀取配額（例如現金缺口試算跑全區時，
+    每個地區都要查同一份行銷費用檔案的分頁標題）。"""
+    cache_key = (spreadsheet_id, str(gid).strip())
+    if cache_key in _SHEET_TITLE_CACHE:
+        return _SHEET_TITLE_CACHE[cache_key]
+
     meta = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id, fields="sheets.properties"
     ).execute()
     for sheet in meta.get("sheets", []):
         props = sheet.get("properties", {})
-        if str(props.get("sheetId", "")) == str(gid).strip():
-            return str(props.get("title", ""))
+        if str(props.get("sheetId", "")) == cache_key[1]:
+            title = str(props.get("title", ""))
+            _SHEET_TITLE_CACHE[cache_key] = title
+            return title
     raise RuntimeError(f"試算表 {spreadsheet_id} 找不到 GID={gid} 對應的分頁")
 
 
