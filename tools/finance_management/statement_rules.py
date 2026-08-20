@@ -11,14 +11,15 @@
   C 條件1欄位（例如 D／H／L）
   D 條件1比對（包含／等於）
   E 條件1值（逗號分隔＝多值 OR，比對 C 欄那個財報欄位）
-  F 條件2欄位（留空表示沒有條件2；有值時跟條件1是 OR，例如 H含新訓 或 L含新訓）
+  F 條件2欄位（留空表示沒有條件2）
   G 條件2比對
   H 條件2值
-  I 設定I欄（符合就把財報 I 欄設成這個值）
-  J L欄月份位移（相對 K 欄的月份，例如 -2 表示往前兩個月；留空表示不改 L 欄）
-  K L欄後綴文字（L 欄標記＝該月份 "YYYY.MM"＋"-"＋這個後綴；留空表示不改 L 欄）
-  L 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F）
-  M 列處理（更新原列／插入新列——插入新列時原列不動，複製一份新列在下面，
+  I 條件關係（且／或，留空當「或」——例如 H含新訓 或 L含新訓；要「且」就填「且」）
+  J 設定I欄（符合就把財報 I 欄設成這個值）
+  K L欄月份位移（相對 K 欄的月份，例如 -2 表示往前兩個月；留空表示不改 L 欄）
+  L L欄後綴文字（L 欄標記＝該月份 "YYYY.MM"＋"-"＋這個後綴；留空表示不改 L 欄）
+  M 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F）
+  N 列處理（更新原列／插入新列——插入新列時原列不動，複製一份新列在下面，
            只改新列的 I／L／E，其餘欄位照抄原列）
 """
 
@@ -33,24 +34,24 @@ RULES_SHEET_NAME = "財報篩選規則"
 
 RULES_HEADER = [
     "啟用", "規則名稱", "條件1欄位", "條件1比對", "條件1值",
-    "條件2欄位", "條件2比對", "條件2值",
+    "條件2欄位", "條件2比對", "條件2值", "條件關係(且/或)",
     "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理",
 ]
 
 # 預設規則（第一次建立分頁時寫入，之後只從分頁讀取，不再看這份清單）。
 DEFAULT_RULES: list[list[object]] = [
-    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "匯款收入", "", "", False, "更新原列"],
-    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列"],
-    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "代收代付-收入", 0, "藍新科技", False, "更新原列"],
-    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "工具包押金", 0, "工具包押金", False, "更新原列"],
-    [True, "電信費", "D", "等於", "電信費", "", "", "", "電話費", 0, "電話費", False, "更新原列"],
-    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "利息收入", 0, "利息收入", False, "更新原列"],
-    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "內勤勞保費", -2, "內勤勞保費", False, "更新原列"],
-    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "內勤退休金", -3, "內勤退休金", False, "更新原列"],
-    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "水費", -2, "水費", False, "更新原列"],
-    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "水費", -1, "水費", False, "插入新列"],
-    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "電費", -2, "電費", False, "更新原列"],
-    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "電費", -1, "電費", False, "插入新列"],
+    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "或", "匯款收入", "", "", False, "更新原列"],
+    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "或", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列"],
+    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "或", "代收代付-收入", 0, "藍新科技", False, "更新原列"],
+    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "或", "工具包押金", 0, "工具包押金", False, "更新原列"],
+    [True, "電信費", "D", "等於", "電信費", "", "", "", "或", "電話費", 0, "電話費", False, "更新原列"],
+    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "或", "利息收入", 0, "利息收入", False, "更新原列"],
+    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "或", "內勤勞保費", -2, "內勤勞保費", False, "更新原列"],
+    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "或", "內勤退休金", -3, "內勤退休金", False, "更新原列"],
+    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "或", "水費", -2, "水費", False, "更新原列"],
+    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "或", "水費", -1, "水費", False, "插入新列"],
+    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "或", "電費", -2, "電費", False, "更新原列"],
+    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "或", "電費", -1, "電費", False, "插入新列"],
 ]
 
 INSERT_ACTION = "插入新列"
@@ -130,11 +131,12 @@ class Rule:
         self.col2 = str(_cell(raw, 6) or "").strip().upper()
         self.cmp2 = str(_cell(raw, 7) or "").strip()
         self.values2 = [v.strip() for v in str(_cell(raw, 8) or "").split(",") if v.strip()]
-        self.set_i = str(_cell(raw, 9) or "").strip()
-        self.month_offset = _to_int_or_none(_cell(raw, 10))
-        self.suffix = str(_cell(raw, 11) or "").strip()
-        self.move_complaint_amount = _to_bool(_cell(raw, 12))
-        self.action = str(_cell(raw, 13) or "").strip() or "更新原列"
+        self.relation = str(_cell(raw, 9) or "").strip() or "或"
+        self.set_i = str(_cell(raw, 10) or "").strip()
+        self.month_offset = _to_int_or_none(_cell(raw, 11))
+        self.suffix = str(_cell(raw, 12) or "").strip()
+        self.move_complaint_amount = _to_bool(_cell(raw, 13))
+        self.action = str(_cell(raw, 14) or "").strip() or "更新原列"
 
     def _one_condition_matches(self, row: list[object], col: str, cmp_: str, values: list[str]) -> bool:
         if not col or not values:
@@ -145,11 +147,13 @@ class Rule:
         return any(v in text for v in values)
 
     def matches(self, row: list[object]) -> bool:
-        if self._one_condition_matches(row, self.col1, self.cmp1, self.values1):
-            return True
-        if self.col2:
-            return self._one_condition_matches(row, self.col2, self.cmp2, self.values2)
-        return False
+        cond1 = self._one_condition_matches(row, self.col1, self.cmp1, self.values1)
+        if not self.col2:
+            return cond1
+        cond2 = self._one_condition_matches(row, self.col2, self.cmp2, self.values2)
+        if self.relation == "且":
+            return cond1 and cond2
+        return cond1 or cond2
 
     def l_value(self, row: list[object]) -> str | None:
         if self.month_offset is None or not self.suffix:
