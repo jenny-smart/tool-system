@@ -161,7 +161,7 @@ def _get_gspread_client():
         pass
 
     if service_account_info is None:
-        raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip() or os.getenv("GOOGLE_SERVICE_ACCOUNT", "").strip()
         if raw_json:
             service_account_info = json.loads(raw_json)
 
@@ -832,8 +832,20 @@ def search_atm_unpaid_orders(session, date_until: str, ui_logger=None) -> List[D
 
 
 def paste_atm_unpaid_list(region: str, rows: List[Dict], ui_logger=None) -> Dict:
+    """把待付款 ATM 名單貼進工作表 I~L 欄。
+
+    修正紀錄：原本用「B 欄（狀態）最後一列 + 5」推算起始列，但 B 欄是人工
+    欄位，這個函式寫入的 I~L 欄和 process_atm_rows() 寫入的 P~T 欄都不會
+    動到 B 欄，B 欄常常沒有跟著更新，導致起算列數過早；加上只用固定
+    間隔 5 列探測、只檢查探測點單一列有沒有資料，一批貼超過 5 筆時，後面
+    幾列完全沒被檢查過是否已有資料，就直接覆蓋掉——這正是之前「新增列時
+    覆蓋原始 ATM 資料」的原因。
+    改成一律接在整張工作表（任何欄位）目前最後一列有資料的下一列開始貼，
+    確定不會覆蓋任何既有列；另外用 J 欄（訂單編號）去重，避免同一筆訂單
+    因為還沒對帳、下次掃描又查到而被重複貼上。
+    """
     log = make_logger(ui_logger)
-    result = {"pasted": 0, "start_row": None, "errors": []}
+    result = {"pasted": 0, "start_row": None, "skipped_existing": 0, "errors": []}
 
     if not rows:
         log("沒有資料可以貼")
@@ -842,29 +854,30 @@ def paste_atm_unpaid_list(region: str, rows: List[Dict], ui_logger=None) -> Dict
     ws = get_atm_worksheet(region)
     all_values = memo.with_retry(ws.get_all_values)
 
-    last_b_row = 0
+    existing_order_nos = {
+        memo.safe_cell(row, COL_ORDER_NO)
+        for row in all_values[1:]
+        if memo.safe_cell(row, COL_ORDER_NO)
+    }
+    new_rows = [r for r in rows if str(r.get("order_no", "")).strip() not in existing_order_nos]
+    skipped = len(rows) - len(new_rows)
+    if skipped:
+        log(f"略過 {skipped} 筆已存在於工作表的訂單（避免重複新增）")
+    result["skipped_existing"] = skipped
+
+    if not new_rows:
+        log("沒有新資料需要貼上（全部已存在）")
+        return result
+
+    last_row_with_data = 0
     for idx, row in enumerate(all_values, start=1):
-        b_val = row[1] if len(row) > 1 else ""
-        if str(b_val).strip():
-            last_b_row = idx
+        if any(str(cell).strip() for cell in row):
+            last_row_with_data = idx
 
-    start_row = last_b_row + 5
-
-    def block_has_data(row_num: int) -> bool:
-        if row_num - 1 >= len(all_values):
-            return False
-        row = all_values[row_num - 1]
-        for col_idx in range(8, 13):  # I~M：0-based index 8~12
-            if len(row) > col_idx and str(row[col_idx]).strip():
-                return True
-        return False
-
-    while block_has_data(start_row):
-        log(f"第 {start_row} 列的 I~L 欄已經有資料，往下移 5 列")
-        start_row += 5
+    start_row = last_row_with_data + 1
 
     updates = []
-    for i, r in enumerate(rows):
+    for i, r in enumerate(new_rows):
         row_num = start_row + i
         updates.append({
             "range": f"I{row_num}:L{row_num}",
@@ -873,8 +886,8 @@ def paste_atm_unpaid_list(region: str, rows: List[Dict], ui_logger=None) -> Dict
 
     memo.with_retry(ws.batch_update, updates, value_input_option="RAW")
 
-    result["pasted"] = len(rows)
+    result["pasted"] = len(new_rows)
     result["start_row"] = start_row
-    log(f"✅ 已從第 {start_row} 列開始，貼上 {len(rows)} 筆資料到 I~L 欄")
+    log(f"✅ 已從第 {start_row} 列開始，貼上 {len(new_rows)} 筆資料到 I~L 欄（略過 {skipped} 筆已存在）")
 
     return result
