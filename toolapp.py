@@ -2615,6 +2615,41 @@ def run_deposit_report_flag_discrepancies(*, month="", start_date=None, end_date
     return f"完成：檢查 {result['checked']} 人（今年已上課），標記異常 {result['flagged']} 筆"
 
 
+def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    from tools.finance_management.statement_update import apply_lc_remittance_filter
+
+    cities = ["台北", "台中", "桃園", "新竹", "高雄"]
+    if area == "全區":
+        targets = cities
+    elif area in cities:
+        targets = [area]
+    else:
+        raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
+
+    messages = []
+    failed = []
+    for i, city in enumerate(targets):
+        if i > 0:
+            time.sleep(3)  # 地區之間稍微間隔，避免瞬間打太多 Sheets API 請求觸發配額限制
+        try:
+            result = apply_lc_remittance_filter(city)
+            messages.append(
+                f"{city}：I 欄設為匯款收入 {result['remittance_marked']} 筆，"
+                f"LC客訴搬移金額 {result['complaint_moved']} 筆"
+            )
+            if on_progress:
+                on_progress(messages[-1], "success")
+        except Exception as exc:
+            failed.append(f"{city}：{exc}")
+            if on_progress:
+                on_progress(f"{city}：失敗 - {exc}", "error")
+
+    result_text = "\n".join(messages)
+    if failed:
+        result_text += "\n❌ 失敗：" + "；".join(failed)
+    return result_text
+
+
 def _get_vip_workflow():
     from config.vip_config import MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID
     from services.google_auth import get_drive_service, get_gspread_client
@@ -2720,6 +2755,7 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
+    {"name": "【財報】財報富邦更新｜LC匯款收入／客訴搬移", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
