@@ -24,9 +24,12 @@
            會各拿原始金額的一半——原始金額是整數且不能平分時，前面的規則
            拿少 1 元的那一半、後面（插入新列）的規則拿多 1 元的那一半，
            兩邊加起來等於原始金額，不會多算或少算。留空表示照抄原值，不分帳）
+  O 條件關係（且／或，留空當「或」——例如 H含新訓 或 L含新訓；要「且」就填「且」，
+           只有同時有條件1和條件2時才有意義）
 
-新增欄位一律加在「列處理」之後（不要插在中間），避免手動插入分頁欄位時
-把既有欄位的資料位置擠掉、讓已經對好的規則跑錯。
+新增欄位一律加在「金額對半欄位」之後（不要插在中間），避免手動插入分頁欄位時
+把既有欄位的資料位置擠掉、讓已經對好的規則跑錯。分頁已存在時，程式會自動把
+少的欄位補在最後面，不用手動調整。
 """
 
 from __future__ import annotations
@@ -42,22 +45,23 @@ RULES_HEADER = [
     "啟用", "規則名稱", "條件1欄位", "條件1比對", "條件1值",
     "條件2欄位", "條件2比對", "條件2值",
     "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理", "金額對半欄位",
+    "條件關係(且/或)",
 ]
 
 # 預設規則（第一次建立分頁時寫入，之後只從分頁讀取，不再看這份清單）。
 DEFAULT_RULES: list[list[object]] = [
-    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "匯款收入", "", "", False, "更新原列", ""],
-    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列", ""],
-    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "代收代付-收入", 0, "藍新科技", False, "更新原列", ""],
-    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "工具包押金", 0, "工具包押金", False, "更新原列", ""],
-    [True, "電信費", "D", "等於", "電信費", "", "", "", "電話費", 0, "電話費", False, "更新原列", ""],
-    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "利息收入", 0, "利息收入", False, "更新原列", ""],
-    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "內勤勞保費", -2, "內勤勞保費", False, "更新原列", ""],
-    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "內勤退休金", -3, "內勤退休金", False, "更新原列", ""],
-    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "水費", -2, "水費", False, "更新原列", "E"],
-    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "水費", -1, "水費", False, "插入新列", "E"],
-    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "電費", -2, "電費", False, "更新原列", "E"],
-    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "電費", -1, "電費", False, "插入新列", "E"],
+    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "匯款收入", "", "", False, "更新原列", "", ""],
+    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列", "", ""],
+    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "代收代付-收入", 0, "藍新科技", False, "更新原列", "", ""],
+    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "工具包押金", 0, "工具包押金", False, "更新原列", "", "或"],
+    [True, "電信費", "D", "等於", "電信費", "", "", "", "電話費", 0, "電話費", False, "更新原列", "", ""],
+    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "利息收入", 0, "利息收入", False, "更新原列", "", ""],
+    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "內勤勞保費", -2, "內勤勞保費", False, "更新原列", "", ""],
+    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "內勤退休金", -3, "內勤退休金", False, "更新原列", "", ""],
+    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "水費", -2, "水費", False, "更新原列", "E", ""],
+    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "水費", -1, "水費", False, "插入新列", "E", ""],
+    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "電費", -2, "電費", False, "更新原列", "E", ""],
+    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "電費", -1, "電費", False, "插入新列", "E", ""],
 ]
 
 INSERT_ACTION = "插入新列"
@@ -143,6 +147,7 @@ class Rule:
         self.move_complaint_amount = _to_bool(_cell(raw, 12))
         self.action = str(_cell(raw, 13) or "").strip() or "更新原列"
         self.split_column = str(_cell(raw, 14) or "").strip().upper()
+        self.relation = str(_cell(raw, 15) or "").strip() or "或"
 
     def _one_condition_matches(self, row: list[object], col: str, cmp_: str, values: list[str]) -> bool:
         if not col or not values:
@@ -153,11 +158,13 @@ class Rule:
         return any(v in text for v in values)
 
     def matches(self, row: list[object]) -> bool:
-        if self._one_condition_matches(row, self.col1, self.cmp1, self.values1):
-            return True
-        if self.col2:
-            return self._one_condition_matches(row, self.col2, self.cmp2, self.values2)
-        return False
+        cond1 = self._one_condition_matches(row, self.col1, self.cmp1, self.values1)
+        if not self.col2:
+            return cond1
+        cond2 = self._one_condition_matches(row, self.col2, self.cmp2, self.values2)
+        if self.relation == "且":
+            return cond1 and cond2
+        return cond1 or cond2
 
     def l_value(self, row: list[object]) -> str | None:
         if self.month_offset is None or not self.suffix:
@@ -240,8 +247,9 @@ def load_rules() -> list[Rule]:
     service = get_sheets_service()
     master_id = get_master_spreadsheet_id()
     _ensure_rules_sheet(service, master_id)
+    last_col = _column_letter(len(RULES_HEADER))
     res = service.spreadsheets().values().get(
-        spreadsheetId=master_id, range=f"'{RULES_SHEET_NAME}'!A2:M"
+        spreadsheetId=master_id, range=f"'{RULES_SHEET_NAME}'!A2:{last_col}"
     ).execute()
     return [Rule(row) for row in res.get("values", []) if any(str(c).strip() for c in row)]
 
