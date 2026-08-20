@@ -2650,11 +2650,16 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
 
 
 def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from calendar import monthrange
+    from datetime import date as _date
+
     from tools.finance_management.cash_gap import CASH_GAP_AREAS, write_cash_gap_sheet
 
-    as_of = end_date or start_date
-    if as_of is None:
-        raise ValueError("請選擇日期區間（試算「截至」的那一天，例如當月最後一天）")
+    year_month = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    year, mon = int(year_month[:4]), int(year_month[4:])
+    as_of = _date(year, mon, monthrange(year, mon)[1])
 
     if area == "全區":
         areas = CASH_GAP_AREAS
@@ -3475,6 +3480,16 @@ with date_col:
         elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
+        elif selected_function == "【財報】All財報現金缺口｜試算並寫入現金缺口試算表":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_cash_gap_period",
+            )
+            st.caption("格式：YYYYMM；試算該月最後一天的現金缺口")
         elif selected_function == "【儲值金】複製期別檔案":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
