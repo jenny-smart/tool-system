@@ -20,14 +20,17 @@ from tools.memo_system.change_order import get_worksheet
 AREAS = ["台北", "台中"]
 TZ = ZoneInfo("Asia/Taipei")
 CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+CALENDAR_ID = "jenny@hers.com.tw"
 
 
 def create_calendar_reminder(summary: str, description: str) -> None:
     """用 Google Calendar 事件當提醒，取代寄信。
 
     跟其他排程共用同一套 Google 認證：sitecustomize 在 GOOGLE_OAUTH_* 就緒時，
-    會把這裡建立的服務帳號憑證換成 Jenny 本人的 OAuth，事件才會建到她自己的
-    日曆（calendarId="primary"）上，而不是服務帳號自己的日曆。
+    會把這裡建立的服務帳號憑證換成 Jenny 本人（jenny@lemonclean.com.tw）的
+    OAuth。事件寫進 CALENDAR_ID 指定的日曆，而不是這個 OAuth 身分自己的
+    主日曆——所以 CALENDAR_ID 這個日曆必須先分享給 jenny@lemonclean.com.tw
+    「變更活動」權限，不然這裡會收到權限錯誤。
     """
     creds = service_account.Credentials.from_service_account_info(
         get_service_account_info(), scopes=CALENDAR_SCOPES
@@ -43,14 +46,21 @@ def create_calendar_reminder(summary: str, description: str) -> None:
         "end": {"dateTime": end.isoformat(), "timeZone": "Asia/Taipei"},
         "reminders": {"useDefault": False, "overrides": [{"method": "popup", "minutes": 0}]},
     }
-    service.events().insert(calendarId="primary", body=body).execute()
+    service.events().insert(calendarId=CALENDAR_ID, body=body).execute()
 
 
-def describe(label: str, candidates: list[dict[str, object]]) -> str:
+def describe(label: str, candidates: list[dict[str, object]], detail_key: str = "") -> str:
     if not candidates:
         return f"　{label}：0 筆"
-    rows = "、".join(str(item["sheet_row"]) for item in candidates)
-    return f"　{label}：{len(candidates)} 筆（列號：{rows}）"
+    if not detail_key:
+        parts = [str(item["sheet_row"]) for item in candidates]
+    else:
+        parts = []
+        for item in candidates:
+            detail = str(item.get(detail_key, "")).strip()
+            row_text = str(item["sheet_row"])
+            parts.append(f"{row_text}（{detail}）" if detail else row_text)
+    return f"　{label}：{len(candidates)} 筆（{'、'.join(parts)}）"
 
 
 def main() -> None:
@@ -65,9 +75,9 @@ def main() -> None:
         total += len(atm_candidates) + len(payment_candidates) + len(deposit_candidates)
 
         lines.append(f"【{area}】")
-        lines.append(describe("異動 ATM 退款", atm_candidates))
-        lines.append(describe("請款記錄", payment_candidates))
-        lines.append(describe("工具包押金退款", deposit_candidates))
+        lines.append(describe("異動 ATM 退款", atm_candidates, "note"))       # K 欄（後台備註）
+        lines.append(describe("請款記錄", payment_candidates, "memo"))         # E 欄（費用說明）
+        lines.append(describe("工具包押金退款", deposit_candidates, "memo"))   # Q 欄（留言）
         lines.append("")
 
     report = "\n".join(lines).strip()
