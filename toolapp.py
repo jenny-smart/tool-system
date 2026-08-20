@@ -2650,6 +2650,23 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
     return result_text
 
 
+def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from calendar import monthrange
+    from datetime import date as _date
+
+    from tools.finance_management.cash_gap import write_cash_gap_sheet
+
+    year_month = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month):
+        raise ValueError("請輸入 6 位數月份（YYYYMM），例如 202607")
+    year, mon = int(year_month[:4]), int(year_month[4:])
+    as_of = _date(year, mon, monthrange(year, mon)[1])
+
+    results = write_cash_gap_sheet(as_of)
+    lines = [f"{a}：現金餘額 {r['BF14']:,.0f}" for a, r in results.items()]
+    return "已寫入「現金缺口試算」工作表：\n" + "\n".join(lines)
+
+
 def _get_vip_workflow():
     from config.vip_config import MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID
     from services.google_auth import get_drive_service, get_gspread_client
@@ -2756,6 +2773,7 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【財報】財報富邦更新｜LC匯款收入／客訴搬移", "handler": run_fubon_statement_lc_filter, "enabled": True},
+    {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},

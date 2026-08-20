@@ -25,10 +25,22 @@ from datetime import date
 
 from tools.common.config_loader import get_sheets_service
 from tools.finance_management.statement_registry import (
+    CASH_GAP_AREA,
     marketing_expense_spreadsheet_id,
+    resolve_standalone_spreadsheet_id,
     resolve_statement_location,
     sheet_title_for_gid,
 )
+
+CASH_GAP_SHEET_NAME = "現金缺口試算"
+CASH_GAP_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
+CASH_GAP_ROWS = [
+    ("現金餘額(BF14)", "BF14"),
+    ("內勤薪資(BF21)", "BF21"),
+    ("專員薪資(BF22)", "BF22"),
+    ("行銷費用(BF23)", "BF23"),
+    ("2%支出(BF24)", "BF24"),
+]
 
 COL_B, COL_G, COL_H, COL_L, COL_M = 2, 7, 8, 12, 13
 
@@ -224,3 +236,47 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float]:
         "BF23": marketing_expense(area, as_of.month),
         "BF24": finance_bimonthly_value(area, as_of.month),
     }
+
+
+def _ensure_cash_gap_sheet(service, spreadsheet_id: str) -> None:
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets.properties.title"
+    ).execute()
+    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+    if CASH_GAP_SHEET_NAME in titles:
+        return
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{"addSheet": {"properties": {"title": CASH_GAP_SHEET_NAME}}}]},
+    ).execute()
+
+
+def write_cash_gap_sheet(
+    as_of: date, areas: list[str] | None = None
+) -> dict[str, dict[str, float]]:
+    """試算各地區現金缺口，整批寫進獨立的「現金缺口試算」工作表（不動 BF 欄）。"""
+    areas = areas or CASH_GAP_AREAS
+    results = {area: compute_cash_gap(area, as_of) for area in areas}
+
+    spreadsheet_id = resolve_standalone_spreadsheet_id(CASH_GAP_AREA)
+    service = get_sheets_service()
+    _ensure_cash_gap_sheet(service, spreadsheet_id)
+
+    date_text = as_of.strftime("%Y/%m/%d")
+    rows = [
+        [""] + areas + ["ALL"],
+        ["日期"] + [date_text] * len(areas) + [date_text],
+    ]
+    for label, key in CASH_GAP_ROWS:
+        values = [results[area][key] for area in areas]
+        rows.append([label, *values, sum(values)])
+
+    last_col = _column_letter(len(areas) + 2)
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{CASH_GAP_SHEET_NAME}'!A1:{last_col}{len(rows)}",
+        valueInputOption="USER_ENTERED",
+        body={"values": rows},
+    ).execute()
+
+    return results
