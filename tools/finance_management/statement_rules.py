@@ -11,16 +11,22 @@
   C 條件1欄位（例如 D／H／L）
   D 條件1比對（包含／等於）
   E 條件1值（逗號分隔＝多值 OR，比對 C 欄那個財報欄位）
-  F 條件2欄位（留空表示沒有條件2）
+  F 條件2欄位（留空表示沒有條件2；有值時跟條件1是 OR，例如 H含新訓 或 L含新訓）
   G 條件2比對
   H 條件2值
-  I 條件關係（且／或，留空當「或」——例如 H含新訓 或 L含新訓；要「且」就填「且」）
-  J 設定I欄（符合就把財報 I 欄設成這個值）
-  K L欄月份位移（相對 K 欄的月份，例如 -2 表示往前兩個月；留空表示不改 L 欄）
-  L L欄後綴文字（L 欄標記＝該月份 "YYYY.MM"＋"-"＋這個後綴；留空表示不改 L 欄）
-  M 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F）
-  N 列處理（更新原列／插入新列——插入新列時原列不動，複製一份新列在下面，
+  I 設定I欄（符合就把財報 I 欄設成這個值）
+  J L欄月份位移（相對 K 欄的月份，例如 -2 表示往前兩個月；留空表示不改 L 欄）
+  K L欄後綴文字（L 欄標記＝該月份 "YYYY.MM"＋"-"＋這個後綴；留空表示不改 L 欄）
+  L 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F）
+  M 列處理（更新原列／插入新列——插入新列時原列不動，複製一份新列在下面，
            只改新列的 I／L／E，其餘欄位照抄原列）
+  N 金額對半欄位（例如 E；有填時，這條規則跟同一列命中的「更新原列」規則
+           會各拿原始金額的一半——原始金額是整數且不能平分時，前面的規則
+           拿少 1 元的那一半、後面（插入新列）的規則拿多 1 元的那一半，
+           兩邊加起來等於原始金額，不會多算或少算。留空表示照抄原值，不分帳）
+
+新增欄位一律加在「列處理」之後（不要插在中間），避免手動插入分頁欄位時
+把既有欄位的資料位置擠掉、讓已經對好的規則跑錯。
 """
 
 from __future__ import annotations
@@ -34,24 +40,24 @@ RULES_SHEET_NAME = "財報篩選規則"
 
 RULES_HEADER = [
     "啟用", "規則名稱", "條件1欄位", "條件1比對", "條件1值",
-    "條件2欄位", "條件2比對", "條件2值", "條件關係(且/或)",
-    "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理",
+    "條件2欄位", "條件2比對", "條件2值",
+    "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理", "金額對半欄位",
 ]
 
 # 預設規則（第一次建立分頁時寫入，之後只從分頁讀取，不再看這份清單）。
 DEFAULT_RULES: list[list[object]] = [
-    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "或", "匯款收入", "", "", False, "更新原列"],
-    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "或", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列"],
-    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "或", "代收代付-收入", 0, "藍新科技", False, "更新原列"],
-    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "或", "工具包押金", 0, "工具包押金", False, "更新原列"],
-    [True, "電信費", "D", "等於", "電信費", "", "", "", "或", "電話費", 0, "電話費", False, "更新原列"],
-    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "或", "利息收入", 0, "利息收入", False, "更新原列"],
-    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "或", "內勤勞保費", -2, "內勤勞保費", False, "更新原列"],
-    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "或", "內勤退休金", -3, "內勤退休金", False, "更新原列"],
-    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "或", "水費", -2, "水費", False, "更新原列"],
-    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "或", "水費", -1, "水費", False, "插入新列"],
-    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "或", "電費", -2, "電費", False, "更新原列"],
-    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "或", "電費", -1, "電費", False, "插入新列"],
+    [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "匯款收入", "", "", False, "更新原列", ""],
+    [True, "客訴退費", "L", "包含", "客訴", "", "", "", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列", ""],
+    [True, "藍新科技代收代付", "H", "包含", "藍新科技", "", "", "", "代收代付-收入", 0, "藍新科技", False, "更新原列", ""],
+    [True, "新訓工具包押金", "H", "包含", "新訓", "L", "包含", "新訓", "工具包押金", 0, "工具包押金", False, "更新原列", ""],
+    [True, "電信費", "D", "等於", "電信費", "", "", "", "電話費", 0, "電話費", False, "更新原列", ""],
+    [True, "利息收入", "D", "等於", "定存息,利息", "", "", "", "利息收入", 0, "利息收入", False, "更新原列", ""],
+    [True, "內勤勞保費", "D", "等於", "勞保費", "", "", "", "內勤勞保費", -2, "內勤勞保費", False, "更新原列", ""],
+    [True, "內勤退休金", "D", "等於", "勞退", "", "", "", "內勤退休金", -3, "內勤退休金", False, "更新原列", ""],
+    [True, "水費(前2月)", "D", "等於", "市水水費", "", "", "", "水費", -2, "水費", False, "更新原列", "E"],
+    [True, "水費(前1月)", "D", "等於", "市水水費", "", "", "", "水費", -1, "水費", False, "插入新列", "E"],
+    [True, "電費(前2月)", "D", "等於", "電費", "", "", "", "電費", -2, "電費", False, "更新原列", "E"],
+    [True, "電費(前1月)", "D", "等於", "電費", "", "", "", "電費", -1, "電費", False, "插入新列", "E"],
 ]
 
 INSERT_ACTION = "插入新列"
@@ -131,12 +137,12 @@ class Rule:
         self.col2 = str(_cell(raw, 6) or "").strip().upper()
         self.cmp2 = str(_cell(raw, 7) or "").strip()
         self.values2 = [v.strip() for v in str(_cell(raw, 8) or "").split(",") if v.strip()]
-        self.relation = str(_cell(raw, 9) or "").strip() or "或"
-        self.set_i = str(_cell(raw, 10) or "").strip()
-        self.month_offset = _to_int_or_none(_cell(raw, 11))
-        self.suffix = str(_cell(raw, 12) or "").strip()
-        self.move_complaint_amount = _to_bool(_cell(raw, 13))
-        self.action = str(_cell(raw, 14) or "").strip() or "更新原列"
+        self.set_i = str(_cell(raw, 9) or "").strip()
+        self.month_offset = _to_int_or_none(_cell(raw, 10))
+        self.suffix = str(_cell(raw, 11) or "").strip()
+        self.move_complaint_amount = _to_bool(_cell(raw, 12))
+        self.action = str(_cell(raw, 13) or "").strip() or "更新原列"
+        self.split_column = str(_cell(raw, 14) or "").strip().upper()
 
     def _one_condition_matches(self, row: list[object], col: str, cmp_: str, values: list[str]) -> bool:
         if not col or not values:
@@ -147,13 +153,11 @@ class Rule:
         return any(v in text for v in values)
 
     def matches(self, row: list[object]) -> bool:
-        cond1 = self._one_condition_matches(row, self.col1, self.cmp1, self.values1)
-        if not self.col2:
-            return cond1
-        cond2 = self._one_condition_matches(row, self.col2, self.cmp2, self.values2)
-        if self.relation == "且":
-            return cond1 and cond2
-        return cond1 or cond2
+        if self._one_condition_matches(row, self.col1, self.cmp1, self.values1):
+            return True
+        if self.col2:
+            return self._one_condition_matches(row, self.col2, self.cmp2, self.values2)
+        return False
 
     def l_value(self, row: list[object]) -> str | None:
         if self.month_offset is None or not self.suffix:
@@ -257,6 +261,30 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
             else:
                 in_place_rule = rule  # 同一列多條「更新原列」規則命中時，以最後一條為準
 
+        # 金額對半：同一列命中的「更新原列」規則＋「插入新列」規則，如果指定了
+        # 同一個金額對半欄位，就把原始金額拆成整數兩半（不能平分時，前面／
+        # 更新原列那份少 1、插入新列那份多 1），取代直接複製整筆金額。
+        split_targets: list[tuple[str, int | None]] = []
+        split_column = None
+        if in_place_rule is not None and in_place_rule.split_column:
+            split_column = in_place_rule.split_column
+            split_targets.append(("in_place", None))
+        for i, rule in enumerate(insert_rules):
+            if rule.split_column and (split_column is None or rule.split_column == split_column):
+                split_column = split_column or rule.split_column
+                split_targets.append(("insert", i))
+        split_values: dict[tuple[str, int | None], float] = {}
+        if split_column and len(split_targets) >= 2:
+            total = _to_number(_cell(row, _letter_to_index(split_column)))
+            parts = len(split_targets)
+            base = int(total // parts)
+            remainder = int(total - base * parts)
+            shares = [base] * parts
+            for i in range(parts - remainder, parts):
+                shares[i] += 1
+            for target, share in zip(split_targets, shares):
+                split_values[target] = share
+
         if in_place_rule is not None:
             if in_place_rule.set_i:
                 value_updates.append(
@@ -272,10 +300,15 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
                 value_updates.append(
                     {"range": f"'{title}'!E{row_idx}", "values": [[-f_value]]}
                 )
+            if ("in_place", None) in split_values:
+                value_updates.append({
+                    "range": f"'{title}'!{split_column}{row_idx}",
+                    "values": [[split_values[("in_place", None)]]],
+                })
 
         if insert_rules:
             new_rows = []
-            for rule in insert_rules:
+            for i, rule in enumerate(insert_rules):
                 new_row = list(row)
                 if rule.set_i:
                     while len(new_row) < 9:
@@ -290,6 +323,11 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
                     while len(new_row) < 5:
                         new_row.append("")
                     new_row[4] = -_to_number(_cell(row, 6))
+                if ("insert", i) in split_values:
+                    col_index = _letter_to_index(rule.split_column)
+                    while len(new_row) < col_index:
+                        new_row.append("")
+                    new_row[col_index - 1] = split_values[("insert", i)]
                 new_rows.append(new_row)
             pending_inserts.append((row_idx, new_rows))
 
