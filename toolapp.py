@@ -2649,7 +2649,7 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
     return result_text
 
 
-def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from calendar import monthrange
     from datetime import date as _date
 
@@ -2668,7 +2668,7 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
     else:
         raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
 
-    results = write_cash_gap_sheet(as_of, areas=areas)
+    results = write_cash_gap_sheet(as_of, areas=areas, on_progress=on_progress)
     def _fmt(value):
         return f"{value:,.0f}" if isinstance(value, (int, float)) else str(value)
 
@@ -4371,6 +4371,8 @@ if run_clicked:
                 "【儲值金】套用公式",
                 "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）",
                 "【檸檬後台】預收款金額",
+                "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
+                "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完

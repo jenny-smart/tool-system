@@ -26,6 +26,7 @@ import time
 from datetime import date
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+from tools.finance_management.execution_log import log_execution
 from tools.finance_management.statement_registry import (
     marketing_expense_spreadsheet_id,
     resolve_statement_location,
@@ -300,17 +301,34 @@ def _ensure_cash_gap_sheet(service, spreadsheet_id: str) -> None:
 
 
 def write_cash_gap_sheet(
-    as_of: date, areas: list[str] | None = None
+    as_of: date, areas: list[str] | None = None, on_progress=None
 ) -> dict[str, dict[str, float]]:
     """試算各地區現金缺口，整批寫進主控試算表（Jenny's Lemonhometools）裡獨立的
     「現金缺口試算」工作表（不動各地區財報原本的 BF 欄，也不需要在「財報設定」
-    分頁另外設定試算表ID）。"""
+    分頁另外設定試算表ID）。
+
+    on_progress(msg, level) 可選，每算完一個地區就回報一次，讓呼叫端（例如
+    Streamlit 執行日誌）即時顯示進度，不用等全部地區跑完才看到結果。
+    """
     areas = areas or CASH_GAP_AREAS
+    log_execution("All財報現金缺口", "／".join(areas), "開始", f"期別截至 {as_of}")
     results = {}
     for i, area in enumerate(areas):
         if i > 0:
             time.sleep(2)  # 地區之間留點間隔，避免瞬間打太多 Sheets API 請求觸發配額限制
+        if on_progress:
+            on_progress(f"{area}：試算中...", "info")
         results[area] = compute_cash_gap(area, as_of)
+        errors = [k for k, v in results[area].items() if isinstance(v, str)]
+        if errors:
+            message = f"{area}：完成，但 {'、'.join(errors)} 出錯"
+            if on_progress:
+                on_progress(message, "warning")
+        else:
+            message = f"{area}：試算完成"
+            if on_progress:
+                on_progress(message, "success")
+        log_execution("All財報現金缺口", area, "完成" if not errors else "部分失敗", message)
 
     spreadsheet_id = get_master_spreadsheet_id()
     service = get_sheets_service()

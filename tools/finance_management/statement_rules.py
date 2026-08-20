@@ -47,6 +47,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+from tools.finance_management.execution_log import log_execution
 from tools.finance_management.statement_registry import resolve_statement_location
 
 RULES_SHEET_NAME = "財報篩選規則"
@@ -359,7 +360,24 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
     Q 欄已經有更新時間的列會直接跳過，不會重複套用規則——重複執行同一段
     日期區間是安全的，不會把 F 欄清過一次的客訴列再清一次、也不會重複插入
     水電費對半的新列。
+
+    每次執行都會在主控試算表的「財務工具執行記錄」分頁留下一筆記錄。
     """
+    date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
+    log_execution("財報富邦更新套用規則", area, "開始", f"日期區間：{date_range}")
+    try:
+        result = _apply_rules_impl(area, start_date, end_date)
+    except Exception as exc:
+        log_execution("財報富邦更新套用規則", area, "失敗", str(exc))
+        raise
+    log_execution(
+        "財報富邦更新套用規則", area, "完成",
+        f"更新 {result['updated_rows']} 格，插入 {result['inserted_rows']} 列",
+    )
+    return result
+
+
+def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, int]:
     rules = [r for r in load_rules() if r.enabled]
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
     values = _read_values(spreadsheet_id, title)
