@@ -23,11 +23,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from tools.common.config_loader import get_sheets_service
+from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.statement_registry import (
-    CASH_GAP_AREA,
     marketing_expense_spreadsheet_id,
-    resolve_standalone_spreadsheet_id,
     resolve_statement_location,
     sheet_title_for_gid,
 )
@@ -254,11 +252,13 @@ def _ensure_cash_gap_sheet(service, spreadsheet_id: str) -> None:
 def write_cash_gap_sheet(
     as_of: date, areas: list[str] | None = None
 ) -> dict[str, dict[str, float]]:
-    """試算各地區現金缺口，整批寫進獨立的「現金缺口試算」工作表（不動 BF 欄）。"""
+    """試算各地區現金缺口，整批寫進主控試算表（Jenny's Lemonhometools）裡獨立的
+    「現金缺口試算」工作表（不動各地區財報原本的 BF 欄，也不需要在「財報設定」
+    分頁另外設定試算表ID）。"""
     areas = areas or CASH_GAP_AREAS
     results = {area: compute_cash_gap(area, as_of) for area in areas}
 
-    spreadsheet_id = resolve_standalone_spreadsheet_id(CASH_GAP_AREA)
+    spreadsheet_id = get_master_spreadsheet_id()
     service = get_sheets_service()
     _ensure_cash_gap_sheet(service, spreadsheet_id)
 
