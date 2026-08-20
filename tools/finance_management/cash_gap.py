@@ -1,18 +1,19 @@
-"""All財報現金缺口：試算各地區「現金」分頁的 BF14／BF21／BF22／BF23／BF24。
+"""All財報現金缺口：試算各地區的富邦餘額／元大餘額／內勤薪資／專員承攬費／
+行銷費用／2%支出，整批寫進「現金缺口試算」工作表。
 
 比照財報既有欄位配置（見 statement_update.py）：
   B=2  帳務日　G=7  富邦更新餘額　H=8  元大更新餘額　L=12  摘要／分類標籤　M=13  該列累計金額
 
-五個公式：
-  BF14＝富邦更新當月最後一筆（帳務日 <= 當月最後一天）G欄餘額
-        ＋元大更新當月最後一筆（帳務日 <= 當月最後一天）H欄餘額
-  BF21＝富邦更新中，帳務日 < 次月5日 且 L欄＝「{年月}-內勤薪資」的那一列 M欄
-  BF22＝富邦更新中，帳務日 < 次月10日 且 L欄＝「{年月}-專員薪資」或「{年月}-專員承攬費」
-        的列，加總 M欄
-  BF23＝行銷費用總管理試算表（固定分頁 GID＝228482464）第16列，欄位依月份與
+六個項目：
+  富邦餘額＝富邦更新當月最後一筆（帳務日 <= 當月最後一天）G欄餘額
+  元大餘額＝元大更新當月最後一筆（帳務日 <= 當月最後一天）H欄餘額
+  內勤薪資＝富邦更新中，帳務日 < 次月5日 且 L欄＝「{年月}-內勤薪資」的那一列 M欄
+  專員承攬費＝富邦更新中，帳務日 < 次月10日 且 L欄＝「{年月}-專員薪資」或
+        「{年月}-專員承攬費」的列，加總 M欄
+  行銷費用＝行銷費用總管理試算表（固定分頁 GID＝228482464）第9列，欄位依月份與
         地區位移：7月從 AS 欄起，每月位移 7 欄（同一月的區塊依序是
         台北／桃園／新竹／台中／家電／高雄／總計）
-  BF24＝財務分頁 O2 起算：單月只取當月欄；雙月要加回前一月欄
+  2%支出＝財務分頁 O2 起算：單月只取當月欄；雙月要加回前一月欄
         （1月對應 C 欄，每月位移 2 欄，7月＝O，8月＝Q ...）
 
 「其他地區以此類推」：同一組公式，只是換成該地區自己財報的「富邦更新」／
@@ -33,17 +34,18 @@ from tools.finance_management.statement_registry import (
 CASH_GAP_SHEET_NAME = "現金缺口試算"
 CASH_GAP_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 CASH_GAP_ROWS = [
-    ("現金餘額(BF14)", "BF14"),
-    ("內勤薪資(BF21)", "BF21"),
-    ("專員薪資(BF22)", "BF22"),
-    ("行銷費用(BF23)", "BF23"),
-    ("2%支出(BF24)", "BF24"),
+    ("富邦餘額", "富邦餘額"),
+    ("元大餘額", "元大餘額"),
+    ("內勤薪資", "內勤薪資"),
+    ("專員承攬費", "專員承攬費"),
+    ("行銷費用", "行銷費用"),
+    ("2%支出", "2%支出"),
 ]
 
 COL_B, COL_G, COL_H, COL_L, COL_M = 2, 7, 8, 12, 13
 
 MARKETING_REPORT_GID = "228482464"
-MARKETING_ROW = 16
+MARKETING_ROW = 9
 MARKETING_BASE_COLUMN = 45  # AS，對應 7月
 MARKETING_MONTH_STEP_COLUMNS = 7
 MARKETING_BASE_MONTH = 7
@@ -128,11 +130,14 @@ def _month_end_balance(area: str, report: str, balance_col: int, as_of: date) ->
     return last_value
 
 
-def cash_balance(area: str, as_of: date) -> float:
-    """BF14：富邦更新＋元大更新，當月最後一筆的餘額加總。"""
-    fubon_balance = _month_end_balance(area, "富邦更新", COL_G, as_of)
-    yuanta_balance = _month_end_balance(area, "元大更新", COL_H, as_of)
-    return fubon_balance + yuanta_balance
+def fubon_balance(area: str, as_of: date) -> float:
+    """富邦餘額：富邦更新當月最後一筆的 G 欄餘額。"""
+    return _month_end_balance(area, "富邦更新", COL_G, as_of)
+
+
+def yuanta_balance(area: str, as_of: date) -> float:
+    """元大餘額：元大更新當月最後一筆的 H 欄餘額。"""
+    return _month_end_balance(area, "元大更新", COL_H, as_of)
 
 
 def _label_amount_before(area: str, labels: list[str], before: date) -> float:
@@ -155,14 +160,14 @@ def internal_staff_salary(area: str, year_month: str, before: date) -> float:
 
 
 def specialist_salary(area: str, year_month: str, before: date) -> float:
-    """BF22：富邦更新裡「{年月}-專員薪資」或「{年月}-專員承攬費」、
+    """專員承攬費：富邦更新裡「{年月}-專員薪資」或「{年月}-專員承攬費」、
     帳務日 < before 的列，加總 M欄。"""
     labels = [f"{year_month}-專員薪資", f"{year_month}-專員承攬費"]
     return _label_amount_before(area, labels, before)
 
 
 def marketing_expense(area: str, month: int) -> float:
-    """BF23：行銷費用總管理試算表，指定月份／地區那一格（固定第16列）。"""
+    """行銷費用：行銷費用總管理試算表，指定月份／地區那一格（固定第9列）。"""
     if area not in MARKETING_REGION_OFFSETS:
         raise ValueError(f"行銷費用檔沒有「{area}」這個地區欄位")
     spreadsheet_id = marketing_expense_spreadsheet_id()
@@ -222,21 +227,23 @@ def _next_month_cutoff(as_of: date, day: int) -> date:
 
 
 def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
-    """回傳 {'BF14', 'BF21', 'BF22', 'BF23', 'BF24'}，試算但不寫回試算表。
+    """回傳 {'富邦餘額', '元大餘額', '內勤薪資', '專員承攬費', '行銷費用', '2%支出'}，
+    試算但不寫回試算表。
 
     as_of 是要試算的月份最後一天（例如 2026/7/31 傳 date(2026, 7, 31)）。
 
     每一項獨立算、獨立擋錯：其中一項出錯（例如某份外部試算表還沒授權給
-    服務帳號）不會讓其他四項也算不出來，該項改填錯誤訊息，方便一眼看出
+    服務帳號）不會讓其他項也算不出來，該項改填錯誤訊息，方便一眼看出
     是哪一項、哪個地區出問題。
     """
     year_month = as_of.strftime("%Y.%m")
     computations = {
-        "BF14": lambda: cash_balance(area, as_of),
-        "BF21": lambda: internal_staff_salary(area, year_month, _next_month_cutoff(as_of, 5)),
-        "BF22": lambda: specialist_salary(area, year_month, _next_month_cutoff(as_of, 10)),
-        "BF23": lambda: marketing_expense(area, as_of.month),
-        "BF24": lambda: finance_bimonthly_value(area, as_of.month),
+        "富邦餘額": lambda: fubon_balance(area, as_of),
+        "元大餘額": lambda: yuanta_balance(area, as_of),
+        "內勤薪資": lambda: internal_staff_salary(area, year_month, _next_month_cutoff(as_of, 5)),
+        "專員承攬費": lambda: specialist_salary(area, year_month, _next_month_cutoff(as_of, 10)),
+        "行銷費用": lambda: marketing_expense(area, as_of.month),
+        "2%支出": lambda: finance_bimonthly_value(area, as_of.month),
     }
     result: dict[str, float | str] = {}
     for key, compute in computations.items():
