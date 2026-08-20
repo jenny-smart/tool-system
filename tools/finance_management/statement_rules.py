@@ -4,6 +4,9 @@
 財報欄位（1-based，沿用既有配置）：
   D=4 摘要　E=5 收入　F=6 支出　H=8 附註/對象
   I=9 收支類別（下拉選單）　K=11 記帳日期（L欄月份標記依這欄算）　L=12 分類標籤
+  Q=17 更新時間　R=18 更新內容——只要規則有改到某一列（不管是更新原列
+  還是插入的新列），就會自動打上這兩欄，記錄「什麼時候、改了什麼」；沒被
+  任何規則改到的列不會動 Q／R。
 
 規則分頁欄位（A起，第一列是標題，從第二列開始是規則，由上到下依序套用）：
   A 啟用（TRUE/FALSE）
@@ -41,6 +44,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.statement_registry import resolve_statement_location
@@ -71,6 +75,8 @@ DEFAULT_RULES: list[list[object]] = [
 ]
 
 INSERT_ACTION = "插入新列"
+TW_TZ = ZoneInfo("Asia/Taipei")
+COL_Q, COL_R = 17, 18
 
 # 條件比對容錯：允許直接打符號，不用硬記中文名稱。
 _COMPARATOR_ALIASES = {
@@ -406,15 +412,18 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
                 split_values[target] = share
 
         if in_place_rule is not None:
+            changes: list[str] = []
             if in_place_rule.set_i:
                 value_updates.append(
                     {"range": f"'{title}'!I{row_idx}", "values": [[in_place_rule.set_i]]}
                 )
+                changes.append(f"I={in_place_rule.set_i}")
             l_value = in_place_rule.l_value(row)
             if l_value is not None:
                 value_updates.append(
                     {"range": f"'{title}'!L{row_idx}", "values": [[l_value]]}
                 )
+                changes.append(f"L={l_value}")
             if in_place_rule.move_complaint_amount:
                 f_value = _to_number(_cell(row, 6))
                 value_updates.append(
@@ -423,35 +432,54 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
                 value_updates.append(
                     {"range": f"'{title}'!F{row_idx}", "values": [[0]]}
                 )
+                changes.append(f"E={-f_value}, F=0")
             if ("in_place", None) in split_values:
+                share = split_values[("in_place", None)]
                 value_updates.append({
                     "range": f"'{title}'!{split_column}{row_idx}",
-                    "values": [[split_values[("in_place", None)]]],
+                    "values": [[share]],
                 })
+                changes.append(f"{split_column}={share}")
+            if changes:
+                now_text = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
+                value_updates.append({"range": f"'{title}'!Q{row_idx}", "values": [[now_text]]})
+                value_updates.append(
+                    {"range": f"'{title}'!R{row_idx}", "values": [["；".join(changes)]]}
+                )
 
         if insert_rules:
             new_rows = []
             for i, rule in enumerate(insert_rules):
                 new_row = list(row)
+                changes = []
                 if rule.set_i:
                     while len(new_row) < 9:
                         new_row.append("")
                     new_row[8] = rule.set_i
+                    changes.append(f"I={rule.set_i}")
                 l_value = rule.l_value(row)
                 if l_value is not None:
                     while len(new_row) < 12:
                         new_row.append("")
                     new_row[11] = l_value
+                    changes.append(f"L={l_value}")
                 if rule.move_complaint_amount:
                     while len(new_row) < 6:
                         new_row.append("")
                     new_row[4] = -_to_number(_cell(row, 6))
                     new_row[5] = 0
+                    changes.append(f"E={new_row[4]}, F=0")
                 if ("insert", i) in split_values:
                     col_index = _letter_to_index(rule.split_column)
                     while len(new_row) < col_index:
                         new_row.append("")
                     new_row[col_index - 1] = split_values[("insert", i)]
+                    changes.append(f"{rule.split_column}={split_values[('insert', i)]}")
+                if changes:
+                    while len(new_row) < COL_R:
+                        new_row.append("")
+                    new_row[COL_Q - 1] = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
+                    new_row[COL_R - 1] = "；".join(changes) + "（新增列）"
                 new_rows.append(new_row)
             pending_inserts.append((row_idx, new_rows))
 
