@@ -351,6 +351,8 @@ def run_schedule_stats_for_area(
         try:
             log(f"開始處理排班統計表：{file_base}")
 
+            alt_file_base = f"排班統計表{key}-{area}"
+
             file = find_file_by_possible_names(
                 drive,
                 source_folder_id,
@@ -358,6 +360,9 @@ def run_schedule_stats_for_area(
                     file_base,
                     f"{file_base}.xlsx",
                     f"{file_base}.xls",
+                    alt_file_base,
+                    f"{alt_file_base}.xlsx",
+                    f"{alt_file_base}.xls",
                 ],
             )
             source_file_name = file.get("name", "")  # ★
