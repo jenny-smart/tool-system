@@ -21,7 +21,8 @@
   I 設定I欄（符合就把財報 I 欄設成這個值）
   J L欄月份位移（相對 K 欄的月份，例如 -2 表示往前兩個月；留空表示不改 L 欄）
   K L欄後綴文字（L 欄標記＝該月份 "YYYY.MM"＋"-"＋這個後綴；留空表示不改 L 欄）
-  L 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F）
+  L 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F，並把 F 欄清成 0，
+           避免同一筆金額 E、F 兩欄都算到）
   M 列處理（更新原列／插入新列——插入新列時原列不動，複製一份新列在下面，
            只改新列的 I／L／E，其餘欄位照抄原列）
   N 金額對半欄位（例如 E；有填時，這條規則跟同一列命中的「更新原列」規則
@@ -419,6 +420,9 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
                 value_updates.append(
                     {"range": f"'{title}'!E{row_idx}", "values": [[-f_value]]}
                 )
+                value_updates.append(
+                    {"range": f"'{title}'!F{row_idx}", "values": [[0]]}
+                )
             if ("in_place", None) in split_values:
                 value_updates.append({
                     "range": f"'{title}'!{split_column}{row_idx}",
@@ -439,9 +443,10 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
                         new_row.append("")
                     new_row[11] = l_value
                 if rule.move_complaint_amount:
-                    while len(new_row) < 5:
+                    while len(new_row) < 6:
                         new_row.append("")
                     new_row[4] = -_to_number(_cell(row, 6))
+                    new_row[5] = 0
                 if ("insert", i) in split_values:
                     col_index = _letter_to_index(rule.split_column)
                     while len(new_row) < col_index:
