@@ -9,10 +9,12 @@
   A 啟用（TRUE/FALSE）
   B 規則名稱（純備註用）
   C 條件1欄位（例如 D／H／L）
-  D 條件1比對（包含／等於／小於／小於等於／大於／大於等於，也接受 </></=/>= 這種寫法）
+  D 條件1比對（包含／等於／小於／小於等於／大於／大於等於／介於，也接受
+           </></=/>= 這種寫法）
   E 條件1值（逗號分隔＝多值 OR，比對 C 欄那個財報欄位；比對是小於/大於類時，
            值可以填「10日」這種格式，比對 C 欄那個日期欄位的「日」，也可以
-           直接填日期）
+           直接填日期；比對是「介於」時，值填「15日-20日」這種區間，
+           表示日期是 15 號到 20 號之間（含頭尾））
   F 條件2欄位（留空表示沒有條件2；有值時跟條件1是 OR，例如 H含新訓 或 L含新訓）
   G 條件2比對
   H 條件2值
@@ -36,6 +38,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
@@ -122,6 +125,16 @@ def _to_bool(value: object) -> bool:
     return text in ("TRUE", "1", "YES", "Y")
 
 
+def _day_number(text: str) -> int | None:
+    text = text.strip()
+    if text.endswith("日"):
+        text = text[:-1]
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def _to_int_or_none(value: object) -> int | None:
     text = str(value or "").strip()
     if not text:
@@ -193,6 +206,20 @@ class Rule:
                 if op == "大於" and lhs > rhs:
                     return True
                 if op == "大於等於" and lhs >= rhs:
+                    return True
+            return False
+        if op == "介於":
+            row_date = _parse_date(text)
+            if row_date is None:
+                return False
+            for raw_value in values:
+                parts = re.split(r"[~\-]", raw_value.strip())
+                if len(parts) != 2:
+                    continue
+                low, high = (_day_number(p) for p in parts)
+                if low is None or high is None:
+                    continue
+                if low <= row_date.day <= high:
                     return True
             return False
         return any(v in text for v in values)  # 包含（預設）
