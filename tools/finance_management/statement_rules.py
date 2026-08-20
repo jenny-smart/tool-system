@@ -216,8 +216,12 @@ def _sheet_id_for_title(service, spreadsheet_id: str, title: str) -> int:
     raise RuntimeError(f"試算表 {spreadsheet_id} 找不到分頁「{title}」")
 
 
-def apply_rules(area: str) -> dict[str, int]:
-    """套用「財報篩選規則」分頁裡的所有啟用規則到指定地區的財報富邦更新分頁。"""
+def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
+    """套用「財報篩選規則」分頁裡的所有啟用規則到指定地區的財報富邦更新分頁。
+
+    start_date／end_date（date 物件，兩者皆可留空）會依 B 欄（帳務日）限制只處理
+    該區間內的列；沒給日期區間就處理整張表。
+    """
     rules = [r for r in load_rules() if r.enabled]
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
     values = _read_values(spreadsheet_id, title)
@@ -230,6 +234,15 @@ def apply_rules(area: str) -> dict[str, int]:
     pending_inserts: list[tuple[int, list[list[object]]]] = []
 
     for row_idx, row in enumerate(values[1:], start=2):
+        if start_date or end_date:
+            row_date = _parse_date(_cell(row, 2))  # B欄＝帳務日
+            if row_date is None:
+                continue
+            if start_date and row_date < start_date:
+                continue
+            if end_date and row_date > end_date:
+                continue
+
         in_place_rule = None
         insert_rules = []
         for rule in rules:
