@@ -355,6 +355,10 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
 
     start_date／end_date（date 物件，兩者皆可留空）會依 B 欄（帳務日）限制只處理
     該區間內的列；沒給日期區間就處理整張表。
+
+    Q 欄已經有更新時間的列會直接跳過，不會重複套用規則——重複執行同一段
+    日期區間是安全的，不會把 F 欄清過一次的客訴列再清一次、也不會重複插入
+    水電費對半的新列。
     """
     rules = [r for r in load_rules() if r.enabled]
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
@@ -368,6 +372,9 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
     pending_inserts: list[tuple[int, list[list[object]]]] = []
 
     for row_idx, row in enumerate(values[1:], start=2):
+        if str(_cell(row, COL_Q)).strip():
+            continue  # Q欄已有更新時間，代表這列處理過了，不重複套規則
+
         if start_date or end_date:
             row_date = _parse_date(_cell(row, 2))  # B欄＝帳務日
             if row_date is None:
