@@ -205,13 +205,21 @@ def wait_for_yuanta_login(account: object, timeout: float = 30.0) -> dict[str, o
     while time.monotonic() < deadline:
         try:
             state = page_state()
-        except RuntimeError:
+        except Exception:
+            # 登入成功那一刻頁面正好在轉址／換頁，這時呼叫 page_state()
+            # 常會撞上 Playwright 的「Execution context was destroyed」
+            # （不是 RuntimeError，之前只接 RuntimeError 接不住，會直接
+            # 把整支腳本打掛）；當作還沒讀到穩定狀態，繼續輪詢即可。
             time.sleep(1)
             continue
         if state.get("logged_in") or not state.get("prelogin"):
             # 登入後頁面可能先轉址，再載入導覽列；稍候確認不會跳回登入頁。
             time.sleep(2)
-            stable = page_state()
+            try:
+                stable = page_state()
+            except Exception:
+                time.sleep(1)
+                continue
             if stable.get("logged_in") or not stable.get("prelogin"):
                 return stable
         time.sleep(1)
