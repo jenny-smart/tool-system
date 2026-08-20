@@ -20,10 +20,6 @@ PAYMENT_REQUEST_TYPE = "請款記錄"
 DEPOSIT_REFUND_TYPE = "工具包押金退款"
 SUPPLY_PURCHASE_TYPE = "清潔用品採購"
 DEPOSIT_REPORT_TYPE = "工具包押金財報"
-ALL_REPORT_TYPE = "All財報"
-ALL_CASH_GAP_TYPE = "All財報現金缺口"
-FUBON_STATEMENT_TYPE = "財報富邦更新"
-YUANTA_STATEMENT_TYPE = "財報元大更新"
 
 
 def _sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:

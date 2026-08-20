@@ -9,9 +9,8 @@
   2. L 欄文字包含「LC客訴」的列（已符合規則 1），再把 F 欄金額搬到 E 欄，
      且轉為負數（E = -F），比照客訴退費從支出改記為負的收入。
 
-要讓這裡的功能找得到試算表，需要先在主控試算表（Jenny's Lemonhometools）的
-「內部請款設定」分頁，替各地區新增一列：
-  類型=財報富邦更新　地區=台北（或台中／桃園／新竹／高雄）　試算表ID=...　GID=...
+試算表位置查詢走主控試算表（Jenny's Lemonhometools）的「財報設定」分頁
+（見 tools/finance_management/statement_registry.py），不需要另外設定。
 """
 
 from __future__ import annotations
@@ -19,11 +18,8 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from tools.bank_statement.internal_payment_registry import (
-    FUBON_STATEMENT_TYPE,
-    resolve_report_location,
-)
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+from tools.finance_management.statement_registry import resolve_statement_location
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 
@@ -124,7 +120,7 @@ def apply_lc_remittance_filter(area: str) -> dict[str, int]:
 
 
 def _apply_lc_remittance_filter(area: str) -> dict[str, int]:
-    spreadsheet_id, title = resolve_report_location(FUBON_STATEMENT_TYPE, area)
+    spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
     values = _read_values(spreadsheet_id, title)
     if len(values) < 2:
         return {"remittance_marked": 0, "complaint_moved": 0}
