@@ -146,7 +146,9 @@ class Rule:
         self.suffix = str(_cell(raw, 11) or "").strip()
         self.move_complaint_amount = _to_bool(_cell(raw, 12))
         self.action = str(_cell(raw, 13) or "").strip() or "更新原列"
-        self.split_column = str(_cell(raw, 14) or "").strip().upper()
+        # 容錯：欄位有時會被填成 "E/2" 這種寫法，只取開頭的英文字母當欄位代號。
+        raw_split_column = str(_cell(raw, 14) or "").strip().upper()
+        self.split_column = "".join(ch for ch in raw_split_column if ch.isalpha())
         self.relation = str(_cell(raw, 15) or "").strip() or "或"
 
     def _one_condition_matches(self, row: list[object], col: str, cmp_: str, values: list[str]) -> bool:
