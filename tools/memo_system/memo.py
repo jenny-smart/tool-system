@@ -1,6 +1,5 @@
 # memo.py
 # -*- coding: utf-8 -*-
-import os
 import re
 import time
 from datetime import datetime
@@ -31,16 +30,10 @@ except Exception:
 
 
 def secret_value(key: str, default=""):
-    """依序查 st.secrets（Streamlit 介面用）→ 環境變數（無頭排程／GitHub Actions 用）→ default。"""
     try:
-        if key in st.secrets:
-            return st.secrets[key]
+        return st.secrets.get(key, default)
     except Exception:
-        pass
-    env_value = os.getenv(key)
-    if env_value is not None:
-        return env_value
-    return default
+        return default
 
 
 ENV_NAME = str(secret_value("ENV", getattr(env, "ENV", "prod"))).lower()
