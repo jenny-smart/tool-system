@@ -11,6 +11,23 @@ TZ = timezone(timedelta(hours=8))
 DAILY_ROOT_FOLDER_ID = "11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc"
 MONTHLY_ROOT_FOLDER_ID = "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
 
+
+# ============================================================
+# gspread 429 自動重試
+# ============================================================
+# install_gspread_retry() 原本只有 toolapp.py 會呼叫（跑在 Streamlit
+# Cloud）。本機 Agent 執行的每一支腳本（fubon_agent.py、
+# stored_value_adjustment.py…）都是各自獨立的 `python -m` 行程，不會繼承
+# toolapp.py 裝好的重試保護，一撞到 Sheets API 配額（429 Quota exceeded）
+# 就直接整支崩潰。這裡在直譯器啟動時就裝好，讓所有本機腳本都受惠，不用
+# 逐一修改每支腳本。
+try:
+    from services.google_api_retry import install_gspread_retry
+
+    install_gspread_retry()
+except Exception as exc:
+    print(f"⚠️ gspread 429 自動重試安裝失敗：{exc}", flush=True)
+
 # 舊共用雲端來源 ID -> Jenny「我的雲端硬碟 / @日排程」子資料夾名稱。
 # 外場 / 客服程式可以繼續沿用既有設定值，Drive proxy 會在 API 呼叫前
 # 自動改寫成新的 My Drive 子資料夾 ID。
