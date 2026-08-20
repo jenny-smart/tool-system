@@ -176,6 +176,7 @@ def _ensure_rules_sheet(service, spreadsheet_id: str) -> None:
     ).execute()
     titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
     if RULES_SHEET_NAME in titles:
+        _migrate_rules_sheet(service, spreadsheet_id)
         return
     service.spreadsheets().batchUpdate(
         spreadsheetId=spreadsheet_id,
@@ -189,6 +190,49 @@ def _ensure_rules_sheet(service, spreadsheet_id: str) -> None:
         valueInputOption="RAW",
         body={"values": rows},
     ).execute()
+
+
+def _migrate_rules_sheet(service, spreadsheet_id: str) -> None:
+    """分頁已存在但欄位比目前 RULES_HEADER 少（例如程式新增了欄位）時，自動在
+    最後面補齊缺少的標題／預設值，不用手動去分頁裡插欄位。只會「往後補」，
+    不會動到既有欄位的位置或內容。"""
+    last_col = _column_letter(len(RULES_HEADER))
+    header_res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{RULES_SHEET_NAME}'!A1:{last_col}1"
+    ).execute()
+    existing_header = (header_res.get("values") or [[]])[0]
+    if len(existing_header) >= len(RULES_HEADER):
+        return
+
+    missing_start = len(existing_header) + 1  # 1-based，缺少欄位的起始欄
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{RULES_SHEET_NAME}'!{_column_letter(missing_start)}1:{last_col}1",
+        valueInputOption="RAW",
+        body={"values": [RULES_HEADER[missing_start - 1:]]},
+    ).execute()
+
+    rows_res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{RULES_SHEET_NAME}'!A2:B"
+    ).execute()
+    default_by_name = {str(r[1]).strip(): r for r in DEFAULT_RULES}
+    fill_updates = []
+    for row_idx, row in enumerate(rows_res.get("values") or [], start=2):
+        name = str(row[1]).strip() if len(row) > 1 else ""
+        default_row = default_by_name.get(name)
+        if not default_row:
+            continue
+        missing_values = default_row[missing_start - 1:]
+        if any(str(v) != "" for v in missing_values):
+            fill_updates.append({
+                "range": f"'{RULES_SHEET_NAME}'!{_column_letter(missing_start)}{row_idx}:{last_col}{row_idx}",
+                "values": [missing_values],
+            })
+    if fill_updates:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": fill_updates},
+        ).execute()
 
 
 def load_rules() -> list[Rule]:
