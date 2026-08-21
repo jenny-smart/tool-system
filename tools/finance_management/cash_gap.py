@@ -6,17 +6,16 @@
   B=2  帳務日　G=7  富邦更新餘額　H=8  元大更新餘額
   L=12 富邦更新分類標籤　M=13 富邦更新該列金額
   M=13 元大更新分類標籤　N=14 元大更新該列金額
-  （元大更新原生欄位比富邦更新多一欄，所以分類標籤／金額欄位對應往後移一欄；
-  這點沒有實際資料驗證過，只是照富邦更新的配置往右推一欄的假設，如果元大
-  更新那邊算出來的數字不對，很可能是這個欄位假設錯了）
+  （元大更新原生欄位比富邦更新多一欄，所以分類標籤／金額欄位對應往後移一欄）
 
 各項目：
   富邦餘額／元大餘額＝各自報表當月最後一筆（帳務日 <= 當月最後一天）的餘額欄
   內勤薪資＝富邦更新 L欄 或 元大更新 M欄，文字包含「{年月}-內勤薪資」的列，
         兩邊分別加總金額欄後相加
-  專員承攬費＝富邦更新 L欄 或 元大更新 M欄，文字包含「{年月往前推2個月}-專員
-        承攬費」的列，兩邊分別加總金額欄後相加（往前推2個月是照使用者原話
-        「YYYY.MM為該月份＋專員承攬費-2」理解，還沒實際驗證過）
+  專員承攬費＝富邦更新 L欄 或 元大更新 M欄，文字同時包含「{年月}」與
+        「專員承攬費-2」（不要求相鄰）的列，兩邊分別加總金額欄後相加。
+        專員承攬費每月有兩期：-1（當月20日左右）、-2（次月10日左右），
+        這裡只抓「-2」那期，年月本身不做偏移
   行銷費用(廣告)／行銷費用(服務)＝行銷費用總管理試算表（固定分頁 GID＝
         228482464）第5列／第8列，欄位依月份與地區位移：7月從 AS 欄起，
         每月位移 7 欄（同一月的區塊依序是台北／桃園／新竹／台中／家電／
@@ -173,32 +172,28 @@ def yuanta_balance(area: str, as_of: date, values: list[list[object]] | None = N
     return _month_end_balance_from_values(values, COL_H, as_of)
 
 
-def _shift_year_month(as_of: date, offset: int) -> str:
-    month_index = as_of.year * 12 + (as_of.month - 1) + offset
-    year, month = divmod(month_index, 12)
-    return f"{year}.{month + 1:02d}"
-
-
-def _contains_label_sum_from_values(
-    values: list[list[object]], label_col: int, amount_col: int, fragment: str
+def _contains_all_sum_from_values(
+    values: list[list[object]], label_col: int, amount_col: int, required: list[str]
 ) -> float:
     total = 0.0
     for row in values[1:]:
-        if fragment in str(_cell(row, label_col) or ""):
+        text = str(_cell(row, label_col) or "")
+        if all(fragment in text for fragment in required):
             total += _to_number(_cell(row, amount_col))
     return total
 
 
 def _dual_source_label_sum(
-    fragment: str,
+    required: list[str],
     fubon_values: list[list[object]],
     yuanta_values: list[list[object]],
 ) -> float:
-    """富邦更新 L欄 或 元大更新 M欄，文字包含 fragment 的列，兩邊分別加總後相加。"""
-    return _contains_label_sum_from_values(
-        fubon_values, COL_FUBON_LABEL, COL_FUBON_AMOUNT, fragment
-    ) + _contains_label_sum_from_values(
-        yuanta_values, COL_YUANTA_LABEL, COL_YUANTA_AMOUNT, fragment
+    """富邦更新 L欄 或 元大更新 M欄，文字同時包含 required 裡每個片段的列，
+    兩邊分別加總後相加。"""
+    return _contains_all_sum_from_values(
+        fubon_values, COL_FUBON_LABEL, COL_FUBON_AMOUNT, required
+    ) + _contains_all_sum_from_values(
+        yuanta_values, COL_YUANTA_LABEL, COL_YUANTA_AMOUNT, required
     )
 
 
@@ -211,7 +206,7 @@ def internal_staff_salary(
     fubon_values = fubon_values if fubon_values is not None else _report_values(area, "富邦更新")
     yuanta_values = yuanta_values if yuanta_values is not None else _report_values(area, "元大更新")
     fragment = f"{as_of.strftime('%Y.%m')}-內勤薪資"
-    return _dual_source_label_sum(fragment, fubon_values, yuanta_values)
+    return _dual_source_label_sum([fragment], fubon_values, yuanta_values)
 
 
 def specialist_contract_fee(
@@ -219,12 +214,16 @@ def specialist_contract_fee(
     fubon_values: list[list[object]] | None = None,
     yuanta_values: list[list[object]] | None = None,
 ) -> float:
-    """專員承攬費：富邦更新 L欄 或 元大更新 M欄，包含「{年月往前推2個月}-專員承攬費」
-    的列加總。"""
+    """專員承攬費：富邦更新 L欄 或 元大更新 M欄，同時包含「{年月}」與「專員承攬費-2」
+    的列加總（不要求兩段文字相鄰，因為有時會多出領現等其他註記文字）。
+
+    專員承攬費每月有兩期：專員承攬費-1（當月20日左右）、專員承攬費-2（次月10日
+    左右）；這裡只抓「-2」那期，年月不做偏移，就是目標月份本身。
+    """
     fubon_values = fubon_values if fubon_values is not None else _report_values(area, "富邦更新")
     yuanta_values = yuanta_values if yuanta_values is not None else _report_values(area, "元大更新")
-    fragment = f"{_shift_year_month(as_of, -2)}-專員承攬費"
-    return _dual_source_label_sum(fragment, fubon_values, yuanta_values)
+    year_month = as_of.strftime("%Y.%m")
+    return _dual_source_label_sum([year_month, "專員承攬費-2"], fubon_values, yuanta_values)
 
 
 def marketing_expense_row(area: str, month: int, row: int) -> float:
