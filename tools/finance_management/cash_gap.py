@@ -23,9 +23,9 @@
   總營收＝財務分頁「{年月}預估」欄第3列
   2%＝總營收 × 2%
   營業稅＝總營收 × 5%
-  年終費用＝財務分頁 AA欄（固定欄位，不隨月份變動）第97列 × 月份數
-        （例如期別 202607，月份數就是 7）
-  春酒費用＝財務分頁 AA欄第135列 × 月份數，算法同上
+  年終費用＝財務分頁「{年月}預估」欄第97列 × 月份數
+        （例如期別 202607，欄位取 7月那欄，月份數是 7）
+  春酒費用＝財務分頁「{年月}預估」欄第135列 × 月份數，算法同上
   藍新發票金額＝主控試算表（Jenny's Lemonhometools，固定分頁 GID＝
         327631316，欄位為 A區域／B月份YYYYMM／C發票日期／D發票金額／
         E發票號碼／F發票狀態／G更新時間）裡，A欄＝地區、B欄＝月份都符合
@@ -88,7 +88,6 @@ MARKETING_REGION_OFFSETS = {
 FINANCE_BASE_COLUMN = 3  # C，對應 1月
 FINANCE_MONTH_STEP_COLUMNS = 2
 FINANCE_REVENUE_ROW = 3
-FINANCE_FIXED_COLUMN = "AA"  # 年終／春酒費用是固定欄位，不隨月份變動
 FINANCE_YEAR_END_BONUS_ROW = 97
 FINANCE_SPRING_PARTY_ROW = 135
 
@@ -282,24 +281,6 @@ def finance_revenue(area: str, month: int) -> float:
     return _finance_column_value(area, month, FINANCE_REVENUE_ROW)
 
 
-def _finance_fixed_column_value(area: str, column_letter: str, row: int) -> float:
-    """財務分頁固定欄位（不隨月份變動），指定列數的值。"""
-    spreadsheet_id, title = resolve_statement_location(area, "財務")
-    service = get_sheets_service()
-    res = (
-        service.spreadsheets()
-        .values()
-        .get(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!{column_letter}{row}",
-            valueRenderOption="UNFORMATTED_VALUE",
-        )
-        .execute()
-    )
-    values = res.get("values", [])
-    return _to_number(values[0][0]) if values and values[0] else 0.0
-
-
 def newebpay_invoice_amount(area: str, as_of: date) -> float:
     """藍新發票金額：主控試算表固定分頁（GID=327631316）裡，A欄＝地區、B欄＝
     月份（YYYYMM）都符合的列，取 D欄（發票金額），若有多筆則加總。"""
@@ -371,8 +352,8 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
         "總營收": lambda: finance_revenue(area, month),
         "2%": _revenue_based(0.02),
         "營業稅": _revenue_based(0.05),
-        "年終費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_YEAR_END_BONUS_ROW) * month,
-        "春酒費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_SPRING_PARTY_ROW) * month,
+        "年終費用": lambda: _finance_column_value(area, month, FINANCE_YEAR_END_BONUS_ROW) * month,
+        "春酒費用": lambda: _finance_column_value(area, month, FINANCE_SPRING_PARTY_ROW) * month,
         "藍新發票金額": lambda: newebpay_invoice_amount(area, as_of),
     }
     result: dict[str, float | str] = {}
