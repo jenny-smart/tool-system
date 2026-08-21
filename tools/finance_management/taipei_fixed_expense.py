@@ -97,10 +97,19 @@ def _imap_connect() -> tuple[imaplib.IMAP4_SSL, str]:
     return imap, user
 
 
-def _search(imap: imaplib.IMAP4_SSL, criteria: str) -> list[bytes]:
-    typ, data = imap.search("UTF-8", criteria.encode("utf-8"))
+def _search_by_subject(imap: imaplib.IMAP4_SSL, subject_query: str, since_str: str, before_str: str) -> list[bytes]:
+    """依 SUBJECT／SINCE／BEFORE 搜尋。
+
+    SUBJECT 條件含中文時，編碼後的 UTF-8 多位元組字元不是合法的 IMAP 指令行
+    內容，直接塞進指令行 Gmail 會回 BAD Could not parse command；純 ASCII
+    主旨才恰好不會踩到這個問題。正確做法是用 IMAP literal 語法
+    （{n}\\r\\n<bytes>）：把 SUBJECT 的值設進 imap.literal，讓 imaplib 在
+    指令最後自動補上 {n}，收到伺服器 "+ " continuation 後才送出實際位元組。
+    """
+    imap.literal = subject_query.encode("utf-8")
+    typ, data = imap.search("UTF-8", "SINCE", since_str, "BEFORE", before_str, "SUBJECT")
     if typ != "OK":
-        raise RuntimeError(f"IMAP 搜尋失敗（回應：{typ}）｜條件：{criteria}")
+        raise RuntimeError(f"IMAP 搜尋失敗（回應：{typ}）｜SUBJECT={subject_query!r}")
     if not data or not data[0]:
         return []
     return data[0].split()
@@ -197,16 +206,40 @@ def _pdf_attachments_text(msg: email.message.Message) -> list[str]:
     return texts
 
 
-def _latest_message(imap: imaplib.IMAP4_SSL, criteria: str) -> tuple[email.message.Message, int]:
-    nums = _search(imap, criteria)
+def _matching_messages(
+    imap: imaplib.IMAP4_SSL, subject_query: str, since_str: str, before_str: str
+) -> list[email.message.Message]:
+    """回傳期間內主旨符合的信件，新到舊排序。
+
+    有些通知信（例如眾點）是同一條主旨全年一直往下回覆，同一個月份的搜尋
+    區間裡除了當月真正的資料信，也常常混到單純回覆確認的信（例如「金額
+    無誤，謝謝」），所以這裡回傳全部候選信件，不在這裡就先認定「最新一封
+    ＝要的那封」；由呼叫端依序嘗試解析，直到抓到金額為止。
+    """
+    nums = _search_by_subject(imap, subject_query, since_str, before_str)
     if not nums:
-        raise RuntimeError(f"找不到符合條件的信件：{criteria}")
-    messages = [(_fetch_message(imap, num), num) for num in nums]
-    messages = [(msg, num) for msg, num in messages if msg is not None]
+        raise RuntimeError(f"找不到符合條件的信件：SUBJECT={subject_query!r}")
+    messages = [_fetch_message(imap, num) for num in nums]
+    messages = [msg for msg in messages if msg is not None]
     if not messages:
-        raise RuntimeError(f"信件抓取失敗：{criteria}")
-    messages.sort(key=lambda item: _message_datetime(item[0]))
-    return messages[-1][0], len(nums)
+        raise RuntimeError(f"信件抓取失敗：SUBJECT={subject_query!r}")
+    messages.sort(key=_message_datetime, reverse=True)
+    return messages
+
+
+def _extract_from_message(label: str, msg: email.message.Message, parse_fn) -> tuple[int, str]:
+    if label == "眾點":
+        return parse_fn(_plain_body(msg))
+    pdf_texts = _pdf_attachments_text(msg)
+    if not pdf_texts:
+        raise RuntimeError("信件沒有 PDF 附件")
+    last_exc: Exception | None = None
+    for text in pdf_texts:
+        try:
+            return parse_fn(text)
+        except ValueError as exc:
+            last_exc = exc
+    raise last_exc or RuntimeError("PDF 附件解析失敗")
 
 
 # ────────────────────────────────────────────────────────────
@@ -314,26 +347,20 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
         if _already_submitted(existing_memos, base_memo):
             items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
             return
-        criteria = f'(SUBJECT "{subject_query}" SINCE {since_str} BEFORE {before_str})'
         try:
-            msg, matched = _latest_message(imap, criteria)
-            if label == "眾點":
-                amount, detail = parse_fn(_plain_body(msg))
-            else:
-                pdf_texts = _pdf_attachments_text(msg)
-                if not pdf_texts:
-                    raise RuntimeError("信件沒有 PDF 附件")
-                result = None
-                last_exc: Exception | None = None
-                for text in pdf_texts:
-                    try:
-                        result = parse_fn(text)
-                        break
-                    except ValueError as exc:
-                        last_exc = exc
-                if result is None:
-                    raise last_exc or RuntimeError("PDF 附件解析失敗")
-                amount, detail = result
+            messages = _matching_messages(imap, subject_query, since_str, before_str)
+            matched = len(messages)
+            result = None
+            last_exc: Exception | None = None
+            for msg in messages:
+                try:
+                    result = _extract_from_message(label, msg, parse_fn)
+                    break
+                except Exception as exc:
+                    last_exc = exc
+            if result is None:
+                raise last_exc or RuntimeError("找到的信件都解析失敗")
+            amount, detail = result
             memo = base_memo + (f"，{detail}" if detail else "")
             rows.append(["待付款", "", now_text, category, memo, amount, "", payee, ""])
             items.append({"label": label, "amount": amount, "matched": matched, "status": "成功"})
