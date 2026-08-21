@@ -9,8 +9,8 @@
     自動回填後台，成功後才把 B 欄改成「已退款」。
   - 待收款：M（收款時間）與 O（收款發票號碼）都有值 → 視為已備妥，
     自動回填後台，成功後才把 B 欄改成「已收款」。
-  - 條件還沒補齊（或自動回填失敗）的列，列進待辦清單寄信＋寫一筆行事曆
-    提醒，完全不動 Sheet 資料。
+  - 條件還沒補齊（或自動回填失敗）的列，列進待辦清單寫一筆行事曆提醒，
+    完全不動 Sheet 資料（已經有行事曆通知就不再另外寄信）。
 """
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 
 from tools.memo_system import memo, change_order
 from tools.finance_management.execution_log import log_execution
-from tools.notify.send_daily_result import send_email
 from tools.orders_system import calendar_notify
 
 REGIONS = ["台北", "台中", "桃園", "新竹"]
@@ -141,31 +140,6 @@ def _notify(all_todo: list, summary: dict):
     else:
         lines.append("今天沒有待辦事項。")
     plain_body = "\n".join(lines)
-
-    if all_todo:
-        html_rows = "".join(
-            f"<tr><td>{item['region']}</td><td>{item['kind']}</td><td>{item['order_no']}</td>"
-            f"<td>{item.get('customer_name', '')}</td><td>{item['missing']}</td><td>{item['sheet_row']}</td></tr>"
-            for item in all_todo
-        )
-        todo_html = (
-            "<table border='1' cellpadding='4' cellspacing='0'>"
-            "<tr><th>地區</th><th>類型</th><th>訂單編號</th><th>客人</th><th>缺少</th><th>列號</th></tr>"
-            + html_rows + "</table>"
-        )
-    else:
-        todo_html = "<p>今天沒有待辦事項。</p>"
-
-    html_body = (
-        f"<p>{today} 清潔異動每日檢查</p>"
-        f"<p>已自動回填：{total_synced} 筆；失敗：{total_failed} 筆；待辦：{len(all_todo)} 筆</p>"
-        f"{todo_html}"
-    )
-
-    try:
-        send_email(f"【清潔異動每日檢查】{today}", plain_body, html_body)
-    except Exception as exc:
-        print(f"⚠️ 寄信失敗：{exc}", flush=True)
 
     try:
         calendar_notify.create_notify_event(
