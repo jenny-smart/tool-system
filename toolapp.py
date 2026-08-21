@@ -2686,14 +2686,17 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
 
 
 REVIEW_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
+MASTER_REVIEW_SELECT_AREA = "2026review工作表"  # 跨地區彙總的固定分頁，「全區」不含它
 
 
 def _review_areas_for(area: str) -> list[str]:
     if area == "全區":
         return REVIEW_AREAS
+    if area == MASTER_REVIEW_SELECT_AREA:
+        return ["2026review"]
     if area in REVIEW_AREAS:
         return [area]
-    raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
+    raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區／2026review工作表")
 
 
 def run_review_formula_preview(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
@@ -3598,8 +3601,9 @@ with date_col:
                 key="finance_review_period",
             )
             st.caption(
-                "格式：YYYYMM；把 2026review 檔各地區分頁裡 SUMIF(\"*預估*\") 公式的結尾欄，"
-                "改成該期別對應的預估欄。先跑「預覽」確認調整內容沒問題，再跑「套用」寫入。"
+                "格式：YYYYMM；把 2026review 檔各地區分頁（或執行區域選「2026review工作表」"
+                "跨地區彙總分頁）裡 SUMIF(\"*預估*\") 公式的結尾欄，改成該期別對應的預估欄。"
+                "先跑「預覽」確認調整內容沒問題，再跑「套用」寫入。"
                 "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來。"
             )
         elif selected_function == "【儲值金】複製期別檔案":
@@ -3859,6 +3863,14 @@ with area_col:
         # 高雄結算/高雄儲值金預收都是從新竹/台南資料算出來的，兩個地區
         # 常常要一起重跑，所以多一個組合選項，不用切兩次分開跑。
         area_select_options = area_select_options + ["新竹＋高雄"]
+    if selected_function in (
+        "【財報】2026review｜預覽公式調整",
+        "【財報】2026review｜套用公式調整",
+        "【財報】2026review｜分組隱藏當月起實際欄位",
+    ):
+        # 「2026review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
+        # 分頁，「全區」不會自動包含它，要另外選這個選項才會處理。
+        area_select_options = area_select_options + ["2026review工作表"]
 
     selected_area_value = st.selectbox(
         "執行區域",
