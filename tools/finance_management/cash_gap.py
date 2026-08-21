@@ -23,8 +23,8 @@
   總營收＝財務分頁「{年月}預估」欄第3列
   2%＝總營收 × 2%
   營業稅＝總營收 × 5%
-  年終費用＝財務分頁「{年月}預估」欄第97列
-  春酒費用＝財務分頁「{年月}預估」欄第135列
+  年終費用＝財務分頁 AA欄（固定欄位，不隨月份變動）第97列
+  春酒費用＝財務分頁 AA欄（固定欄位，不隨月份變動）第135列
   藍新發票金額＝主控試算表（Jenny's Lemonhometools，固定分頁 GID＝
         327631316）裡，找該月份那一列，取 D欄，若有多筆則加總
 
@@ -85,6 +85,7 @@ MARKETING_REGION_OFFSETS = {
 FINANCE_BASE_COLUMN = 3  # C，對應 1月
 FINANCE_MONTH_STEP_COLUMNS = 2
 FINANCE_REVENUE_ROW = 3
+FINANCE_FIXED_COLUMN = "AA"  # 年終／春酒費用是固定欄位，不隨月份變動
 FINANCE_YEAR_END_BONUS_ROW = 97
 FINANCE_SPRING_PARTY_ROW = 135
 
@@ -278,6 +279,24 @@ def finance_revenue(area: str, month: int) -> float:
     return _finance_column_value(area, month, FINANCE_REVENUE_ROW)
 
 
+def _finance_fixed_column_value(area: str, column_letter: str, row: int) -> float:
+    """財務分頁固定欄位（不隨月份變動），指定列數的值。"""
+    spreadsheet_id, title = resolve_statement_location(area, "財務")
+    service = get_sheets_service()
+    res = (
+        service.spreadsheets()
+        .values()
+        .get(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{title}'!{column_letter}{row}",
+            valueRenderOption="UNFORMATTED_VALUE",
+        )
+        .execute()
+    )
+    values = res.get("values", [])
+    return _to_number(values[0][0]) if values and values[0] else 0.0
+
+
 def newebpay_invoice_amount(as_of: date) -> float:
     """藍新發票金額：主控試算表固定分頁（GID=327631316）裡，該月份那一列的 D欄，
     若有多筆則加總。判斷「該月份那一列」的方式是掃這一列每一欄，看有沒有出現
@@ -349,8 +368,8 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
         "總營收": lambda: finance_revenue(area, month),
         "2%": _revenue_based(0.02),
         "營業稅": _revenue_based(0.05),
-        "年終費用": lambda: _finance_column_value(area, month, FINANCE_YEAR_END_BONUS_ROW),
-        "春酒費用": lambda: _finance_column_value(area, month, FINANCE_SPRING_PARTY_ROW),
+        "年終費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_YEAR_END_BONUS_ROW),
+        "春酒費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_SPRING_PARTY_ROW),
         "藍新發票金額": lambda: newebpay_invoice_amount(as_of),
     }
     result: dict[str, float | str] = {}
