@@ -326,3 +326,115 @@ def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
         f"期別 {year_month}：分組隱藏 {grouped} 欄（跳過 {len(target_columns) - grouped} 個已分組過的）",
     )
     return {"grouped": grouped}
+
+
+_FORECAST_MONTH_HEADER_RE = re.compile(r"^(\d{2,4})\.(\d{1,2})預估$")
+
+
+def _forecast_month_index(header_text: str) -> tuple[int, int] | None:
+    """標題文字若是「YYYY.MM預估」或「YY.MM預估」，回傳 (年, 月)；否則 None
+    （年度加總欄「YYYY預估」沒有月份、沒有句點，不會match，維持一律不動）。"""
+    match = _FORECAST_MONTH_HEADER_RE.match(header_text.strip())
+    if not match:
+        return None
+    year_text, month_text = match.groups()
+    year = int(year_text) if len(year_text) == 4 else 2000 + int(year_text)
+    return year, int(month_text)
+
+
+def group_hide_future_forecast_columns(area: str, year_month: str) -> dict[str, object]:
+    """把「當月之後」的「預估」欄位分組隱藏；當月及之前的「預估」欄位維持顯示
+    ——如果之前被誤分組隱藏過，會先解開（刪除分組＋取消隱藏）。年度加總的
+    「YYYY預估」欄（沒有月份）永遠不動，一律維持顯示。
+
+    跟 group_hide_actual_columns() 是相反方向：那邊隱藏「當月起」的實際欄
+    （還沒發生、沒有真實數字），這邊隱藏「當月後」的預估欄（還不需要現在看，
+    避免版面塞滿一整年的預估數字）。
+
+    year_month 格式 YYYY.MM，例如 "2026.07"。
+    """
+    target_year, target_month = int(year_month[:4]), int(year_month[5:])
+    spreadsheet_id, title = _resolve_location(area)
+    service = get_sheets_service()
+
+    header_res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!1:1",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    header_row = header_res.get("values", [[]])
+    header_row = header_row[0] if header_row else []
+
+    future_columns: list[int] = []  # 0-based，當月之後，要分組隱藏
+    keep_visible_columns: list[int] = []  # 0-based，當月及之前，要確保顯示
+    for idx, value in enumerate(header_row):
+        parsed = _forecast_month_index(str(value))
+        if parsed is None:
+            continue
+        year, month = parsed
+        if (year, month) > (target_year, target_month):
+            future_columns.append(idx)
+        else:
+            keep_visible_columns.append(idx)
+
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets(properties(sheetId,title),columnGroups)"
+    ).execute()
+    sheet_meta = next(s for s in meta.get("sheets", []) if s["properties"]["title"] == title)
+    sheet_id = sheet_meta["properties"]["sheetId"]
+    existing_ranges = {
+        (g["range"]["startIndex"], g["range"]["endIndex"])
+        for g in sheet_meta.get("columnGroups", [])
+    }
+
+    requests = []
+    ungrouped = 0
+    for col in keep_visible_columns:
+        if (col, col + 1) not in existing_ranges:
+            continue  # 本來就沒被分組，不用動
+        col_range = {
+            "sheetId": sheet_id,
+            "dimension": "COLUMNS",
+            "startIndex": col,
+            "endIndex": col + 1,
+        }
+        requests.append({"deleteDimensionGroup": {"range": col_range}})
+        requests.append({
+            "updateDimensionProperties": {
+                "range": col_range,
+                "properties": {"hiddenByUser": False},
+                "fields": "hiddenByUser",
+            }
+        })
+        ungrouped += 1
+
+    grouped = 0
+    for col in future_columns:
+        if (col, col + 1) in existing_ranges:
+            continue  # 已經分組過了，不要重複疊加分組
+        col_range = {
+            "sheetId": sheet_id,
+            "dimension": "COLUMNS",
+            "startIndex": col,
+            "endIndex": col + 1,
+        }
+        requests.append({"addDimensionGroup": {"range": col_range}})
+        requests.append({
+            "updateDimensionProperties": {
+                "range": col_range,
+                "properties": {"hiddenByUser": True},
+                "fields": "hiddenByUser",
+            }
+        })
+        grouped += 1
+
+    if requests:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"requests": requests}
+        ).execute()
+
+    log_execution(
+        "2026review欄位分組隱藏（預估）", area, "完成",
+        f"期別 {year_month}：分組隱藏 {grouped} 個未來預估欄，解開 {ungrouped} 個當月/過去預估欄",
+    )
+    return {"grouped": grouped, "ungrouped": ungrouped}

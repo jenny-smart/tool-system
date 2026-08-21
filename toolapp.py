@@ -2777,6 +2777,30 @@ def run_review_group_hide_actual(*, month="", start_date=None, end_date=None, ar
     return "\n".join(lines)
 
 
+def run_review_group_hide_future_forecast(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    from tools.finance_management.review_update import group_hide_future_forecast_columns
+
+    year_month_input = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month_input):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    year_month = f"{year_month_input[:4]}.{year_month_input[4:]}"
+
+    areas = _review_areas_for(area)
+    lines = []
+    for i, a in enumerate(areas):
+        if i > 0:
+            time.sleep(2)
+        try:
+            result = group_hide_future_forecast_columns(a, year_month)
+            message = f"{a}：分組隱藏 {result['grouped']} 個未來預估欄，解開 {result['ungrouped']} 個當月/過去預估欄"
+        except Exception as exc:
+            message = f"{a}：失敗 - {exc}"
+        lines.append(message)
+        if on_progress:
+            on_progress(message, "success" if "失敗" not in message else "error")
+    return "\n".join(lines)
+
+
 def _get_vip_workflow():
     from config.vip_config import MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID
     from services.google_auth import get_drive_service, get_gspread_client
@@ -2887,6 +2911,7 @@ FINANCE_TASKS = [
     {"name": "【財報】2026review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
     {"name": "【財報】2026review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
     {"name": "【財報】2026review｜分組隱藏當月起實際欄位", "handler": run_review_group_hide_actual, "enabled": True},
+    {"name": "【財報】2026review｜分組隱藏當月後預估欄位", "handler": run_review_group_hide_future_forecast, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
@@ -3595,6 +3620,7 @@ with date_col:
             "【財報】2026review｜預覽公式調整",
             "【財報】2026review｜套用公式調整",
             "【財報】2026review｜分組隱藏當月起實際欄位",
+            "【財報】2026review｜分組隱藏當月後預估欄位",
         ):
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -3609,7 +3635,9 @@ with date_col:
                 "（執行區域選「全區」兩者都會處理，也可以選「2026review工作表」只跑彙總分頁）"
                 "裡 SUMIF(\"*預估*\") 公式的結尾欄，改成該期別對應的預估欄。"
                 "先跑「預覽」確認調整內容沒問題，再跑「套用」寫入。"
-                "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來。"
+                "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來；"
+                "「分組隱藏當月後預估欄位」則相反，把該期別之後的「預估」欄位分組收合，"
+                "該期別及之前的預估欄位會維持顯示（若之前被誤收合會自動解開）。"
             )
         elif selected_function == "【儲值金】複製期別檔案":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
@@ -3872,6 +3900,7 @@ with area_col:
         "【財報】2026review｜預覽公式調整",
         "【財報】2026review｜套用公式調整",
         "【財報】2026review｜分組隱藏當月起實際欄位",
+        "【財報】2026review｜分組隱藏當月後預估欄位",
     ):
         # 「2026review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
         # 分頁；「全區」已經會一併處理它，這個選項是給只想單獨重跑彙總
@@ -4510,6 +4539,7 @@ if run_clicked:
                 "【財報】2026review｜預覽公式調整",
                 "【財報】2026review｜套用公式調整",
                 "【財報】2026review｜分組隱藏當月起實際欄位",
+                "【財報】2026review｜分組隱藏當月後預估欄位",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完
