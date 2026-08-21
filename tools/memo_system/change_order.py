@@ -43,7 +43,7 @@ import requests
 from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
-from tools.common.config_loader import get_service_account_info
+from tools.common.config_loader import get_service_account_info, read_sheet_records, is_enabled
 
 try:
     import streamlit as st
@@ -124,17 +124,68 @@ def get_service_amount(order: dict) -> int:
 # Google Sheet 連線（比照 memo.py 用 service account）
 # ============================================================
 
-# 兩個地區各自的清潔異動工作表（Sheet ID 取自您提供的網址）
-SHEET_IDS = {
+# 內建預設值（僅台北/台中）：主控試算表「清潔異動設定」分頁讀不到時的 fallback，
+# 確保既有功能不會因為讀不到設定分頁而整個掛掉。
+_DEFAULT_SHEET_IDS = {
     "台北": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
     "台中": "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM",
 }
 
 # 對應網址列上的 gid，用來精準定位分頁（比用分頁名稱比對更穩，不怕改名）
-SHEET_GIDS = {
+_DEFAULT_SHEET_GIDS = {
     "台北": 759897417,
     "台中": 759897417,
 }
+
+# 各地區清潔異動試算表的正式設定來源：主控試算表（Jenny's Lemonhometools）
+# 的「清潔異動設定」分頁，欄位為 地區 / 試算表ID / GID / 啟用。
+# 之後要增減地區只要改這個分頁，不用改程式碼。
+REGION_CONFIG_SHEET = "清潔異動設定"
+
+_region_config_cache = None
+
+
+def load_region_config(force_reload: bool = False) -> dict:
+    """讀取各地區清潔異動試算表設定（地區 → 試算表ID / GID），
+    優先讀主控試算表「清潔異動設定」分頁並依「啟用」欄過濾；
+    讀不到分頁（權限、網路、分頁不存在…等）時，安靜地退回內建的台北/台中設定。
+    """
+    global _region_config_cache
+    if _region_config_cache is not None and not force_reload:
+        return _region_config_cache
+
+    sheet_ids = dict(_DEFAULT_SHEET_IDS)
+    sheet_gids = dict(_DEFAULT_SHEET_GIDS)
+
+    try:
+        records = read_sheet_records(REGION_CONFIG_SHEET)
+        loaded_ids = {}
+        loaded_gids = {}
+        for record in records:
+            region = (record.get("地區") or "").strip()
+            sid = (record.get("試算表ID") or "").strip()
+            gid_text = (record.get("GID") or "").strip()
+            if not region or not sid or not is_enabled(record.get("啟用", "")):
+                continue
+            loaded_ids[region] = sid
+            if gid_text:
+                try:
+                    loaded_gids[region] = int(gid_text)
+                except ValueError:
+                    pass
+        if loaded_ids:
+            sheet_ids = loaded_ids
+            sheet_gids = loaded_gids
+    except Exception:
+        pass
+
+    _region_config_cache = {"sheet_ids": sheet_ids, "sheet_gids": sheet_gids}
+    return _region_config_cache
+
+
+def supported_regions() -> list:
+    """目前設定為啟用的地區清單（依「清潔異動設定」分頁；讀不到時只有台北/台中）。"""
+    return list(load_region_config()["sheet_ids"].keys())
 
 _SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -200,18 +251,22 @@ def get_worksheet(region: str, tab_name: str = "清潔異動"):
     優先用 gid（SHEET_GIDS）精準定位分頁；若該地區沒有設定 gid，
     退而用 tab_name 嘗試找同名分頁，最後 fallback 用該試算表第一個分頁。
     """
-    if region not in SHEET_IDS:
-        raise ValueError(f"不支援的地區：{region}（目前支援：{list(SHEET_IDS.keys())}）")
+    config = load_region_config()
+    sheet_ids = config["sheet_ids"]
+    sheet_gids = config["sheet_gids"]
+
+    if region not in sheet_ids:
+        raise ValueError(f"不支援的地區：{region}（目前支援：{list(sheet_ids.keys())}）")
 
     client = _get_gspread_client()
     try:
-        sh = client.open_by_key(SHEET_IDS[region])
+        sh = client.open_by_key(sheet_ids[region])
     except gspread.exceptions.SpreadsheetNotFound as exc:
         raise RuntimeError(
             f"無法開啟「{region}」清潔異動試算表。請確認試算表已分享給目前的 Google 服務帳號（編輯者權限）。"
         ) from exc
 
-    gid = SHEET_GIDS.get(region)
+    gid = sheet_gids.get(region)
     if gid is not None:
         for ws in sh.worksheets():
             if ws.id == gid:

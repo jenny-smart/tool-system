@@ -1,0 +1,148 @@
+name: Scheduled Change Order Daily Check
+
+on:
+  schedule:
+    - cron: "0 2 * * *"  # 台北 10:00：清潔異動每日檢查
+
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run-change-order-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
+      MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
+
+      LEMON_EMAIL: ${{ secrets.LEMON_EMAIL }}
+      LEMON_PASSWORD: ${{ secrets.LEMON_PASSWORD }}
+
+      NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+      NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
+      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_secret() {
+            NAME="$1"
+            VALUE="$2"
+
+            if [ -z "$VALUE" ]; then
+              echo "❌ 缺少 GitHub Secret：$NAME"
+              exit 1
+            fi
+
+            echo "✅ 已設定：$NAME"
+          }
+
+          check_secret "GOOGLE_SERVICE_ACCOUNT" "$GOOGLE_SERVICE_ACCOUNT"
+          check_secret "LEMON_EMAIL" "$LEMON_EMAIL"
+          check_secret "LEMON_PASSWORD" "$LEMON_PASSWORD"
+          check_secret "NOTIFY_EMAIL" "$NOTIFY_EMAIL"
+          check_secret "NOTIFY_PASSWORD" "$NOTIFY_PASSWORD"
+          check_secret "NOTIFY_TO" "$NOTIFY_TO"
+          check_secret \
+            "TOOLS_APP_LOG_SPREADSHEET_ID 或 MASTER_SPREADSHEET_ID" \
+            "$TOOLS_APP_LOG_SPREADSHEET_ID"
+
+      - name: Run change order daily check
+        shell: bash
+        run: |
+          set +e
+
+          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+          LOG_DIR="logs/$TODAY"
+          NAME="change_order_daily_check"
+          mkdir -p "$LOG_DIR"
+
+          echo "========================================"
+          echo "台北時間：$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")"
+          echo "執行任務：清潔異動每日檢查（台北／台中／桃園／新竹）"
+          echo "========================================"
+
+          START_TS=$(date +%s)
+          START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          LOG_FILE="$LOG_DIR/$NAME.log"
+
+          python -u -m tools.orders_system.change_order_daily_check > "$LOG_FILE" 2>&1
+          EXIT_CODE=$?
+
+          END_TS=$(date +%s)
+          END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          DURATION=$((END_TS - START_TS))
+
+          echo "$EXIT_CODE" > "$LOG_DIR/$NAME.exit"
+          printf \
+            '{"job_name":"%s","status":"%s","exit_code":%s,"started_at":"%s","finished_at":"%s","duration_seconds":%s}\n' \
+            "$NAME" \
+            "$([ "$EXIT_CODE" -eq 0 ] && echo success || echo failed)" \
+            "$EXIT_CODE" "$START_TEXT" "$END_TEXT" "$DURATION" \
+            > "$LOG_DIR/$NAME.json"
+
+          cat "$LOG_FILE"
+
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "✅ 清潔異動每日檢查執行成功"
+          else
+            echo "❌ 清潔異動每日檢查執行失敗（exit $EXIT_CODE）"
+          fi
+
+          echo "結束時間：$END_TEXT"
+          echo "執行秒數：$DURATION"
+
+          exit "$EXIT_CODE"
+
+      - name: Commit logs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -d "logs" ]; then
+            echo "沒有 logs 目錄"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -f logs
+
+          if git diff --cached --quiet; then
+            echo "沒有新的 Log 需要提交"
+            exit 0
+          fi
+
+          git commit -m "Update change order daily check logs"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+          echo "✅ 清潔異動每日檢查 Log 已提交"
