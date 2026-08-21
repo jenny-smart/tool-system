@@ -2685,6 +2685,67 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
     return "已寫入「現金缺口試算」工作表：\n" + "\n".join(lines)
 
 
+REVIEW_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
+
+
+def _review_areas_for(area: str) -> list[str]:
+    if area == "全區":
+        return REVIEW_AREAS
+    if area in REVIEW_AREAS:
+        return [area]
+    raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
+
+
+def run_review_formula_preview(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    from tools.finance_management.review_update import preview_review_formula_updates
+
+    year_month_input = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month_input):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    year_month = f"{year_month_input[:4]}.{year_month_input[4:]}"
+
+    areas = _review_areas_for(area)
+    lines = []
+    for i, a in enumerate(areas):
+        if i > 0:
+            time.sleep(2)
+        try:
+            changes = preview_review_formula_updates(a, year_month)
+            preview = "；".join(f"{c['cell']}: {c['old_formula']} → {c['new_formula']}" for c in changes[:5])
+            more = f"（還有 {len(changes) - 5} 個）" if len(changes) > 5 else ""
+            message = f"{a}：預計調整 {len(changes)} 個儲存格" + (f"　{preview}{more}" if changes else "")
+        except Exception as exc:
+            message = f"{a}：失敗 - {exc}"
+        lines.append(message)
+        if on_progress:
+            on_progress(message, "info")
+    return "預覽（尚未寫入，確認沒問題再執行「套用公式調整」）：\n" + "\n".join(lines)
+
+
+def run_review_formula_apply(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    from tools.finance_management.review_update import apply_review_formula_updates
+
+    year_month_input = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month_input):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202607")
+    year_month = f"{year_month_input[:4]}.{year_month_input[4:]}"
+
+    areas = _review_areas_for(area)
+    lines = []
+    for i, a in enumerate(areas):
+        if i > 0:
+            time.sleep(2)
+        try:
+            result = apply_review_formula_updates(a, year_month)
+            message = f"{a}：已調整 {result['changed']} 個儲存格"
+        except Exception as exc:
+            message = f"{a}：失敗 - {exc}"
+        lines.append(message)
+        if on_progress:
+            on_progress(message, "success" if "失敗" not in message else "error")
+    return "\n".join(lines)
+
+
 def _get_vip_workflow():
     from config.vip_config import MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID
     from services.google_auth import get_drive_service, get_gspread_client
@@ -2792,6 +2853,8 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
+    {"name": "【財報】2026review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
+    {"name": "【財報】2026review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
@@ -3496,6 +3559,22 @@ with date_col:
                 key="finance_cash_gap_period",
             )
             st.caption("格式：YYYYMM；試算該月最後一天的現金缺口")
+        elif selected_function in (
+            "【財報】2026review｜預覽公式調整",
+            "【財報】2026review｜套用公式調整",
+        ):
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_review_period",
+            )
+            st.caption(
+                "格式：YYYYMM；把 2026review 檔各地區分頁裡 SUMIF(\"*預估*\") 公式的結尾欄，"
+                "改成該期別對應的預估欄。先跑「預覽」確認調整內容沒問題，再跑「套用」寫入。"
+            )
         elif selected_function == "【儲值金】複製期別檔案":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -4383,6 +4462,8 @@ if run_clicked:
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
+                "【財報】2026review｜預覽公式調整",
+                "【財報】2026review｜套用公式調整",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完
