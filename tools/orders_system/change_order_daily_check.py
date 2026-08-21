@@ -11,15 +11,20 @@
     自動回填後台，成功後才把 B 欄改成「已收款」。
   - 條件還沒補齊（或自動回填失敗）的列，列進待辦清單寫一筆行事曆提醒，
     完全不動 Sheet 資料（已經有行事曆通知就不再另外寄信）。
+
+登入後台採「各區帳號密碼」（比照 tools/lemon_backend/config.py 的 AREA_ENV：
+台北→TAIPEI_EMAIL/TAIPEI_PASSWORD、台中→TAICHUNG_EMAIL/TAICHUNG_PASSWORD、
+桃園→TAOYUAN_EMAIL/TAOYUAN_PASSWORD、新竹→HSINCHU_EMAIL/HSINCHU_PASSWORD），
+每個地區各自用自己的帳密登入、拿各自的 session，不共用單一帳號。
 """
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from tools.memo_system import memo, change_order
+from tools.lemon_backend.config import get_credentials
 from tools.finance_management.execution_log import log_execution
 from tools.orders_system import calendar_notify
 
@@ -27,12 +32,14 @@ REGIONS = ["台北", "台中", "桃園", "新竹"]
 TW_TZ = ZoneInfo("Asia/Taipei")
 
 
-def _login_credentials() -> tuple[str, str]:
-    email = os.environ.get("LEMON_EMAIL", "").strip()
-    password = os.environ.get("LEMON_PASSWORD", "").strip()
-    if not email or not password:
-        raise RuntimeError("缺少 LEMON_EMAIL / LEMON_PASSWORD，無法登入後台")
-    return email, password
+def _login_session(region: str, ui_logger=None):
+    """用該地區自己的帳密登入後台，回傳該地區專屬的 session。"""
+    creds = get_credentials(region, required=False)
+    if creds is None:
+        raise RuntimeError(f"{region} 後台帳密未設定（需要對應的 *_EMAIL / *_PASSWORD Secret）")
+    memo.set_env("prod")  # tools/memo_system/env.py 預設 ENV="dev"，排程一定要強制切到正式站
+    memo.set_runtime_credentials(creds.email, creds.password)
+    return memo.login(ui_logger=ui_logger)
 
 
 def _col_index(letter: str) -> int:
@@ -161,15 +168,18 @@ def run(regions=None, ui_logger=None) -> dict:
     active_regions = [r for r in requested if r in enabled]
     skipped_regions = [r for r in requested if r not in enabled]
 
-    email, password = _login_credentials()
-    memo.set_env("prod")  # tools/memo_system/env.py 預設 ENV="dev"，排程一定要強制切到正式站
-    memo.set_runtime_credentials(email, password)
-    session = memo.login(ui_logger=ui_logger)
-
     all_todo = []
     summary = {}
 
     for region in active_regions:
+        try:
+            session = _login_session(region, ui_logger=ui_logger)
+        except Exception as exc:
+            log(f"❌ 【{region}】登入失敗：{exc}")
+            summary[region] = {"synced": 0, "failed": 1, "todo": 0, "errors": [str(exc)]}
+            log_execution("清潔異動每日檢查", region, "失敗", str(exc))
+            continue
+
         scanned = scan_region(region)
         ready, todo = scanned["ready"], scanned["todo"]
         all_todo.extend(todo)

@@ -37,10 +37,9 @@ HSINCHU_PASSWORD
 KAOHSIUNG_EMAIL
 KAOHSIUNG_PASSWORD
 
-新增（ATM 對帳 / 清潔異動每日檢查排程共用的檸檬後台登入帳密）：
-
-LEMON_EMAIL
-LEMON_PASSWORD
+新增：ATM 對帳 / 清潔異動每日檢查排程，登入後台一律各區用各區自己的帳密
+（TAIPEI_EMAIL/PASSWORD、TAICHUNG_EMAIL/PASSWORD、TAOYUAN_EMAIL/PASSWORD、
+HSINCHU_EMAIL/PASSWORD，同上表已列的既有 Secrets），不共用單一帳號登入。
 
 scheduled_atm_reconcile.yml -> .github/workflows/scheduled_atm_reconcile.yml
 scheduled_change_order_check.yml -> .github/workflows/scheduled_change_order_check.yml

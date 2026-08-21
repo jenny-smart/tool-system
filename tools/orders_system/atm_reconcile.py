@@ -14,25 +14,30 @@ process_atm_rows() 本身只會略過 J 欄空白或 T 欄為「需確認／非�
 （先前發生過的問題）。因此這支排程自己先掃描、只把 T 欄仍空白的列號組成
 row_spec 再呼叫 process_atm_rows()，已經對過帳的原始資料列完全不會被讀進
 待處理清單，從根本避免覆蓋。
+登入後台採「各區帳號密碼」（比照 tools/lemon_backend/config.py 的 AREA_ENV：
+台北→TAIPEI_EMAIL/TAIPEI_PASSWORD、台中→TAICHUNG_EMAIL/TAICHUNG_PASSWORD…），
+每個地區各自用自己的帳密登入、拿各自的 session，不共用單一帳號。
 """
 from __future__ import annotations
 
-import os
 import sys
 
 from tools.memo_system import memo, atm
+from tools.lemon_backend.config import get_credentials
 from tools.finance_management.execution_log import log_execution
 from tools.orders_system import calendar_notify
 
 REGIONS = ["台北", "台中"]
 
 
-def _login_credentials() -> tuple[str, str]:
-    email = os.environ.get("LEMON_EMAIL", "").strip()
-    password = os.environ.get("LEMON_PASSWORD", "").strip()
-    if not email or not password:
-        raise RuntimeError("缺少 LEMON_EMAIL / LEMON_PASSWORD，無法登入後台")
-    return email, password
+def _login_session(region: str, ui_logger=None):
+    """用該地區自己的帳密登入後台，回傳該地區專屬的 session。"""
+    creds = get_credentials(region, required=False)
+    if creds is None:
+        raise RuntimeError(f"{region} 後台帳密未設定（需要對應的 *_EMAIL / *_PASSWORD Secret）")
+    memo.set_env("prod")  # tools/memo_system/env.py 預設 ENV="dev"，排程一定要強制切到正式站
+    memo.set_runtime_credentials(creds.email, creds.password)
+    return memo.login(ui_logger=ui_logger)
 
 
 def find_new_rows(region: str) -> list:
@@ -73,15 +78,20 @@ def run(regions=None, ui_logger=None) -> dict:
             ui_logger(msg)
 
     regions = regions or REGIONS
-    email, password = _login_credentials()
-    memo.set_env("prod")  # tools/memo_system/env.py 預設 ENV="dev"，排程一定要強制切到正式站
-    memo.set_runtime_credentials(email, password)
-    session = memo.login(ui_logger=ui_logger)
 
     summary = {}
     total_success = total_failed = total_skipped = 0
 
     for region in regions:
+        try:
+            session = _login_session(region, ui_logger=ui_logger)
+        except Exception as exc:
+            log(f"❌ 【{region}】登入失敗：{exc}")
+            summary[region] = {"processed": 0, "success": 0, "failed": 1, "skipped": 0, "errors": [str(exc)]}
+            total_failed += 1
+            log_execution("ATM對帳", region, "失敗", str(exc))
+            continue
+
         new_rows = find_new_rows(region)
         log(f"【{region}】新增列（J有單號且T空白）：{len(new_rows)} 筆 → {new_rows}")
 
