@@ -20,9 +20,7 @@ jobs:
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
       GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
       TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
-      NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
-      NOTIFY_PASSWORD: ${{ secrets.NOTIFY_PASSWORD }}
-      NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+      GOOGLE_HERS_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_HERS_CALENDAR_REFRESH_TOKEN }}
 
     steps:
       - name: Checkout repository
@@ -38,5 +36,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 檢查台北／台中富邦異動待處理資料
+      - name: 檢查台北／台中富邦異動待處理資料（有新增才建立日曆提醒）
         run: python -u -m tools.scheduled_daily.fubon_pending_notify
