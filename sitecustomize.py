@@ -28,6 +28,19 @@ try:
 except Exception as exc:
     print(f"⚠️ gspread 429 自動重試安裝失敗：{exc}", flush=True)
 
+# tools/local_agent.py 這支常駐 daemon 本身也是用 `python -m` 啟動，一樣
+# 會自動載入這支檔案。它在任務執行中每 3 秒回報一次進度、任務結束時
+# 回寫 status／log（tools/local_agent_queue.py），走的是原生
+# googleapiclient（不是 gspread），install_gspread_retry() 補不到。沒有
+# 重試的話，daemon 這幾個回報呼叫只要撞到 429 就直接失敗、佇列表狀態
+# 停在原地，網頁上的執行日誌就會卡住不動，即使任務其實已經在本機跑完。
+try:
+    from services.google_api_retry import install_googleapiclient_retry
+
+    install_googleapiclient_retry()
+except Exception as exc:
+    print(f"⚠️ googleapiclient 429 自動重試安裝失敗：{exc}", flush=True)
+
 # 舊共用雲端來源 ID -> Jenny「我的雲端硬碟 / @日排程」子資料夾名稱。
 # 外場 / 客服程式可以繼續沿用既有設定值，Drive proxy 會在 API 呼叫前
 # 自動改寫成新的 My Drive 子資料夾 ID。

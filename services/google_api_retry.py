@@ -42,6 +42,13 @@ def is_retryable_error(error: Exception) -> bool:
     if status_code in RETRYABLE_STATUS:
         return True
 
+    # googleapiclient.errors.HttpError 是用 .resp（httplib2 Response）帶
+    # 狀態碼，屬性名稱跟 gspread 的 .response.status_code 不一樣。
+    resp = getattr(error, "resp", None)
+    status = getattr(resp, "status", None)
+    if status in RETRYABLE_STATUS:
+        return True
+
     return False
 
 
@@ -90,6 +97,40 @@ def install_gspread_retry() -> None:
 
     request_with_retry._retry_installed = True
     http_client_cls.request = request_with_retry
+
+
+def install_googleapiclient_retry() -> None:
+    """
+    Monkey patch googleapiclient.http.HttpRequest.execute。
+
+    tools/common/config_loader.get_sheets_service() 建出來的 service 是
+    原生 googleapiclient（不是 gspread），local_agent_queue.py 的
+    create_task／list_tasks／update_task／append_task_log 全部走這條路。
+    install_gspread_retry() 只補到 gspread 那邊，這條路一直沒有保護——
+    本機 Agent daemon 在任務執行中每 3 秒回報一次進度、任務結束時回寫
+    status／log，只要中途撞到 429，這幾個 update_task() 呼叫沒有重試就
+    直接失敗，佇列表裡的狀態就會停在最後一次成功寫入的樣子（例如永遠
+    停在剛建立時的「等待本機 Agent」），即使任務其實已經在本機跑完，
+    網頁上的執行日誌也看不到後續進度。
+    """
+    import googleapiclient.http
+
+    request_cls = googleapiclient.http.HttpRequest
+
+    if getattr(request_cls.execute, "_retry_installed", False):
+        return
+
+    original_execute = request_cls.execute
+
+    @wraps(original_execute)
+    def execute_with_retry(self, *args, **kwargs):
+        return retry_call(
+            lambda: original_execute(self, *args, **kwargs),
+            retries=6,
+        )
+
+    execute_with_retry._retry_installed = True
+    request_cls.execute = execute_with_retry
 
 
 def api_pause(seconds: float = 1.2) -> None:
