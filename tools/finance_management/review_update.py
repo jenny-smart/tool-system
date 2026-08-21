@@ -14,17 +14,70 @@
 流程分兩步，故意不會一次到位直接寫入試算表：
   1. preview_review_formula_updates()：只讀取、不寫入，回傳「哪些儲存格、
      舊公式、新公式」的清單，先讓人確認調整方向對不對。
-  2. apply_review_formula_updates()：把 preview 算出的清單實際寫回去。
-這樣萬一抓錯欄位，不會直接改壞正式的年度 review 檔。
+  2. apply_review_formula_updates()：把 preview 算出的清單實際寫回去，並在
+     主控試算表的「2026review公式調整記錄」分頁，逐一記下每個被改動儲存格
+     的時間／地區／期別／舊公式／新公式，方便事後查改了什麼、什麼時候改的。
+這樣萬一抓錯欄位，不會直接改壞正式的年度 review 檔，改完也留得下紀錄。
 """
 
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from tools.common.config_loader import get_sheets_service
+from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.execution_log import log_execution
 from tools.finance_management.statement_registry import resolve_review_location
+
+TW_TZ = ZoneInfo("Asia/Taipei")
+CHANGE_LOG_SHEET = "2026review公式調整記錄"
+_CHANGE_LOG_HEADER = ["時間", "地區", "期別", "儲存格", "舊公式", "新公式"]
+
+
+def _ensure_change_log_sheet(service, spreadsheet_id: str) -> None:
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets.properties.title"
+    ).execute()
+    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+    if CHANGE_LOG_SHEET in titles:
+        return
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{"addSheet": {"properties": {"title": CHANGE_LOG_SHEET}}}]},
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{CHANGE_LOG_SHEET}'!A1:F1",
+        valueInputOption="RAW",
+        body={"values": [_CHANGE_LOG_HEADER]},
+    ).execute()
+
+
+def _log_changes(area: str, year_month: str, changes: list[dict[str, str]]) -> None:
+    """把每一個被改動的儲存格，各記一列到「2026review公式調整記錄」分頁
+    （時間／地區／期別／儲存格／舊公式／新公式），方便事後回頭查改了什麼、
+    什麼時候改的。記錄本身失敗不影響主要功能。"""
+    if not changes:
+        return
+    try:
+        service = get_sheets_service()
+        master_id = get_master_spreadsheet_id()
+        _ensure_change_log_sheet(service, master_id)
+        now_text = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
+        rows = [
+            [now_text, area, year_month, c["cell"], c["old_formula"], c["new_formula"]]
+            for c in changes
+        ]
+        service.spreadsheets().values().append(
+            spreadsheetId=master_id,
+            range=f"'{CHANGE_LOG_SHEET}'!A:F",
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": rows},
+        ).execute()
+    except Exception:
+        pass
 
 _SUMIF_RE = re.compile(
     r'^=SUM[Ii][Ff]\(\s*\$?([A-Z]+)\$?1\s*:\s*\$?([A-Z]+)(\d+)\s*,'
@@ -124,6 +177,7 @@ def apply_review_formula_updates(area: str, year_month: str) -> dict[str, int]:
             spreadsheetId=spreadsheet_id,
             body={"valueInputOption": "USER_ENTERED", "data": data},
         ).execute()
+        _log_changes(area, year_month, changes)
     except Exception as exc:
         log_execution("2026review公式調整", area, "失敗", str(exc))
         raise
