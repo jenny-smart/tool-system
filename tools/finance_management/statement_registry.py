@@ -145,6 +145,19 @@ def review_spreadsheet_id() -> str:
     return spreadsheet_id
 
 
+# 「2026review工作表」：2026目標及review檔裡跨地區彙整的固定分頁（不是某個
+# 地區自己的分頁），固定 GID，不用地區去查。
+MASTER_REVIEW_TAB_GID = "435608470"
+
+
+def resolve_master_review_location() -> tuple[str, str]:
+    """回傳 (試算表ID, 分頁標題)：「2026review工作表」這個固定的彙整分頁。"""
+    spreadsheet_id = review_spreadsheet_id()
+    service = get_sheets_service()
+    title = sheet_title_for_gid(service, spreadsheet_id, MASTER_REVIEW_TAB_GID)
+    return spreadsheet_id, title
+
+
 def resolve_review_location(area: str) -> tuple[str, str]:
     """回傳 (試算表ID, 分頁標題)：2026目標及review檔裡，該地區對應的分頁。"""
     row = _find_row(area)

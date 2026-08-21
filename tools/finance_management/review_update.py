@@ -33,7 +33,19 @@ from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.execution_log import log_execution
-from tools.finance_management.statement_registry import resolve_review_location
+from tools.finance_management.statement_registry import (
+    resolve_master_review_location,
+    resolve_review_location,
+)
+
+MASTER_REVIEW_AREA = "2026review"  # 特殊地區代號：指「2026review工作表」這個跨地區彙整分頁
+
+
+def _resolve_location(area: str) -> tuple[str, str]:
+    if area == MASTER_REVIEW_AREA:
+        return resolve_master_review_location()
+    return resolve_review_location(area)
+
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 CHANGE_LOG_SHEET = "2026review公式調整記錄"
@@ -136,7 +148,7 @@ def preview_review_formula_updates(area: str, year_month: str) -> list[dict[str,
 
     year_month 格式 YYYY.MM，例如 "2026.07"。
     """
-    spreadsheet_id, title = resolve_review_location(area)
+    spreadsheet_id, title = _resolve_location(area)
     service = get_sheets_service()
 
     # 標題列（row1）跟表格內容分開讀：標題可能是公式算出來的月份文字
@@ -187,7 +199,7 @@ def apply_review_formula_updates(area: str, year_month: str) -> dict[str, int]:
             log_execution("2026review公式調整", area, "完成", "沒有需要調整的公式")
             return {"changed": 0}
 
-        spreadsheet_id, title = resolve_review_location(area)
+        spreadsheet_id, title = _resolve_location(area)
         service = get_sheets_service()
         data = [
             {"range": f"'{title}'!{c['cell']}", "values": [[c["new_formula"]]]}
@@ -227,7 +239,7 @@ def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
     year_month 格式 YYYY.MM，例如 "2026.07"。
     """
     target_year, target_month = int(year_month[:4]), int(year_month[5:])
-    spreadsheet_id, title = resolve_review_location(area)
+    spreadsheet_id, title = _resolve_location(area)
     service = get_sheets_service()
 
     header_res = service.spreadsheets().values().get(
