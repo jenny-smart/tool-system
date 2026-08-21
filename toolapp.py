@@ -2686,12 +2686,16 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
 
 
 REVIEW_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
-MASTER_REVIEW_SELECT_AREA = "2026review工作表"  # 跨地區彙總的固定分頁，「全區」不含它
+MASTER_REVIEW_SELECT_AREA = "2026review工作表"  # 跨地區彙總的固定分頁
+
+# 換期別時，2026review彙整分頁跟各地區分頁通常要一起處理，所以「全區」
+# 也一併包含彙整分頁；想只處理彙整分頁的話，另外選 MASTER_REVIEW_SELECT_AREA。
+REVIEW_AREAS_ALL = REVIEW_AREAS + ["2026review"]
 
 
 def _review_areas_for(area: str) -> list[str]:
     if area == "全區":
-        return REVIEW_AREAS
+        return REVIEW_AREAS_ALL
     if area == MASTER_REVIEW_SELECT_AREA:
         return ["2026review"]
     if area in REVIEW_AREAS:
@@ -3601,8 +3605,9 @@ with date_col:
                 key="finance_review_period",
             )
             st.caption(
-                "格式：YYYYMM；把 2026review 檔各地區分頁（或執行區域選「2026review工作表」"
-                "跨地區彙總分頁）裡 SUMIF(\"*預估*\") 公式的結尾欄，改成該期別對應的預估欄。"
+                "格式：YYYYMM；把 2026review 檔各地區分頁、以及2026review跨地區彙總分頁"
+                "（執行區域選「全區」兩者都會處理，也可以選「2026review工作表」只跑彙總分頁）"
+                "裡 SUMIF(\"*預估*\") 公式的結尾欄，改成該期別對應的預估欄。"
                 "先跑「預覽」確認調整內容沒問題，再跑「套用」寫入。"
                 "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來。"
             )
@@ -3869,7 +3874,8 @@ with area_col:
         "【財報】2026review｜分組隱藏當月起實際欄位",
     ):
         # 「2026review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
-        # 分頁，「全區」不會自動包含它，要另外選這個選項才會處理。
+        # 分頁；「全區」已經會一併處理它，這個選項是給只想單獨重跑彙總
+        # 分頁時用的。
         area_select_options = area_select_options + ["2026review工作表"]
 
     selected_area_value = st.selectbox(
