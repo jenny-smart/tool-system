@@ -39,12 +39,18 @@ from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_
 list_local_agent_tasks = st.cache_data(ttl=5, show_spinner=False)(_list_local_agent_tasks_raw)
 read_local_agent_task_log = st.cache_data(ttl=5, show_spinner=False)(_read_local_agent_task_log_raw)
 
-from services.google_api_retry import install_gspread_retry
+from services.google_api_retry import install_googleapiclient_retry, install_gspread_retry
 
 # gspread（儲值金功能用）遇到 429 Quota exceeded 時自動重試＋退避，
 # 避免像 convert_files/move_files/apply_formulas 這種一次跑很多 API
 # 呼叫的流程，被 Sheets API 的「每分鐘讀取次數」限制擋下來直接失敗。
 install_gspread_retry()
+
+# local_agent_queue.py（本機 Agent 任務佇列 create_task／list_tasks／
+# update_task／append_task_log）走的是原生 googleapiclient，不是 gspread，
+# install_gspread_retry() 補不到；這裡也裝上重試，才不會因為一次 429
+# 就讓 render_agent_task_progress 讀不到最新任務狀態。
+install_googleapiclient_retry()
 
 try:
     from tools.local_agent_queue import list_agent_status as list_local_agent_status
