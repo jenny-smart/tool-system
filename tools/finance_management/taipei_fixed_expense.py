@@ -224,9 +224,9 @@ def _round_twd(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def parse_aws_invoice(pdf_text: str) -> int:
+def parse_aws_invoice(pdf_text: str) -> tuple[int, str]:
     """從 AWS Tax Invoice PDF 文字抓 AWS Service Charges（USD）與台幣匯率，
-    回傳金額 = AWS Service Charges * 匯率 * 1.015（四捨五入到整數台幣）。
+    回傳 (金額, 換算說明)；金額 = AWS Service Charges * 匯率 * 1.015（四捨五入到整數台幣）。
     """
     charge_match = AWS_CHARGE_RE.search(pdf_text)
     rate_match = FX_RATE_RE.search(pdf_text)
@@ -236,23 +236,25 @@ def parse_aws_invoice(pdf_text: str) -> int:
         raise ValueError("AWS PDF 找不到台幣匯率（1 USD = ... TWD）")
     usd_amount = _parse_decimal(charge_match.group(1))
     rate = _parse_decimal(rate_match.group(1))
-    return _round_twd(usd_amount * rate * Decimal("1.015"))
+    amount = _round_twd(usd_amount * rate * Decimal("1.015"))
+    detail = f"TWD rate={rate}，USD{usd_amount} × rate × 1.015={amount}"
+    return amount, detail
 
 
-def parse_zhendan_invoice(pdf_text: str) -> int:
+def parse_zhendan_invoice(pdf_text: str) -> tuple[int, str]:
     """從震旦行電子發票 PDF 文字抓總計金額。"""
     match = ZHENDAN_TOTAL_RE.search(pdf_text)
     if not match:
         raise ValueError("震旦行 PDF 找不到總計金額")
-    return _round_twd(_parse_decimal(match.group(1)))
+    return _round_twd(_parse_decimal(match.group(1))), ""
 
 
-def parse_zhongdian_email(body_text: str) -> int:
+def parse_zhongdian_email(body_text: str) -> tuple[int, str]:
     """從眾點數位信件內文抓發票金額總計。"""
     match = ZHONGDIAN_TOTAL_RE.search(body_text)
     if not match:
         raise ValueError("眾點信件內文找不到「發票金額總計為」")
-    return _round_twd(_parse_decimal(match.group(1)))
+    return _round_twd(_parse_decimal(match.group(1))), ""
 
 
 # ────────────────────────────────────────────────────────────
@@ -292,22 +294,25 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
         try:
             msg, matched = _latest_message(imap, criteria)
             if label == "眾點":
-                amount = parse_fn(_plain_body(msg))
+                amount, detail = parse_fn(_plain_body(msg))
             else:
                 pdf_texts = _pdf_attachments_text(msg)
                 if not pdf_texts:
                     raise RuntimeError("信件沒有 PDF 附件")
-                amount = None
+                result = None
                 last_exc: Exception | None = None
                 for text in pdf_texts:
                     try:
-                        amount = parse_fn(text)
+                        result = parse_fn(text)
                         break
                     except ValueError as exc:
                         last_exc = exc
-                if amount is None:
+                if result is None:
                     raise last_exc or RuntimeError("PDF 附件解析失敗")
+                amount, detail = result
             memo = f"{period_label}-{label}"
+            if detail:
+                memo += f"，{detail}"
             rows.append(["待付款", "", now_text, category, memo, amount, "", payee, ""])
             items.append({"label": label, "amount": amount, "matched": matched, "status": "成功"})
         except Exception as exc:
@@ -335,9 +340,9 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                 pass
 
     # 固定金額，不查信
-    rows.append(["待付款", "", now_text, "辦公室租金", f"{period_label}-辦公室租金", 80000, "", "韓承艗", ""])
-    rows.append(["待付款", "", now_text, "辦公室租金", f"{period_label}-辦公室管理費", 9392, "", "管理室", ""])
-    items.append({"label": "辦公室租金", "amount": 80000, "matched": None, "status": "成功"})
+    rows.append(["待付款", "", now_text, "辦公室租金", f"{period_label}-辦公室租金", 77343, "", "信義路四段房東韓承艗", ""])
+    rows.append(["待付款", "", now_text, "辦公室租金", f"{period_label}-辦公室管理費", 9392, "", "辦公室管理費新", ""])
+    items.append({"label": "辦公室租金", "amount": 77343, "matched": None, "status": "成功"})
     items.append({"label": "辦公室管理費", "amount": 9392, "matched": None, "status": "成功"})
 
     spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, AREA)
