@@ -2575,6 +2575,23 @@ def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="
     return result
 
 
+def run_taipei_fixed_expense_billing(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from tools.finance_management.taipei_fixed_expense import submit_taipei_fixed_expenses
+
+    period = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
+    result = submit_taipei_fixed_expenses(period)
+    detail = "、".join(
+        f"{item['label']}={item['amount'] if item['amount'] is not None else '失敗'}"
+        for item in result["items"]
+    )
+    summary = f"完成：{result['period_label']} 已新增 {result['rows_added']} 筆請款記錄｜{detail}"
+    if result["errors"]:
+        summary += f"｜⚠️ {'；'.join(result['errors'])}"
+    return summary
+
+
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.deposit_report import aggregate_month_to_uy
 
@@ -2903,6 +2920,7 @@ FINANCE_TASKS = [
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
     {"name": "【藍新金流】藍新信用卡待退款", "handler": queue_newebpay_refund_pending, "enabled": True},
+    {"name": "【財報】台北固定費用請款", "handler": run_taipei_fixed_expense_billing, "enabled": True},
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
@@ -3582,6 +3600,19 @@ with date_col:
                 "付款狀態＝已付款。會分別查「藍新ATM／信用卡／ATM」付款方式與"
                 "「家電清潔／傢俱清潔」購買項目，寫入主控表「預收款金額」分頁"
                 "（找到該月份的欄位就覆蓋，找不到就在最右邊新增）。"
+            )
+        elif selected_function == "【財報】台北固定費用請款":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202608",
+                label_visibility="collapsed",
+                key="finance_taipei_fixed_expense_period",
+            )
+            st.caption(
+                "格式：YYYYMM；新增 AWS／震旦行／眾點（查信）＋辦公室租金／管理費（固定金額）"
+                "共 5 筆請款記錄到「請款記錄／台北」"
             )
         elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
             st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
