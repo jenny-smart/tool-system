@@ -18,6 +18,11 @@
      主控試算表的「2026review公式調整記錄」分頁，逐一記下每個被改動儲存格
      的時間／地區／期別／舊公式／新公式，方便事後查改了什麼、什麼時候改的。
 這樣萬一抓錯欄位，不會直接改壞正式的年度 review 檔，改完也留得下紀錄。
+
+另外 group_hide_actual_columns()：把「當月」以及「隔月到全年」的「實際」欄位
+（例如換到 202607 期別時的 O欄=2026.07實際、之後每月的實際欄）各自用 Google
+Sheets 的欄位分組功能分組並隱藏——因為那些月份還沒發生，「實際」欄位還沒有
+真實數字。已經過去、已經有數字的月份「實際」欄位不會動。
 """
 
 from __future__ import annotations
@@ -194,3 +199,95 @@ def apply_review_formula_updates(area: str, year_month: str) -> dict[str, int]:
         raise
     log_execution("2026review公式調整", area, "完成", f"調整 {len(changes)} 個儲存格")
     return {"changed": len(changes)}
+
+
+_MONTH_HEADER_RE = re.compile(r"^(\d{2,4})\.(\d{1,2})實際$")
+
+
+def _actual_month_index(header_text: str) -> tuple[int, int] | None:
+    """標題文字若是「YYYY.MM實際」或「YY.MM實際」，回傳 (年, 月)；否則 None。"""
+    match = _MONTH_HEADER_RE.match(header_text.strip())
+    if not match:
+        return None
+    year_text, month_text = match.groups()
+    year = int(year_text) if len(year_text) == 4 else 2000 + int(year_text)
+    return year, int(month_text)
+
+
+def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
+    """把「當月實際」欄位，以及「隔月到全年」的「實際」欄位，各自分組並隱藏
+    （用 Google Sheets 的欄位分組功能，不是單純隱藏——保留展開箭頭方便之後
+    要看真實數字時自己展開）。已上市/已過去的月份「實際」欄位不動，因為那些
+    是已經有真實數字的資料。
+
+    year_month 格式 YYYY.MM，例如 "2026.07"。
+    """
+    target_year, target_month = int(year_month[:4]), int(year_month[5:])
+    spreadsheet_id, title = resolve_review_location(area)
+    service = get_sheets_service()
+
+    header_res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!1:1",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    header_row = header_res.get("values", [[]])
+    header_row = header_row[0] if header_row else []
+
+    target_columns: list[int] = []  # 0-based
+    for idx, value in enumerate(header_row):
+        parsed = _actual_month_index(str(value))
+        if parsed is None:
+            continue
+        year, month = parsed
+        if (year, month) >= (target_year, target_month):
+            target_columns.append(idx)
+
+    if not target_columns:
+        log_execution(
+            "2026review欄位分組隱藏", area, "完成",
+            f"期別 {year_month}：沒有找到 {year_month} 或之後的「實際」欄位",
+        )
+        return {"grouped": 0}
+
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets(properties(sheetId,title),columnGroups)"
+    ).execute()
+    sheet_meta = next(s for s in meta.get("sheets", []) if s["properties"]["title"] == title)
+    sheet_id = sheet_meta["properties"]["sheetId"]
+    existing_ranges = {
+        (g["range"]["startIndex"], g["range"]["endIndex"])
+        for g in sheet_meta.get("columnGroups", [])
+    }
+
+    requests = []
+    grouped = 0
+    for col in target_columns:
+        if (col, col + 1) in existing_ranges:
+            continue  # 已經分組過了，不要重複疊加分組
+        col_range = {
+            "sheetId": sheet_id,
+            "dimension": "COLUMNS",
+            "startIndex": col,
+            "endIndex": col + 1,
+        }
+        requests.append({"addDimensionGroup": {"range": col_range}})
+        requests.append({
+            "updateDimensionProperties": {
+                "range": col_range,
+                "properties": {"hiddenByUser": True},
+                "fields": "hiddenByUser",
+            }
+        })
+        grouped += 1
+
+    if requests:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"requests": requests}
+        ).execute()
+
+    log_execution(
+        "2026review欄位分組隱藏", area, "完成",
+        f"期別 {year_month}：分組隱藏 {grouped} 欄（跳過 {len(target_columns) - grouped} 個已分組過的）",
+    )
+    return {"grouped": grouped}
