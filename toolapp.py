@@ -3918,6 +3918,9 @@ with area_col:
         "【財報】工具包押金｜比對異常標記（N欄）",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
+    if selected_function == "【財報】台北固定費用請款":
+        # 台北固定費用請款只會寫進請款記錄／台北，區域固定台北，不用選。
+        area_select_options = ["台北"]
     if selected_function in (
         "【儲值金】轉檔",
         "【儲值金】搬運",
