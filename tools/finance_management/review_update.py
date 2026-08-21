@@ -20,9 +20,13 @@
 這樣萬一抓錯欄位，不會直接改壞正式的年度 review 檔，改完也留得下紀錄。
 
 另外 group_hide_actual_columns()：把「當月」以及「隔月到全年」的「實際」欄位
-（例如換到 202607 期別時的 O欄=2026.07實際、之後每月的實際欄）各自用 Google
-Sheets 的欄位分組功能分組並隱藏——因為那些月份還沒發生，「實際」欄位還沒有
-真實數字。已經過去、已經有數字的月份「實際」欄位不會動。
+（例如換到 202607 期別時的 O欄=2026.07實際、之後每月的實際欄，一路到年度
+加總的「2026實際」欄，例如各區工作表的 AA欄）各自用 Google Sheets 的欄位
+分組功能分組並隱藏——因為那些月份還沒發生，「實際」欄位還沒有真實數字。
+已經過去、已經有數字的月份「實際」欄位不會動。2026review工作表跟各地區
+工作表都適用；2026review工作表因為多一欄地區標示欄位，同名的「實際」／
+「預估」標題會落在不同欄位字母，但因為都是照 row1 標題文字動態比對，不用
+另外處理欄位位移。
 """
 
 from __future__ import annotations
@@ -218,6 +222,7 @@ def apply_review_formula_updates(area: str, year_month: str) -> dict[str, int]:
 
 
 _MONTH_HEADER_RE = re.compile(r"^(\d{2,4})\.(\d{1,2})實際$")
+_YEAR_HEADER_RE = re.compile(r"^(\d{4})實際$")
 
 
 def _actual_month_index(header_text: str) -> tuple[int, int] | None:
@@ -230,11 +235,21 @@ def _actual_month_index(header_text: str) -> tuple[int, int] | None:
     return year, int(month_text)
 
 
+def _actual_year_index(header_text: str) -> int | None:
+    """標題文字若是「YYYY實際」（沒有月份，年度加總欄，例如 AA欄的「2026實際」），
+    回傳年份；否則 None。"""
+    match = _YEAR_HEADER_RE.match(header_text.strip())
+    if not match:
+        return None
+    return int(match.group(1))
+
+
 def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
-    """把「當月實際」欄位，以及「隔月到全年」的「實際」欄位，各自分組並隱藏
-    （用 Google Sheets 的欄位分組功能，不是單純隱藏——保留展開箭頭方便之後
-    要看真實數字時自己展開）。已上市/已過去的月份「實際」欄位不動，因為那些
-    是已經有真實數字的資料。
+    """把「當月實際」欄位，一路到「年度實際加總」欄位（例如「2026.07實際」到
+    「2026實際」這一段連續範圍），各自分組並隱藏（用 Google Sheets 的欄位
+    分組功能，不是單純隱藏——保留展開箭頭方便之後要看真實數字時自己展開）。
+    已上市/已過去的月份「實際」欄位不動，因為那些是已經有真實數字的資料。
+    2026review工作表跟各地區工作表都適用（area 決定要處理哪個分頁）。
 
     year_month 格式 YYYY.MM，例如 "2026.07"。
     """
@@ -252,11 +267,15 @@ def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
 
     target_columns: list[int] = []  # 0-based
     for idx, value in enumerate(header_row):
-        parsed = _actual_month_index(str(value))
-        if parsed is None:
+        text = str(value)
+        parsed = _actual_month_index(text)
+        if parsed is not None:
+            year, month = parsed
+            if (year, month) >= (target_year, target_month):
+                target_columns.append(idx)
             continue
-        year, month = parsed
-        if (year, month) >= (target_year, target_month):
+        year_only = _actual_year_index(text)
+        if year_only is not None and year_only >= target_year:
             target_columns.append(idx)
 
     if not target_columns:
