@@ -268,6 +268,22 @@ def _period_window(period: str) -> tuple[datetime, datetime]:
     return start, end
 
 
+def _existing_memos(service, spreadsheet_id: str, sheet_title: str) -> set[str]:
+    """讀取請款記錄／台北現有的 E 欄（費用說明），用來判斷本期是否已經新增過。"""
+    res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{sheet_title}'!E:E",
+    ).execute()
+    return {str(row[0]).strip() for row in res.get("values", []) if row and str(row[0]).strip()}
+
+
+def _already_submitted(existing_memos: set[str], base_memo: str) -> bool:
+    """base_memo 是「YYYY.MM-標籤」；AWS 那筆實際寫入時後面會再接匯率換算說明，
+    所以判斷是否重複要用「相等」或「以 base_memo＋逗號 開頭」，不能只比對完全相等。
+    """
+    return any(memo == base_memo or memo.startswith(base_memo + "，") for memo in existing_memos)
+
+
 def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[str, Any]:
     period = (period or "").strip()
     if not re.fullmatch(r"\d{6}", period):
@@ -278,6 +294,10 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
     since_str = _imap_date(start_dt)
     before_str = _imap_date(end_dt)
     now_text = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
+
+    spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, AREA)
+    service = get_sheets_service()
+    existing_memos = _existing_memos(service, spreadsheet_id, sheet_title)
 
     rows: list[list[Any]] = []
     items: list[dict[str, Any]] = []
@@ -290,6 +310,10 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
     ]
 
     def add_mail_row(imap: imaplib.IMAP4_SSL, label: str, subject_query: str, category: str, payee: str, parse_fn) -> None:
+        base_memo = f"{period_label}-{label}"
+        if _already_submitted(existing_memos, base_memo):
+            items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
+            return
         criteria = f'(SUBJECT "{subject_query}" SINCE {since_str} BEFORE {before_str})'
         try:
             msg, matched = _latest_message(imap, criteria)
@@ -310,9 +334,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                 if result is None:
                     raise last_exc or RuntimeError("PDF 附件解析失敗")
                 amount, detail = result
-            memo = f"{period_label}-{label}"
-            if detail:
-                memo += f"，{detail}"
+            memo = base_memo + (f"，{detail}" if detail else "")
             rows.append(["待付款", "", now_text, category, memo, amount, "", payee, ""])
             items.append({"label": label, "amount": amount, "matched": matched, "status": "成功"})
         except Exception as exc:
@@ -320,45 +342,63 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
             items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
 
     # 抓信失敗（例如信箱密碼還沒設定）不該擋掉下面兩筆不用查信的固定金額，
-    # 所以連線本身的例外也要接住，只記錄失敗、不中斷主流程。
+    # 所以連線本身的例外也要接住，只記錄失敗、不中斷主流程。當所有查信項目
+    # 本期都已經新增過時，直接跳過連線，不用白白登入一次信箱。
     mailbox_user = ""
-    try:
-        imap, mailbox_user = _imap_connect()
-    except Exception as exc:
-        for label, *_ in mail_items:
-            errors.append(f"{label}：{exc}")
-            items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
-    else:
+    pending_mail_items = []
+    for item in mail_items:
+        label = item[0]
+        if _already_submitted(existing_memos, f"{period_label}-{label}"):
+            items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
+        else:
+            pending_mail_items.append(item)
+    if pending_mail_items:
         try:
-            imap.select("INBOX")
-            for label, subject_query, category, payee, parse_fn in mail_items:
-                add_mail_row(imap, label, subject_query, category, payee, parse_fn)
-        finally:
+            imap, mailbox_user = _imap_connect()
+        except Exception as exc:
+            for label, *_rest in pending_mail_items:
+                errors.append(f"{label}：{exc}")
+                items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
+        else:
             try:
-                imap.logout()
-            except Exception:
-                pass
+                imap.select("INBOX")
+                for label, subject_query, category, payee, parse_fn in pending_mail_items:
+                    add_mail_row(imap, label, subject_query, category, payee, parse_fn)
+            finally:
+                try:
+                    imap.logout()
+                except Exception:
+                    pass
 
     # 固定金額，不查信
-    rows.append(["待付款", "", now_text, "辦公室租金", f"{period_label}-辦公室租金", 77343, "", "信義路四段房東韓承艗", ""])
-    rows.append(["待付款", "", now_text, "辦公室租金", f"{period_label}-辦公室管理費", 9392, "", "辦公室管理費新", ""])
-    items.append({"label": "辦公室租金", "amount": 77343, "matched": None, "status": "成功"})
-    items.append({"label": "辦公室管理費", "amount": 9392, "matched": None, "status": "成功"})
+    fixed_items = [
+        ("辦公室租金", "辦公室租金", 77343, "信義路四段房東韓承艗"),
+        ("辦公室管理費", "辦公室租金", 9392, "辦公室管理費新"),
+    ]
+    for label, category, amount, payee in fixed_items:
+        base_memo = f"{period_label}-{label}"
+        if _already_submitted(existing_memos, base_memo):
+            items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
+            continue
+        rows.append(["待付款", "", now_text, category, base_memo, amount, "", payee, ""])
+        items.append({"label": label, "amount": amount, "matched": None, "status": "成功"})
 
-    spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, AREA)
-    service = get_sheets_service()
-    service.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{sheet_title}'!{REQUEST_SHEET_RANGE}",
-        valueInputOption="USER_ENTERED",
-        insertDataOption="INSERT_ROWS",
-        body={"values": rows},
-    ).execute()
+    if rows:
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{sheet_title}'!{REQUEST_SHEET_RANGE}",
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": rows},
+        ).execute()
 
     status = "成功" if not errors else "部分失敗"
+    item_lines = "\n".join(
+        f"{item['label']}：{item['status']}" + (f"（{item['amount']}）" if item["amount"] is not None else "")
+        for item in items
+    )
     message = (
-        f"{run_type}｜信箱={mailbox_user}｜期別={period_label}｜新增 {len(rows)} 筆"
-        + (f"｜失敗：{'；'.join(errors)}" if errors else "")
+        f"{run_type}｜信箱={mailbox_user}｜期別={period_label}｜新增 {len(rows)} 筆\n{item_lines}"
     )
     log_execution(TOOL_NAME, AREA, status, message)
 
