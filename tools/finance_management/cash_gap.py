@@ -27,7 +27,9 @@
         （例如期別 202607，月份數就是 7）
   春酒費用＝財務分頁 AA欄第135列 × 月份數，算法同上
   藍新發票金額＝主控試算表（Jenny's Lemonhometools，固定分頁 GID＝
-        327631316）裡，找該月份那一列，取 D欄，若有多筆則加總
+        327631316，欄位為 A區域／B月份YYYYMM／C發票日期／D發票金額／
+        E發票號碼／F發票狀態／G更新時間）裡，A欄＝地區、B欄＝月份都符合
+        的列，取 D欄，若有多筆則加總
 
 「其他地區以此類推」：同一組公式，只是換成該地區自己財報的「富邦更新」／
 「元大更新」／「財務」分頁（走 statement_registry 的登記表查地區）。
@@ -298,10 +300,9 @@ def _finance_fixed_column_value(area: str, column_letter: str, row: int) -> floa
     return _to_number(values[0][0]) if values and values[0] else 0.0
 
 
-def newebpay_invoice_amount(as_of: date) -> float:
-    """藍新發票金額：主控試算表固定分頁（GID=327631316）裡，該月份那一列的 D欄，
-    若有多筆則加總。判斷「該月份那一列」的方式是掃這一列每一欄，看有沒有出現
-    「YYYY.MM」或「YYYY/MM」這個月份字串。"""
+def newebpay_invoice_amount(area: str, as_of: date) -> float:
+    """藍新發票金額：主控試算表固定分頁（GID=327631316）裡，A欄＝地區、B欄＝
+    月份（YYYYMM）都符合的列，取 D欄（發票金額），若有多筆則加總。"""
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
     title = sheet_title_for_gid(service, spreadsheet_id, NEWEBPAY_INVOICE_GID)
@@ -312,13 +313,14 @@ def newebpay_invoice_amount(as_of: date) -> float:
         dateTimeRenderOption="FORMATTED_STRING",
     ).execute()
     values = res.get("values", [])
-    dot_month = as_of.strftime("%Y.%m")
-    slash_month = as_of.strftime("%Y/%m")
+    year_month = as_of.strftime("%Y%m")
     total = 0.0
     for row in values[1:]:
-        row_text = [str(c) for c in row]
-        if any(dot_month in c or slash_month in c for c in row_text):
-            total += _to_number(_cell(row, NEWEBPAY_INVOICE_AMOUNT_COL))
+        if str(_cell(row, 1) or "").strip() != area:
+            continue
+        if str(_cell(row, 2) or "").strip() != year_month:
+            continue
+        total += _to_number(_cell(row, NEWEBPAY_INVOICE_AMOUNT_COL))
     return total
 
 
@@ -371,7 +373,7 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
         "營業稅": _revenue_based(0.05),
         "年終費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_YEAR_END_BONUS_ROW) * month,
         "春酒費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_SPRING_PARTY_ROW) * month,
-        "藍新發票金額": lambda: newebpay_invoice_amount(as_of),
+        "藍新發票金額": lambda: newebpay_invoice_amount(area, as_of),
     }
     result: dict[str, float | str] = {}
     for key, compute in computations.items():
