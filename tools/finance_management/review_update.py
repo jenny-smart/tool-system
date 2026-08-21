@@ -77,7 +77,11 @@ def _log_changes(area: str, year_month: str, changes: list[dict[str, str]]) -> N
         service.spreadsheets().values().append(
             spreadsheetId=master_id,
             range=f"'{CHANGE_LOG_SHEET}'!A:F",
-            valueInputOption="USER_ENTERED",
+            # RAW：舊公式／新公式是「=」開頭的文字，USER_ENTERED 會被 Sheets
+            # 當成真正的公式執行，而且範圍剛好涵蓋記錄本身那一格，會自己形成
+            # 循環參照（實際發生過：AA2 的公式寫進記錄的 E2，E2 又落在
+            # B2:Y2 範圍內）。RAW 保證這兩欄永遠是純文字，不會被執行。
+            valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": rows},
         ).execute()
