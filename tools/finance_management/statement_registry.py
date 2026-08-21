@@ -15,8 +15,9 @@
 「All財報」／「All財報現金缺口」試算表本身。
 
 還有一列地區＝「2026」，B 欄是「2026目標及review檔」這份試算表本身的ID
-（各地區共用同一份試算表，只是分頁不同——分頁 GID 記在各地區列的 H欄，
-不是這一列）。
+（各地區共用同一份試算表，只是分頁不同——各地區自己的分頁 GID 記在各地區
+列的 H欄，不是這一列）。這一列自己的 H欄，登記的是「2026review工作表」
+這個跨地區彙整分頁的 GID。
 """
 
 from __future__ import annotations
@@ -145,16 +146,17 @@ def review_spreadsheet_id() -> str:
     return spreadsheet_id
 
 
-# 「2026review工作表」：2026目標及review檔裡跨地區彙整的固定分頁（不是某個
-# 地區自己的分頁），固定 GID，不用地區去查。
-MASTER_REVIEW_TAB_GID = "435608470"
-
-
 def resolve_master_review_location() -> tuple[str, str]:
-    """回傳 (試算表ID, 分頁標題)：「2026review工作表」這個固定的彙整分頁。"""
+    """回傳 (試算表ID, 分頁標題)：「2026review工作表」這個跨地區彙整的固定分頁。
+    GID 登記在地區＝「2026」那一列的 H欄（跟各地區列的「2026review gid」共用
+    同一欄，只是這一列代表的不是某個地區自己的分頁，而是彙整分頁本身）。"""
+    row = _find_row(REVIEW_SPREADSHEET_AREA)
+    gid = _cell(row, COL_REVIEW_GID)
+    if not gid:
+        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{REVIEW_SPREADSHEET_AREA} 缺少 2026review工作表 gid")
     spreadsheet_id = review_spreadsheet_id()
     service = get_sheets_service()
-    title = sheet_title_for_gid(service, spreadsheet_id, MASTER_REVIEW_TAB_GID)
+    title = sheet_title_for_gid(service, spreadsheet_id, gid)
     return spreadsheet_id, title
 
 
