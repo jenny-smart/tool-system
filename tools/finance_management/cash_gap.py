@@ -23,8 +23,9 @@
   總營收＝財務分頁「{年月}預估」欄第3列
   2%＝總營收 × 2%
   營業稅＝總營收 × 5%
-  年終費用＝財務分頁 AA欄（固定欄位，不隨月份變動）第97列
-  春酒費用＝財務分頁 AA欄（固定欄位，不隨月份變動）第135列
+  年終費用＝財務分頁 AA欄（固定欄位，不隨月份變動）第97列 × 月份數
+        （例如期別 202607，月份數就是 7）
+  春酒費用＝財務分頁 AA欄第135列 × 月份數，算法同上
   藍新發票金額＝主控試算表（Jenny's Lemonhometools，固定分頁 GID＝
         327631316）裡，找該月份那一列，取 D欄，若有多筆則加總
 
@@ -368,8 +369,8 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
         "總營收": lambda: finance_revenue(area, month),
         "2%": _revenue_based(0.02),
         "營業稅": _revenue_based(0.05),
-        "年終費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_YEAR_END_BONUS_ROW),
-        "春酒費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_SPRING_PARTY_ROW),
+        "年終費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_YEAR_END_BONUS_ROW) * month,
+        "春酒費用": lambda: _finance_fixed_column_value(area, FINANCE_FIXED_COLUMN, FINANCE_SPRING_PARTY_ROW) * month,
         "藍新發票金額": lambda: newebpay_invoice_amount(as_of),
     }
     result: dict[str, float | str] = {}
