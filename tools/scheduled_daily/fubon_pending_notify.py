@@ -54,7 +54,10 @@ def create_calendar_reminder(summary: str, description: str) -> None:
     )
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
 
-    start = datetime.now(TZ)
+    # 事件開始時間要留一點前導時間（這裡抓 3 分鐘），不能設「現在」：
+    # Google 的提醒推播是在事件開始前才排定發送，事件一建立就已經到了開始
+    # 時間的話，推播系統來不及排定，popup 提醒常常就不會真的跳出來。
+    start = datetime.now(TZ) + timedelta(minutes=3)
     end = start + timedelta(minutes=30)
     body = {
         "summary": summary,
