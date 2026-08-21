@@ -129,17 +129,28 @@ def preview_review_formula_updates(area: str, year_month: str) -> list[dict[str,
     """
     spreadsheet_id, title = resolve_review_location(area)
     service = get_sheets_service()
+
+    # 標題列（row1）跟表格內容分開讀：標題可能是公式算出來的月份文字
+    # （例如用 TEXT()/EDATE() 產生），要讀「顯示結果」才拿得到真正的
+    # 「2026.07預估」這種文字；表格內容則要讀「公式」原始文字，才能抓到
+    # SUMIF 公式本身去改寫。
+    header_res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!1:1",
+        valueRenderOption="FORMATTED_VALUE",
+    ).execute()
+    header_row = header_res.get("values", [[]])
+    header_row = header_row[0] if header_row else []
+    target_col = _find_target_column(header_row, year_month)
+
     res = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{title}'!A:ZZ",
+        range=f"'{title}'!A2:ZZ",
         valueRenderOption="FORMULA",
     ).execute()
-    values = res.get("values", [])
-    if not values:
+    values = [header_row] + res.get("values", [])
+    if len(values) < 2:
         return []
-
-    header_row = values[0]
-    target_col = _find_target_column(header_row, year_month)
 
     changes: list[dict[str, str]] = []
     for row_idx, row in enumerate(values[1:], start=2):
