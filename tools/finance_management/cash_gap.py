@@ -1,20 +1,33 @@
 """All財報現金缺口：試算各地區的富邦餘額／元大餘額／內勤薪資／專員承攬費／
-行銷費用／2%支出，整批寫進「現金缺口試算」工作表。
+行銷費用（廣告／服務）／總營收／2%／營業稅／藍新發票金額，整批寫進
+「現金缺口試算」工作表。
 
-比照財報既有欄位配置（見 statement_update.py）：
-  B=2  帳務日　G=7  富邦更新餘額　H=8  元大更新餘額　L=12  摘要／分類標籤　M=13  該列累計金額
+比照財報既有欄位配置：
+  B=2  帳務日　G=7  富邦更新餘額　H=8  元大更新餘額
+  L=12 富邦更新分類標籤　M=13 富邦更新該列金額
+  M=13 元大更新分類標籤　N=14 元大更新該列金額
+  （元大更新原生欄位比富邦更新多一欄，所以分類標籤／金額欄位對應往後移一欄；
+  這點沒有實際資料驗證過，只是照富邦更新的配置往右推一欄的假設，如果元大
+  更新那邊算出來的數字不對，很可能是這個欄位假設錯了）
 
-六個項目：
-  富邦餘額＝富邦更新當月最後一筆（帳務日 <= 當月最後一天）G欄餘額
-  元大餘額＝元大更新當月最後一筆（帳務日 <= 當月最後一天）H欄餘額
-  內勤薪資＝富邦更新中，帳務日 < 次月5日 且 L欄＝「{年月}-內勤薪資」的那一列 M欄
-  專員承攬費＝富邦更新中，帳務日 < 次月10日 且 L欄＝「{年月}-專員薪資」或
-        「{年月}-專員承攬費」的列，加總 M欄
-  行銷費用＝行銷費用總管理試算表（固定分頁 GID＝228482464）第9列，欄位依月份與
-        地區位移：7月從 AS 欄起，每月位移 7 欄（同一月的區塊依序是
-        台北／桃園／新竹／台中／家電／高雄／總計）
-  2%支出＝財務分頁 O2 起算：單月只取當月欄；雙月要加回前一月欄
-        （1月對應 C 欄，每月位移 2 欄，7月＝O，8月＝Q ...）
+各項目：
+  富邦餘額／元大餘額＝各自報表當月最後一筆（帳務日 <= 當月最後一天）的餘額欄
+  內勤薪資＝富邦更新 L欄 或 元大更新 M欄，文字包含「{年月}-內勤薪資」的列，
+        兩邊分別加總金額欄後相加
+  專員承攬費＝富邦更新 L欄 或 元大更新 M欄，文字包含「{年月往前推2個月}-專員
+        承攬費」的列，兩邊分別加總金額欄後相加（往前推2個月是照使用者原話
+        「YYYY.MM為該月份＋專員承攬費-2」理解，還沒實際驗證過）
+  行銷費用(廣告)／行銷費用(服務)＝行銷費用總管理試算表（固定分頁 GID＝
+        228482464）第5列／第8列，欄位依月份與地區位移：7月從 AS 欄起，
+        每月位移 7 欄（同一月的區塊依序是台北／桃園／新竹／台中／家電／
+        高雄／總計）
+  總營收＝財務分頁「{年月}預估」欄第3列
+  2%＝總營收 × 2%
+  營業稅＝總營收 × 5%
+  年終費用＝財務分頁「{年月}預估」欄第97列
+  春酒費用＝財務分頁「{年月}預估」欄第135列
+  藍新發票金額＝主控試算表（Jenny's Lemonhometools，固定分頁 GID＝
+        327631316）裡，找該月份那一列，取 D欄，若有多筆則加總
 
 「其他地區以此類推」：同一組公式，只是換成該地區自己財報的「富邦更新」／
 「元大更新」／「財務」分頁（走 statement_registry 的登記表查地區）。
@@ -40,14 +53,23 @@ CASH_GAP_ROWS = [
     ("元大餘額", "元大餘額"),
     ("內勤薪資", "內勤薪資"),
     ("專員承攬費", "專員承攬費"),
-    ("行銷費用", "行銷費用"),
-    ("2%支出", "2%支出"),
+    ("行銷費用(廣告)", "行銷費用(廣告)"),
+    ("行銷費用(服務)", "行銷費用(服務)"),
+    ("總營收", "總營收"),
+    ("2%", "2%"),
+    ("營業稅", "營業稅"),
+    ("年終費用", "年終費用"),
+    ("春酒費用", "春酒費用"),
+    ("藍新發票金額", "藍新發票金額"),
 ]
 
-COL_B, COL_G, COL_H, COL_L, COL_M = 2, 7, 8, 12, 13
+COL_B, COL_G, COL_H = 2, 7, 8
+COL_FUBON_LABEL, COL_FUBON_AMOUNT = 12, 13  # 富邦更新：L 標籤／M 金額
+COL_YUANTA_LABEL, COL_YUANTA_AMOUNT = 13, 14  # 元大更新：M 標籤／N 金額（假設，見檔頭說明）
 
 MARKETING_REPORT_GID = "228482464"
-MARKETING_ROW = 9
+MARKETING_ROW_AD = 5
+MARKETING_ROW_SERVICE = 8
 MARKETING_BASE_COLUMN = 45  # AS，對應 7月
 MARKETING_MONTH_STEP_COLUMNS = 7
 MARKETING_BASE_MONTH = 7
@@ -63,7 +85,12 @@ MARKETING_REGION_OFFSETS = {
 
 FINANCE_BASE_COLUMN = 3  # C，對應 1月
 FINANCE_MONTH_STEP_COLUMNS = 2
-FINANCE_ROW = 2
+FINANCE_REVENUE_ROW = 3
+FINANCE_YEAR_END_BONUS_ROW = 97
+FINANCE_SPRING_PARTY_ROW = 135
+
+NEWEBPAY_INVOICE_GID = "327631316"
+NEWEBPAY_INVOICE_AMOUNT_COL = 4  # D
 
 
 def _cell(row: list[object], col: int) -> object:
@@ -146,38 +173,62 @@ def yuanta_balance(area: str, as_of: date, values: list[list[object]] | None = N
     return _month_end_balance_from_values(values, COL_H, as_of)
 
 
-def _label_amount_from_values(values: list[list[object]], labels: list[str], before: date) -> float:
+def _shift_year_month(as_of: date, offset: int) -> str:
+    month_index = as_of.year * 12 + (as_of.month - 1) + offset
+    year, month = divmod(month_index, 12)
+    return f"{year}.{month + 1:02d}"
+
+
+def _contains_label_sum_from_values(
+    values: list[list[object]], label_col: int, amount_col: int, fragment: str
+) -> float:
     total = 0.0
     for row in values[1:]:
-        row_date = _parse_date(_cell(row, COL_B))
-        if row_date is None or row_date >= before:
-            continue
-        if str(_cell(row, COL_L) or "").strip() not in labels:
-            continue
-        total += _to_number(_cell(row, COL_M))
+        if fragment in str(_cell(row, label_col) or ""):
+            total += _to_number(_cell(row, amount_col))
     return total
 
 
+def _dual_source_label_sum(
+    fragment: str,
+    fubon_values: list[list[object]],
+    yuanta_values: list[list[object]],
+) -> float:
+    """富邦更新 L欄 或 元大更新 M欄，文字包含 fragment 的列，兩邊分別加總後相加。"""
+    return _contains_label_sum_from_values(
+        fubon_values, COL_FUBON_LABEL, COL_FUBON_AMOUNT, fragment
+    ) + _contains_label_sum_from_values(
+        yuanta_values, COL_YUANTA_LABEL, COL_YUANTA_AMOUNT, fragment
+    )
+
+
 def internal_staff_salary(
-    area: str, year_month: str, before: date, values: list[list[object]] | None = None
+    area: str, as_of: date,
+    fubon_values: list[list[object]] | None = None,
+    yuanta_values: list[list[object]] | None = None,
 ) -> float:
-    """BF21：富邦更新裡「{年月}-內勤薪資」、帳務日 < before 的那一列 M欄。"""
-    values = values if values is not None else _report_values(area, "富邦更新")
-    return _label_amount_from_values(values, [f"{year_month}-內勤薪資"], before)
+    """內勤薪資：富邦更新 L欄 或 元大更新 M欄，包含「{年月}-內勤薪資」的列加總。"""
+    fubon_values = fubon_values if fubon_values is not None else _report_values(area, "富邦更新")
+    yuanta_values = yuanta_values if yuanta_values is not None else _report_values(area, "元大更新")
+    fragment = f"{as_of.strftime('%Y.%m')}-內勤薪資"
+    return _dual_source_label_sum(fragment, fubon_values, yuanta_values)
 
 
-def specialist_salary(
-    area: str, year_month: str, before: date, values: list[list[object]] | None = None
+def specialist_contract_fee(
+    area: str, as_of: date,
+    fubon_values: list[list[object]] | None = None,
+    yuanta_values: list[list[object]] | None = None,
 ) -> float:
-    """專員承攬費：富邦更新裡「{年月}-專員薪資」或「{年月}-專員承攬費」、
-    帳務日 < before 的列，加總 M欄。"""
-    values = values if values is not None else _report_values(area, "富邦更新")
-    labels = [f"{year_month}-專員薪資", f"{year_month}-專員承攬費"]
-    return _label_amount_from_values(values, labels, before)
+    """專員承攬費：富邦更新 L欄 或 元大更新 M欄，包含「{年月往前推2個月}-專員承攬費」
+    的列加總。"""
+    fubon_values = fubon_values if fubon_values is not None else _report_values(area, "富邦更新")
+    yuanta_values = yuanta_values if yuanta_values is not None else _report_values(area, "元大更新")
+    fragment = f"{_shift_year_month(as_of, -2)}-專員承攬費"
+    return _dual_source_label_sum(fragment, fubon_values, yuanta_values)
 
 
-def marketing_expense(area: str, month: int) -> float:
-    """行銷費用：行銷費用總管理試算表，指定月份／地區那一格（固定第9列）。"""
+def marketing_expense_row(area: str, month: int, row: int) -> float:
+    """行銷費用總管理試算表，指定月份／地區／列數那一格。"""
     if area not in MARKETING_REGION_OFFSETS:
         raise ValueError(f"行銷費用檔沒有「{area}」這個地區欄位")
     spreadsheet_id = marketing_expense_spreadsheet_id()
@@ -194,7 +245,7 @@ def marketing_expense(area: str, month: int) -> float:
         .values()
         .get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!{column_letter}{MARKETING_ROW}",
+            range=f"'{title}'!{column_letter}{row}",
             valueRenderOption="UNFORMATTED_VALUE",
         )
         .execute()
@@ -203,7 +254,8 @@ def marketing_expense(area: str, month: int) -> float:
     return _to_number(values[0][0]) if values and values[0] else 0.0
 
 
-def _finance_month_column_value(area: str, month: int) -> float:
+def _finance_column_value(area: str, month: int, row: int) -> float:
+    """財務分頁「{年月}預估」欄，指定列數的值。"""
     spreadsheet_id, title = resolve_statement_location(area, "財務")
     service = get_sheets_service()
     column_index = FINANCE_BASE_COLUMN + (month - 1) * FINANCE_MONTH_STEP_COLUMNS
@@ -213,7 +265,7 @@ def _finance_month_column_value(area: str, month: int) -> float:
         .values()
         .get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!{column_letter}{FINANCE_ROW}",
+            range=f"'{title}'!{column_letter}{row}",
             valueRenderOption="UNFORMATTED_VALUE",
         )
         .execute()
@@ -222,23 +274,37 @@ def _finance_month_column_value(area: str, month: int) -> float:
     return _to_number(values[0][0]) if values and values[0] else 0.0
 
 
-def finance_bimonthly_value(area: str, month: int) -> float:
-    """BF24：財務分頁；單月只取當月欄，雙月要加回前一月欄。"""
-    value = _finance_month_column_value(area, month)
-    if month % 2 == 0:
-        value += _finance_month_column_value(area, month - 1)
-    return value
+def finance_revenue(area: str, month: int) -> float:
+    """總營收：財務分頁「{年月}預估」欄第3列。"""
+    return _finance_column_value(area, month, FINANCE_REVENUE_ROW)
 
 
-def _next_month_cutoff(as_of: date, day: int) -> date:
-    year = as_of.year + (1 if as_of.month == 12 else 0)
-    month = 1 if as_of.month == 12 else as_of.month + 1
-    return date(year, month, day)
+def newebpay_invoice_amount(as_of: date) -> float:
+    """藍新發票金額：主控試算表固定分頁（GID=327631316）裡，該月份那一列的 D欄，
+    若有多筆則加總。判斷「該月份那一列」的方式是掃這一列每一欄，看有沒有出現
+    「YYYY.MM」或「YYYY/MM」這個月份字串。"""
+    service = get_sheets_service()
+    spreadsheet_id = get_master_spreadsheet_id()
+    title = sheet_title_for_gid(service, spreadsheet_id, NEWEBPAY_INVOICE_GID)
+    res = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!A:Z",
+        valueRenderOption="UNFORMATTED_VALUE",
+        dateTimeRenderOption="FORMATTED_STRING",
+    ).execute()
+    values = res.get("values", [])
+    dot_month = as_of.strftime("%Y.%m")
+    slash_month = as_of.strftime("%Y/%m")
+    total = 0.0
+    for row in values[1:]:
+        row_text = [str(c) for c in row]
+        if any(dot_month in c or slash_month in c for c in row_text):
+            total += _to_number(_cell(row, NEWEBPAY_INVOICE_AMOUNT_COL))
+    return total
 
 
 def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
-    """回傳 {'富邦餘額', '元大餘額', '內勤薪資', '專員承攬費', '行銷費用', '2%支出'}，
-    試算但不寫回試算表。
+    """回傳現金缺口試算各項目的值，試算但不寫回試算表。
 
     as_of 是要試算的月份最後一天（例如 2026/7/31 傳 date(2026, 7, 31)）。
 
@@ -246,7 +312,7 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
     服務帳號）不會讓其他項也算不出來，該項改填錯誤訊息，方便一眼看出
     是哪一項、哪個地區出問題。
     """
-    year_month = as_of.strftime("%Y.%m")
+    month = as_of.month
 
     # 富邦更新／元大更新各只讀一次、重複使用，避免同一份財報短時間內被讀
     # 好幾次，觸發 Sheets API 的每分鐘讀取配額（跑「全區」很容易撞到）。
@@ -259,24 +325,34 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
     fubon_values, fubon_error = _try_fetch("富邦更新")
     yuanta_values, yuanta_error = _try_fetch("元大更新")
 
-    def _need(values, error, compute):
+    def _need1(values, error, compute):
         if error is not None:
             raise error
         return compute(values)
 
+    def _need2(compute):
+        if fubon_error is not None:
+            raise fubon_error
+        if yuanta_error is not None:
+            raise yuanta_error
+        return compute(fubon_values, yuanta_values)
+
+    def _revenue_based(multiplier):
+        return lambda: finance_revenue(area, month) * multiplier
+
     computations = {
-        "富邦餘額": lambda: _need(fubon_values, fubon_error, lambda v: fubon_balance(area, as_of, v)),
-        "元大餘額": lambda: _need(yuanta_values, yuanta_error, lambda v: yuanta_balance(area, as_of, v)),
-        "內勤薪資": lambda: _need(
-            fubon_values, fubon_error,
-            lambda v: internal_staff_salary(area, year_month, _next_month_cutoff(as_of, 5), v),
-        ),
-        "專員承攬費": lambda: _need(
-            fubon_values, fubon_error,
-            lambda v: specialist_salary(area, year_month, _next_month_cutoff(as_of, 10), v),
-        ),
-        "行銷費用": lambda: marketing_expense(area, as_of.month),
-        "2%支出": lambda: finance_bimonthly_value(area, as_of.month),
+        "富邦餘額": lambda: _need1(fubon_values, fubon_error, lambda v: fubon_balance(area, as_of, v)),
+        "元大餘額": lambda: _need1(yuanta_values, yuanta_error, lambda v: yuanta_balance(area, as_of, v)),
+        "內勤薪資": lambda: _need2(lambda fv, yv: internal_staff_salary(area, as_of, fv, yv)),
+        "專員承攬費": lambda: _need2(lambda fv, yv: specialist_contract_fee(area, as_of, fv, yv)),
+        "行銷費用(廣告)": lambda: marketing_expense_row(area, month, MARKETING_ROW_AD),
+        "行銷費用(服務)": lambda: marketing_expense_row(area, month, MARKETING_ROW_SERVICE),
+        "總營收": lambda: finance_revenue(area, month),
+        "2%": _revenue_based(0.02),
+        "營業稅": _revenue_based(0.05),
+        "年終費用": lambda: _finance_column_value(area, month, FINANCE_YEAR_END_BONUS_ROW),
+        "春酒費用": lambda: _finance_column_value(area, month, FINANCE_SPRING_PARTY_ROW),
+        "藍新發票金額": lambda: newebpay_invoice_amount(as_of),
     }
     result: dict[str, float | str] = {}
     for key, compute in computations.items():
