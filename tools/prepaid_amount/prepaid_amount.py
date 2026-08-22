@@ -1,8 +1,8 @@
 """【檸檬後台】預收款金額。
 
 檔案：tools/finance_management/prepaid_amount.py
-版本：0820_v1
-更新日期：2026-08-20
+版本：0822_v2
+更新日期：2026-08-22
 
 功能：
 - 輸入年月（YYYYMM）＋地區，登入該地區檸檬後台，查詢「訂單管理」頁面的
@@ -17,13 +17,13 @@
     3. 水洗服務金額
        （同上日期／付款狀態，購買項目＝傢俱清潔，取法同家電服務金額）
 
-- 查得的 5 個數字寫入主控表（Jenny's Lemonhometools）新增分頁「預收款金額」：
-    每個月份是一個「區塊」（5 欄，對應台北／台中／桃園／新竹／高雄），
-    區塊第 1 列＝地區名稱、第 2 列＝該月月底日期（例如 2026/7/31）、
-    第 3～7 列＝藍新ATM服務金額／信用卡服務金額／ATM服務金額／
-    家電服務金額／水洗服務金額。
-    寫入時只更新「執行地區」對應的那一欄；若找不到該月份的區塊就在最右邊
-    新增一組區塊，找得到就直接覆蓋該欄位（不會動到其他地區的欄位）。
+- 查得的 5 個數字併入主控表（Jenny's Lemonhometools）的「現金缺口試算」
+    工作表（tools/finance_management/cash_gap.py 寫的同一份分頁），接在
+    現金缺口試算原本的 12 列下方（中間空 2 列）：
+    欄位沿用現金缺口試算的地區欄（B～F＝台北／台中／桃園／新竹／高雄），
+    列則是藍新ATM服務金額／信用卡服務金額／ATM服務金額／家電服務金額／
+    水洗服務金額。寫入時只更新「執行地區」對應的那一欄，每次執行直接覆蓋
+    （只保留最新一次查得的金額，不像舊版會依月份往右新增區塊保留歷史）。
 """
 
 from __future__ import annotations
@@ -38,14 +38,15 @@ from bs4 import BeautifulSoup
 from googleapiclient.errors import HttpError
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+from tools.finance_management.cash_gap import CASH_GAP_AREAS, CASH_GAP_ROWS, CASH_GAP_SHEET_NAME
 from tools.scheduled_monthly.prepaid_report import LOGIN_URL, HEADERS, load_accounts, login, choose_keyword
 
 TZ = timezone(timedelta(hours=8))
 
 PURCHASE_URL = "https://backend.lemonclean.com.tw/purchase"
 
-SHEET_NAME = "預收款金額"
-CITIES = ["台北", "台中", "桃園", "新竹", "高雄"]
+SHEET_NAME = CASH_GAP_SHEET_NAME
+CITIES = CASH_GAP_AREAS
 
 ROW_LABELS = [
     "藍新ATM服務金額",
@@ -54,6 +55,9 @@ ROW_LABELS = [
     "家電服務金額",
     "水洗服務金額",
 ]
+
+# 接在現金缺口試算原本的表頭（2列）＋ 12 個項目下方，中間空 2 列。
+PREPAID_START_ROW = 2 + len(CASH_GAP_ROWS) + 2 + 1
 
 # 對應後台「付款方式」下拉選單代碼
 PAYWAY_CODE = {"藍新ATM服務金額": "5", "信用卡服務金額": "1", "ATM服務金額": "2"}
@@ -276,13 +280,13 @@ def _execute_with_retry(request, *, max_retries: int = 6, base_delay: float = 5.
     raise RuntimeError("重試次數用盡")
 
 
-def _find_or_create_block(service, spreadsheet_id: str, date_label: str) -> int:
-    """回傳該月份區塊第一欄（台北欄）的欄位編號（1-based）。找不到就新增區塊。"""
+def _ensure_prepaid_rows(service, spreadsheet_id: str) -> None:
+    """確保「現金缺口試算」分頁存在，且預收款 5 個項目的列標籤已經寫在 A 欄
+    （PREPAID_START_ROW 起）。標籤內容固定，每次覆蓋也無妨。"""
     meta = _execute_with_retry(
         service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties.title")
     )
     titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
-
     if SHEET_NAME not in titles:
         _execute_with_retry(
             service.spreadsheets().batchUpdate(
@@ -290,59 +294,27 @@ def _find_or_create_block(service, spreadsheet_id: str, date_label: str) -> int:
                 body={"requests": [{"addSheet": {"properties": {"title": SHEET_NAME}}}]},
             )
         )
-        _execute_with_retry(
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{SHEET_NAME}'!A1:A7",
-                valueInputOption="RAW",
-                body={"values": [[""], [""], *[[label] for label in ROW_LABELS]]},
-            )
-        )
 
-    res = _execute_with_retry(
-        service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{SHEET_NAME}'!B1:ZZ2",
-        )
-    )
-    values = res.get("values", [])
-    row1 = values[0] if len(values) > 0 else []
-    row2 = values[1] if len(values) > 1 else []
-
-    used_width = max(len(row1), len(row2))  # 已使用的欄數（從 B 欄開始算）
-    block_count = -(-used_width // len(CITIES)) if used_width else 0  # 無條件進位
-
-    block_start = 2  # 欄位編號（1-based），從 B 欄（=2）開始
-    for block_no in range(block_count):
-        idx = block_no * len(CITIES)
-        date_here = row2[idx] if idx < len(row2) else ""
-        if str(date_here).strip() == date_label:
-            return block_start + block_no * len(CITIES)
-
-    # 找不到，新增一個區塊（接在最後一個已使用區塊右邊）
-    new_block_start = block_start + block_count * len(CITIES)
-
-    start_letter = _col_letter(new_block_start)
-    end_letter = _col_letter(new_block_start + len(CITIES) - 1)
+    end_row = PREPAID_START_ROW + len(ROW_LABELS) - 1
     _execute_with_retry(
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{SHEET_NAME}'!{start_letter}1:{end_letter}2",
+            range=f"'{SHEET_NAME}'!A{PREPAID_START_ROW}:A{end_row}",
             valueInputOption="RAW",
-            body={"values": [CITIES, [date_label] * len(CITIES)]},
+            body={"values": [[label] for label in ROW_LABELS]},
         )
     )
-    return new_block_start
 
 
-def _write_area_column(service, spreadsheet_id: str, block_start: int, area: str, amounts: dict[str, int]) -> None:
-    col_index = block_start + CITIES.index(area)
-    col_letter = _col_letter(col_index)
+def _write_area_column(service, spreadsheet_id: str, area: str, amounts: dict[str, int]) -> None:
+    col_letter = _col_letter(2 + CITIES.index(area))  # 從 B 欄開始，跟現金缺口試算的地區欄對齊
+    start_row = PREPAID_START_ROW
+    end_row = PREPAID_START_ROW + len(ROW_LABELS) - 1
     values = [[amounts[label]] for label in ROW_LABELS]
     _execute_with_retry(
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{SHEET_NAME}'!{col_letter}3:{col_letter}7",
+            range=f"'{SHEET_NAME}'!{col_letter}{start_row}:{col_letter}{end_row}",
             valueInputOption="RAW",
             body={"values": values},
         )
@@ -385,8 +357,8 @@ def run(area: str, year_month: str, on_progress=None) -> str:
 
         service = get_sheets_service()
         spreadsheet_id = get_master_spreadsheet_id()
-        block_start = _find_or_create_block(service, spreadsheet_id, bounds["date_label"])
-        _write_area_column(service, spreadsheet_id, block_start, area, amounts)
+        _ensure_prepaid_rows(service, spreadsheet_id)
+        _write_area_column(service, spreadsheet_id, area, amounts)
         notify(f"{area}：已寫入「{SHEET_NAME}」分頁", "success")
 
         summary = "、".join(f"{label}={amounts[label]:,}" for label in ROW_LABELS)
