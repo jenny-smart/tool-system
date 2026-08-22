@@ -2706,21 +2706,21 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
 
 
 REVIEW_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
-MASTER_REVIEW_SELECT_AREA = "2026review工作表"  # 跨地區彙總的固定分頁
+MASTER_REVIEW_SELECT_AREA = "年度review工作表"  # 跨地區彙總的固定分頁
 
-# 換期別時，2026review彙整分頁跟各地區分頁通常要一起處理，所以「全區」
+# 換期別時，年度review彙整分頁跟各地區分頁通常要一起處理，所以「全區」
 # 也一併包含彙整分頁；想只處理彙整分頁的話，另外選 MASTER_REVIEW_SELECT_AREA。
-REVIEW_AREAS_ALL = REVIEW_AREAS + ["2026review"]
+REVIEW_AREAS_ALL = REVIEW_AREAS + ["年度review"]
 
 
 def _review_areas_for(area: str) -> list[str]:
     if area == "全區":
         return REVIEW_AREAS_ALL
     if area == MASTER_REVIEW_SELECT_AREA:
-        return ["2026review"]
+        return ["年度review"]
     if area in REVIEW_AREAS:
         return [area]
-    raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區／2026review工作表")
+    raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區／年度review工作表")
 
 
 def run_review_formula_preview(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
@@ -2929,10 +2929,10 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
-    {"name": "【財報】2026review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
-    {"name": "【財報】2026review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
-    {"name": "【財報】2026review｜分組隱藏當月起實際欄位", "handler": run_review_group_hide_actual, "enabled": True},
-    {"name": "【財報】2026review｜分組隱藏當月後預估欄位", "handler": run_review_group_hide_future_forecast, "enabled": True},
+    {"name": "【財報】年度review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
+    {"name": "【財報】年度review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
+    {"name": "【財報】年度review｜分組隱藏當月起實際欄位", "handler": run_review_group_hide_actual, "enabled": True},
+    {"name": "【財報】年度review｜分組隱藏當月後預估欄位", "handler": run_review_group_hide_future_forecast, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
@@ -3651,10 +3651,10 @@ with date_col:
             )
             st.caption("格式：YYYYMM；試算該月最後一天的現金缺口")
         elif selected_function in (
-            "【財報】2026review｜預覽公式調整",
-            "【財報】2026review｜套用公式調整",
-            "【財報】2026review｜分組隱藏當月起實際欄位",
-            "【財報】2026review｜分組隱藏當月後預估欄位",
+            "【財報】年度review｜預覽公式調整",
+            "【財報】年度review｜套用公式調整",
+            "【財報】年度review｜分組隱藏當月起實際欄位",
+            "【財報】年度review｜分組隱藏當月後預估欄位",
         ):
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -3665,8 +3665,8 @@ with date_col:
                 key="finance_review_period",
             )
             st.caption(
-                "格式：YYYYMM；把 2026review 檔各地區分頁、以及2026review跨地區彙總分頁"
-                "（執行區域選「全區」兩者都會處理，也可以選「2026review工作表」只跑彙總分頁）"
+                "格式：YYYYMM；把 年度review 檔各地區分頁、以及年度review跨地區彙總分頁"
+                "（執行區域選「全區」兩者都會處理，也可以選「年度review工作表」只跑彙總分頁）"
                 "裡 SUMIF(\"*預估*\") 公式的結尾欄，改成該期別對應的預估欄。"
                 "先跑「預覽」確認調整內容沒問題，再跑「套用」寫入。"
                 "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來；"
@@ -3934,15 +3934,15 @@ with area_col:
         # 常常要一起重跑，所以多一個組合選項，不用切兩次分開跑。
         area_select_options = area_select_options + ["新竹＋高雄"]
     if selected_function in (
-        "【財報】2026review｜預覽公式調整",
-        "【財報】2026review｜套用公式調整",
-        "【財報】2026review｜分組隱藏當月起實際欄位",
-        "【財報】2026review｜分組隱藏當月後預估欄位",
+        "【財報】年度review｜預覽公式調整",
+        "【財報】年度review｜套用公式調整",
+        "【財報】年度review｜分組隱藏當月起實際欄位",
+        "【財報】年度review｜分組隱藏當月後預估欄位",
     ):
-        # 「2026review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
+        # 「年度review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
         # 分頁；「全區」已經會一併處理它，這個選項是給只想單獨重跑彙總
         # 分頁時用的。
-        area_select_options = area_select_options + ["2026review工作表"]
+        area_select_options = area_select_options + ["年度review工作表"]
 
     selected_area_value = st.selectbox(
         "執行區域",
@@ -4573,10 +4573,10 @@ if run_clicked:
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
-                "【財報】2026review｜預覽公式調整",
-                "【財報】2026review｜套用公式調整",
-                "【財報】2026review｜分組隱藏當月起實際欄位",
-                "【財報】2026review｜分組隱藏當月後預估欄位",
+                "【財報】年度review｜預覽公式調整",
+                "【財報】年度review｜套用公式調整",
+                "【財報】年度review｜分組隱藏當月起實際欄位",
+                "【財報】年度review｜分組隱藏當月後預估欄位",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完
