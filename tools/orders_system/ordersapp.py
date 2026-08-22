@@ -470,6 +470,7 @@ def _punch_log(function_name, status, *, area="", date="", target="", message=""
     打卡失敗只印警告，不影響主流程。"""
     try:
         from tools.common.log_to_sheet import write_job_log
+        from tools.orders_system.log_config import ORDERS_LOG_SPREADSHEET_ID
         write_job_log(
             system_name="訂單系統",
             job_name=function_name,
@@ -480,6 +481,7 @@ def _punch_log(function_name, status, *, area="", date="", target="", message=""
             message=message,
             run_type=run_type,
             traceback_text=traceback_text,
+            spreadsheet_id=ORDERS_LOG_SPREADSHEET_ID,
         )
     except Exception as e:
         print(f"[orders_system] 執行 log 打卡失敗：{e}")

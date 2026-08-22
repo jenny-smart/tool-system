@@ -359,6 +359,7 @@ def write_job_log(
     source_file: str = "",
     run_type: str = "手動",
     traceback_text: str = "",
+    spreadsheet_id: str = "",
 ) -> None:
     status_text = normalize_status(status)
 
@@ -382,6 +383,7 @@ def write_job_log(
         status=status_text,
         message="｜".join(msg_parts),
         traceback_text=traceback_text or message,
+        spreadsheet_id=spreadsheet_id,
     )
 
 

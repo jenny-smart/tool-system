@@ -57,6 +57,7 @@ systems:
   - name: 訂單系統
     type: orders_memo_system
     enabled: true
+    log_spreadsheet_id: "1nnbpR1s-VYeClpmIbYjKfi3IiDWtBUBXuXUjQhhgYT0"
 
   - name: 內勤薪資管理
     type: staff_payroll
