@@ -343,6 +343,22 @@ def log_to_sheet(
             ],
         )
 
+    try:
+        from tools.common.function_catalog import sync_function_catalog
+
+        sync_function_catalog(
+            service,
+            spreadsheet_id,
+            system=system,
+            function=function,
+            status=status_text,
+            run_type=run_type,
+            timestamp=row[0],
+        )
+    except Exception as e:
+        # 功能目錄同步失敗不應中斷實際的執行 Log 寫入
+        print(f"[log_to_sheet] 功能目錄同步失敗：{e}", flush=True)
+
 
 def write_job_log(
     *,
