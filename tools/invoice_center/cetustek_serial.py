@@ -16,22 +16,23 @@ from __future__ import annotations
 import argparse
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, sync_playwright
 
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
     from invoice_center.invoice_archive import (
+        SERIAL_LOG_HEADERS,
+        SERIAL_LOG_SHEET,
         _ensure_sheet,
         _escape,
         _master_spreadsheet_id,
         ensure_config_sheet,
         get_google_services,
         resolve_archive_folders,
+        write_serial_log,
     )
     from invoice_center.mof_serial import parse_period_arg, period_filename
     from invoice_center.ei_export_all import (
@@ -43,12 +44,15 @@ if __package__ in {None, ""}:
     )
 else:
     from .invoice_archive import (
+        SERIAL_LOG_HEADERS,
+        SERIAL_LOG_SHEET,
         _ensure_sheet,
         _escape,
         _master_spreadsheet_id,
         ensure_config_sheet,
         get_google_services,
         resolve_archive_folders,
+        write_serial_log,
     )
     from .mof_serial import parse_period_arg, period_filename
     from .ei_export_all import (
@@ -78,9 +82,6 @@ DEFAULT_ALLOCATION_CONFIG = [
     ["新竹", "3", ""],
     ["高雄", "3", ""],
 ]
-SERIAL_LOG_SHEET = "鯨躍字軌匯入配號Log"
-SERIAL_LOG_HEADERS = ["執行時間", "功能", "地區", "期別", "狀態", "訊息"]
-TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 def find_ei_page(context) -> Page | None:
@@ -171,34 +172,6 @@ def ensure_allocation_config(sheets: Any, spreadsheet_id: str) -> dict[str, int]
         if area:
             result[area] = reserve
     return result
-
-
-def _ensure_serial_log_sheet(sheets: Any, spreadsheet_id: str) -> None:
-    _ensure_sheet(sheets, spreadsheet_id, SERIAL_LOG_SHEET)
-    current = sheets.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=f"'{SERIAL_LOG_SHEET}'!A1:F1"
-    ).execute().get("values", [])
-    if not current:
-        sheets.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{SERIAL_LOG_SHEET}'!A1",
-            valueInputOption="RAW",
-            body={"values": [SERIAL_LOG_HEADERS]},
-        ).execute()
-
-
-def write_serial_log(sheets: Any, spreadsheet_id: str, *, function_name: str, area: str, period: str, status: str, message: str) -> None:
-    _ensure_serial_log_sheet(sheets, spreadsheet_id)
-    sheets.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{SERIAL_LOG_SHEET}'!A:F",
-        valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": [[
-            datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-            function_name, area, period, status, message,
-        ]]},
-    ).execute()
 
 
 def import_serial_numbers(page: Page, csv_path: Path) -> None:

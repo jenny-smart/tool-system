@@ -1,7 +1,8 @@
 # 財政部字軌下載 → 鯨躍匯入 → 鯨躍配號，一次跑完的整合流程。
 #
-# 三個步驟各自沿用原本模組的邏輯與 Log（財政部電子發票取號Log、
-# 鯨躍字軌匯入配號Log），這裡不重複判斷或記錄，純粹依序呼叫。任何一步
+# 三個步驟各自沿用原本模組的邏輯，執行記錄共用同一份「鯨躍字軌匯入配號
+# Log」（靠「功能」欄分辨是哪個步驟），這裡不重複判斷或記錄，純粹依序
+# 呼叫。任何一步
 # 失敗（例如財政部這期還沒有字軌可下載）就整個停止、不會繼續跑後面的
 # 步驟——這是每個步驟原本就有的行為（丟出例外），這裡沒有另外加防護，
 # 是原本设计的自然结果。
@@ -80,7 +81,7 @@ def main() -> int:
         mof_serial.download_serial_csv(mof_page, year, label, destination)
         print(f"[1/3] 已下載：{destination}")
         mof_serial.archive_and_log(destination, args.area, year, label)
-        print("[1/3] 已歸檔到 Google Drive，並寫入財政部電子發票取號Log")
+        print("[1/3] 已歸檔到 Google Drive，並寫入鯨躍字軌匯入配號Log")
 
         # 2/3 鯨躍匯入
         # Follow the same complete two-layer flow as 「鯨躍登入」.

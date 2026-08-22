@@ -46,6 +46,15 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
+# 財政部電子發票取號、鯨躍字軌匯入配號共用同一份執行記錄分頁（原本分開記在
+# 「財政部電子發票取號Log」／「鯨躍字軌匯入配號Log」兩個分頁，併成一份，
+# 靠「功能」欄分辨是哪個步驟）。放在這裡（而不是 mof_serial.py 或
+# cetustek_serial.py 任一邊），是因為 cetustek_serial.py 本身會 import
+# mof_serial.py，兩邊互相 import 會循環；invoice_archive.py 是兩邊都已經
+# 在用的共同底層模組，才不會有這個問題。
+SERIAL_LOG_SHEET = "鯨躍字軌匯入配號Log"
+SERIAL_LOG_HEADERS = ["執行時間", "功能", "地區", "期別", "狀態", "訊息"]
+
 
 @dataclass(frozen=True)
 class AreaRootConfig:
@@ -171,6 +180,34 @@ def _ensure_sheet(sheets: Any, spreadsheet_id: str, title: str, *, hidden: bool 
         body={"requests": [{"addSheet": {"properties": {"title": title, "hidden": hidden, "gridProperties": {"frozenRowCount": 1}}}}]},
     ).execute()
     return int(response["replies"][0]["addSheet"]["properties"]["sheetId"])
+
+
+def _ensure_serial_log_sheet(sheets: Any, spreadsheet_id: str) -> None:
+    _ensure_sheet(sheets, spreadsheet_id, SERIAL_LOG_SHEET)
+    current = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{SERIAL_LOG_SHEET}'!A1:F1"
+    ).execute().get("values", [])
+    if not current:
+        sheets.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{SERIAL_LOG_SHEET}'!A1",
+            valueInputOption="RAW",
+            body={"values": [SERIAL_LOG_HEADERS]},
+        ).execute()
+
+
+def write_serial_log(sheets: Any, spreadsheet_id: str, *, function_name: str, area: str, period: str, status: str, message: str) -> None:
+    _ensure_serial_log_sheet(sheets, spreadsheet_id)
+    sheets.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{SERIAL_LOG_SHEET}'!A:F",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[
+            datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d %H:%M:%S"),
+            function_name, area, period, status, message,
+        ]]},
+    ).execute()
 
 
 def ensure_config_sheet(sheets: Any, spreadsheet_id: str = "") -> dict[str, AreaRootConfig]:

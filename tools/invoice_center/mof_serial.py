@@ -4,17 +4,17 @@
 # 登入頁有圖形驗證碼，一律留給使用者在畫面上手動輸入密碼與驗證碼、按「登入」；
 # 本程式只負責預填統一編號／帳號，以及登入後的選單導覽、查詢、下載、
 # 歸檔到 Google Drive「紙本發票／期別」資料夾（跟鯨躍紙本發票共用同一套
-# 地區設定與資料夾規則），並寫入「財政部電子發票取號Log」。
+# 地區設定與資料夾規則），並寫入「鯨躍字軌匯入配號Log」（跟鯨躍字軌匯入／
+# 配號共用同一份執行記錄分頁，見 invoice_archive.write_serial_log）。
 from __future__ import annotations
 
 import argparse
 import re
 import sys
 import time
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, sync_playwright
 
@@ -32,7 +32,7 @@ if __package__ in {None, ""}:
         get_google_services,
         resolve_archive_folders,
         upload_replacing,
-        _ensure_sheet,
+        write_serial_log,
         _master_spreadsheet_id,
     )
 else:
@@ -48,7 +48,7 @@ else:
         get_google_services,
         resolve_archive_folders,
         upload_replacing,
-        _ensure_sheet,
+        write_serial_log,
         _master_spreadsheet_id,
     )
 
@@ -59,9 +59,7 @@ from tools.invoice_center.chrome_cdp import (
 )
 
 MOF_SERIAL_QUERY_URL = "https://www.einvoice.nat.gov.tw/dashboard/btb/btb004w/search"
-MOF_LOG_SHEET = "財政部電子發票取號Log"
-MOF_LOG_HEADERS = ["執行時間", "功能", "地區", "期別", "狀態", "訊息"]
-TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+MOF_LOG_FUNCTION_NAME = "財政部電子發票取號"
 
 _PERIOD_LABELS = ["01-02", "03-04", "05-06", "07-08", "09-10", "11-12"]
 
@@ -290,34 +288,6 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
     return destination
 
 
-def _ensure_log_sheet(sheets: Any, spreadsheet_id: str) -> None:
-    _ensure_sheet(sheets, spreadsheet_id, MOF_LOG_SHEET)
-    current = sheets.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=f"'{MOF_LOG_SHEET}'!A1:F1"
-    ).execute().get("values", [])
-    if not current:
-        sheets.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{MOF_LOG_SHEET}'!A1",
-            valueInputOption="RAW",
-            body={"values": [MOF_LOG_HEADERS]},
-        ).execute()
-
-
-def write_mof_log(sheets: Any, spreadsheet_id: str, *, area: str, period: str, status: str, message: str) -> None:
-    _ensure_log_sheet(sheets, spreadsheet_id)
-    sheets.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{MOF_LOG_SHEET}'!A:F",
-        valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": [[
-            datetime.now(TAIPEI_TZ).strftime("%Y-%m-%d %H:%M:%S"),
-            "財政部電子發票取號", area, period, status, message,
-        ]]},
-    ).execute()
-
-
 def archive_and_log(local_path: Path, area: str, year: int, label: str) -> str:
     period_text = f"{year}年{label}期"
     drive, sheets = get_google_services()
@@ -326,7 +296,7 @@ def archive_and_log(local_path: Path, area: str, year: int, label: str) -> str:
     config = configs.get(area)
     if not config:
         message = f"「鯨躍發票根目錄設定」找不到已啟用的 {area} 設定"
-        write_mof_log(sheets, spreadsheet_id, area=area, period=period_text, status="失敗", message=message)
+        write_serial_log(sheets, spreadsheet_id, function_name=MOF_LOG_FUNCTION_NAME, area=area, period=period_text, status="失敗", message=message)
         raise RuntimeError(message)
 
     start_month = int(label.split("-")[0])
@@ -335,7 +305,7 @@ def archive_and_log(local_path: Path, area: str, year: int, label: str) -> str:
     upload_replacing(drive, local_path, folders.paper_invoice)
 
     message = f"已存為 {local_path.name}"
-    write_mof_log(sheets, spreadsheet_id, area=area, period=period_text, status="成功", message=message)
+    write_serial_log(sheets, spreadsheet_id, function_name=MOF_LOG_FUNCTION_NAME, area=area, period=period_text, status="成功", message=message)
     return message
 
 

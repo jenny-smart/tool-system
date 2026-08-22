@@ -1,4 +1,4 @@
-"""2026review｜調整年度預估欄的 SUMIF 公式範圍。
+"""年度review｜調整年度預估欄的 SUMIF 公式範圍。
 
 「2026目標及review檔」裡，每個地區自己的分頁上有一批統計列，公式長這樣：
   =SUMIF(C$1:N3,"*預估*",C3:N3)
@@ -15,7 +15,7 @@
   1. preview_review_formula_updates()：只讀取、不寫入，回傳「哪些儲存格、
      舊公式、新公式」的清單，先讓人確認調整方向對不對。
   2. apply_review_formula_updates()：把 preview 算出的清單實際寫回去，並在
-     主控試算表的「2026review公式調整記錄」分頁，逐一記下每個被改動儲存格
+     主控試算表的「年度review公式調整記錄」分頁，逐一記下每個被改動儲存格
      的時間／地區／期別／舊公式／新公式，方便事後查改了什麼、什麼時候改的。
 這樣萬一抓錯欄位，不會直接改壞正式的年度 review 檔，改完也留得下紀錄。
 
@@ -23,8 +23,8 @@
 （例如換到 202607 期別時的 O欄=2026.07實際、之後每月的實際欄，一路到年度
 加總的「2026實際」欄，例如各區工作表的 AA欄）各自用 Google Sheets 的欄位
 分組功能分組並隱藏——因為那些月份還沒發生，「實際」欄位還沒有真實數字。
-已經過去、已經有數字的月份「實際」欄位不會動。2026review工作表跟各地區
-工作表都適用；2026review工作表因為多一欄地區標示欄位，同名的「實際」／
+已經過去、已經有數字的月份「實際」欄位不會動。年度review工作表跟各地區
+工作表都適用；年度review工作表因為多一欄地區標示欄位，同名的「實際」／
 「預估」標題會落在不同欄位字母，但因為都是照 row1 標題文字動態比對，不用
 另外處理欄位位移。
 """
@@ -42,7 +42,7 @@ from tools.finance_management.statement_registry import (
     resolve_review_location,
 )
 
-MASTER_REVIEW_AREA = "2026review"  # 特殊地區代號：指「2026review工作表」這個跨地區彙整分頁
+MASTER_REVIEW_AREA = "年度review"  # 特殊地區代號：指「年度review工作表」這個跨地區彙整分頁
 
 
 def _resolve_location(area: str) -> tuple[str, str]:
@@ -52,7 +52,7 @@ def _resolve_location(area: str) -> tuple[str, str]:
 
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-CHANGE_LOG_SHEET = "2026review公式調整記錄"
+CHANGE_LOG_SHEET = "年度review公式調整記錄"
 _CHANGE_LOG_HEADER = ["時間", "地區", "期別", "儲存格", "舊公式", "新公式"]
 
 
@@ -76,7 +76,7 @@ def _ensure_change_log_sheet(service, spreadsheet_id: str) -> None:
 
 
 def _log_changes(area: str, year_month: str, changes: list[dict[str, str]]) -> None:
-    """把每一個被改動的儲存格，各記一列到「2026review公式調整記錄」分頁
+    """把每一個被改動的儲存格，各記一列到「年度review公式調整記錄」分頁
     （時間／地區／期別／儲存格／舊公式／新公式），方便事後回頭查改了什麼、
     什麼時候改的。記錄本身失敗不影響主要功能。"""
     if not changes:
@@ -196,11 +196,11 @@ def preview_review_formula_updates(area: str, year_month: str) -> list[dict[str,
 
 def apply_review_formula_updates(area: str, year_month: str) -> dict[str, int]:
     """套用 preview_review_formula_updates() 算出的調整，實際寫回試算表。"""
-    log_execution("2026review公式調整", area, "開始", f"期別 {year_month}")
+    log_execution("年度review公式調整", area, "開始", f"期別 {year_month}")
     try:
         changes = preview_review_formula_updates(area, year_month)
         if not changes:
-            log_execution("2026review公式調整", area, "完成", "沒有需要調整的公式")
+            log_execution("年度review公式調整", area, "完成", "沒有需要調整的公式")
             return {"changed": 0}
 
         spreadsheet_id, title = _resolve_location(area)
@@ -215,9 +215,9 @@ def apply_review_formula_updates(area: str, year_month: str) -> dict[str, int]:
         ).execute()
         _log_changes(area, year_month, changes)
     except Exception as exc:
-        log_execution("2026review公式調整", area, "失敗", str(exc))
+        log_execution("年度review公式調整", area, "失敗", str(exc))
         raise
-    log_execution("2026review公式調整", area, "完成", f"調整 {len(changes)} 個儲存格")
+    log_execution("年度review公式調整", area, "完成", f"調整 {len(changes)} 個儲存格")
     return {"changed": len(changes)}
 
 
@@ -249,7 +249,7 @@ def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
     「2026實際」這一段連續範圍），各自分組並隱藏（用 Google Sheets 的欄位
     分組功能，不是單純隱藏——保留展開箭頭方便之後要看真實數字時自己展開）。
     已上市/已過去的月份「實際」欄位不動，因為那些是已經有真實數字的資料。
-    2026review工作表跟各地區工作表都適用（area 決定要處理哪個分頁）。
+    年度review工作表跟各地區工作表都適用（area 決定要處理哪個分頁）。
 
     year_month 格式 YYYY.MM，例如 "2026.07"。
     """
@@ -280,7 +280,7 @@ def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
 
     if not target_columns:
         log_execution(
-            "2026review欄位分組隱藏", area, "完成",
+            "年度review欄位分組隱藏", area, "完成",
             f"期別 {year_month}：沒有找到 {year_month} 或之後的「實際」欄位",
         )
         return {"grouped": 0}
@@ -322,7 +322,7 @@ def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
         ).execute()
 
     log_execution(
-        "2026review欄位分組隱藏", area, "完成",
+        "年度review欄位分組隱藏", area, "完成",
         f"期別 {year_month}：分組隱藏 {grouped} 欄（跳過 {len(target_columns) - grouped} 個已分組過的）",
     )
     return {"grouped": grouped}
@@ -434,7 +434,7 @@ def group_hide_future_forecast_columns(area: str, year_month: str) -> dict[str, 
         ).execute()
 
     log_execution(
-        "2026review欄位分組隱藏（預估）", area, "完成",
+        "年度review欄位分組隱藏（預估）", area, "完成",
         f"期別 {year_month}：分組隱藏 {grouped} 個未來預估欄，解開 {ungrouped} 個當月/過去預估欄",
     )
     return {"grouped": grouped, "ungrouped": ungrouped}

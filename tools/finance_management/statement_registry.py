@@ -4,7 +4,7 @@
 分頁欄位（A 起，依欄位順序讀取，不靠標題文字比對）：
   A 地區　B 試算表ID　C 富邦更新gid　D 元大更新gid　E 財務gid　F 現金gid
   G 行銷費用檔案ID（各地區列共用同一個值，指向「行銷費用總管理」試算表）
-  H 2026review gid（該地區在「2026目標及review檔」裡對應的分頁）
+  H 年度review gid（該地區在「2026目標及review檔」裡對應的分頁）
 
 地區列：台北／台中／桃園／新竹／高雄，每列的 B 欄是「該地區財報」這一份
 試算表，C–F 欄則是同一份試算表裡各分頁（富邦更新／元大更新／財務／現金）
@@ -16,7 +16,7 @@
 
 還有一列地區＝「2026」，B 欄是「2026目標及review檔」這份試算表本身的ID
 （各地區共用同一份試算表，只是分頁不同——各地區自己的分頁 GID 記在各地區
-列的 H欄，不是這一列）。這一列自己的 H欄，登記的是「2026review工作表」
+列的 H欄，不是這一列）。這一列自己的 H欄，登記的是「年度review工作表」
 這個跨地區彙整分頁的 GID。
 """
 
@@ -147,13 +147,13 @@ def review_spreadsheet_id() -> str:
 
 
 def resolve_master_review_location() -> tuple[str, str]:
-    """回傳 (試算表ID, 分頁標題)：「2026review工作表」這個跨地區彙整的固定分頁。
-    GID 登記在地區＝「2026」那一列的 H欄（跟各地區列的「2026review gid」共用
+    """回傳 (試算表ID, 分頁標題)：「年度review工作表」這個跨地區彙整的固定分頁。
+    GID 登記在地區＝「2026」那一列的 H欄（跟各地區列的「年度review gid」共用
     同一欄，只是這一列代表的不是某個地區自己的分頁，而是彙整分頁本身）。"""
     row = _find_row(REVIEW_SPREADSHEET_AREA)
     gid = _cell(row, COL_REVIEW_GID)
     if not gid:
-        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{REVIEW_SPREADSHEET_AREA} 缺少 2026review工作表 gid")
+        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{REVIEW_SPREADSHEET_AREA} 缺少 年度review工作表 gid")
     spreadsheet_id = review_spreadsheet_id()
     service = get_sheets_service()
     title = sheet_title_for_gid(service, spreadsheet_id, gid)
@@ -165,7 +165,7 @@ def resolve_review_location(area: str) -> tuple[str, str]:
     row = _find_row(area)
     gid = _cell(row, COL_REVIEW_GID)
     if not gid:
-        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少 2026review gid")
+        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少 年度review gid")
     spreadsheet_id = review_spreadsheet_id()
     service = get_sheets_service()
     title = sheet_title_for_gid(service, spreadsheet_id, gid)
