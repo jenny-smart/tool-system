@@ -5,9 +5,15 @@
   1. Amazon Web Services（信件主旨 "Amazon Web Services Tax Invoice Available"
      的 PDF 附件，抓 AWS Service Charges 金額，換算台幣＋1.5%）
   2. 震旦行（信件主旨含「震旦集團電子發票加值中心通知信」的 PDF 附件，抓總計金額）
-  3. 眾點（信件主旨含「各分店每月發票金額確認」，抓信件內文的發票金額總計）
+  3. 眾點（信件主旨含「各分店每月發票金額確認」，抓信件內文彙總列的「實際廣告花費
+     (台幣)」與「10%服務費」，各自乘 1.05 拆成 google廣告費／google服務費兩筆金額，
+     抓不到彙總列時退回抓「發票金額總計為」的總額）
   4. 辦公室租金（固定金額，不用查信）
   5. 辦公室管理費（固定金額，不用查信）
+
+執行期別（傳入的 period）決定查信的月份區間與辦公室租金/管理費的標記月份；
+AWS／震旦行／眾點都是後付（當月收到的通知信對應上個月的費用），費用說明
+標記的月份是執行期別往前推一個月。
 
 信件收發沿用 tools/gmail_401（IMAP + App 密碼）與
 tools/field_management/resume_system.py 的讀信慣例；PDF 附件用 pdfplumber
@@ -49,6 +55,15 @@ AWS_CHARGE_RE = re.compile(r"AWS Service Charges\s*USD\s*([\d,]+\.\d{2})", re.IG
 FX_RATE_RE = re.compile(r"1\s*USD\s*=\s*([\d.]+)\s*TWD", re.IGNORECASE)
 ZHENDAN_TOTAL_RE = re.compile(r"總計\s+([\d,]+)")
 ZHONGDIAN_TOTAL_RE = re.compile(r"發票金額總計為\$?\s*([\d,]+)")
+# 彙總列「實際廣告花費(台幣) 10%服務費 5%稅金 發票金額(含服含稅)」四個標籤，
+# 後面接著同順序的四個金額（GG/走期/地區等文字欄位夾在中間，用 [\s\S]*? 跳過）。
+ZHONGDIAN_ROW_RE = re.compile(
+    r"實際廣告花費\(台幣\)[\s\S]*?10%服務費[\s\S]*?5%稅金[\s\S]*?發票金額\(含服含稅\)"
+    r"[\s\S]*?(?:NT)?\$\s*([\d,]+)"
+    r"[\s\S]*?\$\s*([\d,]+)"
+    r"[\s\S]*?\$\s*([\d,]+)"
+    r"[\s\S]*?(?:NT)?\$\s*([\d,]+)"
+)
 
 _IMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -179,7 +194,7 @@ def _strip_html(html_text: str) -> str:
     import html as html_module
 
     text = re.sub(r"<br\s*/?>", "\n", html_text, flags=re.IGNORECASE)
-    text = re.sub(r"</p>|</div>|</tr>|</li>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>|</div>|</tr>|</li>|</td>|</th>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
     text = html_module.unescape(text)
     return re.sub(r"\r\n|\r", "\n", text).strip()
@@ -283,11 +298,25 @@ def parse_zhendan_invoice(pdf_text: str) -> tuple[int, str]:
 
 
 def parse_zhongdian_email(body_text: str) -> tuple[int, str]:
-    """從眾點數位信件內文抓發票金額總計。"""
-    match = ZHONGDIAN_TOTAL_RE.search(body_text)
-    if not match:
-        raise ValueError("眾點信件內文找不到「發票金額總計為」")
-    return _round_twd(_parse_decimal(match.group(1))), ""
+    """從眾點數位信件內文抓「實際廣告花費(台幣)」與「10%服務費」，
+    各自乘以 1.05（5%稅金）拆成 google廣告費／google服務費兩塊金額，
+    請款金額＝兩者相加。彙總列格式若對不上，退回只抓「發票金額總計為」
+    的總額（沒有拆分明細），至少不會整筆失敗。
+    """
+    row_match = ZHONGDIAN_ROW_RE.search(body_text)
+    if row_match:
+        ad_spend = _parse_decimal(row_match.group(1))
+        service_fee = _parse_decimal(row_match.group(2))
+        google_ad = _round_twd(ad_spend * Decimal("1.05"))
+        google_service = _round_twd(service_fee * Decimal("1.05"))
+        amount = google_ad + google_service
+        detail = f"google廣告費{google_ad}＋google服務費{google_service}={amount}"
+        return amount, detail
+
+    total_match = ZHONGDIAN_TOTAL_RE.search(body_text)
+    if not total_match:
+        raise ValueError("眾點信件內文找不到彙總列（實際廣告花費/10%服務費）或「發票金額總計為」")
+    return _round_twd(_parse_decimal(total_match.group(1))), ""
 
 
 # ────────────────────────────────────────────────────────────
@@ -299,6 +328,17 @@ def _period_window(period: str) -> tuple[datetime, datetime]:
     start = datetime(year, month, 1, tzinfo=TW_TZ)
     end = datetime(year + 1, 1, 1, tzinfo=TW_TZ) if month == 12 else datetime(year, month + 1, 1, tzinfo=TW_TZ)
     return start, end
+
+
+def _previous_period_label(period: str) -> str:
+    """AWS／震旦行／眾點都是後付：執行期別當月收到的通知信，內容對應的是
+    前一個月的費用，所以費用說明要標前一個月，不是收到信的執行月份。"""
+    year, month = int(period[:4]), int(period[4:6])
+    if month == 1:
+        year, month = year - 1, 12
+    else:
+        month -= 1
+    return f"{year}.{month:02d}"
 
 
 def _existing_memos(service, spreadsheet_id: str, sheet_title: str) -> set[str]:
@@ -323,6 +363,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
 
     period_label = f"{period[:4]}.{period[4:6]}"
+    mail_period_label = _previous_period_label(period)
     start_dt, end_dt = _period_window(period)
     since_str = _imap_date(start_dt)
     before_str = _imap_date(end_dt)
@@ -343,7 +384,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
     ]
 
     def add_mail_row(imap: imaplib.IMAP4_SSL, label: str, subject_query: str, category: str, payee: str, parse_fn) -> None:
-        base_memo = f"{period_label}-{label}"
+        base_memo = f"{mail_period_label}-{label}"
         if _already_submitted(existing_memos, base_memo):
             items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
             return
@@ -375,7 +416,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
     pending_mail_items = []
     for item in mail_items:
         label = item[0]
-        if _already_submitted(existing_memos, f"{period_label}-{label}"):
+        if _already_submitted(existing_memos, f"{mail_period_label}-{label}"):
             items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
         else:
             pending_mail_items.append(item)
@@ -425,13 +466,15 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
         for item in items
     )
     message = (
-        f"{run_type}｜信箱={mailbox_user}｜期別={period_label}｜新增 {len(rows)} 筆\n{item_lines}"
+        f"{run_type}｜信箱={mailbox_user}｜執行期別={period_label}（查信/固定費用月份）"
+        f"｜發票內容期別={mail_period_label}（AWS/震旦行/眾點標記月份）｜新增 {len(rows)} 筆\n{item_lines}"
     )
     log_execution(TOOL_NAME, AREA, status, message)
 
     return {
         "period": period,
         "period_label": period_label,
+        "mail_period_label": mail_period_label,
         "sheet_title": sheet_title,
         "rows_added": len(rows),
         "items": items,
