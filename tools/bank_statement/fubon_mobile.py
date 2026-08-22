@@ -72,7 +72,7 @@ def submit_captcha(context: BrowserContext, session_token: str, code: str) -> Pa
     if submit is None:
         raise RuntimeError("找不到富邦登入送出按鈕")
     submit.click(timeout=5_000)
-    return wait_fubon_login(context, page, timeout_ms=30_000)
+    return wait_fubon_login(context, page, timeout_ms=300_000)
 
 
 def parse_args() -> argparse.Namespace:
