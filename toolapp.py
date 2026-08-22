@@ -2705,6 +2705,22 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
     return "已寫入「現金缺口試算」工作表：\n" + "\n".join(lines)
 
 
+def run_cash_gap_and_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    """一次完成兩件事：先試算並寫入「現金缺口試算」表頭 12 列，再查「預收款金額」
+    寫進同一張表下方的 5 列。兩者本來就共用同一份「現金缺口試算」分頁、同一組
+    地區欄位，只是分成兩個功能要各跑一次；這裡直接依序呼叫既有的
+    run_cash_gap_worksheet()／run_lemon_prepaid_amount()，串成一步。
+    「【檸檬後台】預收款金額」原本的功能／按鈕還是保留，這個只是新增的捷徑。
+    """
+    cash_gap_result = run_cash_gap_worksheet(
+        month=month, start_date=start_date, end_date=end_date, area=area, on_progress=on_progress
+    )
+    prepaid_result = run_lemon_prepaid_amount(
+        month=month, start_date=start_date, end_date=end_date, area=area, on_progress=on_progress
+    )
+    return f"【現金缺口試算】\n{cash_gap_result}\n\n【預收款金額】\n{prepaid_result}"
+
+
 REVIEW_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 MASTER_REVIEW_SELECT_AREA = "年度review工作表"  # 跨地區彙總的固定分頁
 
@@ -2929,6 +2945,7 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
+    {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
     {"name": "【財報】年度review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
     {"name": "【財報】年度review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
     {"name": "【財報】年度review｜分組隱藏當月起實際欄位", "handler": run_review_group_hide_actual, "enabled": True},
@@ -3601,8 +3618,8 @@ with date_col:
             st.caption(
                 "格式：YYYYMM；付款日期＝該月 1 日～月底、服務日期-起＝次月 1 日、"
                 "付款狀態＝已付款。會分別查「藍新ATM／信用卡／ATM」付款方式與"
-                "「家電清潔／傢俱清潔」購買項目，寫入主控表「預收款金額」分頁"
-                "（找到該月份的欄位就覆蓋，找不到就在最右邊新增）。"
+                "「家電清潔／傢俱清潔」購買項目，寫入主控表「現金缺口試算」分頁"
+                "下方 5 列（每次執行覆蓋最新金額）。"
             )
         elif selected_function == "【財報】台北固定費用請款":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
@@ -3650,6 +3667,20 @@ with date_col:
                 key="finance_cash_gap_period",
             )
             st.caption("格式：YYYYMM；試算該月最後一天的現金缺口")
+        elif selected_function == "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202607",
+                label_visibility="collapsed",
+                key="finance_cash_gap_prepaid_period",
+            )
+            st.caption(
+                "格式：YYYYMM；依序執行「All財報現金缺口」＋「預收款金額」兩個功能，"
+                "一次寫齊「現金缺口試算」分頁的表頭 12 列＋下方 5 列（原本兩個功能"
+                "各自的按鈕還在，這個是新增的捷徑）"
+            )
         elif selected_function in (
             "【財報】年度review｜預覽公式調整",
             "【財報】年度review｜套用公式調整",
@@ -4573,6 +4604,7 @@ if run_clicked:
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
+                "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
                 "【財報】年度review｜預覽公式調整",
                 "【財報】年度review｜套用公式調整",
                 "【財報】年度review｜分組隱藏當月起實際欄位",
