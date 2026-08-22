@@ -221,10 +221,10 @@ def update_next_service_dates_sheet(
 # =========================
 SHEETS = [
     # (區域, spreadsheet_id, gid)
-    ("台北", "1T01k68sV0NY6MPD2nw8Tg1ijC9dOXhhr26G5-Bc9bJM", "94436291"),
-    ("台北", "1T01k68sV0NY6MPD2nw8Tg1ijC9dOXhhr26G5-Bc9bJM", "1675299427"),
-    ("台中", "17t3JcUEF0tQwr4a3fvLXUceCXgQDsmihYz7tkRQOc6s", "1389645036"),
-    ("台中", "17t3JcUEF0tQwr4a3fvLXUceCXgQDsmihYz7tkRQOc6s", "1534882634"),
+    ("台北", "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE", "264004068"),
+    ("台北", "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE", "264004068"),
+    ("台中", "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE", "264004068"),
+    ("台中", "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE", "264004068"),
 ]
 
 
