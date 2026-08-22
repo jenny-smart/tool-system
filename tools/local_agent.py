@@ -648,9 +648,16 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
     try:
         command = command_for(task)
         record(f"[{now_text()}] START {task['action']}")
+        child_env = os.environ.copy()
+        project_root_str = str(PROJECT_ROOT)
+        existing_pp = child_env.get("PYTHONPATH", "")
+        pp_parts = [p for p in existing_pp.split(os.pathsep) if p]
+        if project_root_str not in pp_parts:
+            child_env["PYTHONPATH"] = project_root_str + (os.pathsep + existing_pp if existing_pp else "")
         process = subprocess.Popen(
             command,
             cwd=PROJECT_ROOT,
+            env=child_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
