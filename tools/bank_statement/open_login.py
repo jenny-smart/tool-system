@@ -230,7 +230,7 @@ def wait_fubon_page_with_text(
 
 
 def wait_fubon_login(
-    context: BrowserContext, page: Page, timeout_ms: int = 30_000
+    context: BrowserContext, page: Page, timeout_ms: int = 300_000
 ) -> Page:
     """富邦登入可能關閉原分頁並開新分頁，因此每輪都重新鎖定有效頁面。"""
     waited = 0
@@ -590,7 +590,13 @@ def open_fubon_statement(
             for option_index in range(options.count()):
                 option = options.nth(option_index)
                 if account.bank_account[-5:] in option.inner_text():
-                    select.select_option(option.get_attribute("value") or "")
+                    value = option.get_attribute("value") or ""
+                    try:
+                        select.select_option(value)
+                    except Exception:
+                        # 頁面可能在這個瞬間切換可見狀態；重新等待一次可見再試一次。
+                        select.wait_for(state="visible", timeout=10_000)
+                        select.select_option(value)
                     break
 
     _, query = visible_text(page, "開始查詢", timeout_ms=5_000)
