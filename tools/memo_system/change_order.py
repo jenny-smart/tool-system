@@ -1,11 +1,24 @@
 # ============================================================
 # 檔名：change_order.py
-# 版本：v1.6
+# 版本：v1.7
 # 模組：清潔異動模組：車馬費 / 異動服務收款 / 異動服務退款
 # 建立日期：2026-06-22
-# 最後更新：2026-06-24
+# 最後更新：2026-08-22
 #
 # Change Log
+# v1.7
+# - 修正階段 B 回填後台的欄位覆蓋 bug：apply_sheet_row_to_form 過去回填加收
+#   時一律把 isRefund 清成 0（無），回填待退時一律把 isCharge 清成 0，理由
+#   是「加收/待退不能同時進系統」。但這個規則原意只是「新增其中一邊時，不
+#   能連帶把另一邊也生出一筆只有備註、其餘欄位空白的樣板殘影」，不是同一
+#   張訂單永遠只能存在一邊——若同一張訂單另一邊本來就已經有完整的真實
+#   資料（兩筆各自獨立的異動紀錄），就不該被清空。
+#   新增 _extract_purchase_json_from_html / _apply_purchase_json_overrides
+#   （做法比照 orders.py 的 add_bonus_note_to_order）：優先讀編輯頁內嵌
+#   `purchase: {...}`（Vue data()）JSON 的真實值，蓋掉 _read_form_state
+#   解析靜態 HTML 可能拿到的樣板殘留或錯誤 checked 狀態；新增
+#   _has_real_purchase_side_data 判斷另一側是否已有真實資料，只有在另一側
+#   目前確實是空的時候才會清成 0。
 # v1.4
 # v1.5
 # - 修正 v1.5 遺留的 row_spec 未定義錯誤。
@@ -34,6 +47,7 @@
 """
 
 import re
+import json
 import math
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -931,6 +945,53 @@ FIELD_FINANCE_NOTE = [
 ]
 
 
+# v2026.08.22 新增：修正欄位覆蓋 bug，做法比照 orders.py 的
+# add_bonus_note_to_order——訂單編輯頁很多欄位（isCharge/isRefund radio、
+# chargeNote/refundNote textarea 等）是 Vue.js 動態渲染的，_read_form_state
+# 解析靜態 HTML 看到的可能是還沒渲染的樣板語法（例如
+# "{{ purchase.chargeNote }}"），checked 狀態也不一定反映真實值。改成優先讀
+# 頁面內嵌 <script> 裡 `purchase: {...}`（Vue data()）這包 JSON 的真實值，
+# 蓋掉靜態 HTML 解析可能出錯的部分。
+_JSON_BACKED_PURCHASE_FIELDS = [
+    "isCharge", "chargeDate", "chargePayment", "chargeInvoiceDate",
+    "chargeAmount", "chargeInvoice", "chargeNote",
+    "isRefund", "refundDate", "refundPayment", "refundAmount",
+    "refundNumber", "refundInvoiceDate", "refundInvoiceAmount",
+    "refundInvoice", "refundNote",
+]
+
+
+def _extract_purchase_json_from_html(html_text: str) -> dict:
+    json_m = re.search(r'purchase:\s*(\{.*?\})\s*\n?\s*\}\s*\n?\s*\}', html_text, re.S)
+    if not json_m:
+        return {}
+    try:
+        return json.loads(json_m.group(1))
+    except Exception:
+        return {}
+
+
+def _apply_purchase_json_overrides(form_data: dict, purchase_json: dict) -> None:
+    for key in _JSON_BACKED_PURCHASE_FIELDS:
+        if key in purchase_json:
+            val = purchase_json.get(key)
+            form_data[key] = "" if val is None else str(val)
+
+
+def _has_real_purchase_side_data(purchase_json: dict, form_data: dict, status_field: str) -> bool:
+    """
+    判斷加收（isCharge）/ 待退（isRefund）另一側目前是不是「有實際資料」，
+    而不是全空或只剩 Vue 樣板殘留。「加收/待退不能同時進系統」指的是：新增
+    加收（或待退）時，不能連帶把另一側也生出一筆只有備註欄位、其餘欄位都
+    空白的殘影（例如另一側只剩字面上的 "{{ purchase.chargeNote }}"）。但若
+    同一張訂單另一側本來就已經有完整的真實資料（金額、日期、備註等都有
+    登記過），代表這是兩筆各自獨立的異動紀錄，必須同時保留，不能因為這次
+    只回填其中一種類型，就把另一側既有的真實資料清空。
+    """
+    value = str((purchase_json or {}).get(status_field, form_data.get(status_field, "0")) or "0")
+    return value not in ("", "0")
+
+
 def _sheet_cell(row: list, letter: str) -> str:
     idx = _col_letter_to_index(letter)
     return row[idx] if len(row) > idx else ""
@@ -1247,8 +1308,16 @@ def get_pending_rows(region: str, row_spec: str = None, ui_logger=None):
 
 
 def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
-                            order: dict = None, ui_logger=None):
-    """依 Sheet B 欄狀態，把該列資料套到後台 edit 表單。"""
+                            order: dict = None, purchase_json: dict = None, ui_logger=None):
+    """依 Sheet B 欄狀態，把該列資料套到後台 edit 表單。
+
+    v2026.08.22：加收（isCharge）與待退（isRefund）是後台各自獨立的 radio
+    欄位。過去「兩者不能同時進系統」，指的是不能在新增其中一邊時，連帶把
+    另一邊也生出一筆只有備註、其餘欄位空白的殘影列（樣板殘留）。若同一張
+    訂單另一邊本來就已經有完整的真實資料，代表這是兩筆各自獨立的異動
+    紀錄，必須同時保留——所以只有在另一邊「目前沒有真實資料」時才會被
+    清成 0（無），已有真實資料時不動它。
+    """
     raw = item["raw"]
     status = item.get("status") or _sheet_cell(raw, "B").strip()
     backend_note = _sheet_cell(raw, "K").strip()
@@ -1258,7 +1327,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
 
     if status == STATUS_PENDING_CHARGE:
         _set_radio_value(form_data, controls, "isCharge", "1", ui_logger=ui_logger)
-        _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
+        if not _has_real_purchase_side_data(purchase_json, form_data, "isRefund"):
+            _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
@@ -1275,7 +1345,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
         return
 
     if status == STATUS_PENDING_REFUND:
-        _set_radio_value(form_data, controls, "isCharge", "0", ui_logger=ui_logger)
+        if not _has_real_purchase_side_data(purchase_json, form_data, "isCharge"):
+            _set_radio_value(form_data, controls, "isCharge", "0", ui_logger=ui_logger)
         _set_radio_value(form_data, controls, "isRefund", "1", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_REFUND_DATE, refund_date,
                    keywords=["退款日期", "退款時間"], fallback_name="refundDate", ui_logger=ui_logger)
@@ -1294,7 +1365,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
 
     if status == STATUS_DONE_CHARGE:
         _set_radio_value(form_data, controls, "isCharge", "2", ui_logger=ui_logger)
-        _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
+        if not _has_real_purchase_side_data(purchase_json, form_data, "isRefund"):
+            _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
@@ -1311,7 +1383,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
         return
 
     if status == STATUS_DONE_REFUND:
-        _set_radio_value(form_data, controls, "isCharge", "0", ui_logger=ui_logger)
+        if not _has_real_purchase_side_data(purchase_json, form_data, "isCharge"):
+            _set_radio_value(form_data, controls, "isCharge", "0", ui_logger=ui_logger)
 
         refund_amount = _parse_money_value(_sheet_cell(raw, "S"))
         order_total = _parse_money_value((order or {}).get("total"))
@@ -1364,7 +1437,13 @@ def sync_one_to_purchase_edit(item: dict, session: requests.Session, ui_logger=N
     token = token_input["value"] if token_input else ""
 
     form_data, controls = _read_form_state(soup)
-    apply_sheet_row_to_form(form_data, controls, item, order=order, ui_logger=ui_logger)
+    # v2026.08.22：isCharge/isRefund 等欄位是 Vue 動態渲染，靜態 HTML 解析
+    # 可能拿到樣板殘留或錯誤的 checked 狀態，改用頁面內嵌的 purchase JSON
+    # 蓋掉這些欄位的真實值，判斷「另一側是否已有真實資料」才會準確。
+    purchase_json = _extract_purchase_json_from_html(resp.text)
+    _apply_purchase_json_overrides(form_data, purchase_json)
+    apply_sheet_row_to_form(form_data, controls, item, order=order,
+                            purchase_json=purchase_json, ui_logger=ui_logger)
     form_data["_token"] = token
 
     log(f"回填 {order_no}（purchase_id={purchase_id}，Sheet B={item.get('status')}）")
