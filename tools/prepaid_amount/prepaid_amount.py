@@ -1,7 +1,7 @@
 """【檸檬後台】預收款金額。
 
 檔案：tools/finance_management/prepaid_amount.py
-版本：0822_v2
+版本：0822_v3
 更新日期：2026-08-22
 
 功能：
@@ -24,6 +24,10 @@
     列則是藍新ATM服務金額／信用卡服務金額／ATM服務金額／家電服務金額／
     水洗服務金額。寫入時只更新「執行地區」對應的那一欄，每次執行直接覆蓋
     （只保留最新一次查得的金額，不像舊版會依月份往右新增區塊保留歷史）。
+
+- 執行記錄併入「財務工具執行記錄」分頁（跟財報富邦更新、現金缺口試算…等
+    財務工具共用同一份，見 execution_log.py），不再自己開一份獨立的
+    「預收款金額執行記錄」；沒有獨立的「月份」欄，改把期別併進訊息文字。
 """
 
 from __future__ import annotations
@@ -31,7 +35,6 @@ from __future__ import annotations
 import calendar
 import re
 import time
-from datetime import datetime, timedelta, timezone
 
 import requests
 from bs4 import BeautifulSoup
@@ -39,9 +42,8 @@ from googleapiclient.errors import HttpError
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.cash_gap import CASH_GAP_AREAS, CASH_GAP_ROWS, CASH_GAP_SHEET_NAME
+from tools.finance_management.execution_log import log_execution
 from tools.scheduled_monthly.prepaid_report import LOGIN_URL, HEADERS, load_accounts, login, choose_keyword
-
-TZ = timezone(timedelta(hours=8))
 
 PURCHASE_URL = "https://backend.lemonclean.com.tw/purchase"
 
@@ -159,57 +161,15 @@ def _extract_paid_total(html: str, *, corner_label: str | None) -> int:
     return total
 
 
-EXECUTION_LOG_SHEET = "預收款金額執行記錄"
-_execution_log_ready = False  # 同一次程式執行內快取，避免每次都打 metadata API 檢查分頁存不存在
-
-
-def _ensure_execution_log_sheet(service, spreadsheet_id: str) -> None:
-    global _execution_log_ready
-    if _execution_log_ready:
-        return
-
-    meta = _execute_with_retry(
-        service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties.title")
-    )
-    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
-    if EXECUTION_LOG_SHEET not in titles:
-        _execute_with_retry(
-            service.spreadsheets().batchUpdate(
-                spreadsheetId=spreadsheet_id,
-                body={"requests": [{"addSheet": {"properties": {"title": EXECUTION_LOG_SHEET}}}]},
-            )
-        )
-        _execute_with_retry(
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{EXECUTION_LOG_SHEET}'!A1:E1",
-                valueInputOption="RAW",
-                body={"values": [["時間", "地區", "月份", "狀態", "訊息"]]},
-            )
-        )
-    _execution_log_ready = True
+LOG_TOOL_NAME = "預收款金額"
 
 
 def _log_execution(area: str, year_month: str, status: str, message: str) -> None:
-    """記錄寫進 Jenny's Lemonhometools 的「預收款金額執行記錄」分頁（打卡用，重新整理畫面也查得到）。"""
-    try:
-        service = get_sheets_service()
-        master_id = get_master_spreadsheet_id()
-        _ensure_execution_log_sheet(service, master_id)
-
-        now_text = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
-        _execute_with_retry(
-            service.spreadsheets().values().append(
-                spreadsheetId=master_id,
-                range=f"'{EXECUTION_LOG_SHEET}'!A:E",
-                valueInputOption="USER_ENTERED",
-                insertDataOption="INSERT_ROWS",
-                body={"values": [[now_text, area, year_month, status, message]]},
-            )
-        )
-    except Exception as exc:
-        # 寫執行記錄失敗不應該讓整個查詢流程掛掉，記個警告就好。
-        log(f"⚠️ 寫入執行記錄失敗：{exc}")
+    """記錄併入 Jenny's Lemonhometools 的「財務工具執行記錄」分頁（跟財報富邦更新、
+    現金缺口試算…等財務工具共用同一份執行記錄，不再自己開一份「預收款金額執行
+    記錄」；沒有獨立的「月份」欄，改把期別併進訊息文字）。log_execution() 本身
+    失敗也吞掉，不讓查詢流程掛掉。"""
+    log_execution(LOG_TOOL_NAME, area, status, f"期別 {year_month}｜{message}" if message else f"期別 {year_month}")
 
 
 def _safe_int(value) -> int:
