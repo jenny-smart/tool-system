@@ -46,7 +46,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
@@ -167,6 +167,8 @@ def _to_int_or_none(value: object) -> int | None:
 
 
 def _parse_date(value: object):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (datetime(1899, 12, 30) + timedelta(days=float(value))).date()
     text = str(value or "").strip().split(" ", 1)[0]
     for fmt in ("%Y/%m/%d", "%Y-%m-%d"):
         try:
