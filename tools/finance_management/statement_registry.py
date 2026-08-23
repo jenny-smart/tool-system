@@ -4,11 +4,12 @@
 分頁欄位（A 起，依欄位順序讀取，不靠標題文字比對）：
   A 地區　B 試算表ID　C 富邦更新gid　D 元大更新gid　E 財務gid　F 現金gid
   G 行銷費用檔案ID（各地區列共用同一個值，指向「行銷費用總管理」試算表）
-  H 年度review gid（該地區在「2026目標及review檔」裡對應的分頁）
+  H 行銷費用 gid（行銷費用檔案裡的來源分頁）
+  I 年度review gid（該地區在「2026目標及review檔」裡對應的分頁）
 
 地區列：台北／台中／桃園／新竹／高雄，每列的 B 欄是「該地區財報」這一份
 試算表，C–F 欄則是同一份試算表裡各分頁（富邦更新／元大更新／財務／現金）
-的 GID。H欄則是另一份共用試算表（「2026目標及review檔」，見下）裡，該
+的 GID。I欄則是另一份共用試算表（「2026目標及review檔」，見下）裡，該
 地區自己的分頁 GID。
 
 另外兩列 2026-all／2026-現金，只有 B 欄（試算表ID），對應獨立的
@@ -16,7 +17,7 @@
 
 還有一列地區＝「2026」，B 欄是「2026目標及review檔」這份試算表本身的ID
 （各地區共用同一份試算表，只是分頁不同——各地區自己的分頁 GID 記在各地區
-列的 H欄，不是這一列）。這一列自己的 H欄，登記的是「年度review工作表」
+列的 I欄，不是這一列）。這一列自己的 I欄，登記的是「年度review工作表」
 這個跨地區彙整分頁的 GID。
 """
 
@@ -33,7 +34,8 @@ COL_YUANTA_GID = 4
 COL_FINANCE_GID = 5
 COL_CASH_GID = 6
 COL_MARKETING_ID = 7
-COL_REVIEW_GID = 8
+COL_MARKETING_GID = 8
+COL_REVIEW_GID = 9
 
 REPORT_GID_COLUMN = {
     "富邦更新": COL_FUBON_GID,
@@ -69,7 +71,7 @@ def _read_registry() -> list[list[str]]:
     res = (
         service.spreadsheets()
         .values()
-        .get(spreadsheetId=get_master_spreadsheet_id(), range=f"'{REGISTRY_SHEET_NAME}'!A:H")
+        .get(spreadsheetId=get_master_spreadsheet_id(), range=f"'{REGISTRY_SHEET_NAME}'!A:I")
         .execute()
     )
     return res.get("values", [])
@@ -137,6 +139,18 @@ def marketing_expense_spreadsheet_id(area: str = "台北") -> str:
     return spreadsheet_id
 
 
+def resolve_marketing_expense_location(area: str = "台北") -> tuple[str, str]:
+    """回傳行銷費用來源的 (試算表ID, 分頁標題)，位置登記在 G／H 欄。"""
+    row = _find_row(area)
+    spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_MARKETING_ID))
+    gid = _cell(row, COL_MARKETING_GID)
+    if not spreadsheet_id or not gid:
+        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少行銷ID或行銷gid")
+    service = get_sheets_service()
+    title = sheet_title_for_gid(service, spreadsheet_id, gid)
+    return spreadsheet_id, title
+
+
 def review_spreadsheet_id() -> str:
     """2026目標及review檔本身的試算表ID：地區＝「2026」那一列的B欄。"""
     row = _find_row(REVIEW_SPREADSHEET_AREA)
@@ -148,7 +162,7 @@ def review_spreadsheet_id() -> str:
 
 def resolve_master_review_location() -> tuple[str, str]:
     """回傳 (試算表ID, 分頁標題)：「年度review工作表」這個跨地區彙整的固定分頁。
-    GID 登記在地區＝「2026」那一列的 H欄（跟各地區列的「年度review gid」共用
+    GID 登記在地區＝「2026」那一列的 I欄（跟各地區列的「年度review gid」共用
     同一欄，只是這一列代表的不是某個地區自己的分頁，而是彙整分頁本身）。"""
     row = _find_row(REVIEW_SPREADSHEET_AREA)
     gid = _cell(row, COL_REVIEW_GID)
