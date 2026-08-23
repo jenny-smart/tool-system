@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
@@ -94,6 +94,8 @@ def _amount(value: object) -> int:
 
 
 def _parse_date(value: object):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (datetime(1899, 12, 30) + timedelta(days=float(value))).date()
     text = str(value or "").strip().split(" ", 1)[0]
     for fmt in ("%Y/%m/%d", "%Y-%m-%d"):
         try:
@@ -319,9 +321,13 @@ def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) 
         if not match or str(_cell(row, COL_Q) or "").strip():
             continue
         row_date = _statement_row_date(row)
-        if start_date and (row_date is None or row_date < start_date):
+        if (start_date or end_date) and row_date is None:
+            raise RuntimeError(
+                f"J{row_idx} 已辨識為「{marker}」，但 B／K／C 欄日期都無法解析"
+            )
+        if start_date and row_date < start_date:
             continue
-        if end_date and (row_date is None or row_date > end_date):
+        if end_date and row_date > end_date:
             continue
         month = f"{match.group(1)}{match.group(2)}"
         payer_area = match.group(3).strip()
