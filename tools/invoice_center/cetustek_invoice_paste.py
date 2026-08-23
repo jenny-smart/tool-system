@@ -6,6 +6,7 @@ from typing import Any
 from tools.invoice_center.invoice_payload_queue import list_pending_payloads, update_payload_status
 
 
+INVOICE_CREATE_URL = "https://www.ei.com.tw/InvoiceRent/invoiceadd.jsp"
 FORM_IDS = ("orderid", "buyer_name", "invoicetype07")
 
 
@@ -19,6 +20,8 @@ def _visible(locator: Any) -> bool:
 def _is_invoice_create_page(page: Any) -> bool:
     """Only the real invoice form counts; menu text/Tampermonkey button do not."""
     try:
+        if not page.url.startswith(INVOICE_CREATE_URL):
+            return False
         return all(_visible(page.locator(f"#{element_id}")) for element_id in FORM_IDS)
     except Exception:
         return False
@@ -49,31 +52,22 @@ def _open_invoice_create(page: Any) -> None:
         _paste_button(page)
         return
 
-    print(f"[鯨躍] 目前不是發票開立表單，開始導向：{page.url}", flush=True)
-
-    menu = page.get_by_text("電子發票作業", exact=True)
-    if _visible(menu):
-        try:
-            menu.first.click()
-            page.wait_for_timeout(300)
-        except Exception:
-            pass
-
-    # 優先點真正的 link，避免命中首頁說明文字。
-    invoice_link = page.get_by_role("link", name="發票開立", exact=True)
-    if not _visible(invoice_link):
-        candidates = page.locator("a").filter(has_text="發票開立")
-        if _visible(candidates):
-            invoice_link = candidates
-    if not _visible(invoice_link):
-        raise RuntimeError(f"找不到左側『發票開立』連結，目前頁面：{page.url}")
-
-    before_url = page.url
-    invoice_link.first.click()
-    print(f"[鯨躍] 已點左側『發票開立』，原頁面：{before_url}", flush=True)
+    # 已確認鯨躍的發票開立網址固定為 invoiceadd.jsp。
+    # 不再依賴首頁左側選單文字，避免選單折疊/隱藏造成點不到或誤判。
+    print(f"[鯨躍] 直接前往發票開立頁：{INVOICE_CREATE_URL}", flush=True)
+    page.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded")
     _wait_invoice_form(page)
-    _paste_button(page)
-    print("[鯨躍] 發票開立表單驗證完成，找到『貼上發票資料』", flush=True)
+
+    # Tampermonkey 於 document-idle 注入按鈕，給它短暫時間完成。
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        try:
+            _paste_button(page)
+            print("[鯨躍] 發票開立表單驗證完成，找到『貼上發票資料』", flush=True)
+            return
+        except RuntimeError:
+            page.wait_for_timeout(200)
+    raise RuntimeError("已到發票開立頁，但 8 秒內找不到『貼上發票資料』按鈕")
 
 
 def _clear_dialog_handlers(page: Any) -> None:
