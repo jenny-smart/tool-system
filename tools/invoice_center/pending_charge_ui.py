@@ -105,7 +105,11 @@ def install(ui) -> None:
             if not order_no:
                 continue
             override = row if bool(row.get("變更發票")) else None
-            prepared.append({\n                "order_no": order_no,\n                "source_row": int(row.get("列號") or 0),\n                "payload": _build_payload(area_key, order_no, override),\n            })
+            prepared.append({
+                "order_no": order_no,
+                "source_row": int(row.get("列號") or 0),
+                "payload": _build_payload(area_key, order_no, override),
+            })
         return prepared
 
     def _dispatch(prepared: list[dict[str, Any]], area_label: str) -> None:
@@ -118,6 +122,7 @@ def install(ui) -> None:
                 item["order_no"],
                 json.dumps(item["payload"], ensure_ascii=False),
                 created_by=created_by,
+                source_row=item["source_row"],
             )
         task = create_task(
             "cetustek.login",
