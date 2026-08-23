@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import sys
 import types
+import unittest
 from unittest.mock import MagicMock
-
-import pytest
 
 
 queue_module = types.ModuleType("tools.invoice_center.invoice_payload_queue")
@@ -49,44 +48,48 @@ def _dialog_context(dialog: MagicMock) -> MagicMock:
     return context
 
 
-def test_helper_button_alone_is_not_invoice_page() -> None:
-    page = MagicMock()
-    page.locator.side_effect = lambda selector: (
-        _locator() if selector == "#lemon-ei-fill-btn" else _locator(count=0, visible=False)
-    )
+class CetustekInvoicePasteTest(unittest.TestCase):
+    def test_helper_button_alone_is_not_invoice_page(self) -> None:
+        page = MagicMock()
+        page.locator.side_effect = lambda selector: (
+            _locator() if selector == "#lemon-ei-fill-btn" else _locator(count=0, visible=False)
+        )
 
-    assert paste._is_invoice_create_page(page) is False
-    with pytest.raises(RuntimeError, match="不是鯨躍發票開立頁"):
-        paste._paste_button(page)
+        self.assertFalse(paste._is_invoice_create_page(page))
+        with self.assertRaisesRegex(RuntimeError, "不是鯨躍發票開立頁"):
+            paste._paste_button(page)
 
+    def test_native_invoice_fields_identify_invoice_page(self) -> None:
+        self.assertTrue(paste._is_invoice_create_page(_invoice_page()))
 
-def test_native_invoice_fields_identify_invoice_page() -> None:
-    assert paste._is_invoice_create_page(_invoice_page()) is True
+    def test_paste_requires_success_dialog_and_matching_order_id(self) -> None:
+        page = _invoice_page("LC001")
+        prompt = MagicMock(type="prompt")
+        confirmation = MagicMock(
+            message="已填入。請檢查買受人/統編、Email、付款方式、載具後再按下一步。"
+        )
+        page.expect_dialog.side_effect = [
+            _dialog_context(prompt),
+            _dialog_context(confirmation),
+        ]
 
-
-def test_paste_requires_success_dialog_and_matching_order_id() -> None:
-    page = _invoice_page("LC001")
-    prompt = MagicMock(type="prompt")
-    confirmation = MagicMock(message="已填入。請檢查買受人/統編、Email、付款方式、載具後再按下一步。")
-    page.expect_dialog.side_effect = [
-        _dialog_context(prompt),
-        _dialog_context(confirmation),
-    ]
-
-    paste._paste_one(page, json.dumps({"orderid": "LC001"}))
-
-    prompt.accept.assert_called_once()
-    confirmation.accept.assert_called_once()
-
-
-def test_paste_rejects_false_success_when_form_order_id_is_blank() -> None:
-    page = _invoice_page("")
-    prompt = MagicMock(type="prompt")
-    confirmation = MagicMock(message="已填入。請檢查後再按下一步。")
-    page.expect_dialog.side_effect = [
-        _dialog_context(prompt),
-        _dialog_context(confirmation),
-    ]
-
-    with pytest.raises(RuntimeError, match="表單驗證失敗"):
         paste._paste_one(page, json.dumps({"orderid": "LC001"}))
+
+        prompt.accept.assert_called_once()
+        confirmation.accept.assert_called_once()
+
+    def test_paste_rejects_false_success_when_form_order_id_is_blank(self) -> None:
+        page = _invoice_page("")
+        prompt = MagicMock(type="prompt")
+        confirmation = MagicMock(message="已填入。請檢查後再按下一步。")
+        page.expect_dialog.side_effect = [
+            _dialog_context(prompt),
+            _dialog_context(confirmation),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "表單驗證失敗"):
+            paste._paste_one(page, json.dumps({"orderid": "LC001"}))
+
+
+if __name__ == "__main__":
+    unittest.main()
