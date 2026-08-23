@@ -78,12 +78,21 @@ def install(ui) -> None:
         st.caption(f"只執行：{area_label}")
         try:
             candidates = get_pending_invoice_candidates(area_label)
+            select_all = st.checkbox("全選", key=f"invoice_pending_select_all_{area_label}")
             visible_keys = ["選取", *DISPLAY_COLUMNS]
+            visible_rows = []
+            for row in candidates:
+                item = {key: row.get(key, "") for key in visible_keys}
+                if select_all:
+                    item["選取"] = True
+                visible_rows.append(item)
             editor = st.data_editor(
-                [{key: row.get(key, "") for key in visible_keys} for row in candidates],
-                hide_index=True, use_container_width=True, disabled=list(DISPLAY_COLUMNS),
+                visible_rows,
+                hide_index=True,
+                use_container_width=True,
+                disabled=list(DISPLAY_COLUMNS),
                 column_config={"選取": st.column_config.CheckboxColumn("執行", default=False)},
-                key=f"invoice_pending_picker_{area_label}",
+                key=f"invoice_pending_picker_{area_label}_{int(select_all)}",
             )
             selected = [row for row in _records(editor) if row.get("選取")]
             by_row = {row["列號"]: row for row in candidates}
@@ -94,7 +103,10 @@ def install(ui) -> None:
             st.error(f"讀取清潔異動表失敗：{exc}")
         if st.button("▶ 執行", type="primary", use_container_width=True, disabled=not queue):
             try:
-                _start_invoice(area_label, area_key, queue)
+                with st.status("已接收執行需求，正在查詢訂單並產生 Payload…", expanded=True) as status:
+                    st.write(f"地區：{area_label}；勾選：{len(queue)} 筆")
+                    _start_invoice(area_label, area_key, queue)
+                    status.update(label="執行需求已送出，正在交由 Local Agent 處理鯨躍流程", state="complete")
                 st.rerun()
             except Exception as exc:
                 st.error(f"發票流程啟動失敗：{exc}")
