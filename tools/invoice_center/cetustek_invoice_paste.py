@@ -20,31 +20,52 @@ def _paste_button(page: Any) -> Any:
     button = page.get_by_text("貼上發票資料", exact=True)
     if _visible(button):
         return button.first
-    raise RuntimeError("發票開立頁找不到「貼上發票資料」按鈕；請確認 Tampermonkey 已啟用")
+    raise RuntimeError("目前頁面找不到『貼上發票資料』按鈕")
+
+
+def _is_invoice_create_page(page: Any) -> bool:
+    try:
+        if _visible(page.locator("#lemon-ei-fill-btn")):
+            return True
+        breadcrumb = page.get_by_text("發票開立", exact=True)
+        return _visible(breadcrumb)
+    except Exception:
+        return False
 
 
 def _open_invoice_create(page: Any) -> None:
-    try:
-        _paste_button(page)
-        return
-    except RuntimeError:
-        pass
+    if _is_invoice_create_page(page):
+        try:
+            _paste_button(page)
+            print("[鯨躍] 已在發票開立頁", flush=True)
+            return
+        except Exception:
+            pass
 
-    direct = page.get_by_text("發票開立", exact=True)
-    if _visible(direct):
-        direct.first.click()
-    else:
-        menu = page.get_by_text("電子發票作業", exact=True)
-        if _visible(menu):
-            menu.first.click()
-        page.get_by_text("發票開立", exact=True).first.click()
-    page.wait_for_timeout(800)
-    _paste_button(page)
+    # 明確從左側選單進入「電子發票作業 > 發票開立」；不能只因頁面上
+    # 出現任意『發票開立』文字就當作已到正確頁面。
+    menu = page.get_by_text("電子發票作業", exact=True)
+    if _visible(menu):
+        menu.first.click()
+        page.wait_for_timeout(300)
+
+    invoice_link = page.get_by_text("發票開立", exact=True)
+    if not _visible(invoice_link):
+        raise RuntimeError("找不到左側『發票開立』選單")
+    invoice_link.first.click()
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            _paste_button(page)
+            print("[鯨躍] 已進入發票開立頁，找到『貼上發票資料』", flush=True)
+            return
+        except Exception:
+            page.wait_for_timeout(200)
+    raise RuntimeError("已點『發票開立』，但 10 秒內找不到『貼上發票資料』按鈕")
 
 
 def _clear_dialog_handlers(page: Any) -> None:
-    # 登入流程的訊息 logger 可能掛在 page 或 BrowserContext；兩邊都要清掉。
-    # 只清 page 會讓 context listener 先 accept prompt，造成 already handled。
     try:
         page.remove_all_listeners("dialog")
     except Exception:
@@ -74,7 +95,7 @@ def _paste_one(page: Any, payload_json: str) -> None:
     try:
         button = _paste_button(page)
         button.scroll_into_view_if_needed()
-        print("[鯨躍] 點擊「貼上發票資料」", flush=True)
+        print("[鯨躍] 點擊『貼上發票資料』", flush=True)
         button.click(force=True)
 
         deadline = time.monotonic() + 8
@@ -86,7 +107,7 @@ def _paste_one(page: Any, payload_json: str) -> None:
             page.wait_for_timeout(100)
 
         if "prompt" not in dialogs:
-            raise RuntimeError("已點擊「貼上發票資料」，但未出現 Payload 輸入視窗")
+            raise RuntimeError("已點『貼上發票資料』，但未出現 Payload 輸入視窗")
         if len(dialogs) < 2:
             raise RuntimeError("Payload 已填入，但未收到第二個確認訊息")
     finally:
@@ -102,7 +123,7 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         print(f"[{area}] 沒有待貼入的發票 Payload")
         return 0
 
-    print(f"[{area}] 待貼入發票 Payload：{len(pending)} 筆")
+    print(f"[{area}] 待匯入發票 Payload：{len(pending)} 筆")
     _open_invoice_create(page)
     _clear_dialog_handlers(page)
 
@@ -113,16 +134,18 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         payload_json = str(item.get("payload_json") or "").strip()
         if not payload_json:
             update_payload_status(row_no, "failed", "Payload 空白")
-            print(f"[{area}] {order_no or row_no}：Payload 空白")
             continue
         try:
             _paste_one(page, payload_json)
-            update_payload_status(row_no, "pasted", "已點擊貼上發票資料並完成 Payload 確認")
+            update_payload_status(row_no, "pasted", "發票資料已匯入；尚未按下一步/儲存")
             completed += 1
-            print(f"[{area}] {order_no}：Payload 已貼入")
+            print(f"[{area}] {order_no}：發票資料匯入完成，停在下一步前", flush=True)
         except Exception as exc:
             update_payload_status(row_no, "failed", str(exc))
-            raise RuntimeError(f"{order_no} 貼入 Payload 失敗：{exc}") from exc
+            raise RuntimeError(f"{order_no} 匯入發票資料失敗：{exc}") from exc
 
-    print(f"[{area}] Payload 貼入完成：{completed}/{len(pending)} 筆")
+        # 後續『下一步/儲存/O、AA 回填』尚未接好前，每次只處理一筆。
+        break
+
+    print(f"[{area}] 本次發票資料匯入：{completed} 筆")
     return completed
