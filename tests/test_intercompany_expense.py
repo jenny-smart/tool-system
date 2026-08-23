@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from datetime import date
 from unittest.mock import patch
 
 
@@ -169,6 +170,31 @@ class IntercompanyExpenseTest(unittest.TestCase):
         with patch.object(expense, "_read_statement_values", return_value=[["標題"], source_row]):
             with self.assertRaisesRegex(RuntimeError, "目前執行地區是 新竹"):
                 expense.apply_intercompany_expense_rules("新竹")
+
+    def test_short_b_date_uses_full_k_date_for_date_filter(self):
+        source_row = [""] * 18
+        source_row[1] = "08/22"
+        source_row[2] = "2026/08/22 09:10:01"
+        source_row[4] = 125
+        source_row[9] = "202605桃園代墊"
+        source_row[10] = "2026/08/22"
+        fake_service = _FakeService()
+
+        with (
+            patch.object(expense, "_read_statement_values", return_value=[["標題"], source_row]),
+            patch.object(expense, "load_expense_rules", return_value=_rules()),
+            patch.object(expense, "_read_marketing_values", return_value=_marketing_values()),
+            patch.object(expense, "get_sheets_service", return_value=fake_service),
+            patch.object(expense, "_sheet_id_for_title", return_value=123),
+        ):
+            result = expense.apply_intercompany_expense_rules(
+                "桃園", date(2026, 8, 22), date(2026, 8, 22)
+            )
+
+        self.assertEqual(result, {"updated_rows": 1, "inserted_rows": 2})
+
+    def test_google_sheets_date_serial_is_accepted(self):
+        self.assertEqual(expense._parse_date(46257), date(2026, 8, 23))
 
 
 if __name__ == "__main__":

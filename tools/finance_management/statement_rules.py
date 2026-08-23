@@ -46,7 +46,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
@@ -167,12 +167,23 @@ def _to_int_or_none(value: object) -> int | None:
 
 
 def _parse_date(value: object):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return (datetime(1899, 12, 30) + timedelta(days=float(value))).date()
     text = str(value or "").strip().split(" ", 1)[0]
     for fmt in ("%Y/%m/%d", "%Y-%m-%d"):
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+    return None
+
+
+def _statement_row_date(row: list[object]):
+    """B 欄若只有 MM/DD，改由 K 或 C 欄取得含年份的完整日期。"""
+    for col in (2, 11, 3):
+        parsed = _parse_date(_cell(row, col))
+        if parsed is not None:
+            return parsed
     return None
 
 
@@ -430,7 +441,7 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
             continue  # Q欄已有更新時間，代表這列處理過了，不重複套規則
 
         if start_date or end_date:
-            row_date = _parse_date(_cell(row, 2))  # B欄＝帳務日
+            row_date = _statement_row_date(row)
             if row_date is None:
                 continue
             if start_date and row_date < start_date:
