@@ -24,6 +24,7 @@ _stub_module(
 _stub_module(
     "tools.finance_management.statement_registry",
     resolve_statement_location=lambda *args, **kwargs: ("", ""),
+    resolve_marketing_expense_location=lambda *args, **kwargs: ("", ""),
 )
 
 from tools.finance_management import statement_rules
