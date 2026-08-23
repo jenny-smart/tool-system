@@ -7,7 +7,7 @@ from tools.local_agent_queue import now_text
 
 
 SHEET_NAME = "發票開立佇列"
-HEADERS = ["created_at", "created_by", "area", "order_no", "payload_json", "status", "message"]
+HEADERS = ["created_at", "created_by", "area", "order_no", "payload_json", "status", "message", "source_row"]
 
 
 def _ensure_sheet(service: Any, spreadsheet_id: str) -> None:
@@ -23,7 +23,7 @@ def _ensure_sheet(service: Any, spreadsheet_id: str) -> None:
         ).execute()
     current = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{SHEET_NAME}'!A1:G1",
+        range=f"'{SHEET_NAME}'!A1:H1",
     ).execute().get("values", [])
     if not current or current[0][: len(HEADERS)] != HEADERS:
         service.spreadsheets().values().update(
@@ -37,7 +37,7 @@ def _ensure_sheet(service: Any, spreadsheet_id: str) -> None:
 def _all_rows(service: Any, spreadsheet_id: str) -> list[dict[str, Any]]:
     rows = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=f"'{SHEET_NAME}'!A2:G",
+        range=f"'{SHEET_NAME}'!A2:H",
     ).execute().get("values", [])
     result: list[dict[str, Any]] = []
     for row_no, row in enumerate(rows, start=2):
@@ -48,7 +48,7 @@ def _all_rows(service: Any, spreadsheet_id: str) -> list[dict[str, Any]]:
     return result
 
 
-def enqueue_payload(area: str, order_no: str, payload_json: str, created_by: str = "Tool System") -> int:
+def enqueue_payload(\n    area: str,\n    order_no: str,\n    payload_json: str,\n    created_by: str = "Tool System",\n    source_row: int = 0,\n) -> int:
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
     _ensure_sheet(service, spreadsheet_id)
@@ -69,16 +69,16 @@ def enqueue_payload(area: str, order_no: str, payload_json: str, created_by: str
             spreadsheetId=spreadsheet_id,
             range=f"'{SHEET_NAME}'!A{row_no}:G{row_no}",
             valueInputOption="RAW",
-            body={"values": [[now_text(), created_by, normalized_area, normalized_order, payload_json, "pending", "等待鯨躍貼入"]]},
+            body={"values": [[now_text(), created_by, normalized_area, normalized_order, payload_json, "pending", "等待鯨躍貼入", int(source_row or 0)]]},
         ).execute()
         return row_no
 
     result = service.spreadsheets().values().append(
         spreadsheetId=spreadsheet_id,
-        range=f"'{SHEET_NAME}'!A:G",
+        range=f"'{SHEET_NAME}'!A:H",
         valueInputOption="RAW",
         insertDataOption="INSERT_ROWS",
-        body={"values": [[now_text(), created_by, normalized_area, normalized_order, payload_json, "pending", "等待鯨躍貼入"]]},
+        body={"values": [[now_text(), created_by, normalized_area, normalized_order, payload_json, "pending", "等待鯨躍貼入", int(source_row or 0)]]},
     ).execute()
     updated = result.get("updates", {}).get("updatedRange", "")
     try:
@@ -128,3 +128,39 @@ def update_payload_status(row_no: int, status: str, message: str = "") -> None:
         valueInputOption="RAW",
         body={"values": [[status, message]]},
     ).execute()
+
+
+def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: str) -> None:
+    """Write the issued invoice number to O and creation time to AA without guessing the row."""
+    row_no = int(source_row or 0)
+    if row_no < 2:
+        raise ValueError("Payload 缺少清潔異動來源列號，禁止猜測回填列")
+
+    normalized_order = str(order_no or "").strip()
+    normalized_invoice = str(invoice_no or "").strip().upper()
+    if not normalized_invoice:
+        raise ValueError("發票號碼空白")
+
+    ws = get_worksheet(area)
+    values = ws.get(f"G{row_no}:AA{row_no}")
+    row = list(values[0] if values else []) + [""] * 21
+    current_order = str(row[0] or "").strip()
+    current_invoice = str(row[8] or "").strip().upper()
+    current_time = str(row[20] or "").strip()
+
+    if current_order != normalized_order:
+        raise RuntimeError(
+            f"清潔異動第 {row_no} 列訂單已變更：預期 {normalized_order}，實際 {current_order or '空白'}"
+        )
+    if current_invoice and current_invoice != normalized_invoice:
+        raise RuntimeError(
+            f"清潔異動第 {row_no} 列 O 欄已有其他發票號碼 {current_invoice}，禁止覆蓋"
+        )
+
+    updates = []
+    if not current_invoice:
+        updates.append({"range": f"O{row_no}", "values": [[normalized_invoice]]})
+    if not current_time:
+        updates.append({"range": f"AA{row_no}", "values": [[now_text()]]})
+    if updates:
+        ws.batch_update(updates)
