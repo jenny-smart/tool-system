@@ -5,6 +5,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from tools.invoice_center.cetustek_invoice_paste import process_pending_invoice_payloads
 from tools.invoice_center.ei_export_all import (
     configured_areas,
     credentials_for,
@@ -22,7 +23,7 @@ from tools.invoice_center.chrome_cdp import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="登入鯨躍第一層及指定地區 EI 第二層，不匯出資料")
+    parser = argparse.ArgumentParser(description="登入鯨躍第一層及指定地區 EI 第二層；若有待開立 Payload 則接續貼入")
     parser.add_argument("--area", help="第二層地區，例如：台北、台中；未指定時使用第一個已設定地區")
     parser.add_argument("--accounts", type=Path, help="EI／鯨躍帳密 JSON")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
@@ -51,18 +52,27 @@ def main() -> int:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
         portal_page, ei_page = find_invoice_pages(context)
+        active_page = None
+
         if portal_page is not None:
             login_portal(portal_page, accounts)
-            second_page = open_second_login(context, portal_page)
-            login_second(second_page, credentials)
+            active_page = open_second_login(context, portal_page)
+            login_second(active_page, credentials)
         elif ei_page is not None:
-            login_second(ei_page, credentials)
+            active_page = ei_page
+            login_second(active_page, credentials)
         else:
             portal_page = context.new_page()
             login_portal(portal_page, accounts)
-            second_page = open_second_login(context, portal_page)
-            login_second(second_page, credentials)
-        print(f"鯨躍第一層及 {credentials.label} EI 第二層登入完成；不會下載資料。")
+            active_page = open_second_login(context, portal_page)
+            login_second(active_page, credentials)
+
+        print(f"鯨躍第一層及 {credentials.label} EI 第二層登入完成")
+        processed = process_pending_invoice_payloads(active_page, credentials.label)
+        if processed:
+            print(f"已接續處理 {processed} 筆發票 Payload；同區多筆不重複登入。")
+        else:
+            print("沒有待開立 Payload；停留在目前鯨躍登入狀態。")
     return 0
 
 
