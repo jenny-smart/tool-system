@@ -7,6 +7,7 @@ from playwright.sync_api import sync_playwright
 
 from tools.invoice_center.cetustek_invoice_paste import process_pending_invoice_payloads
 from tools.invoice_center.ei_export_all import (
+    EI_HOME_URL,
     configured_areas,
     credentials_for,
     load_accounts,
@@ -28,6 +29,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--accounts", type=Path, help="EI／鯨躍帳密 JSON")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     return parser.parse_args()
+
+
+def _ei_logged_in(page) -> bool:
+    """Detect an already-authenticated EI page without installing any dialog handler."""
+    try:
+        page.wait_for_load_state("domcontentloaded")
+        if "ei.com.tw/InvoiceRent" not in page.url:
+            return False
+        field = page.locator("#userid")
+        return field.count() == 0 or not field.first.is_visible()
+    except Exception:
+        return False
+
+
+def _clean_ei_page(context, page):
+    """Return a page with the same authenticated session but no login dialog listeners."""
+    clean = context.new_page()
+    clean.goto(EI_HOME_URL, wait_until="domcontentloaded")
+    try:
+        if _ei_logged_in(clean):
+            print("[鯨躍] 已建立乾淨 EI 分頁供發票貼入，不沿用登入 Dialog handler")
+            return clean
+    except Exception:
+        pass
+    try:
+        clean.close()
+    except Exception:
+        pass
+    return page
 
 
 def main() -> int:
@@ -52,23 +82,36 @@ def main() -> int:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
         portal_page, ei_page = find_invoice_pages(context)
+        used_login_handler = False
 
-        # 已有 EI 分頁時優先沿用，避免從第一層再開第二層造成重複登入。
-        if ei_page is not None:
+        # 已登入 EI 時直接沿用，不再呼叫 login_second；login_second 會安裝一個
+        # 自動 accept 所有 dialog 的 logger，會搶先吃掉「貼上發票資料」的 prompt。
+        if ei_page is not None and _ei_logged_in(ei_page):
             active_page = ei_page
-            print(f"[{credentials.label}] 發現既有 EI 分頁，優先沿用目前登入狀態")
+            print(f"[{credentials.label}] 發現既有 EI 分頁，沿用目前登入狀態")
+        elif ei_page is not None:
+            active_page = ei_page
             login_second(active_page, credentials)
+            used_login_handler = True
         elif portal_page is not None:
             login_portal(portal_page, accounts)
             active_page = open_second_login(context, portal_page)
             login_second(active_page, credentials)
+            used_login_handler = True
         else:
             portal_page = context.new_page()
             login_portal(portal_page, accounts)
             active_page = open_second_login(context, portal_page)
             login_second(active_page, credentials)
+            used_login_handler = True
 
         print(f"鯨躍第一層及 {credentials.label} EI 第二層登入完成")
+
+        # 若本次真的走過登入流程，換到同一 BrowserContext 的乾淨 EI 分頁。
+        # Cookie/session 會沿用，但 Playwright page dialog listener 不會跟過去。
+        if used_login_handler:
+            active_page = _clean_ei_page(context, active_page)
+
         processed = process_pending_invoice_payloads(active_page, credentials.label)
         if processed:
             print(f"已接續處理 {processed} 筆發票 Payload；同區多筆不重複登入。")
