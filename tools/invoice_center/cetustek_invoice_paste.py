@@ -13,7 +13,23 @@ def _visible(locator: Any) -> bool:
         return False
 
 
+def _paste_button(page: Any) -> Any:
+    button = page.locator("#lemon-ei-fill-btn")
+    if _visible(button):
+        return button.first
+    button = page.get_by_text("貼上發票資料", exact=True)
+    if _visible(button):
+        return button.first
+    raise RuntimeError("發票開立頁找不到「貼上發票資料」按鈕；請確認 Tampermonkey 已啟用")
+
+
 def _open_invoice_create(page: Any) -> None:
+    try:
+        _paste_button(page)
+        return
+    except RuntimeError:
+        pass
+
     direct = page.get_by_text("發票開立", exact=True)
     if _visible(direct):
         direct.first.click()
@@ -23,10 +39,7 @@ def _open_invoice_create(page: Any) -> None:
             menu.first.click()
         page.get_by_text("發票開立", exact=True).first.click()
     page.wait_for_timeout(800)
-
-    button = page.get_by_text("貼上發票資料", exact=True)
-    if not _visible(button):
-        raise RuntimeError("發票開立頁找不到「貼上發票資料」按鈕；請確認 Tampermonkey 已啟用")
+    _paste_button(page)
 
 
 def _paste_one(page: Any, payload_json: str) -> None:
@@ -41,7 +54,7 @@ def _paste_one(page: Any, payload_json: str) -> None:
 
     page.on("dialog", on_dialog)
     try:
-        page.get_by_text("貼上發票資料", exact=True).first.click()
+        _paste_button(page).click()
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline and len(dialogs) < 2:
             page.wait_for_timeout(150)
@@ -64,6 +77,13 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
 
     print(f"[{area}] 待貼入發票 Payload：{len(pending)} 筆")
     _open_invoice_create(page)
+
+    # 登入流程會掛 dialog logger；Payload 階段必須移除，否則 prompt/confirm
+    # 會被兩個 listener 同時 accept，造成 already handled。
+    try:
+        page.remove_all_listeners("dialog")
+    except Exception:
+        pass
 
     completed = 0
     for item in pending:
