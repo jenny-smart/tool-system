@@ -52,7 +52,29 @@ def _money(value: str) -> Decimal:
     return Decimal(str(value).replace(",", "").replace("$", "").replace("NT", "").strip())
 
 
-def _create_one(page: Page, invoice_no: str, refund: str, untaxed: str) -> str:
+def _select_allowance_reason(page: Page, full_refund: bool) -> None:
+    select = page.locator("#s_remark")
+    options = select.locator("option")
+    available: list[tuple[str, str]] = []
+    for index in range(options.count()):
+        option = options.nth(index)
+        label = option.inner_text().strip()
+        value = str(option.get_attribute("value") or "").strip()
+        available.append((value, label))
+
+    for value, label in available:
+        normalized = re.sub(r"[\s,，、。．]+", "", label)
+        is_match = "全退" in normalized if full_refund else ("部分退" in normalized or "部份退" in normalized)
+        if is_match:
+            select.select_option(value=value)
+            return
+
+    labels = "、".join(label for _value, label in available if label) or "無"
+    expected = "全退" if full_refund else "部分退"
+    raise RuntimeError(f"鯨躍折讓原因找不到「{expected}」選項；實際選項：{labels}")
+
+
+def _create_one(page: Page, invoice_no: str, untaxed: str) -> str:
     year = page.locator("#qyear")
     year.select_option(index=1)
     page.locator("#invoicenumber").fill(invoice_no)
@@ -62,8 +84,7 @@ def _create_one(page: Page, invoice_no: str, refund: str, untaxed: str) -> str:
     available_text = page.locator("body").inner_text()
     sales_match = re.search(r"銷售額[\s\S]*?應稅:\$\s*([\d,]+(?:\.\d+)?)", available_text)
     sales_amount = _money(sales_match.group(1)) if sales_match else Decimal("-1")
-    reason = "取消，全退" if _money(refund) == sales_amount else "部份退"
-    page.locator("#s_remark").select_option(label=reason)
+    _select_allowance_reason(page, full_refund=_money(untaxed) == sales_amount)
 
     page.locator("img[title='發票明細查詢']").click()
     select_product = page.locator("#processresult a[onclick^='setInvoiceDetail']").first
@@ -104,17 +125,17 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
             number = _create_one(
                 page,
                 str(item["invoice_no"]),
-                str(item["refund_amount"]),
                 str(item["untaxed_amount"]),
             )
             allowance_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
-            worksheet.update(
-                range_name=f"AA{item['sheet_row']}",
-                values=[[allowance_date]],
+            worksheet.batch_update(
+                [
+                    {"range": f"AA{item['sheet_row']}", "values": [[allowance_date]]},
+                    {"range": f"AB{item['sheet_row']}", "values": [[number]]},
+                ],
                 value_input_option="USER_ENTERED",
             )
-            worksheet.update(range_name=f"AB{item['sheet_row']}", values=[[number]], value_input_option="RAW")
-            print(f"第 {item['sheet_row']} 列：{item['invoice_no']} → {number}")
+            print(f"第 {item['sheet_row']} 列：{item['invoice_no']} → {number}，已回寫 AA／AB")
     return 0
 
 
