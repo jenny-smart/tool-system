@@ -24,12 +24,7 @@ def install(ui) -> None:
 
         with st.container(border=True):
             st.markdown('<div class="ic-section-title">待開立異動資料</div>', unsafe_allow_html=True)
-            area_label = st.selectbox(
-                "地區",
-                labels,
-                key="invoice_pending_area_label",
-                help="先選地區，再從該地區清潔異動表篩選待開立資料。",
-            )
+            area_label = st.selectbox("地區", labels, key="invoice_pending_area_label", help="先選地區，再從該地區清潔異動表篩選待開立資料。")
             area = key_by_label[area_label]
 
             try:
@@ -50,12 +45,13 @@ def install(ui) -> None:
                         "選取": st.column_config.CheckboxColumn("開立", default=False),
                         "列號": st.column_config.NumberColumn("列號", disabled=True),
                         "B 狀態": st.column_config.TextColumn("B 狀態", disabled=True),
+                        "G 訂單編號": st.column_config.TextColumn("G 訂單編號", disabled=True),
                         "H 客戶": st.column_config.TextColumn("H 客戶", disabled=True),
                         "K 後台備註": st.column_config.TextColumn("K 後台備註", disabled=True),
                         "M 收款時間": st.column_config.TextColumn("M 收款時間", disabled=True),
                         "N 收款金額": st.column_config.TextColumn("N 收款金額", disabled=True),
                     },
-                    disabled=[key for key in DISPLAY_COLUMNS],
+                    disabled=list(DISPLAY_COLUMNS),
                 )
                 selected_rows = [row for row in _records(edited) if row.get("選取")]
                 by_row_no = {row["列號"]: row for row in candidates}
@@ -73,17 +69,9 @@ def install(ui) -> None:
             with cols[0]:
                 st.text_input("地區", value=area_label, disabled=True, key="invoice_center_area_display")
             with cols[1]:
-                order_no = st.text_input(
-                    "Lemon 訂單號",
-                    key="invoice_center_order_no",
-                    placeholder="勾選上方資料後會自動帶入",
-                )
+                order_no = st.text_input("Lemon 訂單號", key="invoice_center_order_no", placeholder="勾選上方資料後會自動帶入")
             with cols[2]:
-                invoice_type = st.selectbox(
-                    "API 開立類型",
-                    list(ui.INVOICE_TYPE_OPTIONS.keys()),
-                    key="invoice_center_invoice_type",
-                )
+                invoice_type = st.selectbox("API 開立類型", list(ui.INVOICE_TYPE_OPTIONS.keys()), key="invoice_center_invoice_type")
             with cols[3]:
                 st.write("")
                 st.write("")
@@ -95,12 +83,7 @@ def install(ui) -> None:
                         st.session_state.pop("invoice_center_backend_order", None)
                         st.error(f"查詢失敗：{exc}")
             with st.expander("進階設定", expanded=False):
-                suffix = st.text_input(
-                    "EI orderid suffix",
-                    value=suffix,
-                    key="invoice_center_order_suffix",
-                    help="一般使用不需調整",
-                )
+                suffix = st.text_input("EI orderid suffix", value=suffix, key="invoice_center_order_suffix", help="一般使用不需調整")
         return area, order_no, suffix, invoice_type
 
     ui._render_top_query = _render_top_query
