@@ -52,14 +52,15 @@ def main() -> int:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
         portal_page, ei_page = find_invoice_pages(context)
-        active_page = None
 
-        if portal_page is not None:
+        # 已有 EI 分頁時優先沿用，避免從第一層再開第二層造成重複登入。
+        if ei_page is not None:
+            active_page = ei_page
+            print(f"[{credentials.label}] 發現既有 EI 分頁，優先沿用目前登入狀態")
+            login_second(active_page, credentials)
+        elif portal_page is not None:
             login_portal(portal_page, accounts)
             active_page = open_second_login(context, portal_page)
-            login_second(active_page, credentials)
-        elif ei_page is not None:
-            active_page = ei_page
             login_second(active_page, credentials)
         else:
             portal_page = context.new_page()
