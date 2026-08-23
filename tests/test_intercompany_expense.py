@@ -197,6 +197,20 @@ class IntercompanyExpenseTest(unittest.TestCase):
     def test_google_sheets_date_serial_is_accepted(self):
         self.assertEqual(expense._parse_date(46257), date(2026, 8, 23))
 
+    def test_zero_result_explains_why_marker_was_skipped(self):
+        source_row = [""] * 18
+        source_row[1] = "2026/08/23"
+        source_row[9] = "202607桃園代墊"
+        source_row[16] = "2026/08/24 03:00:00"
+        with patch.object(
+            expense, "_read_statement_values", return_value=[["標題"], source_row]
+        ):
+            result = expense.apply_intercompany_expense_rules("桃園")
+
+        self.assertEqual(result["updated_rows"], 0)
+        self.assertIn("格式符合 1 筆", result["diagnostics"])
+        self.assertIn("Q欄已處理 1 筆", result["diagnostics"])
+
     def test_public_task_writes_start_and_completion_logs(self):
         expected = {"updated_rows": 1, "inserted_rows": 3}
         with (

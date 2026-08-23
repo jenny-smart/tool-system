@@ -308,7 +308,7 @@ def _detail_row(source_row: list[object], detail: dict[str, object], marker: str
     return row
 
 
-def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
+def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) -> dict[str, object]:
     """執行代墊費用拆分，並在主控檔記錄開始、完成或失敗。"""
     date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
     log_execution("財報富邦更新代墊費用拆分", area, "開始", f"日期區間：{date_range}")
@@ -317,26 +317,48 @@ def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) 
     except Exception as exc:
         log_execution("財報富邦更新代墊費用拆分", area, "失敗", str(exc))
         raise
+    completion_detail = (
+        f"更新 {result['updated_rows']} 列，插入 {result['inserted_rows']} 列"
+    )
+    if result.get("diagnostics"):
+        completion_detail += f"；{result['diagnostics']}"
     log_execution(
         "財報富邦更新代墊費用拆分",
         area,
         "完成",
-        f"更新 {result['updated_rows']} 列，插入 {result['inserted_rows']} 列",
+        completion_detail,
     )
     return result
 
-def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, int]:
+def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, object]:
     """處理指定財報中尚未蓋 Q 欄的 ``YYYYMM地區代墊`` 標記。"""
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
     statement_values = _read_statement_values(spreadsheet_id, title)
     if len(statement_values) < 2:
-        return {"updated_rows": 0, "inserted_rows": 0}
+        return {
+            "updated_rows": 0,
+            "inserted_rows": 0,
+            "diagnostics": f"掃描「{title}」0 列；工作表沒有資料列",
+        }
 
     marker_rows: list[tuple[int, list[object], str, str, str]] = []
+    keyword_count = 0
+    matched_count = 0
+    processed_count = 0
+    date_excluded_count = 0
+    marker_samples: list[str] = []
     for row_idx, row in enumerate(statement_values[1:], start=2):
         marker = str(_cell(row, COL_J) or "").strip()
+        if "代墊" in marker:
+            keyword_count += 1
+            if len(marker_samples) < 3:
+                marker_samples.append(f"J{row_idx}={marker}")
         match = MARKER_RE.fullmatch(marker)
-        if not match or str(_cell(row, COL_Q) or "").strip():
+        if not match:
+            continue
+        matched_count += 1
+        if str(_cell(row, COL_Q) or "").strip():
+            processed_count += 1
             continue
         row_date = _statement_row_date(row)
         if (start_date or end_date) and row_date is None:
@@ -344,8 +366,10 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
                 f"J{row_idx} 已辨識為「{marker}」，但 B／K／C 欄日期都無法解析"
             )
         if start_date and row_date < start_date:
+            date_excluded_count += 1
             continue
         if end_date and row_date > end_date:
+            date_excluded_count += 1
             continue
         month = f"{match.group(1)}{match.group(2)}"
         payer_area = match.group(3).strip()
@@ -355,7 +379,15 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
             raise RuntimeError(f"J{row_idx} 標示 {payer_area} 代墊，但目前執行地區是 {area}")
         marker_rows.append((row_idx, row, marker, month, payer_area))
     if not marker_rows:
-        return {"updated_rows": 0, "inserted_rows": 0}
+        diagnostics = (
+            f"掃描「{title}」{len(statement_values) - 1} 列；"
+            f"J欄含代墊 {keyword_count} 筆；格式符合 {matched_count} 筆；"
+            f"Q欄已處理 {processed_count} 筆；日期排除 {date_excluded_count} 筆；"
+            "待處理 0 筆"
+        )
+        if marker_samples:
+            diagnostics += "；樣本：" + "、".join(marker_samples)
+        return {"updated_rows": 0, "inserted_rows": 0, "diagnostics": diagnostics}
 
     markers = [item[2] for item in marker_rows]
     duplicates = sorted({marker for marker in markers if markers.count(marker) > 1})
