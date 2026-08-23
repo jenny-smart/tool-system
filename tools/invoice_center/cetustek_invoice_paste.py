@@ -6,6 +6,9 @@ from typing import Any
 from tools.invoice_center.invoice_payload_queue import list_pending_payloads, update_payload_status
 
 
+FORM_IDS = ("orderid", "buyer_name", "invoicetype07")
+
+
 def _visible(locator: Any) -> bool:
     try:
         return locator.count() > 0 and locator.first.is_visible()
@@ -13,56 +16,64 @@ def _visible(locator: Any) -> bool:
         return False
 
 
-def _paste_button(page: Any) -> Any:
-    button = page.locator("#lemon-ei-fill-btn")
-    if _visible(button):
-        return button.first
-    button = page.get_by_text("貼上發票資料", exact=True)
-    if _visible(button):
-        return button.first
-    raise RuntimeError("目前頁面找不到『貼上發票資料』按鈕")
-
-
 def _is_invoice_create_page(page: Any) -> bool:
+    """Only the real invoice form counts; menu text/Tampermonkey button do not."""
     try:
-        if _visible(page.locator("#lemon-ei-fill-btn")):
-            return True
-        breadcrumb = page.get_by_text("發票開立", exact=True)
-        return _visible(breadcrumb)
+        return all(_visible(page.locator(f"#{element_id}")) for element_id in FORM_IDS)
     except Exception:
         return False
 
 
+def _paste_button(page: Any) -> Any:
+    if not _is_invoice_create_page(page):
+        raise RuntimeError("尚未進入真正的發票開立表單")
+    button = page.locator("#lemon-ei-fill-btn")
+    if _visible(button):
+        return button.first
+    raise RuntimeError("已進入發票開立頁，但找不到『貼上發票資料』按鈕；請確認 Tampermonkey 已啟用")
+
+
+def _wait_invoice_form(page: Any, timeout_seconds: float = 12.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _is_invoice_create_page(page):
+            print(f"[鯨躍] 已確認真正發票開立表單：{page.url}", flush=True)
+            return
+        page.wait_for_timeout(200)
+    raise RuntimeError(f"未進入真正的發票開立表單，目前頁面：{page.url}")
+
+
 def _open_invoice_create(page: Any) -> None:
     if _is_invoice_create_page(page):
+        print(f"[鯨躍] 已在真正的發票開立表單：{page.url}", flush=True)
+        _paste_button(page)
+        return
+
+    print(f"[鯨躍] 目前不是發票開立表單，開始導向：{page.url}", flush=True)
+
+    menu = page.get_by_text("電子發票作業", exact=True)
+    if _visible(menu):
         try:
-            _paste_button(page)
-            print("[鯨躍] 已在發票開立頁", flush=True)
-            return
+            menu.first.click()
+            page.wait_for_timeout(300)
         except Exception:
             pass
 
-    # 明確從左側選單進入「電子發票作業 > 發票開立」；不能只因頁面上
-    # 出現任意『發票開立』文字就當作已到正確頁面。
-    menu = page.get_by_text("電子發票作業", exact=True)
-    if _visible(menu):
-        menu.first.click()
-        page.wait_for_timeout(300)
-
-    invoice_link = page.get_by_text("發票開立", exact=True)
+    # 優先點真正的 link，避免命中首頁說明文字。
+    invoice_link = page.get_by_role("link", name="發票開立", exact=True)
     if not _visible(invoice_link):
-        raise RuntimeError("找不到左側『發票開立』選單")
-    invoice_link.first.click()
+        candidates = page.locator("a").filter(has_text="發票開立")
+        if _visible(candidates):
+            invoice_link = candidates
+    if not _visible(invoice_link):
+        raise RuntimeError(f"找不到左側『發票開立』連結，目前頁面：{page.url}")
 
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        try:
-            _paste_button(page)
-            print("[鯨躍] 已進入發票開立頁，找到『貼上發票資料』", flush=True)
-            return
-        except Exception:
-            page.wait_for_timeout(200)
-    raise RuntimeError("已點『發票開立』，但 10 秒內找不到『貼上發票資料』按鈕")
+    before_url = page.url
+    invoice_link.first.click()
+    print(f"[鯨躍] 已點左側『發票開立』，原頁面：{before_url}", flush=True)
+    _wait_invoice_form(page)
+    _paste_button(page)
+    print("[鯨躍] 發票開立表單驗證完成，找到『貼上發票資料』", flush=True)
 
 
 def _clear_dialog_handlers(page: Any) -> None:
@@ -77,6 +88,9 @@ def _clear_dialog_handlers(page: Any) -> None:
 
 
 def _paste_one(page: Any, payload_json: str) -> None:
+    if not _is_invoice_create_page(page):
+        raise RuntimeError(f"貼入前頁面驗證失敗，不是發票開立表單：{page.url}")
+
     dialogs: list[str] = []
     errors: list[str] = []
 
@@ -110,6 +124,8 @@ def _paste_one(page: Any, payload_json: str) -> None:
             raise RuntimeError("已點『貼上發票資料』，但未出現 Payload 輸入視窗")
         if len(dialogs) < 2:
             raise RuntimeError("Payload 已填入，但未收到第二個確認訊息")
+        if not _is_invoice_create_page(page):
+            raise RuntimeError("Payload 處理後已離開發票開立表單，視為失敗")
     finally:
         try:
             page.remove_listener("dialog", on_dialog)
@@ -143,8 +159,6 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         except Exception as exc:
             update_payload_status(row_no, "failed", str(exc))
             raise RuntimeError(f"{order_no} 匯入發票資料失敗：{exc}") from exc
-
-        # 後續『下一步/儲存/O、AA 回填』尚未接好前，每次只處理一筆。
         break
 
     print(f"[{area}] 本次發票資料匯入：{completed} 筆")
