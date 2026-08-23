@@ -5,7 +5,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from tools.invoice_center.cetustek_invoice_paste import _open_invoice_create
+from tools.invoice_center.cetustek_invoice_paste import process_pending_invoice_payloads
 from tools.invoice_center.ei_export_all import (
     EI_HOME_URL,
     configured_areas,
@@ -24,7 +24,7 @@ from tools.invoice_center.chrome_cdp import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="登入鯨躍第一層及指定地區 EI 第二層，並停在發票開立頁")
+    parser = argparse.ArgumentParser(description="登入鯨躍並將第一筆待開立發票 Payload 匯入發票開立頁")
     parser.add_argument("--area", help="第二層地區，例如：台北、台中；未指定時使用第一個已設定地區")
     parser.add_argument("--accounts", type=Path, help="EI／鯨躍帳密 JSON")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
@@ -107,10 +107,11 @@ def main() -> int:
         if used_login_handler:
             active_page = _clean_ei_page(context, active_page)
 
-        # 目前階段只負責登入並進到「發票開立」頁。
-        # Payload 已由 Tools App 保留在頁面及佇列，這裡不點「貼上發票資料」、不處理 dialog。
-        _open_invoice_create(active_page)
-        print(f"[{credentials.label}] 已停在發票開立頁；尚未貼入 Payload")
+        processed = process_pending_invoice_payloads(active_page, credentials.label)
+        if processed:
+            print(f"[{credentials.label}] 發票資料已匯入；停在『下一步』前，等待人工確認與儲存")
+        else:
+            print(f"[{credentials.label}] 沒有待匯入 Payload；保留目前鯨躍頁面")
     return 0
 
 
