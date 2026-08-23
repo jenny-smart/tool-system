@@ -4,6 +4,7 @@ from typing import Any
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.local_agent_queue import now_text
+from tools.memo_system.change_order import get_worksheet
 
 
 SHEET_NAME = "發票開立佇列"
@@ -67,7 +68,7 @@ def enqueue_payload(\n    area: str,\n    order_no: str,\n    payload_json: str,
         row_no = int(item.get("_row") or 0)
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
-            range=f"'{SHEET_NAME}'!A{row_no}:G{row_no}",
+            range=f"'{SHEET_NAME}'!A{row_no}:H{row_no}",
             valueInputOption="RAW",
             body={"values": [[now_text(), created_by, normalized_area, normalized_order, payload_json, "pending", "等待鯨躍貼入", int(source_row or 0)]]},
         ).execute()
