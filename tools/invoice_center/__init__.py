@@ -22,3 +22,10 @@ def __getattr__(name: str):
 
         return getattr(bridge, name)
     raise AttributeError(name)
+
+
+# Invoice create UI extension: choose area and pending change-order rows before lookup.
+from . import ui as _ui
+from .pending_charge_ui import install as _install_pending_charge_ui
+
+_install_pending_charge_ui(_ui)
