@@ -176,6 +176,15 @@ def _parse_date(value: object):
     return None
 
 
+def _statement_row_date(row: list[object]):
+    """B 欄若只有 MM/DD，改由 K 或 C 欄取得含年份的完整日期。"""
+    for col in (2, 11, 3):
+        parsed = _parse_date(_cell(row, col))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 class Rule:
     def __init__(self, raw: list[object]):
         self.enabled = _to_bool(_cell(raw, 1))
@@ -430,7 +439,7 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
             continue  # Q欄已有更新時間，代表這列處理過了，不重複套規則
 
         if start_date or end_date:
-            row_date = _parse_date(_cell(row, 2))  # B欄＝帳務日
+            row_date = _statement_row_date(row)
             if row_date is None:
                 continue
             if start_date and row_date < start_date:
