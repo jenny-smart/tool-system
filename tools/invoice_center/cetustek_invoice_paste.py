@@ -43,30 +43,32 @@ def _open_invoice_create(page: Any) -> None:
 
 
 def _paste_one(page: Any, payload_json: str) -> None:
-    dialogs: list[str] = []
-
-    def on_dialog(dialog: Any) -> None:
-        dialogs.append(dialog.type)
-        if dialog.type == "prompt":
-            dialog.accept(payload_json)
-        else:
-            dialog.accept()
-
-    page.on("dialog", on_dialog)
-    try:
+    # 使用 expect_event 同步逐一處理 dialog，避免 page.on("dialog") listener
+    # 與網站/登入階段既有 listener 同時 accept，造成 already handled。
+    with page.expect_event("dialog", timeout=8000) as first_dialog_info:
         _paste_button(page).click()
-        deadline = time.monotonic() + 8
-        while time.monotonic() < deadline and len(dialogs) < 2:
-            page.wait_for_timeout(150)
-        if "prompt" not in dialogs:
-            raise RuntimeError("點擊「貼上發票資料」後未出現 Payload 輸入視窗")
-        if len(dialogs) < 2:
-            raise RuntimeError("Payload 已送出，但未收到第二個確認訊息")
-    finally:
+    first_dialog = first_dialog_info.value
+    if first_dialog.type != "prompt":
         try:
-            page.remove_listener("dialog", on_dialog)
+            first_dialog.dismiss()
         except Exception:
             pass
+        raise RuntimeError(f"點擊「貼上發票資料」後第一個視窗不是 prompt：{first_dialog.type}")
+
+    first_dialog.accept(payload_json)
+
+    try:
+        with page.expect_event("dialog", timeout=8000) as second_dialog_info:
+            # 第一個 prompt accept 後，第二個確認視窗由頁面自行觸發。
+            page.wait_for_timeout(50)
+        second_dialog = second_dialog_info.value
+    except Exception as exc:
+        raise RuntimeError("Payload 已送出，但未收到第二個確認訊息") from exc
+
+    try:
+        second_dialog.accept()
+    except Exception as exc:
+        raise RuntimeError(f"第二個確認訊息無法接受：{exc}") from exc
 
 
 def process_pending_invoice_payloads(page: Any, area: str) -> int:
@@ -78,8 +80,7 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
     print(f"[{area}] 待貼入發票 Payload：{len(pending)} 筆")
     _open_invoice_create(page)
 
-    # 登入流程會掛 dialog logger；Payload 階段必須移除，否則 prompt/confirm
-    # 會被兩個 listener 同時 accept，造成 already handled。
+    # 清除登入階段可能留下的 dialog listener，Payload 階段改用 expect_event 同步處理。
     try:
         page.remove_all_listeners("dialog")
     except Exception:
