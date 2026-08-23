@@ -3,7 +3,7 @@
 
 財報欄位（1-based，沿用既有配置）：
   D=4 摘要　E=5 收入　F=6 支出　H=8 附註/對象
-  I=9 收支類別（下拉選單）　K=11 記帳日期（L欄月份標記依這欄算）　L=12 分類標籤
+  I=9 收支類別（下拉選單）　J=10 人工標記　K=11 記帳日期　L=12 分類標籤
   Q=17 更新時間　R=18 更新內容——只要規則有改到某一列（不管是更新原列
   還是插入的新列），就會自動打上這兩欄，記錄「什麼時候、改了什麼」；沒被
   任何規則改到的列不會動 Q／R。
@@ -34,8 +34,11 @@
            兩邊加起來等於原始金額，不會多算或少算。留空表示照抄原值，不分帳）
   O 條件關係（且／或，留空當「或」——例如 H含新訓 或 L含新訓；要「且」就填「且」，
            只有同時有條件1和條件2時才有意義）
+  P L欄年月來源（留空或 K＝依 K 欄日期；J＝讀取 J 欄開頭的 YYYYMM，亦接受
+           YYYY.MM／YYYY-MM／YYYY/MM）
+  Q 設定E欄固定金額（例如 -2406；留空表示保留原金額。可用於新增固定費用列）
 
-新增欄位一律加在「金額對半欄位」之後（不要插在中間），避免手動插入分頁欄位時
+新增欄位一律加在既有欄位最後面（不要插在中間），避免手動插入分頁欄位時
 把既有欄位的資料位置擠掉、讓已經對好的規則跑錯。分頁已存在時，程式會自動把
 少的欄位補在最後面，不用手動調整。
 """
@@ -56,7 +59,7 @@ RULES_HEADER = [
     "啟用", "規則名稱", "條件1欄位", "條件1比對", "條件1值",
     "條件2欄位", "條件2比對", "條件2值",
     "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理", "金額對半欄位",
-    "條件關係(且/或)",
+    "條件關係(且/或)", "L欄年月來源", "設定E欄固定金額",
 ]
 
 # 預設規則（第一次建立分頁時寫入，之後只從分頁讀取，不再看這份清單）。
@@ -128,6 +131,16 @@ def _to_number(value: object) -> float:
         return 0.0
 
 
+def _to_number_or_none(value: object) -> float | None:
+    text = ("" if value is None else str(value)).replace(",", "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def _to_bool(value: object) -> bool:
     text = str(value or "").strip().upper()
     return text in ("TRUE", "1", "YES", "Y")
@@ -144,7 +157,7 @@ def _day_number(text: str) -> int | None:
 
 
 def _to_int_or_none(value: object) -> int | None:
-    text = str(value or "").strip()
+    text = ("" if value is None else str(value)).strip()
     if not text:
         return None
     try:
@@ -182,6 +195,8 @@ class Rule:
         raw_split_column = str(_cell(raw, 14) or "").strip().upper()
         self.split_column = "".join(ch for ch in raw_split_column if ch.isalpha())
         self.relation = str(_cell(raw, 15) or "").strip() or "或"
+        self.month_source = str(_cell(raw, 16) or "K").strip().upper() or "K"
+        self.set_e = _to_number_or_none(_cell(raw, 17))
 
     def _one_condition_matches(self, row: list[object], col: str, cmp_: str, values: list[str]) -> bool:
         if not col or not values:
@@ -244,10 +259,20 @@ class Rule:
     def l_value(self, row: list[object]) -> str | None:
         if self.month_offset is None or not self.suffix:
             return None
-        k_date = _parse_date(_cell_by_letter(row, "K"))
-        if k_date is None:
+        if self.month_source == "J":
+            marker = str(_cell_by_letter(row, "J") or "").strip()
+            match = re.match(r"^(\d{4})[./-]?(0[1-9]|1[0-2])", marker)
+            if match is None:
+                return None
+            base_year, base_month = int(match.group(1)), int(match.group(2))
+        else:
+            base_date = _parse_date(_cell_by_letter(row, "K"))
+            if base_date is None:
+                return None
+            base_year, base_month = base_date.year, base_date.month
+        month_index = base_year * 12 + (base_month - 1) + self.month_offset
+        if month_index < 0:
             return None
-        month_index = k_date.year * 12 + (k_date.month - 1) + self.month_offset
         year, month = divmod(month_index, 12)
         return f"{year}.{month + 1:02d}-{self.suffix}"
 
@@ -465,6 +490,11 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
                     "values": [[share]],
                 })
                 changes.append(f"{split_column}={share}")
+            if in_place_rule.set_e is not None:
+                value_updates.append(
+                    {"range": f"'{title}'!E{row_idx}", "values": [[in_place_rule.set_e]]}
+                )
+                changes.append(f"E={in_place_rule.set_e}")
             if changes:
                 now_text = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
                 value_updates.append({"range": f"'{title}'!Q{row_idx}", "values": [[now_text]]})
@@ -500,6 +530,11 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
                         new_row.append("")
                     new_row[col_index - 1] = split_values[("insert", i)]
                     changes.append(f"{rule.split_column}={split_values[('insert', i)]}")
+                if rule.set_e is not None:
+                    while len(new_row) < 5:
+                        new_row.append("")
+                    new_row[4] = rule.set_e
+                    changes.append(f"E={rule.set_e}")
                 if changes:
                     while len(new_row) < COL_R:
                         new_row.append("")
