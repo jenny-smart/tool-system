@@ -18,6 +18,7 @@ _stub_module(
     get_master_spreadsheet_id=lambda: "master",
     get_sheets_service=lambda: None,
 )
+_stub_module("tools.finance_management.execution_log", log_execution=lambda *args, **kwargs: None)
 _stub_module(
     "tools.finance_management.statement_registry",
     resolve_statement_location=lambda *args, **kwargs: ("statement", "承攬費"),
@@ -195,6 +196,19 @@ class IntercompanyExpenseTest(unittest.TestCase):
 
     def test_google_sheets_date_serial_is_accepted(self):
         self.assertEqual(expense._parse_date(46257), date(2026, 8, 23))
+
+    def test_public_task_writes_start_and_completion_logs(self):
+        expected = {"updated_rows": 1, "inserted_rows": 3}
+        with (
+            patch.object(expense, "_apply_intercompany_expense_rules_impl", return_value=expected),
+            patch.object(expense, "log_execution") as log_execution,
+        ):
+            result = expense.apply_intercompany_expense_rules("桃園")
+
+        self.assertEqual(result, expected)
+        self.assertEqual(log_execution.call_count, 2)
+        self.assertEqual(log_execution.call_args_list[0].args[:3], ("財報富邦更新代墊費用拆分", "桃園", "開始"))
+        self.assertEqual(log_execution.call_args_list[1].args[:3], ("財報富邦更新代墊費用拆分", "桃園", "完成"))
 
 
 if __name__ == "__main__":

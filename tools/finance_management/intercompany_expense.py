@@ -15,6 +15,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+from tools.finance_management.execution_log import log_execution
 from tools.finance_management.statement_registry import (
     resolve_marketing_expense_location,
     resolve_statement_location,
@@ -308,6 +309,23 @@ def _detail_row(source_row: list[object], detail: dict[str, object], marker: str
 
 
 def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
+    """執行代墊費用拆分，並在主控檔記錄開始、完成或失敗。"""
+    date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
+    log_execution("財報富邦更新代墊費用拆分", area, "開始", f"日期區間：{date_range}")
+    try:
+        result = _apply_intercompany_expense_rules_impl(area, start_date, end_date)
+    except Exception as exc:
+        log_execution("財報富邦更新代墊費用拆分", area, "失敗", str(exc))
+        raise
+    log_execution(
+        "財報富邦更新代墊費用拆分",
+        area,
+        "完成",
+        f"更新 {result['updated_rows']} 列，插入 {result['inserted_rows']} 列",
+    )
+    return result
+
+def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, int]:
     """處理指定財報中尚未蓋 Q 欄的 ``YYYYMM地區代墊`` 標記。"""
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
     statement_values = _read_statement_values(spreadsheet_id, title)

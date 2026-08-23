@@ -402,18 +402,7 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
     date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
     log_execution("財報富邦更新套用規則", area, "開始", f"日期區間：{date_range}")
     try:
-        # 代墊拆分要先執行：它會把原始總額列改成明細並在 Q 欄留下處理記錄，
-        # 接著一般規則重新讀表時便會跳過這些明細，不會再套用第二次。
-        from tools.finance_management.intercompany_expense import (
-            apply_intercompany_expense_rules,
-        )
-
-        special = apply_intercompany_expense_rules(area, start_date, end_date)
-        regular = _apply_rules_impl(area, start_date, end_date)
-        result = {
-            "updated_rows": special["updated_rows"] + regular["updated_rows"],
-            "inserted_rows": special["inserted_rows"] + regular["inserted_rows"],
-        }
+        result = _apply_rules_impl(area, start_date, end_date)
     except Exception as exc:
         log_execution("財報富邦更新套用規則", area, "失敗", str(exc))
         raise
