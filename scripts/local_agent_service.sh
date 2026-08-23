@@ -40,8 +40,15 @@ start_agent() {
     return
   fi
   rm -f "$PID_FILE"
-  /usr/bin/osascript -e 'tell application "Terminal"' -e "do script quoted form of \"$LAUNCHER\"" -e 'activate' -e 'end tell' >/dev/null
-  echo "started in user Terminal session"
+  # 從使用者 shell 啟動後立即脫離 Terminal；保留 Documents 存取權限，關閉視窗不影響 Agent。
+  nohup "$LAUNCHER" </dev/null >/dev/null 2>&1 &!
+  sleep 1
+  if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+    echo "started in background: pid $(cat "$PID_FILE")"
+  else
+    echo "Local Agent 啟動失敗；請執行 $0 logs" >&2
+    exit 1
+  fi
 }
 
 install_service() {
