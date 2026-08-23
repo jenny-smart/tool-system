@@ -16,8 +16,9 @@
         「專員承攬費-2」（不要求相鄰）的列，兩邊分別加總金額欄後相加。
         專員承攬費每月有兩期：-1（當月20日左右）、-2（次月10日左右），
         這裡只抓「-2」那期，年月本身不做偏移
-  行銷費用(廣告)／行銷費用(服務)＝行銷費用總管理試算表（固定分頁 GID＝
-        228482464）第5列／第8列，欄位依月份與地區位移：7月從 AS 欄起，
+  行銷費用(廣告)／行銷費用(服務)＝「財報設定」工作表各地區列的
+        行銷ID（G欄）及行銷gid（H欄）所指定分頁第5列／第8列；欄位依月份與
+        地區位移：7月從 AS 欄起，
         每月位移 7 欄（同一月的區塊依序是台北／桃園／新竹／台中／家電／
         高雄／總計）
   總營收＝財務分頁「{年月}預估」欄第3列
@@ -43,7 +44,7 @@ from datetime import date
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.execution_log import log_execution
 from tools.finance_management.statement_registry import (
-    marketing_expense_spreadsheet_id,
+    resolve_marketing_expense_location,
     resolve_statement_location,
     sheet_title_for_gid,
 )
@@ -69,7 +70,6 @@ COL_B, COL_G, COL_H = 2, 7, 8
 COL_FUBON_LABEL, COL_FUBON_AMOUNT = 12, 13  # 富邦更新：L 標籤／M 金額
 COL_YUANTA_LABEL, COL_YUANTA_AMOUNT = 13, 14  # 元大更新：M 標籤／N 金額（假設，見檔頭說明）
 
-MARKETING_REPORT_GID = "228482464"
 MARKETING_ROW_AD = 5
 MARKETING_ROW_SERVICE = 8
 MARKETING_BASE_COLUMN = 45  # AS，對應 7月
@@ -233,9 +233,8 @@ def marketing_expense_row(area: str, month: int, row: int) -> float:
     """行銷費用總管理試算表，指定月份／地區／列數那一格。"""
     if area not in MARKETING_REGION_OFFSETS:
         raise ValueError(f"行銷費用檔沒有「{area}」這個地區欄位")
-    spreadsheet_id = marketing_expense_spreadsheet_id()
+    spreadsheet_id, title = resolve_marketing_expense_location(area)
     service = get_sheets_service()
-    title = sheet_title_for_gid(service, spreadsheet_id, MARKETING_REPORT_GID)
     column_index = (
         MARKETING_BASE_COLUMN
         + (month - MARKETING_BASE_MONTH) * MARKETING_MONTH_STEP_COLUMNS
