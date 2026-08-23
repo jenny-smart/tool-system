@@ -7,10 +7,8 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/python3</string>
-    <string>-m</string>
-    <string>tools.local_agent</string>
-    <string>--poll-seconds</string>
-    <string>2</string>
+    <string>-c</string>
+    <string>import sys; sys.path.insert(0, '/Users/jenny/Documents/codex-workspace/tool-system'); from tools.local_agent import main; sys.argv=['tools.local_agent','--poll-seconds','2']; raise SystemExit(main())</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/jenny/Documents/codex-workspace/tool-system</string>
