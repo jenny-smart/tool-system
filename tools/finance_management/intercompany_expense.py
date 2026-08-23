@@ -1,9 +1,11 @@
 """依 J 欄代墊標記，從行銷費用矩陣拆出跨區代墊明細。
 
-J 欄格式：YYYYMM地區代墊，例如 ``202605桃園代墊``。
+J 欄格式：YYYYMM地區代墊，例如 ``202605桃園代墊``；若只補單一科目，可用
+``YYYYMM地區代墊-來源科目``，例如 ``202605桃園代墊-內勤薪資``。
 來源金額來自「財報設定」G/H 欄所指向的行銷費用分頁；科目及雙方會計處理則
 由主控試算表的「代墊費用設定」分頁管理。原始銀行總額列會改成第一筆明細，
-其餘明細插在其下，並以來源表的「內部資金收入/支出」淨額做勾稽。
+其餘明細插在其下。本次所有待執行 J 欄列的銀行總額，會與本次實際拆出的代墊
+明細淨額合併勾稽，允許跨月、跨科目一次執行。
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ DEFAULT_SETTINGS: list[list[object]] = [
 ]
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-MARKER_RE = re.compile(r"^(20\d{2})(0[1-9]|1[0-2])(.+?)代墊$")
+MARKER_RE = re.compile(r"^(20\d{2})(0[1-9]|1[0-2])(.+?)代墊(?:-(.+))?$")
 CONTROL_LABEL = "內部資金收入/支出"
 COL_E, COL_F, COL_I, COL_J, COL_L, COL_M, COL_Q, COL_R = 5, 6, 9, 10, 12, 13, 17, 18
 
@@ -161,12 +163,30 @@ def load_expense_rules() -> list[ExpenseRule]:
     return rules
 
 
+def _select_rules(rules: list[ExpenseRule], subject: str | None) -> list[ExpenseRule]:
+    """有指定 ``-科目`` 時只執行該科目；未指定則沿用所有 A=TRUE 規則。"""
+    if not subject:
+        return rules
+    wanted = _normalize_source_key(subject)
+    source_matches = [rule for rule in rules if _normalize_source_key(rule.source_key) == wanted]
+    if source_matches:
+        return source_matches
+    account_matches = [rule for rule in rules if _normalize_text(rule.account) == _normalize_text(subject)]
+    if len(account_matches) == 1:
+        return account_matches
+    if len(account_matches) > 1:
+        raise RuntimeError(
+            f"代墊科目「{subject}」對應多個來源科目，請改用「代墊費用設定」B欄來源科目"
+        )
+    enabled = "、".join(rule.source_key for rule in rules)
+    raise RuntimeError(f"找不到啟用中的代墊科目「{subject}」；可用來源科目：{enabled}")
+
+
 def _read_statement_values(spreadsheet_id: str, title: str) -> list[list[object]]:
     service = get_sheets_service()
     res = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range=f"'{title}'!A:R",
-        # 使用畫面顯示值，確保人工輸入或公式產生的 J 欄標記與使用者看到的一致。
         valueRenderOption="FORMATTED_VALUE",
         dateTimeRenderOption="FORMATTED_STRING",
     ).execute()
@@ -212,7 +232,6 @@ def _find_source_column(values: list[list[object]], month: str, payer_area: str)
 
 def _source_rows(values: list[list[object]], source_col: int) -> list[tuple[int, str, int]]:
     rows = []
-    # 第 1、2 列是年月／地區表頭，不是科目資料。
     for row_number, row in enumerate(values[2:], start=3):
         key = _normalize_source_key(_cell(row, 2))
         rows.append((row_number, key, _amount(_cell(row, source_col))))
@@ -256,7 +275,7 @@ def _posting(amount: int, treatment: str) -> tuple[int, int]:
 
 def _build_details(
     rules: list[ExpenseRule], source_rows: list[tuple[int, str, int]], month: str,
-    payer_area: str, report_area: str, control_total: int,
+    payer_area: str, report_area: str, control_total: int | None = None,
 ) -> list[dict[str, object]]:
     side = "台北" if report_area == "台北" else "支付區"
     details: list[dict[str, object]] = []
@@ -276,21 +295,22 @@ def _build_details(
     if not details:
         raise RuntimeError(f"{month[:4]}.{month[4:]}／{payer_area} 沒有可拆分的代墊明細")
 
-    expected_signed = control_total if report_area == "台北" else -control_total
-    actual_signed = sum(int(item["f"]) - int(item["e"]) for item in details)
-    residual = expected_signed - actual_signed
-    tolerance = max(2, len(details))
-    if abs(residual) > tolerance:
-        raise RuntimeError(
-            f"代墊明細無法勾稽：來源淨額 {control_total:,}，規則明細淨額 "
-            f"{actual_signed:,}，差額 {residual:,}；請檢查「{SETTINGS_SHEET_NAME}」是否漏科目"
-        )
-    if residual:
-        first = details[0]
-        if int(first["f"]):
-            first["f"] = int(first["f"]) + residual
-        else:
-            first["e"] = int(first["e"]) - residual
+    if control_total is not None:
+        expected_signed = control_total if report_area == "台北" else -control_total
+        actual_signed = sum(int(item["f"]) - int(item["e"]) for item in details)
+        residual = expected_signed - actual_signed
+        tolerance = max(2, len(details))
+        if abs(residual) > tolerance:
+            raise RuntimeError(
+                f"代墊明細無法勾稽：來源淨額 {control_total:,}，規則明細淨額 "
+                f"{actual_signed:,}，差額 {residual:,}；請檢查「{SETTINGS_SHEET_NAME}」是否漏科目"
+            )
+        if residual:
+            first = details[0]
+            if int(first["f"]):
+                first["f"] = int(first["f"]) + residual
+            else:
+                first["e"] = int(first["e"]) - residual
     return details
 
 
@@ -318,38 +338,26 @@ def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) 
     except Exception as exc:
         log_execution("財報富邦更新代墊費用拆分", area, "失敗", str(exc))
         raise
-    completion_detail = (
-        f"更新 {result['updated_rows']} 列，插入 {result['inserted_rows']} 列"
-    )
+    completion_detail = f"更新 {result['updated_rows']} 列，插入 {result['inserted_rows']} 列"
     if result.get("diagnostics"):
         completion_detail += f"；{result['diagnostics']}"
-    log_execution(
-        "財報富邦更新代墊費用拆分",
-        area,
-        "完成",
-        completion_detail,
-    )
+    log_execution("財報富邦更新代墊費用拆分", area, "完成", completion_detail)
     return result
 
+
 def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, object]:
-    """處理指定財報中尚未蓋 Q 欄的 ``YYYYMM地區代墊`` 標記。"""
+    """處理尚未蓋 Q 欄的 ``YYYYMM地區代墊[-科目]`` 標記。"""
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
     statement_values = _read_statement_values(spreadsheet_id, title)
     if len(statement_values) < 2:
         return {
             "updated_rows": 0,
             "inserted_rows": 0,
-            "diagnostics": (
-                f"試算表ID={spreadsheet_id}；分頁「{title}」；掃描 0 列；工作表沒有資料列"
-            ),
+            "diagnostics": f"試算表ID={spreadsheet_id}；分頁「{title}」；掃描 0 列；工作表沒有資料列",
         }
 
-    marker_rows: list[tuple[int, list[object], str, str, str]] = []
-    j_nonblank_count = 0
-    keyword_count = 0
-    matched_count = 0
-    processed_count = 0
-    date_excluded_count = 0
+    marker_rows: list[tuple[int, list[object], str, str, str, str | None]] = []
+    j_nonblank_count = keyword_count = matched_count = processed_count = date_excluded_count = 0
     j_nonblank_samples: list[str] = []
     marker_samples: list[str] = []
     for row_idx, row in enumerate(statement_values[1:], start=2):
@@ -372,9 +380,7 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
             continue
         row_date = _statement_row_date(row)
         if (start_date or end_date) and row_date is None:
-            raise RuntimeError(
-                f"J{row_idx} 已辨識為「{marker}」，但 B／K／C 欄日期都無法解析"
-            )
+            raise RuntimeError(f"J{row_idx} 已辨識為「{marker}」，但 B／K／C 欄日期都無法解析")
         if start_date and row_date < start_date:
             date_excluded_count += 1
             continue
@@ -383,18 +389,18 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
             continue
         month = f"{match.group(1)}{match.group(2)}"
         payer_area = match.group(3).strip()
+        subject = match.group(4).strip() if match.group(4) else None
         if payer_area == "台北":
             raise RuntimeError(f"J{row_idx} 的支付區不能是台北：{marker}")
         if area != "台北" and area != payer_area:
             raise RuntimeError(f"J{row_idx} 標示 {payer_area} 代墊，但目前執行地區是 {area}")
-        marker_rows.append((row_idx, row, marker, month, payer_area))
+        marker_rows.append((row_idx, row, marker, month, payer_area, subject))
+
     if not marker_rows:
         diagnostics = (
-            f"試算表ID={spreadsheet_id}；分頁「{title}」；"
-            f"掃描 {len(statement_values) - 1} 列；J欄非空 {j_nonblank_count} 筆；"
-            f"J欄含代墊 {keyword_count} 筆；格式符合 {matched_count} 筆；"
-            f"Q欄已處理 {processed_count} 筆；日期排除 {date_excluded_count} 筆；"
-            "待處理 0 筆"
+            f"試算表ID={spreadsheet_id}；分頁「{title}」；掃描 {len(statement_values) - 1} 列；"
+            f"J欄非空 {j_nonblank_count} 筆；J欄含代墊 {keyword_count} 筆；格式符合 {matched_count} 筆；"
+            f"Q欄已處理 {processed_count} 筆；日期排除 {date_excluded_count} 筆；待處理 0 筆"
         )
         if marker_samples:
             diagnostics += "；代墊樣本：" + "、".join(marker_samples)
@@ -415,25 +421,44 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
         for row in statement_values[1:]
         if str(_cell(row, COL_L) or "").strip()
     }
+    planned_labels: set[str] = set()
     plans: list[tuple[int, list[list[object]]]] = []
     now_text = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
-    for row_idx, source_row, marker, month, payer_area in marker_rows:
+    bank_total_sum = 0
+    expected_signed_sum = 0
+    detail_count = 0
+
+    for row_idx, source_row, marker, month, payer_area, subject in marker_rows:
         source_col = _find_source_column(marketing_values, month, payer_area)
-        control_total = _control_total(marketing_values, source_col)
-        bank_total = abs(_amount(_cell(source_row, COL_F)) - _amount(_cell(source_row, COL_E)))
-        if abs(bank_total - abs(control_total)) > 2:
-            raise RuntimeError(
-                f"J{row_idx} 銀行總額 {bank_total:,} 與行銷來源淨額 {control_total:,} 不符，未寫入"
-            )
+        selected_rules = _select_rules(rules, subject)
+        control_total = _control_total(marketing_values, source_col) if subject is None else None
         details = _build_details(
-            rules, _source_rows(marketing_values, source_col), month, payer_area, area, control_total
+            selected_rules,
+            _source_rows(marketing_values, source_col),
+            month,
+            payer_area,
+            area,
+            control_total,
         )
         expected_labels = {str(detail["label"]) for detail in details}
-        duplicate_labels = sorted(expected_labels & existing_labels)
+        duplicate_labels = sorted(expected_labels & (existing_labels | planned_labels))
         if duplicate_labels:
             raise RuntimeError(f"代墊明細已存在，未重複插入：{', '.join(duplicate_labels)}")
+        planned_labels.update(expected_labels)
+
+        bank_total_sum += abs(_amount(_cell(source_row, COL_F)) - _amount(_cell(source_row, COL_E)))
+        expected_signed_sum += sum(int(item["f"]) - int(item["e"]) for item in details)
+        detail_count += len(details)
         rows = [_detail_row(source_row, detail, marker, now_text) for detail in details]
         plans.append((row_idx, rows))
+
+    expected_total = abs(expected_signed_sum)
+    tolerance = max(2, detail_count)
+    if abs(bank_total_sum - expected_total) > tolerance:
+        raise RuntimeError(
+            f"本次代墊銀行總額 {bank_total_sum:,} 與本次執行科目總額 {expected_total:,} 不符，"
+            f"差額 {bank_total_sum - expected_total:,}，未寫入"
+        )
 
     service = get_sheets_service()
     sheet_id = _sheet_id_for_title(service, spreadsheet_id, title)
