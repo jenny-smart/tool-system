@@ -2675,6 +2675,42 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
     return result_text
 
 
+def run_fubon_intercompany_expense_split(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    from tools.finance_management.intercompany_expense import apply_intercompany_expense_rules
+
+    cities = ["台北", "台中", "桃園", "新竹", "高雄"]
+    if area == "全區":
+        targets = cities
+    elif area in cities:
+        targets = [area]
+    else:
+        raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
+
+    messages = []
+    failed = []
+    for i, city in enumerate(targets):
+        if i > 0:
+            time.sleep(3)
+        try:
+            result = apply_intercompany_expense_rules(
+                city, start_date=start_date, end_date=end_date
+            )
+            messages.append(
+                f"{city}：拆分 {result['updated_rows']} 筆，插入 {result['inserted_rows']} 列"
+            )
+            if on_progress:
+                on_progress(messages[-1], "success")
+        except Exception as exc:
+            failed.append(f"{city}：{exc}")
+            if on_progress:
+                on_progress(f"{city}：失敗 - {exc}", "error")
+
+    result_text = "\n".join(messages)
+    if failed:
+        result_text += "\n❌ 失敗：" + "；".join(failed)
+    return result_text
+
+
 def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from calendar import monthrange
     from datetime import date as _date
@@ -2944,6 +2980,7 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
+    {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
     {"name": "【財報】年度review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
@@ -4603,6 +4640,7 @@ if run_clicked:
                 "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）",
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
+                "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
                 "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
                 "【財報】年度review｜預覽公式調整",
