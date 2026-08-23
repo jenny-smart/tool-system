@@ -4,7 +4,7 @@ from typing import Any
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.local_agent_queue import now_text
-from tools.memo_system.change_order import get_worksheet
+from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
 SHEET_NAME = "發票開立佇列"
