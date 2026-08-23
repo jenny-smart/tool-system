@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
+import re
 import time
 from typing import Any
 
-from tools.invoice_center.invoice_payload_queue import list_pending_payloads, update_payload_status
-
-
-INVOICE_CREATE_URL = "https://www.ei.com.tw/InvoiceRent/invoiceadd.jsp"
-FORM_IDS = ("orderid", "buyer_name", "invoicetype07")
+from tools.invoice_center.invoice_payload_queue import (
+    list_pending_payloads,
+    update_payload_status,
+    write_invoice_result,
+)
 
 
 def _visible(locator: Any) -> bool:
@@ -17,57 +19,72 @@ def _visible(locator: Any) -> bool:
         return False
 
 
-def _is_invoice_create_page(page: Any) -> bool:
-    """Only the real invoice form counts; menu text/Tampermonkey button do not."""
+INVOICE_FORM_SELECTORS = (
+    "#orderid",
+    "#buyer_name",
+    "#buyer_emailaddress",
+    "#detaildata",
+    "#totalamount",
+)
+
+INVOICE_CREATE_URL = "https://www.ei.com.tw/InvoiceRent/invoiceadd.jsp"
+INVOICE_NO_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{2})[ -]?(\d{8})(?!\d)")
+MANUAL_SAVE_TIMEOUT_MS = 30 * 60 * 1000
+
+
+def _is_invoice_create_url(page: Any) -> bool:
     try:
-        if not page.url.startswith(INVOICE_CREATE_URL):
-            return False
-        return all(_visible(page.locator(f"#{element_id}")) for element_id in FORM_IDS)
+        return str(page.url or "").split("?", 1)[0].split("#", 1)[0] == INVOICE_CREATE_URL
+    except Exception:
+        return False
+
+
+def _is_invoice_create_page(page: Any) -> bool:
+    """Require the exact EI URL and native form fields, never the injected helper button."""
+    try:
+        return _is_invoice_create_url(page) and all(
+            page.locator(selector).count() > 0 for selector in INVOICE_FORM_SELECTORS
+        )
     except Exception:
         return False
 
 
 def _paste_button(page: Any) -> Any:
     if not _is_invoice_create_page(page):
-        raise RuntimeError("尚未進入真正的發票開立表單")
+        raise RuntimeError("目前不是鯨躍發票開立頁，禁止貼入發票資料")
+
     button = page.locator("#lemon-ei-fill-btn")
     if _visible(button):
         return button.first
-    raise RuntimeError("已進入發票開立頁，但找不到『貼上發票資料』按鈕；請確認 Tampermonkey 已啟用")
-
-
-def _wait_invoice_form(page: Any, timeout_seconds: float = 12.0) -> None:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if _is_invoice_create_page(page):
-            print(f"[鯨躍] 已確認真正發票開立表單：{page.url}", flush=True)
-            return
-        page.wait_for_timeout(200)
-    raise RuntimeError(f"未進入真正的發票開立表單，目前頁面：{page.url}")
+    button = page.get_by_text("貼上發票資料", exact=True)
+    if _visible(button):
+        return button.first
+    raise RuntimeError("發票開立頁找不到『貼上發票資料』按鈕，請確認 Tampermonkey 腳本已啟用")
 
 
 def _open_invoice_create(page: Any) -> None:
     if _is_invoice_create_page(page):
-        print(f"[鯨躍] 已在真正的發票開立表單：{page.url}", flush=True)
         _paste_button(page)
+        print("[鯨躍] 已在發票開立頁", flush=True)
         return
 
-    # 已確認鯨躍的發票開立網址固定為 invoiceadd.jsp。
-    # 不再依賴首頁左側選單文字，避免選單折疊/隱藏造成點不到或誤判。
-    print(f"[鯨躍] 直接前往發票開立頁：{INVOICE_CREATE_URL}", flush=True)
-    page.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded")
-    _wait_invoice_form(page)
+    print(f"[鯨躍] 前往發票開立頁：{INVOICE_CREATE_URL}", flush=True)
+    page.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded", timeout=15000)
 
-    # Tampermonkey 於 document-idle 注入按鈕，給它短暫時間完成。
-    deadline = time.monotonic() + 8
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        try:
-            _paste_button(page)
-            print("[鯨躍] 發票開立表單驗證完成，找到『貼上發票資料』", flush=True)
-            return
-        except RuntimeError:
-            page.wait_for_timeout(200)
-    raise RuntimeError("已到發票開立頁，但 8 秒內找不到『貼上發票資料』按鈕")
+        if _is_invoice_create_page(page):
+            try:
+                _paste_button(page)
+                print("[鯨躍] 已進入發票開立頁，找到『貼上發票資料』", flush=True)
+                return
+            except Exception:
+                pass
+        page.wait_for_timeout(200)
+    raise RuntimeError(
+        f"已開啟 {INVOICE_CREATE_URL}，但 10 秒內未出現發票開立表單；"
+        f"目前頁面：{str(page.url or '未知')}"
+    )
 
 
 def _clear_dialog_handlers(page: Any) -> None:
@@ -75,6 +92,66 @@ def _clear_dialog_handlers(page: Any) -> None:
         page.remove_all_listeners("dialog")
     except Exception:
         pass
+
+
+def _install_save_click_marker(page: Any) -> None:
+    script = """
+    (() => {
+      if (window.__lemonSaveMarkerInstalled) return;
+      window.__lemonSaveMarkerInstalled = true;
+      document.addEventListener('click', (event) => {
+        if (event.target && event.target.closest && event.target.closest('#btnSave')) {
+          sessionStorage.setItem('lemonInvoiceSaveClicked', '1');
+        }
+      }, true);
+    })();
+    """
+    page.context.add_init_script(script=script)
+    page.evaluate("sessionStorage.removeItem('lemonInvoiceSaveClicked')")
+    page.evaluate(script)
+
+
+def _extract_invoice_no(page: Any) -> str:
+    chunks: list[str] = []
+    try:
+        chunks.append(str(page.locator("body").inner_text() or ""))
+    except Exception:
+        pass
+    try:
+        chunks.extend(str(value or "") for value in page.locator("input").evaluate_all(
+            "els => els.map(el => el.value)"
+        ))
+    except Exception:
+        pass
+    for chunk in chunks:
+        match = INVOICE_NO_RE.search(chunk.upper())
+        if match:
+            return f"{match.group(1)}{match.group(2)}"
+    return ""
+
+
+def _wait_for_manual_save(page: Any, timeout_ms: int = MANUAL_SAVE_TIMEOUT_MS) -> str:
+    _install_save_click_marker(page)
+    print("[鯨躍] 等待人工按『下一步』並按『儲存』；程式不會代按", flush=True)
+    deadline = time.monotonic() + timeout_ms / 1000
+    save_clicked = False
+    while time.monotonic() < deadline:
+        try:
+            save_clicked = save_clicked or bool(
+                page.evaluate("sessionStorage.getItem('lemonInvoiceSaveClicked') === '1'")
+            )
+            if save_clicked:
+                invoice_no = _extract_invoice_no(page)
+                if invoice_no:
+                    print(f"[鯨躍] 已取得發票號碼：{invoice_no}", flush=True)
+                    return invoice_no
+        except Exception:
+            # 人工處理網站確認視窗或頁面跳轉期間，Playwright 可能暫時無法讀取 DOM。
+            pass
+        page.wait_for_timeout(500)
+    if not save_clicked:
+        raise TimeoutError("30 分鐘內未偵測到人工按『儲存』")
+    raise TimeoutError("已偵測到人工按『儲存』，但 30 分鐘內找不到發票號碼")
     try:
         page.context.remove_all_listeners("dialog")
     except Exception:
@@ -82,49 +159,39 @@ def _clear_dialog_handlers(page: Any) -> None:
 
 
 def _paste_one(page: Any, payload_json: str) -> None:
-    if not _is_invoice_create_page(page):
-        raise RuntimeError(f"貼入前頁面驗證失敗，不是發票開立表單：{page.url}")
-
-    dialogs: list[str] = []
-    errors: list[str] = []
-
-    def on_dialog(dialog: Any) -> None:
-        try:
-            dialogs.append(dialog.type)
-            if dialog.type == "prompt":
-                dialog.accept(payload_json)
-            else:
-                dialog.accept()
-        except Exception as exc:
-            errors.append(str(exc))
+    payload = json.loads(payload_json)
+    expected_order_id = str(payload.get("orderid") or "").strip()
+    if not expected_order_id:
+        raise RuntimeError("Payload 缺少 orderid")
 
     _clear_dialog_handlers(page)
-    page.on("dialog", on_dialog)
-    try:
-        button = _paste_button(page)
-        button.scroll_into_view_if_needed()
-        print("[鯨躍] 點擊『貼上發票資料』", flush=True)
+    button = _paste_button(page)
+    button.scroll_into_view_if_needed()
+    print("[鯨躍] 點擊『貼上發票資料』", flush=True)
+
+    with page.expect_dialog(timeout=8000) as prompt_info:
         button.click(force=True)
+    prompt = prompt_info.value
+    if prompt.type != "prompt":
+        prompt.accept()
+        raise RuntimeError(f"預期 Payload 輸入視窗，實際收到 {prompt.type}")
 
-        deadline = time.monotonic() + 8
-        while time.monotonic() < deadline:
-            if errors:
-                raise RuntimeError(errors[0])
-            if "prompt" in dialogs and len(dialogs) >= 2:
-                break
-            page.wait_for_timeout(100)
+    with page.expect_dialog(timeout=8000) as confirmation_info:
+        prompt.accept(payload_json)
+    confirmation = confirmation_info.value
+    confirmation_message = str(confirmation.message or "").strip()
+    confirmation.accept()
 
-        if "prompt" not in dialogs:
-            raise RuntimeError("已點『貼上發票資料』，但未出現 Payload 輸入視窗")
-        if len(dialogs) < 2:
-            raise RuntimeError("Payload 已填入，但未收到第二個確認訊息")
-        if not _is_invoice_create_page(page):
-            raise RuntimeError("Payload 處理後已離開發票開立表單，視為失敗")
-    finally:
-        try:
-            page.remove_listener("dialog", on_dialog)
-        except Exception:
-            pass
+    if not confirmation_message.startswith("已填入。"):
+        raise RuntimeError(f"貼入結果異常：{confirmation_message or '沒有完成訊息'}")
+    if not _is_invoice_create_page(page):
+        raise RuntimeError("貼入後已離開發票開立頁")
+
+    actual_order_id = str(page.locator("#orderid").input_value() or "").strip()
+    if actual_order_id != expected_order_id:
+        raise RuntimeError(
+            f"發票表單驗證失敗：orderid 預期 {expected_order_id}，實際 {actual_order_id or '空白'}"
+        )
 
 
 def process_pending_invoice_payloads(page: Any, area: str) -> int:
@@ -140,6 +207,7 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
     completed = 0
     for item in pending:
         row_no = int(item.get("_row") or 0)
+        source_row = int(item.get("source_row") or 0)
         order_no = str(item.get("order_no") or "").strip()
         payload_json = str(item.get("payload_json") or "").strip()
         if not payload_json:
@@ -147,12 +215,17 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
             continue
         try:
             _paste_one(page, payload_json)
-            update_payload_status(row_no, "pasted", "發票資料已匯入；尚未按下一步/儲存")
+            update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存")
+            invoice_no = _wait_for_manual_save(page)
+            write_invoice_result(area, source_row, order_no, invoice_no)
+            update_payload_status(row_no, "completed", f"已回填 O/AA：{invoice_no}")
             completed += 1
-            print(f"[{area}] {order_no}：發票資料匯入完成，停在下一步前", flush=True)
+            print(f"[{area}] {order_no}：已回填 O 欄 {invoice_no}、AA 欄開立時間", flush=True)
         except Exception as exc:
             update_payload_status(row_no, "failed", str(exc))
             raise RuntimeError(f"{order_no} 匯入發票資料失敗：{exc}") from exc
+
+        # 後續『下一步/儲存/O、AA 回填』尚未接好前，每次只處理一筆。
         break
 
     print(f"[{area}] 本次發票資料匯入：{completed} 筆")

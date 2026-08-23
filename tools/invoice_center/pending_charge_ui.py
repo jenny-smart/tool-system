@@ -105,7 +105,11 @@ def install(ui) -> None:
             if not order_no:
                 continue
             override = row if bool(row.get("變更發票")) else None
-            prepared.append({"order_no": order_no, "payload": _build_payload(area_key, order_no, override)})
+            prepared.append({
+                "order_no": order_no,
+                "source_row": int(row.get("列號") or 0),
+                "payload": _build_payload(area_key, order_no, override),
+            })
         return prepared
 
     def _dispatch(prepared: list[dict[str, Any]], area_label: str) -> None:
@@ -118,6 +122,7 @@ def install(ui) -> None:
                 item["order_no"],
                 json.dumps(item["payload"], ensure_ascii=False),
                 created_by=created_by,
+                source_row=item["source_row"],
             )
         task = create_task(
             "cetustek.login",
@@ -130,9 +135,9 @@ def install(ui) -> None:
         prepared = st.session_state.get("invoice_active_payloads") or []
         if not prepared:
             return
-        st.info("⏳ 目前正在執行：登入鯨躍 → 電子發票作業 → 發票開立 → 貼上發票資料")
+        st.info("⏳ 目前正在執行：登入鯨躍 → 貼上資料 → 等你人工按下一步及儲存 → 回填 O／AA")
         st.markdown("### 🧾 Payload（備用）")
-        st.caption("此 Payload 保留在頁面供備用；不需要再按任何執行鍵。")
+        st.caption("Payload 貼入後，請在鯨躍人工檢查並按「下一步」及「儲存」；程式會自動回填發票號碼與時間。")
         for item in prepared:
             with st.expander(f"Payload：{item['order_no']}", expanded=len(prepared) == 1):
                 st.json(item["payload"])

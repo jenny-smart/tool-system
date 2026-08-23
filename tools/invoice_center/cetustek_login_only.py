@@ -109,7 +109,7 @@ def main() -> int:
 
         processed = process_pending_invoice_payloads(active_page, credentials.label)
         if processed:
-            print(f"[{credentials.label}] 發票資料已匯入；停在『下一步』前，等待人工確認與儲存")
+            print(f"[{credentials.label}] 發票已儲存，號碼與開立時間已回填清潔異動表")
         else:
             print(f"[{credentials.label}] 沒有待匯入 Payload；保留目前鯨躍頁面")
     return 0
