@@ -18,6 +18,7 @@ _stub_module(
     get_master_spreadsheet_id=lambda: "master",
     get_sheets_service=lambda: None,
 )
+_stub_module("tools.finance_management.execution_log", log_execution=lambda *args, **kwargs: None)
 _stub_module(
     "tools.finance_management.statement_registry",
     resolve_statement_location=lambda *args, **kwargs: ("statement", "承攬費"),
