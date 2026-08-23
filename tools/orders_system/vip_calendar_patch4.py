@@ -10,30 +10,7 @@ UI rule:
 """
 
 import re
-import traceback
 from datetime import datetime
-
-
-def _punch_log(function_name, status, *, area="", date="", target="", message="", traceback_text="", run_type="手動"):
-    """訂單系統執行 log 打卡：寫入主控 Log 試算表「訂單系統執行Log」分頁。
-    打卡失敗只印警告，不影響主流程。"""
-    try:
-        from tools.common.log_to_sheet import write_job_log
-        from tools.orders_system.log_config import ORDERS_LOG_SPREADSHEET_ID
-        write_job_log(
-            system_name="訂單系統",
-            job_name=function_name,
-            status=status,
-            area=area,
-            date=date,
-            target=target,
-            message=message,
-            run_type=run_type,
-            traceback_text=traceback_text,
-            spreadsheet_id=ORDERS_LOG_SPREADSHEET_ID,
-        )
-    except Exception as e:
-        print(f"[orders_system] 執行 log 打卡失敗：{e}")
 
 
 CONFIRM_OPTIONS = ["保持不變", "每月確認", "已確認"]
@@ -241,19 +218,9 @@ def _render_manual_ui(vcs, vcp, backend_email, backend_password, env_name):
                 _patch_calendar(vcs, vcp, row, cal_date, cal_period, confirm, color)
                 _refresh(vcs, st, env_name, backend_email, backend_password, customer)
                 st.success("✅ Google 日曆已更新")
-                _punch_log(
-                    "VIP 訂單／Google 日曆同步：修改日曆資訊", "成功",
-                    target=customer.get("phone", ""), date=cal_date.isoformat() if cal_date else "",
-                    message=f"時段：{cal_period}｜確認文字：{confirm}｜顏色：{color}",
-                )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
-                _punch_log(
-                    "VIP 訂單／Google 日曆同步：修改日曆資訊", "失敗",
-                    target=customer.get("phone", ""), message=str(exc),
-                    traceback_text=traceback.format_exc(),
-                )
         return
 
     with left:
@@ -289,30 +256,14 @@ def _render_manual_ui(vcs, vcp, backend_email, backend_password, env_name):
                 result = vcs.change_backend_order_date(customer, source, new_date.isoformat(), new_period)
                 if not result.get("ok"):
                     st.error(result.get("message", "後台異動失敗"))
-                    _punch_log(
-                        "VIP 訂單／Google 日曆同步：異動日期／時段", "失敗",
-                        target=source.get("order_no", ""), date=new_date.isoformat(),
-                        message=result.get("message", "後台異動失敗"),
-                    )
                     return
                 try:
                     _patch_calendar(vcs, vcp, cal_row, cal_date, cal_period, confirm, color)
                     _refresh(vcs, st, env_name, backend_email, backend_password, customer)
                     st.success("✅ 訂單與 Google 日曆已同步異動")
-                    _punch_log(
-                        "VIP 訂單／Google 日曆同步：異動日期／時段", "成功",
-                        target=source.get("order_no", ""), date=new_date.isoformat(),
-                        message=f"新時段：{new_period}",
-                    )
                     st.rerun()
                 except Exception as exc:
                     st.error(f"⚠️ 後台已異動，但日曆同步失敗：{exc}")
-                    _punch_log(
-                        "VIP 訂單／Google 日曆同步：異動日期／時段", "失敗",
-                        target=source.get("order_no", ""), date=new_date.isoformat(),
-                        message=f"後台已異動，但日曆同步失敗：{exc}",
-                        traceback_text=traceback.format_exc(),
-                    )
         return
 
     if action == "取消／暫停":
@@ -350,28 +301,14 @@ def _render_manual_ui(vcs, vcp, backend_email, backend_password, env_name):
                     cancel_status, memo, "", "",
                 )
                 if not rows or not rows[0].get("ok"):
-                    message = rows[0].get("message") if rows else "後台取消失敗"
-                    st.error(message)
-                    _punch_log(
-                        "VIP 訂單／Google 日曆同步：取消／暫停", "失敗",
-                        target=source.get("order_no", ""), message=message,
-                    )
+                    st.error((rows[0].get("message") if rows else "後台取消失敗"))
                     return
                 _patch_calendar(vcs, vcp, cal_row, cal_date, cal_period, confirm, color)
                 _refresh(vcs, st, env_name, backend_email, backend_password, customer)
                 st.success("✅ 訂單已取消，Google 日曆已同步")
-                _punch_log(
-                    "VIP 訂單／Google 日曆同步：取消／暫停", "成功",
-                    target=source.get("order_no", ""), message=f"取消狀態：{cancel_status}",
-                )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
-                _punch_log(
-                    "VIP 訂單／Google 日曆同步：取消／暫停", "失敗",
-                    target=source.get("order_no", ""), message=str(exc),
-                    traceback_text=traceback.format_exc(),
-                )
         return
 
     if action == "僅新增日曆":
@@ -390,19 +327,9 @@ def _render_manual_ui(vcs, vcp, backend_email, backend_password, env_name):
                 _create_calendar_direct(vcs, customer, source, cal_date.isoformat(), cal_period, confirm, color)
                 _refresh(vcs, st, env_name, backend_email, backend_password, customer)
                 st.success("✅ Google 日曆已新增")
-                _punch_log(
-                    "VIP 訂單／Google 日曆同步：僅新增日曆", "成功",
-                    target=customer.get("phone", ""), date=cal_date.isoformat(),
-                    message=f"時段：{cal_period}｜顏色：{color}",
-                )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
-                _punch_log(
-                    "VIP 訂單／Google 日曆同步：僅新增日曆", "失敗",
-                    target=customer.get("phone", ""), message=str(exc),
-                    traceback_text=traceback.format_exc(),
-                )
         return
 
     if action == "先預約再新增日曆":
@@ -430,20 +357,9 @@ def _render_manual_ui(vcs, vcp, backend_email, backend_password, env_name):
                     _create_calendar_direct(vcs, customer, source, cal_date.isoformat(), cal_period, confirm, color, order_no=result.get("order_no", ""))
                     _refresh(vcs, st, env_name, backend_email, backend_password, customer)
                     st.success(f"✅ 訂單 {result.get('order_no','')} 已成立，Google 日曆已新增")
-                    _punch_log(
-                        "VIP 訂單／Google 日曆同步：先預約再新增日曆", "成功",
-                        target=result.get("order_no", ""), date=new_date.isoformat(),
-                        message=f"時段：{new_period}",
-                    )
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
-                    _punch_log(
-                        "VIP 訂單／Google 日曆同步：先預約再新增日曆", "失敗",
-                        target=customer.get("phone", ""), date=new_date.isoformat(),
-                        message=str(exc),
-                        traceback_text=traceback.format_exc(),
-                    )
         return
 
 

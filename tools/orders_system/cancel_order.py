@@ -13,7 +13,6 @@ import calendar
 import html
 import json
 import re
-import traceback
 from datetime import date
 
 import requests
@@ -22,28 +21,6 @@ from bs4 import BeautifulSoup
 
 import orders
 from env import BASE_URL_DEV, BASE_URL_PROD
-
-
-def _punch_log(function_name, status, *, area="", date="", target="", message="", traceback_text="", run_type="手動"):
-    """訂單系統執行 log 打卡：寫入主控 Log 試算表「訂單系統執行Log」分頁。
-    打卡失敗只印警告，不影響主流程。"""
-    try:
-        from tools.common.log_to_sheet import write_job_log
-        from tools.orders_system.log_config import ORDERS_LOG_SPREADSHEET_ID
-        write_job_log(
-            system_name="訂單系統",
-            job_name=function_name,
-            status=status,
-            area=area,
-            date=date,
-            target=target,
-            message=message,
-            run_type=run_type,
-            traceback_text=traceback_text,
-            spreadsheet_id=ORDERS_LOG_SPREADSHEET_ID,
-        )
-    except Exception as e:
-        print(f"[orders_system] 執行 log 打卡失敗：{e}")
 
 
 PURCHASE_FILTER_PARAMS_TEMPLATE = {
@@ -751,22 +728,9 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                     st.session_state.cancel_order_dialog_open = False
                     st.session_state.cancel_order_results = []
                     st.session_state.cancel_order_pending = []
-                    _ok_count = sum(1 for r in (result or []) if r.get("ok"))
-                    _fail_count = len(result or []) - _ok_count
-                    _punch_log(
-                        "取消訂單", "成功" if not _fail_count else "失敗",
-                        target="、".join(str(item.get("order_no", "")) for item in pending),
-                        message=f"處理方式：{status}｜共 {len(pending)} 筆，成功 {_ok_count} 筆，失敗 {_fail_count} 筆",
-                    )
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
-                    _punch_log(
-                        "取消訂單", "失敗",
-                        target="、".join(str(item.get("order_no", "")) for item in pending),
-                        message=f"處理方式：{status}｜取消失敗：{exc}",
-                        traceback_text=traceback.format_exc(),
-                    )
 
     if hasattr(st, "dialog"):
         @st.dialog("確定要取消訂單？", width="large")
