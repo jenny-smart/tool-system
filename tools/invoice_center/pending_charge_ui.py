@@ -22,19 +22,7 @@ def _records(value: Any) -> list[dict[str, Any]]:
 
 
 def install(ui) -> None:
-    """Pending invoice picker with optional per-row overrides, then one-click batch dispatch."""
-
-    def _carrier_value() -> str:
-        method = st.session_state.get("invoice_center_delivery_method", "會員載具")
-        if method == "手機載具":
-            return str(st.session_state.get("invoice_center_mobile_barcode") or "")
-        if method == "自然人憑證":
-            return str(st.session_state.get("invoice_center_citizen_cert") or "")
-        if method == "捐贈":
-            return str(st.session_state.get("invoice_center_donate_code") or "")
-        if method == "會員載具":
-            return str(st.session_state.get("invoice_center_member_carrier") or "")
-        return ""
+    """Pending invoice picker with optional per-row overrides, payload preview, then local import."""
 
     def _current_invoice_settings(area_key: str, order_no: str) -> dict[str, str]:
         suffix = str(st.session_state.get("invoice_center_order_suffix", "-1") or "-1")
@@ -47,29 +35,17 @@ def install(ui) -> None:
         donate_code = str(getattr(payload, "donatevat", "") or "").strip()
 
         if buyer_identifier:
-            delivery = "紙本"
-            carrier_value = ""
-            buyer_type = "公司"
+            delivery, carrier_value, buyer_type = "紙本", "", "公司"
         elif donate == "1" or donate_code:
-            delivery = "捐贈"
-            carrier_value = donate_code
-            buyer_type = "自然人"
+            delivery, carrier_value, buyer_type = "捐贈", donate_code, "自然人"
         elif carrier_type == "3J0002":
-            delivery = "手機載具"
-            carrier_value = carrier_no
-            buyer_type = "自然人"
+            delivery, carrier_value, buyer_type = "手機載具", carrier_no, "自然人"
         elif carrier_type == "CQ0001":
-            delivery = "自然人憑證"
-            carrier_value = carrier_no
-            buyer_type = "自然人"
+            delivery, carrier_value, buyer_type = "自然人憑證", carrier_no, "自然人"
         elif carrier_type:
-            delivery = "會員載具"
-            carrier_value = carrier_no
-            buyer_type = "自然人"
+            delivery, carrier_value, buyer_type = "會員載具", carrier_no, "自然人"
         else:
-            delivery = "紙本"
-            carrier_value = ""
-            buyer_type = "自然人"
+            delivery, carrier_value, buyer_type = "紙本", "", "自然人"
 
         return {
             "發票對象": buyer_type,
@@ -86,7 +62,6 @@ def install(ui) -> None:
         st.session_state["invoice_center_buyer_type"] = buyer_type
         st.session_state["invoice_center_delivery_method"] = delivery
         st.session_state["invoice_center_invoice_type"] = str(row.get("API開立類型") or "一般發票")
-
         if buyer_type == "公司":
             company_title = str(row.get("公司抬頭") or "").strip()
             st.session_state["invoice_center_company_title"] = company_title
@@ -97,10 +72,8 @@ def install(ui) -> None:
             st.session_state["invoice_center_company_title"] = ""
 
         carrier = str(row.get("載具/捐贈碼") or "").strip()
-        st.session_state["invoice_center_member_carrier"] = ""
-        st.session_state["invoice_center_mobile_barcode"] = ""
-        st.session_state["invoice_center_citizen_cert"] = ""
-        st.session_state["invoice_center_donate_code"] = ""
+        for key in ("invoice_center_member_carrier", "invoice_center_mobile_barcode", "invoice_center_citizen_cert", "invoice_center_donate_code"):
+            st.session_state[key] = ""
         if delivery == "會員載具":
             st.session_state["invoice_center_member_carrier"] = carrier
         elif delivery == "手機載具":
@@ -120,25 +93,23 @@ def install(ui) -> None:
         payload = ui._build_payload(area_key, order_no, suffix, rows, totals)
         return ui.create_invoice_from_payload(payload, dry_run=True).payload
 
-    def _dispatch(rows: list[dict[str, Any]], area_label: str, area_key: str) -> None:
-        created_by = st.session_state.get("username", "Tool System")
-        sent = 0
+    def _prepare(rows: list[dict[str, Any]], area_key: str) -> list[dict[str, Any]]:
+        prepared = []
         for row in rows:
             order_no = str(row.get("G 訂單編號") or row.get("_order_no") or "").strip()
             if not order_no:
                 continue
             override = row if bool(row.get("變更發票")) else None
-            preview = _build_payload(area_key, order_no, override)
-            enqueue_payload(area_label, order_no, json.dumps(preview, ensure_ascii=False), created_by=created_by)
-            sent += 1
-        if not sent:
-            raise ValueError("沒有可送出的 Payload")
+            prepared.append({"order_no": order_no, "payload": _build_payload(area_key, order_no, override)})
+        return prepared
 
-        task = create_task(
-            "cetustek.login",
-            {"area": area_label, "cdp_url": "http://127.0.0.1:9222"},
-            created_by=created_by,
-        )
+    def _dispatch(prepared: list[dict[str, Any]], area_label: str) -> None:
+        created_by = st.session_state.get("username", "Tool System")
+        for item in prepared:
+            enqueue_payload(area_label, item["order_no"], json.dumps(item["payload"], ensure_ascii=False), created_by=created_by)
+        if not prepared:
+            raise ValueError("沒有可送出的 Payload")
+        task = create_task("cetustek.login", {"area": area_label, "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
         st.session_state["invoice_cetustek_task_id"] = task.get("task_id", "")
         st.session_state["invoice_agent_dispatched"] = True
 
@@ -146,7 +117,6 @@ def install(ui) -> None:
         options = ui.get_area_options()
         labels = [display for _key, display in options]
         key_by_label = {display: key for key, display in options}
-
         st.markdown("### 📍 執行區域")
         area_label = st.selectbox("執行區域", labels, label_visibility="collapsed", key="invoice_pending_picker_area")
         area_key = key_by_label[area_label]
@@ -159,72 +129,62 @@ def install(ui) -> None:
             for source in candidates:
                 item = {key: source.get(key, "") for key in DISPLAY_COLUMNS}
                 order_no = str(source.get("G 訂單編號") or source.get("_order_no") or "").strip()
-                current = _current_invoice_settings(area_key, order_no) if order_no else {
-                    "發票對象": "自然人",
-                    "發票方式": "紙本",
-                    "公司抬頭": "",
-                    "統編": "",
-                    "載具/捐贈碼": "",
-                    "API開立類型": "一般發票",
-                }
-                item.update({
-                    "選取": bool(select_all),
-                    "變更發票": False,
-                    **current,
-                })
+                current = _current_invoice_settings(area_key, order_no) if order_no else {"發票對象": "自然人", "發票方式": "紙本", "公司抬頭": "", "統編": "", "載具/捐贈碼": "", "API開立類型": "一般發票"}
+                item.update({"選取": bool(select_all), "變更發票": False, **current})
                 visible_rows.append(item)
 
             editor = st.data_editor(
-                visible_rows,
-                hide_index=True,
-                use_container_width=True,
-                disabled=list(DISPLAY_COLUMNS),
+                visible_rows, hide_index=True, use_container_width=True, disabled=list(DISPLAY_COLUMNS),
                 column_order=["選取", *DISPLAY_COLUMNS, "變更發票", "發票對象", "發票方式", "公司抬頭", "統編", "載具/捐贈碼", "API開立類型"],
                 column_config={
                     "選取": st.column_config.CheckboxColumn("執行", default=False),
                     "變更發票": st.column_config.CheckboxColumn("變更發票", help="不勾選＝完全沿用訂單原發票設定"),
                     "發票對象": st.column_config.SelectboxColumn("發票對象", options=BUYER_OPTIONS),
                     "發票方式": st.column_config.SelectboxColumn("發票方式", options=DELIVERY_OPTIONS),
-                    "公司抬頭": st.column_config.TextColumn("公司抬頭"),
-                    "統編": st.column_config.TextColumn("統編"),
+                    "公司抬頭": st.column_config.TextColumn("公司抬頭"), "統編": st.column_config.TextColumn("統編"),
                     "載具/捐贈碼": st.column_config.TextColumn("載具/捐贈碼"),
                     "API開立類型": st.column_config.SelectboxColumn("API開立類型", options=list(ui.INVOICE_TYPE_OPTIONS.keys())),
-                },
-                key=f"invoice_pending_picker_{area_label}_{int(select_all)}",
+                }, key=f"invoice_pending_picker_{area_label}_{int(select_all)}",
             )
             edited_rows = _records(editor)
             selected = [row for row in edited_rows if row.get("選取")]
             by_row = {row["列號"]: row for row in candidates}
-            queue: list[dict[str, Any]] = []
+            queue = []
             for row in selected:
                 source = by_row.get(row.get("列號"))
-                if not source:
-                    continue
-                merged = dict(source)
-                merged.update(row)
-                queue.append(merged)
+                if source:
+                    merged = dict(source); merged.update(row); queue.append(merged)
             st.caption(f"待開立發票：{len(candidates)} 筆；已勾選：{len(queue)} 筆")
             st.caption("發票欄位顯示訂單目前設定；需要改紙本／載具／統編等才勾「變更發票」。")
         except Exception as exc:
             queue = []
             st.error(f"讀取清潔異動表失敗：{exc}")
 
-        invalid = []
-        for row in queue:
-            if not row.get("變更發票"):
-                continue
-            if row.get("發票對象") == "公司" and not str(row.get("統編") or "").strip():
-                invalid.append(str(row.get("G 訂單編號") or ""))
+        invalid = [str(row.get("G 訂單編號") or "") for row in queue if row.get("變更發票") and row.get("發票對象") == "公司" and not str(row.get("統編") or "").strip()]
         if invalid:
             st.warning("公司發票尚缺統編：" + "、".join(invalid))
 
-        if st.button("▶ 執行", type="primary", use_container_width=True, disabled=not queue or bool(invalid)):
+        prepared = []
+        if queue and not invalid:
             try:
-                with st.status("正在建立發票資料並送往本機 Agent…", expanded=True) as status:
-                    st.write(f"地區：{area_label}；勾選：{len(queue)} 筆")
-                    _dispatch(queue, area_label, area_key)
-                    status.update(label="已送出，等待本機 Agent 連續處理鯨躍", state="complete")
-                st.success(f"已送往本機 Agent：{len(queue)} 筆；後續不需逐筆確認")
+                prepared = _prepare(queue, area_key)
+                st.markdown("### 🧾 Payload 預覽（備用）")
+                st.caption("下方 Payload 會保留供手動貼入或除錯；執行時仍由本機 Agent 自動匯入。")
+                for item in prepared:
+                    with st.expander(f"預覽 Payload：{item['order_no']}", expanded=len(prepared) == 1):
+                        st.json(item["payload"])
+                        st.code(json.dumps(item["payload"], ensure_ascii=False), language="json")
+            except Exception as exc:
+                prepared = []
+                st.error(f"建立 Payload 預覽失敗：{exc}")
+
+        if st.button("▶ 執行", type="primary", use_container_width=True, disabled=not prepared):
+            try:
+                with st.status("正在送往本機 Agent 匯入發票資料…", expanded=True) as status:
+                    st.write(f"地區：{area_label}；勾選：{len(prepared)} 筆")
+                    _dispatch(prepared, area_label)
+                    status.update(label="已送出；本機 Agent 將匯入發票資料", state="complete")
+                st.success(f"已送往本機 Agent：{len(prepared)} 筆；目前流程只做到發票資料匯入")
             except Exception as exc:
                 st.error(f"送出失敗：{exc}")
 
