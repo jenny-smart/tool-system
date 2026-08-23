@@ -173,6 +173,51 @@ def _read_statement_values(spreadsheet_id: str, title: str) -> list[list[object]
     return res.get("values", [])
 
 
+def _grid_cell_value(cell: dict[str, object]) -> object:
+    if "formattedValue" in cell:
+        return cell["formattedValue"]
+    for value_type in ("effectiveValue", "userEnteredValue"):
+        value = cell.get(value_type)
+        if not isinstance(value, dict):
+            continue
+        for key in ("stringValue", "numberValue", "boolValue"):
+            if key in value:
+                return value[key]
+    return ""
+
+
+def _read_marker_grid_values(
+    spreadsheet_id: str, title: str, start_row: int, end_row: int,
+) -> dict[int, tuple[object, object]]:
+    """直接讀 GridData 的 J/Q，避開 Values API 未反映人工輸入的情況。"""
+    service = get_sheets_service()
+    res = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        ranges=[f"'{title}'!J{start_row}:J{end_row}", f"'{title}'!Q{start_row}:Q{end_row}"],
+        includeGridData=True,
+        fields=(
+            "sheets.data(startRow,startColumn,"
+            "rowData.values(userEnteredValue,effectiveValue,formattedValue))"
+        ),
+    ).execute()
+    result: dict[int, tuple[object, object]] = {}
+    for sheet in res.get("sheets", []):
+        for data in sheet.get("data", []):
+            first_row = int(data.get("startRow", start_row - 1)) + 1
+            start_column = int(data.get("startColumn", -1))
+            for offset, row_data in enumerate(data.get("rowData", [])):
+                cells = row_data.get("values", [])
+                value = _grid_cell_value(cells[0]) if cells else ""
+                row_number = first_row + offset
+                j_value, q_value = result.get(row_number, ("", ""))
+                if start_column == COL_J - 1:
+                    j_value = value
+                elif start_column == COL_Q - 1:
+                    q_value = value
+                result[row_number] = (j_value, q_value)
+    return result
+
+
 def _read_marketing_values(spreadsheet_id: str, title: str) -> list[list[object]]:
     service = get_sheets_service()
     res = service.spreadsheets().values().get(
@@ -311,8 +356,7 @@ def _detail_row(source_row: list[object], detail: dict[str, object], marker: str
 
 def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) -> dict[str, object]:
     """執行代墊費用拆分，並在主控檔記錄開始、完成或失敗。"""
-    date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
-    log_execution("財報富邦更新代墊費用拆分", area, "開始", f"日期區間：{date_range}")
+    log_execution("財報富邦更新代墊費用拆分", area, "開始", "依 J／Q 欄全列掃描")
     try:
         result = _apply_intercompany_expense_rules_impl(area, start_date, end_date)
     except Exception as exc:
@@ -344,12 +388,33 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
             ),
         }
 
+    grid_probe = ""
+    has_visible_marker = any(
+        "代墊" in str(_cell(row, COL_J) or "") for row in statement_values[1:]
+    )
+    if not has_visible_marker:
+        first_row, last_row = 2, len(statement_values)
+        grid_values = _read_marker_grid_values(
+            spreadsheet_id, title, first_row, last_row
+        )
+        if grid_values:
+            for row_idx, (j_value, q_value) in grid_values.items():
+                if not (2 <= row_idx <= len(statement_values)):
+                    continue
+                row = statement_values[row_idx - 1]
+                while len(row) < COL_Q:
+                    row.append("")
+                if str(j_value or "").strip():
+                    row[COL_J - 1] = j_value
+                if str(q_value or "").strip():
+                    row[COL_Q - 1] = q_value
+        grid_probe = f"GridData核對 J{first_row}:J{last_row}、Q{first_row}:Q{last_row}"
+
     marker_rows: list[tuple[int, list[object], str, str, str]] = []
     j_nonblank_count = 0
     keyword_count = 0
     matched_count = 0
     processed_count = 0
-    date_excluded_count = 0
     j_nonblank_samples: list[str] = []
     marker_samples: list[str] = []
     for row_idx, row in enumerate(statement_values[1:], start=2):
@@ -370,17 +435,6 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
         if str(_cell(row, COL_Q) or "").strip():
             processed_count += 1
             continue
-        row_date = _statement_row_date(row)
-        if (start_date or end_date) and row_date is None:
-            raise RuntimeError(
-                f"J{row_idx} 已辨識為「{marker}」，但 B／K／C 欄日期都無法解析"
-            )
-        if start_date and row_date < start_date:
-            date_excluded_count += 1
-            continue
-        if end_date and row_date > end_date:
-            date_excluded_count += 1
-            continue
         month = f"{match.group(1)}{match.group(2)}"
         payer_area = match.group(3).strip()
         if payer_area == "台北":
@@ -393,9 +447,11 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
             f"試算表ID={spreadsheet_id}；分頁「{title}」；"
             f"掃描 {len(statement_values) - 1} 列；J欄非空 {j_nonblank_count} 筆；"
             f"J欄含代墊 {keyword_count} 筆；格式符合 {matched_count} 筆；"
-            f"Q欄已處理 {processed_count} 筆；日期排除 {date_excluded_count} 筆；"
-            "待處理 0 筆"
+            f"Q欄已處理 {processed_count} 筆；待處理 0 筆；"
+            "依列數掃描、不使用日期"
         )
+        if grid_probe:
+            diagnostics += f"；{grid_probe}"
         if marker_samples:
             diagnostics += "；代墊樣本：" + "、".join(marker_samples)
         elif j_nonblank_samples:
