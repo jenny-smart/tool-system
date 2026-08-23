@@ -7,10 +7,12 @@
 
 (() => {
   const TOOL_ID = "lemon-ei-fill-btn";
-  const TOOL_VERSION = "2026-07-15.3";
+  const TOOL_VERSION = "2026-08-23.1";
   if (window.__lemonEiToolVersion === TOOL_VERSION) return;
   window.__lemonEiToolVersion = TOOL_VERSION;
 
+  const FORM_FIELD_IDS = ["orderid", "buyer_name", "buyer_emailaddress", "detaildata", "totalamount"];
+  const isInvoiceCreatePage = () => FORM_FIELD_IDS.every((id) => document.getElementById(id));
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const valueText = (value) => String(value ?? "").trim();
 
@@ -175,6 +177,8 @@
 
   const addButton = () => {
     document.getElementById(TOOL_ID)?.remove();
+    if (!isInvoiceCreatePage()) return;
+
     const btn = document.createElement("button");
     btn.id = TOOL_ID;
     btn.type = "button";
@@ -200,6 +204,10 @@
 
   addButton();
   setInterval(() => {
+    if (!isInvoiceCreatePage()) {
+      document.getElementById(TOOL_ID)?.remove();
+      return;
+    }
     if (!document.getElementById(TOOL_ID)) addButton();
   }, 1000);
 })();
