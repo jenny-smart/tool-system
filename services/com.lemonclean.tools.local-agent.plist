@@ -6,7 +6,7 @@
   <string>com.lemonclean.tools.local-agent</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/python3</string>
+    <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
     <string>-c</string>
     <string>import sys; sys.path.insert(0, '/Users/jenny/Documents/codex-workspace/tool-system'); from tools.local_agent import main; sys.argv=['tools.local_agent','--poll-seconds','2']; raise SystemExit(main())</string>
   </array>
