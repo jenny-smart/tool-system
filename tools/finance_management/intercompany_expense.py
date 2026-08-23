@@ -103,6 +103,15 @@ def _parse_date(value: object):
     return None
 
 
+def _statement_row_date(row: list[object]):
+    """B 欄有時只顯示 MM/DD；改由 B、K、C 依序找可解析的完整日期。"""
+    for col in (2, 11, 3):
+        parsed = _parse_date(_cell(row, col))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _ensure_settings_sheet(service, master_id: str) -> None:
     meta = service.spreadsheets().get(
         spreadsheetId=master_id, fields="sheets.properties.title"
@@ -309,7 +318,7 @@ def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) 
         match = MARKER_RE.fullmatch(marker)
         if not match or str(_cell(row, COL_Q) or "").strip():
             continue
-        row_date = _parse_date(_cell(row, 2))
+        row_date = _statement_row_date(row)
         if start_date and (row_date is None or row_date < start_date):
             continue
         if end_date and (row_date is None or row_date > end_date):
