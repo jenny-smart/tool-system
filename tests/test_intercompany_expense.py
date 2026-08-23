@@ -194,6 +194,30 @@ class IntercompanyExpenseTest(unittest.TestCase):
 
         self.assertEqual(result, {"updated_rows": 1, "inserted_rows": 2})
 
+    def test_grid_data_fallback_recovers_visible_marker(self):
+        source_row = [""] * 18
+        source_row[1] = "2026/08/23"
+        source_row[4] = 125
+        fake_service = _FakeService()
+
+        with (
+            patch.object(expense, "_read_statement_values", return_value=[["標題"], source_row]),
+            patch.object(
+                expense,
+                "_read_marker_grid_values",
+                return_value={2: ("202605桃園代墊", "")},
+            ),
+            patch.object(expense, "load_expense_rules", return_value=_rules()),
+            patch.object(expense, "_read_marketing_values", return_value=_marketing_values()),
+            patch.object(expense, "get_sheets_service", return_value=fake_service),
+            patch.object(expense, "_sheet_id_for_title", return_value=123),
+        ):
+            result = expense.apply_intercompany_expense_rules(
+                "桃園", date(2026, 8, 21), date(2026, 8, 24)
+            )
+
+        self.assertEqual(result, {"updated_rows": 1, "inserted_rows": 2})
+
     def test_google_sheets_date_serial_is_accepted(self):
         self.assertEqual(expense._parse_date(46257), date(2026, 8, 23))
 
