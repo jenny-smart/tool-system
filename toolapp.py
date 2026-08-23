@@ -2695,9 +2695,12 @@ def run_fubon_intercompany_expense_split(*, month="", start_date=None, end_date=
             result = apply_intercompany_expense_rules(
                 city, start_date=start_date, end_date=end_date
             )
-            messages.append(
+            summary = (
                 f"{city}：拆分 {result['updated_rows']} 筆，插入 {result['inserted_rows']} 列"
             )
+            if result.get("diagnostics"):
+                summary += f"；診斷：{result['diagnostics']}"
+            messages.append(summary)
             if on_progress:
                 on_progress(messages[-1], "success")
         except Exception as exc:
