@@ -193,6 +193,9 @@ class IntercompanyExpenseTest(unittest.TestCase):
 
         self.assertEqual(result, {"updated_rows": 1, "inserted_rows": 2})
 
+    def test_google_sheets_date_serial_is_accepted(self):
+        self.assertEqual(expense._parse_date(46257), date(2026, 8, 23))
+
 
 if __name__ == "__main__":
     unittest.main()
