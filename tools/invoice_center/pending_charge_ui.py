@@ -36,6 +36,50 @@ def install(ui) -> None:
             return str(st.session_state.get("invoice_center_member_carrier") or "")
         return ""
 
+    def _current_invoice_settings(area_key: str, order_no: str) -> dict[str, str]:
+        suffix = str(st.session_state.get("invoice_center_order_suffix", "-1") or "-1")
+        _order, payload = ui.fetch_backend_order_invoice_payload(area_key, order_no, suffix=suffix)
+        buyer_identifier = str(getattr(payload, "buyer_identifier", "") or "").strip()
+        buyer_name = str(getattr(payload, "buyer_name", "") or "").strip()
+        carrier_type = str(getattr(payload, "carriertype", "") or "").strip()
+        carrier_no = str(getattr(payload, "carrierid1", "") or "").strip()
+        donate = str(getattr(payload, "donate", "") or "").strip()
+        donate_code = str(getattr(payload, "donatevat", "") or "").strip()
+
+        if buyer_identifier:
+            delivery = "紙本"
+            carrier_value = ""
+            buyer_type = "公司"
+        elif donate == "1" or donate_code:
+            delivery = "捐贈"
+            carrier_value = donate_code
+            buyer_type = "自然人"
+        elif carrier_type == "3J0002":
+            delivery = "手機載具"
+            carrier_value = carrier_no
+            buyer_type = "自然人"
+        elif carrier_type == "CQ0001":
+            delivery = "自然人憑證"
+            carrier_value = carrier_no
+            buyer_type = "自然人"
+        elif carrier_type:
+            delivery = "會員載具"
+            carrier_value = carrier_no
+            buyer_type = "自然人"
+        else:
+            delivery = "紙本"
+            carrier_value = ""
+            buyer_type = "自然人"
+
+        return {
+            "發票對象": buyer_type,
+            "發票方式": delivery,
+            "公司抬頭": buyer_name if buyer_type == "公司" else "",
+            "統編": buyer_identifier,
+            "載具/捐贈碼": carrier_value,
+            "API開立類型": "一般發票",
+        }
+
     def _apply_override(row: dict[str, Any]) -> None:
         buyer_type = str(row.get("發票對象") or "自然人")
         delivery = str(row.get("發票方式") or "會員載具")
@@ -69,7 +113,6 @@ def install(ui) -> None:
     def _build_payload(area_key: str, order_no: str, override: dict[str, Any] | None) -> dict[str, Any]:
         suffix = str(st.session_state.get("invoice_center_order_suffix", "-1") or "-1")
         ui._load_backend_order(area_key, order_no, suffix)
-        # 未勾「變更發票」時完全沿用訂單原始發票設定；只有明確勾選才覆寫。
         if override is not None:
             _apply_override(override)
         rows = ui._normalize_line_items(st.session_state.get("invoice_center_line_items", []))
@@ -115,15 +158,19 @@ def install(ui) -> None:
             visible_rows = []
             for source in candidates:
                 item = {key: source.get(key, "") for key in DISPLAY_COLUMNS}
-                item.update({
-                    "選取": bool(select_all),
-                    "變更發票": False,
+                order_no = str(source.get("G 訂單編號") or source.get("_order_no") or "").strip()
+                current = _current_invoice_settings(area_key, order_no) if order_no else {
                     "發票對象": "自然人",
-                    "發票方式": "會員載具",
+                    "發票方式": "紙本",
                     "公司抬頭": "",
                     "統編": "",
                     "載具/捐贈碼": "",
                     "API開立類型": "一般發票",
+                }
+                item.update({
+                    "選取": bool(select_all),
+                    "變更發票": False,
+                    **current,
                 })
                 visible_rows.append(item)
 
@@ -157,7 +204,7 @@ def install(ui) -> None:
                 merged.update(row)
                 queue.append(merged)
             st.caption(f"待開立發票：{len(candidates)} 筆；已勾選：{len(queue)} 筆")
-            st.caption("需要改紙本／載具／統編等才勾「變更發票」；未勾選會沿用訂單原設定。")
+            st.caption("發票欄位顯示訂單目前設定；需要改紙本／載具／統編等才勾「變更發票」。")
         except Exception as exc:
             queue = []
             st.error(f"讀取清潔異動表失敗：{exc}")
@@ -171,8 +218,6 @@ def install(ui) -> None:
         if invalid:
             st.warning("公司發票尚缺統編：" + "、".join(invalid))
 
-        # 清單就是最後確認層。按一次執行後建立全部 Payload 並交給 Agent 連續處理，
-        # 不再逐筆顯示 Payload 或要求再次按「開始開立發票」。
         if st.button("▶ 執行", type="primary", use_container_width=True, disabled=not queue or bool(invalid)):
             try:
                 with st.status("正在建立發票資料並送往本機 Agent…", expanded=True) as status:
