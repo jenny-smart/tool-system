@@ -5,7 +5,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from tools.invoice_center.cetustek_invoice_paste import process_pending_invoice_payloads
+from tools.invoice_center.cetustek_invoice_paste import _open_invoice_create
 from tools.invoice_center.ei_export_all import (
     EI_HOME_URL,
     configured_areas,
@@ -24,7 +24,7 @@ from tools.invoice_center.chrome_cdp import (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="登入鯨躍第一層及指定地區 EI 第二層；若有待開立 Payload 則接續貼入")
+    parser = argparse.ArgumentParser(description="登入鯨躍第一層及指定地區 EI 第二層，並停在發票開立頁")
     parser.add_argument("--area", help="第二層地區，例如：台北、台中；未指定時使用第一個已設定地區")
     parser.add_argument("--accounts", type=Path, help="EI／鯨躍帳密 JSON")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
@@ -32,7 +32,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def _ei_logged_in(page) -> bool:
-    """Detect an already-authenticated EI page without installing any dialog handler."""
     try:
         page.wait_for_load_state("domcontentloaded")
         if "ei.com.tw/InvoiceRent" not in page.url:
@@ -44,12 +43,11 @@ def _ei_logged_in(page) -> bool:
 
 
 def _clean_ei_page(context, page):
-    """Return a page with the same authenticated session but no login dialog listeners."""
     clean = context.new_page()
     clean.goto(EI_HOME_URL, wait_until="domcontentloaded")
     try:
         if _ei_logged_in(clean):
-            print("[鯨躍] 已建立乾淨 EI 分頁供發票貼入，不沿用登入 Dialog handler")
+            print("[鯨躍] 已建立乾淨 EI 分頁，不沿用登入 Dialog handler")
             return clean
     except Exception:
         pass
@@ -65,7 +63,7 @@ def main() -> int:
     accounts = load_accounts(args.accounts)
     area = args.area or configured_areas(accounts)[0]
     credentials = credentials_for(area, accounts)
-    company_id, member_id, portal_password = portal_values(accounts)
+    company_id, _member_id, portal_password = portal_values(accounts)
     missing = []
     if not company_id:
         missing.append("portal_company_id")
@@ -77,6 +75,7 @@ def main() -> int:
             + "、".join(missing)
             + "。這次仍可手動輸入第一層；登入後程式會自動預填第二層。"
         )
+
     print(f"第二層登入地區：{credentials.label}")
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
@@ -84,8 +83,6 @@ def main() -> int:
         portal_page, ei_page = find_invoice_pages(context)
         used_login_handler = False
 
-        # 已登入 EI 時直接沿用，不再呼叫 login_second；login_second 會安裝一個
-        # 自動 accept 所有 dialog 的 logger，會搶先吃掉「貼上發票資料」的 prompt。
         if ei_page is not None and _ei_logged_in(ei_page):
             active_page = ei_page
             print(f"[{credentials.label}] 發現既有 EI 分頁，沿用目前登入狀態")
@@ -107,16 +104,13 @@ def main() -> int:
 
         print(f"鯨躍第一層及 {credentials.label} EI 第二層登入完成")
 
-        # 若本次真的走過登入流程，換到同一 BrowserContext 的乾淨 EI 分頁。
-        # Cookie/session 會沿用，但 Playwright page dialog listener 不會跟過去。
         if used_login_handler:
             active_page = _clean_ei_page(context, active_page)
 
-        processed = process_pending_invoice_payloads(active_page, credentials.label)
-        if processed:
-            print(f"已接續處理 {processed} 筆發票 Payload；同區多筆不重複登入。")
-        else:
-            print("沒有待開立 Payload；停留在目前鯨躍登入狀態。")
+        # 目前階段只負責登入並進到「發票開立」頁。
+        # Payload 已由 Tools App 保留在頁面及佇列，這裡不點「貼上發票資料」、不處理 dialog。
+        _open_invoice_create(active_page)
+        print(f"[{credentials.label}] 已停在發票開立頁；尚未貼入 Payload")
     return 0
 
 
