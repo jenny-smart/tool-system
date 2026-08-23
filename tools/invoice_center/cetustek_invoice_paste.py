@@ -75,6 +75,8 @@ def _open_invoice_create(page: Any) -> None:
                 pass
         page.wait_for_timeout(200)
     raise RuntimeError("已點『發票開立』，但 10 秒內未進入發票開立表單")
+
+
 def _clear_dialog_handlers(page: Any) -> None:
     try:
         page.remove_all_listeners("dialog")
@@ -120,6 +122,8 @@ def _paste_one(page: Any, payload_json: str) -> None:
         raise RuntimeError(
             f"發票表單驗證失敗：orderid 預期 {expected_order_id}，實際 {actual_order_id or '空白'}"
         )
+
+
 def process_pending_invoice_payloads(page: Any, area: str) -> int:
     pending = list_pending_payloads(area)
     if not pending:
