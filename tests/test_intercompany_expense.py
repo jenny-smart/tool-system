@@ -208,6 +208,8 @@ class IntercompanyExpenseTest(unittest.TestCase):
             result = expense.apply_intercompany_expense_rules("桃園")
 
         self.assertEqual(result["updated_rows"], 0)
+        self.assertIn("試算表ID=statement", result["diagnostics"])
+        self.assertIn("J欄非空 1 筆", result["diagnostics"])
         self.assertIn("格式符合 1 筆", result["diagnostics"])
         self.assertIn("Q欄已處理 1 筆", result["diagnostics"])
 

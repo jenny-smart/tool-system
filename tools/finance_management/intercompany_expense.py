@@ -166,7 +166,8 @@ def _read_statement_values(spreadsheet_id: str, title: str) -> list[list[object]
     res = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range=f"'{title}'!A:R",
-        valueRenderOption="UNFORMATTED_VALUE",
+        # 使用畫面顯示值，確保人工輸入或公式產生的 J 欄標記與使用者看到的一致。
+        valueRenderOption="FORMATTED_VALUE",
         dateTimeRenderOption="FORMATTED_STRING",
     ).execute()
     return res.get("values", [])
@@ -338,17 +339,26 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
         return {
             "updated_rows": 0,
             "inserted_rows": 0,
-            "diagnostics": f"掃描「{title}」0 列；工作表沒有資料列",
+            "diagnostics": (
+                f"試算表ID={spreadsheet_id}；分頁「{title}」；掃描 0 列；工作表沒有資料列"
+            ),
         }
 
     marker_rows: list[tuple[int, list[object], str, str, str]] = []
+    j_nonblank_count = 0
     keyword_count = 0
     matched_count = 0
     processed_count = 0
     date_excluded_count = 0
+    j_nonblank_samples: list[str] = []
     marker_samples: list[str] = []
     for row_idx, row in enumerate(statement_values[1:], start=2):
         marker = str(_cell(row, COL_J) or "").strip()
+        if marker:
+            j_nonblank_count += 1
+            j_nonblank_samples.append(f"J{row_idx}={marker}")
+            if len(j_nonblank_samples) > 5:
+                j_nonblank_samples.pop(0)
         if "代墊" in marker:
             keyword_count += 1
             if len(marker_samples) < 3:
@@ -380,13 +390,16 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
         marker_rows.append((row_idx, row, marker, month, payer_area))
     if not marker_rows:
         diagnostics = (
-            f"掃描「{title}」{len(statement_values) - 1} 列；"
+            f"試算表ID={spreadsheet_id}；分頁「{title}」；"
+            f"掃描 {len(statement_values) - 1} 列；J欄非空 {j_nonblank_count} 筆；"
             f"J欄含代墊 {keyword_count} 筆；格式符合 {matched_count} 筆；"
             f"Q欄已處理 {processed_count} 筆；日期排除 {date_excluded_count} 筆；"
             "待處理 0 筆"
         )
         if marker_samples:
-            diagnostics += "；樣本：" + "、".join(marker_samples)
+            diagnostics += "；代墊樣本：" + "、".join(marker_samples)
+        elif j_nonblank_samples:
+            diagnostics += "；J欄末筆樣本：" + "、".join(j_nonblank_samples)
         return {"updated_rows": 0, "inserted_rows": 0, "diagnostics": diagnostics}
 
     markers = [item[2] for item in marker_rows]
