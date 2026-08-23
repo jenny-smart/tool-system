@@ -49,7 +49,13 @@ def _all_rows(service: Any, spreadsheet_id: str) -> list[dict[str, Any]]:
     return result
 
 
-def enqueue_payload(\n    area: str,\n    order_no: str,\n    payload_json: str,\n    created_by: str = "Tool System",\n    source_row: int = 0,\n) -> int:
+def enqueue_payload(
+    area: str,
+    order_no: str,
+    payload_json: str,
+    created_by: str = "Tool System",
+    source_row: int = 0,
+) -> int:
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
     _ensure_sheet(service, spreadsheet_id)
