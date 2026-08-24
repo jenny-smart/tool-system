@@ -1456,6 +1456,8 @@ def render_report() -> None:
     meta_path = latest_dir / "meta.json"
     html_path = latest_dir / "email_preview.html"
     order_date_path = latest_dir / "order_date_summary.csv"
+    order_date_paid_path = latest_dir / "order_date_paid_summary.csv"
+    order_date_combined_path = latest_dir / "order_date_combined_summary.csv"
     reserve_path = latest_dir / "reserve_summary.csv"
     net_performance_path = latest_dir / "net_performance_summary.csv"
     month_performance_path = latest_dir / "month_performance_summary.csv"
@@ -1523,52 +1525,59 @@ def render_report() -> None:
         unsafe_allow_html=True,
     )
 
-    def update_performance_report() -> None:
-        """依目前兩個頁籤的篩選條件重新產生所有業績報表。"""
+    def update_performance_report(scope: str = "all") -> None:
+        """更新目前總表，或依頁籤條件重新產生全部業績報表。"""
         selected_order_start = st.session_state.get("performance_order_start_date", default_order_start)
         selected_order_end = st.session_state.get("performance_order_end_date", default_order_end)
         selected_month_start = st.session_state.get("performance_report_start_month", default_start_date)
         selected_month_end = st.session_state.get("performance_report_end_month", default_end_date)
-        if selected_order_start > selected_order_end:
+        if scope == "all" and selected_order_start > selected_order_end:
             st.error("訂購日期迄日不可早於起日")
             return
-        if selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
+        if scope == "all" and selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
             st.error("結束月份不可早於起始月份")
             return
 
         try:
-            add_log("開始更新業績報表", "info")
-            run_script(
-                "tools/scheduled_daily/performance_report.py",
-                [
-                    "dashboard", "true",
+            label = "目前總表" if scope == "current" else "全部報表"
+            add_log(f"開始更新{label}", "info")
+            args = ["dashboard", "true", "--scope", scope]
+            if scope == "all":
+                args.extend([
                     "--order-start-date", selected_order_start.strftime("%Y-%m-%d"),
                     "--order-end-date", selected_order_end.strftime("%Y-%m-%d"),
                     "--start-month", selected_month_start.strftime("%Y-%m"),
                     "--end-month", selected_month_end.strftime("%Y-%m"),
-                ],
+                ])
+            run_script(
+                "tools/scheduled_daily/performance_report.py",
+                args,
             )
-            add_log("業績報表更新完成", "success")
+            add_log(f"{label}更新完成", "success")
             st.rerun()
         except Exception as e:
             add_log(f"業績報表更新失敗：{e}", "error")
             st.error(f"業績報表更新失敗：{e}")
 
-    top_cols = st.columns([1, 1, 1, 1])
+    top_cols = st.columns([1, 1, 1, 1, 1])
     with top_cols[0]:
         if st.button("← 返回主控台", use_container_width=True):
             set_view("main")
             st.rerun()
 
     with top_cols[1]:
-        if st.button("🔄 更新全部報表", use_container_width=True):
-            update_performance_report()
+        if st.button("🔄 更新目前總表", use_container_width=True):
+            update_performance_report("current")
 
     with top_cols[2]:
+        if st.button("🔄 更新全部報表", use_container_width=True):
+            update_performance_report("all")
+
+    with top_cols[3]:
         if st.button("📂 重新讀取資料", use_container_width=True):
             st.rerun()
 
-    with top_cols[3]:
+    with top_cols[4]:
         st.link_button("🔗 開啟獨立連結", "?view=report", use_container_width=True)
 
     if not df4_path.exists():
@@ -1580,6 +1589,8 @@ def render_report() -> None:
     next_df = load_csv(next_path)
     month_end_df = load_csv(month_end_path)
     order_date_df = load_csv(order_date_path)
+    order_date_paid_df = load_csv(order_date_paid_path)
+    order_date_combined_df = load_csv(order_date_combined_path)
     reserve_df = load_csv(reserve_path)
     net_performance_df = load_csv(net_performance_path)
     month_performance_df = load_csv(month_performance_path)
@@ -1639,14 +1650,19 @@ def render_report() -> None:
                 value=default_order_end,
                 key="performance_order_end_date",
             )
-        st.caption("預設起迄日皆為當日；結果依地區彙總未付款、已付款及合計業績。")
+        st.caption("預設起迄日皆為當日；分別顯示總額、服務月份（本月起四個月）與儲值金購買金額。")
         if st.button(
             "✅ 確定並套用訂購日期區間",
             key="apply_performance_order_dates",
             use_container_width=True,
         ):
-            update_performance_report()
+            update_performance_report("all")
+        st.markdown("#### 待付款")
         render_html_table(order_date_df)
+        st.markdown("#### 已付款")
+        render_html_table(order_date_paid_df)
+        st.markdown("#### 待付款＋已付款")
+        render_html_table(order_date_combined_df)
         st.markdown("</div>", unsafe_allow_html=True)
 
     with report_tabs[2]:
@@ -1678,7 +1694,7 @@ def render_report() -> None:
             key="apply_performance_month_range",
             use_container_width=True,
         ):
-            update_performance_report()
+            update_performance_report("all")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="card"><div class="card-title">➖ 該月業績－該月保留單業績</div>', unsafe_allow_html=True)
