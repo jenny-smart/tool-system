@@ -37,6 +37,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def _ei_logged_in(page) -> bool:
+    """Validate the shared EI session in a disposable page without changing the user's page."""
+    probe = None
     messages: list[str] = []
 
     def handle_dialog(dialog) -> None:
@@ -44,17 +46,25 @@ def _ei_logged_in(page) -> bool:
         dialog.accept()
 
     try:
-        page.remove_all_listeners("dialog")
-        page.on("dialog", handle_dialog)
-        page.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded", timeout=15000)
-        return not any("未授權" in message for message in messages) and _is_invoice_create_page(page)
+        probe = page.context.new_page()
+        probe.on("dialog", handle_dialog)
+        probe.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded", timeout=15000)
+        return (
+            not any("未授權" in message for message in messages)
+            and _is_invoice_create_page(probe)
+        )
     except Exception:
         return False
     finally:
-        try:
-            page.remove_listener("dialog", handle_dialog)
-        except Exception:
-            pass
+        if probe is not None:
+            try:
+                probe.remove_listener("dialog", handle_dialog)
+            except Exception:
+                pass
+            try:
+                probe.close()
+            except Exception:
+                pass
 
 def _clean_ei_page(context, page):
     clean = context.new_page()
