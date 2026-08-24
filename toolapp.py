@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0824_v3_support_shortcuts
+版本：0824_v4_short_labels
 更新日期：2026-08-24
 """
 import html
@@ -3462,7 +3462,7 @@ with head_report:
 
 with head_oauth:
     if can_access_page("settings"):
-        if st.button("🔑 Drive 授權設定", use_container_width=True):
+        if st.button("🔑OAuth", use_container_width=True):
             set_view("oauth")
             st.rerun()
     else:
@@ -3470,7 +3470,7 @@ with head_oauth:
 
 with head_agent:
     if can_access_page("settings"):
-        if st.button("🖥️ Agent 離線處理", use_container_width=True):
+        if st.button("🖥️Agent", use_container_width=True):
             set_view("agent_help")
             st.rerun()
     else:
