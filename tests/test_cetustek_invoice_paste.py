@@ -145,18 +145,23 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
     def test_extract_invoice_number_from_matching_order_row(self) -> None:
         page = MagicMock()
-        rows = MagicMock()
-        row_1 = MagicMock()
-        row_1.inner_text.return_value = "DM51791827 LC002147991"
-        row_2 = MagicMock()
-        row_2.inner_text.return_value = "DM51790871 LC002146661-1"
-        rows.count.return_value = 2
-        rows.nth.side_effect = [row_1, row_2]
-        page.locator.return_value = rows
+        page.evaluate.return_value = [
+            "DM51791827 LC002147991",
+            "DM51790871 LC002146661-\n1",
+        ]
 
         self.assertEqual(
             paste._extract_invoice_no_for_order(page, "LC002146661"),
             "DM51790871",
+        )
+
+    def test_extract_invoice_number_does_not_match_similar_order(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = ["DM51791827 LC0021466619-1"]
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC002146661"),
+            "",
         )
 
     def test_extract_invoice_number_from_saved_page(self) -> None:
