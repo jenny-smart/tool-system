@@ -305,6 +305,25 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         return 0
 
     print(f"[{area}] 待匯入發票 Payload：{len(pending)} 筆")
+
+    # 上次若已人工儲存、但 Agent 未完成回填，查詢頁仍可依訂單同列復原，
+    # 必須在導向新的開立頁之前處理，避免重複開立。
+    for item in pending:
+        row_no = int(item.get("_row") or 0)
+        source_row = int(item.get("source_row") or 0)
+        order_no = str(item.get("order_no") or "").strip()
+        invoice_no = _extract_invoice_no_for_order(page, order_no)
+        if not invoice_no:
+            continue
+        write_invoice_result(area, source_row, order_no, invoice_no)
+        update_payload_status(row_no, "completed", f"已從查詢頁復原並回填 O/AA：{invoice_no}")
+        print(
+            f"[{area}] {order_no}：查詢頁已有發票 {invoice_no}，"
+            "已直接回填，未重複開立",
+            flush=True,
+        )
+        return 1
+
     _open_invoice_create(page)
     _clear_dialog_handlers(page)
 
