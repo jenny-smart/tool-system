@@ -18,16 +18,43 @@ write_launcher() {
   mkdir -p "${PID_FILE:h}" "$LOG_DIR"
   cat > "$LAUNCHER" <<EOF
 #!/bin/zsh
-set -e
+set -u
 cd "$PROJECT_DIR"
 export HOME="$HOME"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PYTHONUNBUFFERED=1
 export PYTHONPATH="$PROJECT_DIR"
 export TOOLS_APP_SECRETS_FILE="$HOME/lemon/.streamlit/secrets.toml"
-echo \$\$ > "$PID_FILE"
-trap 'rm -f "$PID_FILE"' EXIT INT TERM
-exec /Library/Developer/CommandLineTools/usr/bin/python3 -m tools.local_agent --poll-seconds 2 >> "$LOG_DIR/local_agent.launchd.out.log" 2>> "$LOG_DIR/local_agent.launchd.err.log"
+
+PID_FILE="$PID_FILE"
+LOG_FILE="$LOG_DIR/local_agent.launchd.out.log"
+ERR_FILE="$LOG_DIR/local_agent.launchd.err.log"
+child_pid=""
+stopping=0
+
+echo \$\$ > "\$PID_FILE"
+
+cleanup() {
+  stopping=1
+  if [[ -n "\${child_pid:-}" ]] && kill -0 "\$child_pid" 2>/dev/null; then
+    kill "\$child_pid" 2>/dev/null || true
+    wait "\$child_pid" 2>/dev/null || true
+  fi
+  rm -f "\$PID_FILE"
+}
+trap cleanup EXIT INT TERM HUP
+
+while (( ! stopping )); do
+  /Library/Developer/CommandLineTools/usr/bin/python3 -m tools.local_agent --poll-seconds 2 >> "\$LOG_FILE" 2>> "\$ERR_FILE" &
+  child_pid=\$!
+  exit_code=0
+  wait "\$child_pid" || exit_code=\$?
+  child_pid=""
+
+  (( stopping )) && break
+  printf '[%s] Local Agent exited with code %s; restarting in 5 seconds.\n' "\$(date '+%Y-%m-%d %H:%M:%S')" "\$exit_code" >> "\$ERR_FILE"
+  sleep 5
+ done
 EOF
   chmod 700 "$LAUNCHER"
 }
@@ -40,7 +67,7 @@ start_agent() {
     return
   fi
   rm -f "$PID_FILE"
-  # 從使用者 shell 啟動後立即脫離 Terminal；保留 Documents 存取權限，關閉視窗不影響 Agent。
+  # 從使用者 shell 啟動常駐 supervisor；保留 Documents 存取權限，Agent 異常退出時自動重啟。
   nohup "$LAUNCHER" </dev/null >/dev/null 2>&1 &!
   sleep 1
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -75,6 +102,10 @@ stop_agent() {
   if [[ -f "$PID_FILE" ]]; then
     pid="$(cat "$PID_FILE")"
     kill "$pid" 2>/dev/null || true
+    for _ in {1..20}; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
     rm -f "$PID_FILE"
   fi
 }
