@@ -325,7 +325,8 @@ def _purchase_service_date(item) -> str:
 
 def _purchase_is_stored_value_topup(item) -> bool:
     buy = str(item.get("buy") or "").strip().lower()
-    if buy in {"1", "true", "yes", "y"}:
+    # 後台購買項目：1 是專業清潔，5 才是購買儲值金。
+    if buy == "5":
         return True
     service = " ".join(str(item.get(key) or "") for key in (
         "service", "service_name", "item_name", "purchase_item", "title",
@@ -440,6 +441,49 @@ def build_order_date_summaries(records, month_ranges=None):
     return {"待付款": unpaid, "已付款": paid, "待付款＋已付款": combined}
 
 
+def build_order_date_summaries_from_report_rows(records, month_ranges):
+    """用後台訂單統計表的實際金額建立訂購日期付款彙總。"""
+    tables = {}
+    for payment_label in ("待付款", "已付款"):
+        cols = ["地區", payment_label]
+        cols.extend(f"{label}{payment_label}" for label, _, _ in month_ranges)
+        cols.append(f"儲值金{payment_label}")
+        rows = []
+        for city in CITY_ORDER:
+            matched = next(
+                (
+                    row for row in records
+                    if row.get("地區") == city and row.get("付款狀態") == payment_label
+                ),
+                {},
+            )
+            row = {col: 0 for col in cols}
+            row["地區"] = city
+            row[payment_label] = safe_int(matched.get("總金額", 0))
+            for label, _, _ in month_ranges:
+                row[f"{label}{payment_label}"] = safe_int(
+                    (matched.get("月份金額") or {}).get(label, 0)
+                )
+            row[f"儲值金{payment_label}"] = safe_int(matched.get("儲值金金額", 0))
+            rows.append(row)
+        out = pd.DataFrame(rows, columns=cols)
+        total = {"地區": "加總", **{col: out[col].sum() for col in cols[1:]}}
+        tables[payment_label] = pd.concat(
+            [out, pd.DataFrame([total])], ignore_index=True,
+        )[cols]
+
+    unpaid = tables["待付款"]
+    paid = tables["已付款"]
+    combined = unpaid.copy()
+    combined.columns = ["地區", "待付款＋已付款"] + [
+        col.replace("待付款", "待付款＋已付款") for col in unpaid.columns[2:]
+    ]
+    for index, col in enumerate(paid.columns[1:], start=1):
+        combined.iloc[:, index] = unpaid.iloc[:, index] + paid[col]
+    tables["待付款＋已付款"] = combined
+    return tables
+
+
 def build_order_date_summary(records) -> pd.DataFrame:
     """保留原介面供既有呼叫使用。"""
     cols = ["地區", "未付款", "已付款", "未付款＋已付款"]
@@ -530,16 +574,23 @@ def build_net_performance_summary(raw_df: pd.DataFrame, reserve_df: pd.DataFrame
     return pd.DataFrame(rows, columns=cols)
 
 
-def build_url(start, end, status, keyword=""):
+def build_report_url(
+    status,
+    keyword="",
+    date_s="",
+    date_e="",
+    clean_date_s="",
+    clean_date_e="",
+):
     params = {
         "keyword": keyword,
         "name": "",
         "phone": "",
         "orderNo": "",
-        "date_s": "",
-        "date_e": "",
-        "clean_date_s": start,
-        "clean_date_e": end,
+        "date_s": date_s,
+        "date_e": date_e,
+        "clean_date_s": clean_date_s,
+        "clean_date_e": clean_date_e,
         "paid_at_s": "",
         "paid_at_e": "",
         "refundDateS": "",
@@ -557,6 +608,15 @@ def build_url(start, end, status, keyword=""):
         "orderBy": "",
     }
     return requests.Request("GET", PURCHASE_URL, params=params).prepare().url
+
+
+def build_url(start, end, status, keyword=""):
+    return build_report_url(
+        status,
+        keyword=keyword,
+        clean_date_s=start,
+        clean_date_e=end,
+    )
 
 
 def get_keywords(city):
@@ -727,6 +787,71 @@ def parse_html(html, payment_status=None):
 
     log(f"✅ parse_html rows = {len(results)}")
     return results
+
+
+def _payment_amount_from_report_rows(rows, payment_status):
+    """拆分服務金額與購買儲值金；服務金額包含以儲值金付款的服務。"""
+    amount_key = "已付款" if str(payment_status) == "1" else "待付款"
+    service_amount = 0
+    stored_value_topup = 0
+    for row in rows:
+        amount = safe_int(row.get(amount_key, 0))
+        if row.get("收入類型") == "現金收入" and row.get("服務") == "儲值金":
+            stored_value_topup += amount
+        else:
+            service_amount += amount
+    return service_amount, stored_value_topup
+
+
+def _fetch_order_date_report_row(
+    session,
+    city,
+    order_start_date,
+    order_end_date,
+    month_ranges,
+    payment_status,
+):
+    payment_label = "已付款" if str(payment_status) == "1" else "待付款"
+    result = {
+        "地區": city,
+        "付款狀態": payment_label,
+        "總金額": 0,
+        "月份金額": {label: 0 for label, _, _ in month_ranges},
+        "儲值金金額": 0,
+    }
+    for keyword in get_keywords(city):
+        total_url = build_report_url(
+            payment_status,
+            keyword=keyword,
+            date_s=order_start_date,
+            date_e=order_end_date,
+        )
+        response = session.get(total_url, headers=HEADERS, allow_redirects=True)
+        response.raise_for_status()
+        rows = parse_html(response.text, payment_status=payment_status)
+        service_amount, topup_amount = _payment_amount_from_report_rows(
+            rows, payment_status,
+        )
+        result["總金額"] += service_amount
+        result["儲值金金額"] += topup_amount
+
+        for label, clean_start, clean_end in month_ranges:
+            month_url = build_report_url(
+                payment_status,
+                keyword=keyword,
+                date_s=order_start_date,
+                date_e=order_end_date,
+                clean_date_s=clean_start,
+                clean_date_e=clean_end,
+            )
+            response = session.get(month_url, headers=HEADERS, allow_redirects=True)
+            response.raise_for_status()
+            month_rows = parse_html(response.text, payment_status=payment_status)
+            month_amount, _ = _payment_amount_from_report_rows(
+                month_rows, payment_status,
+            )
+            result["月份金額"][label] += month_amount
+    return result
 
 
 def to_category(service, income) -> Optional[str]:
@@ -1571,7 +1696,8 @@ def generate_sales_report(
             seen_months.add(month_range[0])
             fetch_month_ranges.append(month_range)
     merged = {}
-    order_date_records = []
+    order_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
+    order_date_report_rows = []
     reserve_records = []
     city_errors = []
 
@@ -1671,14 +1797,17 @@ def generate_sales_report(
 
             if update_scope == "all":
                 try:
-                    month_order_items = _fetch_purchase_items(
-                        session,
-                        date_s=order_start_date,
-                        date_e=order_end_date,
-                    )
-                    for item in month_order_items:
-                        item["__city"] = city
-                    order_date_records.extend(month_order_items)
+                    for payment_status in (0, 1):
+                        order_date_report_rows.append(
+                            _fetch_order_date_report_row(
+                                session,
+                                city,
+                                order_start_date,
+                                order_end_date,
+                                order_month_ranges,
+                                payment_status,
+                            )
+                        )
 
                     reserve_items = _fetch_purchase_items(
                         session,
@@ -1742,8 +1871,9 @@ def generate_sales_report(
     df3 = build_region3_df(df2)
     df4 = build_region4_df(df2)
     if update_scope == "all":
-        order_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
-        order_summaries = build_order_date_summaries(order_date_records, order_month_ranges)
+        order_summaries = build_order_date_summaries_from_report_rows(
+            order_date_report_rows, order_month_ranges,
+        )
         order_date_df = order_summaries["待付款"]
         order_date_paid_df = order_summaries["已付款"]
         order_date_combined_df = order_summaries["待付款＋已付款"]

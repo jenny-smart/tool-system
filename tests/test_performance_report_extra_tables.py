@@ -39,7 +39,7 @@ def test_order_date_summaries_split_service_month_and_add_stored_weekend_price()
         {"__city": "台北", "date_clean": "2026-12-28", "total": 1000, "purchase_status": "0"},
         {"__city": "台北", "date_clean": "2027-01-03", "total": 2000, "purchase_status": "1",
          "stored_value_weekend_price": 200},
-        {"__city": "台中", "service": "儲值金", "buy": 1, "total": 3000, "purchase_status": "0"},
+        {"__city": "台中", "service": "儲值金", "buy": 5, "total": 3000, "purchase_status": "0"},
     ]
     tables = report.build_order_date_summaries(records, ranges)
     unpaid = tables["待付款"].set_index("地區")
@@ -51,6 +51,9 @@ def test_order_date_summaries_split_service_month_and_add_stored_weekend_price()
     assert unpaid.loc["台中", "待付款"] == 0
     assert paid.loc["台北", "2027/01已付款"] == 2200
     assert combined.loc["台北", "待付款＋已付款"] == 3200
+    assert not report._purchase_is_stored_value_topup(
+        {"buy": 1, "service": "居家清潔", "date_clean": "2026-12-28"}
+    )
 
 
 def test_paid_summary_matches_backend_service_and_stored_value_totals():
@@ -62,7 +65,7 @@ def test_paid_summary_matches_backend_service_and_stored_value_totals():
         {"__city": "台北", "date_clean": "2026-09-10", "total": 10800, "purchase_status": "1"},
         {"__city": "台北", "date_clean": "2026-09-20", "total": 21600,
          "payway": "儲值金", "purchase_status": "1"},
-        {"__city": "台北", "service": "儲值金", "buy": 1, "total": 50000, "purchase_status": "1"},
+        {"__city": "台北", "service": "儲值金", "buy": 5, "total": 50000, "purchase_status": "1"},
     ]
     paid = report.build_order_date_summaries(records, ranges)["已付款"].set_index("地區")
 
@@ -70,6 +73,35 @@ def test_paid_summary_matches_backend_service_and_stored_value_totals():
     assert paid.loc["台北", "2026/08已付款"] == 36400
     assert paid.loc["台北", "2026/09已付款"] == 32400
     assert paid.loc["台北", "儲值金已付款"] == 50000
+
+
+def test_report_rows_use_exact_backend_paid_amounts_without_json_tail_digits():
+    ranges = report.get_order_service_month_ranges("2026-08-24", month_count=4)
+    records = [{
+        "地區": "台北",
+        "付款狀態": "已付款",
+        "總金額": 42400 + 26400,
+        "月份金額": {"2026/08": 31600 + 4800, "2026/09": 10800 + 21600},
+        "儲值金金額": 50000,
+    }]
+    paid = report.build_order_date_summaries_from_report_rows(
+        records, ranges,
+    )["已付款"].set_index("地區")
+
+    assert paid.loc["台北", "已付款"] == 68800
+    assert paid.loc["台北", "2026/08已付款"] == 36400
+    assert paid.loc["台北", "2026/09已付款"] == 32400
+    assert paid.loc["台北", "儲值金已付款"] == 50000
+
+
+def test_report_amount_split_keeps_stored_value_service_in_paid_total():
+    rows = [
+        {"收入類型": "現金收入", "服務": "居家清潔", "已付款": 42400},
+        {"收入類型": "儲值金", "服務": "居家清潔", "已付款": 26400},
+        {"收入類型": "現金收入", "服務": "儲值金", "已付款": 50000},
+    ]
+
+    assert report._payment_amount_from_report_rows(rows, 1) == (68800, 50000)
 
 
 def test_parse_html_adds_weekend_surcharge_only_for_stored_value_table():
