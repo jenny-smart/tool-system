@@ -35,7 +35,14 @@ from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_ser
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 
-DEPOSIT_AMOUNT = 2000
+DEPOSIT_AMOUNT_BY_AREA = {"台北": 2000, "台中": 1500}
+
+
+def _deposit_amount(area: str) -> int:
+    try:
+        return DEPOSIT_AMOUNT_BY_AREA[area]
+    except KeyError as exc:
+        raise ValueError(f"不支援的工具包押金地區：{area}") from exc
 
 EXECUTION_LOG_SHEET = "工具包押金執行記錄"
 
@@ -214,6 +221,7 @@ def _aggregate_month_to_uy(area: str, year_month: str) -> int:
 
     types = ["上課", "退還", "已退", "不退"]
     results = [_aggregate(values, t, year_month) for t in types]
+    deposit_amount = _deposit_amount(area)
 
     start_row = max(_last_non_empty_row(values, COL_U) + 1, 2)
     updated_date = datetime.now(TW_TZ).strftime("%Y-%m-%d")
@@ -224,7 +232,7 @@ def _aggregate_month_to_uy(area: str, year_month: str) -> int:
     for type_, (names, total) in zip(types, results):
         if total <= 0:
             continue
-        amount = total * DEPOSIT_AMOUNT
+        amount = total * deposit_amount
         note = f"{type_}：{'/'.join(names)}＋共{total}人"
         period_text = f"{year_month}{type_}"
         income = amount if type_ == "上課" else 0
@@ -415,6 +423,7 @@ def _flag_discrepancies(area: str) -> dict[str, int]:
         return {"flagged": 0, "checked": 0}
 
     year = datetime.now(TW_TZ).year
+    deposit_amount = _deposit_amount(area)
     total_rows = last_row - 1
     n_values: list[list[str]] = []
     flagged = 0
@@ -438,7 +447,7 @@ def _flag_discrepancies(area: str) -> dict[str, int]:
         mark = ""
         if is_this_year and j:
             checked += 1
-            expected = 0 if (k or l or m) else DEPOSIT_AMOUNT
+            expected = 0 if (k or l or m) else deposit_amount
             if b_num != expected:
                 mark = "X"
                 flagged += 1
