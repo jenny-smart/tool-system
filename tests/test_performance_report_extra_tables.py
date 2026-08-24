@@ -1,6 +1,7 @@
 import pandas as pd
 
 from tools.scheduled_daily import performance_report as report
+from tools.scheduled_daily import performance_report_runner as runner
 
 
 def test_configurable_month_ranges_cross_year():
@@ -29,6 +30,43 @@ def test_order_date_summary_groups_region_and_splits_payment():
         "地區": "加總", "未付款": 1500,
         "已付款": 2000, "未付款＋已付款": 3500,
     }
+
+
+def test_order_date_summaries_split_service_month_and_add_stored_weekend_price():
+    ranges = report.get_order_service_month_ranges("2026-12-20", month_count=4)
+    assert ranges[-1][0] == "2027/03"
+    records = [
+        {"__city": "台北", "date_clean": "2026-12-28", "total": 1000, "purchase_status": "0"},
+        {"__city": "台北", "date_clean": "2027-01-03", "total": 2000, "purchase_status": "1",
+         "stored_value_weekend_price": 200},
+        {"__city": "台中", "service": "儲值金", "buy": 1, "total": 3000, "purchase_status": "0"},
+    ]
+    tables = report.build_order_date_summaries(records, ranges)
+    unpaid = tables["待付款"].set_index("地區")
+    paid = tables["已付款"].set_index("地區")
+    combined = tables["待付款＋已付款"].set_index("地區")
+
+    assert unpaid.loc["台北", "2026/12待付款"] == 1000
+    assert unpaid.loc["台中", "儲值金待付款"] == 3000
+    assert paid.loc["台北", "2027/01已付款"] == 2200
+    assert combined.loc["台北", "待付款＋已付款"] == 3200
+
+
+def test_parse_html_adds_weekend_surcharge_only_for_stored_value_table():
+    html = """
+    <table><tr><th>儲值金</th><th>已付款金額</th><th>待付款金額</th><th>週末加價</th></tr>
+    <tr><td>居家清潔</td><td>1,000</td><td>0</td><td>200</td></tr></table>
+    <table><tr><th>現金收入</th><th>已付款金額</th><th>待付款金額</th><th>週末加價</th></tr>
+    <tr><td>居家清潔</td><td>2,000</td><td>0</td><td>300</td></tr></table>
+    """
+    rows = report.parse_html(html)
+    assert rows[0]["已付款"] == 1200
+    assert rows[1]["已付款"] == 2000
+    scheduled_rows = runner.parse_html(html)
+    assert scheduled_rows[0]["已付款"] == 1200
+    assert scheduled_rows[1]["已付款"] == 2000
+    assert report.parse_html(html, payment_status=0)[0]["待付款"] == 200
+    assert runner.parse_html(html, payment_status=0)[0]["待付款"] == 200
 
 
 def test_reserve_hours_and_net_performance():
