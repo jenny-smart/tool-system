@@ -3544,6 +3544,16 @@ if system_type == "finance_management" and selected_function == "【鯨躍發票
     from tools.invoice_center.ui import render_invoice_create
 
     render_invoice_create()
+
+    # 沿用財務管理既有的執行日誌與 Agent 即時進度元件。
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("cetustek.",))
+
+    if st.button("🗑️ 清除日誌", key="clear_invoice_log"):
+        st.session_state.logs = ["[--:--:--] 日誌已清除"]
+        st.session_state.area_log = {}
+        st.rerun()
     st.stop()
 
 if system_type == "orders_memo_system":
