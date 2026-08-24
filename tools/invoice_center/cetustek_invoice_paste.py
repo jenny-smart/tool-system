@@ -222,12 +222,18 @@ def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
     expected_order = re.sub(r"\s+", "", str(order_no or "")).upper()
     if not expected_order:
         return ""
+    order_pattern = re.compile(rf"{re.escape(expected_order)}(?:-\d+)?(?!\d)")
     try:
-        rows = page.locator("tr")
-        for index in range(rows.count()):
-            row_text = str(rows.nth(index).inner_text() or "")
+        # 單次讀取整張查詢表，避免導頁後逐列 Locator 卡在已失效的 DOM。
+        row_texts = page.evaluate(
+            """() => Array.from(document.querySelectorAll('tr, [role="row"]'))
+              .map((row) => row.innerText || row.textContent || '')"""
+        )
+        if not isinstance(row_texts, list):
+            return ""
+        for row_text in row_texts:
             normalized_row = re.sub(r"\s+", "", row_text).upper()
-            if expected_order not in normalized_row:
+            if not order_pattern.search(normalized_row):
                 continue
             match = INVOICE_NO_RE.search(normalized_row)
             if match:
