@@ -4015,12 +4015,22 @@ with area_col:
         # 分頁時用的。
         area_select_options = area_select_options + ["年度review工作表"]
 
+    # 財務工具切換功能時沿用最近選擇的地區，避免每個功能都重新預設台北。
+    # 其他系統保留原本每個功能各自記憶地區的行為。
+    if system_type == "finance_management":
+        area_select_key = f"area_select_{system_type}_{system_name}"
+    else:
+        area_select_key = f"area_select_{system_type}_{system_name}_{selected_function}"
+
+    remembered_area = st.session_state.get(area_select_key)
+    if remembered_area not in area_select_options:
+        st.session_state[area_select_key] = area_select_options[0]
+
     selected_area_value = st.selectbox(
         "執行區域",
         area_select_options,
-        index=0,
         label_visibility="collapsed",
-        key=f"area_select_{system_type}_{system_name}_{selected_function}",
+        key=area_select_key,
     )
 
     selected_areas = [selected_area_value]
