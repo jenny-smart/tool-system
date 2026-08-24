@@ -169,18 +169,41 @@ def _paste_one(page: Any, payload_json: str) -> None:
     button.scroll_into_view_if_needed()
     print("[鯨躍] 點擊 #lemon-ei-fill-btn『貼上發票資料』", flush=True)
 
-    with page.expect_event("dialog", timeout=8000) as prompt_info:
-        button.click(force=True)
-    prompt = prompt_info.value
-    if prompt.type != "prompt":
-        prompt.accept()
-        raise RuntimeError(f"預期 Payload 輸入視窗，實際收到 {prompt.type}")
+    result = page.evaluate(
+        """
+        async ({selector, payload}) => {
+          const button = document.querySelector(selector);
+          if (!button) {
+            return {clicked: false, message: "找不到貼上發票資料按鈕"};
+          }
 
-    with page.expect_event("dialog", timeout=8000) as confirmation_info:
-        prompt.accept(payload_json)
-    confirmation = confirmation_info.value
-    confirmation_message = str(confirmation.message or "").strip()
-    confirmation.accept()
+          const originalPrompt = window.prompt;
+          const originalAlert = window.alert;
+          const messages = [];
+          window.prompt = () => payload;
+          window.alert = (message) => messages.push(String(message ?? ""));
+
+          try {
+            button.click();
+            const deadline = Date.now() + 8000;
+            while (messages.length === 0 && Date.now() < deadline) {
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            return {
+              clicked: true,
+              message: messages[messages.length - 1] || "",
+            };
+          } finally {
+            window.prompt = originalPrompt;
+            window.alert = originalAlert;
+          }
+        }
+        """,
+        {"selector": "#lemon-ei-fill-btn", "payload": payload_json},
+    )
+    if not bool(result.get("clicked")):
+        raise RuntimeError(str(result.get("message") or "未能點擊貼上發票資料按鈕"))
+    confirmation_message = str(result.get("message") or "").strip()
 
     if not confirmation_message.startswith("已填入。"):
         raise RuntimeError(f"貼入結果異常：{confirmation_message or '沒有完成訊息'}")
