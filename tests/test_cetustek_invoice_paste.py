@@ -28,10 +28,11 @@ def _locator(count: int = 1, *, visible: bool = True, value: str = "") -> MagicM
 def _invoice_page(order_id: str = "LC001") -> MagicMock:
     page = MagicMock()
     page.url = paste.INVOICE_CREATE_URL
+    page.fill_button = _locator()
 
     def locate(selector: str) -> MagicMock:
         if selector == "#lemon-ei-fill-btn":
-            return _locator()
+            return page.fill_button
         if selector == "#orderid":
             return _locator(value=order_id)
         if selector in paste.INVOICE_FORM_SELECTORS:
@@ -101,6 +102,7 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
         prompt.accept.assert_called_once_with(json.dumps({"orderid": "LC001"}))
         confirmation.accept.assert_called_once()
+        page.fill_button.click.assert_called_once_with(force=True)
         self.assertEqual(
             page.expect_event.call_args_list,
             [
