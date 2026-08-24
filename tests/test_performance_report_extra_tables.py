@@ -48,8 +48,28 @@ def test_order_date_summaries_split_service_month_and_add_stored_weekend_price()
 
     assert unpaid.loc["台北", "2026/12待付款"] == 1000
     assert unpaid.loc["台中", "儲值金待付款"] == 3000
+    assert unpaid.loc["台中", "待付款"] == 0
     assert paid.loc["台北", "2027/01已付款"] == 2200
     assert combined.loc["台北", "待付款＋已付款"] == 3200
+
+
+def test_paid_summary_matches_backend_service_and_stored_value_totals():
+    ranges = report.get_order_service_month_ranges("2026-08-24", month_count=4)
+    records = [
+        {"__city": "台北", "date_clean": "2026-08-10", "total": 31600, "purchase_status": "1"},
+        {"__city": "台北", "date_clean": "2026-08-20", "total": 4800,
+         "payway": "儲值金", "purchase_status": "1"},
+        {"__city": "台北", "date_clean": "2026-09-10", "total": 10800, "purchase_status": "1"},
+        {"__city": "台北", "date_clean": "2026-09-20", "total": 21600,
+         "payway": "儲值金", "purchase_status": "1"},
+        {"__city": "台北", "service": "儲值金", "buy": 1, "total": 50000, "purchase_status": "1"},
+    ]
+    paid = report.build_order_date_summaries(records, ranges)["已付款"].set_index("地區")
+
+    assert paid.loc["台北", "已付款"] == 68800
+    assert paid.loc["台北", "2026/08已付款"] == 36400
+    assert paid.loc["台北", "2026/09已付款"] == 32400
+    assert paid.loc["台北", "儲值金已付款"] == 50000
 
 
 def test_parse_html_adds_weekend_surcharge_only_for_stored_value_table():
