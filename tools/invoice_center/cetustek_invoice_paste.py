@@ -169,14 +169,14 @@ def _paste_one(page: Any, payload_json: str) -> None:
     button.scroll_into_view_if_needed()
     print("[鯨躍] 點擊『貼上發票資料』", flush=True)
 
-    with page.expect_dialog(timeout=8000) as prompt_info:
+    with page.expect_event("dialog", timeout=8000) as prompt_info:
         button.click(force=True)
     prompt = prompt_info.value
     if prompt.type != "prompt":
         prompt.accept()
         raise RuntimeError(f"預期 Payload 輸入視窗，實際收到 {prompt.type}")
 
-    with page.expect_dialog(timeout=8000) as confirmation_info:
+    with page.expect_event("dialog", timeout=8000) as confirmation_info:
         prompt.accept(payload_json)
     confirmation = confirmation_info.value
     confirmation_message = str(confirmation.message or "").strip()
