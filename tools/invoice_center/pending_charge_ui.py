@@ -210,10 +210,8 @@ def install(ui) -> None:
         task_running = bool(
             task_snapshot and str(task_snapshot.get("status") or "") in {"pending", "running"}
         )
-        active = (
-            bool(st.session_state.get("invoice_active_payloads"))
-            and active_area == area_label
-            and task_running
+        active = task_running and (
+            not active_area or active_area == area_label
         )
 
         try:
