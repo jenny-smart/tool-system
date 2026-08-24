@@ -5,7 +5,7 @@ from typing import Any
 
 import streamlit as st
 
-from tools.local_agent_queue import create_task
+from tools.local_agent_queue import create_task, list_tasks, read_task_log
 
 from .invoice_payload_queue import enqueue_payload
 from .pending_charge import DISPLAY_COLUMNS, get_pending_invoice_candidates
@@ -131,6 +131,49 @@ def install(ui) -> None:
         )
         st.session_state["invoice_cetustek_task_id"] = task.get("task_id", "")
 
+    def _find_invoice_task(area_label: str) -> dict[str, str] | None:
+        task_id = str(st.session_state.get("invoice_cetustek_task_id") or "")
+        created_by = str(st.session_state.get("username") or "Tool System")
+        tasks = list_tasks(limit=100)
+        if task_id:
+            match = next((item for item in tasks if item.get("task_id") == task_id), None)
+            if match:
+                return match
+        for item in tasks:
+            if item.get("action") != "cetustek.login" or item.get("created_by") != created_by:
+                continue
+            try:
+                params = json.loads(item.get("params_json") or "{}")
+            except (TypeError, ValueError):
+                params = {}
+            if str(params.get("area") or "") == area_label:
+                st.session_state["invoice_cetustek_task_id"] = item.get("task_id", "")
+                return item
+        return None
+
+    def _render_task_log(task: dict[str, str] | None) -> None:
+        if not task:
+            return
+        status = str(task.get("status") or "pending")
+        labels = {
+            "pending": "等待 Agent",
+            "running": "執行中",
+            "completed": "執行完成",
+            "failed": "執行失敗",
+        }
+        st.markdown("### 🖥️ 執行日誌")
+        st.caption(
+            f"{labels.get(status, status)}｜"
+            f"{task.get('started_at') or task.get('created_at') or ''}"
+        )
+        task_id = str(task.get("task_id") or "")
+        log_text = read_task_log(task_id) if task_id else ""
+        if not log_text:
+            log_text = str(task.get("log") or task.get("message") or "等待本機 Agent")
+        st.code(log_text, language="text")
+        if st.button("🔄 更新執行日誌", key=f"refresh_invoice_log_{task_id}"):
+            st.rerun()
+
     def _render_active_payload() -> None:
         prepared = st.session_state.get("invoice_active_payloads") or []
         if not prepared:
@@ -159,7 +202,19 @@ def install(ui) -> None:
         st.caption(f"只執行：{area_label}")
 
         active_area = st.session_state.get("invoice_active_area")
-        active = bool(st.session_state.get("invoice_active_payloads")) and active_area == area_label
+        try:
+            task_snapshot = _find_invoice_task(area_label)
+        except Exception as exc:
+            task_snapshot = None
+            st.warning(f"讀取執行日誌失敗：{exc}")
+        task_running = bool(
+            task_snapshot and str(task_snapshot.get("status") or "") in {"pending", "running"}
+        )
+        active = (
+            bool(st.session_state.get("invoice_active_payloads"))
+            and active_area == area_label
+            and task_running
+        )
 
         try:
             candidates = get_pending_invoice_candidates(area_label)
@@ -238,5 +293,6 @@ def install(ui) -> None:
                     st.error(f"發票流程啟動失敗：{exc}")
 
         _render_active_payload()
+        _render_task_log(task_snapshot)
 
     ui.render_invoice_create = render_invoice_create
