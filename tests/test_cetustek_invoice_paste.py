@@ -28,11 +28,8 @@ def _locator(count: int = 1, *, visible: bool = True, value: str = "") -> MagicM
 def _invoice_page(order_id: str = "LC001") -> MagicMock:
     page = MagicMock()
     page.url = paste.INVOICE_CREATE_URL
-    page.fill_button = _locator()
 
     def locate(selector: str) -> MagicMock:
-        if selector == "#lemon-ei-fill-btn":
-            return page.fill_button
         if selector == "#orderid":
             return _locator(value=order_id)
         if selector in paste.INVOICE_FORM_SELECTORS:
@@ -46,13 +43,8 @@ def _invoice_page(order_id: str = "LC001") -> MagicMock:
 class CetustekInvoicePasteTest(unittest.TestCase):
     def test_helper_button_alone_is_not_invoice_page(self) -> None:
         page = MagicMock()
-        page.locator.side_effect = lambda selector: (
-            _locator() if selector == "#lemon-ei-fill-btn" else _locator(count=0, visible=False)
-        )
-
+        page.locator.return_value = _locator(count=0, visible=False)
         self.assertFalse(paste._is_invoice_create_page(page))
-        with self.assertRaisesRegex(RuntimeError, "不是鯨躍發票開立頁"):
-            paste._paste_button(page)
 
     def test_native_invoice_fields_identify_invoice_page(self) -> None:
         self.assertTrue(paste._is_invoice_create_page(_invoice_page()))
@@ -79,39 +71,28 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             timeout=15000,
         )
 
-    def test_paste_clicks_button_in_page_and_matches_order_id(self) -> None:
+    def test_paste_fills_native_form_and_matches_order_id(self) -> None:
         page = _invoice_page("LC001")
-        page.evaluate.return_value = {
-            "clicked": True,
-            "message": "已填入。請檢查買受人/統編、Email、付款方式、載具後再按下一步。",
-        }
-        payload_json = json.dumps({"orderid": "LC001"})
+        page.evaluate.return_value = {"ok": True, "message": "已直接填入鯨躍原生表單"}
+        payload = {"orderid": "LC001"}
+        paste._paste_one(page, json.dumps(payload))
 
-        paste._paste_one(page, payload_json)
-
-        evaluate_payload = page.evaluate.call_args.args[1]
-        self.assertEqual(evaluate_payload["selector"], "#lemon-ei-fill-btn")
-        self.assertEqual(evaluate_payload["payload"], payload_json)
+        self.assertEqual(page.evaluate.call_args.args[1], payload)
+        self.assertIn("setValue", page.evaluate.call_args.args[0])
         page.expect_event.assert_not_called()
 
     def test_paste_rejects_false_success_when_form_order_id_is_blank(self) -> None:
         page = _invoice_page("")
-        page.evaluate.return_value = {
-            "clicked": True,
-            "message": "已填入。請檢查後再按下一步。",
-        }
+        page.evaluate.return_value = {"ok": True, "message": "已直接填入鯨躍原生表單"}
 
         with self.assertRaisesRegex(RuntimeError, "表單驗證失敗"):
             paste._paste_one(page, json.dumps({"orderid": "LC001"}))
 
-    def test_paste_rejects_tampermonkey_error_message(self) -> None:
+    def test_paste_rejects_direct_fill_error(self) -> None:
         page = _invoice_page("LC001")
-        page.evaluate.return_value = {
-            "clicked": True,
-            "message": "Payload JSON 格式錯誤",
-        }
+        page.evaluate.return_value = {"ok": False, "message": "缺少鯨躍欄位：totalamount"}
 
-        with self.assertRaisesRegex(RuntimeError, "貼入結果異常"):
+        with self.assertRaisesRegex(RuntimeError, "填入結果異常"):
             paste._paste_one(page, json.dumps({"orderid": "LC001"}))
 
     def test_extract_invoice_number_from_saved_page(self) -> None:

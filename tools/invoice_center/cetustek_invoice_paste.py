@@ -12,13 +12,6 @@ from tools.invoice_center.invoice_payload_queue import (
 )
 
 
-def _visible(locator: Any) -> bool:
-    try:
-        return locator.count() > 0 and locator.first.is_visible()
-    except Exception:
-        return False
-
-
 INVOICE_FORM_SELECTORS = (
     "#orderid",
     "#buyer_name",
@@ -30,6 +23,117 @@ INVOICE_FORM_SELECTORS = (
 INVOICE_CREATE_URL = "https://www.ei.com.tw/InvoiceRent/invoiceadd.jsp"
 INVOICE_NO_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{2})[ -]?(\d{8})(?!\d)")
 MANUAL_SAVE_TIMEOUT_MS = 30 * 60 * 1000
+
+
+DIRECT_FILL_SCRIPT = """
+async (d) => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const text = (value) => String(value ?? "").trim();
+  const fire = (el) => {
+    el.dispatchEvent(new Event("input", {bubbles: true}));
+    el.dispatchEvent(new Event("change", {bubbles: true}));
+    el.dispatchEvent(new Event("blur", {bubbles: true}));
+  };
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.value = text(value);
+    fire(el);
+    return true;
+  };
+  const forceRadio = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    document.querySelector(`label[for="${id}"]`)?.click();
+    el.checked = true;
+    fire(el);
+    return true;
+  };
+  const required = ["orderid", "buyer_name", "buyer_emailaddress", "detaildata", "totalamount"];
+  const missing = required.filter((id) => !document.getElementById(id));
+  if (missing.length) return {ok: false, message: `缺少鯨躍欄位：${missing.join(", ")}`};
+
+  const clearCarrier = () => {
+    ["carriertype", "carrierid1", "carrierid2", "donatevat"].forEach((id) => setValue(id, ""));
+    ["barcode3J0002", "barcodeCQ0001", "barcodeEJ0011"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.checked = false;
+        fire(el);
+      }
+    });
+  };
+  const setPay = (payway) => {
+    const pay = document.getElementById("pay");
+    if (!pay) return;
+    const value = text(payway);
+    pay.value = value.includes("ATM") || value === "2" ? "2"
+      : value.includes("信用卡") || value === "3" ? "3"
+      : value.includes("儲值金") ? "5" : "1";
+    fire(pay);
+  };
+  const isTriplicate = Boolean(text(d.buyer_identifier));
+  forceRadio("invoicetype07");
+  forceRadio(isTriplicate ? "hastax2" : (text(d.hastax) === "1" ? "hastax1" : "hastax2"));
+  const taxMap = {"1": "businesstax1", "2": "businesstax2", "3": "businesstax3", "4": "businesstax4"};
+  forceRadio(taxMap[text(d.taxtype)] || "businesstax1");
+  forceRadio(`roundnum${text(d.roundnum) || "4"}`);
+  setValue("rate", d.rate || "0.05");
+
+  clearCarrier();
+  setValue("orderid", d.orderid);
+  setValue("orderdate", d.orderdate);
+  setValue("buyer_name", d.buyer_name);
+  setValue("buyer_identifier", d.buyer_identifier);
+  setValue("buyer_phone", d.buyer_phone);
+  setValue("buyer_address", d.buyer_address);
+  setValue("buyer_emailaddress", d.buyer_emailaddress);
+  setPay(d.payway);
+  setValue("mainremark", d.mainremark);
+
+  const buyerId = text(d.buyer_identifier);
+  const donate = text(d.donate);
+  const donatevat = text(d.donatevat);
+  const carrierType = text(d.carriertype);
+  const carrier1 = text(d.carrierid1);
+  const carrier2 = text(d.carrierid2 || d.carrierid1);
+  if (buyerId) {
+    forceRadio("donate2");
+    await sleep(80);
+    clearCarrier();
+    await sleep(80);
+    clearCarrier();
+  } else if (donate === "1" || donatevat) {
+    forceRadio("donate1");
+    await sleep(80);
+    clearCarrier();
+    setValue("donatevat", donatevat);
+  } else if (!carrierType && !carrier1 && !carrier2) {
+    forceRadio("donate2");
+    await sleep(80);
+    clearCarrier();
+  } else {
+    clearCarrier();
+    forceRadio("donate0");
+    await sleep(100);
+    forceRadio(carrierType === "3J0002" ? "barcode3J0002"
+      : carrierType === "CQ0001" ? "barcodeCQ0001" : "barcodeEJ0011");
+    setValue("carriertype", carrierType || "EJ0011");
+    setValue("carrierid1", carrier1);
+    setValue("carrierid2", carrier2);
+  }
+
+  setValue("buyer_emailaddress", d.buyer_emailaddress);
+  setValue("detaildata", d.detaildata || "");
+  setValue("saleamount", d.saleamount || "");
+  setValue("taxamount", d.taxamount || "");
+  setValue("totalamount", d.totalamount || "");
+
+  const email = document.getElementById("buyer_emailaddress")?.value || "";
+  if (email && !email.includes("@")) return {ok: false, message: `Email 欄位異常：${email}`};
+  return {ok: true, message: "已直接填入鯨躍原生表單"};
+}
+"""
 
 
 def _is_invoice_create_url(page: Any) -> bool:
@@ -49,43 +153,27 @@ def _is_invoice_create_page(page: Any) -> bool:
         return False
 
 
-def _paste_button(page: Any) -> Any:
-    if not _is_invoice_create_page(page):
-        raise RuntimeError("目前不是鯨躍發票開立頁，禁止貼入發票資料")
-
-    button = page.locator("#lemon-ei-fill-btn")
-    if _visible(button):
-        return button.first
-    raise RuntimeError(
-        "發票開立頁找不到 #lemon-ei-fill-btn『貼上發票資料』按鈕，"
-        "請確認 Tampermonkey 腳本已啟用"
-    )
-
-
 def _open_invoice_create(page: Any) -> None:
-    if _is_invoice_create_page(page):
-        _paste_button(page)
-        print("[鯨躍] 已在發票開立頁", flush=True)
-        return
-
-    print(f"[鯨躍] 前往發票開立頁：{INVOICE_CREATE_URL}", flush=True)
+    print(f"[鯨躍] 重新驗證並前往發票開立頁：{INVOICE_CREATE_URL}", flush=True)
     page.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded", timeout=15000)
 
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if _is_invoice_create_page(page):
-            try:
-                _paste_button(page)
-                print("[鯨躍] 已進入發票開立頁，找到『貼上發票資料』", flush=True)
-                return
-            except Exception:
-                pass
+            print("[鯨躍] 第二層授權有效，已進入發票開立頁", flush=True)
+            return
         page.wait_for_timeout(200)
+
+    try:
+        body_text = str(page.locator("body").inner_text() or "")
+    except Exception:
+        body_text = ""
+    if "未授權" in body_text or page.locator("#userid").count() > 0:
+        raise PermissionError("鯨躍第二層授權已失效，禁止填入發票資料")
     raise RuntimeError(
-        f"已開啟 {INVOICE_CREATE_URL}，但 10 秒內未出現發票開立表單；"
+        f"已開啟 {INVOICE_CREATE_URL}，但未出現發票開立表單；"
         f"目前頁面：{str(page.url or '未知')}"
     )
-
 
 def _clear_dialog_handlers(page: Any) -> None:
     try:
@@ -163,59 +251,23 @@ def _paste_one(page: Any, payload_json: str) -> None:
     expected_order_id = str(payload.get("orderid") or "").strip()
     if not expected_order_id:
         raise RuntimeError("Payload 缺少 orderid")
+    if not _is_invoice_create_page(page):
+        raise RuntimeError("目前不是已授權的鯨躍發票開立頁，禁止填入資料")
 
     _clear_dialog_handlers(page)
-    button = _paste_button(page)
-    button.scroll_into_view_if_needed()
-    print("[鯨躍] 點擊 #lemon-ei-fill-btn『貼上發票資料』", flush=True)
+    print("[鯨躍] Playwright 直接填入發票原生欄位", flush=True)
+    result = page.evaluate(DIRECT_FILL_SCRIPT, payload)
+    if not isinstance(result, dict) or not bool(result.get("ok")):
+        message = result.get("message") if isinstance(result, dict) else ""
+        raise RuntimeError(f"填入結果異常：{message or '沒有完成訊息'}")
 
-    result = page.evaluate(
-        """
-        async ({selector, payload}) => {
-          const button = document.querySelector(selector);
-          if (!button) {
-            return {clicked: false, message: "找不到貼上發票資料按鈕"};
-          }
-
-          const originalPrompt = window.prompt;
-          const originalAlert = window.alert;
-          const messages = [];
-          window.prompt = () => payload;
-          window.alert = (message) => messages.push(String(message ?? ""));
-
-          try {
-            button.click();
-            const deadline = Date.now() + 8000;
-            while (messages.length === 0 && Date.now() < deadline) {
-              await new Promise((resolve) => setTimeout(resolve, 50));
-            }
-            return {
-              clicked: true,
-              message: messages[messages.length - 1] || "",
-            };
-          } finally {
-            window.prompt = originalPrompt;
-            window.alert = originalAlert;
-          }
-        }
-        """,
-        {"selector": "#lemon-ei-fill-btn", "payload": payload_json},
-    )
-    if not bool(result.get("clicked")):
-        raise RuntimeError(str(result.get("message") or "未能點擊貼上發票資料按鈕"))
-    confirmation_message = str(result.get("message") or "").strip()
-
-    if not confirmation_message.startswith("已填入。"):
-        raise RuntimeError(f"貼入結果異常：{confirmation_message or '沒有完成訊息'}")
     if not _is_invoice_create_page(page):
-        raise RuntimeError("貼入後已離開發票開立頁")
-
+        raise RuntimeError("填入後已離開發票開立頁")
     actual_order_id = str(page.locator("#orderid").input_value() or "").strip()
     if actual_order_id != expected_order_id:
         raise RuntimeError(
             f"發票表單驗證失敗：orderid 預期 {expected_order_id}，實際 {actual_order_id or '空白'}"
         )
-
 
 def process_pending_invoice_payloads(page: Any, area: str) -> int:
     pending = list_pending_payloads(area)
