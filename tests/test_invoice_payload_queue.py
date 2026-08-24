@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 config_module = types.ModuleType("tools.common.config_loader")
@@ -69,6 +69,30 @@ class InvoiceResultWriteTest(unittest.TestCase):
         queue.write_invoice_result("台北", 12, "LC001", "AB12345678")
 
         self.ws.batch_update.assert_not_called()
+
+    def test_enqueue_reuses_existing_pending_without_name_error(self) -> None:
+        service = MagicMock()
+        existing = {"_row": 5, "area": "台北", "order_no": "LC001", "status": "pending"}
+
+        with patch.object(queue, "get_sheets_service", return_value=service), patch.object(
+            queue, "_ensure_sheet"
+        ), patch.object(queue, "_all_rows", return_value=[existing]):
+            self.assertEqual(queue.enqueue_payload("台北", "LC001", "{}"), 5)
+
+    def test_list_returns_pending_and_awaiting_save(self) -> None:
+        service = MagicMock()
+        rows = [
+            {"_row": 2, "area": "台北", "order_no": "LC001", "status": "pending"},
+            {"_row": 3, "area": "台北", "order_no": "LC002", "status": "awaiting_save"},
+            {"_row": 4, "area": "台北", "order_no": "LC003", "status": "completed"},
+        ]
+
+        with patch.object(queue, "get_sheets_service", return_value=service), patch.object(
+            queue, "_ensure_sheet"
+        ), patch.object(queue, "_all_rows", return_value=rows):
+            result = queue.list_pending_payloads("台北")
+
+        self.assertEqual([item["order_no"] for item in result], ["LC001", "LC002"])
 
 
 if __name__ == "__main__":

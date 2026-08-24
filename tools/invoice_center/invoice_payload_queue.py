@@ -69,7 +69,7 @@ def enqueue_payload(
             continue
         if str(item.get("order_no", "")).strip() != normalized_order:
             continue
-        if str(item.get("status", "")).strip() not in actionable_statuses:
+        if str(item.get("status", "")).strip() != "pending":
             continue
         row_no = int(item.get("_row") or 0)
         service.spreadsheets().values().update(
@@ -108,7 +108,7 @@ def list_pending_payloads(area: str) -> list[dict[str, Any]]:
     for item in rows:
         if str(item.get("area", "")).strip() != area:
             continue
-        if str(item.get("status", "")).strip() != "pending":
+        if str(item.get("status", "")).strip() not in actionable_statuses:
             continue
         order_no = str(item.get("order_no", "")).strip()
         if not order_no:
