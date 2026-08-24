@@ -330,6 +330,17 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         )
         return 1
 
+    awaiting_orders = [
+        str(item.get("order_no") or "").strip()
+        for item in pending
+        if str(item.get("status") or "").strip() == "awaiting_save"
+    ]
+    if awaiting_orders:
+        raise RuntimeError(
+            f"{'、'.join(awaiting_orders)} 已在等待儲存結果，"
+            "但目前查詢頁找不到同訂單發票；為避免重複開立，已停止"
+        )
+
     _open_invoice_create(page)
     _clear_dialog_handlers(page)
 

@@ -143,6 +143,27 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             "已從查詢頁復原並回填 O/AA：DM51790871",
         )
 
+    def test_awaiting_save_without_query_result_never_opens_new_invoice(self) -> None:
+        page = MagicMock()
+        item = {
+            "_row": 8,
+            "source_row": 13,
+            "order_no": "LC002145591",
+            "payload_json": json.dumps({"orderid": "LC002145591"}),
+            "status": "awaiting_save",
+        }
+        paste.list_pending_payloads.return_value = [item]
+
+        with patch.object(
+            paste,
+            "_extract_invoice_no_for_order",
+            return_value="",
+        ), patch.object(paste, "_open_invoice_create") as open_invoice:
+            with self.assertRaisesRegex(RuntimeError, "為避免重複開立"):
+                paste.process_pending_invoice_payloads(page, "台北")
+
+        open_invoice.assert_not_called()
+
     def test_extract_invoice_number_from_matching_order_row(self) -> None:
         page = MagicMock()
         page.evaluate.return_value = [
