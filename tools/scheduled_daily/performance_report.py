@@ -275,8 +275,62 @@ def _purchase_created_date(item) -> str:
     return ""
 
 
+def _purchase_uses_stored_value(item) -> bool:
+    payment = " ".join(str(item.get(key) or "") for key in (
+        "payway", "payment", "payment_method", "paymentMethod", "pay_type",
+    )).lower()
+    return "儲值金" in payment or "vvip" in payment or str(item.get("is_vvip") or "") == "1"
+
+
+def _purchase_stored_weekend_amount(item) -> int:
+    """相容後台不同版本的儲值金週末加價欄位（含巢狀資料）。"""
+    generic_weekend_keys = {"weekendprice", "weekendfee", "holidayprice", "holidayfee"}
+
+    def find(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", str(key).lower())
+                is_weekend = "weekend" in normalized or "holiday" in normalized or "週末" in normalized
+                is_stored = "stored" in normalized or "vvip" in normalized or "儲值" in normalized
+                if is_weekend and (is_stored or (normalized in generic_weekend_keys and _purchase_uses_stored_value(item))):
+                    return safe_int(child)
+            for child in value.values():
+                found = find(child)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for child in value:
+                found = find(child)
+                if found:
+                    return found
+        return 0
+
+    return find(item)
+
+
 def _purchase_amount(item) -> int:
-    return safe_int(item.get("total") or item.get("amount") or item.get("price") or 0)
+    base = safe_int(item.get("total") or item.get("amount") or item.get("price") or 0)
+    # 後台 purchaseList 的 total 不含儲值金週末加價，需另外加回。
+    return base + _purchase_stored_weekend_amount(item)
+
+
+def _purchase_service_date(item) -> str:
+    for key in ("date_clean", "service_date", "clean_date", "dateClean"):
+        value = str(item.get(key) or "").strip()
+        match = re.search(r"20\d{2}-\d{2}-\d{2}", value)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _purchase_is_stored_value_topup(item) -> bool:
+    buy = str(item.get("buy") or "").strip().lower()
+    if buy in {"1", "true", "yes", "y"}:
+        return True
+    service = " ".join(str(item.get(key) or "") for key in (
+        "service", "service_name", "item_name", "purchase_item", "title",
+    ))
+    return not _purchase_service_date(item) and "儲值金" in service
 
 
 def _purchase_is_cancelled(item) -> bool:
@@ -320,8 +374,28 @@ def _purchase_person_hours(item) -> float:
     return people * hours
 
 
-def build_order_date_summary(records) -> pd.DataFrame:
-    cols = ["地區", "未付款", "已付款", "未付款＋已付款"]
+def get_order_service_month_ranges(base_date=None, month_count=4):
+    """訂購日期報表固定拆成本月起四個服務月份。"""
+    base = base_date or now_dt()
+    if not isinstance(base, datetime):
+        base = datetime.strptime(str(base)[:10], "%Y-%m-%d")
+    ranges = []
+    for offset in range(month_count):
+        month_index = base.month - 1 + offset
+        year = base.year + month_index // 12
+        month = month_index % 12 + 1
+        ranges.append((
+            f"{year}/{month:02d}",
+            f"{year}-{month:02d}-01",
+            f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}",
+        ))
+    return ranges
+
+
+def _build_order_payment_table(records, payment_label, month_ranges) -> pd.DataFrame:
+    cols = ["地區", payment_label]
+    cols.extend(f"{label}{payment_label}" for label, _, _ in month_ranges)
+    cols.append(f"儲值金{payment_label}")
     rows = []
     for item in records:
         if _purchase_is_cancelled(item):
@@ -330,26 +404,63 @@ def build_order_date_summary(records) -> pd.DataFrame:
         if not city:
             continue
         amount = _purchase_amount(item)
+        row = {col: 0 for col in cols}
+        row["地區"] = city
+        row[payment_label] = amount
+        service_date = _purchase_service_date(item)
+        for label, start, end in month_ranges:
+            if start <= service_date <= end:
+                row[f"{label}{payment_label}"] = amount
+                break
+        if _purchase_is_stored_value_topup(item):
+            row[f"儲值金{payment_label}"] = amount
+        rows.append(row)
+
+    out = pd.DataFrame(rows, columns=cols).groupby("地區", as_index=False).sum() if rows else pd.DataFrame(columns=cols)
+    out = out.set_index("地區").reindex(CITY_ORDER, fill_value=0).reset_index()
+    total = {"地區": "加總", **{col: out[col].sum() for col in cols[1:]}}
+    return pd.concat([out, pd.DataFrame([total])], ignore_index=True)[cols]
+
+
+def build_order_date_summaries(records, month_ranges=None):
+    month_ranges = month_ranges or get_order_service_month_ranges()
+    unpaid = _build_order_payment_table(
+        [x for x in records if not _purchase_is_paid(x)], "待付款", month_ranges,
+    )
+    paid = _build_order_payment_table(
+        [x for x in records if _purchase_is_paid(x)], "已付款", month_ranges,
+    )
+    combined = unpaid.copy()
+    combined.columns = ["地區", "待付款＋已付款"] + [
+        col.replace("待付款", "待付款＋已付款") for col in unpaid.columns[2:]
+    ]
+    for index, col in enumerate(paid.columns[1:], start=1):
+        combined.iloc[:, index] = unpaid.iloc[:, index] + paid[col]
+    return {"待付款": unpaid, "已付款": paid, "待付款＋已付款": combined}
+
+
+def build_order_date_summary(records) -> pd.DataFrame:
+    """保留原介面供既有呼叫使用。"""
+    cols = ["地區", "未付款", "已付款", "未付款＋已付款"]
+    rows = []
+    for item in records:
+        if _purchase_is_cancelled(item) or not item.get("__city"):
+            continue
+        amount = _purchase_amount(item)
         rows.append({
-            "地區": city,
+            "地區": str(item["__city"]),
             "未付款": 0 if _purchase_is_paid(item) else amount,
             "已付款": amount if _purchase_is_paid(item) else 0,
         })
     if not rows:
         return pd.DataFrame(columns=cols)
-    out = pd.DataFrame(rows).groupby(["地區"], as_index=False)[["未付款", "已付款"]].sum()
+    out = pd.DataFrame(rows).groupby("地區", as_index=False)[["未付款", "已付款"]].sum()
     out["未付款＋已付款"] = out["未付款"] + out["已付款"]
     out["地區"] = pd.Categorical(out["地區"], CITY_ORDER, ordered=True)
-    out = out.sort_values(["地區"]).reset_index(drop=True)
+    out = out.sort_values("地區").reset_index(drop=True)
     out["地區"] = out["地區"].astype(str)
-    total = pd.DataFrame([{
-        "地區": "加總",
-        "未付款": out["未付款"].sum(),
-        "已付款": out["已付款"].sum(),
-        "未付款＋已付款": out["未付款＋已付款"].sum(),
-    }])
-    out = pd.concat([out, total], ignore_index=True)
-    return out[cols]
+    total = {"地區": "加總", **{col: out[col].sum() for col in cols[1:]}}
+    return pd.concat([out, pd.DataFrame([total])], ignore_index=True)[cols]
 
 
 def build_month_performance_summary(raw_df: pd.DataFrame, month_ranges) -> pd.DataFrame:
@@ -543,7 +654,7 @@ def normalize_date_text(text: str) -> Optional[str]:
     return None
 
 
-def parse_html(html):
+def parse_html(html, payment_status=None):
     soup = BeautifulSoup(html, "html.parser")
     tables = soup.find_all("table")
     results = []
@@ -570,6 +681,7 @@ def parse_html(html):
 
         paid_idx = header.index("已付款金額") if "已付款金額" in header else None
         unpaid_idx = header.index("待付款金額") if "待付款金額" in header else None
+        weekend_idx = header.index("週末加價") if "週末加價" in header else None
 
         date_idx = None
         for name in date_candidates:
@@ -590,6 +702,13 @@ def parse_html(html):
 
             paid = safe_int(row[paid_idx]) if paid_idx is not None and len(row) > paid_idx else 0
             unpaid = safe_int(row[unpaid_idx]) if unpaid_idx is not None and len(row) > unpaid_idx else 0
+            # 儲值金表的週末加價未包含在付款金額內，依本次查詢狀態併回對應欄位。
+            if income_type == "儲值金" and weekend_idx is not None and len(row) > weekend_idx:
+                weekend_amount = safe_int(row[weekend_idx])
+                if str(payment_status) == "0":
+                    unpaid += weekend_amount
+                else:
+                    paid += weekend_amount
 
             service_date = None
             if date_idx is not None and len(row) > date_idx:
@@ -1273,6 +1392,8 @@ def persist_dashboard_payload(
     month_end_df: pd.DataFrame,
     email_html: str,
     order_date_df: Optional[pd.DataFrame] = None,
+    order_date_paid_df: Optional[pd.DataFrame] = None,
+    order_date_combined_df: Optional[pd.DataFrame] = None,
     month_performance_df: Optional[pd.DataFrame] = None,
     reserve_df: Optional[pd.DataFrame] = None,
     net_performance_df: Optional[pd.DataFrame] = None,
@@ -1297,6 +1418,8 @@ def persist_dashboard_payload(
     latest_html = os.path.join(LATEST_DIR, "email_preview.html")
     latest_meta = os.path.join(LATEST_DIR, "meta.json")
     latest_order_date = os.path.join(LATEST_DIR, "order_date_summary.csv")
+    latest_order_date_paid = os.path.join(LATEST_DIR, "order_date_paid_summary.csv")
+    latest_order_date_combined = os.path.join(LATEST_DIR, "order_date_combined_summary.csv")
     latest_month_performance = os.path.join(LATEST_DIR, "month_performance_summary.csv")
     latest_reserve = os.path.join(LATEST_DIR, "reserve_summary.csv")
     latest_net_performance = os.path.join(LATEST_DIR, "net_performance_summary.csv")
@@ -1324,6 +1447,8 @@ def persist_dashboard_payload(
 
     for report_df, report_path in [
         (order_date_df, latest_order_date),
+        (order_date_paid_df, latest_order_date_paid),
+        (order_date_combined_df, latest_order_date_combined),
         (month_performance_df, latest_month_performance),
         (reserve_df, latest_reserve),
         (net_performance_df, latest_net_performance),
@@ -1346,20 +1471,28 @@ def persist_dashboard_payload(
         f.write(email_html or "")
     append_output_file_log("業績報表", latest_html, trigger)
 
+    previous_meta = {}
+    if os.path.exists(latest_meta):
+        try:
+            with open(latest_meta, encoding="utf-8") as f:
+                previous_meta = json.load(f)
+        except Exception:
+            previous_meta = {}
+
     meta = {
         "updated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
         "df4_rows": int(len(df4)),
         "daily_rows": int(len(daily_df)),
         "next_month_daily_rows": int(len(next_month_daily_df)),
         "month_end_rows": int(len(month_end_df)),
-        "order_date_rows": int(len(order_date_df)) if order_date_df is not None else 0,
-        "month_performance_rows": int(len(month_performance_df)) if month_performance_df is not None else 0,
-        "reserve_rows": int(len(reserve_df)) if reserve_df is not None else 0,
-        "net_performance_rows": int(len(net_performance_df)) if net_performance_df is not None else 0,
-        "report_start_month": report_start_month,
-        "report_end_month": report_end_month,
-        "order_start_date": order_start_date,
-        "order_end_date": order_end_date,
+        "order_date_rows": int(len(order_date_df)) if order_date_df is not None else previous_meta.get("order_date_rows", 0),
+        "month_performance_rows": int(len(month_performance_df)) if month_performance_df is not None else previous_meta.get("month_performance_rows", 0),
+        "reserve_rows": int(len(reserve_df)) if reserve_df is not None else previous_meta.get("reserve_rows", 0),
+        "net_performance_rows": int(len(net_performance_df)) if net_performance_df is not None else previous_meta.get("net_performance_rows", 0),
+        "report_start_month": report_start_month or previous_meta.get("report_start_month"),
+        "report_end_month": report_end_month or previous_meta.get("report_end_month"),
+        "order_start_date": order_start_date or previous_meta.get("order_start_date"),
+        "order_end_date": order_end_date or previous_meta.get("order_end_date"),
         "error": error_msg,
         "trigger": trigger,
     }
@@ -1407,8 +1540,12 @@ def generate_sales_report(
     report_end_month: Optional[str] = None,
     order_start_date: Optional[str] = None,
     order_end_date: Optional[str] = None,
+    update_scope: str = "all",
 ):
     log("🔥 開始業績報表")
+
+    if update_scope not in {"all", "current"}:
+        raise ValueError("更新範圍只支援 all 或 current")
 
     ensure_dirs()
     (m_start, m_end), (n_start, n_end) = get_ranges()
@@ -1422,11 +1559,13 @@ def generate_sales_report(
     next_month_label = n_start[:7].replace("-", "/")
     fetch_month_ranges = []
     seen_months = set()
-    for month_range in [
+    requested_month_ranges = [
         (current_month_label, m_start, m_end),
         (next_month_label, n_start, n_end),
-        *report_month_ranges,
-    ]:
+    ]
+    if update_scope == "all":
+        requested_month_ranges.extend(report_month_ranges)
+    for month_range in requested_month_ranges:
         if month_range[0] not in seen_months:
             seen_months.add(month_range[0])
             fetch_month_ranges.append(month_range)
@@ -1485,7 +1624,7 @@ def generate_sales_report(
                         res = session.get(url, headers=HEADERS, allow_redirects=True)
                         res.raise_for_status()
 
-                        rows = parse_html(res.text)
+                        rows = parse_html(res.text, payment_status=status)
                         city_row_count += len(rows)
 
                         if not rows:
@@ -1529,28 +1668,29 @@ def generate_sales_report(
                             merged[key]["已付款"] += row["已付款"]
                             merged[key]["待付款"] += row["待付款"]
 
-            try:
-                month_order_items = _fetch_purchase_items(
-                    session,
-                    date_s=order_start_date,
-                    date_e=order_end_date,
-                )
-                for item in month_order_items:
-                    item["__city"] = city
-                order_date_records.extend(month_order_items)
+            if update_scope == "all":
+                try:
+                    month_order_items = _fetch_purchase_items(
+                        session,
+                        date_s=order_start_date,
+                        date_e=order_end_date,
+                    )
+                    for item in month_order_items:
+                        item["__city"] = city
+                    order_date_records.extend(month_order_items)
 
-                reserve_items = _fetch_purchase_items(
-                    session,
-                    clean_date_s=report_month_ranges[0][1],
-                    clean_date_e=report_month_ranges[-1][2],
-                )
-                for item in reserve_items:
-                    item["__city"] = city
-                reserve_records.extend(reserve_items)
-            except Exception as extra_exc:
-                msg = f"{city} 新增報表資料抓取失敗：{extra_exc}"
-                city_errors.append(msg)
-                log(f"⚠️ {msg}")
+                    reserve_items = _fetch_purchase_items(
+                        session,
+                        clean_date_s=report_month_ranges[0][1],
+                        clean_date_e=report_month_ranges[-1][2],
+                    )
+                    for item in reserve_items:
+                        item["__city"] = city
+                    reserve_records.extend(reserve_items)
+                except Exception as extra_exc:
+                    msg = f"{city} 新增報表資料抓取失敗：{extra_exc}"
+                    city_errors.append(msg)
+                    log(f"⚠️ {msg}")
 
             if city_row_count == 0:
                 msg = f"{city}：登入成功，但沒有抓到任何表格資料"
@@ -1600,10 +1740,18 @@ def generate_sales_report(
     validate_region2_totals(raw_df, df2)
     df3 = build_region3_df(df2)
     df4 = build_region4_df(df2)
-    order_date_df = build_order_date_summary(order_date_records)
-    month_performance_df = build_month_performance_summary(report_raw_df, report_month_ranges)
-    reserve_df = build_reserve_summary(reserve_records, report_month_ranges)
-    net_performance_df = build_net_performance_summary(report_raw_df, reserve_df, report_month_ranges)
+    if update_scope == "all":
+        order_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
+        order_summaries = build_order_date_summaries(order_date_records, order_month_ranges)
+        order_date_df = order_summaries["待付款"]
+        order_date_paid_df = order_summaries["已付款"]
+        order_date_combined_df = order_summaries["待付款＋已付款"]
+        month_performance_df = build_month_performance_summary(report_raw_df, report_month_ranges)
+        reserve_df = build_reserve_summary(reserve_records, report_month_ranges)
+        net_performance_df = build_net_performance_summary(report_raw_df, reserve_df, report_month_ranges)
+    else:
+        order_date_df = order_date_paid_df = order_date_combined_df = None
+        month_performance_df = reserve_df = net_performance_df = None
 
     raw_df.to_csv(os.path.join(LATEST_DIR, "raw_df.csv"), index=False, encoding="utf-8-sig")
     df1.to_csv(os.path.join(LATEST_DIR, "df1.csv"), index=False, encoding="utf-8-sig")
@@ -1640,10 +1788,10 @@ def generate_sales_report(
     log(f"daily_df rows = {len(daily_df)}")
     log(f"next_month_daily_df rows = {len(next_month_daily_df)}")
     log(f"month_end_df rows = {len(month_end_df)}")
-    log(f"order_date_df rows = {len(order_date_df)}")
-    log(f"month_performance_df rows = {len(month_performance_df)}")
-    log(f"reserve_df rows = {len(reserve_df)}")
-    log(f"net_performance_df rows = {len(net_performance_df)}")
+    log(f"order_date_df rows = {len(order_date_df) if order_date_df is not None else '保留'}")
+    log(f"month_performance_df rows = {len(month_performance_df) if month_performance_df is not None else '保留'}")
+    log(f"reserve_df rows = {len(reserve_df) if reserve_df is not None else '保留'}")
+    log(f"net_performance_df rows = {len(net_performance_df) if net_performance_df is not None else '保留'}")
 
     email_html = build_region4_email_html(df4)
     error_msg = None if not city_errors else " / ".join(city_errors)
@@ -1652,13 +1800,15 @@ def generate_sales_report(
         persist_dashboard_payload(
             df4, daily_df, next_month_daily_df, month_end_df, email_html,
             order_date_df=order_date_df,
+            order_date_paid_df=order_date_paid_df,
+            order_date_combined_df=order_date_combined_df,
             month_performance_df=month_performance_df,
             reserve_df=reserve_df,
             net_performance_df=net_performance_df,
-            report_start_month=report_month_ranges[0][0],
-            report_end_month=report_month_ranges[-1][0],
-            order_start_date=order_start_date,
-            order_end_date=order_end_date,
+            report_start_month=report_month_ranges[0][0] if update_scope == "all" else None,
+            report_end_month=report_month_ranges[-1][0] if update_scope == "all" else None,
+            order_start_date=order_start_date if update_scope == "all" else None,
+            order_end_date=order_end_date if update_scope == "all" else None,
             error_msg=error_msg,
             trigger=trigger,
         )
@@ -1677,6 +1827,8 @@ def generate_sales_report(
         "next_month_daily_df": next_month_daily_df,
         "month_end_df": month_end_df,
         "order_date_df": order_date_df,
+        "order_date_paid_df": order_date_paid_df,
+        "order_date_combined_df": order_date_combined_df,
         "month_performance_df": month_performance_df,
         "reserve_df": reserve_df,
         "net_performance_df": net_performance_df,
@@ -1701,6 +1853,7 @@ def main():
     report_end_month = None
     order_start_date = None
     order_end_date = None
+    update_scope = "all"
 
     # 若 toolapp 誤傳 --folder-id <id>，業績報表不需要雲端資料夾，直接忽略。
     cleaned_args = []
@@ -1708,7 +1861,7 @@ def main():
     index = 0
     while index < len(raw_args):
         arg = raw_args[index]
-        if arg in {"--folder-id", "--start-month", "--end-month", "--order-start-date", "--order-end-date"}:
+        if arg in {"--folder-id", "--start-month", "--end-month", "--order-start-date", "--order-end-date", "--scope"}:
             value = raw_args[index + 1] if index + 1 < len(raw_args) else ""
             if arg == "--start-month":
                 report_start_month = value
@@ -1718,6 +1871,8 @@ def main():
                 order_start_date = value
             elif arg == "--order-end-date":
                 order_end_date = value
+            elif arg == "--scope":
+                update_scope = value
             index += 2
             continue
         cleaned_args.append(arg)
@@ -1740,6 +1895,7 @@ def main():
         report_end_month=report_end_month,
         order_start_date=order_start_date,
         order_end_date=order_end_date,
+        update_scope=update_scope,
     )
 
     if result.get("error"):
