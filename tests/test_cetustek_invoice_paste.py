@@ -95,6 +95,22 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "填入結果異常"):
             paste._paste_one(page, json.dumps({"orderid": "LC001"}))
 
+    def test_wait_for_save_accepts_new_invoice_number_without_click_marker(self) -> None:
+        page = MagicMock()
+        page.url = paste.INVOICE_CREATE_URL
+        page.evaluate.return_value = False
+        page.locator("body").inner_text.side_effect = [
+            "",
+            "開立成功 發票號碼 AB-12345678",
+        ]
+        page.locator("input").evaluate_all.return_value = []
+
+        self.assertEqual(
+            paste._wait_for_manual_save(page, timeout_ms=1000),
+            "AB12345678",
+        )
+        page.bring_to_front.assert_called_once()
+
     def test_extract_invoice_number_from_saved_page(self) -> None:
         page = MagicMock()
         page.locator("body").inner_text.return_value = "開立成功 發票號碼 AB-12345678"
