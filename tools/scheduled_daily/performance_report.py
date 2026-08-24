@@ -406,14 +406,15 @@ def _build_order_payment_table(records, payment_label, month_ranges) -> pd.DataF
         amount = _purchase_amount(item)
         row = {col: 0 for col in cols}
         row["地區"] = city
-        row[payment_label] = amount
-        service_date = _purchase_service_date(item)
-        for label, start, end in month_ranges:
-            if start <= service_date <= end:
-                row[f"{label}{payment_label}"] = amount
-                break
         if _purchase_is_stored_value_topup(item):
             row[f"儲值金{payment_label}"] = amount
+        else:
+            row[payment_label] = amount
+            service_date = _purchase_service_date(item)
+            for label, start, end in month_ranges:
+                if start <= service_date <= end:
+                    row[f"{label}{payment_label}"] = amount
+                    break
         rows.append(row)
 
     out = pd.DataFrame(rows, columns=cols).groupby("地區", as_index=False).sum() if rows else pd.DataFrame(columns=cols)
