@@ -135,11 +135,11 @@ def install(ui) -> None:
         prepared = st.session_state.get("invoice_active_payloads") or []
         if not prepared:
             return
-        st.info("⏳ 目前正在執行：登入鯨躍 → 貼上資料 → 等你人工按下一步及儲存 → 回填 O／AA")
+        st.info("⏳ 目前正在執行：驗證鯨躍授權 → 直接填入表單 → 等你人工按下一步及儲存 → 回填 O／AA")
         st.markdown("### 🧾 Payload（備用）")
         st.caption(
-            "程式會自動點「貼上發票資料」並輸入 Payload；"
-            "若需手動備用，可按 JSON 程式碼框右上角的複製圖示。"
+            "程式會直接填入鯨躍表單，不需要篡改猴；"
+            "若需查看備用資料，可按 JSON 程式碼框右上角的複製圖示。"
         )
         for item in prepared:
             with st.expander(f"Payload：{item['order_no']}", expanded=len(prepared) == 1):
