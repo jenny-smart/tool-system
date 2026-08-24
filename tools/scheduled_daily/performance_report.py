@@ -325,7 +325,8 @@ def _purchase_service_date(item) -> str:
 
 def _purchase_is_stored_value_topup(item) -> bool:
     buy = str(item.get("buy") or "").strip().lower()
-    if buy in {"1", "true", "yes", "y"}:
+    # 後台購買項目：1 是專業清潔，5 才是購買儲值金。
+    if buy == "5":
         return True
     service = " ".join(str(item.get(key) or "") for key in (
         "service", "service_name", "item_name", "purchase_item", "title",
