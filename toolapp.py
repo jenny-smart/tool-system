@@ -26,7 +26,7 @@ import yaml
 
 from tools.common.config_loader import get_sheets_service as _get_sheets_service_raw
 from tools.staff_payroll import AREAS as STAFF_PAYROLL_AREAS
-from tools.local_agent_queue import create_task as create_local_agent_task
+from tools.local_agent_queue import create_task as _create_local_agent_task_raw
 from tools.local_agent_queue import list_tasks as _list_local_agent_tasks_raw
 from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_raw
 
@@ -38,6 +38,19 @@ from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_
 # 讀取次數壓到配額以內。
 list_local_agent_tasks = st.cache_data(ttl=5, show_spinner=False)(_list_local_agent_tasks_raw)
 read_local_agent_task_log = st.cache_data(ttl=5, show_spinner=False)(_read_local_agent_task_log_raw)
+
+
+def create_local_agent_task(action, params, created_by="Tool System"):
+    """Create a task and remember its ID so the live log only follows this session's work."""
+    task = _create_local_agent_task_raw(action, params, created_by=created_by)
+    task_id = str(task.get("task_id") or "")
+    if task_id:
+        active_ids = st.session_state.setdefault("agent_active_task_ids", [])
+        if task_id in active_ids:
+            active_ids.remove(task_id)
+        active_ids.insert(0, task_id)
+        del active_ids[20:]
+    return task
 
 from services.google_api_retry import install_googleapiclient_retry, install_gspread_retry
 
@@ -2568,14 +2581,27 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
     （之前上線就是因為這樣才整個不見）。
     """
     try:
-        agent_tasks = [
+        all_matching_tasks = [
             task
             for task in list_local_agent_tasks(limit=200)
             if task.get("action", "").startswith(relevant_prefixes)
+        ]
+        active_ids = set(st.session_state.get("agent_active_task_ids", []))
+        agent_tasks = [
+            task
+            for task in all_matching_tasks
+            if task.get("task_id", "") in active_ids
+            or task.get("status", "") in ("pending", "running")
         ][:10]
     except Exception as exc:
         st.warning(f"本機 Agent 任務 Log 讀取失敗：{exc}")
         return
+
+    if st.session_state.get("agent_feed_scope_version") != "current_tasks_v1":
+        st.session_state["agent_feed_scope_version"] = "current_tasks_v1"
+        st.session_state["agent_live_feed"] = []
+        st.session_state["agent_task_seen_status"] = {}
+        st.session_state["agent_task_log_offset"] = {}
 
     feed = st.session_state.setdefault("agent_live_feed", [])
     seen_status = st.session_state.setdefault("agent_task_seen_status", {})
