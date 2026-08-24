@@ -218,33 +218,62 @@ def _extract_invoice_no(page: Any) -> str:
     return ""
 
 
-def _wait_for_manual_save(page: Any, timeout_ms: int = MANUAL_SAVE_TIMEOUT_MS) -> str:
+def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
+    expected_order = re.sub(r"\s+", "", str(order_no or "")).upper()
+    if not expected_order:
+        return ""
+    try:
+        rows = page.locator("tr")
+        for index in range(rows.count()):
+            row_text = str(rows.nth(index).inner_text() or "")
+            normalized_row = re.sub(r"\s+", "", row_text).upper()
+            if expected_order not in normalized_row:
+                continue
+            match = INVOICE_NO_RE.search(normalized_row)
+            if match:
+                return f"{match.group(1)}{match.group(2)}"
+    except Exception:
+        pass
+    return ""
+
+
+def _wait_for_manual_save(
+    page: Any,
+    order_no: str,
+    timeout_ms: int = MANUAL_SAVE_TIMEOUT_MS,
+) -> str:
     _install_save_click_marker(page)
-    print("[鯨躍] 等待人工按『下一步』並按『儲存』；程式不會代按", flush=True)
+    page.bring_to_front()
+    initial_invoice_no = _extract_invoice_no_for_order(page, order_no)
+    print(
+        f"[鯨躍] 已切到 Agent 監控分頁：{str(page.url or '未知')}；"
+        "等待人工按『下一步』及『儲存』，再於是否繼續開下一張按『否』",
+        flush=True,
+    )
     deadline = time.monotonic() + timeout_ms / 1000
     save_clicked = False
     while time.monotonic() < deadline:
         try:
-            save_clicked = save_clicked or bool(
+            clicked_now = bool(
                 page.evaluate("sessionStorage.getItem('lemonInvoiceSaveClicked') === '1'")
             )
-            if save_clicked:
-                invoice_no = _extract_invoice_no(page)
-                if invoice_no:
-                    print(f"[鯨躍] 已取得發票號碼：{invoice_no}", flush=True)
-                    return invoice_no
+            if clicked_now and not save_clicked:
+                print("[鯨躍] 已偵測到人工按『儲存』", flush=True)
+            save_clicked = save_clicked or clicked_now
+
+            # 儲存成功後頁面會出現新發票號碼；即使網站導頁使點擊標記遺失，
+            # 仍可依實際結果完成，避免已開立卻持續等待。
+            invoice_no = _extract_invoice_no_for_order(page, order_no)
+            if invoice_no and (save_clicked or invoice_no != initial_invoice_no):
+                print(f"[鯨躍] 已取得發票號碼：{invoice_no}", flush=True)
+                return invoice_no
         except Exception:
             # 人工處理網站確認視窗或頁面跳轉期間，Playwright 可能暫時無法讀取 DOM。
             pass
         page.wait_for_timeout(500)
     if not save_clicked:
-        raise TimeoutError("30 分鐘內未偵測到人工按『儲存』")
+        raise TimeoutError("30 分鐘內未偵測到儲存結果")
     raise TimeoutError("已偵測到人工按『儲存』，但 30 分鐘內找不到發票號碼")
-    try:
-        page.context.remove_all_listeners("dialog")
-    except Exception:
-        pass
-
 
 def _paste_one(page: Any, payload_json: str) -> None:
     payload = json.loads(payload_json)
@@ -291,7 +320,7 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         try:
             _paste_one(page, payload_json)
             update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存")
-            invoice_no = _wait_for_manual_save(page)
+            invoice_no = _wait_for_manual_save(page, order_no)
             write_invoice_result(area, source_row, order_no, invoice_no)
             update_payload_status(row_no, "completed", f"已回填 O/AA：{invoice_no}")
             completed += 1

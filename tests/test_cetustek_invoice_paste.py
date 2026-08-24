@@ -4,7 +4,7 @@ import json
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 queue_module = types.ModuleType("tools.invoice_center.invoice_payload_queue")
@@ -94,6 +94,43 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "填入結果異常"):
             paste._paste_one(page, json.dumps({"orderid": "LC001"}))
+
+    def test_wait_for_save_accepts_new_invoice_number_without_click_marker(self) -> None:
+        page = MagicMock()
+        page.url = paste.INVOICE_CREATE_URL
+        page.evaluate.return_value = False
+        page.locator("body").inner_text.side_effect = [
+            "",
+            "開立成功 發票號碼 AB-12345678",
+        ]
+        page.locator("input").evaluate_all.return_value = []
+
+        with patch.object(
+            paste,
+            "_extract_invoice_no_for_order",
+            side_effect=["", "AB12345678"],
+        ):
+            self.assertEqual(
+                paste._wait_for_manual_save(page, "LC001", timeout_ms=1000),
+                "AB12345678",
+            )
+        page.bring_to_front.assert_called_once()
+
+    def test_extract_invoice_number_from_matching_order_row(self) -> None:
+        page = MagicMock()
+        rows = MagicMock()
+        row_1 = MagicMock()
+        row_1.inner_text.return_value = "DM51791827 LC002147991"
+        row_2 = MagicMock()
+        row_2.inner_text.return_value = "DM51790871 LC002146661-1"
+        rows.count.return_value = 2
+        rows.nth.side_effect = [row_1, row_2]
+        page.locator.return_value = rows
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC002146661"),
+            "DM51790871",
+        )
 
     def test_extract_invoice_number_from_saved_page(self) -> None:
         page = MagicMock()
