@@ -287,7 +287,7 @@ def normalize_date_text(text: str) -> Optional[str]:
     return None
 
 
-def parse_html(html):
+def parse_html(html, payment_status=None):
     soup = BeautifulSoup(html, "html.parser")
     tables = soup.find_all("table")
     results = []
@@ -314,6 +314,7 @@ def parse_html(html):
 
         paid_idx = header.index("已付款金額") if "已付款金額" in header else None
         unpaid_idx = header.index("待付款金額") if "待付款金額" in header else None
+        weekend_idx = header.index("週末加價") if "週末加價" in header else None
 
         date_idx = None
         for name in date_candidates:
@@ -334,6 +335,12 @@ def parse_html(html):
 
             paid = safe_int(row[paid_idx]) if paid_idx is not None and len(row) > paid_idx else 0
             unpaid = safe_int(row[unpaid_idx]) if unpaid_idx is not None and len(row) > unpaid_idx else 0
+            if income_type == "儲值金" and weekend_idx is not None and len(row) > weekend_idx:
+                weekend_amount = safe_int(row[weekend_idx])
+                if str(payment_status) == "0":
+                    unpaid += weekend_amount
+                else:
+                    paid += weekend_amount
 
             service_date = None
             if date_idx is not None and len(row) > date_idx:
@@ -1175,7 +1182,7 @@ def generate_sales_report(send_email=False, persist_dashboard=True, trigger="das
                         res = session.get(url, headers=HEADERS, allow_redirects=True)
                         res.raise_for_status()
 
-                        rows = parse_html(res.text)
+                        rows = parse_html(res.text, payment_status=status)
                         city_row_count += len(rows)
 
                         if not rows:
