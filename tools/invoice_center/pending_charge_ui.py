@@ -5,7 +5,7 @@ from typing import Any
 
 import streamlit as st
 
-from tools.local_agent_queue import create_task, list_tasks, read_task_log
+from tools.local_agent_queue import create_task, list_tasks
 
 from .invoice_payload_queue import enqueue_payload
 from .pending_charge import DISPLAY_COLUMNS, get_pending_invoice_candidates
@@ -151,28 +151,6 @@ def install(ui) -> None:
                 return item
         return None
 
-    def _render_task_log(task: dict[str, str] | None) -> None:
-        if not task:
-            return
-        status = str(task.get("status") or "pending")
-        labels = {
-            "pending": "等待 Agent",
-            "running": "執行中",
-            "completed": "執行完成",
-            "failed": "執行失敗",
-        }
-        st.markdown("### 🖥️ 執行日誌")
-        st.caption(
-            f"{labels.get(status, status)}｜"
-            f"{task.get('started_at') or task.get('created_at') or ''}"
-        )
-        task_id = str(task.get("task_id") or "")
-        log_text = read_task_log(task_id) if task_id else ""
-        if not log_text:
-            log_text = str(task.get("log") or task.get("message") or "等待本機 Agent")
-        st.code(log_text, language="text")
-        if st.button("🔄 更新執行日誌", key=f"refresh_invoice_log_{task_id}"):
-            st.rerun()
 
     def _render_active_payload() -> None:
         prepared = st.session_state.get("invoice_active_payloads") or []
@@ -291,6 +269,5 @@ def install(ui) -> None:
                     st.error(f"發票流程啟動失敗：{exc}")
 
         _render_active_payload()
-        _render_task_log(task_snapshot)
 
     ui.render_invoice_create = render_invoice_create
