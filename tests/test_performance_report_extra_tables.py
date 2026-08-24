@@ -72,6 +72,35 @@ def test_paid_summary_matches_backend_service_and_stored_value_totals():
     assert paid.loc["台北", "儲值金已付款"] == 50000
 
 
+def test_report_rows_use_exact_backend_paid_amounts_without_json_tail_digits():
+    ranges = report.get_order_service_month_ranges("2026-08-24", month_count=4)
+    records = [{
+        "地區": "台北",
+        "付款狀態": "已付款",
+        "總金額": 42400 + 26400,
+        "月份金額": {"2026/08": 31600 + 4800, "2026/09": 10800 + 21600},
+        "儲值金金額": 50000,
+    }]
+    paid = report.build_order_date_summaries_from_report_rows(
+        records, ranges,
+    )["已付款"].set_index("地區")
+
+    assert paid.loc["台北", "已付款"] == 68800
+    assert paid.loc["台北", "2026/08已付款"] == 36400
+    assert paid.loc["台北", "2026/09已付款"] == 32400
+    assert paid.loc["台北", "儲值金已付款"] == 50000
+
+
+def test_report_amount_split_keeps_stored_value_service_in_paid_total():
+    rows = [
+        {"收入類型": "現金收入", "服務": "居家清潔", "已付款": 42400},
+        {"收入類型": "儲值金", "服務": "居家清潔", "已付款": 26400},
+        {"收入類型": "現金收入", "服務": "儲值金", "已付款": 50000},
+    ]
+
+    assert report._payment_amount_from_report_rows(rows, 1) == (68800, 50000)
+
+
 def test_parse_html_adds_weekend_surcharge_only_for_stored_value_table():
     html = """
     <table><tr><th>儲值金</th><th>已付款金額</th><th>待付款金額</th><th>週末加價</th></tr>
