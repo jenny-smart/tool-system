@@ -92,21 +92,28 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         confirmation = MagicMock(
             message="已填入。請檢查買受人/統編、Email、付款方式、載具後再按下一步。"
         )
-        page.expect_dialog.side_effect = [
+        page.expect_event.side_effect = [
             _dialog_context(prompt),
             _dialog_context(confirmation),
         ]
 
         paste._paste_one(page, json.dumps({"orderid": "LC001"}))
 
-        prompt.accept.assert_called_once()
+        prompt.accept.assert_called_once_with(json.dumps({"orderid": "LC001"}))
         confirmation.accept.assert_called_once()
+        self.assertEqual(
+            page.expect_event.call_args_list,
+            [
+                unittest.mock.call("dialog", timeout=8000),
+                unittest.mock.call("dialog", timeout=8000),
+            ],
+        )
 
     def test_paste_rejects_false_success_when_form_order_id_is_blank(self) -> None:
         page = _invoice_page("")
         prompt = MagicMock(type="prompt")
         confirmation = MagicMock(message="已填入。請檢查後再按下一步。")
-        page.expect_dialog.side_effect = [
+        page.expect_event.side_effect = [
             _dialog_context(prompt),
             _dialog_context(confirmation),
         ]
