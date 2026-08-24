@@ -8,14 +8,14 @@ STATUS_CONFIG = {
     "待扣儲值金": {
         "action": "扣款",
         "amount_column": 13,
-        "time_column": 12,
+        "time_column": 13,
         "suffix": "已扣",
         "completed_status": "已扣儲值金",
     },  # N 金額、M 時間
     "待返儲值金": {
         "action": "入帳",
         "amount_column": 18,
-        "time_column": 28,
+        "time_column": 29,
         "suffix": "已返",
         "completed_status": "已返儲值金",
     },  # S 金額、AC 時間
@@ -59,8 +59,8 @@ def pending_stored_value_adjustments(values: list[list[str]]) -> list[dict[str, 
                 "action": config["action"],
                 "suffix": config["suffix"],
                 "completed_status": config["completed_status"],
-                "time_column": int(config["time_column"]) + 1,
-                "completed_at": _cell(row, int(config["time_column"])),
+                "time_column": int(config["time_column"]),
+                "completed_at": _cell(row, int(config["time_column"]) - 1),
             }
         )
     return rows
