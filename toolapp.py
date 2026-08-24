@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0824_v2_desktop_oauth_setup
+版本：0824_v3_support_shortcuts
 更新日期：2026-08-24
 """
 import html
@@ -1072,7 +1072,7 @@ def sync_view_from_query_params() -> None:
     except Exception:
         view = None
 
-    if view in ["report", "log"]:
+    if view in ["report", "oauth", "agent_help", "log"]:
         st.session_state.view = view
 
 
@@ -2009,6 +2009,148 @@ def render_log_page() -> None:
                         st.code(row["content"] or "空 log", language="text")
 
 
+
+
+# ═══════════════════════════════════════════════════════════
+# Local Agent 離線處理頁
+# ═══════════════════════════════════════════════════════════
+def render_agent_help() -> None:
+    st.markdown("## 🖥️ Agent 離線處理")
+
+    back_col, refresh_col = st.columns([1, 1])
+    with back_col:
+        if st.button("← 返回主控台", use_container_width=True, key="agent_help_back"):
+            set_view("main")
+            st.rerun()
+    with refresh_col:
+        if st.button("🔄 重新檢查心跳", use_container_width=True, key="agent_help_refresh"):
+            st.rerun()
+
+    try:
+        agent_rows = list_local_agent_status(max_age_seconds=30)
+        online_agents = [row for row in agent_rows if row.get("online")]
+        if online_agents:
+            agent = online_agents[0]
+            st.success(
+                f"Local Agent Online｜{agent.get('agent_id', '')}｜"
+                f"最後心跳 {agent.get('last_seen', '')}",
+                icon="🟢",
+            )
+        else:
+            last_seen = agent_rows[0].get("last_seen", "尚無心跳") if agent_rows else "尚無心跳"
+            st.error(f"Local Agent Offline｜最後心跳 {last_seen}", icon="🔴")
+    except Exception as exc:
+        st.error(f"無法讀取 Agent 心跳：{exc}", icon="🔴")
+
+    st.markdown(
+        """
+**離線處理：**
+
+1. 在 Mac 開啟 Terminal
+2. 切換至正式 Tool System 專案
+3. 執行固定啟動程式，並保持該 Terminal 視窗開啟
+4. 回到此頁按「重新檢查心跳」
+
+不要使用 `launchctl kickstart` 啟動 Python；macOS 可能禁止背景程序存取 `~/Documents`。
+        """
+    )
+    st.code(
+        "cd ~/Documents/codex-workspace/tool-system\n\n"
+        "'/Users/jenny/Library/Application Support/LemonToolsAgent/start-local-agent.sh'",
+        language="bash",
+    )
+
+    st.markdown("**若仍然離線，查看錯誤 Log：**")
+    st.code(
+        "cd ~/Documents/codex-workspace/tool-system\n\n"
+        "tail -n 50 ~/Library/Logs/LemonToolsAgent/local_agent.launchd.err.log",
+        language="bash",
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# Google Drive OAuth 授權設定頁
+# ═══════════════════════════════════════════════════════════
+def render_oauth_settings() -> None:
+    st.markdown("## 🔑 Drive 授權設定")
+
+    if st.button("← 返回主控台", use_container_width=False):
+        set_view("main")
+        st.rerun()
+
+    st.markdown(
+        """
+**目前使用「電腦版應用程式」OAuth；憑證失效時的操作流程：**
+
+1. 到 Google Cloud Console 確認原本的 **電腦版應用程式** OAuth Client 仍存在
+2. 下載該 Client 的 JSON，命名為 `tool-system-oauth.json`，暫存於本機 Tool System 專案
+3. 在 Mac Terminal 執行下方指令，以可存取月排程 Drive 的 Google 帳號登入並同意
+4. 將終端機產生的三行 `GOOGLE_OAUTH_*` 完整替換至 Tool System Streamlit Secrets
+5. Reboot app 後，按「測試目前 OAuth 憑證」確認
+6. 完成後把 JSON 移出 Git Repo，避免誤提交
+
+不需建立 Web application Client，也不需設定重新導向 URI。
+        """
+    )
+
+    st.code(
+        "cd ~/Documents/codex-workspace/tool-system\n\n"
+        "python3 -m tools.invoice_center.generate_oauth_token "
+        "./tool-system-oauth.json",
+        language="bash",
+    )
+    st.caption(
+        "授權工具會輸出 GOOGLE_OAUTH_CLIENT_ID、"
+        "GOOGLE_OAUTH_CLIENT_SECRET、GOOGLE_OAUTH_REFRESH_TOKEN 三行。"
+    )
+
+    current_oauth_client_id = get_secret_text("GOOGLE_OAUTH_CLIENT_ID").strip()
+    if current_oauth_client_id:
+        st.caption(f"目前 Client ID：{mask_id(current_oauth_client_id)}")
+
+    if st.button(
+        "🔍 測試目前 OAuth 憑證",
+        use_container_width=True,
+        key="test_tool_oauth_credentials",
+    ):
+        oauth_values = {
+            "GOOGLE_OAUTH_CLIENT_ID": get_secret_text("GOOGLE_OAUTH_CLIENT_ID").strip(),
+            "GOOGLE_OAUTH_CLIENT_SECRET": get_secret_text("GOOGLE_OAUTH_CLIENT_SECRET").strip(),
+            "GOOGLE_OAUTH_REFRESH_TOKEN": get_secret_text("GOOGLE_OAUTH_REFRESH_TOKEN").strip(),
+        }
+        oauth_missing = [name for name, value in oauth_values.items() if not value]
+        if oauth_missing:
+            st.error("缺少 Secret：" + "、".join(oauth_missing))
+            return
+
+        try:
+            from google.auth.transport.requests import Request as OAuthRequest
+            from google.oauth2.credentials import Credentials as OAuthCredentials
+            from googleapiclient.discovery import build as oauth_build
+
+            oauth_credentials = OAuthCredentials(
+                token=None,
+                refresh_token=oauth_values["GOOGLE_OAUTH_REFRESH_TOKEN"],
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=oauth_values["GOOGLE_OAUTH_CLIENT_ID"],
+                client_secret=oauth_values["GOOGLE_OAUTH_CLIENT_SECRET"],
+                scopes=[
+                    "https://www.googleapis.com/auth/drive",
+                    "https://www.googleapis.com/auth/spreadsheets",
+                ],
+            )
+            oauth_credentials.refresh(OAuthRequest())
+            oauth_drive = oauth_build(
+                "drive",
+                "v3",
+                credentials=oauth_credentials,
+                cache_discovery=False,
+            )
+            oauth_user = oauth_drive.about().get(fields="user(emailAddress)").execute()
+            oauth_email = (oauth_user.get("user") or {}).get("emailAddress", "")
+            st.success(f"✅ OAuth 憑證有效；授權帳號：{oauth_email or 'Google 帳號'}")
+        except Exception as exc:
+            st.error(f"❌ OAuth 憑證無效：{exc}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -3246,6 +3388,20 @@ if st.session_state.view == "report":
     render_report()
     st.stop()
 
+if st.session_state.view == "oauth":
+    if not can_access_page("settings"):
+        st.error("你沒有權限查看 Drive 授權設定")
+        st.stop()
+    render_oauth_settings()
+    st.stop()
+
+if st.session_state.view == "agent_help":
+    if not can_access_page("settings"):
+        st.error("你沒有權限查看 Agent 離線處理")
+        st.stop()
+    render_agent_help()
+    st.stop()
+
 if st.session_state.view == "log":
     if not can_access_page("log"):
         st.error("你沒有權限查看排程 Log")
@@ -3291,7 +3447,7 @@ except Exception:
 # ═══════════════════════════════════════════════════════════
 st.markdown('<div class="card">', unsafe_allow_html=True)
 
-head_left, head_report, head_log = st.columns([1.7, 1, 1])
+head_left, head_report, head_oauth, head_agent, head_log = st.columns([1.1, 1, 1, 1, 1])
 
 with head_left:
     st.markdown('<div class="card-title">⚙️ 執行設定</div>', unsafe_allow_html=True)
@@ -3303,6 +3459,22 @@ with head_report:
             st.rerun()
     else:
         st.caption("無業績報表權限")
+
+with head_oauth:
+    if can_access_page("settings"):
+        if st.button("🔑 Drive 授權設定", use_container_width=True):
+            set_view("oauth")
+            st.rerun()
+    else:
+        st.caption("無設定權限")
+
+with head_agent:
+    if can_access_page("settings"):
+        if st.button("🖥️ Agent 離線處理", use_container_width=True):
+            set_view("agent_help")
+            st.rerun()
+    else:
+        st.caption("無設定權限")
 
 with head_log:
     if can_access_page("log"):
@@ -4622,84 +4794,6 @@ if can_access_page("settings"):
                         add_log(f"刪除系統設定：{name}", "warning")
                         st.rerun()
 
-
-# ═══════════════════════════════════════════════════════════
-# UI — Google Drive OAuth 重新授權
-# ═══════════════════════════════════════════════════════════
-if can_access_page("settings"):
-    with st.expander("🔑 Drive 授權設定", expanded=False):
-        st.markdown(
-            """
-**目前使用「電腦版應用程式」OAuth；憑證失效時的操作流程：**
-
-1. 到 Google Cloud Console 確認原本的 **電腦版應用程式** OAuth Client 仍存在
-2. 下載該 Client 的 JSON，命名為 `tool-system-oauth.json`，暫存於本機 Tool System 專案
-3. 在 Mac Terminal 執行下方指令，以可存取月排程 Drive 的 Google 帳號登入並同意
-4. 將終端機產生的三行 `GOOGLE_OAUTH_*` 完整替換至 Tool System Streamlit Secrets
-5. Reboot app 後，按「測試目前 OAuth 憑證」確認
-6. 完成後把 JSON 移出 Git Repo，避免誤提交
-
-不需建立 Web application Client，也不需設定重新導向 URI。
-            """
-        )
-
-        st.code(
-            "cd ~/Documents/codex-workspace/tool-system\n\n"
-            "python3 -m tools.invoice_center.generate_oauth_token "
-            "./tool-system-oauth.json",
-            language="bash",
-        )
-        st.caption(
-            "授權工具會輸出 GOOGLE_OAUTH_CLIENT_ID、"
-            "GOOGLE_OAUTH_CLIENT_SECRET、GOOGLE_OAUTH_REFRESH_TOKEN 三行。"
-        )
-
-        current_oauth_client_id = get_secret_text("GOOGLE_OAUTH_CLIENT_ID").strip()
-        if current_oauth_client_id:
-            st.caption(f"目前 Client ID：{mask_id(current_oauth_client_id)}")
-
-        if st.button(
-            "🔍 測試目前 OAuth 憑證",
-            use_container_width=True,
-            key="test_tool_oauth_credentials",
-        ):
-            oauth_values = {
-                "GOOGLE_OAUTH_CLIENT_ID": get_secret_text("GOOGLE_OAUTH_CLIENT_ID").strip(),
-                "GOOGLE_OAUTH_CLIENT_SECRET": get_secret_text("GOOGLE_OAUTH_CLIENT_SECRET").strip(),
-                "GOOGLE_OAUTH_REFRESH_TOKEN": get_secret_text("GOOGLE_OAUTH_REFRESH_TOKEN").strip(),
-            }
-            oauth_missing = [name for name, value in oauth_values.items() if not value]
-            if oauth_missing:
-                st.error("缺少 Secret：" + "、".join(oauth_missing))
-            else:
-                try:
-                    from google.auth.transport.requests import Request as OAuthRequest
-                    from google.oauth2.credentials import Credentials as OAuthCredentials
-                    from googleapiclient.discovery import build as oauth_build
-
-                    oauth_credentials = OAuthCredentials(
-                        token=None,
-                        refresh_token=oauth_values["GOOGLE_OAUTH_REFRESH_TOKEN"],
-                        token_uri="https://oauth2.googleapis.com/token",
-                        client_id=oauth_values["GOOGLE_OAUTH_CLIENT_ID"],
-                        client_secret=oauth_values["GOOGLE_OAUTH_CLIENT_SECRET"],
-                        scopes=[
-                            "https://www.googleapis.com/auth/drive",
-                            "https://www.googleapis.com/auth/spreadsheets",
-                        ],
-                    )
-                    oauth_credentials.refresh(OAuthRequest())
-                    oauth_drive = oauth_build(
-                        "drive",
-                        "v3",
-                        credentials=oauth_credentials,
-                        cache_discovery=False,
-                    )
-                    oauth_user = oauth_drive.about().get(fields="user(emailAddress)").execute()
-                    oauth_email = (oauth_user.get("user") or {}).get("emailAddress", "")
-                    st.success(f"✅ OAuth 憑證有效；授權帳號：{oauth_email or 'Google 帳號'}")
-                except Exception as exc:
-                    st.error(f"❌ OAuth 憑證無效：{exc}")
 
 # ═══════════════════════════════════════════════════════════
 # 執行邏輯
