@@ -207,6 +207,9 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                         int(item["sheet_row"]), int(item["time_column"]), completed_at
                     )
                     print(f"已回寫第 {item['sheet_row']} 列時間：{completed_at}")
+                completed_status = str(item["completed_status"])
+                worksheet.update_cell(int(item["sheet_row"]), 2, completed_status)
+                print(f"已回寫第 {item['sheet_row']} 列狀態：{completed_status}")
                 if created:
                     completed += 1
                     print(f"完成：{item['order_no']}／{date_text}{item['suffix']}")

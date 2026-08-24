@@ -80,17 +80,19 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
         try:
-            for index, item in enumerate(selected):
+            for item in selected:
                 print(
                     f"準備第 {item['sheet_row']} 列：{item['customer']}／"
                     f"P={item['bank_code']}／Q={item['account_number']}／NT$ {item['amount']}"
                 )
                 fill_refund(page, area, account.bank_account, item)
                 print("已進入富邦確認資料頁。")
-                if index + 1 < len(selected):
-                    wait_user_completed_transfer(page)
-                    page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已準備；最後一筆請人工核對並完成最終交易。")
+                # 每一筆都要等人工完成最終交易並驗證成功後才回寫，最後一筆也不例外。
+                wait_user_completed_transfer(page)
+                worksheet.update_cell(int(item["sheet_row"]), 2, "已退款")
+                print(f"已回寫第 {item['sheet_row']} 列狀態：已退款")
+                page = current_fubon_page(context, page) or page
+            print("全部勾選資料均已完成退款並回寫 B 欄。")
         except Exception:
             # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
             raise
