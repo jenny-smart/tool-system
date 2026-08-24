@@ -1,6 +1,23 @@
 from datetime import datetime
+import sys
+import types
 import unittest
 from unittest.mock import patch
+
+
+registry_stub = types.ModuleType("tools.bank_statement.internal_payment_registry")
+registry_stub.DEPOSIT_REPORT_TYPE = "工具包押金財報"
+registry_stub.resolve_report_location = lambda report_type, area: ("", "")
+
+config_stub = types.ModuleType("tools.common.config_loader")
+config_stub.get_master_spreadsheet_id = lambda: ""
+config_stub.get_sheets_service = lambda: None
+
+sys.modules.setdefault(
+    "tools.bank_statement.internal_payment_registry",
+    registry_stub,
+)
+sys.modules.setdefault("tools.common.config_loader", config_stub)
 
 from tools.finance_management import deposit_report
 
