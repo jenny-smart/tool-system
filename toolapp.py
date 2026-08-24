@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """
 檔案：toolapp.py
-版本：0818_v6
-更新日期：2026-08-18
+版本：0824_v1_oauth_setup
+更新日期：2026-08-24
 """
 import html
 import base64
@@ -4602,6 +4602,180 @@ if can_access_page("settings"):
                         save_config(config)
                         add_log(f"刪除系統設定：{name}", "warning")
                         st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════
+# UI — Google Drive OAuth 重新授權
+# ═══════════════════════════════════════════════════════════
+if can_access_page("settings"):
+    with st.expander("🔑 Drive 授權設定", expanded=False):
+        st.markdown(
+            """
+**OAuth 憑證失效時的操作流程：**
+
+1. Google Cloud Console：使用 **Web application** OAuth Client；若現有 Tool System Client 類型是「電腦」，請另建一個 Web Client（不要刪除原本的）
+2. 將下方網址加入該 Client 的「授權的重新導向 URI」
+3. 輸入 Client ID／Client Secret，點擊授權連結，以可存取 Tool System Drive 的 Google 帳號登入並同意
+4. Google 導回本頁後，再輸入一次 Client Secret 完成 Token 交換
+5. 將產生的三行完整替換至 Tool System 的 Streamlit Cloud Secrets
+6. Reboot app，讓新 Secrets 生效
+            """
+        )
+
+        oauth_redirect_uri = get_secret_text("APP_BASE_URL").strip().rstrip("/")
+        if not oauth_redirect_uri:
+            st.warning(
+                "尚未設定 Secret `APP_BASE_URL`。請先填入 Tool System 的完整網址，"
+                "例如 `https://你的-app.streamlit.app`。"
+            )
+        else:
+            st.caption(f"授權的重新導向 URI 請設定為：`{oauth_redirect_uri}`")
+
+        oauth_qp = st.query_params
+        oauth_code = oauth_qp.get("code")
+        oauth_state_raw = oauth_qp.get("state", "")
+        oauth_returned_client_id = ""
+        oauth_is_callback = False
+
+        if oauth_code and oauth_state_raw:
+            try:
+                oauth_state_padded = str(oauth_state_raw) + "=" * (-len(str(oauth_state_raw)) % 4)
+                oauth_state = json.loads(
+                    base64.urlsafe_b64decode(oauth_state_padded.encode()).decode()
+                )
+                oauth_is_callback = oauth_state.get("flow") == "tool_system_drive_oauth"
+                oauth_returned_client_id = str(oauth_state.get("client_id", "")).strip()
+            except Exception:
+                oauth_is_callback = False
+
+        if oauth_is_callback:
+            st.info("已取得 Google 授權碼，請再輸入一次 Client Secret 完成 Token 交換。")
+            oauth_confirm_client_id = st.text_input(
+                "Client ID",
+                value=oauth_returned_client_id,
+                key="tool_oauth_confirm_client_id",
+            )
+            oauth_confirm_client_secret = st.text_input(
+                "Client Secret",
+                type="password",
+                key="tool_oauth_confirm_client_secret",
+            )
+
+            oauth_exchange_col, oauth_cancel_col = st.columns(2)
+            with oauth_exchange_col:
+                oauth_do_exchange = st.button("🔁 換取 Token", use_container_width=True)
+            with oauth_cancel_col:
+                oauth_do_cancel = st.button("✕ 取消", use_container_width=True)
+
+            if oauth_do_cancel:
+                for oauth_key in ("code", "state", "scope", "authuser", "prompt"):
+                    if oauth_key in st.query_params:
+                        del st.query_params[oauth_key]
+                st.rerun()
+
+            if oauth_do_exchange:
+                if not oauth_confirm_client_id or not oauth_confirm_client_secret:
+                    st.error("請輸入 Client ID 與 Client Secret")
+                elif not oauth_redirect_uri:
+                    st.error("請先設定 Secret `APP_BASE_URL` 並 Reboot app")
+                else:
+                    try:
+                        import requests as oauth_requests
+
+                        oauth_response = oauth_requests.post(
+                            "https://oauth2.googleapis.com/token",
+                            data={
+                                "code": oauth_code,
+                                "client_id": oauth_confirm_client_id,
+                                "client_secret": oauth_confirm_client_secret,
+                                "redirect_uri": oauth_redirect_uri,
+                                "grant_type": "authorization_code",
+                            },
+                            timeout=30,
+                        )
+                        oauth_response.raise_for_status()
+                        oauth_token_data = oauth_response.json()
+                        oauth_refresh_token = oauth_token_data.get("refresh_token")
+
+                        for oauth_key in ("code", "state", "scope", "authuser", "prompt"):
+                            if oauth_key in st.query_params:
+                                del st.query_params[oauth_key]
+
+                        if not oauth_refresh_token:
+                            st.warning(
+                                "Google 沒有回傳 Refresh Token。請確認授權時已重新同意；"
+                                "必要時先到 Google 帳戶移除舊授權，再重新操作。"
+                            )
+                        else:
+                            st.success("✅ 已取得新授權，請完整替換以下三行後 Reboot app：")
+                            st.code(
+                                f'GOOGLE_OAUTH_CLIENT_ID = "{oauth_confirm_client_id}"\n'
+                                f'GOOGLE_OAUTH_CLIENT_SECRET = "{oauth_confirm_client_secret}"\n'
+                                f'GOOGLE_OAUTH_REFRESH_TOKEN = "{oauth_refresh_token}"\n',
+                                language="toml",
+                            )
+                    except Exception as exc:
+                        try:
+                            oauth_error_detail = oauth_response.text
+                        except Exception:
+                            oauth_error_detail = ""
+                        st.error(f"換取 Token 失敗：{exc} {oauth_error_detail}".strip())
+        else:
+            if oauth_qp.get("error"):
+                st.error(
+                    f"Google 授權失敗：{oauth_qp.get('error')} "
+                    f"{oauth_qp.get('error_description', '')}".strip()
+                )
+
+            oauth_client_id = st.text_input(
+                "Client ID",
+                value=get_secret_text("GOOGLE_OAUTH_CLIENT_ID"),
+                key="tool_oauth_setup_client_id",
+            )
+            oauth_client_secret = st.text_input(
+                "Client Secret",
+                type="password",
+                key="tool_oauth_setup_client_secret",
+            )
+
+            if oauth_client_id and oauth_client_secret and oauth_redirect_uri:
+                from urllib.parse import urlencode as oauth_urlencode
+                import secrets as oauth_secrets
+
+                oauth_state_payload = base64.urlsafe_b64encode(
+                    json.dumps(
+                        {
+                            "flow": "tool_system_drive_oauth",
+                            "client_id": oauth_client_id,
+                            "nonce": oauth_secrets.token_urlsafe(8),
+                        }
+                    ).encode()
+                ).decode().rstrip("=")
+                oauth_auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + oauth_urlencode(
+                    {
+                        "response_type": "code",
+                        "client_id": oauth_client_id,
+                        "redirect_uri": oauth_redirect_uri,
+                        "scope": " ".join(
+                            [
+                                "https://www.googleapis.com/auth/drive",
+                                "https://www.googleapis.com/auth/spreadsheets",
+                            ]
+                        ),
+                        "access_type": "offline",
+                        "prompt": "consent",
+                        "include_granted_scopes": "true",
+                        "state": oauth_state_payload,
+                    }
+                )
+                st.link_button("🔗 產生授權連結", oauth_auth_url, use_container_width=True)
+            else:
+                st.button(
+                    "🔗 產生授權連結",
+                    use_container_width=True,
+                    disabled=True,
+                    key="tool_oauth_setup_disabled",
+                )
 
 # ═══════════════════════════════════════════════════════════
 # 執行邏輯
