@@ -39,7 +39,7 @@ def test_order_date_summaries_split_service_month_and_add_stored_weekend_price()
         {"__city": "台北", "date_clean": "2026-12-28", "total": 1000, "purchase_status": "0"},
         {"__city": "台北", "date_clean": "2027-01-03", "total": 2000, "purchase_status": "1",
          "stored_value_weekend_price": 200},
-        {"__city": "台中", "service": "儲值金", "buy": 1, "total": 3000, "purchase_status": "0"},
+        {"__city": "台中", "service": "儲值金", "buy": 5, "total": 3000, "purchase_status": "0"},
     ]
     tables = report.build_order_date_summaries(records, ranges)
     unpaid = tables["待付款"].set_index("地區")
@@ -51,6 +51,9 @@ def test_order_date_summaries_split_service_month_and_add_stored_weekend_price()
     assert unpaid.loc["台中", "待付款"] == 0
     assert paid.loc["台北", "2027/01已付款"] == 2200
     assert combined.loc["台北", "待付款＋已付款"] == 3200
+    assert not report._purchase_is_stored_value_topup(
+        {"buy": 1, "service": "居家清潔", "date_clean": "2026-12-28"}
+    )
 
 
 def test_paid_summary_matches_backend_service_and_stored_value_totals():
@@ -62,7 +65,7 @@ def test_paid_summary_matches_backend_service_and_stored_value_totals():
         {"__city": "台北", "date_clean": "2026-09-10", "total": 10800, "purchase_status": "1"},
         {"__city": "台北", "date_clean": "2026-09-20", "total": 21600,
          "payway": "儲值金", "purchase_status": "1"},
-        {"__city": "台北", "service": "儲值金", "buy": 1, "total": 50000, "purchase_status": "1"},
+        {"__city": "台北", "service": "儲值金", "buy": 5, "total": 50000, "purchase_status": "1"},
     ]
     paid = report.build_order_date_summaries(records, ranges)["已付款"].set_index("地區")
 
