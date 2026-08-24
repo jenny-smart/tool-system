@@ -56,10 +56,10 @@ def _paste_button(page: Any) -> Any:
     button = page.locator("#lemon-ei-fill-btn")
     if _visible(button):
         return button.first
-    button = page.get_by_text("貼上發票資料", exact=True)
-    if _visible(button):
-        return button.first
-    raise RuntimeError("發票開立頁找不到『貼上發票資料』按鈕，請確認 Tampermonkey 腳本已啟用")
+    raise RuntimeError(
+        "發票開立頁找不到 #lemon-ei-fill-btn『貼上發票資料』按鈕，"
+        "請確認 Tampermonkey 腳本已啟用"
+    )
 
 
 def _open_invoice_create(page: Any) -> None:
@@ -167,7 +167,7 @@ def _paste_one(page: Any, payload_json: str) -> None:
     _clear_dialog_handlers(page)
     button = _paste_button(page)
     button.scroll_into_view_if_needed()
-    print("[鯨躍] 點擊『貼上發票資料』", flush=True)
+    print("[鯨躍] 點擊 #lemon-ei-fill-btn『貼上發票資料』", flush=True)
 
     with page.expect_event("dialog", timeout=8000) as prompt_info:
         button.click(force=True)
