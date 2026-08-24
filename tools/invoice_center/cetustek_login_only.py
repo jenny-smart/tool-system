@@ -5,9 +5,14 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from tools.invoice_center.cetustek_invoice_paste import process_pending_invoice_payloads
+from tools.invoice_center.cetustek_invoice_paste import (
+    INVOICE_CREATE_URL,
+    _is_invoice_create_page,
+    process_pending_invoice_payloads,
+)
 from tools.invoice_center.ei_export_all import (
     EI_HOME_URL,
+    EI_LOGIN_URL,
     configured_areas,
     credentials_for,
     load_accounts,
@@ -32,15 +37,24 @@ def parse_args() -> argparse.Namespace:
 
 
 def _ei_logged_in(page) -> bool:
+    messages: list[str] = []
+
+    def handle_dialog(dialog) -> None:
+        messages.append(str(dialog.message or "").strip())
+        dialog.accept()
+
     try:
-        page.wait_for_load_state("domcontentloaded")
-        if "ei.com.tw/InvoiceRent" not in page.url:
-            return False
-        field = page.locator("#userid")
-        return field.count() == 0 or not field.first.is_visible()
+        page.remove_all_listeners("dialog")
+        page.on("dialog", handle_dialog)
+        page.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded", timeout=15000)
+        return not any("未授權" in message for message in messages) and _is_invoice_create_page(page)
     except Exception:
         return False
-
+    finally:
+        try:
+            page.remove_listener("dialog", handle_dialog)
+        except Exception:
+            pass
 
 def _clean_ei_page(context, page):
     clean = context.new_page()
@@ -88,6 +102,7 @@ def main() -> int:
             print(f"[{credentials.label}] 發現既有 EI 分頁，沿用目前登入狀態")
         elif ei_page is not None:
             active_page = ei_page
+            active_page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
             login_second(active_page, credentials)
             used_login_handler = True
         elif portal_page is not None:
