@@ -69,7 +69,7 @@ def enqueue_payload(
             continue
         if str(item.get("order_no", "")).strip() != normalized_order:
             continue
-        if str(item.get("status", "")).strip() != "pending":
+        if str(item.get("status", "")).strip() not in actionable_statuses:
             continue
         row_no = int(item.get("_row") or 0)
         service.spreadsheets().values().update(
@@ -100,7 +100,9 @@ def list_pending_payloads(area: str) -> list[dict[str, Any]]:
     _ensure_sheet(service, spreadsheet_id)
     rows = _all_rows(service, spreadsheet_id)
 
-    # 只回傳每個訂單最新一筆 pending；舊的重複 pending 自動標記 superseded。
+    # awaiting_save 代表可能已開立但尚未回填，也必須交回 Agent 復原；
+    # 否則中止舊程序後會永久略過，重新送出又有重複開票風險。
+    actionable_statuses = {"pending", "awaiting_save"}
     latest_by_order: dict[str, dict[str, Any]] = {}
     duplicates: list[int] = []
     for item in rows:
