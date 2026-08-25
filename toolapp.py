@@ -29,6 +29,7 @@ from tools.staff_payroll import AREAS as STAFF_PAYROLL_AREAS
 from tools.local_agent_queue import create_task as _create_local_agent_task_raw
 from tools.local_agent_queue import list_tasks as _list_local_agent_tasks_raw
 from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_raw
+from tools.local_agent_queue import request_task_cancel as _request_local_agent_task_cancel_raw
 
 # render_agent_task_progress／render_fubon_mobile_verification 都是每 2~3 秒
 # 自動輪詢一次的 st.fragment，各自還會再呼叫 read_task_log；不加短期快取的話，
@@ -2048,6 +2049,8 @@ def render_agent_help() -> None:
         if st.button("🔄 重新檢查心跳", use_container_width=True, key="agent_help_refresh"):
             st.rerun()
 
+    agent_rows = []
+    online_agents = []
     try:
         agent_rows = list_local_agent_status(max_age_seconds=30)
         online_agents = [row for row in agent_rows if row.get("online")]
@@ -2061,22 +2064,61 @@ def render_agent_help() -> None:
         else:
             last_seen = agent_rows[0].get("last_seen", "尚無心跳") if agent_rows else "尚無心跳"
             st.error(f"Local Agent Offline｜最後心跳 {last_seen}", icon="🔴")
+            st.warning(
+                "Agent 會先由背景監督程序自動復原。若 30 秒後仍為 OFF，"
+                "請複製下方「離線超過 30 秒」指令執行；不要按 Control + C。"
+            )
     except Exception as exc:
         st.error(f"無法讀取 Agent 心跳：{exc}", icon="🔴")
 
+    try:
+        running_tasks = [
+            task for task in list_local_agent_tasks(limit=100)
+            if task.get("status") in {"running", "cancel_requested"}
+        ]
+    except Exception as exc:
+        running_tasks = []
+        st.warning(f"無法讀取目前工作：{exc}")
+
+    st.markdown("**中止目前工作：**")
+    if running_tasks:
+        current_task = running_tasks[0]
+        st.caption(
+            f"{current_task.get('action', '未知工作')}｜"
+            f"開始時間 {current_task.get('started_at', '')}｜"
+            f"狀態 {current_task.get('status', '')}"
+        )
+        cancel_pending = current_task.get("status") == "cancel_requested"
+        if st.button(
+            "⏹️ 中止目前工作",
+            type="primary",
+            use_container_width=True,
+            disabled=cancel_pending,
+            key=f"agent_cancel_{current_task.get('task_id', '')}",
+        ):
+            ok, message = _request_local_agent_task_cancel_raw(
+                str(current_task.get("task_id") or "")
+            )
+            list_local_agent_tasks.clear()
+            if ok:
+                st.success(message)
+            else:
+                st.error(message)
+            st.rerun()
+        if cancel_pending:
+            st.info("已送出中止要求，Agent 正在關閉目前工作的子程序。")
+    else:
+        st.caption("目前沒有執行中的工作。")
+
     st.markdown(
         """
-**重啟 Agent：**
-
-1. 在 Mac 開啟 Terminal
-2. 執行下方指令
-3. 看到 `state = running` 後，回到此頁按「重新檢查心跳」
-
-Agent 已由背景監督程序管理。子程序若異常退出，會在 5 秒後自動重啟；更新程式（`git pull`）後則需執行一次 `restart` 才會載入新版。
+Agent 已由背景監督程序管理。Agent 子程序若異常退出，會在約 5 秒後自動重啟，不需要按任何按鈕；更新程式（`git pull`）後則需執行一次 `restart` 才會載入新版。
 
 ⚠️ 不要按 `Control + C` 重啟，也不要使用 `launchctl kickstart`；兩者都可能造成 Agent Offline 或 macOS 阻擋 `~/Documents`。
         """
     )
+
+    st.markdown("**離線超過 30 秒才執行：**")
     st.code(
         "cd ~/Documents/codex-workspace/tool-system\n"
         "./scripts/local_agent_service.sh restart\n"
