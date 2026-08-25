@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login
+from tools.bank_statement.fubon_agent import ensure_login, run_download
 from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
@@ -87,12 +89,29 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
                 )
                 fill_refund(page, area, account.bank_account, item)
                 print("已進入富邦確認資料頁。")
-                # 每一筆都要等人工完成最終交易並驗證成功後才回寫，最後一筆也不例外。
-                wait_user_completed_transfer(page)
-                worksheet.update_cell(int(item["sheet_row"]), 2, "已退款")
-                print(f"已回寫第 {item['sheet_row']} 列狀態：已退款")
+                # 等人工輸入密碼，並確認完成頁同時有本筆帳號、金額及交易時間。
+                completed_at = wait_user_completed_transfer(
+                    page,
+                    require_completed_at=True,
+                    expected_amount=str(item["amount"]),
+                    expected_account=str(item["account_number"]),
+                )
+                worksheet.batch_update(
+                    [
+                        {"range": f"AC{item['sheet_row']}", "values": [[completed_at]]},
+                        {"range": f"B{item['sheet_row']}", "values": [["已退款"]]},
+                    ],
+                    value_input_option="USER_ENTERED",
+                )
+                print(
+                    f"已回寫第 {item['sheet_row']} 列："
+                    f"AC={completed_at}／B=已退款"
+                )
                 page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已完成退款並回寫 B 欄。")
+            print("全部勾選資料均已完成退款；開始下載今日富邦明細。")
+            today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+            page = run_download(context, page, account, today, today)
+            print("富邦 ATM 退款及今日明細下載全部完成。")
         except Exception:
             # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
             raise
