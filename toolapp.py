@@ -1563,7 +1563,7 @@ def render_report() -> None:
         selected_order_end = st.session_state.get("performance_order_end_date", default_order_end)
         selected_month_start = st.session_state.get("performance_report_start_month", default_start_date)
         selected_month_end = st.session_state.get("performance_report_end_month", default_end_date)
-        if scope == "all" and selected_order_start > selected_order_end:
+        if scope in {"all", "order"} and selected_order_start > selected_order_end:
             st.error("訂購日期迄日不可早於起日")
             return
         if scope == "all" and selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
@@ -1571,21 +1571,29 @@ def render_report() -> None:
             return
 
         try:
-            label = "目前總表" if scope == "current" else "全部報表"
+            label = {
+                "current": "目前總表",
+                "order": "訂購日期付款彙總",
+                "all": "全部報表",
+            }[scope]
             add_log(f"開始更新{label}", "info")
             args = ["dashboard", "true", "--scope", scope]
-            if scope == "all":
+            if scope in {"all", "order"}:
                 args.extend([
                     "--order-start-date", selected_order_start.strftime("%Y-%m-%d"),
                     "--order-end-date", selected_order_end.strftime("%Y-%m-%d"),
+                ])
+            if scope == "all":
+                args.extend([
                     "--start-month", selected_month_start.strftime("%Y-%m"),
                     "--end-month", selected_month_end.strftime("%Y-%m"),
                 ])
+            started = time.perf_counter()
             run_script(
                 "tools/scheduled_daily/performance_report.py",
                 args,
             )
-            add_log(f"{label}更新完成", "success")
+            add_log(f"{label}更新完成（{time.perf_counter() - started:.1f} 秒）", "success")
             st.rerun()
         except Exception as e:
             add_log(f"業績報表更新失敗：{e}", "error")
@@ -1688,7 +1696,8 @@ def render_report() -> None:
             key="apply_performance_order_dates",
             use_container_width=True,
         ):
-            update_performance_report("all")
+            with st.spinner("正在平行更新各區訂購日期付款彙總…"):
+                update_performance_report("order")
         st.markdown("#### 待付款")
         render_html_table(order_date_df, split_payment_header=True)
         st.markdown("#### 已付款")

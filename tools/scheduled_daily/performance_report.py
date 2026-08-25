@@ -2124,6 +2124,17 @@ def main():
 
     strict_accounts = os.getenv("PERFORMANCE_REPORT_STRICT_ACCOUNTS", "").lower() in ("1", "true", "yes", "y")
 
+    if update_scope == "order":
+        today_text = now_dt().strftime("%Y-%m-%d")
+        result = generate_order_date_report(
+            order_start_date or today_text,
+            order_end_date or today_text,
+            trigger=trigger,
+        )
+        if result.get("error"):
+            log(f"⚠️ {result['error']}")
+        return
+
     result = generate_sales_report(
         send_email=send_email,
         persist_dashboard=True,

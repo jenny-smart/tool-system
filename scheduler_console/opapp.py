@@ -3,7 +3,6 @@ import json
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-import time
 from datetime import datetime, timedelta, timezone
 
 # 重要：一定要在 import dashboard_main 之前 patch performance_report。
@@ -849,75 +848,6 @@ def render_performance_report_page():
     _render_page_without_builtin_daily_overview()
     render_monthly_tracking_tabs()
     render_email_preview_section()
-
-    st.markdown(
-        '<div class="page-header"><div class="page-title">訂購日期付款彙總</div>'
-        '<div class="page-subtitle">只更新此區，不重跑其他業績報表</div></div>',
-        unsafe_allow_html=True,
-    )
-    today = datetime.now(TZ_TAIPEI).date()
-    meta = {}
-    try:
-        with open(os.path.join(LATEST_DIR, "meta.json"), encoding="utf-8") as f:
-            meta = json.load(f)
-    except Exception:
-        pass
-    try:
-        default_start = datetime.strptime(meta.get("order_start_date", ""), "%Y-%m-%d").date()
-        default_end = datetime.strptime(meta.get("order_end_date", ""), "%Y-%m-%d").date()
-    except Exception:
-        default_start = default_end = today
-    c1, c2 = st.columns(2)
-    with c1:
-        order_start = st.date_input("訂購日期－起", value=default_start, key="performance_order_start_date")
-    with c2:
-        order_end = st.date_input("訂購日期－迄", value=default_end, key="performance_order_end_date")
-
-    if order_start > order_end:
-        st.error("訂購日期迄日不可早於起日")
-    elif st.button("✅ 更新訂購日期付款彙總", key="update_order_date_report", use_container_width=True):
-        status = st.empty()
-        progress = st.progress(0)
-        started = time.perf_counter()
-
-        def show_progress(done, total, city, error):
-            progress.progress(done / total)
-            status.info(f"已完成 {done}/{total}：{city}" + (f"（{error}）" if error else ""))
-
-        status.info("已開始執行：正在登入各區後台…")
-        try:
-            result = _performance_report.generate_order_date_report(
-                order_start.strftime("%Y-%m-%d"),
-                order_end.strftime("%Y-%m-%d"),
-                trigger="dashboard",
-                progress_callback=show_progress,
-            )
-            elapsed = time.perf_counter() - started
-            if result.get("error"):
-                st.warning(result["error"])
-            st.success(f"付款彙總更新完成，共 {elapsed:.1f} 秒")
-        except Exception as exc:
-            st.error(f"付款彙總更新失敗：{exc}")
-        finally:
-            progress.empty()
-            status.empty()
-
-    report_tabs = st.tabs(["待付款", "已付款", "待付款＋已付款"])
-    for tab, filename in zip(report_tabs, [
-        "order_date_summary.csv",
-        "order_date_paid_summary.csv",
-        "order_date_combined_summary.csv",
-    ]):
-        with tab:
-            report_df = _read_csv_safe(os.path.join(LATEST_DIR, filename))
-            if report_df.empty:
-                st.info("尚未產生資料。")
-            else:
-                st.dataframe(
-                    _format_report_df(report_df),
-                    use_container_width=True,
-                    hide_index=True,
-                )
 
 
 if st.session_state.page == "業績報表":
