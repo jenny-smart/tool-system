@@ -594,8 +594,8 @@ def extract_completed_transfer_time(text: str) -> str | None:
             windows.append(" ".join(lines[max(0, index - 1): index + 4]))
     for window in windows:
         match = re.search(
-            r"(?<!\\d)(\\d{3,4})[/-](\\d{1,2})[/-](\\d{1,2})"
-            r"\\D{0,20}(\\d{1,2}):(\\d{2})(?::(\\d{2}))?",
+            r"(?<!\d)(\d{3,4})[/-](\d{1,2})[/-](\d{1,2})"
+            r"\D{0,20}(\d{1,2}):(\d{2})(?::(\d{2}))?",
             window,
         )
         if match:
@@ -606,8 +606,8 @@ def extract_completed_transfer_time(text: str) -> str | None:
                 f"{int(hour):02d}:{int(minute):02d}:{int(second or 0):02d}"
             )
         match = re.search(
-            r"(\\d{4})年(\\d{1,2})月(\\d{1,2})日"
-            r"\\D{0,20}(\\d{1,2})[時:](\\d{1,2})[分:]?(\\d{1,2})?",
+            r"(\d{4})年(\d{1,2})月(\d{1,2})日"
+            r"\D{0,20}(\d{1,2})[時:](\d{1,2})[分:]?(\d{1,2})?",
             window,
         )
         if match:
@@ -629,8 +629,8 @@ def wait_user_completed_transfer(
 ) -> str | None:
     """等待人工輸入密碼完成交易；可要求完成頁時間與本筆金額／帳號均吻合。"""
     print("請人工輸入交易密碼並完成本筆交易；確認成功完成頁後才會繼續。")
-    amount_digits = re.sub(r"\\D", "", expected_amount)
-    account_suffix = re.sub(r"\\D", "", expected_account)[-5:]
+    amount_digits = re.sub(r"\D", "", expected_amount)
+    account_suffix = re.sub(r"\D", "", expected_account)[-5:]
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
         dismiss_fubon_idle_dialog(page)
@@ -646,7 +646,7 @@ def wait_user_completed_transfer(
             if _amount_field_still_editable(context):
                 continue
             completed_at = extract_completed_transfer_time(text)
-            compact_digits = re.sub(r"\\D", "", text)
+            compact_digits = re.sub(r"\D", "", text)
             if require_completed_at and not completed_at:
                 continue
             if amount_digits and amount_digits not in compact_digits:
