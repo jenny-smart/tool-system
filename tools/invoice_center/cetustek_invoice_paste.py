@@ -257,7 +257,10 @@ def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
                 return parts.join(' ');
               };
               return {
-                rows: Array.from(document.querySelectorAll('tr, [role="row"]')).map(describe),
+                rows: Array.from(document.querySelectorAll('tr, [role="row"]')).map((row) => ({
+                  text: describe(row),
+                  columns: Array.from(row.querySelectorAll('td, th, [role="cell"]')).map(describe),
+                })),
                 page: describe(document.body),
               };
             }"""
@@ -271,7 +274,26 @@ def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
         else:
             return ""
 
-        for row_text in row_texts:
+        for row in row_texts:
+            if isinstance(row, dict):
+                columns = row.get("columns") or []
+                # 鯨躍查詢表固定對應：第 4 欄訂單編號、第 2 欄發票號碼。
+                if len(columns) >= 4:
+                    order_column = re.sub(r"\s+", "", str(columns[3] or "")).upper()
+                    if not order_pattern.search(order_column):
+                        continue
+                    invoice_candidates = _invoice_candidates(
+                        str(columns[1] or ""),
+                        expected_order,
+                    )
+                    if len(invoice_candidates) == 1:
+                        return invoice_candidates[0]
+                    continue
+                row_text = row.get("text") or ""
+            else:
+                # 舊測試／特殊表格沒有欄位結構時才使用同列安全 fallback。
+                row_text = row
+
             row_upper = str(row_text or "").upper()
             compact_row = re.sub(r"\s+", "", row_upper)
             if not order_pattern.search(compact_row):
