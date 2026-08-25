@@ -45,6 +45,8 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 while (( ! stopping )); do
+  # 上一個 Agent 若在執行中被 Ctrl+C、restart 或 crash 中止，先收尾其 running 任務。
+  /Library/Developer/CommandLineTools/usr/bin/python3 -m tools.local_agent_recovery >> "\$LOG_FILE" 2>> "\$ERR_FILE" || true
   /Library/Developer/CommandLineTools/usr/bin/python3 -m tools.local_agent --poll-seconds 2 >> "\$LOG_FILE" 2>> "\$ERR_FILE" &
   child_pid=\$!
   exit_code=0
