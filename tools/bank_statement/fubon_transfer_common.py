@@ -578,9 +578,59 @@ def _amount_field_still_editable(context: Context) -> bool:
     return False
 
 
-def wait_user_completed_transfer(page: Page, timeout: int = 600_000) -> None:
-    """等待使用者手動核對並完成本筆最終交易，才準備下一筆。"""
-    print("請人工核對並完成本筆最終交易；完成後會自動準備下一筆。")
+TRANSFER_SUCCESS_MARKERS = ("交易成功", "轉帳成功", "交易已完成")
+TRANSFER_TIME_LABELS = ("交易時間", "轉帳時間", "完成時間", "交易日期")
+
+
+def extract_completed_transfer_time(text: str) -> str | None:
+    """從富邦成功完成頁的具名時間欄位取得交易時間，避免抓到其他殘留日期。"""
+    source = str(text or "")
+    if not any(marker in source for marker in TRANSFER_SUCCESS_MARKERS):
+        return None
+    lines = [line.strip() for line in source.splitlines() if line.strip()]
+    windows: list[str] = []
+    for index, line in enumerate(lines):
+        if any(label in line for label in TRANSFER_TIME_LABELS):
+            windows.append(" ".join(lines[max(0, index - 1): index + 4]))
+    for window in windows:
+        match = re.search(
+            r"(?<!\\d)(\\d{3,4})[/-](\\d{1,2})[/-](\\d{1,2})"
+            r"\\D{0,20}(\\d{1,2}):(\\d{2})(?::(\\d{2}))?",
+            window,
+        )
+        if match:
+            year, month, day, hour, minute, second = match.groups()
+            normalized_year = int(year) + 1911 if len(year) == 3 else int(year)
+            return (
+                f"{normalized_year:04d}-{int(month):02d}-{int(day):02d} "
+                f"{int(hour):02d}:{int(minute):02d}:{int(second or 0):02d}"
+            )
+        match = re.search(
+            r"(\\d{4})年(\\d{1,2})月(\\d{1,2})日"
+            r"\\D{0,20}(\\d{1,2})[時:](\\d{1,2})[分:]?(\\d{1,2})?",
+            window,
+        )
+        if match:
+            year, month, day, hour, minute, second = match.groups()
+            return (
+                f"{int(year):04d}-{int(month):02d}-{int(day):02d} "
+                f"{int(hour):02d}:{int(minute):02d}:{int(second or 0):02d}"
+            )
+    return None
+
+
+def wait_user_completed_transfer(
+    page: Page,
+    timeout: int = 600_000,
+    *,
+    require_completed_at: bool = False,
+    expected_amount: str = "",
+    expected_account: str = "",
+) -> str | None:
+    """等待人工輸入密碼完成交易；可要求完成頁時間與本筆金額／帳號均吻合。"""
+    print("請人工輸入交易密碼並完成本筆交易；確認成功完成頁後才會繼續。")
+    amount_digits = re.sub(r"\\D", "", expected_amount)
+    account_suffix = re.sub(r"\\D", "", expected_account)[-5:]
     deadline = time.monotonic() + timeout / 1000
     while time.monotonic() < deadline:
         dismiss_fubon_idle_dialog(page)
@@ -589,14 +639,22 @@ def wait_user_completed_transfer(page: Page, timeout: int = 600_000) -> None:
                 text = context.locator("body").inner_text(timeout=800)
             except Exception:
                 continue
-            if not any(marker in text for marker in ("交易成功", "轉帳成功", "交易已完成")):
+            if not any(marker in text for marker in TRANSFER_SUCCESS_MARKERS):
                 continue
-            # 「交易成功」等字樣可能是頁面上其他不相關的殘留內容（例如通知
-            # 中心、瀏覽器快取著的前一筆交易結果），不能只看整頁有沒有出現
-            # 這幾個字就當作這一筆真的完成了，還要確認這一筆的表單真的已
-            # 經不是還沒送出的可編輯狀態。
+            # 成功字樣可能來自上一筆殘留內容；必須已離開可編輯頁，ATM 退款
+            # 還要在同一個完成頁找到交易時間、金額與轉入帳號末五碼。
             if _amount_field_still_editable(context):
                 continue
-            return
+            completed_at = extract_completed_transfer_time(text)
+            compact_digits = re.sub(r"\\D", "", text)
+            if require_completed_at and not completed_at:
+                continue
+            if amount_digits and amount_digits not in compact_digits:
+                continue
+            if account_suffix and account_suffix not in compact_digits:
+                continue
+            return completed_at
         page.wait_for_timeout(500)
+    if require_completed_at:
+        raise RuntimeError("等待富邦退款完成頁逾時；尚未確認交易時間，未回寫工作表")
     raise RuntimeError("等待人工完成富邦交易逾時；尚未準備下一筆")
