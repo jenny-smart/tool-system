@@ -215,6 +215,30 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             "",
         )
 
+    def test_order_shaped_like_invoice_is_excluded(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "rows": ["LC00213133-1 DM51790873"],
+            "page": "LC00213133-1 DM51790873",
+        }
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC00213133"),
+            "DM51790873",
+        )
+
+    def test_order_without_invoice_is_not_returned_as_invoice(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "rows": ["LC00213133-1"],
+            "page": "LC00213133-1",
+        }
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC00213133"),
+            "",
+        )
+
     def test_extract_invoice_number_does_not_match_similar_order(self) -> None:
         page = MagicMock()
         page.evaluate.return_value = ["DM51791827 LC0021466619-1"]
