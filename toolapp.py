@@ -2037,7 +2037,7 @@ def render_log_page() -> None:
 # Local Agent 離線處理頁
 # ═══════════════════════════════════════════════════════════
 def render_agent_help() -> None:
-    st.markdown("## 🖥️ Agent 離線處理")
+    st.markdown("## 🖥️ Agent 狀態與重啟")
 
     back_col, refresh_col = st.columns([1, 1])
     with back_col:
@@ -2066,26 +2066,37 @@ def render_agent_help() -> None:
 
     st.markdown(
         """
-**離線處理：**
+**重啟 Agent：**
 
 1. 在 Mac 開啟 Terminal
-2. 切換至正式 Tool System 專案
-3. 執行固定啟動程式，並保持該 Terminal 視窗開啟
-4. 回到此頁按「重新檢查心跳」
+2. 執行下方指令
+3. 看到 `state = running` 後，回到此頁按「重新檢查心跳」
 
-不要使用 `launchctl kickstart` 啟動 Python；macOS 可能禁止背景程序存取 `~/Documents`。
+Agent 已由背景監督程序管理。子程序若異常退出，會在 5 秒後自動重啟；更新程式（`git pull`）後則需執行一次 `restart` 才會載入新版。
+
+⚠️ 不要按 `Control + C` 重啟，也不要使用 `launchctl kickstart`；兩者都可能造成 Agent Offline 或 macOS 阻擋 `~/Documents`。
         """
     )
     st.code(
-        "cd ~/Documents/codex-workspace/tool-system\n\n"
-        "'/Users/jenny/Library/Application Support/LemonToolsAgent/start-local-agent.sh'",
+        "cd ~/Documents/codex-workspace/tool-system\n"
+        "./scripts/local_agent_service.sh restart\n"
+        "./scripts/local_agent_service.sh status",
+        language="bash",
+    )
+
+    st.markdown("**更新程式後重啟：**")
+    st.code(
+        "cd ~/Documents/codex-workspace/tool-system\n"
+        "git pull\n"
+        "./scripts/local_agent_service.sh restart\n"
+        "./scripts/local_agent_service.sh status",
         language="bash",
     )
 
     st.markdown("**若仍然離線，查看錯誤 Log：**")
     st.code(
-        "cd ~/Documents/codex-workspace/tool-system\n\n"
-        "tail -n 50 ~/Library/Logs/LemonToolsAgent/local_agent.launchd.err.log",
+        "cd ~/Documents/codex-workspace/tool-system\n"
+        "./scripts/local_agent_service.sh logs",
         language="bash",
     )
 
