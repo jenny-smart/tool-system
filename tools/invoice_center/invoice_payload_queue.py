@@ -122,7 +122,33 @@ def list_pending_payloads(area: str) -> list[dict[str, Any]]:
         if row_no:
             update_payload_status(row_no, "superseded", "同訂單有較新的待處理 Payload，已略過")
 
-    return sorted(latest_by_order.values(), key=lambda item: int(item.get("_row") or 0))
+    pending = sorted(latest_by_order.values(), key=lambda item: int(item.get("_row") or 0))
+    if not pending:
+        return []
+
+    # 舊程序可能已成功回填 O 欄，但來不及把 Payload 改成 completed。
+    # 在交給 Agent 前核對來源列；訂單相同且已有發票即自動結案，
+    # 避免歷史 awaiting_save 擋住真正的新單。
+    worksheet = get_worksheet(area)
+    actionable: list[dict[str, Any]] = []
+    for item in pending:
+        source_row = int(item.get("source_row") or 0)
+        order_no = str(item.get("order_no") or "").strip()
+        if source_row >= 2:
+            values = worksheet.get(f"G{source_row}:O{source_row}")
+            source = list(values[0] if values else []) + [""] * 9
+            current_order = str(source[0] or "").strip()
+            current_invoice = str(source[8] or "").strip().upper()
+            if current_order == order_no and current_invoice:
+                update_payload_status(
+                    int(item.get("_row") or 0),
+                    "completed",
+                    f"來源 O 欄已有發票，佇列自動結案：{current_invoice}",
+                )
+                continue
+        actionable.append(item)
+
+    return actionable
 
 
 def update_payload_status(row_no: int, status: str, message: str = "") -> None:
