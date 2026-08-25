@@ -1658,6 +1658,97 @@ def persist_dashboard_payload(
     append_output_file_log("業績報表", snap_html, trigger)
 
 
+def generate_order_date_report(
+    order_start_date: str,
+    order_end_date: str,
+    trigger="dashboard",
+    progress_callback=None,
+):
+    """只更新訂購日期付款彙總，不重抓目前總表、月份業績或保留單。"""
+    if order_end_date < order_start_date:
+        raise ValueError("訂購日期迄日不可早於起日")
+
+    enabled_cities = [city for city in CITY_ORDER if city in ACCOUNTS]
+    if not enabled_cities:
+        raise RuntimeError("ACCOUNTS 沒有任何可用城市設定")
+
+    month_start = get_ranges()[0][0]
+    month_ranges = get_order_service_month_ranges(month_start, month_count=4)
+
+    def fetch_city(city):
+        session = requests.Session()
+        try:
+            account = ACCOUNTS[city]
+            login(session, account["email"], account["password"])
+            return [
+                _fetch_order_date_report_row(
+                    session,
+                    city,
+                    order_start_date,
+                    order_end_date,
+                    month_ranges,
+                    payment_status,
+                )
+                for payment_status in (0, 1)
+            ]
+        finally:
+            close = getattr(session, "close", None)
+            if close:
+                close()
+
+    report_rows = []
+    errors = []
+    with ThreadPoolExecutor(max_workers=min(5, len(enabled_cities))) as executor:
+        futures = {city: executor.submit(fetch_city, city) for city in enabled_cities}
+        for completed, city in enumerate(enabled_cities, start=1):
+            city_error = None
+            try:
+                report_rows.extend(futures[city].result())
+            except Exception as exc:
+                city_error = f"{city} 失敗：{exc}"
+                errors.append(city_error)
+                log(f"❌ {city_error}")
+            if progress_callback:
+                progress_callback(completed, len(enabled_cities), city, city_error)
+
+    if not report_rows:
+        raise RuntimeError("所有地區更新失敗：" + " / ".join(errors))
+
+    summaries = build_order_date_summaries_from_report_rows(report_rows, month_ranges)
+    ensure_dirs()
+    output_files = {
+        "待付款": os.path.join(LATEST_DIR, "order_date_summary.csv"),
+        "已付款": os.path.join(LATEST_DIR, "order_date_paid_summary.csv"),
+        "待付款＋已付款": os.path.join(LATEST_DIR, "order_date_combined_summary.csv"),
+    }
+    for label, path in output_files.items():
+        summaries[label].to_csv(path, index=False, encoding="utf-8-sig")
+        append_output_file_log("業績報表", path, trigger)
+
+    meta_path = os.path.join(LATEST_DIR, "meta.json")
+    meta = {}
+    try:
+        if os.path.exists(meta_path):
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+    except Exception:
+        meta = {}
+    meta.update({
+        "updated_at": now_dt().strftime("%Y-%m-%d %H:%M:%S"),
+        "order_date_updated_at": now_dt().strftime("%Y-%m-%d %H:%M:%S"),
+        "order_date_rows": int(len(summaries["待付款"])),
+        "order_start_date": order_start_date,
+        "order_end_date": order_end_date,
+        "order_date_error": " / ".join(errors) if errors else None,
+        "trigger": trigger,
+    })
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    append_output_file_log("業績報表", meta_path, trigger)
+
+    return {**summaries, "error": " / ".join(errors) if errors else None}
+
+
 def generate_sales_report(
     send_email=False,
     persist_dashboard=True,
