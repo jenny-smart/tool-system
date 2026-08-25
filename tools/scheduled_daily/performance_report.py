@@ -3,6 +3,7 @@ import json
 import calendar
 import re
 import smtplib
+from concurrent.futures import ThreadPoolExecutor
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
 
@@ -1733,7 +1734,11 @@ def generate_sales_report(
         }
 
 
-    for city in enabled_cities:
+    def fetch_city(city):
+        city_merged = {}
+        city_order_date_rows = []
+        city_reserve_records = []
+        errors = []
         log(f"===== {city} =====")
         session = requests.Session()
         acc = ACCOUNTS[city]
@@ -1779,8 +1784,8 @@ def generate_sales_report(
                                 row["子項目"],
                             )
 
-                            if key not in merged:
-                                merged[key] = {
+                            if key not in city_merged:
+                                city_merged[key] = {
                                     "城市": city,
                                     "月份": label,
                                     "日期": row["日期"],
@@ -1792,13 +1797,13 @@ def generate_sales_report(
                                     "待付款": 0,
                                 }
 
-                            merged[key]["已付款"] += row["已付款"]
-                            merged[key]["待付款"] += row["待付款"]
+                            city_merged[key]["已付款"] += row["已付款"]
+                            city_merged[key]["待付款"] += row["待付款"]
 
             if update_scope == "all":
                 try:
                     for payment_status in (0, 1):
-                        order_date_report_rows.append(
+                        city_order_date_rows.append(
                             _fetch_order_date_report_row(
                                 session,
                                 city,
@@ -1816,21 +1821,32 @@ def generate_sales_report(
                     )
                     for item in reserve_items:
                         item["__city"] = city
-                    reserve_records.extend(reserve_items)
+                    city_reserve_records.extend(reserve_items)
                 except Exception as extra_exc:
                     msg = f"{city} 新增報表資料抓取失敗：{extra_exc}"
-                    city_errors.append(msg)
+                    errors.append(msg)
                     log(f"⚠️ {msg}")
 
             if city_row_count == 0:
                 msg = f"{city}：登入成功，但沒有抓到任何表格資料"
-                city_errors.append(msg)
+                errors.append(msg)
                 log(f"⚠️ {msg}")
 
         except Exception as e:
             msg = f"{city} 失敗：{e}"
-            city_errors.append(msg)
+            errors.append(msg)
             log(f"❌ {msg}")
+
+        return city_merged, city_order_date_rows, city_reserve_records, errors
+
+    with ThreadPoolExecutor(max_workers=min(5, len(enabled_cities))) as executor:
+        futures = {city: executor.submit(fetch_city, city) for city in enabled_cities}
+        for city in enabled_cities:
+            city_merged, city_order_rows, city_reserve_rows, errors = futures[city].result()
+            merged.update(city_merged)
+            order_date_report_rows.extend(city_order_rows)
+            reserve_records.extend(city_reserve_rows)
+            city_errors.extend(errors)
 
     report_raw_df = pd.DataFrame(merged.values())
     raw_df = report_raw_df.copy()
