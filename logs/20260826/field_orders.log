@@ -1,0 +1,15 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.orders --date 20260826 --system-name 外場排程系統 --run-type 排程
+[2026-08-26 07:16:57] 開始處理訂單資料：20260826訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1i50m_GzqGBhNub6YG9o4S3rXBNZjTz-6Yt66u4_CZy4
+🗑️ 已刪除來源暫存 Google Sheet：1i50m_GzqGBhNub6YG9o4S3rXBNZjTz-6Yt66u4_CZy4
+[2026-08-26 07:17:13] 完成：20260826訂單-台北.xls → 訂單資料!A:ZZ / rows=1188
+[2026-08-26 07:17:15] 開始處理訂單資料：20260826訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1_zsBljK1I90exqauTB-8HQhOjT7EyI9n8pk9fRFvt0Q
+🗑️ 已刪除來源暫存 Google Sheet：1_zsBljK1I90exqauTB-8HQhOjT7EyI9n8pk9fRFvt0Q
+[2026-08-26 07:17:23] 完成：20260826訂單-台中.xls → 訂單資料!A:ZZ / rows=95
+[2026-08-26 07:17:26] orders.py 全部完成
+
+📝 外場排程打卡：外場訂單 / success
+field_management scheduler 全部完成
