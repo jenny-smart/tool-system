@@ -61,6 +61,16 @@ class InvoiceResultWriteTest(unittest.TestCase):
             queue.write_invoice_result("台北", 12, "LC001", "AB12345678")
         self.ws.batch_update.assert_not_called()
 
+    def test_replaces_order_number_mistakenly_written_as_invoice(self) -> None:
+        self.ws.get.return_value = _sheet_row("LC00213133", "LC00213133")
+
+        queue.write_invoice_result("台北", 12, "LC00213133", "DM51790873")
+
+        self.ws.batch_update.assert_called_once_with([
+            {"range": "O12", "values": [["DM51790873"]]},
+            {"range": "AA12", "values": [["2026-08-23 19:30:00"]]},
+        ])
+
     def test_duplicate_result_preserves_existing_data(self) -> None:
         self.ws.get.return_value = _sheet_row(
             "LC001", "AB12345678", "2026-08-23 19:20:00"

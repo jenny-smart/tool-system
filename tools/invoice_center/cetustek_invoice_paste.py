@@ -218,6 +218,19 @@ def _extract_invoice_no(page: Any) -> str:
     return ""
 
 
+
+def _invoice_candidates(text: str, order_no: str) -> list[str]:
+    """Return invoice-shaped values, excluding the order number itself."""
+    order_base = re.sub(r"-\d+$", "", re.sub(r"\s+", "", str(order_no or "")).upper())
+    result: list[str] = []
+    for prefix, digits in INVOICE_NO_RE.findall(str(text or "").upper()):
+        candidate = f"{prefix}{digits}"
+        if candidate == order_base or candidate in result:
+            continue
+        result.append(candidate)
+    return result
+
+
 def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
     expected_order = re.sub(r"\s+", "", str(order_no or "")).upper()
     if not expected_order:
@@ -244,7 +257,10 @@ def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
                 return parts.join(' ');
               };
               return {
-                rows: Array.from(document.querySelectorAll('tr, [role="row"]')).map(describe),
+                rows: Array.from(document.querySelectorAll('tr, [role="row"]')).map((row) => ({
+                  text: describe(row),
+                  columns: Array.from(row.querySelectorAll('td, th, [role="cell"]')).map(describe),
+                })),
                 page: describe(document.body),
               };
             }"""
@@ -258,26 +274,42 @@ def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
         else:
             return ""
 
-        for row_text in row_texts:
+        for row in row_texts:
+            if isinstance(row, dict):
+                columns = row.get("columns") or []
+                # 鯨躍查詢表固定對應：第 4 欄訂單編號、第 2 欄發票號碼。
+                if len(columns) >= 4:
+                    order_column = re.sub(r"\s+", "", str(columns[3] or "")).upper()
+                    if not order_pattern.search(order_column):
+                        continue
+                    invoice_candidates = _invoice_candidates(
+                        str(columns[1] or ""),
+                        expected_order,
+                    )
+                    if len(invoice_candidates) == 1:
+                        return invoice_candidates[0]
+                    continue
+                row_text = row.get("text") or ""
+            else:
+                # 舊測試／特殊表格沒有欄位結構時才使用同列安全 fallback。
+                row_text = row
+
             row_upper = str(row_text or "").upper()
             compact_row = re.sub(r"\s+", "", row_upper)
             if not order_pattern.search(compact_row):
                 continue
-            match = INVOICE_NO_RE.search(row_upper)
-            if match:
-                return f"{match.group(1)}{match.group(2)}"
+            candidates = _invoice_candidates(row_upper, expected_order)
+            if len(candidates) == 1:
+                return candidates[0]
 
         # 若訂單與發票分置於不同 DOM 列，只在整頁確實包含目標訂單，
         # 且頁面僅有一個發票號碼時復原；多個號碼則保持停止，避免錯配。
         page_upper = page_text.upper()
         compact_page = re.sub(r"\s+", "", page_upper)
         if order_pattern.search(compact_page):
-            invoice_numbers = {
-                f"{prefix}{digits}"
-                for prefix, digits in INVOICE_NO_RE.findall(page_upper)
-            }
+            invoice_numbers = _invoice_candidates(page_upper, expected_order)
             if len(invoice_numbers) == 1:
-                return invoice_numbers.pop()
+                return invoice_numbers[0]
     except Exception:
         pass
     return ""
