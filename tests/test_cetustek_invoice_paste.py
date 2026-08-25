@@ -215,6 +215,46 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             "",
         )
 
+    def test_maps_ei_column_four_order_to_column_two_invoice(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "rows": [{
+                "text": "115/08/25 DM51790873 115/08/25 LC00213133-1",
+                "columns": [
+                    "115/08/25",
+                    "DM51790873",
+                    "115/08/25",
+                    "LC00213133-1",
+                ],
+            }],
+            "page": "115/08/25 DM51790873 115/08/25 LC00213133-1",
+        }
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC00213133"),
+            "DM51790873",
+        )
+
+    def test_does_not_take_invoice_from_row_with_other_column_four_order(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "rows": [{
+                "text": "115/08/25 DM51790872 115/08/25 LC002145591-1",
+                "columns": [
+                    "115/08/25",
+                    "DM51790872",
+                    "115/08/25",
+                    "LC002145591-1",
+                ],
+            }],
+            "page": "",
+        }
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC00213133"),
+            "",
+        )
+
     def test_order_shaped_like_invoice_is_excluded(self) -> None:
         page = MagicMock()
         page.evaluate.return_value = {
