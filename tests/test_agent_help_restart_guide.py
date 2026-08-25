@@ -26,3 +26,15 @@ def test_agent_help_does_not_show_obsolete_foreground_start():
     assert "⏹️ 中止目前工作" in source
     assert "_request_local_agent_task_cancel_raw" in source
     assert "離線超過 30 秒才執行" in source
+
+
+def test_agent_cancel_import_has_deployment_fallback():
+    source = Path("toolapp.py").read_text(encoding="utf-8")
+    import_line = (
+        "from tools.local_agent_queue import request_task_cancel "
+        "as _request_local_agent_task_cancel_raw"
+    )
+
+    assert "try:\n    " + import_line in source
+    assert "except ImportError:" in source
+    assert "取消功能尚未完成載入" in source
