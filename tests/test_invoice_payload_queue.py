@@ -95,5 +95,66 @@ class InvoiceResultWriteTest(unittest.TestCase):
         self.assertEqual([item["order_no"] for item in result], ["LC001", "LC002"])
 
 
+    def test_list_auto_completes_old_payload_when_source_has_invoice(self) -> None:
+        service = MagicMock()
+        worksheet = MagicMock()
+        rows = [
+            {
+                "_row": 2,
+                "area": "台北",
+                "order_no": "LC002146661",
+                "status": "awaiting_save",
+                "source_row": "249",
+            },
+            {
+                "_row": 3,
+                "area": "台北",
+                "order_no": "LC002147000",
+                "status": "pending",
+                "source_row": "250",
+            },
+        ]
+        worksheet.get.side_effect = [
+            _sheet_row("LC002146661", "DM51790871"),
+            _sheet_row("LC002147000"),
+        ]
+
+        with patch.object(queue, "get_sheets_service", return_value=service), patch.object(
+            queue, "_ensure_sheet"
+        ), patch.object(queue, "_all_rows", return_value=rows), patch.object(
+            queue, "get_worksheet", return_value=worksheet
+        ), patch.object(queue, "update_payload_status") as update_status:
+            result = queue.list_pending_payloads("台北")
+
+        self.assertEqual([item["order_no"] for item in result], ["LC002147000"])
+        update_status.assert_called_once_with(
+            2,
+            "completed",
+            "來源 O 欄已有發票，佇列自動結案：DM51790871",
+        )
+
+    def test_list_keeps_payload_when_source_row_order_changed(self) -> None:
+        service = MagicMock()
+        worksheet = MagicMock()
+        item = {
+            "_row": 2,
+            "area": "台北",
+            "order_no": "LC001",
+            "status": "awaiting_save",
+            "source_row": "12",
+        }
+        worksheet.get.return_value = _sheet_row("LC999", "DM51790871")
+
+        with patch.object(queue, "get_sheets_service", return_value=service), patch.object(
+            queue, "_ensure_sheet"
+        ), patch.object(queue, "_all_rows", return_value=[item]), patch.object(
+            queue, "get_worksheet", return_value=worksheet
+        ), patch.object(queue, "update_payload_status") as update_status:
+            result = queue.list_pending_payloads("台北")
+
+        self.assertEqual(result, [item])
+        update_status.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
