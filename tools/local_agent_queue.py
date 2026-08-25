@@ -24,6 +24,8 @@ __all__ = [
     "list_agent_status",
     "now_text",
     "read_task_log",
+    "read_task_status",
+    "request_task_cancel",
     "update_task",
     "write_agent_heartbeat",
 ]
@@ -191,6 +193,59 @@ def update_task(
         valueInputOption="RAW",
         body={"values": [values[: len(HEADERS)]]},
     ).execute()
+
+
+
+def read_task_status(
+    row_number: int,
+    *,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> str:
+    """Read only the task status cell so the Agent can cheaply detect cancellation."""
+    service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
+    values = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{SHEET_NAME}'!F{row_number}",
+    ).execute().get("values", [])
+    return str(values[0][0]) if values and values[0] else ""
+
+
+def request_task_cancel(
+    task_id: str,
+    *,
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> tuple[bool, str]:
+    """Cancel a queued task or request termination of a running child process."""
+    service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
+    task = next(
+        (item for item in list_tasks(limit=500, service=service, spreadsheet_id=spreadsheet_id)
+         if item.get("task_id") == task_id),
+        None,
+    )
+    if not task:
+        return False, "找不到任務"
+    status = task.get("status", "")
+    if status in {"pending", "queued"}:
+        update_task(
+            int(task["_row"]),
+            {"status": "cancelled", "finished_at": now_text(), "message": "已取消，未執行"},
+            service=service,
+            spreadsheet_id=spreadsheet_id,
+        )
+        return True, "已取消等待中的任務"
+    if status == "running":
+        update_task(
+            int(task["_row"]),
+            {"status": "cancel_requested", "message": "正在中止目前工作"},
+            service=service,
+            spreadsheet_id=spreadsheet_id,
+        )
+        return True, "已送出中止要求"
+    if status == "cancel_requested":
+        return True, "中止要求已送出，請稍候"
+    return False, f"任務已是 {status or '未知'} 狀態"
 
 
 def append_task_log(
