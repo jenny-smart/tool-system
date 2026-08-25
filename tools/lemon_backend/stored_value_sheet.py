@@ -6,7 +6,12 @@ from typing import Optional
 import gspread
 from google.oauth2.service_account import Credentials
 
-from tools.common.config_loader import get_service_account_info, read_sheet_records
+from tools.common.config_loader import get_service_account_info
+from tools.bank_statement.internal_payment_registry import (
+    CLEANING_CHANGE_TYPE,
+    REGISTRY_SHEET_NAME,
+    find_registry_row,
+)
 
 
 SCOPES = [
@@ -27,20 +32,15 @@ def _client() -> gspread.Client:
 def get_sheet_config(area: str) -> tuple[str, Optional[int]]:
     if area not in SUPPORTED_AREAS:
         raise ValueError(f"不支援的地區：{area}")
-    for record in read_sheet_records("清潔異動設定"):
-        if str(record.get("地區", "")).strip() != area:
-            continue
-        if str(record.get("啟用", "")).strip().lower() in ("否", "false", "0", "停用"):
-            continue
-        spreadsheet_id = str(record.get("試算表ID", "")).strip()
-        gid_text = str(record.get("GID", "")).strip()
-        if not spreadsheet_id:
-            break
-        try:
-            return spreadsheet_id, int(gid_text) if gid_text else None
-        except ValueError as exc:
-            raise RuntimeError(f"{area} 的 GID 必須是數字") from exc
-    raise RuntimeError(f"共用設定表找不到「{area}」清潔異動設定")
+    record = find_registry_row(CLEANING_CHANGE_TYPE, area)
+    spreadsheet_id = str(record.get("試算表ID", "")).strip()
+    gid_text = str(record.get("GID", "")).strip()
+    if not spreadsheet_id:
+        raise RuntimeError(f"{REGISTRY_SHEET_NAME} 找不到「{area}」清潔異動設定")
+    try:
+        return spreadsheet_id, int(gid_text) if gid_text else None
+    except ValueError as exc:
+        raise RuntimeError(f"{area} 的 GID 必須是數字") from exc
 
 
 def get_worksheet(area: str, tab_name: str = "清潔異動"):
