@@ -314,6 +314,21 @@ def build_newebpay_download(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_newebpay_express_payment_check(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    if not area or area == "全區":
+        raise ValueError("藍新快速收款查帳請選擇單一區域")
+    return [
+        sys.executable,
+        "-m",
+        "tools.newebpay.express_payment_check",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+    ]
+
+
 def build_newebpay_invoice_amounts(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     months = str(params.get("months") or "").strip()
@@ -584,6 +599,7 @@ register_action("mofei.login", build_mofei_login)
 register_action("mofei.download", build_mofei_download)
 register_action("newebpay.login", build_newebpay_login)
 register_action("newebpay.download", build_newebpay_download)
+register_action("newebpay.express_payment_check", build_newebpay_express_payment_check)
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
 register_action("newebpay.refund_pending", build_newebpay_refund_pending)
 register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjustment)

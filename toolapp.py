@@ -2371,6 +2371,17 @@ def queue_newebpay_download(*, month="", start_date=None, end_date=None, area="�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_newebpay_express_payment_check(*, month="", start_date=None, end_date=None, area="全區"):
+    if not area or area == "全區":
+        raise ValueError("藍新快速收款查帳請選擇單一區域")
+    task = create_local_agent_task(
+        "newebpay.express_payment_check",
+        {"area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent）"
+
+
 def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, area="全區"):
     if month:
         months = str(month).strip()
@@ -3187,6 +3198,7 @@ FINANCE_TASKS = [
     {"name": "【財政部電子發票】財政部登入", "handler": queue_mofei_login, "enabled": True},
     {"name": "【財政部電子發票】字軌取號下載", "handler": queue_mofei_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
+    {"name": "【藍新金流】藍新快速收款查帳", "handler": queue_newebpay_express_payment_check, "enabled": True},
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
     {"name": "【藍新金流】藍新信用卡待退款", "handler": queue_newebpay_refund_pending, "enabled": True},
@@ -3666,6 +3678,9 @@ with date_col:
         elif selected_function == "【藍新金流】藍新信用卡待退款":
             st.markdown('<div class="field-label">📆 查詢期間</div>', unsafe_allow_html=True)
             st.info("固定查詢今天起往前 85 天", icon="📅")
+        elif selected_function == "【藍新金流】藍新快速收款查帳":
+            st.markdown('<div class="field-label">📆 查詢期間</div>', unsafe_allow_html=True)
+            st.info("使用藍新快速收款查詢頁目前的預設期間", icon="📅")
         elif selected_function == "【檸檬後台】異動儲值金":
             st.markdown('<div class="field-label">📆 異動日期</div>', unsafe_allow_html=True)
             st.info("備註日期使用今天（台北時間）", icon="📅")
@@ -4209,6 +4224,7 @@ with area_col:
     if selected_function in (
         "【檸檬後台】異動儲值金",
         "【藍新金流】藍新登入",
+        "【藍新金流】藍新快速收款查帳",
         "【藍新金流】藍新信用卡待退款",
         "【鯨躍發票】開立折讓單",
         "【鯨躍發票】電子發票字軌號碼匯入",

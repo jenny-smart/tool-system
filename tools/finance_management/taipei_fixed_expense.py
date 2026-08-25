@@ -1,5 +1,5 @@
 """新增『台北固定費用請款』：每月期別（YYYYMM）批次新增 5 筆台北固定費用
-請款記錄，寫入「內部請款設定」登記表指向的請款記錄／台北報表。
+請款記錄，寫入「財務帳務設定」登記表指向的請款記錄／台北報表。
 
 5 筆固定費用：
   1. Amazon Web Services（信件主旨 "Amazon Web Services Tax Invoice Available"
