@@ -29,7 +29,13 @@ from tools.staff_payroll import AREAS as STAFF_PAYROLL_AREAS
 from tools.local_agent_queue import create_task as _create_local_agent_task_raw
 from tools.local_agent_queue import list_tasks as _list_local_agent_tasks_raw
 from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_raw
-from tools.local_agent_queue import request_task_cancel as _request_local_agent_task_cancel_raw
+try:
+    from tools.local_agent_queue import request_task_cancel as _request_local_agent_task_cancel_raw
+except ImportError:
+    # Streamlit Cloud may briefly load toolapp.py before the companion queue module
+    # is refreshed during deployment. Keep the app available and ask for a refresh.
+    def _request_local_agent_task_cancel_raw(_task_id: str) -> tuple[bool, str]:
+        return False, "取消功能尚未完成載入，請重新整理頁面後再試"
 
 # render_agent_task_progress／render_fubon_mobile_verification 都是每 2~3 秒
 # 自動輪詢一次的 st.fragment，各自還會再呼叫 read_task_log；不加短期快取的話，
