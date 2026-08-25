@@ -16,6 +16,9 @@ from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_ch
 from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
+ALLOWANCE_ADD_URL = "https://www.ei.com.tw/InvoiceRent/allowanceadd.jsp"
+
+
 def _visible(locator: Locator) -> Locator | None:
     for index in range(locator.count()):
         item = locator.nth(index)
@@ -42,8 +45,9 @@ def _login(context: object, area: str, accounts: dict) -> Page:
 
 
 def _open_allowance(page: Page) -> None:
+    # 登入後直接進折讓單開立頁，不經「折讓單作業 > 折讓單開立」選單。
     if "allowanceadd.jsp" not in page.url:
-        page.goto("https://www.ei.com.tw/InvoiceRent/allowanceadd.jsp")
+        page.goto(ALLOWANCE_ADD_URL)
     page.wait_for_load_state("domcontentloaded")
     page.locator("#qyear").wait_for(state="visible")
 
