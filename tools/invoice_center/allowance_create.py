@@ -115,31 +115,69 @@ def _create_one(page: Page, invoice_no: str, untaxed: str) -> str:
     return matches[-1]
 
 
+def _existing_allowance(values: list[list[str]], sheet_row: int) -> tuple[str, str]:
+    row = values[sheet_row - 1] if 0 < sheet_row <= len(values) else []
+    allowance_date = str(row[26]).strip() if len(row) > 26 else ""
+    allowance_no = str(row[27]).strip() if len(row) > 27 else ""
+    return allowance_date, allowance_no
+
+
 def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
     worksheet = get_worksheet(area)
-    rows = [item for item in pending_allowances(worksheet.get_all_values()) if item["sheet_row"] in selected_rows]
+    values = worksheet.get_all_values()
+    rows = [item for item in pending_allowances(values) if item["sheet_row"] in selected_rows]
     if not rows:
+        # selected rows may already have been completed manually or by an earlier run.
+        completed = []
+        for sheet_row in sorted(selected_rows):
+            allowance_date, allowance_no = _existing_allowance(values, sheet_row)
+            if allowance_date or allowance_no:
+                completed.append(sheet_row)
+        if completed:
+            print(f"已略過既有折讓結果列：{', '.join(map(str, completed))}；AA／AB 不覆蓋")
+            return 0
         raise ValueError("沒有可執行的待退款折讓資料")
+
     accounts = load_accounts(None)
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = _login(context, area, accounts)
         _open_allowance(page)
         for item in rows:
+            sheet_row = int(item["sheet_row"])
+            # Re-read the row immediately before creating the allowance. This protects
+            # manual corrections made after the task was queued and prevents retries
+            # from creating a second allowance.
+            current_values = worksheet.get_all_values()
+            allowance_date, allowance_no = _existing_allowance(current_values, sheet_row)
+            if allowance_date or allowance_no:
+                print(
+                    f"第 {sheet_row} 列已有折讓結果"
+                    f"（AA={allowance_date or '-'}／AB={allowance_no or '-'}），略過開立且不覆蓋"
+                )
+                continue
+
             number = _create_one(
                 page,
                 str(item["invoice_no"]),
                 str(item["untaxed_amount"]),
             )
             allowance_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
-            worksheet.batch_update(
-                [
-                    {"range": f"AA{item['sheet_row']}", "values": [[allowance_date]]},
-                    {"range": f"AB{item['sheet_row']}", "values": [[number]]},
-                ],
-                value_input_option="USER_ENTERED",
+
+            # One final read before writing, so a concurrent/manual update always wins.
+            latest_values = worksheet.get_all_values()
+            existing_date, existing_no = _existing_allowance(latest_values, sheet_row)
+            updates = []
+            if not existing_date:
+                updates.append({"range": f"AA{sheet_row}", "values": [[allowance_date]]})
+            if not existing_no:
+                updates.append({"range": f"AB{sheet_row}", "values": [[number]]})
+            if updates:
+                worksheet.batch_update(updates, value_input_option="USER_ENTERED")
+            print(
+                f"第 {sheet_row} 列：{item['invoice_no']} → {number}；"
+                f"AA／AB 僅補空白欄位，既有資料不覆蓋"
             )
-            print(f"第 {item['sheet_row']} 列：{item['invoice_no']} → {number}，已回寫 AA／AB")
     return 0
 
 
