@@ -23,3 +23,6 @@ def test_agent_help_does_not_show_obsolete_foreground_start():
     assert "start-local-agent.sh" not in source
     assert "保持該 Terminal 視窗開啟" not in source
     assert "Control + C" in source
+    assert "⏹️ 中止目前工作" in source
+    assert "_request_local_agent_task_cancel_raw" in source
+    assert "離線超過 30 秒才執行" in source

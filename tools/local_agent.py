@@ -20,6 +20,7 @@ from tools.local_agent_queue import (
     claim_next_task,
     default_agent_id,
     now_text,
+    read_task_status,
     update_task,
     write_agent_heartbeat,
 )
@@ -642,6 +643,8 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
     next_seq = 1
     result_files: list[str] = []
     special_result: dict[str, Any] = {}
+    cancel_requested = threading.Event()
+    cancel_monitor_stop = threading.Event()
 
     def record(text: str) -> None:
         nonlocal preview, pending_log
@@ -680,7 +683,39 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            start_new_session=True,
         )
+
+        def monitor_cancellation() -> None:
+            control_service = get_sheets_service()
+            while not cancel_monitor_stop.wait(2):
+                try:
+                    status = read_task_status(
+                        row_number,
+                        service=control_service,
+                        spreadsheet_id=spreadsheet_id,
+                    )
+                    if status != "cancel_requested":
+                        continue
+                    cancel_requested.set()
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGTERM)
+                        for _ in range(10):
+                            if process.poll() is not None:
+                                break
+                            time.sleep(0.5)
+                        if process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                    return
+                except Exception as exc:
+                    print(f"取消狀態檢查失敗：{exc}", file=sys.stderr, flush=True)
+
+        cancel_monitor = threading.Thread(
+            target=monitor_cancellation,
+            name=f"agent-cancel-{task_id[:8]}",
+            daemon=True,
+        )
+        cancel_monitor.start()
         last_upload = 0.0
         assert process.stdout is not None
         for raw_line in process.stdout:
@@ -704,13 +739,19 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
                 )
                 last_upload = time.monotonic()
         return_code = process.wait()
-        status = "completed" if return_code == 0 else "failed"
-        message = "執行完成" if return_code == 0 else f"執行失敗（exit {return_code}）"
-        if return_code == 0 and special_result.get("image_base64"):
+        cancel_monitor_stop.set()
+        cancel_monitor.join(timeout=3)
+        if cancel_requested.is_set():
+            status = "cancelled"
+            message = "已中止目前工作"
+        else:
+            status = "completed" if return_code == 0 else "failed"
+            message = "執行完成" if return_code == 0 else f"執行失敗（exit {return_code}）"
+        if not cancel_requested.is_set() and return_code == 0 and special_result.get("image_base64"):
             message = "驗證碼圖片已擷取，請在手機輸入驗證碼"
-        elif return_code == 0 and special_result.get("already_logged_in"):
+        elif not cancel_requested.is_set() and return_code == 0 and special_result.get("already_logged_in"):
             message = "富邦已登入；任務已接續執行"
-        if return_code == 0 and result_files:
+        if not cancel_requested.is_set() and return_code == 0 and result_files:
             message += "；檔案：" + "、".join(result_files)
         record(f"[{now_text()}] {status.upper()} {message}")
         flush_full_log()
@@ -736,6 +777,7 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
         )
         return return_code
     except Exception as exc:
+        cancel_monitor_stop.set()
         record(f"[{now_text()}] FAILED {type(exc).__name__}: {exc}")
         record(traceback.format_exc())
         flush_full_log()
