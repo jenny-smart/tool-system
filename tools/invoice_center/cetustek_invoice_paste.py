@@ -259,20 +259,22 @@ def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
             return ""
 
         for row_text in row_texts:
-            normalized_row = re.sub(r"\s+", "", str(row_text or "")).upper()
-            if not order_pattern.search(normalized_row):
+            row_upper = str(row_text or "").upper()
+            compact_row = re.sub(r"\s+", "", row_upper)
+            if not order_pattern.search(compact_row):
                 continue
-            match = INVOICE_NO_RE.search(normalized_row)
+            match = INVOICE_NO_RE.search(row_upper)
             if match:
                 return f"{match.group(1)}{match.group(2)}"
 
         # 若訂單與發票分置於不同 DOM 列，只在整頁確實包含目標訂單，
         # 且頁面僅有一個發票號碼時復原；多個號碼則保持停止，避免錯配。
-        normalized_page = re.sub(r"\s+", "", page_text).upper()
-        if order_pattern.search(normalized_page):
+        page_upper = page_text.upper()
+        compact_page = re.sub(r"\s+", "", page_upper)
+        if order_pattern.search(compact_page):
             invoice_numbers = {
                 f"{prefix}{digits}"
-                for prefix, digits in INVOICE_NO_RE.findall(normalized_page)
+                for prefix, digits in INVOICE_NO_RE.findall(page_upper)
             }
             if len(invoice_numbers) == 1:
                 return invoice_numbers.pop()
