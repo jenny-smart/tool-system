@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
@@ -9,6 +10,18 @@ from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 SHEET_NAME = "發票開立佇列"
 HEADERS = ["created_at", "created_by", "area", "order_no", "payload_json", "status", "message", "source_row"]
+
+
+
+def _is_order_number_value(value: str, order_no: str) -> bool:
+    """Detect the known bad value where O contains its own order number."""
+    normalized_value = re.sub(r"\s+", "", str(value or "")).upper()
+    order_base = re.sub(
+        r"-\d+$",
+        "",
+        re.sub(r"\s+", "", str(order_no or "")).upper(),
+    )
+    return bool(normalized_value and order_base and normalized_value == order_base)
 
 
 def _ensure_sheet(service: Any, spreadsheet_id: str) -> None:
@@ -139,7 +152,11 @@ def list_pending_payloads(area: str) -> list[dict[str, Any]]:
             source = list(values[0] if values else []) + [""] * 9
             current_order = str(source[0] or "").strip()
             current_invoice = str(source[8] or "").strip().upper()
-            if current_order == order_no and current_invoice:
+            if (
+                current_order == order_no
+                and current_invoice
+                and not _is_order_number_value(current_invoice, current_order)
+            ):
                 update_payload_status(
                     int(item.get("_row") or 0),
                     "completed",
@@ -187,13 +204,14 @@ def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: 
         raise RuntimeError(
             f"清潔異動第 {row_no} 列訂單已變更：預期 {normalized_order}，實際 {current_order or '空白'}"
         )
-    if current_invoice and current_invoice != normalized_invoice:
+    mistaken_order_value = _is_order_number_value(current_invoice, current_order)
+    if current_invoice and current_invoice != normalized_invoice and not mistaken_order_value:
         raise RuntimeError(
             f"清潔異動第 {row_no} 列 O 欄已有其他發票號碼 {current_invoice}，禁止覆蓋"
         )
 
     updates = []
-    if not current_invoice:
+    if not current_invoice or mistaken_order_value:
         updates.append({"range": f"O{row_no}", "values": [[normalized_invoice]]})
     if not current_time:
         updates.append({"range": f"AA{row_no}", "values": [[now_text()]]})
