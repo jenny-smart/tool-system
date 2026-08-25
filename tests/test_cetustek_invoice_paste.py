@@ -176,6 +176,45 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             "DM51790871",
         )
 
+    def test_extract_invoice_number_from_enriched_value_fields(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "rows": ["LC002146661 DM51790871"],
+            "page": "LC002146661 DM51790871",
+        }
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC002146661"),
+            "DM51790871",
+        )
+        evaluated_script = page.evaluate.call_args.args[0]
+        self.assertIn("input, a", evaluated_script)
+        self.assertIn("data-orderid", evaluated_script)
+
+    def test_extract_separate_dom_fields_only_when_invoice_is_unique(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "rows": ["LC002146661", "DM51790871"],
+            "page": "LC002146661 DM51790871",
+        }
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC002146661"),
+            "DM51790871",
+        )
+
+    def test_extract_separate_dom_fields_rejects_multiple_invoices(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = {
+            "rows": ["LC002146661", "DM51790871", "DM51791827"],
+            "page": "LC002146661 DM51790871 DM51791827",
+        }
+
+        self.assertEqual(
+            paste._extract_invoice_no_for_order(page, "LC002146661"),
+            "",
+        )
+
     def test_extract_invoice_number_does_not_match_similar_order(self) -> None:
         page = MagicMock()
         page.evaluate.return_value = ["DM51791827 LC0021466619-1"]

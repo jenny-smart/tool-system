@@ -224,20 +224,60 @@ def _extract_invoice_no_for_order(page: Any, order_no: str) -> str:
         return ""
     order_pattern = re.compile(rf"{re.escape(expected_order)}(?:-\d+)?(?!\d)")
     try:
-        # 單次讀取整張查詢表，避免導頁後逐列 Locator 卡在已失效的 DOM。
-        row_texts = page.evaluate(
-            """() => Array.from(document.querySelectorAll('tr, [role="row"]'))
-              .map((row) => row.innerText || row.textContent || '')"""
+        # 鯨躍查詢結果有些欄位放在 input value、連結或 data-*，
+        # 不能只讀 innerText；同時保留逐列配對，避免誤抓其他訂單發票。
+        extracted = page.evaluate(
+            """() => {
+              const describe = (root) => {
+                const parts = [root.innerText || root.textContent || ''];
+                root.querySelectorAll('input, a, [data-orderid], [data-invoice]')
+                  .forEach((el) => {
+                    parts.push(
+                      el.value || '',
+                      el.textContent || '',
+                      el.getAttribute('href') || '',
+                      el.getAttribute('title') || '',
+                      el.getAttribute('data-orderid') || '',
+                      el.getAttribute('data-invoice') || ''
+                    );
+                  });
+                return parts.join(' ');
+              };
+              return {
+                rows: Array.from(document.querySelectorAll('tr, [role="row"]')).map(describe),
+                page: describe(document.body),
+              };
+            }"""
         )
-        if not isinstance(row_texts, list):
+        if isinstance(extracted, list):
+            row_texts = extracted
+            page_text = ""
+        elif isinstance(extracted, dict):
+            row_texts = extracted.get("rows") or []
+            page_text = str(extracted.get("page") or "")
+        else:
             return ""
+
         for row_text in row_texts:
-            normalized_row = re.sub(r"\s+", "", row_text).upper()
-            if not order_pattern.search(normalized_row):
+            row_upper = str(row_text or "").upper()
+            compact_row = re.sub(r"\s+", "", row_upper)
+            if not order_pattern.search(compact_row):
                 continue
-            match = INVOICE_NO_RE.search(normalized_row)
+            match = INVOICE_NO_RE.search(row_upper)
             if match:
                 return f"{match.group(1)}{match.group(2)}"
+
+        # 若訂單與發票分置於不同 DOM 列，只在整頁確實包含目標訂單，
+        # 且頁面僅有一個發票號碼時復原；多個號碼則保持停止，避免錯配。
+        page_upper = page_text.upper()
+        compact_page = re.sub(r"\s+", "", page_upper)
+        if order_pattern.search(compact_page):
+            invoice_numbers = {
+                f"{prefix}{digits}"
+                for prefix, digits in INVOICE_NO_RE.findall(page_upper)
+            }
+            if len(invoice_numbers) == 1:
+                return invoice_numbers.pop()
     except Exception:
         pass
     return ""
