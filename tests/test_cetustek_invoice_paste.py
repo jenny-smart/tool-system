@@ -79,6 +79,10 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
         self.assertEqual(page.evaluate.call_args.args[1], payload)
         self.assertIn("setValue", page.evaluate.call_args.args[0])
+        self.assertIn(
+            'forceRadio(isTriplicate ? "hastax1"',
+            page.evaluate.call_args.args[0],
+        )
         page.expect_event.assert_not_called()
 
     def test_paste_rejects_false_success_when_form_order_id_is_blank(self) -> None:
