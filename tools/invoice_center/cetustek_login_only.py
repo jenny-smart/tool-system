@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -18,6 +19,7 @@ from tools.invoice_center.ei_export_all import (
     load_accounts,
     login_second,
     login_portal,
+    logout_second,
     open_second_login,
     portal_values,
 )
@@ -36,8 +38,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _ei_logged_in(page) -> bool:
-    """Validate the shared EI session in a disposable page without changing the user's page."""
+SESSION_USERID_RE = re.compile(r"虛實合一\s*[：:]\s*([0-9]+)")
+
+
+def _session_userid(page) -> str:
+    try:
+        body_text = str(page.locator("body").inner_text() or "")
+    except Exception:
+        return ""
+    match = SESSION_USERID_RE.search(body_text)
+    return match.group(1) if match else ""
+
+
+def _ei_logged_in(page, expected_userid: str = "") -> bool:
+    """Validate EI authorization and, when supplied, the exact second-layer account ID."""
     probe = None
     messages: list[str] = []
 
@@ -49,10 +63,13 @@ def _ei_logged_in(page) -> bool:
         probe = page.context.new_page()
         probe.on("dialog", handle_dialog)
         probe.goto(INVOICE_CREATE_URL, wait_until="domcontentloaded", timeout=15000)
-        return (
-            not any("未授權" in message for message in messages)
-            and _is_invoice_create_page(probe)
-        )
+        if (
+            any("未授權" in message for message in messages)
+            or not _is_invoice_create_page(probe)
+        ):
+            return False
+        expected = str(expected_userid or "").strip()
+        return not expected or _session_userid(probe) == expected
     except Exception:
         return False
     finally:
@@ -66,11 +83,37 @@ def _ei_logged_in(page) -> bool:
             except Exception:
                 pass
 
-def _clean_ei_page(context, page):
+
+def ensure_expected_ei_login(page, credentials) -> bool:
+    """Reuse only the exact configured EI account; otherwise switch accounts and verify."""
+    expected_userid = str(credentials.userid or "").strip()
+    if _ei_logged_in(page, expected_userid):
+        print(f"[{credentials.label}] 虛實合一 ID {expected_userid} 已驗證，沿用登入狀態")
+        return True
+
+    if _ei_logged_in(page):
+        print(
+            f"[{credentials.label}] 目前虛實合一 ID 與設定 ID {expected_userid} 不同，"
+            "先登出再切換正確帳號"
+        )
+        logout_second(page, credentials.label)
+
+    page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
+    login_second(page, credentials)
+    if not _ei_logged_in(page, expected_userid):
+        raise RuntimeError(
+            f"{credentials.label} 第二層登入後，右上角虛實合一 ID "
+            f"仍不是設定值 {expected_userid}，禁止繼續"
+        )
+    print(f"[{credentials.label}] 虛實合一 ID {expected_userid} 驗證完成")
+    return False
+
+
+def _clean_ei_page(context, page, expected_userid: str):
     clean = context.new_page()
     clean.goto(EI_HOME_URL, wait_until="domcontentloaded")
     try:
-        if _ei_logged_in(clean):
+        if _ei_logged_in(clean, expected_userid):
             print("[鯨躍] 已建立乾淨 EI 分頁，不沿用登入 Dialog handler")
             return clean
     except Exception:
@@ -107,30 +150,28 @@ def main() -> int:
         portal_page, ei_page = find_invoice_pages(context)
         used_login_handler = False
 
-        if ei_page is not None and _ei_logged_in(ei_page):
+        if ei_page is not None:
             active_page = ei_page
-            print(f"[{credentials.label}] 發現既有 EI 分頁，沿用目前登入狀態")
-        elif ei_page is not None:
-            active_page = ei_page
-            active_page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
-            login_second(active_page, credentials)
-            used_login_handler = True
+            reused = ensure_expected_ei_login(active_page, credentials)
+            used_login_handler = not reused
+            if reused:
+                print(f"[{credentials.label}] 發現相同虛實合一 ID 的 EI 分頁，沿用登入狀態")
         elif portal_page is not None:
             login_portal(portal_page, accounts)
             active_page = open_second_login(context, portal_page)
-            login_second(active_page, credentials)
+            ensure_expected_ei_login(active_page, credentials)
             used_login_handler = True
         else:
             portal_page = context.new_page()
             login_portal(portal_page, accounts)
             active_page = open_second_login(context, portal_page)
-            login_second(active_page, credentials)
+            ensure_expected_ei_login(active_page, credentials)
             used_login_handler = True
 
         print(f"鯨躍第一層及 {credentials.label} EI 第二層登入完成")
 
         if used_login_handler:
-            active_page = _clean_ei_page(context, active_page)
+            active_page = _clean_ei_page(context, active_page, credentials.userid)
 
         processed = process_pending_invoice_payloads(active_page, credentials.label)
         if processed:
@@ -142,3 +183,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
