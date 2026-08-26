@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 playwright_module = types.ModuleType("playwright")
@@ -26,6 +26,7 @@ for name in (
     "load_accounts",
     "login_second",
     "login_portal",
+    "logout_second",
     "open_second_login",
     "portal_values",
 ):
@@ -73,6 +74,47 @@ class EISessionProbeTest(unittest.TestCase):
         page.goto.assert_not_called()
         probe.close.assert_called_once()
 
+    def test_session_reused_only_when_virtual_id_matches(self) -> None:
+        page = MagicMock()
+        probe = MagicMock()
+        page.context.new_page.return_value = probe
+        probe.locator.return_value.inner_text.return_value = (
+            "虛實合一： 52551362 寧盟 您好"
+        )
+        login._is_invoice_create_page.return_value = True
+
+        self.assertTrue(login._ei_logged_in(page, "52551362"))
+        self.assertFalse(login._ei_logged_in(page, "42627791"))
+
+    def test_wrong_logged_in_account_is_logged_out_and_reverified(self) -> None:
+        page = MagicMock()
+        credentials = MagicMock(userid="42627791", label="台北")
+
+        with patch.object(
+            login, "_ei_logged_in", side_effect=[False, True, True]
+        ), patch.object(login, "logout_second") as logout, patch.object(
+            login, "login_second"
+        ) as second_login:
+            reused = login.ensure_expected_ei_login(page, credentials)
+
+        self.assertFalse(reused)
+        logout.assert_called_once_with(page, "台北")
+        page.goto.assert_called_once_with(
+            login.EI_LOGIN_URL, wait_until="domcontentloaded"
+        )
+        second_login.assert_called_once_with(page, credentials)
+
+    def test_wrong_account_after_login_is_blocked(self) -> None:
+        page = MagicMock()
+        credentials = MagicMock(userid="42627791", label="台北")
+
+        with patch.object(
+            login, "_ei_logged_in", side_effect=[False, False, False]
+        ), patch.object(login, "login_second"):
+            with self.assertRaisesRegex(RuntimeError, "禁止繼續"):
+                login.ensure_expected_ei_login(page, credentials)
+
 
 if __name__ == "__main__":
     unittest.main()
+
