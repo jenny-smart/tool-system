@@ -10,7 +10,11 @@ from playwright.sync_api import Locator, Page, sync_playwright
 
 from tools.invoice_center.allowance_filter import pending_allowances
 from tools.invoice_center.cetustek_login_only import (
-    credentials_for, load_accounts, login_portal, login_second, open_second_login,
+    credentials_for,
+    ensure_expected_ei_login,
+    load_accounts,
+    login_portal,
+    open_second_login,
 )
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_invoice_pages
 from tools.lemon_backend.stored_value_sheet import get_worksheet
@@ -31,16 +35,13 @@ def _login(context: object, area: str, accounts: dict) -> Page:
     credentials = credentials_for(area, accounts)
     portal_page, ei_page = find_invoice_pages(context)
     if ei_page is not None:
-        try:
-            login_second(ei_page, credentials)
-        except Exception:
-            pass
+        ensure_expected_ei_login(ei_page, credentials)
         return ei_page
     if portal_page is None:
         portal_page = context.new_page()
     login_portal(portal_page, accounts)
     page = open_second_login(context, portal_page)
-    login_second(page, credentials)
+    ensure_expected_ei_login(page, credentials)
     return page
 
 
@@ -192,3 +193,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
