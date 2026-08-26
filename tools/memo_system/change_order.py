@@ -1,85 +1,11 @@
 # ============================================================
 # 檔名：change_order.py
-# 版本：v3.1
+# 版本：v1.6
 # 模組：清潔異動模組：車馬費 / 異動服務收款 / 異動服務退款
 # 建立日期：2026-06-22
-# 最後更新：2026-08-27
+# 最後更新：2026-06-24
 #
 # Change Log
-# v3.1
-# - 儲值金異動成功回填後，B 欄狀態同步完成：待回／待扣儲值金→已扣儲值金，待返儲值金→已返儲值金。
-# - Google Sheet 403 時顯示實際服務帳號 email，方便確認地區試算表編輯權限。
-# v3.0
-# - 回填加收／退款時只更新指定側，另一側狀態與資料完整保留。
-# - 從 Vue purchase JSON 取得真實值；抓不到時停止，避免把樣板占位符寫回。
-# v2.9
-# - 一般客異動費 30%／50% 統一改以「訂單總金額－車馬費」為計算基礎，
-#   不再直接用訂單總金額乘以異動比例。
-# v2.8
-# - 回填 purchase/edit 表單時，過濾後台未渲染的 Vue/Blade 佔位符（例如
-#   {{ purchase.chargeNote }}），避免退款列把佔位符寫進加收備註，或反向
-#   污染另一側欄位。加收／退款仍只啟用對應一側狀態。
-# v2.7
-# - 階段 A 建立異動寫入 Google Sheet 時，AD 欄同步記錄建立時間（台北時區），
-#   AE 欄維持標記「建立異動」。
-# v2.6
-# - B 欄新增特殊狀態支援：「專員服務時間異動」只把 K 欄寫入加收備註；
-#   「車馬費發票」只把 K 欄插入財務備註最上方。
-# - VIP待退券／VIP已退券 視為待退款／已退款；待扣儲值金／已扣儲值金 視為
-#   待收款／已收款；待返儲值金／已返儲值金 視為待退款／已退款。
-# v2.5
-# - AD 欄系統回填時間改用 Asia/Taipei 台北時區，避免部署環境使用 UTC 或
-#   其他時區造成時間偏差。
-# v2.4
-# - 清潔異動工作表 AE 欄新增處理狀態：階段 A 寫入工作表時標記「建立異動」；
-#   階段 B 成功回填後，AD 欄保留系統回填時間，AE 欄改標記「更新系統」。
-# v2.3
-# - 已收款回填後台時，加收備註改為保留 Sheet 備註並加上「MM/DD已收」；
-#   若 O 欄發票號碼不是「儲值金」，再加註「開立發票XXXXXXXXXX」。
-# - 已退款／已部份退款／已全額退款回填後台時，待退備註改為保留 Sheet 備註
-#   並加上「MM/DD已退」。
-# - 加收備註與待退備註會同步插入財務備註最上方，不覆蓋原本內容。
-# - 依後台 edit HTML 確認財務備註欄位 name 為 memoFinance，將其列為精準
-#   欄位第一順位，避免關鍵字搜尋誤寫到 LINE 網址等其他欄位。
-# - 清潔異動工作表新增桃園／新竹／高雄 Sheet ID 與 gid。
-# v2.2
-# - 清潔異動 Google Sheet B 欄加收類狀態改回財務用語「待收款／已收款」；
-#   回填後台時仍相容並寫入後台加收欄位（待加收／已加收）。
-# - dev/prod 環境由 UI 同步呼叫 change_order.set_env()，查詢與回填會跟上方
-#   環境選單一致。
-# v2.1
-# - B 欄為「已退款」時，已全額／已部份退款改依「退款金額」與「總金額－車馬費」判斷：
-#   退款金額大於等於總金額扣車馬費時回填已全額退款，低於則回填已部份退款。
-# v2.0
-# - ATM 待收款／已收款回填後台時，服務狀態改為已處理，收款方式改讀
-#   Google Sheet R 欄，發票日期改讀 Google Sheet AA 欄，並將待收備註插入
-#   財務備註最上方，不覆蓋原本內容。
-# - 待退款／已部份退款／已全額退款回填後台時，服務狀態改為已處理，
-#   並將待退備註插入財務備註最上方，不覆蓋原本內容。
-# - 異動寫入 Google Sheet 時，F 欄客戶類別改為依付款方式判斷：
-#   付款方式為儲值金寫入 VIP，非儲值金寫入一般客。
-# v1.9
-# - 階段 B 回填系統改以 B 欄「待加收／已加收／待退款／已退款」為準，
-#   並保留舊「待收款／已收款」相容；加收列只回填加收欄位，退款列只回填
-#   退款欄位，避免一筆資料同時動到加收與退款狀態。
-# - 加收列依 M/N/O/AA/K 欄回填加收日期、加收金額、加收發票號碼、開立
-#   發票日期與待收備註；退款列依 AC/AB/R/S/K 欄回填退款日期、折讓單號、
-#   付款方式、退款金額與待退備註。
-# - 退款付款方式改參照原訂單付款資訊；藍新ATM/ATM 統一回填 ATM，不再誤填
-#   信用卡。
-# - 電話查詢異動訂單時，除了已付款未服務訂單，也納入近 2 場已付款已服務
-#   訂單，支援服務時減時／專員回報情境。
-# v1.8
-# - 所有 build_*_row 函式新增 "D": order.get("line_url", "")，把客戶 LINE
-#   聊天連結網址寫進清潔異動工作表的 D 欄（純網址，Google Sheets 寫入後
-#   會自動變成可點擊連結）。append_rows_to_sheet 不用改，D 欄本來就沒被
-#   K 欄公式那類保護邏輯排除，會照現有機制正常寫入。
-# v1.7
-# - _parse_order_row 新增抓取客戶 LINE 聊天連結網址（line_url），從訂單卡片
-#   裡 chat.line.biz 的 <a> 連結直接取得。customer_name 本身維持純文字不變
-#   （因為會被寫進清潔異動工作表 H 欄，不能塞 markdown 語法進去），line_url
-#   是另外給 UI 端用來把姓名顯示成可點擊連結的欄位。
-# v1.6
 # v1.4
 # v1.5
 # - 修正 v1.5 遺留的 row_spec 未定義錯誤。
@@ -107,10 +33,8 @@
   階段 B：sync_pending_rows() → 讀「清潔異動工作表」待處理列 → 回填後台 purchase/edit → 更新 Sheet 狀態
 """
 
-import json
 import re
 import math
-import os
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
@@ -119,6 +43,7 @@ import requests
 from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
+from tools.common.config_loader import get_service_account_info
 
 try:
     import streamlit as st
@@ -200,12 +125,15 @@ def get_service_amount(order: dict) -> int:
 # ============================================================
 
 # 兩個地區各自的清潔異動工作表（Sheet ID 取自您提供的網址）
-REGION_SECRET_PREFIX = {
-    "台北": "TAIPEI",
-    "台中": "TAICHUNG",
-    "桃園": "TAOYUAN",
-    "新竹": "HSINCHU",
-    "高雄": "KAOHSIUNG",
+SHEET_IDS = {
+    "台北": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
+    "台中": "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM",
+}
+
+# 對應網址列上的 gid，用來精準定位分頁（比用分頁名稱比對更穩，不怕改名）
+SHEET_GIDS = {
+    "台北": 759897417,
+    "台中": 759897417,
 }
 
 _SCOPES = [
@@ -217,34 +145,12 @@ _gspread_client = None
 
 
 def _secret_value(key, default=""):
-    if st is not None:
-        try:
-            value = st.secrets.get(key, "")
-            if value is not None and str(value).strip():
-                return str(value).strip()
-            section = st.secrets.get("sheet_settings", {})
-            value = section.get(key, "") if section else ""
-            if value is not None and str(value).strip():
-                return str(value).strip()
-        except Exception:
-            pass
-    return str(os.getenv(key, default) or default).strip()
-
-
-def _sheet_config(region: str) -> dict:
-    if region not in REGION_SECRET_PREFIX:
-        raise ValueError(f"不支援的地區：{region}（目前支援：{list(REGION_SECRET_PREFIX.keys())}）")
-    prefix = REGION_SECRET_PREFIX[region]
-    spreadsheet_id = _secret_value(f"CHANGE_ORDER_{prefix}_SPREADSHEET_ID")
-    gid_text = _secret_value(f"CHANGE_ORDER_{prefix}_GID")
-    worksheet_title = _secret_value(f"CHANGE_ORDER_{prefix}_WORKSHEET_TITLE", "清潔異動")
-    if not spreadsheet_id:
-        raise ValueError(f"Secrets 尚未設定「{region}」清潔異動試算表 ID")
+    if st is None:
+        return default
     try:
-        gid = int(gid_text) if gid_text else None
-    except ValueError as exc:
-        raise ValueError(f"Secrets 的「{region}」清潔異動 GID 必須是整數") from exc
-    return {"spreadsheet_id": spreadsheet_id, "gid": gid, "worksheet_title": worksheet_title}
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
 
 
 def _get_gspread_client():
@@ -257,9 +163,6 @@ def _get_gspread_client():
     global _gspread_client
     if _gspread_client is not None:
         return _gspread_client
-
-    if st is None:
-        raise RuntimeError("找不到 streamlit，無法讀取 st.secrets 取得 Google 憑證")
 
     sa_info = None
 
@@ -284,10 +187,7 @@ def _get_gspread_client():
         break
 
     if not sa_info:
-        raise RuntimeError(
-            "找不到 Google 服務帳號憑證，請確認 secrets.toml 裡有 [GOOGLE_SERVICE_ACCOUNT] "
-            "區塊或 GOOGLE_SERVICE_ACCOUNT（JSON 字串），命名請跟 memo.py 現有設定一致"
-        )
+        sa_info = get_service_account_info()
 
     creds = Credentials.from_service_account_info(sa_info, scopes=_SCOPES)
     _gspread_client = gspread.authorize(creds)
@@ -300,23 +200,25 @@ def get_worksheet(region: str, tab_name: str = "清潔異動"):
     優先用 gid（SHEET_GIDS）精準定位分頁；若該地區沒有設定 gid，
     退而用 tab_name 嘗試找同名分頁，最後 fallback 用該試算表第一個分頁。
     """
-    config = _sheet_config(region)
+    if region not in SHEET_IDS:
+        raise ValueError(f"不支援的地區：{region}（目前支援：{list(SHEET_IDS.keys())}）")
+
     client = _get_gspread_client()
     try:
-        sh = client.open_by_key(config["spreadsheet_id"])
+        sh = client.open_by_key(SHEET_IDS[region])
     except gspread.exceptions.SpreadsheetNotFound as exc:
         raise RuntimeError(
-            f"無法開啟「{region}」清潔異動試算表。請確認試算表 ID 正確，且已分享給目前的 Google 服務帳號（編輯者權限）。"
+            f"無法開啟「{region}」清潔異動試算表。請確認試算表已分享給目前的 Google 服務帳號（編輯者權限）。"
         ) from exc
 
-    gid = config["gid"]
+    gid = SHEET_GIDS.get(region)
     if gid is not None:
         for ws in sh.worksheets():
             if ws.id == gid:
                 return ws
 
     try:
-        return sh.worksheet(config["worksheet_title"] or tab_name)
+        return sh.worksheet(tab_name)
     except gspread.exceptions.WorksheetNotFound:
         return sh.get_worksheet(0)
 
@@ -355,29 +257,11 @@ STATUS_PENDING_CHARGE = "待收款"
 STATUS_PENDING_REFUND = "待退款"
 STATUS_DONE_CHARGE = "已收款"
 STATUS_DONE_REFUND = "已退款"
-STATUS_PENDING_CHARGE_ALIASES = {
-    STATUS_PENDING_CHARGE, "待加收", "待回儲值金", "待扣儲值金",
-}
-STATUS_DONE_CHARGE_ALIASES = {STATUS_DONE_CHARGE, "已加收", "已扣儲值金"}
-STATUS_PENDING_REFUND_ALIASES = {STATUS_PENDING_REFUND, "VIP待退券", "待返儲值金"}
-STATUS_DONE_REFUND_ALIASES = {
-    STATUS_DONE_REFUND, "已部份退款", "已部分退款", "已全額退款",
-    "VIP已退券", "已返儲值金",
-}
-STATUS_AFTER_SYNC = {
-    "待回儲值金": "已扣儲值金",
-    "待扣儲值金": "已扣儲值金",
-    "待返儲值金": "已返儲值金",
-}
-STATUS_STAFF_TIME_CHANGE = {"專員服務時間異動"}
-STATUS_FARE_INVOICE_ONLY = {"車馬費發票"}
 SYNC_STATUSES = {
-    *STATUS_PENDING_CHARGE_ALIASES,
-    *STATUS_PENDING_REFUND_ALIASES,
-    *STATUS_DONE_CHARGE_ALIASES,
-    *STATUS_DONE_REFUND_ALIASES,
-    *STATUS_STAFF_TIME_CHANGE,
-    *STATUS_FARE_INVOICE_ONLY,
+    STATUS_PENDING_CHARGE,
+    STATUS_PENDING_REFUND,
+    STATUS_DONE_CHARGE,
+    STATUS_DONE_REFUND,
 }
 
 TYPE_FARE = "車馬費發票"
@@ -458,13 +342,6 @@ def _parse_order_row(row) -> dict:
     name_tag = row.select_one('a[href*="/member?keyword"]')
     customer_name = name_tag.get_text(strip=True) if name_tag else ""
 
-    # v1.7 新增：客戶 LINE 聊天連結網址。跟 customer_name 分開存放——
-    # customer_name 之後會被原封不動寫進清潔異動工作表 H 欄，不能塞
-    # markdown/超連結語法進去，line_url 只給 UI 端顯示用（例如把姓名顯示
-    # 成可點擊連結），不會被寫進 Sheet。
-    line_tag = row.select_one('a[href*="chat.line.biz"]')
-    line_url = line_tag.get("href", "").strip() if line_tag else ""
-
     tds = row.select("td")
     date_cell = tds[2] if len(tds) > 2 else None
     date_cell_text = date_cell.get_text("\n", strip=True) if date_cell else ""
@@ -484,14 +361,7 @@ def _parse_order_row(row) -> dict:
     travel_fee_match = re.search(r"車馬費[：:]\s*([\d,]+)", pay_cell_text)
     travel_fee = int(travel_fee_match.group(1).replace(",", "")) if travel_fee_match else 0
 
-    if "儲值金" in pay_cell_text:
-        payway = "儲值金"
-    elif "ATM" in pay_cell_text or "藍新ATM" in pay_cell_text:
-        payway = "ATM"
-    elif "信用卡" in pay_cell_text or "刷卡" in pay_cell_text:
-        payway = "信用卡"
-    else:
-        payway = "非儲值金"
+    payway = "儲值金" if "儲值金" in pay_cell_text else "非儲值金"
 
     invoice_match = re.search(r"發票[：:]\s*([A-Z0-9]+)", pay_cell_text)
     invoice_no = invoice_match.group(1) if invoice_match else ""
@@ -503,7 +373,6 @@ def _parse_order_row(row) -> dict:
         "purchase_id": purchase_id,
         "order_no": order_no,
         "customer_name": customer_name,
-        "line_url": line_url,
         "period_text": period_text,
         "service_hours": _parse_period_hours(period_text),
         "cleaner_count": cleaner_count,
@@ -551,29 +420,19 @@ def fetch_order_basic(keyword: str, session: requests.Session, ui_logger=None, b
     return result
 
 
-def _select_change_order_candidates(parsed: list, today: date = None) -> list:
-    """已付款未服務 + 近 2 場已付款已服務，供服務時加減時異動使用。"""
+def _select_upcoming_paid_orders(parsed: list, today: date = None) -> list:
+    """從已解析訂單中挑出已付款且尚未服務的訂單，依服務日期由近到遠排序。"""
     today = today or date.today()
-    upcoming = [
+    paid_with_date = [
         p for p in parsed
         if p.get("is_paid") and p.get("service_date") and p["service_date"] >= today
     ]
-    recent_done = [
-        p for p in parsed
-        if p.get("is_paid") and p.get("service_date") and p["service_date"] < today
-    ]
-    upcoming = sorted(upcoming, key=lambda p: (p["service_date"], p.get("order_no", "")))
-    recent_done = sorted(recent_done, key=lambda p: (p["service_date"], p.get("order_no", "")), reverse=True)[:2]
-    return upcoming + recent_done
-
-
-def _select_upcoming_paid_orders(parsed: list, today: date = None) -> list:
-    return _select_change_order_candidates(parsed, today=today)
+    return sorted(paid_with_date, key=lambda p: (p["service_date"], p.get("order_no", "")))
 
 
 def fetch_upcoming_paid_orders_by_phone(phone: str, session: requests.Session, ui_logger=None):
     """
-    依電話查詢 /purchase，找出「已付款且尚未服務」與近 2 場「已付款且已服務」訂單。
+    依電話查詢 /purchase，找出目前「已付款且尚未服務」的訂單列表。
     回傳 list of dict（內容同 fetch_order_basic 的結果），查無資料則回傳空 list。
     """
     def log(msg):
@@ -597,12 +456,12 @@ def fetch_upcoming_paid_orders_by_phone(phone: str, session: requests.Session, u
         if info:
             parsed.append(info)
 
-    result = _select_change_order_candidates(parsed)
+    result = _select_upcoming_paid_orders(parsed)
     if not result:
-        log("⚠️ 查無「已付款」且有服務日期的訂單")
+        log("⚠️ 查無「已付款、尚未服務」且有服務日期的訂單")
         return []
 
-    log(f"✅ 找到 {len(result)} 筆已付款可異動訂單（含未服務與近 2 場已服務）")
+    log(f"✅ 找到 {len(result)} 筆目前已付款未服務訂單，已依服務日期由近到遠排序")
     return result
 
 
@@ -729,8 +588,7 @@ def calc_change_fee(order: dict, service_date: date, change_person: int = None,
         rate_percent = None
     else:
         rate = 0.5 if tier == "near" else (0.3 if tier == "far" else 0)
-        service_amount = get_service_amount(order)
-        change_fee = round(service_amount * rate)
+        change_fee = round(order.get("total", 0) * rate)
         if tier == "free":
             calc_note = (
                 f"{workday_note}，一般客：4個工作天以上，免收異動費 = $0；"
@@ -738,8 +596,7 @@ def calc_change_fee(order: dict, service_date: date, change_person: int = None,
             )
         else:
             calc_note = (
-                f"{workday_note}，一般客：(總金額{_money_int(order.get('total', 0))} "
-                f"− 車馬費{get_travel_fee(order)}) = {service_amount} × "
+                f"{workday_note}，一般客：總金額{order.get('total', 0)} × "
                 f"{int(rate*100)}% = ${change_fee}"
             )
         unit = None
@@ -762,11 +619,6 @@ def calc_refund_amount(order: dict, change_fee: int) -> int:
     return max(get_service_amount(order) - _money_int(change_fee), 0)
 
 
-def _customer_type_from_order(order: dict) -> str:
-    """Google Sheet F 欄客戶類別：付款方式為儲值金寫 VIP，其他一律寫一般客。"""
-    return "VIP" if str((order or {}).get("payway") or "").strip() == "儲值金" else "一般客"
-
-
 # ============================================================
 # 階段 A-3：組合一筆要寫入 Sheet 的列（三種情境）
 # ============================================================
@@ -777,9 +629,8 @@ def build_fare_row(order: dict, service_date: date = None, today: date = None) -
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     return {
         "A": "清潔", "B": "待處理發票", "C": TYPE_FARE,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": "", "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": f"車馬費 ${fare}",
         "_calc_amount": fare,
     }
@@ -788,14 +639,13 @@ def build_fare_row(order: dict, service_date: date = None, today: date = None) -
 def build_charge_row(order: dict, change_fee_info: dict, service_note: str,
                       customer_type: str = "一般", service_date: date = None,
                       today: date = None) -> dict:
-    """不退服務 → 異動服務收款（Sheet 狀態：待收款；後台欄位：待加收）"""
+    """不退服務 → 異動服務收款（待收款）"""
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     j_value = _format_change_fee_j(order, change_fee_info)
     return {
         "A": "清潔", "B": STATUS_PENDING_CHARGE, "C": TYPE_CHARGE,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
         "M": "", "N": change_fee_info["change_fee"], "O": "",
@@ -813,13 +663,12 @@ def build_refund_row(order: dict, change_fee_info: dict, service_note: str,
     j_value = _format_change_fee_j(order, change_fee_info)
     return {
         "A": "清潔", "B": STATUS_PENDING_REFUND, "C": TYPE_REFUND,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value,
         "J": j_value,
         "K": service_note or "",
-        "R": _refund_payway(order),
+        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
         "S": refund_amount,
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -881,25 +730,17 @@ def _format_people_hours_fee_j(prefix: str, action: str, time_fee_info: dict) ->
     return f"{prefix}{person}人{hours}小時，{action}服務費${amount}"
 
 
-def _refund_payway(order: dict) -> str:
-    payway = str((order or {}).get("payway") or "").strip()
-    if "ATM" in payway or "藍新ATM" in payway:
-        return "ATM"
-    return payway or "信用卡"
-
-
 def build_addtime_row(order: dict, time_fee_info: dict, service_note: str,
                        customer_type: str = "一般", service_date: date = None,
                        today: date = None) -> dict:
-    """加時 → 異動服務收款（Sheet 狀態：待收款；後台欄位：待加收）"""
+    """加時 → 異動服務收款（待收款），其餘欄位結構同異動待收款"""
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     timing = _time_change_timing_label(service_date, today=today)
     j_value = _format_people_hours_fee_j(f"{timing}加時", "待收", time_fee_info)
     return {
         "A": "清潔", "B": STATUS_PENDING_CHARGE, "C": TYPE_CHARGE,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
         "M": "", "N": time_fee_info["amount"], "O": "",
@@ -917,13 +758,12 @@ def build_reducetime_row(order: dict, time_fee_info: dict, service_note: str,
     j_value = _format_people_hours_fee_j(f"{timing}減時", "待退", time_fee_info)
     return {
         "A": "清潔", "B": STATUS_PENDING_REFUND, "C": TYPE_REFUND,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value,
         "J": j_value,
         "K": service_note or "",
-        "R": _refund_payway(order),
+        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
         "S": time_fee_info["amount"],
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -935,14 +775,13 @@ def build_reducetime_row(order: dict, time_fee_info: dict, service_note: str,
 def build_weekday_to_weekend_row(order: dict, time_fee_info: dict, service_note: str,
                                   customer_type: str = "一般", service_date: date = None,
                                   today: date = None) -> dict:
-    """異動平日轉週末 → Sheet 狀態待收款，每人時差額 $100。"""
+    """異動平日轉週末 → 待收款，每人時差額 $100。"""
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     j_value = _format_people_hours_fee_j("異動平日轉週末", "待收", time_fee_info)
     return {
         "A": "清潔", "B": STATUS_PENDING_CHARGE, "C": TYPE_CHARGE,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
         "M": "", "N": time_fee_info["amount"], "O": "",
@@ -959,12 +798,11 @@ def build_weekend_to_weekday_row(order: dict, time_fee_info: dict, service_note:
     j_value = _format_people_hours_fee_j("異動週末轉平日", "待退", time_fee_info)
     return {
         "A": "清潔", "B": STATUS_PENDING_REFUND, "C": TYPE_REFUND,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
-        "R": _refund_payway(order),
+        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
         "S": time_fee_info["amount"],
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -994,13 +832,12 @@ def build_manual_refund_row(order: dict, amount, refund_type_label: str, service
     )
     return {
         "A": "清潔", "B": STATUS_PENDING_REFUND, "C": refund_type_label,
-        "D": order.get("line_url", ""),
         "E": _today_taipei_str(today),
-        "F": _customer_type_from_order(order), "G": order["order_no"], "H": order["customer_name"],
+        "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value,
         "J": j_value,
         "K": service_note or "",
-        "R": _refund_payway(order),
+        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
         "S": amount,
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -1047,8 +884,6 @@ def append_rows_to_sheet(region: str, rows: list, ui_logger=None):
             for col in col_letters:
                 if col in row and row[col] != "":
                     ws.update_acell(f"{col}{target_row}", row[col])
-            ws.update_acell(f"AD{target_row}", datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M:%S"))
-            ws.update_acell(f"AE{target_row}", "建立異動")
             written += 1
             log(f"✅ 已寫入第 {target_row} 列：{row.get('G', '')}")
         except Exception as e:
@@ -1077,10 +912,8 @@ CHECK_REFUND_PARTIAL = [
 ]
 
 FIELD_CHARGE_DATE = ["chargeDate", "charge_date", "addChargeDate", "extraChargeDate"]
-FIELD_CHARGE_PAYMENT = ["chargePayment", "charge_payment", "addChargePayment", "extraChargePayment"]
 FIELD_CHARGE_AMOUNT = ["chargeAmount", "charge_amount", "addChargeAmount", "extraChargeAmount"]
 FIELD_CHARGE_INVOICE = ["chargeInvoice", "charge_invoice", "addChargeInvoice"]
-FIELD_CHARGE_INVOICE_DATE = ["chargeInvoiceDate", "charge_invoice_date", "invoiceDate", "invoice_date"]
 FIELD_CHARGE_NOTE = ["chargeNote", "charge_note", "addChargeNote", "extraChargeNote"]
 
 FIELD_REFUND_DATE = ["refundDate", "refund_date"]
@@ -1092,7 +925,7 @@ FIELD_REFUND_FLOW = [
 ]
 FIELD_REFUND_NOTE = ["refundNote", "refund_note"]
 FIELD_FINANCE_NOTE = [
-    "memoFinance", "financeNote", "finance_note", "financialNote", "financial_note",
+    "financeNote", "finance_note", "financialNote", "financial_note",
     "accountingNote", "accounting_note", "paymentNote", "payment_note",
     "moneyNote", "money_note", "financeMemo", "finance_memo",
 ]
@@ -1127,49 +960,6 @@ def _normalize_date_value(value: str) -> str:
     return f"{y:04d}-{mo:02d}-{d:02d}"
 
 
-def _format_mmdd_date(value: str) -> str:
-    text = _normalize_date_value(value)
-    m = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", text or "")
-    if not m:
-        return ""
-    return f"{int(m.group(2)):02d}/{int(m.group(3)):02d}"
-
-
-def _append_note_parts_once(base: str, parts: list[str]) -> str:
-    text = str(base or "").strip()
-    for part in parts:
-        part = str(part or "").strip(" ，,")
-        if not part or part in text:
-            continue
-        text = f"{text}，{part}" if text else part
-    return text
-
-
-def _build_charge_note(base_note: str, charge_date: str, charge_invoice: str,
-                       include_paid_date: bool) -> str:
-    parts = []
-    if include_paid_date:
-        mmdd = _format_mmdd_date(charge_date)
-        if mmdd:
-            parts.append(f"{mmdd}已收")
-    invoice_text = str(charge_invoice or "").strip()
-    if invoice_text and invoice_text != "儲值金":
-        parts.append(f"開立發票{invoice_text}")
-    return _append_note_parts_once(base_note, parts)
-
-
-def _build_refund_note(base_note: str, refund_date: str) -> str:
-    mmdd = _format_mmdd_date(refund_date)
-    return _append_note_parts_once(base_note, [f"{mmdd}已退" if mmdd else ""])
-
-
-def _sheet_refund_payway(raw: list) -> str:
-    text = str(_sheet_cell(raw, "R") or "").strip()
-    if "ATM" in text or "藍新ATM" in text:
-        return "ATM"
-    return text
-
-
 def _control_context(el) -> str:
     parts = []
     el_id = el.get("id")
@@ -1200,21 +990,6 @@ def _control_context(el) -> str:
     return " ".join(dict.fromkeys(parts))
 
 
-def _extract_purchase_state(soup: BeautifulSoup) -> dict:
-    """從 Vue data() 的 purchase JSON 讀取後台真實值。"""
-    html = str(soup)
-    decoder = json.JSONDecoder()
-    for match in re.finditer(r"\bpurchase\s*:\s*", html):
-        start = match.end()
-        try:
-            value, _ = decoder.raw_decode(html[start:])
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(value, dict):
-            return value
-    return {}
-
-
 def _read_form_state(soup: BeautifulSoup) -> tuple[dict, dict]:
     """
     讀取後台表單現值。checkbox/radio 只有原本 checked 的才放入 form_data，
@@ -1238,11 +1013,6 @@ def _read_form_state(soup: BeautifulSoup) -> tuple[dict, dict]:
         else:
             value = el.get("value", "")
 
-        # 後台偶爾會把未渲染的 Vue/Blade 表達式直接留在 input/textarea。
-        # 這些不是使用者資料，不可在完整表單 POST 時原樣寫回資料庫。
-        if re.fullmatch(r"\s*\{\{\s*[^{}]+\s*\}\}\s*", str(value or "")):
-            value = ""
-
         control = {
             "name": name,
             "tag": tag,
@@ -1257,25 +1027,6 @@ def _read_form_state(soup: BeautifulSoup) -> tuple[dict, dict]:
             if control["checked"]:
                 form_data[name] = value or "1"
         else:
-            form_data[name] = value
-
-    # radio 與 Vue 綁定欄位的真值不一定反映在靜態 HTML；用 purchase JSON 覆蓋。
-    purchase_state = _extract_purchase_state(soup)
-    if not purchase_state:
-        raise RuntimeError("無法讀取後台 purchase 真實資料，為避免覆蓋加收／退款另一側，停止回填")
-    json_backed_fields = {
-        "isCharge", "chargeDate", "chargePayment", "chargeInvoiceDate",
-        "chargeAmount", "chargeInvoice", "chargeNote",
-        "isRefund", "refundDate", "refundPayment", "refundPayway",
-        "refundAmount", "refundNumber", "refundInvoiceDate",
-        "refundInvoiceAmount", "refundInvoice", "refundNote", "progress",
-    }
-    for name in json_backed_fields:
-        if name in purchase_state:
-            value = purchase_state.get(name)
-            value = "" if value is None else str(value)
-            if re.fullmatch(r"\s*\{\{\s*[^{}]+\s*\}\}\s*", value):
-                value = ""
             form_data[name] = value
 
     return form_data, controls
@@ -1382,14 +1133,6 @@ def _set_field(form_data: dict, controls: dict, names: list, value,
     return name
 
 
-def _set_progress_done(form_data: dict, controls: dict, ui_logger=None):
-    """服務狀態設定為已處理（後台 progress=1）。"""
-    return _set_field(
-        form_data, controls, ["progress", "progress_status", "progressStatus"], "1",
-        keywords=["服務狀態"], fallback_name="progress", allow_blank=True, ui_logger=ui_logger,
-    )
-
-
 def _prepend_field(form_data: dict, controls: dict, names: list, note: str,
                    keywords: list = None, ui_logger=None):
     note = str(note or "").strip()
@@ -1413,13 +1156,9 @@ def _prepend_field(form_data: dict, controls: dict, names: list, note: str,
 
 
 def _row_kind(status: str) -> str:
-    if status in STATUS_STAFF_TIME_CHANGE:
-        return "charge_note"
-    if status in STATUS_FARE_INVOICE_ONLY:
-        return "finance_note"
-    if status in STATUS_PENDING_CHARGE_ALIASES or status in STATUS_DONE_CHARGE_ALIASES:
+    if status in (STATUS_PENDING_CHARGE, STATUS_DONE_CHARGE):
         return "charge"
-    if status in STATUS_PENDING_REFUND_ALIASES or status in STATUS_DONE_REFUND_ALIASES:
+    if status in (STATUS_PENDING_REFUND, STATUS_DONE_REFUND):
         return "refund"
     return ""
 
@@ -1429,8 +1168,6 @@ def _row_amount(row: list, status: str) -> str:
         return _sheet_cell(row, "N")
     if _row_kind(status) == "refund":
         return _sheet_cell(row, "S")
-    if _row_kind(status) in {"charge_note", "finance_note"}:
-        return _sheet_cell(row, "K")
     return ""
 
 
@@ -1462,7 +1199,7 @@ def _parse_sheet_row_spec(row_spec: str) -> set[int]:
 def get_pending_rows(region: str, row_spec: str = None, ui_logger=None):
     """
     讀取清潔異動工作表，篩出需要回填後台的列。
-    支援 B 欄狀態：待收款、待退款、已收款、已退款；並相容舊值與特殊備註狀態。
+    支援 B 欄狀態：待收款、待退款、已收款、已退款；且對應金額欄需有值。
     回傳 list of dict，含 sheet_row（原始列號，回寫用）。
     """
     def log(msg):
@@ -1516,103 +1253,70 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
     status = item.get("status") or _sheet_cell(raw, "B").strip()
     backend_note = _sheet_cell(raw, "K").strip()
     charge_date = _normalize_date_value(_sheet_cell(raw, "M"))
-    charge_invoice_date = _normalize_date_value(_sheet_cell(raw, "AA"))
     charge_invoice = _sheet_cell(raw, "O").strip()
     refund_date = _normalize_date_value(_sheet_cell(raw, "AC"))
 
-    if status in STATUS_STAFF_TIME_CHANGE:
-        _set_field(form_data, controls, FIELD_CHARGE_NOTE, backend_note,
-                   keywords=["加收備註", "收款備註"], fallback_name="chargeNote", ui_logger=ui_logger)
-        return
-
-    if status in STATUS_FARE_INVOICE_ONLY:
-        if backend_note:
-            _prepend_field(form_data, controls, FIELD_FINANCE_NOTE, backend_note,
-                           keywords=["財務備註"], ui_logger=ui_logger)
-        return
-
-    if status in STATUS_PENDING_CHARGE_ALIASES:
+    if status == STATUS_PENDING_CHARGE:
         _set_radio_value(form_data, controls, "isCharge", "1", ui_logger=ui_logger)
-        _set_progress_done(form_data, controls, ui_logger=ui_logger)
+        _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_CHARGE_PAYMENT, _sheet_cell(raw, "R"),
-                   keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
                    keywords=["加收金額", "收款金額"], fallback_name="chargeAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_INVOICE, charge_invoice,
                    keywords=["加收發票", "收款發票"], fallback_name="chargeInvoice", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_CHARGE_INVOICE_DATE, charge_invoice_date,
-                   keywords=["加收發票日期", "開立發票日期", "發票日期"], fallback_name="chargeInvoiceDate", ui_logger=ui_logger)
-        charge_note = _build_charge_note(backend_note, charge_date, charge_invoice, include_paid_date=False)
+        charge_note = _append_suffix_once(backend_note, f"，開立發票{charge_invoice}" if charge_invoice else "")
         _set_field(form_data, controls, FIELD_CHARGE_NOTE, charge_note,
                    keywords=["加收備註", "收款備註"], fallback_name="chargeNote", ui_logger=ui_logger)
-        finance_line = charge_note
+        finance_line = _first_line_for_finance(charge_note)
         if finance_line:
             _prepend_field(form_data, controls, FIELD_FINANCE_NOTE, finance_line,
                            keywords=["財務備註"], ui_logger=ui_logger)
         return
 
-    if status in STATUS_PENDING_REFUND_ALIASES:
+    if status == STATUS_PENDING_REFUND:
+        _set_radio_value(form_data, controls, "isCharge", "0", ui_logger=ui_logger)
         _set_radio_value(form_data, controls, "isRefund", "1", ui_logger=ui_logger)
-        _set_progress_done(form_data, controls, ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_REFUND_DATE, refund_date,
                    keywords=["退款日期", "退款時間"], fallback_name="refundDate", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_REFUND_AMOUNT, _sheet_cell(raw, "S"),
                    keywords=["退款金額"], fallback_name="refundAmount", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_REFUND_NUMBER, _sheet_cell(raw, "AB"),
-                   keywords=["折讓單號碼", "退款編號"], fallback_name="refundNumber", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_REFUND_FLOW, _sheet_refund_payway(raw),
+        _set_field(form_data, controls, FIELD_REFUND_FLOW, _sheet_cell(raw, "R"),
                    keywords=["退款金流"], ui_logger=ui_logger)
-        refund_note = _build_refund_note(backend_note, refund_date)
+        refund_note = _append_suffix_once(backend_note, f"，{refund_date}已退款" if refund_date else "")
         _set_field(form_data, controls, FIELD_REFUND_NOTE, refund_note,
                    keywords=["待退備註", "退款備註"], fallback_name="refundNote", ui_logger=ui_logger)
-        finance_line = refund_note
+        finance_line = _first_line_for_finance(refund_note)
         if finance_line:
             _prepend_field(form_data, controls, FIELD_FINANCE_NOTE, finance_line,
                            keywords=["財務備註"], ui_logger=ui_logger)
         return
 
-    if status in STATUS_DONE_CHARGE_ALIASES:
+    if status == STATUS_DONE_CHARGE:
         _set_radio_value(form_data, controls, "isCharge", "2", ui_logger=ui_logger)
-        _set_progress_done(form_data, controls, ui_logger=ui_logger)
+        _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_CHARGE_PAYMENT, _sheet_cell(raw, "R"),
-                   keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
                    keywords=["加收金額", "收款金額"], fallback_name="chargeAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_INVOICE, charge_invoice,
                    keywords=["加收發票", "收款發票"], fallback_name="chargeInvoice", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_CHARGE_INVOICE_DATE, charge_invoice_date,
-                   keywords=["加收發票日期", "開立發票日期", "發票日期"], fallback_name="chargeInvoiceDate", ui_logger=ui_logger)
-        charge_note = _build_charge_note(backend_note, charge_date, charge_invoice, include_paid_date=True)
+        charge_note = _append_suffix_once(backend_note, f"，開立發票{charge_invoice}" if charge_invoice else "")
         _set_field(form_data, controls, FIELD_CHARGE_NOTE, charge_note,
                    keywords=["加收備註", "收款備註"], fallback_name="chargeNote", ui_logger=ui_logger)
-        finance_line = charge_note
+        finance_line = _first_line_for_finance(charge_note)
         if finance_line:
             _prepend_field(form_data, controls, FIELD_FINANCE_NOTE, finance_line,
                            keywords=["財務備註"], ui_logger=ui_logger)
         return
 
-    if status in STATUS_DONE_REFUND_ALIASES:
-        _set_progress_done(form_data, controls, ui_logger=ui_logger)
+    if status == STATUS_DONE_REFUND:
+        _set_radio_value(form_data, controls, "isCharge", "0", ui_logger=ui_logger)
 
         refund_amount = _parse_money_value(_sheet_cell(raw, "S"))
         order_total = _parse_money_value((order or {}).get("total"))
-        travel_fee = _parse_money_value((order or {}).get("travel_fee"))
-        service_amount = max(order_total - travel_fee, 0)
-
-        if status == "已全額退款":
-            refund_status_value = "3"
-        elif status in {"已部份退款", "已部分退款"}:
-            refund_status_value = "2"
-        else:
-            # B 欄若仍使用舊狀態「已退款」，依退款金額判斷部分／全額：
-            # 退款金額 >= 總金額 - 車馬費 → 已全額退款；否則 → 已部份退款。
-            is_full_refund = bool(service_amount and refund_amount >= service_amount)
-            refund_status_value = "3" if is_full_refund else "2"
-        _set_radio_value(form_data, controls, "isRefund", refund_status_value, ui_logger=ui_logger)
+        is_full_refund = bool(order_total and refund_amount == order_total)
+        _set_radio_value(form_data, controls, "isRefund", "3" if is_full_refund else "2", ui_logger=ui_logger)
 
         _set_field(form_data, controls, FIELD_REFUND_DATE, refund_date,
                    keywords=["退款日期", "退款時間"], fallback_name="refundDate", ui_logger=ui_logger)
@@ -1620,12 +1324,12 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
                    keywords=["退款金額"], fallback_name="refundAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_REFUND_NUMBER, _sheet_cell(raw, "AB"),
                    keywords=["折讓單號碼", "退款編號"], fallback_name="refundNumber", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_REFUND_FLOW, _sheet_refund_payway(raw),
+        _set_field(form_data, controls, FIELD_REFUND_FLOW, _sheet_cell(raw, "R"),
                    keywords=["退款金流"], ui_logger=ui_logger)
-        refund_note = _build_refund_note(backend_note, refund_date)
+        refund_note = _append_suffix_once(backend_note, f"，{refund_date}已退款" if refund_date else "")
         _set_field(form_data, controls, FIELD_REFUND_NOTE, refund_note,
                    keywords=["待退備註", "退款備註"], fallback_name="refundNote", ui_logger=ui_logger)
-        finance_line = refund_note
+        finance_line = _first_line_for_finance(refund_note)
         if finance_line:
             _prepend_field(form_data, controls, FIELD_FINANCE_NOTE, finance_line,
                            keywords=["財務備註"], ui_logger=ui_logger)
@@ -1670,40 +1374,15 @@ def sync_one_to_purchase_edit(item: dict, session: requests.Session, ui_logger=N
     return True
 
 
-def mark_sheet_row_done(region: str, sheet_row: int, status: str, ui_logger=None):
-    """回填成功後標記處理時間；儲值金待處理狀態同步改為完成狀態。"""
+def mark_sheet_row_done(region: str, sheet_row: int, kind: str, ui_logger=None):
+    """回填成功後只標記處理時間，不改 B 欄狀態。"""
     def log(msg):
         if ui_logger:
             ui_logger(msg)
 
     ws = get_worksheet(region)
-    done_status = STATUS_AFTER_SYNC.get(status, status)
-    update_status = f"更新系統（B欄：{done_status}）"
-    updated_at = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M:%S")
-    updates = [
-        {"range": f"AD{sheet_row}", "values": [[updated_at]]},
-        {"range": f"AE{sheet_row}", "values": [[update_status]]},
-    ]
-    if done_status != status:
-        updates.insert(0, {"range": f"B{sheet_row}", "values": [[done_status]]})
-
-    try:
-        ws.batch_update(updates)
-    except gspread.exceptions.APIError as exc:
-        response = getattr(exc, "response", None)
-        if getattr(response, "status_code", None) == 403:
-            auth = getattr(_get_gspread_client(), "auth", None)
-            account = getattr(auth, "service_account_email", "") or "未知服務帳號"
-            raise RuntimeError(
-                f"Google Sheet 無編輯權限（服務帳號：{account}）。"
-                f"請將「{region}」清潔異動試算表分享為編輯者。"
-            ) from exc
-        raise
-
-    if done_status != status:
-        log(f"✅ Sheet 第 {sheet_row} 列 B 欄已由「{status}」改為「{done_status}」，並標記回填時間")
-    else:
-        log(f"✅ Sheet 第 {sheet_row} 列已標記系統回填時間與更新狀態（B 欄狀態不變）")
+    ws.update_acell(f"AD{sheet_row}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    log(f"✅ Sheet 第 {sheet_row} 列已標記系統回填時間（B 欄狀態不變）")
 
 
 # ============================================================
@@ -1725,7 +1404,7 @@ def sync_pending_rows(region: str, selected_rows: list, session: requests.Sessio
         result["processed"] += 1
         try:
             sync_one_to_purchase_edit(item, session=session, ui_logger=ui_logger)
-            mark_sheet_row_done(region, item["sheet_row"], item["status"], ui_logger=ui_logger)
+            mark_sheet_row_done(region, item["sheet_row"], item["kind"], ui_logger=ui_logger)
             result["success"] += 1
         except Exception as e:
             result["failed"] += 1
