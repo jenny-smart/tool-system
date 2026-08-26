@@ -74,7 +74,7 @@ async (d) => {
   };
   const isTriplicate = Boolean(text(d.buyer_identifier));
   forceRadio("invoicetype07");
-  forceRadio(isTriplicate ? "hastax2" : (text(d.hastax) === "1" ? "hastax1" : "hastax2"));
+  forceRadio(isTriplicate ? "hastax1" : (text(d.hastax) === "1" ? "hastax1" : "hastax2"));
   const taxMap = {"1": "businesstax1", "2": "businesstax2", "3": "businesstax3", "4": "businesstax4"};
   forceRadio(taxMap[text(d.taxtype)] || "businesstax1");
   forceRadio(`roundnum${text(d.roundnum) || "4"}`);

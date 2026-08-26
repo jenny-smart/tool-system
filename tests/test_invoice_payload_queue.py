@@ -15,18 +15,31 @@ agent_module = types.ModuleType("tools.local_agent_queue")
 agent_module.now_text = MagicMock(return_value="2026-08-23 19:30:00")
 sys.modules.setdefault("tools.local_agent_queue", agent_module)
 
-change_module = types.ModuleType("tools.memo_system.change_order")
-change_module.get_worksheet = MagicMock()
-sys.modules.setdefault("tools.memo_system.change_order", change_module)
+sheet_module = types.ModuleType("tools.lemon_backend.stored_value_sheet")
+sheet_module.get_worksheet = MagicMock()
+sys.modules.setdefault("tools.lemon_backend.stored_value_sheet", sheet_module)
 
 from tools.invoice_center import invoice_payload_queue as queue
 
 
-def _sheet_row(order_no: str, invoice_no: str = "", created_at: str = "") -> list[list[str]]:
-    row = [""] * 21
+def _sheet_row(
+    order_no: str,
+    invoice_no: str = "",
+    created_at: str = "",
+    status: str = "",
+) -> list[list[str]]:
+    row = [""] * 28
+    row[0] = status
+    row[5] = order_no
+    row[13] = invoice_no
+    row[27] = created_at
+    return [row]
+
+
+def _source_invoice_row(order_no: str, invoice_no: str = "") -> list[list[str]]:
+    row = [""] * 9
     row[0] = order_no
     row[8] = invoice_no
-    row[20] = created_at
     return [row]
 
 
@@ -41,10 +54,11 @@ class InvoiceResultWriteTest(unittest.TestCase):
 
         queue.write_invoice_result("台北", 12, "LC001", "AB12345678")
 
-        self.ws.get.assert_called_once_with("G12:AA12")
+        self.ws.get.assert_called_once_with("B12:AC12")
         self.ws.batch_update.assert_called_once_with([
             {"range": "O12", "values": [["AB12345678"]]},
-            {"range": "AA12", "values": [["2026-08-23 19:30:00"]]},
+            {"range": "AC12", "values": [["2026-08-23 19:30:00"]]},
+            {"range": "B12", "values": [["已付款"]]},
         ])
 
     def test_rejects_changed_order_row(self) -> None:
@@ -68,17 +82,29 @@ class InvoiceResultWriteTest(unittest.TestCase):
 
         self.ws.batch_update.assert_called_once_with([
             {"range": "O12", "values": [["DM51790873"]]},
-            {"range": "AA12", "values": [["2026-08-23 19:30:00"]]},
+            {"range": "AC12", "values": [["2026-08-23 19:30:00"]]},
+            {"range": "B12", "values": [["已付款"]]},
         ])
 
     def test_duplicate_result_preserves_existing_data(self) -> None:
         self.ws.get.return_value = _sheet_row(
-            "LC001", "AB12345678", "2026-08-23 19:20:00"
+            "LC001", "AB12345678", "2026-08-23 19:20:00", "已付款"
         )
 
         queue.write_invoice_result("台北", 12, "LC001", "AB12345678")
 
         self.ws.batch_update.assert_not_called()
+
+    def test_existing_invoice_and_time_still_updates_payment_status(self) -> None:
+        self.ws.get.return_value = _sheet_row(
+            "LC001", "AB12345678", "2026-08-23 19:20:00", "待開發票"
+        )
+
+        queue.write_invoice_result("台北", 12, "LC001", "AB12345678")
+
+        self.ws.batch_update.assert_called_once_with([
+            {"range": "B12", "values": [["已付款"]]},
+        ])
 
     def test_enqueue_reuses_existing_pending_without_name_error(self) -> None:
         service = MagicMock()
@@ -125,15 +151,17 @@ class InvoiceResultWriteTest(unittest.TestCase):
             },
         ]
         worksheet.get.side_effect = [
-            _sheet_row("LC002146661", "DM51790871"),
-            _sheet_row("LC002147000"),
+            _source_invoice_row("LC002146661", "DM51790871"),
+            _source_invoice_row("LC002147000"),
         ]
 
         with patch.object(queue, "get_sheets_service", return_value=service), patch.object(
             queue, "_ensure_sheet"
         ), patch.object(queue, "_all_rows", return_value=rows), patch.object(
             queue, "get_worksheet", return_value=worksheet
-        ), patch.object(queue, "update_payload_status") as update_status:
+        ), patch.object(queue, "update_payload_status") as update_status, patch.object(
+            queue, "write_invoice_result"
+        ) as write_result:
             result = queue.list_pending_payloads("台北")
 
         self.assertEqual([item["order_no"] for item in result], ["LC002147000"])
@@ -141,6 +169,9 @@ class InvoiceResultWriteTest(unittest.TestCase):
             2,
             "completed",
             "來源 O 欄已有發票，佇列自動結案：DM51790871",
+        )
+        write_result.assert_called_once_with(
+            "台北", 249, "LC002146661", "DM51790871"
         )
 
     def test_list_keeps_payload_when_source_row_order_changed(self) -> None:
@@ -153,7 +184,7 @@ class InvoiceResultWriteTest(unittest.TestCase):
             "status": "awaiting_save",
             "source_row": "12",
         }
-        worksheet.get.return_value = _sheet_row("LC999", "DM51790871")
+        worksheet.get.return_value = _source_invoice_row("LC999", "DM51790871")
 
         with patch.object(queue, "get_sheets_service", return_value=service), patch.object(
             queue, "_ensure_sheet"

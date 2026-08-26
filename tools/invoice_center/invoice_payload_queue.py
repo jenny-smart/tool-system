@@ -157,6 +157,7 @@ def list_pending_payloads(area: str) -> list[dict[str, Any]]:
                 and current_invoice
                 and not _is_order_number_value(current_invoice, current_order)
             ):
+                write_invoice_result(area, source_row, order_no, current_invoice)
                 update_payload_status(
                     int(item.get("_row") or 0),
                     "completed",
@@ -183,7 +184,7 @@ def update_payload_status(row_no: int, status: str, message: str = "") -> None:
 
 
 def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: str) -> None:
-    """Write the issued invoice number to O and creation time to AA without guessing the row."""
+    """Write O/AC and mark B as paid after validating the exact source order row."""
     row_no = int(source_row or 0)
     if row_no < 2:
         raise ValueError("Payload 缺少清潔異動來源列號，禁止猜測回填列")
@@ -194,11 +195,12 @@ def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: 
         raise ValueError("發票號碼空白")
 
     ws = get_worksheet(area)
-    values = ws.get(f"G{row_no}:AA{row_no}")
-    row = list(values[0] if values else []) + [""] * 21
-    current_order = str(row[0] or "").strip()
-    current_invoice = str(row[8] or "").strip().upper()
-    current_time = str(row[20] or "").strip()
+    values = ws.get(f"B{row_no}:AC{row_no}")
+    row = list(values[0] if values else []) + [""] * 28
+    current_status = str(row[0] or "").strip()
+    current_order = str(row[5] or "").strip()
+    current_invoice = str(row[13] or "").strip().upper()
+    current_time = str(row[27] or "").strip()
 
     if current_order != normalized_order:
         raise RuntimeError(
@@ -214,6 +216,8 @@ def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: 
     if not current_invoice or mistaken_order_value:
         updates.append({"range": f"O{row_no}", "values": [[normalized_invoice]]})
     if not current_time:
-        updates.append({"range": f"AA{row_no}", "values": [[now_text()]]})
+        updates.append({"range": f"AC{row_no}", "values": [[now_text()]]})
+    if current_status != "已付款":
+        updates.append({"range": f"B{row_no}", "values": [["已付款"]]})
     if updates:
         ws.batch_update(updates)
