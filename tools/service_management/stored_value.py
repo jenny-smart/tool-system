@@ -81,15 +81,11 @@ BACKEND_BASE = "https://backend.lemonclean.com.tw"
 LOGIN_URL = f"{BACKEND_BASE}/login"
 STORED_VALUE_EXPORT_URL = f"{BACKEND_BASE}/member/export_stored_value"
 
-# 客服儲值功能的固定目的試算表。網址中的 gid 只代表當時開啟的分頁；
-# 程式會在試算表內尋找並沿用「{地區}儲值金結算_YYYYMMDD」分頁。
+# 客服儲值功能沿用月排程系統的儲值金結算試算表；台北、台中分別
+# 尋找並沿用「{地區}儲值金結算_YYYYMMDD」分頁。
 STORED_VALUE_SPREADSHEET_IDS: dict[str, str] = {
-    "台北": "1T01k68sV0NY6MPD2nw8Tg1ijC9dOXhhr26G5-Bc9bJM",
-    "台中": "17t3JcUEF0tQwr4a3fvLXUceCXgQDsmihYz7tkRQOc6s",
-}
-STORED_VALUE_WORKSHEET_GIDS: dict[str, int] = {
-    "台北": 141159387,
-    "台中": 2057599829,
+    "台北": "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE",
+    "台中": "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE",
 }
 
 # 主控試算表地區設定工作表
@@ -451,15 +447,9 @@ def _write_stored_value_sheet(
             sh.update_title(sheet_name)
         sh.clear()
     else:
-        # 首次執行沿用使用者指定網址中的既有 gid，不另外新增分頁。
-        worksheet_gid = STORED_VALUE_WORKSHEET_GIDS.get(area_name)
-        sh = ss.get_worksheet_by_id(worksheet_gid) if worksheet_gid is not None else None
-        if sh is None:
-            raise gspread.WorksheetNotFound(
-                f"[{area_name}] 找不到指定工作表 gid={worksheet_gid}"
-            )
-        sh.update_title(sheet_name)
-        sh.clear()
+        raise gspread.WorksheetNotFound(
+            f"[{area_name}] 找不到 {area_name}儲值金結算_YYYYMMDD 工作表"
+        )
 
     if values:
         required_rows = max(len(values) + 10, 500)
