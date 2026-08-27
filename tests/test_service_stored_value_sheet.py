@@ -3,6 +3,7 @@ import re
 import sys
 import unittest
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -53,6 +54,59 @@ def load_credentials():
     return namespace["get_area_credentials"]
 
 
+def load_converter(fake_drive):
+    path = Path(__file__).parents[1] / "tools/service_management/stored_value.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_convert_stored_value_export"
+    )
+    namespace = {
+        "Any": object,
+        "BytesIO": BytesIO,
+        "gspread": SimpleNamespace(Client=object),
+        "build": lambda *args, **kwargs: fake_drive,
+        "_get_credentials": lambda: object(),
+        "MediaIoBaseUpload": lambda *args, **kwargs: object(),
+        "uuid": SimpleNamespace(uuid4=lambda: SimpleNamespace(hex="12345678")),
+        "log": SimpleNamespace(warning=lambda *args: None),
+    }
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
+    return namespace["_convert_stored_value_export"]
+
+
+class FakeRequest:
+    def __init__(self, result):
+        self.result = result
+
+    def execute(self):
+        return self.result
+
+
+class FakeDriveFiles:
+    def __init__(self):
+        self.trashed = []
+
+    def create(self, **kwargs):
+        return FakeRequest({"id": "source-xlsx"})
+
+    def copy(self, **kwargs):
+        return FakeRequest({"id": "converted-sheet"})
+
+    def update(self, fileId, **kwargs):
+        self.trashed.append(fileId)
+        return FakeRequest({"id": fileId})
+
+
+class FakeDrive:
+    def __init__(self):
+        self.resource = FakeDriveFiles()
+
+    def files(self):
+        return self.resource
+
+
 class FakeWorksheet:
     def __init__(self, title):
         self.title = title
@@ -94,6 +148,22 @@ class FakeClient:
 
 
 class StoredValueSheetTest(unittest.TestCase):
+    def test_xlsx_is_drive_converted_before_writing(self):
+        drive = FakeDrive()
+        converted_worksheet = SimpleNamespace(
+            get_all_values=lambda: [["客戶姓名"], ["王小明"]]
+        )
+        gc = SimpleNamespace(
+            open_by_key=lambda key: SimpleNamespace(
+                worksheets=lambda: [converted_worksheet]
+            )
+        )
+
+        result = load_converter(drive)(gc, b"xlsx-content", "台北")
+
+        self.assertEqual(result, [["客戶姓名"], ["王小明"]])
+        self.assertEqual(drive.resource.trashed, ["converted-sheet", "source-xlsx"])
+
     def test_credentials_reuse_monthly_settlement_accounts(self):
         monthly = SimpleNamespace(
             load_accounts=lambda: {
