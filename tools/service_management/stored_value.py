@@ -57,11 +57,11 @@ from html.parser import HTMLParser
 from io import BytesIO
 from typing import Any
 
-import pandas as pd
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
 # ──────────────────────────────────────────────────────────
 # 基本設定
@@ -406,26 +406,58 @@ def _download_stored_value_export(session: requests.Session, area_name: str) -> 
     return resp.content
 
 
-def _excel_to_rows(content: bytes, area_name: str) -> list[list[Any]]:
-    """將下載的第一張 Excel 工作表轉成可貼入 Google Sheets 的二維資料。"""
+def _convert_stored_value_export(
+    gc: gspread.Client,
+    content: bytes,
+    area_name: str,
+) -> list[list[Any]]:
+    """將下載的 xlsx 暫存至 Drive、轉成 Google Sheet，再讀取內容。"""
+    drive = build("drive", "v3", credentials=_get_credentials(), cache_discovery=False)
+    token = uuid.uuid4().hex[:8]
+    source_id = ""
+    converted_id = ""
     try:
-        frame = pd.read_excel(BytesIO(content), engine="openpyxl", dtype=object)
+        source = drive.files().create(
+            body={"name": f"_tmp_{area_name}儲值金結算_{token}.xlsx"},
+            media_body=MediaIoBaseUpload(
+                BytesIO(content),
+                mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                resumable=False,
+            ),
+            fields="id",
+        ).execute()
+        source_id = source["id"]
+        converted = drive.files().copy(
+            fileId=source_id,
+            body={
+                "name": f"_tmp_{area_name}儲值金結算_{token}",
+                "mimeType": "application/vnd.google-apps.spreadsheet",
+            },
+            fields="id",
+        ).execute()
+        converted_id = converted["id"]
+
+        worksheets = gc.open_by_key(converted_id).worksheets()
+        if not worksheets:
+            raise RuntimeError("轉檔後沒有工作表")
+        values = worksheets[0].get_all_values()
+        if not values:
+            raise RuntimeError("轉檔後沒有資料")
+        return values
     except Exception as exc:
         raise RuntimeError(f"[{area_name}] 儲值金結算檔轉檔失敗：{exc}") from exc
-
-    frame = frame.fillna("")
-    values: list[list[Any]] = [list(map(str, frame.columns.tolist()))]
-    for row in frame.itertuples(index=False, name=None):
-        converted = []
-        for value in row:
-            if isinstance(value, (datetime, date)):
-                converted.append(value.strftime("%Y-%m-%d %H:%M:%S"))
-            elif hasattr(value, "item"):
-                converted.append(value.item())
-            else:
-                converted.append(value)
-        values.append(converted)
-    return values
+    finally:
+        for file_id in (converted_id, source_id):
+            if not file_id:
+                continue
+            try:
+                drive.files().update(
+                    fileId=file_id,
+                    body={"trashed": True},
+                    fields="id",
+                ).execute()
+            except Exception as cleanup_exc:
+                log.warning("[%s] 暫存轉檔清理失敗：%s", area_name, cleanup_exc)
 
 
 def _write_stored_value_sheet(
@@ -490,7 +522,7 @@ def step1_fetch_stored_value(
             email, password = get_area_credentials(area_name)
             session = _login_backend_session(email, password, area_name)
             content = _download_stored_value_export(session, area_name)
-            values = _excel_to_rows(content, area_name)
+            values = _convert_stored_value_export(gc, content, area_name)
             worksheet = _write_stored_value_sheet(gc, area_name, values)
 
             results[area_name] = {
