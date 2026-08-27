@@ -331,14 +331,17 @@ def get_secret_prefix(area_name: str) -> str:
     return AREA_TO_SECRET_PREFIX.get(area_name, area_name.upper().replace(" ", "_"))
 
 def get_area_credentials(area_name: str) -> tuple[str, str]:
-    """取得地區的 EMAIL / PASSWORD，找不到就拋出例外。"""
-    prefix = get_secret_prefix(area_name)
-    email    = os.environ.get(f"{prefix}_EMAIL", "")
-    password = os.environ.get(f"{prefix}_PASSWORD", "")
+    """沿用月排程儲值金結算的帳密來源，找不到就拋出例外。"""
+    from tools.scheduled_monthly.stored_value_settlement import load_accounts
+
+    account = load_accounts().get(area_name, {})
+    email = str(account.get("email", "")).strip()
+    password = str(account.get("password", "")).strip()
     if not email or not password:
+        prefix = get_secret_prefix(area_name)
         raise EnvironmentError(
-            f"找不到 {prefix}_EMAIL / {prefix}_PASSWORD，"
-            f"請在 GitHub Secrets 新增這兩個 key"
+            f"找不到月排程帳密 accounts.{prefix.lower()}，"
+            f"也沒有 {prefix}_EMAIL / {prefix}_PASSWORD"
         )
     return email, password
 
@@ -447,8 +450,12 @@ def _write_stored_value_sheet(
             sh.update_title(sheet_name)
         sh.clear()
     else:
-        raise gspread.WorksheetNotFound(
-            f"[{area_name}] 找不到 {area_name}儲值金結算_YYYYMMDD 工作表"
+        required_rows = max(len(values) + 10, 500)
+        required_cols = max(max((len(row) for row in values), default=0) + 5, 10)
+        sh = ss.add_worksheet(
+            title=sheet_name,
+            rows=required_rows,
+            cols=required_cols,
         )
 
     if values:
