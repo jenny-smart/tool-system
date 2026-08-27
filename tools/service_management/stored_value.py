@@ -335,14 +335,25 @@ def get_secret_prefix(area_name: str) -> str:
     return AREA_TO_SECRET_PREFIX.get(area_name, area_name.upper().replace(" ", "_"))
 
 def get_area_credentials(area_name: str) -> tuple[str, str]:
-    """取得地區的 EMAIL / PASSWORD，找不到就拋出例外。"""
+    """取得地區登入帳密；環境變數優先，並沿用共用後台帳密設定。"""
     prefix = get_secret_prefix(area_name)
-    email    = os.environ.get(f"{prefix}_EMAIL", "")
-    password = os.environ.get(f"{prefix}_PASSWORD", "")
+    email = os.environ.get(f"{prefix}_EMAIL", "").strip()
+    password = os.environ.get(f"{prefix}_PASSWORD", "").strip()
+
+    if not email or not password:
+        try:
+            from services.backend import ACCOUNTS as backend_accounts
+
+            account = backend_accounts.get(area_name, {})
+            email = email or str(account.get("email", "")).strip()
+            password = password or str(account.get("password", "")).strip()
+        except Exception:
+            pass
+
     if not email or not password:
         raise EnvironmentError(
             f"找不到 {prefix}_EMAIL / {prefix}_PASSWORD，"
-            f"請在 GitHub Secrets 新增這兩個 key"
+            "請確認客服系統後台帳密設定"
         )
     return email, password
 
