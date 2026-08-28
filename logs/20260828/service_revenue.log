@@ -1,0 +1,29 @@
+2026-08-28 05:56:38 [INFO] === 客服排程系統 run_id=08c4e3e7 step=3 台北時間=2026-08-28 13:56:38 ===
+2026-08-28 05:56:38 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-08-28 05:56:38 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-08-28 05:56:39 [WARNING] [主控表打卡失敗（非致命）] <HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8/values/%E5%A4%96%E5%A0%B4%E6%8E%92%E7%A8%8B%E5%9F%B7%E8%A1%8CLog%21A1%3AZ1?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_location': 'global', 'service': 'sheets.googleapis.com', 'window_start_time': '1787896539', 'consumer': 'projects/1042663213860', 'quota_unit': '1/min/{project}/{user}', 'quota_limit_value': '60', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+2026-08-28 05:56:39 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-08-28 05:56:54 [INFO]   [mail] text/plain 為空，fallback 到 text/html（3157 字元）
+2026-08-28 05:57:01 [INFO]   近三日營業額-台北 → 選中 17:25:04（與17:25差4s）
+2026-08-28 05:57:01 [INFO]   [debug] 行57 repr='2026-08-25：57分'
+2026-08-28 05:57:01 [INFO]   [debug] 行58 repr='2026-08-26：72分'
+2026-08-28 05:57:01 [INFO]   [debug] 行59 repr='2026-08-27：25分'
+2026-08-28 05:57:01 [INFO]   [debug] 行60 repr='【家電清潔】日營業額'
+2026-08-28 05:57:01 [INFO]   [debug] 行61 repr='2026-08-25：0分'
+2026-08-28 05:57:01 [INFO]   [debug] 行62 repr='2026-08-26：0分'
+2026-08-28 05:57:01 [INFO]   [debug] 行63 repr='2026-08-27：0分'
+2026-08-28 05:57:01 [INFO]   [debug] 行64 repr='【儲值金】日營業額'
+2026-08-28 05:57:10 [INFO]   [mail] text/plain 為空，fallback 到 text/html（1201 字元）
+2026-08-28 05:57:12 [INFO]   近三日營業額-台中 → 選中 17:25:07（與17:25差7s）
+2026-08-28 05:57:12 [INFO]   [debug] 行26 repr='2026-08-25：6分'
+2026-08-28 05:57:12 [INFO]   [debug] 行27 repr='2026-08-26：0分'
+2026-08-28 05:57:12 [INFO]   [debug] 行28 repr='2026-08-27：0分'
+2026-08-28 05:57:12 [INFO]   [debug] 行29 repr='【家電清潔】日營業額'
+2026-08-28 05:57:12 [INFO]   [debug] 行30 repr='2026-08-25：0分'
+2026-08-28 05:57:12 [INFO]   [debug] 行31 repr='2026-08-26：0分'
+2026-08-28 05:57:12 [INFO]   [debug] 行32 repr='2026-08-27：0分'
+2026-08-28 05:57:12 [INFO]   [debug] 行33 repr='【儲值金】日營業額'
+2026-08-28 05:57:12 [INFO]   台北：{'daily_value': 25, 'total_count': 1449, 'total_amount': 2898760}
+2026-08-28 05:57:12 [INFO]   台中：{'daily_value': 0, 'total_count': 107, 'total_amount': 214800}
+2026-08-28 05:57:13 [INFO] Step 3 完成，row=2385（33.0s）
+2026-08-28 05:57:14 [INFO] === 全部完成 run_id=08c4e3e7（34.0s）===
