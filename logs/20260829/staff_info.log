@@ -1,0 +1,54 @@
+開始執行：專員個資
+⚠️ 一鍵日排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 一鍵日排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_daily/staff_info.py
+[2026-08-29 09:03:35] ====================================================
+[2026-08-29 09:03:35] staff_info.py 開始執行
+[2026-08-29 09:03:35] GITHUB_ACTIONS = true
+[2026-08-29 09:03:35] PWD = /home/runner/work/tool-system/tool-system
+[2026-08-29 09:03:35] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員個資
+[2026-08-29 09:03:35] LOCAL_OUTPUT_DIR exists = False
+[2026-08-29 09:03:35] can_use_local_output_dir = False
+[2026-08-29 09:03:35] root folder_id = 11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc
+[2026-08-29 09:03:35] ====================================================
+[2026-08-29 09:03:35] Google Drive 初始化成功
+[2026-08-29 09:03:35] 📁 使用既有資料夾：專員個資
+[2026-08-29 09:03:35] today_stamp = 20260829
+[2026-08-29 09:03:35] 專員個資 folder_id = 1v1Er8oC3BEAWHbBrDq3SUpjEDwHIuK0f
+[2026-08-29 09:03:35] 帳號數量 = 2
+[2026-08-29 09:03:35] 
+[2026-08-29 09:03:35] === 開始處理 台北 ===
+[2026-08-29 09:03:35] 開始登入：jenny@lemonclean.com.tw
+[2026-08-29 09:03:37] 登入成功：jenny@lemonclean.com.tw
+[2026-08-29 09:03:37] 開始下載：city=台北 / filename=20260829專員個資-台北.xlsx
+[2026-08-29 09:03:39] ✅ 已下載到暫存：/tmp/tmpn74ae7kf/20260829專員個資-台北.xlsx
+[2026-08-29 09:03:39] 📦 檔案大小：227840 bytes
+[2026-08-29 09:03:39] 📂 暫存目錄存在：True
+[2026-08-29 09:03:39] 📄 暫存檔案存在：True
+[2026-08-29 09:03:39] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-29 09:03:39] Google Drive 初始化成功
+[2026-08-29 09:03:39] 準備上傳到 Google Drive：20260829專員個資-台北.xlsx
+[2026-08-29 09:03:42] ☁️ 已上傳新檔：20260829專員個資-台北.xlsx (file_id=1OnZcQ3zRMvKrUeI4wV0e0r0dIZjHIND1) https://docs.google.com/spreadsheets/d/1OnZcQ3zRMvKrUeI4wV0e0r0dIZjHIND1/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-29 09:03:42] ✅ 完成處理：20260829專員個資-台北.xlsx
+[2026-08-29 09:03:42] ✅ 台北 全部完成
+[2026-08-29 09:03:42] 
+[2026-08-29 09:03:42] === 開始處理 台中 ===
+[2026-08-29 09:03:42] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-08-29 09:03:43] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-08-29 09:03:43] 開始下載：city=台中 / filename=20260829專員個資-台中.xlsx
+[2026-08-29 09:03:43] ✅ 已下載到暫存：/tmp/tmph1qjq3q6/20260829專員個資-台中.xlsx
+[2026-08-29 09:03:43] 📦 檔案大小：59904 bytes
+[2026-08-29 09:03:43] 📂 暫存目錄存在：True
+[2026-08-29 09:03:43] 📄 暫存檔案存在：True
+[2026-08-29 09:03:43] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-08-29 09:03:43] Google Drive 初始化成功
+[2026-08-29 09:03:43] 準備上傳到 Google Drive：20260829專員個資-台中.xlsx
+[2026-08-29 09:03:46] ☁️ 已上傳新檔：20260829專員個資-台中.xlsx (file_id=1qq00PRhgY55JEnzEhm_rBxl0Se0_xekb) https://docs.google.com/spreadsheets/d/1qq00PRhgY55JEnzEhm_rBxl0Se0_xekb/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-08-29 09:03:46] ✅ 完成處理：20260829專員個資-台中.xlsx
+[2026-08-29 09:03:46] ✅ 台中 全部完成
+[2026-08-29 09:03:46] 🎉 staff_info.py 全部完成
+
+完成執行：專員個資
+scheduled_daily scheduler 全部完成
