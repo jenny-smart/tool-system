@@ -1,0 +1,20 @@
+📋 log_spreadsheet_id 已從設定檔載入
+⚠️ 外場排程打卡失敗：<HttpError 503 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "The service is currently unavailable.". Details: "The service is currently unavailable.">
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.schedule_stats --date 20260830 --system-name 外場排程系統 --run-type 排程
+[2026-08-30 08:51:07] 開始處理排班統計表：20260830排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20260830排班統計表-台北 (1RjEve7hr3O5DiO2Wy093VsvPoNIBYbON67AF9cWoHF4)
+⚠️ Google API 暫時限流/忙碌，等待 6.2 秒後重試 (1/6)
+[2026-08-30 08:51:19] 完成：20260830排班統計表-台北 → 2026排班統計表!CX4 / rows=86
+[2026-08-30 08:51:30] 開始處理排班統計表：20260930排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20260930排班統計表-台北 (1IhUCWiNzRUKFTMfY0is_FMIyNs05tJ48vKexVreLibs)
+[2026-08-30 08:51:33] 完成：20260930排班統計表-台北 → 2026排班統計表!DJ4 / rows=69
+[2026-08-30 08:51:34] 開始處理排班統計表：20260830排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20260830排班統計表-台中 (1VmPWqJrJI7cBqa1j5-UKMZ4QwybQwvLlFw5I4R6bmbw)
+[2026-08-30 08:51:37] 完成：20260830排班統計表-台中 → 2026排班統計表!CX4 / rows=15
+[2026-08-30 08:51:39] 開始處理排班統計表：20260930排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20260930排班統計表-台中 (1auy5F4Skj5QsmE-qHH-HQjhCVooPLNdvB77DSUHRotg)
+[2026-08-30 08:51:41] 完成：20260930排班統計表-台中 → 2026排班統計表!DJ4 / rows=12
+[2026-08-30 08:51:43] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成
