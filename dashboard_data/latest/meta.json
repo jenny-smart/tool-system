@@ -1,9 +1,9 @@
 {
-  "updated_at": "2026-08-30 22:39:40",
+  "updated_at": "2026-08-31 03:13:19",
   "df4_rows": 6,
-  "daily_rows": 408,
-  "next_month_daily_rows": 408,
-  "month_end_rows": 0,
+  "daily_rows": 409,
+  "next_month_daily_rows": 409,
+  "month_end_rows": 6,
   "error": null,
   "trigger": "schedule"
 }
