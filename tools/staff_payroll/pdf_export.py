@@ -32,6 +32,9 @@ from ._shared import PAYROLL_WS, open_area_folder, open_area_summary, open_year_
 
 NAME_CELL = "AC2"
 EXPORT_RANGE = "AA1:AH15"
+PDF_EXPORT_MAX_ATTEMPTS = 6
+PDF_EXPORT_RETRY_BASE_SECONDS = 3.0
+PDF_EXPORT_RETRY_MAX_SECONDS = 30.0
 
 _DRIVE_FILE_ID_PATTERNS = [
     re.compile(r"/d/([a-zA-Z0-9_-]{10,})"),
@@ -106,9 +109,27 @@ def _export_range_as_pdf(access_token: str, spreadsheet_id: str, sheet_gid: int)
         f"&sheetnames=false"
         f"&pagenum=UNDEFINED"
     )
-    resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, timeout=60)
-    resp.raise_for_status()
-    return resp.content
+    for attempt in range(PDF_EXPORT_MAX_ATTEMPTS):
+        resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, timeout=60)
+        if resp.status_code != 429:
+            resp.raise_for_status()
+            return resp.content
+
+        if attempt == PDF_EXPORT_MAX_ATTEMPTS - 1:
+            raise requests.HTTPError(
+                f"Google Sheets PDF 匯出頻率過高（HTTP 429），"
+                f"已重試 {PDF_EXPORT_MAX_ATTEMPTS} 次，請稍後再執行",
+                response=resp,
+            )
+
+        retry_after = resp.headers.get("Retry-After", "")
+        try:
+            delay = float(retry_after)
+        except (TypeError, ValueError):
+            delay = PDF_EXPORT_RETRY_BASE_SECONDS * (2**attempt)
+        time.sleep(min(delay, PDF_EXPORT_RETRY_MAX_SECONDS))
+
+    raise RuntimeError("PDF 匯出重試流程異常")
 
 
 def run_pdf_export(
@@ -175,6 +196,11 @@ def run_pdf_export(
                 .execute()
             )
             ws.update_acell(rowcol_to_a1(row["row"], 3), file_meta.get("webViewLink", ""))
+
+        # 成功產出且 C 欄已有連結後，清除 D 欄勾選，避免下次重複產出。
+        pdf_link = file_meta.get("webViewLink") or row.get("link", "")
+        if pdf_link:
+            ws.update_acell(rowcol_to_a1(row["row"], 4), "")
 
         uploaded.append(file_meta)
 
