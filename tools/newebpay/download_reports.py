@@ -389,6 +389,19 @@ def save_empty_csv(target: Path) -> None:
     print(f"  查無資料，已建立空白檔：{target}")
 
 
+def configure_downloads(context: BrowserContext, page: Page, directory: Path) -> None:
+    # 連線到既有 Chrome（非 Playwright 自建的 context）不會自動接管下載行為，
+    # 若該 Chrome 個人資料設定「下載前詢問儲存位置」，就會跳出系統「另存新檔」
+    # 視窗，Playwright 抓不到也點不到，導致 Download.save_as 卡住或被取消。
+    # 用 CDP 強制設成自動下載到指定資料夾，略過該視窗。
+    directory.mkdir(parents=True, exist_ok=True)
+    session = context.new_cdp_session(page)
+    session.send(
+        "Browser.setDownloadBehavior",
+        {"behavior": "allow", "downloadPath": str(directory)},
+    )
+
+
 def click_search(page: Page) -> None:
     buttons = page.locator('input[value="開始查詢"], button:has-text("開始查詢")')
     for index in range(buttons.count()):
@@ -405,7 +418,14 @@ def save_download(page: Page, selectors: Iterable[str], target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     with page.expect_download(timeout=30_000) as info:
         button.click()
-    info.value.save_as(target)
+    download = info.value
+    # configure_downloads() 已把下載目錄指到 target.parent，Chrome 會用網站
+    # 自己的檔名存一份在那裡；save_as 另外複製成我們要的檔名，這裡把原始那份
+    # 清掉，資料夾裡才不會多出一個重複檔案。
+    original_path = Path(download.path())
+    download.save_as(target)
+    if original_path != target and original_path.exists():
+        original_path.unlink()
     print(f"  已下載：{target}")
 
 
@@ -507,6 +527,7 @@ def run_account(
     page = page or context.new_page()
     payment_path = output / f"{period}藍新收款-{account.area}.csv"
     refund_path = output / f"{period}藍新退款-{account.area}.csv"
+    configure_downloads(context, page, output)
     completed = False
     try:
         messages = login(page, account)
