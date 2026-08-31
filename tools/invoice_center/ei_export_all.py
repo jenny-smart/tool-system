@@ -421,9 +421,11 @@ def export_invoices(
     target.parent.mkdir(parents=True, exist_ok=True)
     with page.expect_download(timeout=60_000) as info:
         # 版面上常有浮動元件（如 lemon-ei-export-tool）蓋住此按鈕，導致一般
-        # click 判定「intercepts pointer events」逾時；改直接呼叫按鈕的
-        # onclick 事件處理函式，效果相同且不受畫面遮擋影響。
-        page.evaluate("() => { if (typeof DirectExport === 'function') DirectExport(); }")
+        # click 判定「intercepts pointer events」逾時。改用 el.click()：這會
+        # 呼叫原生 DOM click，跳過 Playwright 的可視性判斷，但事件仍會照常
+        # 往上冒泡，觸發外層委派的前置處理（直接呼叫 DirectExport() 會跳過
+        # 那段前置處理，曾導致匯出成功但下載檔案是空的）。
+        page.get_by_text("直接匯出", exact=False).evaluate("el => el.click()")
 
     download = info.value
     suggested = download.suggested_filename or ""
@@ -523,7 +525,7 @@ def export_prize_invoices(page: Page, period8: str, target: Path) -> Path:
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     with page.expect_download(timeout=60_000) as info:
-        page.evaluate("() => { if (typeof DirectExport === 'function') DirectExport(); }")
+        page.get_by_text("直接匯出", exact=False).evaluate("el => el.click()")
     download = info.value
     with tempfile.TemporaryDirectory(prefix="ei_prize_") as temp_dir:
         suggested = download.suggested_filename or "prize.xls"
