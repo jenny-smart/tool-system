@@ -420,7 +420,10 @@ def export_invoices(
 
     target.parent.mkdir(parents=True, exist_ok=True)
     with page.expect_download(timeout=60_000) as info:
-        page.get_by_text("直接匯出", exact=False).click()
+        # 版面上常有浮動元件（如 lemon-ei-export-tool）蓋住此按鈕，導致一般
+        # click 判定「intercepts pointer events」逾時；改直接呼叫按鈕的
+        # onclick 事件處理函式，效果相同且不受畫面遮擋影響。
+        page.evaluate("() => { if (typeof DirectExport === 'function') DirectExport(); }")
 
     download = info.value
     suggested = download.suggested_filename or ""
@@ -520,7 +523,7 @@ def export_prize_invoices(page: Page, period8: str, target: Path) -> Path:
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     with page.expect_download(timeout=60_000) as info:
-        page.get_by_text("直接匯出", exact=False).click()
+        page.evaluate("() => { if (typeof DirectExport === 'function') DirectExport(); }")
     download = info.value
     with tempfile.TemporaryDirectory(prefix="ei_prize_") as temp_dir:
         suggested = download.suggested_filename or "prize.xls"
@@ -592,11 +595,7 @@ def main() -> int:
                 credentials = credentials_for(area, accounts)
                 print(f"\n開始處理：{credentials.label}")
                 try:
-                    reused_existing_ei = (
-                        index == 0
-                        and portal_page is None
-                        and existing_ei_page is not None
-                    )
+                    reused_existing_ei = index == 0 and existing_ei_page is not None
                     if reused_existing_ei:
                         ei_page = existing_ei_page
                     else:
