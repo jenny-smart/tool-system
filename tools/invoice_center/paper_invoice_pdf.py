@@ -199,7 +199,11 @@ def _click_function_icon(page: Page, order_no: str) -> bool:
         function_cell = cells.nth(cell_count - 1)
         clickable = function_cell.locator("a, img, button")
         target = clickable.first if clickable.count() else function_cell
-        target.click()
+        # 這顆功能圖示在畫面上常常量不到「visible」（同一列裡其他隱藏欄位
+        # 蓋住，或圖示本身靠 CSS 呈現），跟 ei_export_all.py 的「直接匯出」
+        # 按鈕是同一種狀況；改用 el.click() 呼叫原生 DOM click，跳過
+        # Playwright 的可視性判斷，但 onclick（InvoiceView(...)）照常觸發。
+        target.evaluate("el => el.click()")
         return True
     return False
 
