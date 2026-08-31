@@ -200,7 +200,7 @@ def run_pdf_export(
         # 成功產出且 C 欄已有連結後，清除 D 欄勾選，避免下次重複產出。
         pdf_link = file_meta.get("webViewLink") or row.get("link", "")
         if pdf_link:
-            ws.update_acell(rowcol_to_a1(row["row"], 4), "")
+            ws.batch_clear([rowcol_to_a1(row["row"], 4)])
 
         uploaded.append(file_meta)
 
