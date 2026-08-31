@@ -355,6 +355,34 @@ def no_transaction_data(messages: list[str], start_index: int) -> bool:
     return any("查無交易資料" in message or "查無資料" in message for message in messages[start_index:])
 
 
+def wait_for_download_or_empty(
+    page: Page,
+    selectors: Iterable[str],
+    messages: list[str],
+    message_index: int,
+    timeout_ms: int = 30_000,
+) -> bool:
+    """等待下載按鈕出現。回傳 True 表示可下載；False 表示查無資料。
+
+    查無資料有時只會顯示在畫面文字上，不會跳出 dialog，所以除了原本的
+    dialog 訊息，也要輪詢畫面文字，否則會一路等到 timeout 才失敗。
+    """
+    selectors = tuple(selectors)
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if no_transaction_data(messages, message_index):
+            return False
+        for selector in selectors:
+            locator = page.locator(selector)
+            for index in range(locator.count()):
+                if locator.nth(index).is_visible():
+                    return True
+        if page.get_by_text(re.compile("查無")).count():
+            return False
+        page.wait_for_timeout(300)
+    raise RuntimeError(f"等待下載按鈕逾時，頁面：{page.url}")
+
+
 def save_empty_csv(target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("", encoding="utf-8-sig")
@@ -408,10 +436,9 @@ def download_payments(
     message_index = len(messages)
     search_button.click()
     page.wait_for_timeout(1_000)
-    if no_transaction_data(messages, message_index):
+    if not wait_for_download_or_empty(page, ("#download_trans",), messages, message_index):
         save_empty_csv(target)
         return
-    page.locator("#download_trans").wait_for(state="visible", timeout=30_000)
     save_download(
         page,
         (
@@ -437,21 +464,21 @@ def download_refunds(
     force_check(page.locator('input[name="ProcessType"][value=""]'))
     message_index = len(messages)
     click_search(page)
-    if no_transaction_data(messages, message_index):
+    refund_selectors = (
+        "#download_close_trans",
+        "#download_div input",
+        "#download_div button",
+        "#download_div a",
+        'input[value*="下載"]',
+        'button:has-text("下載")',
+        'a:has-text("下載")',
+    )
+    if not wait_for_download_or_empty(page, refund_selectors, messages, message_index):
         save_empty_csv(target)
         return
-    page.locator("#download_close_trans").wait_for(state="visible", timeout=30_000)
     save_download(
         page,
-        (
-            "#download_close_trans",
-            "#download_div input",
-            "#download_div button",
-            "#download_div a",
-            'input[value*="下載"]',
-            'button:has-text("下載")',
-            'a:has-text("下載")',
-        ),
+        refund_selectors,
         target,
     )
 
