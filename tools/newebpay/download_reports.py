@@ -465,6 +465,8 @@ def download_refunds(
     message_index = len(messages)
     click_search(page)
     refund_selectors = (
+        "button.exportExcel",
+        'button:has-text("下載查詢結果")',
         "#download_close_trans",
         "#download_div input",
         "#download_div button",
