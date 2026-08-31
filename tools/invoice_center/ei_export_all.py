@@ -268,17 +268,42 @@ def skip_optional_ei_pages(page: Page, label: str) -> None:
         page.goto(EI_HOME_URL, wait_until="domcontentloaded")
 
 
+SESSION_USERID_RE = re.compile(r"虛實合一\s*[：:]\s*([0-9]+)")
+
+
+def session_userid(page: Page) -> str:
+    """讀取畫面右上角「虛實合一」帳號 ID，用來核對目前分頁實際登入的是哪個帳號。"""
+    try:
+        body_text = str(page.locator("body").inner_text() or "")
+    except Exception:
+        return ""
+    match = SESSION_USERID_RE.search(body_text)
+    return match.group(1) if match else ""
+
+
 def login_second(page: Page, credentials: EICredentials) -> None:
     install_dialog_log(page, credentials.label)
     page.wait_for_load_state("domcontentloaded")
     skip_optional_ei_pages(page, credentials.label)
     login_field = page.locator("#userid")
-    if (
+    already_logged_in = (
         "ei.com.tw/InvoiceRent" in page.url
         and (login_field.count() == 0 or not login_field.first.is_visible())
-    ):
-        print(f"[{credentials.label}] 沿用目前 EI 登入狀態")
-        return
+    )
+    if already_logged_in:
+        current_userid = session_userid(page)
+        # 分頁可能是別的地區留下、還沒登出的 EI 帳號；沿用前一定要先核對
+        # 虛實合一 ID 是不是這次要處理的帳號，避免把別區發票下載成這區的。
+        if current_userid == credentials.userid:
+            print(f"[{credentials.label}] 沿用目前 EI 登入狀態（虛實合一 ID {current_userid} 已核對相符）")
+            return
+        print(
+            f"[{credentials.label}] 目前分頁虛實合一 ID（{current_userid or '無法讀取'}）"
+            f"與應登入帳號 {credentials.userid} 不同，先登出再切換正確帳號。"
+        )
+        logout_second(page, credentials.label)
+        page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
+    login_field = page.locator("#userid")
     if login_field.count() == 0:
         page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
     page.locator("#userid").fill(credentials.userid)
@@ -291,6 +316,12 @@ def login_second(page: Page, credentials: EICredentials) -> None:
         login_field = page.locator("#userid")
         if not login_field.count() or not login_field.first.is_visible():
             skip_optional_ei_pages(page, credentials.label)
+            current_userid = session_userid(page)
+            if current_userid and current_userid != credentials.userid:
+                raise RuntimeError(
+                    f"{credentials.label} 第二層登入後，畫面虛實合一 ID 為 {current_userid}，"
+                    f"與應登入帳號 {credentials.userid} 不同，禁止繼續（可能輸入了別區的驗證碼／帳號）。"
+                )
             print(f"[{credentials.label}] 第二層登入成功")
             return
         message_field = page.locator("#msg")
@@ -614,54 +645,65 @@ def main() -> int:
                         if range_mode or args.output_root is not None
                         else Path(temp_root) / credentials.label
                     )
-                    full_download = export_invoices(
-                        ei_page,
-                        start,
-                        end,
-                        paper_only=False,
-                        csv=csv,
-                        detail=args.detail,
-                        target=area_dir / (
-                            f"{export_key}發票-{credentials.label}{extension}"
-                            if range_mode
-                            else f"{yyyymm}-2發票-{credentials.label}{extension}"
-                        ),
-                    )
-                    paper_download = export_invoices(
-                        ei_page,
-                        start,
-                        end,
-                        paper_only=True,
-                        csv=csv,
-                        detail=args.detail,
-                        target=area_dir / f"{export_key}紙本發票-{credentials.label}{extension}",
-                    )
-                    prize_download = None
-                    if not range_mode:
-                        full_archive = archive_as_zip(
-                            full_download,
-                            area_dir / f"{yyyymm}-2發票-{credentials.label}.zip",
+                    try:
+                        full_download = export_invoices(
+                            ei_page,
+                            start,
+                            end,
+                            paper_only=False,
+                            csv=csv,
+                            detail=args.detail,
+                            target=area_dir / (
+                                f"{export_key}發票-{credentials.label}{extension}"
+                                if range_mode
+                                else f"{yyyymm}-2發票-{credentials.label}{extension}"
+                            ),
                         )
-                        paper_archive = archive_as_zip(
-                            paper_download,
-                            area_dir / f"{yyyymm}紙本發票-{credentials.label}.zip",
+                        paper_download = export_invoices(
+                            ei_page,
+                            start,
+                            end,
+                            paper_only=True,
+                            csv=csv,
+                            detail=args.detail,
+                            target=area_dir / f"{export_key}紙本發票-{credentials.label}{extension}",
                         )
-                        prize_period = previous_prize_period(yyyymm)
-                        if prize_period:
-                            prize_download = export_prize_invoices(
-                                ei_page,
-                                prize_period,
-                                area_dir / f"{prize_period}中獎發票-{credentials.label}.zip",
+                        prize_download = None
+                        if not range_mode:
+                            full_archive = archive_as_zip(
+                                full_download,
+                                area_dir / f"{yyyymm}-2發票-{credentials.label}.zip",
                             )
-                        if processor is not None:
-                            processor.archive_month(
-                                area=credentials.label,
-                                yyyymm=yyyymm,
-                                full_path=full_archive,
-                                paper_path=paper_archive,
-                                prize_path=prize_download,
+                            paper_archive = archive_as_zip(
+                                paper_download,
+                                area_dir / f"{yyyymm}紙本發票-{credentials.label}.zip",
                             )
-                    logout_second(ei_page, credentials.label)
+                            prize_period = previous_prize_period(yyyymm)
+                            if prize_period:
+                                prize_download = export_prize_invoices(
+                                    ei_page,
+                                    prize_period,
+                                    area_dir / f"{prize_period}中獎發票-{credentials.label}.zip",
+                                )
+                            if processor is not None:
+                                processor.archive_month(
+                                    area=credentials.label,
+                                    yyyymm=yyyymm,
+                                    full_path=full_archive,
+                                    paper_path=paper_archive,
+                                    prize_path=prize_download,
+                                )
+                    finally:
+                        # 不論匯出／歸檔是否成功，只要第二層已經登入就要登出，
+                        # 避免留著已登入分頁，讓下次執行誤判成「已登入」而沿用
+                        # 到錯的帳號（見 login_second 的虛實合一 ID 核對）。
+                        try:
+                            logout_second(ei_page, credentials.label)
+                        except Exception as logout_exc:
+                            print(
+                                f"  [{credentials.label}] 第二層登出失敗，下次執行會重新核對帳號：{logout_exc}",
+                                file=sys.stderr,
+                            )
                     if ei_page is not portal_page and not reused_existing_ei:
                         ei_page.close()
                 except Exception as exc:
