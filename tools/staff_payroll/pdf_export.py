@@ -140,6 +140,7 @@ def run_pdf_export(
     yyyymm: str,
     rows: List[dict] = None,
     sleep_seconds: float = 1.0,
+    progress_callback=None,
 ) -> dict:
     """
     對單一地區跑內勤PDF產出。
@@ -163,8 +164,10 @@ def run_pdf_export(
         ws.update_acell(NAME_CELL, name)
         time.sleep(sleep_seconds)  # 讓試算表公式（VLOOKUP/QUERY 等）重新計算完成
 
-        pdf_bytes = _export_range_as_pdf(access_token, spreadsheet.id, ws.id)
         filename = f"{yyyymm}{area}薪資單_{name}.pdf"
+        if progress_callback:
+            progress_callback(filename)
+        pdf_bytes = _export_range_as_pdf(access_token, spreadsheet.id, ws.id)
 
         existing_file_id = _extract_drive_file_id(row.get("link", ""))
         if existing_file_id:
@@ -219,8 +222,18 @@ def run_pdf_export_all(
     access_token: str,
     areas: List[str],
     yyyymm: str,
+    progress_callback=None,
 ) -> List[dict]:
     results = []
     for area in areas:
-        results.append(run_pdf_export(drive, sheets, access_token, area, yyyymm))
+        results.append(
+            run_pdf_export(
+                drive,
+                sheets,
+                access_token,
+                area,
+                yyyymm,
+                progress_callback=progress_callback,
+            )
+        )
     return results
