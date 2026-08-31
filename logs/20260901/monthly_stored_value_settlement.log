@@ -1,22 +1,64 @@
 ⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
 ⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 311, in <module>
-    main(target=args.target, folder_id=args.folder_id, area=args.area, period=args.period, start=args.start, end=args.end)
-  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 279, in main
-    year_folder_id = get_or_create_year_folder(folder_id, year)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 170, in get_or_create_year_folder
-    folder_id = find_child_folder(service, root_folder_id, folder_name)
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 159, in find_child_folder
-    ).execute()
-      ^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
-    return wrapped(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
-    raise HttpError(resp, content, uri=self.uri)
-googleapiclient.errors.HttpError: <HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?q=%27%E8%B2%A1%E5%8B%99%E8%B7%AF%E5%BE%91%27+in+parents+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+name%3D%272026%E5%B0%88%E5%93%A1%E6%89%BF%E6%94%AC%E6%9C%8D%E5%8B%99%E8%B2%BB%27+and+trashed%3Dfalse&fields=files%28id%2Cname%29&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true&alt=json returned "File not found: .". Details: "[{'message': 'File not found: .', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
+📁 月排程年度資料夾：2026專員承攬服務費 (1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK)
+📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
+📂 本次使用年度：2026
+📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+📝 月排程打卡：儲值金結算 / running
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/stored_value_settlement.py
+📌 功能：儲值金結算
+📌 版本：0704_v3
+📌 期別：202608-2
+📌 存取期間：期別：202608-2；後台匯出網址本身無日期參數；實際為執行當下資料：2026-09-01 04:32:31
+📌 執行區域：all
+📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+
+=== 處理 台北 ===
+✅ 登入成功：jenny@lemonclean.com.tw
+📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 使用既有資料夾：202608-2 / 1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um
+☁️ 已上傳新檔：202608-2儲值金結算-台北.xlsx → folder_id=1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um https://docs.google.com/spreadsheets/d/1SZRWdrPNj0WoSBK5rC8_0ojIZhiQyrhg/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202608-2 / 1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz
+☁️ 已上傳新檔：202608-2儲值金結算-台中.xlsx → folder_id=1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz https://docs.google.com/spreadsheets/d/1tUm8oU42E1i5HWFnjwmBoeyLfcL2vHzJ/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202608-2 / 1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i
+☁️ 已上傳新檔：202608-2儲值金結算-桃園.xlsx → folder_id=1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i https://docs.google.com/spreadsheets/d/1vlXgc_upyCXe0t1XleNTy0jOiOpAksVO/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202608-2 / 1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj
+☁️ 已上傳新檔：202608-2儲值金結算-新竹.xlsx → folder_id=1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj https://docs.google.com/spreadsheets/d/1e8BLM65XtCohnK_CgsqPtmV-TBu0TqxE/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202608-2 / 1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3
+☁️ 已上傳新檔：202608-2儲值金結算-高雄.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/12Xn_Pyl85gMkW2ySPMgnRCGUPitVjhG3/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄
+🎉 儲值金結算 全部完成
+
+📝 月排程打卡：儲值金結算 / success
+scheduled_monthly scheduler 全部完成
