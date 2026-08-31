@@ -199,7 +199,15 @@ def _click_function_icon(page: Page, order_no: str) -> bool:
         function_cell = cells.nth(cell_count - 1)
         clickable = function_cell.locator("a, img, button")
         target = clickable.first if clickable.count() else function_cell
-        target.click()
+        onclick = target.get_attribute("onclick")
+        if onclick:
+            # 這顆功能圖示常常被畫面捲動或 CSS 蓋住而判定為不可見，
+            # Playwright 的 click 需要算出畫面座標才能點；onclick 裡就是
+            # 網站自己的處理函式（含這筆訂單的參數），直接執行同一段 JS
+            # 比等它變成「看得到」再點更可靠。
+            page.evaluate(onclick)
+        else:
+            target.click(force=True)
         return True
     return False
 
