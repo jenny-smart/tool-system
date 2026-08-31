@@ -43,11 +43,6 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 try:
-    from tools.common.config_loader import load_monthly_config
-except Exception:
-    load_monthly_config = None
-
-try:
     from tools.common.log_to_sheet import log_to_sheet
 except Exception:
     log_to_sheet = None
@@ -60,14 +55,6 @@ HEADERS = {
 }
 TZ = timezone(timedelta(hours=8))
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-AREA_FOLDER_NAMES = {
-    "台北": "01.台北專員",
-    "台中": "02.台中專員",
-    "桃園": "03.桃園專員",
-    "新竹": "04.新竹專員",
-    "高雄": "05.高雄專員",
-}
 
 AREA_ALIASES = {
     "01.台北專員": "台北",
@@ -271,16 +258,6 @@ def get_or_create_single_child_folder(service, parent_id: str, folder_name: str)
     return res["id"]
 
 
-def resolve_area_folder(service, root_folder_id: str, city: str) -> str:
-    folder_name = AREA_FOLDER_NAMES.get(city)
-    if not folder_name:
-        raise RuntimeError(f"找不到地區資料夾名稱設定：{city}")
-
-    folder_id = get_or_create_single_child_folder(service, root_folder_id, folder_name)
-    log(f"📁 區域資料夾：{city} / {folder_name} / {folder_id}")
-    return folder_id
-
-
 def list_files_in_folder(service, parent_folder_id: str, filename: str) -> list[dict[str, Any]]:
     escaped_name = escape_drive_query_value(filename)
     q = (
@@ -421,14 +398,7 @@ def root_folder_from_args_or_config(folder_id: str) -> str:
     if folder_id:
         return folder_id
 
-    if load_monthly_config is not None:
-        try:
-            cfg = load_monthly_config()
-            return str(cfg.get("root_folder_id") or cfg.get("folder_id") or "").strip()
-        except Exception:
-            pass
-
-    return os.getenv("MONTHLY_ROOT_FOLDER_ID", "").strip()
+    return os.getenv("STORED_VALUE_ROOT_FOLDER_ID", "").strip()
 
 
 def write_monthly_log(
@@ -471,7 +441,7 @@ def parse_common_args(description: str) -> RunArgs:
     parser.add_argument("--start", default="", help="查詢開始日，例如：2026-06-01")
     parser.add_argument("--end", default="", help="查詢結束日，例如：2026-06-30")
     parser.add_argument("--area", default=os.getenv("TARGET_AREA", "all"), help="台北 / 台中 / 桃園 / 新竹 / 高雄 / all")
-    parser.add_argument("--folder-id", default=os.getenv("MONTHLY_ROOT_FOLDER_ID", ""), help="月排程總根目錄 ID")
+    parser.add_argument("--folder-id", default=os.getenv("STORED_VALUE_ROOT_FOLDER_ID", ""), help="儲值金報表根目錄 ID")
 
     # 舊版相容：python xxx.py 202606
     parser.add_argument("legacy_month", nargs="?", default="")
@@ -485,7 +455,7 @@ def parse_common_args(description: str) -> RunArgs:
 
     root_folder_id = root_folder_from_args_or_config(args.folder_id.strip())
     if not root_folder_id:
-        raise RuntimeError("缺少月排程總根目錄 ID，請提供 --folder-id 或 MONTHLY_ROOT_FOLDER_ID")
+        raise RuntimeError("缺少儲值金報表根目錄 ID，請提供 --folder-id 或 STORED_VALUE_ROOT_FOLDER_ID")
 
     return RunArgs(
         period=period or None,
@@ -530,6 +500,8 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
     acc = accounts[city]
     session = requests.Session()
     tag = rng["folder_tag"]
+    year, month = period_month(tag)
+    folder_period = f"{year}{month:02d}"
 
     status = "失敗"
     message = ""
@@ -540,11 +512,11 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
         log(f"\n=== 處理 {city} ===")
         login(session, acc["email"], acc["password"])
 
-        area_folder_id = resolve_area_folder(service, args.folder_id, city)
-        tag_folder_id = get_or_create_single_child_folder(service, area_folder_id, tag)
+        year_folder_id = get_or_create_single_child_folder(service, args.folder_id, str(year))
+        tag_folder_id = get_or_create_single_child_folder(service, year_folder_id, folder_period)
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            filename = f"{tag}儲值金結算-{city}.xlsx"
+            filename = f"{folder_period}儲值金結算-{city}.xlsx"
             path = os.path.join(temp_dir, filename)
             content = download_export(session)
             with open(path, "wb") as f:
