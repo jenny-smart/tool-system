@@ -60,7 +60,7 @@ class InvoiceResultWriteTest(unittest.TestCase):
         self.ws.batch_update.assert_called_once_with([
             {"range": "O12", "values": [["AB12345678"]]},
             {"range": "AA12", "values": [["2026-08-23 19:30:00"]]},
-            {"range": "B12", "values": [["已付款"]]},
+            {"range": "B12", "values": [["已收款"]]},
         ])
 
     def test_rejects_changed_order_row(self) -> None:
@@ -85,12 +85,12 @@ class InvoiceResultWriteTest(unittest.TestCase):
         self.ws.batch_update.assert_called_once_with([
             {"range": "O12", "values": [["DM51790873"]]},
             {"range": "AA12", "values": [["2026-08-23 19:30:00"]]},
-            {"range": "B12", "values": [["已付款"]]},
+            {"range": "B12", "values": [["已收款"]]},
         ])
 
     def test_duplicate_result_preserves_existing_data(self) -> None:
         self.ws.get.return_value = _sheet_row(
-            "LC001", "AB12345678", "2026-08-23 19:20:00", "已付款", "付款資料"
+            "LC001", "AB12345678", "2026-08-23 19:20:00", "已收款", "付款資料"
         )
 
         queue.write_invoice_result("台北", 12, "LC001", "AB12345678")
@@ -105,7 +105,7 @@ class InvoiceResultWriteTest(unittest.TestCase):
         queue.write_invoice_result("台北", 12, "LC001", "AB12345678")
 
         self.ws.batch_update.assert_called_once_with([
-            {"range": "B12", "values": [["已付款"]]},
+            {"range": "B12", "values": [["已收款"]]},
         ])
 
     def test_empty_m_does_not_change_payment_status(self) -> None:
