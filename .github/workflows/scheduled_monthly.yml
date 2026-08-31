@@ -54,11 +54,11 @@ jobs:
       KAOHSIUNG_EMAIL: ${{ secrets.KAOHSIUNG_EMAIL }}
       KAOHSIUNG_PASSWORD: ${{ secrets.KAOHSIUNG_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
