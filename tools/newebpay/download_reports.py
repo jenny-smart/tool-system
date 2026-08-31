@@ -416,16 +416,23 @@ def click_search(page: Page) -> None:
 def save_download(page: Page, selectors: Iterable[str], target: Path) -> None:
     button = first_visible(page, selectors)
     target.parent.mkdir(parents=True, exist_ok=True)
+    # configure_downloads() 已把下載目錄指到 target.parent，Chrome 會用網站
+    # 自己的檔名（例如 NewebPay_Transaction_...）存檔在那裡。download.path()
+    # 回傳的路徑不一定對得上 Chrome 實際存檔位置，所以改用資料夾快照比對，
+    # 找出下載後新增的檔案，直接改名成目標檔名，其餘多出來的一律刪除，
+    # 資料夾裡只留下 target 這個檔名。
+    before = {item.name for item in target.parent.iterdir()}
     with page.expect_download(timeout=30_000) as info:
         button.click()
-    download = info.value
-    # configure_downloads() 已把下載目錄指到 target.parent，Chrome 會用網站
-    # 自己的檔名存一份在那裡；save_as 另外複製成我們要的檔名，這裡把原始那份
-    # 清掉，資料夾裡才不會多出一個重複檔案。
-    original_path = Path(download.path())
-    download.save_as(target)
-    if original_path != target and original_path.exists():
-        original_path.unlink()
+    info.value.path()  # 等待瀏覽器把檔案完整寫入磁碟
+    new_files = [item for item in target.parent.iterdir() if item.name not in before]
+    if not new_files:
+        raise RuntimeError(f"下載後在 {target.parent} 找不到新檔案")
+    downloaded = max(new_files, key=lambda item: item.stat().st_mtime)
+    downloaded.replace(target)
+    for extra in new_files:
+        if extra != downloaded and extra.exists():
+            extra.unlink()
     print(f"  已下載：{target}")
 
 
