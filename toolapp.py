@@ -5098,7 +5098,16 @@ if run_clicked:
                     from tools.staff_payroll import pdf_export
 
                     access_token = get_access_token()
-                    results = pdf_export.run_pdf_export_all(drive, sheets, access_token, run_areas, ym)
+                    results = pdf_export.run_pdf_export_all(
+                        drive,
+                        sheets,
+                        access_token,
+                        run_areas,
+                        ym,
+                        progress_callback=lambda filename: add_log(
+                            f"📄 正在產出：{filename}", "info"
+                        ),
+                    )
                     for r in results:
                         add_log(f"✅ {r['area']} PDF產出完成，共 {r['count']} 份", "success")
                     _log_staff_payroll("成功", "、".join(f"{r['area']} {r['count']}份" for r in results))
