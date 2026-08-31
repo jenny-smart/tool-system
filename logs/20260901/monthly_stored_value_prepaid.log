@@ -1,0 +1,69 @@
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+📁 月排程年度資料夾：2026專員承攬服務費 (1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK)
+📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
+📂 本次使用年度：2026
+📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+📝 月排程打卡：儲值金預收 / running
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/stored_value_prepaid.py
+📌 功能：儲值金預收
+📌 版本：0704_v3
+📌 期別：202608-2
+📌 存取期間：預收/服務：2026-09-01 ~ 2026-12-30
+📌 執行區域：all
+📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+
+=== 處理 台北 ===
+✅ 登入成功：jenny@lemonclean.com.tw
+📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 使用既有資料夾：202608-2 / 1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-台北.xlsx → folder_id=1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um https://docs.google.com/spreadsheets/d/1tJY1jZ9il8Scl-y9_csnb-xfKtnz2XJY/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202608-2 / 1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-台中.xlsx → folder_id=1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz https://docs.google.com/spreadsheets/d/1CrqGZ5O8mVR0cSU7BGsS8oWR9G3M6EIn/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202608-2 / 1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-桃園.xlsx → folder_id=1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i https://docs.google.com/spreadsheets/d/1eQoaftqYHTygd-1nX3L91y70DnFayR0i/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202608-2 / 1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj
+🔄 下載 新竹
+☁️ 已上傳新檔：202608-2儲值金預收-新竹.xlsx → folder_id=1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj https://docs.google.com/spreadsheets/d/1HCI6fz8hOkeVPSJ6cR7NAH-gQExMuq5b/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202608-2 / 1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-高雄.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/1S7O0Ivs2_tcOSSRBCLc9TekbFrQ7HipS/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄
+🎉 儲值金預收 全部完成
+
+📝 月排程打卡：儲值金預收 / success
+scheduled_monthly scheduler 全部完成
