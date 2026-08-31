@@ -54,11 +54,11 @@ jobs:
       KAOHSIUNG_EMAIL: ${{ secrets.KAOHSIUNG_EMAIL }}
       KAOHSIUNG_PASSWORD: ${{ secrets.KAOHSIUNG_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -106,20 +106,24 @@ jobs:
                 TASK="half_month_orders_1"
                 PERIOD="${CURRENT_MONTH}-1"
                 ;;
-              "0 9 28-31 * *")
-                if [ "$TOMORROW_DAY" != "01" ]; then
-                  SHOULD_RUN="false"
-                else
-                  TASK="half_month_orders_2"
+              "0 9 28-31 * *"|"0 10 28-31 * *")
+                # 正常情況：執行當下台北時間的「明天」是 1 號，代表今天是月底。
+                # 若 runner 排程被延遲（見 https://docs.github.com/actions/using-workflows/events-that-trigger-workflows#schedule）
+                # 拖過台北午夜才真正執行，執行當下台北「今天」已經變成 1 號，
+                # TOMORROW_DAY 會誤判成 2 號而被略過，因此加上 TW_DAY=="01" 的補救判斷，
+                # 這種情況下用「前一個月」當作目標期別（比照月初任務的算法）。
+                if [ "$TOMORROW_DAY" = "01" ]; then
                   PERIOD="${CURRENT_MONTH}-2"
+                elif [ "$TW_DAY" = "01" ]; then
+                  PERIOD="$(TZ=Asia/Taipei date -d "$TW_DATE -1 month" +"%Y%m")-2"
+                else
+                  SHOULD_RUN="false"
                 fi
-                ;;
-              "0 10 28-31 * *")
-                if [ "$TOMORROW_DAY" != "01" ]; then
-                  SHOULD_RUN="false"
-                else
-                  TASK="refund_report"
-                  PERIOD="${CURRENT_MONTH}-2"
+                if [ "$SHOULD_RUN" = "true" ]; then
+                  case "$SCHEDULE" in
+                    "0 9 28-31 * *") TASK="half_month_orders_2" ;;
+                    "0 10 28-31 * *") TASK="refund_report" ;;
+                  esac
                 fi
                 ;;
               "0 16 28-31 * *"|"30 16 28-31 * *"|"40 16 28-31 * *")
