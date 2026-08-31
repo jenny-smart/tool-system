@@ -680,7 +680,9 @@ def main() -> int:
                         if "cetustek.com.tw" in open_page.url:
                             logout_portal(open_page)
                     except Exception as exc:
-                        failures.append(f"鯨躍第一層: {exc}")
+                        # 發票已下載並歸檔完成；第一層登出只是收尾動作，
+                        # 找不到登出按鈕不代表任務失敗，僅記錄警告即可。
+                        print(f"[第一層] 登出失敗（不影響已完成的匯出）：{exc}", file=sys.stderr)
                     finally:
                         if ("cetustek.com.tw" in open_page.url or "ei.com.tw" in open_page.url) and not open_page.is_closed():
                             open_page.close()
