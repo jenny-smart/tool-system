@@ -40,6 +40,15 @@ AREA_OUTPUT_DIRS = {
     "家電": "07.家電專員",
 }
 
+# 藍新登入後，右上角「您管理的公司為 ○○○」會顯示這裡對應的公司名稱；
+# 用來確認目前分頁真的是這個統編登入的狀態，而不是其他帳號的殘留 session。
+NEWEBPAY_COMPANY_NAMES = {
+    "42627791": "檸檬專業清潔有限公司",
+    "82830399": "泳檬",
+    "42945846": "竹盟",
+    "52551362": "檬盟",
+}
+
 
 @dataclass(frozen=True)
 class AreaAccount:
@@ -320,8 +329,15 @@ def login(page: Page, account: AreaAccount) -> list[str]:
     page.on("dialog", show_dialog)
     page.on("response", show_login_response)
     if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
-        print(f"[{account.area}] 沿用目前藍新登入狀態。")
-        return login_messages
+        expected_name = NEWEBPAY_COMPANY_NAMES.get(account.company_id)
+        if expected_name and page.get_by_text(expected_name).count() > 0:
+            print(f"[{account.area}] 沿用目前藍新登入狀態（{expected_name}）。")
+            return login_messages
+        print(f"[{account.area}] 目前藍新分頁登入的公司不是設定的帳號，先登出再重新登入。")
+        try:
+            logout(page, account.area)
+        except Exception:
+            pass
     fill_enterprise_login(page, account)
 
     max_retries = 3
