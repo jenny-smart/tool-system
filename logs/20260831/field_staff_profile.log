@@ -1,23 +1,23 @@
 📋 log_spreadsheet_id 已從設定檔載入
 📝 外場排程打卡：外場專員個資 / running
 Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.staff_profile --date 20260831 --system-name 外場排程系統 --run-type 排程
-[2026-08-31 08:07:14] 開始處理專員個資：20260831專員個資-台北
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1HLCyCdnkpMrH7WSMckofD8JOwQq1b9BN0tMB_KBvQ0Y
-🗑️ 已刪除來源暫存 Google Sheet：1HLCyCdnkpMrH7WSMckofD8JOwQq1b9BN0tMB_KBvQ0Y
-[2026-08-31 08:07:21] 完成專員個資：20260831專員個資-台北.xlsx → 專員個人資料!A4:C / rows=99
-[2026-08-31 08:07:23] 開始處理訂單截取：20260831訂單-台北
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1xPCA1Kx8opJmesajHp_XQO_v_HjXaLiAUlhnqzB5oFY
-🗑️ 已刪除來源暫存 Google Sheet：1xPCA1Kx8opJmesajHp_XQO_v_HjXaLiAUlhnqzB5oFY
-[2026-08-31 08:07:33] 完成訂單截取：20260831訂單-台北.xls → 專員個人資料!G1:N / rows=1248
-[2026-08-31 08:07:34] 開始處理專員個資：20260831專員個資-台中
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1fAlu0xAMkfu49f7SVowbXEpQCDjoZRbfgWiAeAKBKoU
-🗑️ 已刪除來源暫存 Google Sheet：1fAlu0xAMkfu49f7SVowbXEpQCDjoZRbfgWiAeAKBKoU
-[2026-08-31 08:07:44] 完成專員個資：20260831專員個資-台中.xlsx → 專員個人資料!A4:C / rows=17
-[2026-08-31 08:07:45] 開始處理訂單截取：20260831訂單-台中
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1JRv0QnfLbpgg_GMm4F092IQi2V0a_ad7Y3TWpFHzlbY
-🗑️ 已刪除來源暫存 Google Sheet：1JRv0QnfLbpgg_GMm4F092IQi2V0a_ad7Y3TWpFHzlbY
-[2026-08-31 08:07:54] 完成訂單截取：20260831訂單-台中.xls → 專員個人資料!G1:N / rows=100
-[2026-08-31 08:07:56] staff_profile.py 全部完成
+[2026-08-31 08:48:05] 開始處理專員個資：20260831專員個資-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：14McsTG_wHcxgGp9yenED6JaqxoSfq1t2ocWDm1_Iy74
+🗑️ 已刪除來源暫存 Google Sheet：14McsTG_wHcxgGp9yenED6JaqxoSfq1t2ocWDm1_Iy74
+[2026-08-31 08:48:09] 完成專員個資：20260831專員個資-台北.xlsx → 專員個人資料!A4:C / rows=99
+[2026-08-31 08:48:10] 開始處理訂單截取：20260831訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1d5ZXsurxVXootWYBBUanV08hkJcjJCv1C75NfFkHnEk
+🗑️ 已刪除來源暫存 Google Sheet：1d5ZXsurxVXootWYBBUanV08hkJcjJCv1C75NfFkHnEk
+[2026-08-31 08:48:16] 完成訂單截取：20260831訂單-台北.xls → 專員個人資料!G1:N / rows=1248
+[2026-08-31 08:48:17] 開始處理專員個資：20260831專員個資-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1rUVMonwblmsAFP64cdx_SC2tpbx3-mNAa4htz1MiImw
+🗑️ 已刪除來源暫存 Google Sheet：1rUVMonwblmsAFP64cdx_SC2tpbx3-mNAa4htz1MiImw
+[2026-08-31 08:48:22] 完成專員個資：20260831專員個資-台中.xlsx → 專員個人資料!A4:C / rows=17
+[2026-08-31 08:48:23] 開始處理訂單截取：20260831訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1bb_tVeP6kp4m-GY5n8OEgx1BJSrxcWWjpsupDvvwN_s
+🗑️ 已刪除來源暫存 Google Sheet：1bb_tVeP6kp4m-GY5n8OEgx1BJSrxcWWjpsupDvvwN_s
+[2026-08-31 08:48:29] 完成訂單截取：20260831訂單-台中.xls → 專員個人資料!G1:N / rows=100
+[2026-08-31 08:48:31] staff_profile.py 全部完成
 
 📝 外場排程打卡：外場專員個資 / success
 field_management scheduler 全部完成

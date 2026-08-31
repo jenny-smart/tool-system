@@ -1,149 +1,29 @@
 📋 log_spreadsheet_id 已從設定檔載入
 📝 外場排程打卡：外場專員班表 / running
 Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.staff_schedule --date 20260831 --system-name 外場排程系統 --run-type 排程
-[2026-08-31 08:03:59] 開始處理專員班表：20260831專員班表-台北
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1WLcEy6qjsLBCkjVlhBKD_9pli1Zd5fNnqQaEHEK8MPg
-🗑️ 已刪除來源暫存 Google Sheet：1WLcEy6qjsLBCkjVlhBKD_9pli1Zd5fNnqQaEHEK8MPg
-[2026-08-31 08:04:09] 目標分頁已是當日名稱：專員班表查詢本月_0831
-[2026-08-31 08:04:10] 完成：20260831專員班表-台北.xls → '專員班表查詢本月_0831'!A:G / rows=1567
-[write_target_log] 目標執行檔打卡失敗：The read operation timed out
-[2026-08-31 08:05:10] 開始處理專員班表：20260931專員班表-台北
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1hlcTyEJUj-BvCbzo6NU0BtgPxRRcccSgeyHBZj0q26g
-🗑️ 已刪除來源暫存 Google Sheet：1hlcTyEJUj-BvCbzo6NU0BtgPxRRcccSgeyHBZj0q26g
-[2026-08-31 08:05:18] 更新專員班表分頁名稱：專員班表查詢次月_0830 → 專員班表查詢次月_0831
-[2026-08-31 08:06:19] 失敗：20260931專員班表-台北 / The read operation timed out
+[2026-08-31 08:46:51] 開始處理專員班表：20260831專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1adziDWQ79GVPlZfDu_90VyY3TSRSSG-M4uKjfA4R67w
+🗑️ 已刪除來源暫存 Google Sheet：1adziDWQ79GVPlZfDu_90VyY3TSRSSG-M4uKjfA4R67w
+[2026-08-31 08:46:56] 目標分頁已是當日名稱：專員班表查詢本月_0831
+[2026-08-31 08:46:56] 完成：20260831專員班表-台北.xls → '專員班表查詢本月_0831'!A:G / rows=1567
+[2026-08-31 08:46:58] 開始處理專員班表：20260931專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1xvCA_HsaKn-kAG4eqzB5wciGYZJqijZMaeBmzplBQR8
+🗑️ 已刪除來源暫存 Google Sheet：1xvCA_HsaKn-kAG4eqzB5wciGYZJqijZMaeBmzplBQR8
+[2026-08-31 08:47:01] 更新專員班表分頁名稱：專員班表查詢次月_0830 → 專員班表查詢次月_0831
+[2026-08-31 08:47:02] 專員班表分頁名稱更新完成：專員班表查詢次月_0831
+[2026-08-31 08:47:02] 完成：20260931專員班表-台北.xls → '專員班表查詢次月_0831'!A:G / rows=1306
+[2026-08-31 08:47:03] 開始處理專員班表：20260831專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1iLpu3BCN-G7lnVc6gDowTqqFa-DjLzXuLMq8l2qOr9Q
+🗑️ 已刪除來源暫存 Google Sheet：1iLpu3BCN-G7lnVc6gDowTqqFa-DjLzXuLMq8l2qOr9Q
+[2026-08-31 08:47:08] 目標分頁已是當日名稱：專員班表查詢本月_0831
+[2026-08-31 08:47:08] 完成：20260831專員班表-台中.xls → '專員班表查詢本月_0831'!A:G / rows=233
+[2026-08-31 08:47:11] 開始處理專員班表：20260931專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：11sFLcegqtXaK0XFxhqiR_vKeAKGmhRHHC_jQGm_4rDQ
+🗑️ 已刪除來源暫存 Google Sheet：11sFLcegqtXaK0XFxhqiR_vKeAKGmhRHHC_jQGm_4rDQ
+[2026-08-31 08:47:14] 更新專員班表分頁名稱：專員班表查詢次月_0830 → 專員班表查詢次月_0831
+[2026-08-31 08:47:15] 專員班表分頁名稱更新完成：專員班表查詢次月_0831
+[2026-08-31 08:47:16] 完成：20260931專員班表-台中.xls → '專員班表查詢次月_0831'!A:G / rows=209
+[2026-08-31 08:47:17] staff_schedule.py 全部完成
 
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 1045, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 997, in main
-    run_staff_schedule_for_area(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 881, in run_staff_schedule_for_area
-    ensure_daily_sheet_name(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 715, in ensure_daily_sheet_name
-    .execute()
-     ^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
-    return wrapped(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 923, in execute
-    resp, content = _retry_request(
-                    ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 222, in _retry_request
-    raise exception
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 191, in _retry_request
-    resp, content = http.request(uri, method, *args, **kwargs)
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/google_auth_httplib2.py", line 214, in request
-    response, content = self.http.request(
-                        ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1755, in request
-    (response, content) = self._request(
-                          ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1475, in _request
-    (response, content) = self._conn_request(conn, request_uri, method, body, headers)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1427, in _conn_request
-    response = conn.getresponse()
-               ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/http/client.py", line 1443, in getresponse
-    response.begin()
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/http/client.py", line 337, in begin
-    version, status, reason = self._read_status()
-                              ^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/http/client.py", line 298, in _read_status
-    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/socket.py", line 718, in readinto
-    return self._sock.recv_into(b)
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/ssl.py", line 1314, in recv_into
-    return self.read(nbytes, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/ssl.py", line 1166, in read
-    return self._sslobj.read(len, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TimeoutError: The read operation timed out
-
-📝 外場排程打卡：外場專員班表 / failed
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
-    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
-    results.append(run_job(job_name, date_key, area, system_name))
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
-    raise RuntimeError(message)
-RuntimeError: 外場專員班表 執行失敗，exit=1
-STDOUT:
-[2026-08-31 08:03:59] 開始處理專員班表：20260831專員班表-台北
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1WLcEy6qjsLBCkjVlhBKD_9pli1Zd5fNnqQaEHEK8MPg
-🗑️ 已刪除來源暫存 Google Sheet：1WLcEy6qjsLBCkjVlhBKD_9pli1Zd5fNnqQaEHEK8MPg
-[2026-08-31 08:04:09] 目標分頁已是當日名稱：專員班表查詢本月_0831
-[2026-08-31 08:04:10] 完成：20260831專員班表-台北.xls → '專員班表查詢本月_0831'!A:G / rows=1567
-[write_target_log] 目標執行檔打卡失敗：The read operation timed out
-[2026-08-31 08:05:10] 開始處理專員班表：20260931專員班表-台北
-🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1hlcTyEJUj-BvCbzo6NU0BtgPxRRcccSgeyHBZj0q26g
-🗑️ 已刪除來源暫存 Google Sheet：1hlcTyEJUj-BvCbzo6NU0BtgPxRRcccSgeyHBZj0q26g
-[2026-08-31 08:05:18] 更新專員班表分頁名稱：專員班表查詢次月_0830 → 專員班表查詢次月_0831
-[2026-08-31 08:06:19] 失敗：20260931專員班表-台北 / The read operation timed out
-
-STDERR:
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 1045, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 997, in main
-    run_staff_schedule_for_area(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 881, in run_staff_schedule_for_area
-    ensure_daily_sheet_name(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/staff_schedule.py", line 715, in ensure_daily_sheet_name
-    .execute()
-     ^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
-    return wrapped(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 923, in execute
-    resp, content = _retry_request(
-                    ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 222, in _retry_request
-    raise exception
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 191, in _retry_request
-    resp, content = http.request(uri, method, *args, **kwargs)
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/google_auth_httplib2.py", line 214, in request
-    response, content = self.http.request(
-                        ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1755, in request
-    (response, content) = self._request(
-                          ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1475, in _request
-    (response, content) = self._conn_request(conn, request_uri, method, body, headers)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1427, in _conn_request
-    response = conn.getresponse()
-               ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/http/client.py", line 1443, in getresponse
-    response.begin()
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/http/client.py", line 337, in begin
-    version, status, reason = self._read_status()
-                              ^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/http/client.py", line 298, in _read_status
-    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/socket.py", line 718, in readinto
-    return self._sock.recv_into(b)
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/ssl.py", line 1314, in recv_into
-    return self.read(nbytes, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/ssl.py", line 1166, in read
-    return self._sslobj.read(len, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TimeoutError: The read operation timed out
-
+📝 外場排程打卡：外場專員班表 / success
+field_management scheduler 全部完成
