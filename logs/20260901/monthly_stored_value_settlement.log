@@ -1,0 +1,22 @@
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 311, in <module>
+    main(target=args.target, folder_id=args.folder_id, area=args.area, period=args.period, start=args.start, end=args.end)
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 279, in main
+    year_folder_id = get_or_create_year_folder(folder_id, year)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 170, in get_or_create_year_folder
+    folder_id = find_child_folder(service, root_folder_id, folder_name)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 159, in find_child_folder
+    ).execute()
+      ^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
+    return wrapped(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.11.16/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 938, in execute
+    raise HttpError(resp, content, uri=self.uri)
+googleapiclient.errors.HttpError: <HttpError 404 when requesting https://www.googleapis.com/drive/v3/files?q=%27%E8%B2%A1%E5%8B%99%E8%B7%AF%E5%BE%91%27+in+parents+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+name%3D%272026%E5%B0%88%E5%93%A1%E6%89%BF%E6%94%AC%E6%9C%8D%E5%8B%99%E8%B2%BB%27+and+trashed%3Dfalse&fields=files%28id%2Cname%29&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true&alt=json returned "File not found: .". Details: "[{'message': 'File not found: .', 'domain': 'global', 'reason': 'notFound', 'location': 'fileId', 'locationType': 'parameter'}]">
