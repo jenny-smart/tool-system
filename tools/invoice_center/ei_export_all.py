@@ -54,13 +54,15 @@ BASE_GOOGLE_DRIVE = (
 )
 PATH_HR = BASE_GOOGLE_DRIVE / "lemon_人事" / "03 服務分潤表"
 
+# 跟 invoice_archive.py 的 AREA_FOLDER_NAMES 用同一套編號；兩邊各自
+# 對應到 Google Drive 上同一批「承攬服務費」資料夾，編號不一致會在雲端
+# 造成同地區但編號不同的重複資料夾（如 04.桃園專員／03.桃園專員 並存）。
 AREA_OUTPUT_DIRS = {
-    "taipei": "02.台北專員",
+    "taipei": "01.台北專員",
     "taichung": "02.台中專員",
-    "new_taipei": "03.新北專員",
-    "taoyuan": "04.桃園專員",
-    "hsinchu": "05.新竹專員",
-    "kaohsiung": "06.高雄專員",
+    "taoyuan": "03.桃園專員",
+    "hsinchu": "04.新竹專員",
+    "kaohsiung": "05.高雄專員",
 }
 
 
