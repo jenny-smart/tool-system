@@ -268,13 +268,29 @@ def query_invoice_rows(page: Page, wanted_dates: list[str]) -> list[dict[str, st
     visible_search = [search.nth(i) for i in range(search.count()) if search.nth(i).is_visible()]
     if len(visible_search) != 1:
         raise RuntimeError(f"找不到唯一的開始查詢按鈕（找到 {len(visible_search)} 個）")
-    visible_search[0].click()
 
-    # 藍新以 AJAX 填入結果後，還會用動畫展開表格。資料已存在時，
-    # table 可能暫時被壓成數像素高，不能用 is_visible() 判斷是否有結果。
+    # 同一頁面換公司重新登入後查詢，表格不會自動清空；如果上一家公司的
+    # 結果本來就是 visible 狀態，點下查詢後 wait_for(state="visible") 會
+    # 立刻通過（狀態沒變），讀到的其實是上一家公司留下的舊資料，導致不同
+    # 地區查到同一組發票金額／號碼。先記錄查詢前的表格內容，查詢後等內容
+    # 真的變了再往下讀；等不到變化（例如剛好兩次都查無發票）就照舊往下走。
     result_table = page.locator("#table_area_trans table")
+    before_html = result_table.inner_html() if result_table.count() else None
+    visible_search[0].click()
+    if before_html is not None:
+        try:
+            page.wait_for_function(
+                "(before) => { const el = document.querySelector('#table_area_trans table'); "
+                "return el && el.innerHTML !== before; }",
+                arg=before_html,
+                timeout=30_000,
+            )
+        except Exception:
+            pass
+
     try:
-        # 等表格展開完成，避免 AJAX 已回傳但動畫仍收合時誤判失敗。
+        # 藍新以 AJAX 填入結果後，還會用動畫展開表格。資料已存在時，
+        # table 可能暫時被壓成數像素高，不能用 is_visible() 判斷是否有結果。
         result_table.wait_for(state="visible", timeout=30_000)
     except Exception as exc:
         count = page.locator("#data_count")
