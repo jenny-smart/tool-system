@@ -184,7 +184,7 @@ def update_payload_status(row_no: int, status: str, message: str = "") -> None:
 
 
 def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: str) -> None:
-    """Write O/AA and mark B paid only when M is non-empty, after row validation."""
+    """Write O/AA and mark B collected only when M is non-empty, after row validation."""
     row_no = int(source_row or 0)
     if row_no < 2:
         raise ValueError("Payload 缺少清潔異動來源列號，禁止猜測回填列")
@@ -218,7 +218,7 @@ def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: 
         updates.append({"range": f"O{row_no}", "values": [[normalized_invoice]]})
     if not current_time:
         updates.append({"range": f"AA{row_no}", "values": [[now_text()]]})
-    if payment_marker and current_status != "已付款":
-        updates.append({"range": f"B{row_no}", "values": [["已付款"]]})
+    if payment_marker and current_status != "已收款":
+        updates.append({"range": f"B{row_no}", "values": [["已收款"]]})
     if updates:
         ws.batch_update(updates)
