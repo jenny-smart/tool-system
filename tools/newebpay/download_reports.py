@@ -13,11 +13,7 @@ from typing import Iterable
 
 from playwright.sync_api import BrowserContext, Locator, Page, sync_playwright
 
-from tools.invoice_center.chrome_cdp import (
-    DEFAULT_CDP_URL,
-    connect_existing_chrome,
-    find_existing_page,
-)
+from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
 
 BASE_URL = "https://www.newebpay.com"
@@ -328,23 +324,25 @@ def login(page: Page, account: AreaAccount) -> list[str]:
         return login_messages
     fill_enterprise_login(page, account)
 
+    max_retries = 3
     print(f"\n[{account.area}] 企業帳密已預填。")
-    print("請直接在網頁輸入驗證碼，並點擊「企業會員登入」。")
-    print("若被退回登入頁，終端機會顯示藍新的錯誤訊息，並可重新輸入新驗證碼。")
+    print(f"請直接在網頁輸入驗證碼，並點擊「企業會員登入」。若驗證碼填錯，最多可重新輸入 {max_retries} 次。")
 
+    retries = 0
     deadline = time.monotonic() + 30
-    refilled_after_failure = False
     while time.monotonic() < deadline:
         if "/sale/Sell_center/search_transaction" in page.url:
             return login_messages
         if "/main/login_center/single_login" in page.url:
             company_id = visible_login_field(page, ('.MoComUbn', 'input[name="LoginUBN"]'))
-            if company_id is not None:
-                if not company_id.input_value().strip():
-                    fill_enterprise_login(page, account)
-                    if login_messages or refilled_after_failure:
-                        print(f"[{account.area}] 已重新填入企業帳密，請輸入網頁上的新驗證碼。")
-                    refilled_after_failure = True
+            if company_id is not None and not company_id.input_value().strip():
+                if retries >= max_retries:
+                    detail = f"；最後訊息：{login_messages[-1]}" if login_messages else ""
+                    raise RuntimeError(f"{account.area} 驗證碼已重試 {max_retries} 次仍失敗，停止等待{detail}")
+                retries += 1
+                fill_enterprise_login(page, account)
+                deadline = time.monotonic() + 30
+                print(f"[{account.area}] 已重新填入企業帳密（第 {retries}/{max_retries} 次重試），請輸入網頁上的新驗證碼。")
         page.wait_for_timeout(500)
 
     detail = f"；最後訊息：{login_messages[-1]}" if login_messages else ""
@@ -563,6 +561,12 @@ def run_account(
         (debug / f"{period}-{account.area}.html").write_text(page.content(), encoding="utf-8")
         raise
     finally:
+        # 藍新的匯出按鈕偶爾會觸發兩次下載，第一次會被改名成正確檔名，
+        # 第二次沒被攔到就會用網站自己的原始檔名留在資料夾裡；這裡收尾
+        # 時把任何殘留的原始檔名清掉，確保資料夾只留下正確命名的檔案。
+        for stray in output.glob("NewebPay_*"):
+            if stray.is_file():
+                stray.unlink()
         try:
             logout(page, account.area)
         except Exception as exc:
@@ -603,7 +607,15 @@ def main() -> int:
     failures: list[str] = []
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
-        shared_page = find_existing_page(context, ("newebpay.com",)) or context.new_page()
+        # 上次執行若中途中斷（例如驗證碼逾時），舊分頁可能沒關掉；只留一個
+        # 藍新分頁繼續用，其餘的關掉，避免同時開好幾個視窗造成混淆。
+        newebpay_pages = [p for p in context.pages if "newebpay.com" in p.url]
+        if newebpay_pages:
+            shared_page = newebpay_pages[0]
+            for extra_page in newebpay_pages[1:]:
+                extra_page.close()
+        else:
+            shared_page = context.new_page()
         try:
             for account in accounts:
                 print(f"\n開始處理：{account.area}")
