@@ -258,6 +258,17 @@ def write_date(locator: Locator, value: str) -> None:
     )
 
 
+def force_check(locator: Locator) -> None:
+    # 藍新部分頁面把 radio/checkbox 用 CSS 隱藏、改用自訂樣式呈現，
+    # 導致 Playwright 的 .check(force=True) 仍會因元素不可見而失敗；
+    # 改成直接操作 DOM 屬性並觸發事件，不需要元素可見。
+    locator.evaluate(
+        "el => { el.checked = true; "
+        "el.dispatchEvent(new Event('input', {bubbles: true})); "
+        "el.dispatchEvent(new Event('change', {bubbles: true})); }"
+    )
+
+
 def check_label(page: Page, label_text: str) -> None:
     labels = page.locator("label").filter(has_text=label_text)
     for index in range(labels.count()):
@@ -266,7 +277,7 @@ def check_label(page: Page, label_text: str) -> None:
             continue
         control = label.locator('input[type="radio"], input[type="checkbox"]')
         if control.count():
-            control.first.check(force=True)
+            force_check(control.first)
             return
     raise RuntimeError(f"找不到選項：{label_text}")
 
@@ -390,7 +401,7 @@ def download_payments(
     if advanced.count() and advanced.is_visible():
         advanced.click()
     select_merchant(page, account)
-    form.locator('input[name="PayStatus"][value="1"]').check(force=True)
+    force_check(form.locator('input[name="PayStatus"][value="1"]'))
     search_button = page.locator('#trans_search input[value="開始查詢"]')
     if not search_button.count():
         raise RuntimeError("找不到收款「開始查詢」按鈕")
@@ -423,7 +434,7 @@ def download_refunds(
     set_date(page, ("PeriodStartDate", "per_start_date", "StartDate", "start_date"), start, 0)
     set_date(page, ("PeriodEndDate", "per_end_date", "EndDate", "end_date"), end, 1)
     select_merchant(page, account)
-    page.locator('input[name="ProcessType"][value=""]').check(force=True)
+    force_check(page.locator('input[name="ProcessType"][value=""]'))
     message_index = len(messages)
     click_search(page)
     if no_transaction_data(messages, message_index):
