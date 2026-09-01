@@ -23,7 +23,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
 📁 使用既有資料夾：202608-2 / 1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um
 🔄 下載 全部
-☁️ 已上傳新檔：202608-2預收-台北.xlsx → folder_id=1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um https://docs.google.com/spreadsheets/d/1o5-Zb8zNWPngOC4tYIf-33KCQkZr-IqR/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🗑️ 已刪除重複舊檔：202608-2預收-台北.xlsx
+☁️ 已上傳新檔：202608-2預收-台北.xlsx → folder_id=1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um https://docs.google.com/spreadsheets/d/19QUydYKnvCW6Bo0U5PEl954kvPUP1KZD/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 台中 ===
@@ -32,7 +33,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
 📁 使用既有資料夾：202608-2 / 1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz
 🔄 下載 全部
-☁️ 已上傳新檔：202608-2預收-台中.xlsx → folder_id=1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz https://docs.google.com/spreadsheets/d/1Wa9_hJbTVEwHUYslVGShtgNunqz5zdzR/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🗑️ 已刪除重複舊檔：202608-2預收-台中.xlsx
+☁️ 已上傳新檔：202608-2預收-台中.xlsx → folder_id=1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz https://docs.google.com/spreadsheets/d/1wHDxXSGTM8jP-r3ZQxU2ELP2klLxMY_v/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 桃園 ===
@@ -41,7 +43,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
 📁 使用既有資料夾：202608-2 / 1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i
 🔄 下載 全部
-☁️ 已上傳新檔：202608-2預收-桃園.xlsx → folder_id=1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i https://docs.google.com/spreadsheets/d/10Fr69SNafzv5k4OtbwpHePuNPSSKjUnG/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🗑️ 已刪除重複舊檔：202608-2預收-桃園.xlsx
+☁️ 已上傳新檔：202608-2預收-桃園.xlsx → folder_id=1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i https://docs.google.com/spreadsheets/d/1RpgCkNN71I2zXesnFfhckDF2pMSjXzQp/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 新竹 ===
@@ -50,7 +53,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
 📁 使用既有資料夾：202608-2 / 1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj
 🔄 下載 新竹
-☁️ 已上傳新檔：202608-2預收-新竹.xlsx → folder_id=1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj https://docs.google.com/spreadsheets/d/1RBaOFBAPjA_l80oDIhNprq139HWGfgbK/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🗑️ 已刪除重複舊檔：202608-2預收-新竹.xlsx
+☁️ 已上傳新檔：202608-2預收-新竹.xlsx → folder_id=1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj https://docs.google.com/spreadsheets/d/1wnZip_JYDFBT0xr5oT5G2VoFtlj1DSDl/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 高雄 ===
@@ -59,9 +63,11 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
 📁 使用既有資料夾：202608-2 / 1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3
 🔄 下載 高雄
-☁️ 已上傳新檔：202608-2預收-高雄.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/1HVPWiwf83Jcowc-xZT572VTlrJV6ebPS/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🗑️ 已刪除重複舊檔：202608-2預收-高雄.xlsx
+☁️ 已上傳新檔：202608-2預收-高雄.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/14l63JvF56mVEx9yEc1MDYK7c9FojXxfd/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 🔄 下載 台南
-☁️ 已上傳新檔：202608-2預收-台南.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/1-cc6WJguJNMz2aOEJNt8qD1s2s6M3flt/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🗑️ 已刪除重複舊檔：202608-2預收-台南.xlsx
+☁️ 已上傳新檔：202608-2預收-台南.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/10HM5Ikl8zx-kV5JrvZ8GrMW8mfJazREY/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 ✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄

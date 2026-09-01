@@ -29,6 +29,10 @@ tools/service_management/service_schedule.py
 選填：
   LOG_SPREADSHEET_ID            執行檔試算表（預設同 LEMON_TARGET_FILE_ID）
   NOTIFY_EMAIL / NOTIFY_PASSWORD / NOTIFY_TO
+  SERVICE_SCHEDULE_DEEP_CLEAN_START
+                                 大掃除起始月份（YYYY-MM-DD，只看年月）。設定後，
+                                 該月起 Step1 一次下載/更新 5 個月，之後每月遞減 1，
+                                 最低回落到 2 個月（本月＋次月）並維持。未設定則一律 2 個月。
 """
 
 from __future__ import annotations
@@ -68,6 +72,20 @@ CONFIG: dict[str, Any] = {
     # 由 main() 動態載入（env SERVICE_TARGET_SPREADSHEET_ID 或主控試算表）
     "target_file_id": "",
 
+    # 每月正常只下載/更新「本月＋次月」共 2 個月。
+    "default_month_window": 2,
+
+    # 清除範圍至少要涵蓋到第幾列（從第 3 列起算），即使工作表 row_count 異常偏小
+    # 也保證清到這裡，避免新資料列數變少時舊資料殘留。
+    "min_clear_rows": 120,
+
+    # 大掃除：從某個月份起，一次多下載/更新未來幾個月，之後逐月遞減，
+    # 最後回落到 default_month_window。由環境變數 SERVICE_SCHEDULE_DEEP_CLEAN_START
+    # （格式 YYYY-MM-DD，只看年月）控制起始月份，未設定則不啟用、維持 2 個月。
+    # 例：設定 2026-10-01 → 10月下載5個月、11月4個月、12月3個月、隔年1月2個月，之後維持2個月。
+    "deep_clean_start_months": 5,
+    "deep_clean_start_env": "SERVICE_SCHEDULE_DEEP_CLEAN_START",
+
     # 工作表名稱
     "target_sheet_name": "台北台中排班統計表",
     "report_sheet_name": "【空班】居家清潔(每日回報)",
@@ -91,9 +109,11 @@ CONFIG: dict[str, Any] = {
     },
 
     # 依資料月份由近到遠寫入，清除時保留格式。
+    # 每個 slot 的清除範圍需與 _write_import_values 的實際寫入寬度（起始欄 +8，共 9 欄）對齊，
+    # 否則寫入寬度會超出清除範圍，殘留舊資料清不到。
     "schedule_import_slots": [
-        {"taipei": "G3:O",   "taichung": "CD3:CK"},
-        {"taipei": "V3:AD",  "taichung": "CS3:CZ"},
+        {"taipei": "G3:O",   "taichung": "CD3:CL"},
+        {"taipei": "V3:AD",  "taichung": "CS3:DA"},
         {"taipei": "AK3:AS", "taichung": "DH3:DP"},
         {"taipei": "AZ3:BH", "taichung": "DW3:EE"},
         {"taipei": "BO3:BW", "taichung": "EL3:ET"},
@@ -377,6 +397,11 @@ def find_schedule_files(base: datetime) -> dict[str, dict[str, dict]]:
     current_month = fmt(local_base, "%Y%m")
     run_day = fmt(local_base, "%d")
 
+    month_window = _resolve_month_window(local_base)
+    max_year, max_month_num = _add_months(local_base.year, local_base.month, month_window - 1)
+    max_month = f"{max_year}{max_month_num:02d}"
+    log.info("本次視窗：%s ~ %s（共 %d 個月）", current_month, max_month, month_window)
+
     q = (
         f"'{CONFIG['source_folder_id']}' in parents and trashed=false and ("
         "mimeType='application/vnd.google-apps.spreadsheet' or "
@@ -401,7 +426,7 @@ def find_schedule_files(base: datetime) -> dict[str, dict[str, dict]]:
         if not parsed:
             continue
         month, day, city = parsed
-        if month < current_month or day != run_day:
+        if month < current_month or month > max_month or day != run_day:
             continue
         bucket = buckets.setdefault(month, {"台北": [], "台中": []})
         bucket[city].append(f)
@@ -438,11 +463,57 @@ def _a1_start(a1: str) -> tuple[int, int]:
     return int(m.group(2)), col
 
 
+def _bounded_clear_range(rng: str, row_count: int) -> str:
+    """把開放式欄位範圍（如 'G3:O'）換成明確結尾列（如 'G3:O5000'），
+    避免依賴 Sheets API 對開放式 A1 記法的解讀方式，確保整欄確實被清空。"""
+    start, end_col = rng.split(":")
+    return f"{start}:{end_col}{row_count}"
+
+
 def _month_offset(base: datetime, month: str) -> int:
     """計算 YYYYMM 相對於執行月份的月數，用來保留缺檔月份的槽位。"""
     local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
     year, month_number = int(month[:4]), int(month[4:])
     return (year - local_base.year) * 12 + month_number - local_base.month
+
+
+def _resolve_month_window(base: datetime) -> int:
+    """依 CONFIG['deep_clean_start_env'] 計算本次應處理的月份數（本月起算幾個月）。
+
+    未設定該環境變數，或執行月份早於起始月份：回傳 default_month_window（2）。
+    從起始月份當月開始：deep_clean_start_months（5），之後每過一個月遞減 1，
+    最低回落到 default_month_window，不會再往下降。
+    """
+    default_window = CONFIG["default_month_window"]
+    start_raw = os.environ.get(CONFIG["deep_clean_start_env"], "").strip()
+    if not start_raw:
+        return default_window
+
+    try:
+        start_dt = datetime.fromisoformat(start_raw)
+    except ValueError:
+        log.warning(
+            "%s 格式錯誤（應為 YYYY-MM-DD）：%s，改用預設 %d 個月",
+            CONFIG["deep_clean_start_env"], start_raw, default_window,
+        )
+        return default_window
+
+    local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
+    months_since_start = (local_base.year - start_dt.year) * 12 + (local_base.month - start_dt.month)
+    if months_since_start < 0:
+        return default_window
+
+    window = CONFIG["deep_clean_start_months"] - months_since_start
+    return max(default_window, window)
+
+
+def _add_months(year: int, month: int, delta: int) -> tuple[int, int]:
+    total = (year * 12 + (month - 1)) + delta
+    return total // 12, total % 12 + 1
+
+
+class EmptySourceError(ValueError):
+    """來源檔案讀取成功，但內容沒有可貼入的資料列（跟技術性讀取失敗不同）。"""
 
 
 def _read_import_values(
@@ -507,7 +578,7 @@ def _read_import_values(
     values = [r for r in values if any(str(c).strip() for c in r)]
 
     if not values:
-        raise ValueError(f"來源沒有可貼入資料：{name}")
+        raise EmptySourceError(f"來源沒有可貼入資料：{name}")
     return values
 
 
@@ -579,6 +650,38 @@ def cleanup_previous_month_files(run_dt: datetime, drive) -> list[str]:
 # Step 1：更新排班統計表
 # ──────────────────────────────────────────────────────────
 
+def _process_city_slot(
+    target_sh: gspread.Worksheet,
+    label: str,
+    file_info: dict,
+    slot_range: str,
+    drive,
+    gc: gspread.Client,
+) -> str | None:
+    """獨立處理單一城市單一月份的槽位：不管另一個城市成功或失敗都會執行。
+
+    先無條件清空槽位，再嘗試讀取來源：
+    - 讀到資料 → 貼上，回傳來源檔名。
+    - 讀不到資料（來源確定是空的，或讀取技術性失敗）→ 保留清空後的空白，回傳 None。
+    """
+    clear_row_bound = max(target_sh.row_count, CONFIG["min_clear_rows"])
+    clear_range = _bounded_clear_range(slot_range, clear_row_bound)
+    target_sh.batch_clear([clear_range])
+    log.info("  已清除範圍（%s）：%s", label, clear_range)
+
+    try:
+        values = _read_import_values(file_info, drive, gc)
+    except EmptySourceError as exc:
+        log.warning("  %s：%s，保留空白", label, exc)
+        return None
+    except Exception as exc:
+        log.error("  %s 讀取失敗，保留空白：%s", label, exc)
+        return None
+
+    _write_import_values(target_sh, slot_range, values)
+    return file_info["name"]
+
+
 def step1_update_schedule_stats(
     run_dt: datetime, gc: gspread.Client, drive, run_id: str
 ) -> dict:
@@ -601,21 +704,16 @@ def step1_update_schedule_stats(
                 continue
 
             slot = slots[index]
-            try:
-                # 同月台北／台中都讀取並驗證完成後，才可清除目標。
-                taipei_values = _read_import_values(pair["taipei"], drive, gc)
-                taichung_values = _read_import_values(pair["taichung"], drive, gc)
-            except Exception as exc:
-                log.error("%s 來源讀取／驗證失敗，略過該月份：%s", month, exc)
-                continue
-
-            target_sh.batch_clear([slot["taipei"], slot["taichung"]])
-            _write_import_values(target_sh, slot["taipei"], taipei_values)
-            _write_import_values(target_sh, slot["taichung"], taichung_values)
-            processed[month] = {
-                "taipei": pair["taipei"]["name"],
-                "taichung": pair["taichung"]["name"],
-            }
+            # 台北／台中各自獨立處理：一邊技術性失敗不會擋到另一邊更新，
+            # 一邊確定沒有資料就清空該邊、不影響另一邊。
+            taipei_name = _process_city_slot(
+                target_sh, f"{month} 台北", pair["taipei"], slot["taipei"], drive, gc,
+            )
+            taichung_name = _process_city_slot(
+                target_sh, f"{month} 台中", pair["taichung"], slot["taichung"], drive, gc,
+            )
+            if taipei_name or taichung_name:
+                processed[month] = {"taipei": taipei_name, "taichung": taichung_name}
 
         if not processed:
             raise RuntimeError("沒有任何月份成功更新")

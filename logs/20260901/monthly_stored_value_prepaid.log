@@ -4,16 +4,16 @@
 📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
 📂 本次使用年度：2026
 📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
-📝 月排程打卡：儲值金結算 / running
+📝 月排程打卡：儲值金預收 / running
 ⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
 ⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
 OAuth env ready = True
 OAuth bootstrap forced = True
-Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/stored_value_settlement.py
-📌 功能：儲值金結算
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/stored_value_prepaid.py
+📌 功能：儲值金預收
 📌 版本：0704_v3
 📌 期別：202608-2
-📌 存取期間：期別：202608-2；後台匯出網址本身無日期參數；實際為執行當下資料：2026-09-01 05:33:01
+📌 存取期間：預收/服務：2026-09-01 ~ 2026-12-30
 📌 執行區域：all
 📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
 
@@ -22,8 +22,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
 📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
 📁 使用既有資料夾：202608-2 / 1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um
-🗑️ 已刪除重複舊檔：202608-2儲值金結算-台北.xlsx
-☁️ 已上傳新檔：202608-2儲值金結算-台北.xlsx → folder_id=1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um https://docs.google.com/spreadsheets/d/1nBye_LU6yyQTZ2HIG7b_smSsI_FMKiPT/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-台北.xlsx → folder_id=1UuV4QbJz5c6HlrgPBSfLgp2ILvvaV5um https://docs.google.com/spreadsheets/d/1tJY1jZ9il8Scl-y9_csnb-xfKtnz2XJY/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 台中 ===
@@ -31,8 +31,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
 📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
 📁 使用既有資料夾：202608-2 / 1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz
-🗑️ 已刪除重複舊檔：202608-2儲值金結算-台中.xlsx
-☁️ 已上傳新檔：202608-2儲值金結算-台中.xlsx → folder_id=1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz https://docs.google.com/spreadsheets/d/1Tj1jFrPLerFlV_e1fHAjtoYWq3o0T1y-/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-台中.xlsx → folder_id=1teMdN8MEdJ0gjyHL-9pYn9BC_ow4EJEz https://docs.google.com/spreadsheets/d/1CrqGZ5O8mVR0cSU7BGsS8oWR9G3M6EIn/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 桃園 ===
@@ -40,8 +40,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
 📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
 📁 使用既有資料夾：202608-2 / 1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i
-🗑️ 已刪除重複舊檔：202608-2儲值金結算-桃園.xlsx
-☁️ 已上傳新檔：202608-2儲值金結算-桃園.xlsx → folder_id=1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i https://docs.google.com/spreadsheets/d/13gU4ekZ_InGNCc3iz4siZ5l5A7BZzJ-0/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-桃園.xlsx → folder_id=1PDeofywJ4YhS9c_s1s_s3nGkWx25ed0i https://docs.google.com/spreadsheets/d/1eQoaftqYHTygd-1nX3L91y70DnFayR0i/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 新竹 ===
@@ -49,8 +49,8 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
 📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
 📁 使用既有資料夾：202608-2 / 1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj
-🗑️ 已刪除重複舊檔：202608-2儲值金結算-新竹.xlsx
-☁️ 已上傳新檔：202608-2儲值金結算-新竹.xlsx → folder_id=1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj https://docs.google.com/spreadsheets/d/1FM9jwM_P3cqEYNoX8bsC9ki5YL4tvZdD/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🔄 下載 新竹
+☁️ 已上傳新檔：202608-2儲值金預收-新竹.xlsx → folder_id=1Zgw9eG60WLf8wMiNrlH7_n0zC66seTcj https://docs.google.com/spreadsheets/d/1HCI6fz8hOkeVPSJ6cR7NAH-gQExMuq5b/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 === 處理 高雄 ===
@@ -58,12 +58,12 @@ Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/sch
 📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
 📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
 📁 使用既有資料夾：202608-2 / 1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3
-🗑️ 已刪除重複舊檔：202608-2儲值金結算-高雄.xlsx
-☁️ 已上傳新檔：202608-2儲值金結算-高雄.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/16ehfXUBH_9wo8YKZaDQHhAhnlOpJYzCg/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🔄 下載 全部
+☁️ 已上傳新檔：202608-2儲值金預收-高雄.xlsx → folder_id=1z5eUFggBuV79gg8HOg5jzONfBxy81Lf3 https://docs.google.com/spreadsheets/d/1S7O0Ivs2_tcOSSRBCLc9TekbFrQ7HipS/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
 ✅ 已寫入月排程 Log
 
 ✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄
-🎉 儲值金結算 全部完成
+🎉 儲值金預收 全部完成
 
-📝 月排程打卡：儲值金結算 / success
+📝 月排程打卡：儲值金預收 / success
 scheduled_monthly scheduler 全部完成
