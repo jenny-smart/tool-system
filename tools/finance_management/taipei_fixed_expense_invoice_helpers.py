@@ -31,23 +31,19 @@ def extract_html_body(msg) -> str:
 
 
 def tradevan_invoice_link(msg) -> str:
-    body = extract_html_body(msg)
-    match = TRADEVAN_LINK_RE.search(body)
+    match = TRADEVAN_LINK_RE.search(extract_html_body(msg))
     if not match:
         raise ValueError("台灣連線通知信找不到發票連結")
     return html.unescape(match.group(1))
 
 
 def fetch_tradevan_invoice_amount(msg) -> int:
-    url = tradevan_invoice_link(msg)
-    request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    request = Request(tradevan_invoice_link(msg), headers={"User-Agent": "Mozilla/5.0"})
     with urlopen(request, timeout=20) as response:
         raw = response.read()
         charset = response.headers.get_content_charset() or "utf-8"
-    page = raw.decode(charset, errors="replace")
-    text = html.unescape(re.sub(r"<[^>]+>", " ", page))
-    text = re.sub(r"\s+", " ", text)
-    match = TRADEVAN_TOTAL_RE.search(text)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", raw.decode(charset, errors="replace")))
+    match = TRADEVAN_TOTAL_RE.search(re.sub(r"\s+", " ", text))
     if not match:
         raise ValueError("台灣連線發票頁找不到發票總金額")
     return int(match.group(1).replace(",", ""))
@@ -79,6 +75,29 @@ def sum_newebpay_invoices(messages, companies: tuple[str, ...]) -> tuple[dict[st
     if not matched:
         raise ValueError("藍新金流沒有符合指定公司的發票")
     return totals, matched
+
+
+def parse_zhongdian_region(body_text: str, region: str = "台北") -> tuple[int, str]:
+    """Use the requested region's actual ad spend; service fee is 10% of that spend."""
+    text = re.sub(r"\s+", " ", body_text.replace("NT$", "$"))
+    # Region block ends at the next known region/section. Capture money values only inside it.
+    region_match = re.search(
+        rf"{re.escape(region)}\s+(.*?)(?=桃園|新竹|台中|電器|實際廣告花費\(台幣\)|$)",
+        text,
+        re.IGNORECASE,
+    )
+    if not region_match:
+        raise ValueError(f"眾點信件找不到{region}區塊")
+    values = [int(v.replace(",", "")) for v in re.findall(r"\$\s*([\d,]+)", region_match.group(1))]
+    if not values:
+        raise ValueError(f"眾點信件找不到{region}實際廣告花費")
+    # In the region block, actual-spend values alternate with budget values in HTML text;
+    # the last amount before the next region is the region's actual-spend total.
+    ad_spend = Decimal(values[-1])
+    google_ad = _round_twd(ad_spend * Decimal("1.05"))
+    google_service = _round_twd(ad_spend * Decimal("0.10") * Decimal("1.05"))
+    total = google_ad + google_service
+    return total, f"google廣告費{google_ad}＋google服務費{google_service}={total}"
 
 
 def _plain_body(msg) -> str:
