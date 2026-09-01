@@ -429,7 +429,7 @@ def download_refunds(
     if no_transaction_data(messages, message_index):
         save_empty_csv(target)
         return
-    page.locator("#download_close_trans").wait_for(state="visible", timeout=30_000)
+    page.get_by_text("下載查詢結果").first.wait_for(state="visible", timeout=30_000)
     save_download(
         page,
         (
@@ -440,6 +440,7 @@ def download_refunds(
             'input[value*="下載"]',
             'button:has-text("下載")',
             'a:has-text("下載")',
+            "text=下載查詢結果",
         ),
         target,
     )
