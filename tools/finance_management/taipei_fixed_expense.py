@@ -1,25 +1,4 @@
-"""新增『台北固定費用請款』：每月期別（YYYYMM）批次新增 5 筆台北固定費用
-請款記錄，寫入「財務帳務設定」登記表指向的請款記錄／台北報表。
-
-5 筆固定費用：
-  1. Amazon Web Services（信件主旨 "Amazon Web Services Tax Invoice Available"
-     的 PDF 附件，抓 AWS Service Charges 金額，換算台幣＋1.5%）
-  2. 震旦行（信件主旨含「震旦集團電子發票加值中心通知信」的 PDF 附件，抓總計金額）
-  3. 眾點（信件主旨含「各分店每月發票金額確認」，抓信件內文彙總列的「實際廣告花費
-     (台幣)」與「10%服務費」，各自乘 1.05 拆成 google廣告費／google服務費兩筆金額，
-     抓不到彙總列時退回抓「發票金額總計為」的總額）
-  4. 辦公室租金（固定金額，不用查信）
-  5. 辦公室管理費（固定金額，不用查信）
-
-執行期別（傳入的 period）決定查信的月份區間與辦公室租金/管理費的標記月份；
-AWS／震旦行／眾點都是後付（當月收到的通知信對應上個月的費用），費用說明
-標記的月份是執行期別往前推一個月。
-
-信件收發沿用 tools/gmail_401（IMAP + App 密碼）與
-tools/field_management/resume_system.py 的讀信慣例；PDF 附件用 pdfplumber
-解析文字後用關鍵字＋正規表示式抓金額。
-"""
-
+"""台北固定費用請款：依月份抓信、計算金額並寫入請款記錄。"""
 from __future__ import annotations
 
 import argparse
@@ -34,43 +13,32 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from email.header import decode_header
 from typing import Any
 
-from tools.bank_statement.internal_payment_registry import (
-    PAYMENT_REQUEST_TYPE,
-    resolve_report_location,
-)
+from tools.bank_statement.internal_payment_registry import PAYMENT_REQUEST_TYPE, resolve_report_location
 from tools.common.config_loader import get_sheets_service
 from tools.finance_management.execution_log import log_execution
+from tools.finance_management.taipei_fixed_expense_invoice_helpers import (
+    parse_zhongdian_region,
+    sum_newebpay_invoices,
+    sum_tradevan_invoices,
+)
 
 TW_TZ = timezone(timedelta(hours=8))
 AREA = "台北"
 TOOL_NAME = "台北固定費用請款"
-
 REQUEST_SHEET_RANGE = "A:I"
 
 AWS_SUBJECT = "Amazon Web Services Tax Invoice Available"
 ZHENDAN_SUBJECT = "震旦集團電子發票加值中心通知信"
 ZHONGDIAN_SUBJECT = "各分店每月發票金額確認"
+TRADEVAN_SUBJECT = "台灣連線股份有限公司電子發票開立通知"
+NEWEBPAY_SUBJECT = "藍新金流電子發票開立通知"
+NEWEBPAY_COMPANIES = ("泳檬有限公司", "檸檬專業清潔有限公司", "竹盟有限公司")
 
-AWS_CHARGE_RE = re.compile(r"AWS Service Charges\s*USD\s*([\d,]+\.\d{2})", re.IGNORECASE)
-FX_RATE_RE = re.compile(r"1\s*USD\s*=\s*([\d.]+)\s*TWD", re.IGNORECASE)
+AWS_CHARGE_RE = re.compile(r"AWS Service Charges\s*USD\s*([\d,]+\.\d{2})", re.I)
+FX_RATE_RE = re.compile(r"1\s*USD\s*=\s*([\d.]+)\s*TWD", re.I)
 ZHENDAN_TOTAL_RE = re.compile(r"總計\s+([\d,]+)")
-ZHONGDIAN_TOTAL_RE = re.compile(r"發票金額總計為\$?\s*([\d,]+)")
-# 彙總列「實際廣告花費(台幣) 10%服務費 5%稅金 發票金額(含服含稅)」四個標籤，
-# 後面接著同順序的四個金額（GG/走期/地區等文字欄位夾在中間，用 [\s\S]*? 跳過）。
-ZHONGDIAN_ROW_RE = re.compile(
-    r"實際廣告花費\(台幣\)[\s\S]*?10%服務費[\s\S]*?5%稅金[\s\S]*?發票金額\(含服含稅\)"
-    r"[\s\S]*?(?:NT)?\$\s*([\d,]+)"
-    r"[\s\S]*?\$\s*([\d,]+)"
-    r"[\s\S]*?\$\s*([\d,]+)"
-    r"[\s\S]*?(?:NT)?\$\s*([\d,]+)"
-)
-
 _IMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-
-# ────────────────────────────────────────────────────────────
-# Secrets / IMAP（沿用 resume_system.py 的慣例）
-# ────────────────────────────────────────────────────────────
 
 def _get_secret(key: str) -> str:
     value = os.environ.get(key, "").strip()
@@ -78,378 +46,262 @@ def _get_secret(key: str) -> str:
         return value
     try:
         import streamlit as st
-
-        value = str(st.secrets.get(key, "") or "").strip()
-        if value:
-            return value
+        return str(st.secrets.get(key, "") or "").strip()
     except Exception:
-        pass
-    return ""
+        return ""
+
+
+def _imap_connect() -> tuple[imaplib.IMAP4_SSL, str]:
+    user = _get_secret("TAIPEI_FIXED_EXPENSE_GMAIL_USER") or _get_secret("GMAIL_401_USER") or _get_secret("GMAIL_USER")
+    password = _get_secret("TAIPEI_FIXED_EXPENSE_GMAIL_APP_PASSWORD") or _get_secret("GMAIL_401_APP_PASSWORD") or _get_secret("GMAIL_APP_PASSWORD")
+    if not user or not password:
+        raise EnvironmentError("需要台北固定費用 Gmail 帳號/App Password（可沿用 GMAIL_401 設定）")
+    imap = imaplib.IMAP4_SSL("imap.gmail.com")
+    imap.login(user, password)
+    return imap, user
 
 
 def _imap_date(dt: datetime) -> str:
     return f"{dt.day:02d}-{_IMAP_MONTHS[dt.month - 1]}-{dt.year:04d}"
 
 
-def _imap_connect() -> tuple[imaplib.IMAP4_SSL, str]:
-    user = (
-        _get_secret("TAIPEI_FIXED_EXPENSE_GMAIL_USER")
-        or _get_secret("GMAIL_401_USER")
-        or _get_secret("GMAIL_USER")
-    )
-    password = (
-        _get_secret("TAIPEI_FIXED_EXPENSE_GMAIL_APP_PASSWORD")
-        or _get_secret("GMAIL_401_APP_PASSWORD")
-        or _get_secret("GMAIL_APP_PASSWORD")
-    )
-    if not user or not password:
-        raise EnvironmentError(
-            "需要 TAIPEI_FIXED_EXPENSE_GMAIL_USER / TAIPEI_FIXED_EXPENSE_GMAIL_APP_PASSWORD"
-            "（或既有的 GMAIL_401_USER / GMAIL_401_APP_PASSWORD）"
-        )
-    imap = imaplib.IMAP4_SSL("imap.gmail.com")
-    imap.login(user, password)
-    return imap, user
-
-
-def _search_by_subject(imap: imaplib.IMAP4_SSL, subject_query: str, since_str: str, before_str: str) -> list[bytes]:
-    """依 SUBJECT／SINCE／BEFORE 搜尋。
-
-    SUBJECT 條件含中文時，編碼後的 UTF-8 多位元組字元不是合法的 IMAP 指令行
-    內容，直接塞進指令行 Gmail 會回 BAD Could not parse command；純 ASCII
-    主旨才恰好不會踩到這個問題。正確做法是用 IMAP literal 語法
-    （{n}\\r\\n<bytes>）：把 SUBJECT 的值設進 imap.literal，讓 imaplib 在
-    指令最後自動補上 {n}，收到伺服器 "+ " continuation 後才送出實際位元組。
-    """
-    imap.literal = subject_query.encode("utf-8")
-    typ, data = imap.search("UTF-8", "SINCE", since_str, "BEFORE", before_str, "SUBJECT")
+def _search_by_subject(imap, subject: str, since: str, before: str) -> list[bytes]:
+    imap.literal = subject.encode("utf-8")
+    typ, data = imap.search("UTF-8", "SINCE", since, "BEFORE", before, "SUBJECT")
     if typ != "OK":
-        raise RuntimeError(f"IMAP 搜尋失敗（回應：{typ}）｜SUBJECT={subject_query!r}")
-    if not data or not data[0]:
-        return []
-    return data[0].split()
+        raise RuntimeError(f"IMAP 搜尋失敗：{subject}")
+    return data[0].split() if data and data[0] else []
 
 
-def _fetch_message(imap: imaplib.IMAP4_SSL, num: bytes) -> email.message.Message | None:
-    typ, msg_data = imap.fetch(num, "(RFC822)")
-    if typ != "OK" or not msg_data or not msg_data[0]:
+def _fetch_message(imap, num: bytes):
+    typ, data = imap.fetch(num, "(RFC822)")
+    if typ != "OK" or not data or not data[0]:
         return None
-    return email.message_from_bytes(msg_data[0][1])
+    return email.message_from_bytes(data[0][1])
 
 
-def _message_datetime(msg: email.message.Message) -> datetime:
-    date_tuple = email.utils.parsedate_tz(msg.get("Date", "") or "")
-    if not date_tuple:
-        return datetime.now(TW_TZ)
-    ts = email.utils.mktime_tz(date_tuple)
-    return datetime.fromtimestamp(ts, TW_TZ)
+def _message_datetime(msg) -> datetime:
+    parsed = email.utils.parsedate_tz(msg.get("Date", "") or "")
+    return datetime.fromtimestamp(email.utils.mktime_tz(parsed), TW_TZ) if parsed else datetime.now(TW_TZ)
 
 
-def _decode_filename(part: email.message.Message) -> str:
+def _matching_messages(imap, subject: str, since: str, before: str):
+    messages = [_fetch_message(imap, n) for n in _search_by_subject(imap, subject, since, before)]
+    messages = [m for m in messages if m is not None]
+    if not messages:
+        raise RuntimeError(f"找不到符合條件的信件：{subject}")
+    return sorted(messages, key=_message_datetime, reverse=True)
+
+
+def _plain_body(msg) -> str:
+    plain = html_body = ""
+    parts = msg.walk() if msg.is_multipart() else [msg]
+    for part in parts:
+        if "attachment" in str(part.get("Content-Disposition", "")):
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        text = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+        if part.get_content_type() == "text/plain" and not plain:
+            plain = text
+        elif part.get_content_type() == "text/html" and not html_body:
+            html_body = text
+    if plain.strip():
+        return plain
+    import html as html_module
+    text = re.sub(r"</p>|</div>|</tr>|</li>|</td>|</th>|<br\s*/?>", "\n", html_body, flags=re.I)
+    return html_module.unescape(re.sub(r"<[^>]+>", "", text))
+
+
+def _decode_filename(part) -> str:
     raw = part.get_filename()
     if not raw:
         return ""
-    decoded_parts = decode_header(raw)
-    filename = ""
-    for chunk, charset in decoded_parts:
-        if isinstance(chunk, bytes):
-            filename += chunk.decode(charset or "utf-8", errors="replace")
-        else:
-            filename += chunk
-    return filename
+    return "".join(c.decode(cs or "utf-8", errors="replace") if isinstance(c, bytes) else c for c, cs in decode_header(raw))
 
 
-def _plain_body(msg: email.message.Message) -> str:
-    plain, html_body = "", ""
-    if msg.is_multipart():
-        for part in msg.walk():
-            content_type = part.get_content_type()
-            disposition = str(part.get("Content-Disposition", ""))
-            if "attachment" in disposition:
-                continue
-            charset = part.get_content_charset() or "utf-8"
-            payload = part.get_payload(decode=True)
-            if payload is None:
-                continue
-            decoded = payload.decode(charset, errors="replace")
-            if content_type == "text/plain" and not plain:
-                plain = decoded
-            elif content_type == "text/html" and not html_body:
-                html_body = decoded
-    else:
-        charset = msg.get_content_charset() or "utf-8"
-        payload = msg.get_payload(decode=True)
-        if payload:
-            decoded = payload.decode(charset, errors="replace")
-            if msg.get_content_type() == "text/html":
-                html_body = decoded
-            else:
-                plain = decoded
-    if plain.strip():
-        return plain
-    return _strip_html(html_body) if html_body.strip() else ""
-
-
-def _strip_html(html_text: str) -> str:
-    import html as html_module
-
-    text = re.sub(r"<br\s*/?>", "\n", html_text, flags=re.IGNORECASE)
-    text = re.sub(r"</p>|</div>|</tr>|</li>|</td>|</th>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = html_module.unescape(text)
-    return re.sub(r"\r\n|\r", "\n", text).strip()
-
-
-def _pdf_attachments_text(msg: email.message.Message) -> list[str]:
+def _pdf_texts(msg) -> list[str]:
     import pdfplumber
-
-    texts: list[str] = []
+    result = []
     for part in msg.walk():
-        if part.get_content_maintype() == "multipart":
-            continue
-        if part.get("Content-Disposition") is None:
-            continue
-        filename = _decode_filename(part)
-        if not filename.lower().endswith(".pdf"):
+        if not _decode_filename(part).lower().endswith(".pdf"):
             continue
         data = part.get_payload(decode=True)
-        if not data:
-            continue
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            page_texts = [page.extract_text() or "" for page in pdf.pages]
-        texts.append("\n".join(page_texts))
-    return texts
+        if data:
+            with pdfplumber.open(io.BytesIO(data)) as pdf:
+                result.append("\n".join(page.extract_text() or "" for page in pdf.pages))
+    return result
 
-
-def _matching_messages(
-    imap: imaplib.IMAP4_SSL, subject_query: str, since_str: str, before_str: str
-) -> list[email.message.Message]:
-    """回傳期間內主旨符合的信件，新到舊排序。
-
-    有些通知信（例如眾點）是同一條主旨全年一直往下回覆，同一個月份的搜尋
-    區間裡除了當月真正的資料信，也常常混到單純回覆確認的信（例如「金額
-    無誤，謝謝」），所以這裡回傳全部候選信件，不在這裡就先認定「最新一封
-    ＝要的那封」；由呼叫端依序嘗試解析，直到抓到金額為止。
-    """
-    nums = _search_by_subject(imap, subject_query, since_str, before_str)
-    if not nums:
-        raise RuntimeError(f"找不到符合條件的信件：SUBJECT={subject_query!r}")
-    messages = [_fetch_message(imap, num) for num in nums]
-    messages = [msg for msg in messages if msg is not None]
-    if not messages:
-        raise RuntimeError(f"信件抓取失敗：SUBJECT={subject_query!r}")
-    messages.sort(key=_message_datetime, reverse=True)
-    return messages
-
-
-def _extract_from_message(label: str, msg: email.message.Message, parse_fn) -> tuple[int, str]:
-    if label == "眾點":
-        return parse_fn(_plain_body(msg))
-    pdf_texts = _pdf_attachments_text(msg)
-    if not pdf_texts:
-        raise RuntimeError("信件沒有 PDF 附件")
-    last_exc: Exception | None = None
-    for text in pdf_texts:
-        try:
-            return parse_fn(text)
-        except ValueError as exc:
-            last_exc = exc
-    raise last_exc or RuntimeError("PDF 附件解析失敗")
-
-
-# ────────────────────────────────────────────────────────────
-# 金額解析
-# ────────────────────────────────────────────────────────────
 
 def _parse_decimal(text: str) -> Decimal:
     try:
         return Decimal(text.replace(",", ""))
     except InvalidOperation as exc:
-        raise ValueError(f"無法解析金額：{text!r}") from exc
+        raise ValueError(f"無法解析金額：{text}") from exc
 
 
 def _round_twd(value: Decimal) -> int:
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def parse_aws_invoice(pdf_text: str) -> tuple[int, str]:
-    """從 AWS Tax Invoice PDF 文字抓 AWS Service Charges（USD）與台幣匯率，
-    回傳 (金額, 換算說明)；金額 = AWS Service Charges * 匯率 * 1.015（四捨五入到整數台幣）。
-    """
-    charge_match = AWS_CHARGE_RE.search(pdf_text)
-    rate_match = FX_RATE_RE.search(pdf_text)
-    if not charge_match:
-        raise ValueError("AWS PDF 找不到 AWS Service Charges 金額")
-    if not rate_match:
-        raise ValueError("AWS PDF 找不到台幣匯率（1 USD = ... TWD）")
-    usd_amount = _parse_decimal(charge_match.group(1))
-    rate = _parse_decimal(rate_match.group(1))
-    amount = _round_twd(usd_amount * rate * Decimal("1.015"))
-    detail = f"TWD rate={rate}，USD{usd_amount} × rate × 1.015={amount}"
-    return amount, detail
+def parse_aws_invoice(text: str) -> tuple[int, str]:
+    charge, rate = AWS_CHARGE_RE.search(text), FX_RATE_RE.search(text)
+    if not charge or not rate:
+        raise ValueError("AWS PDF 找不到服務費或台幣匯率")
+    usd, fx = _parse_decimal(charge.group(1)), _parse_decimal(rate.group(1))
+    amount = _round_twd(usd * fx * Decimal("1.015"))
+    return amount, f"TWD rate={fx}，USD{usd} × rate × 1.015={amount}"
 
 
-def parse_zhendan_invoice(pdf_text: str) -> tuple[int, str]:
-    """從震旦行電子發票 PDF 文字抓總計金額。"""
-    match = ZHENDAN_TOTAL_RE.search(pdf_text)
+def parse_zhendan_invoice(text: str) -> tuple[int, str]:
+    match = ZHENDAN_TOTAL_RE.search(text)
     if not match:
         raise ValueError("震旦行 PDF 找不到總計金額")
-    return _round_twd(_parse_decimal(match.group(1))), ""
+    return int(match.group(1).replace(",", "")), ""
 
 
-def parse_zhongdian_email(body_text: str) -> tuple[int, str]:
-    """從眾點數位信件內文抓「實際廣告花費(台幣)」與「10%服務費」，
-    各自乘以 1.05（5%稅金）拆成 google廣告費／google服務費兩塊金額，
-    請款金額＝兩者相加。彙總列格式若對不上，退回只抓「發票金額總計為」
-    的總額（沒有拆分明細），至少不會整筆失敗。
-    """
-    row_match = ZHONGDIAN_ROW_RE.search(body_text)
-    if row_match:
-        ad_spend = _parse_decimal(row_match.group(1))
-        service_fee = _parse_decimal(row_match.group(2))
-        google_ad = _round_twd(ad_spend * Decimal("1.05"))
-        google_service = _round_twd(service_fee * Decimal("1.05"))
-        amount = google_ad + google_service
-        detail = f"google廣告費{google_ad}＋google服務費{google_service}={amount}"
-        return amount, detail
+def _parse_single_message(label: str, msg, parser):
+    if label == "眾點":
+        return parser(_plain_body(msg))
+    last = None
+    for text in _pdf_texts(msg):
+        try:
+            return parser(text)
+        except Exception as exc:
+            last = exc
+    raise last or RuntimeError("信件沒有可解析的 PDF 附件")
 
-    total_match = ZHONGDIAN_TOTAL_RE.search(body_text)
-    if not total_match:
-        raise ValueError("眾點信件內文找不到彙總列（實際廣告花費/10%服務費）或「發票金額總計為」")
-    return _round_twd(_parse_decimal(total_match.group(1))), ""
-
-
-# ────────────────────────────────────────────────────────────
-# 主流程
-# ────────────────────────────────────────────────────────────
 
 def _period_window(period: str) -> tuple[datetime, datetime]:
     year, month = int(period[:4]), int(period[4:6])
     start = datetime(year, month, 1, tzinfo=TW_TZ)
-    end = datetime(year + 1, 1, 1, tzinfo=TW_TZ) if month == 12 else datetime(year, month + 1, 1, tzinfo=TW_TZ)
+    end = datetime(year + (month == 12), 1 if month == 12 else month + 1, 1, tzinfo=TW_TZ)
     return start, end
 
 
 def _previous_period_label(period: str) -> str:
-    """AWS／震旦行／眾點都是後付：執行期別當月收到的通知信，內容對應的是
-    前一個月的費用，所以費用說明要標前一個月，不是收到信的執行月份。"""
     year, month = int(period[:4]), int(period[4:6])
-    if month == 1:
-        year, month = year - 1, 12
-    else:
-        month -= 1
+    year, month = (year - 1, 12) if month == 1 else (year, month - 1)
     return f"{year}.{month:02d}"
 
 
 def _existing_memos(service, spreadsheet_id: str, sheet_title: str) -> set[str]:
-    """讀取請款記錄／台北現有的 E 欄（費用說明），用來判斷本期是否已經新增過。"""
-    res = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{sheet_title}'!E:E",
-    ).execute()
-    return {str(row[0]).strip() for row in res.get("values", []) if row and str(row[0]).strip()}
+    result = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"'{sheet_title}'!E:E").execute()
+    return {str(r[0]).strip() for r in result.get("values", []) if r and str(r[0]).strip()}
 
 
-def _already_submitted(existing_memos: set[str], base_memo: str) -> bool:
-    """base_memo 是「YYYY.MM-標籤」；AWS 那筆實際寫入時後面會再接匯率換算說明，
-    所以判斷是否重複要用「相等」或「以 base_memo＋逗號 開頭」，不能只比對完全相等。
-    """
-    return any(memo == base_memo or memo.startswith(base_memo + "，") for memo in existing_memos)
+def _already_submitted(existing: set[str], memo: str) -> bool:
+    return any(x == memo or x.startswith(memo + "，") for x in existing)
 
 
 def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[str, Any]:
     period = (period or "").strip()
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
-
     period_label = f"{period[:4]}.{period[4:6]}"
-    mail_period_label = _previous_period_label(period)
-    start_dt, end_dt = _period_window(period)
-    since_str = _imap_date(start_dt)
-    before_str = _imap_date(end_dt)
-    now_text = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
-
+    mail_label = _previous_period_label(period)
+    start, end = _period_window(period)
+    since, before = _imap_date(start), _imap_date(end)
+    now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
     spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, AREA)
     service = get_sheets_service()
-    existing_memos = _existing_memos(service, spreadsheet_id, sheet_title)
-
+    existing = _existing_memos(service, spreadsheet_id, sheet_title)
     rows: list[list[Any]] = []
     items: list[dict[str, Any]] = []
     errors: list[str] = []
-
-    mail_items = [
-        ("Amazon Web Services", AWS_SUBJECT, "其他行銷", "彥妃信用卡", parse_aws_invoice),
-        ("震旦行", ZHENDAN_SUBJECT, "其他租金", "震旦行", parse_zhendan_invoice),
-        ("眾點", ZHONGDIAN_SUBJECT, "行銷費用", "眾點", parse_zhongdian_email),
-    ]
-
-    def add_mail_row(imap: imaplib.IMAP4_SSL, label: str, subject_query: str, category: str, payee: str, parse_fn) -> None:
-        base_memo = f"{mail_period_label}-{label}"
-        if _already_submitted(existing_memos, base_memo):
-            items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
-            return
-        try:
-            messages = _matching_messages(imap, subject_query, since_str, before_str)
-            matched = len(messages)
-            result = None
-            last_exc: Exception | None = None
-            for msg in messages:
-                try:
-                    result = _extract_from_message(label, msg, parse_fn)
-                    break
-                except Exception as exc:
-                    last_exc = exc
-            if result is None:
-                raise last_exc or RuntimeError("找到的信件都解析失敗")
-            amount, detail = result
-            memo = base_memo + (f"，{detail}" if detail else "")
-            rows.append(["待付款", "", now_text, category, memo, amount, "", payee, ""])
-            items.append({"label": label, "amount": amount, "matched": matched, "status": "成功"})
-        except Exception as exc:
-            errors.append(f"{label}：{exc}")
-            items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
-
-    # 抓信失敗（例如信箱密碼還沒設定）不該擋掉下面兩筆不用查信的固定金額，
-    # 所以連線本身的例外也要接住，只記錄失敗、不中斷主流程。當所有查信項目
-    # 本期都已經新增過時，直接跳過連線，不用白白登入一次信箱。
     mailbox_user = ""
-    pending_mail_items = []
-    for item in mail_items:
-        label = item[0]
-        if _already_submitted(existing_memos, f"{mail_period_label}-{label}"):
-            items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
-        else:
-            pending_mail_items.append(item)
-    if pending_mail_items:
+
+    def append_row(label: str, category: str, payee: str, amount: int, detail: str = "", memo_label: str | None = None):
+        base = f"{mail_label}-{memo_label or label}"
+        memo = base + (f"，{detail}" if detail else "")
+        rows.append(["待付款", "", now, category, memo, amount, "", payee, ""])
+        items.append({"label": label, "amount": amount, "matched": None, "status": "成功"})
+
+    mail_labels = ["Amazon Web Services", "震旦行", "眾點", "台灣連線", *[f"藍新金流-{c}" for c in NEWEBPAY_COMPANIES]]
+    needs_mail = any(not _already_submitted(existing, f"{mail_label}-{label}") for label in mail_labels)
+    if needs_mail:
         try:
             imap, mailbox_user = _imap_connect()
-        except Exception as exc:
-            for label, *_rest in pending_mail_items:
-                errors.append(f"{label}：{exc}")
-                items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
-        else:
+            imap.select("INBOX")
             try:
-                imap.select("INBOX")
-                for label, subject_query, category, payee, parse_fn in pending_mail_items:
-                    add_mail_row(imap, label, subject_query, category, payee, parse_fn)
+                singles = [
+                    ("Amazon Web Services", AWS_SUBJECT, "其他行銷", "彥妃信用卡", parse_aws_invoice),
+                    ("震旦行", ZHENDAN_SUBJECT, "其他租金", "震旦行", parse_zhendan_invoice),
+                    ("眾點", ZHONGDIAN_SUBJECT, "行銷費用", "眾點", lambda body: parse_zhongdian_region(body, "台北")),
+                ]
+                for label, subject, category, payee, parser in singles:
+                    base = f"{mail_label}-{label}"
+                    if _already_submitted(existing, base):
+                        items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
+                        continue
+                    try:
+                        messages = _matching_messages(imap, subject, since, before)
+                        result = None
+                        last = None
+                        for msg in messages:
+                            try:
+                                result = _parse_single_message(label, msg, parser)
+                                break
+                            except Exception as exc:
+                                last = exc
+                        if result is None:
+                            raise last or RuntimeError("找到的信件都解析失敗")
+                        append_row(label, category, payee, result[0], result[1])
+                        items[-1]["matched"] = len(messages)
+                    except Exception as exc:
+                        errors.append(f"{label}：{exc}")
+                        items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
+
+                label = "台灣連線"
+                if _already_submitted(existing, f"{mail_label}-{label}"):
+                    items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
+                else:
+                    try:
+                        messages = _matching_messages(imap, TRADEVAN_SUBJECT, since, before)
+                        amount, detail = sum_tradevan_invoices(messages)
+                        append_row(label, "行銷費用", "台灣連線股份有限公司", amount, detail)
+                        items[-1]["matched"] = len(messages)
+                    except Exception as exc:
+                        errors.append(f"{label}：{exc}")
+                        items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
+
+                pending_companies = [c for c in NEWEBPAY_COMPANIES if not _already_submitted(existing, f"{mail_label}-藍新金流-{c}")]
+                for company in NEWEBPAY_COMPANIES:
+                    if company not in pending_companies:
+                        items.append({"label": f"藍新金流-{company}", "amount": None, "matched": None, "status": "略過（本期已新增過）"})
+                if pending_companies:
+                    try:
+                        messages = _matching_messages(imap, NEWEBPAY_SUBJECT, since, before)
+                        totals, matched = sum_newebpay_invoices(messages, tuple(pending_companies))
+                        for company in pending_companies:
+                            amount = totals[company]
+                            if amount <= 0:
+                                raise ValueError(f"找不到{company}的藍新金流發票")
+                            append_row(f"藍新金流-{company}", "金流手續費", "藍新金流", amount, memo_label=f"藍新金流-{company}")
+                            items[-1]["matched"] = matched
+                    except Exception as exc:
+                        errors.append(f"藍新金流：{exc}")
+                        items.append({"label": "藍新金流", "amount": None, "matched": 0, "status": f"失敗：{exc}"})
             finally:
                 try:
                     imap.logout()
                 except Exception:
                     pass
+        except Exception as exc:
+            errors.append(f"Gmail：{exc}")
+            items.append({"label": "Gmail", "amount": None, "matched": 0, "status": f"失敗：{exc}"})
 
-    # 固定金額，不查信
-    fixed_items = [
+    for label, category, amount, payee in [
         ("辦公室租金", "辦公室租金", 77343, "信義路四段房東韓承艗"),
         ("辦公室管理費", "辦公室租金", 9392, "辦公室管理費新"),
-    ]
-    for label, category, amount, payee in fixed_items:
-        base_memo = f"{period_label}-{label}"
-        if _already_submitted(existing_memos, base_memo):
+    ]:
+        base = f"{period_label}-{label}"
+        if _already_submitted(existing, base):
             items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
-            continue
-        rows.append(["待付款", "", now_text, category, base_memo, amount, "", payee, ""])
-        items.append({"label": label, "amount": amount, "matched": None, "status": "成功"})
+        else:
+            rows.append(["待付款", "", now, category, base, amount, "", payee, ""])
+            items.append({"label": label, "amount": amount, "matched": None, "status": "成功"})
 
     if rows:
         service.spreadsheets().values().append(
@@ -459,41 +311,18 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
             insertDataOption="INSERT_ROWS",
             body={"values": rows},
         ).execute()
-
     status = "成功" if not errors else "部分失敗"
-    item_lines = "\n".join(
-        f"{item['label']}：{item['status']}" + (f"（{item['amount']}）" if item["amount"] is not None else "")
-        for item in items
-    )
-    message = (
-        f"{run_type}｜信箱={mailbox_user}｜執行期別={period_label}（查信/固定費用月份）"
-        f"｜發票內容期別={mail_period_label}（AWS/震旦行/眾點標記月份）｜新增 {len(rows)} 筆\n{item_lines}"
-    )
-    log_execution(TOOL_NAME, AREA, status, message)
+    item_lines = "\n".join(f"{i['label']}：{i['status']}" + (f"（{i['amount']}）" if i['amount'] is not None else "") for i in items)
+    log_execution(TOOL_NAME, AREA, status, f"{run_type}｜信箱={mailbox_user}｜執行期別={period_label}｜發票內容期別={mail_label}｜新增 {len(rows)} 筆\n{item_lines}")
+    return {"period": period, "period_label": period_label, "mail_period_label": mail_label, "sheet_title": sheet_title, "rows_added": len(rows), "items": items, "errors": errors, "mailbox": mailbox_user}
 
-    return {
-        "period": period,
-        "period_label": period_label,
-        "mail_period_label": mail_period_label,
-        "sheet_title": sheet_title,
-        "rows_added": len(rows),
-        "items": items,
-        "errors": errors,
-        "mailbox": mailbox_user,
-    }
-
-
-# ────────────────────────────────────────────────────────────
-# CLI（手動測試用；主要介面在 toolapp.py 主控台）
-# ────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="新增『台北固定費用請款』")
-    parser.add_argument("--period", required=True, help="期別，格式：YYYYMM，例如 202608")
+    parser.add_argument("--period", required=True)
     parser.add_argument("--run-type", default="手動")
     args = parser.parse_args()
-    result = submit_taipei_fixed_expenses(args.period, args.run_type)
-    print(result)
+    print(submit_taipei_fixed_expenses(args.period, args.run_type))
 
 
 if __name__ == "__main__":
