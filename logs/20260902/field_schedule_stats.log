@@ -1,0 +1,19 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.schedule_stats --date 20260902 --system-name 外場排程系統 --run-type 排程
+[2026-09-02 07:41:06] 開始處理排班統計表：20260902排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20260902排班統計表-台北 (1MWUglvOcjkLAnLtBOF6SpzTKCIyAdEuxZq6rVoTN9MU)
+[2026-09-02 07:41:08] 完成：20260902排班統計表-台北 → 2026排班統計表!DJ4 / rows=74
+[2026-09-02 07:41:11] 開始處理排班統計表：20261002排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261002排班統計表-台北 (1ytn5hOE5wB-sRrzcprddJN9arP-jauenjtlkUTu_pjk)
+[2026-09-02 07:41:12] 完成：20261002排班統計表-台北 → 2026排班統計表!DV4 / rows=15
+[2026-09-02 07:41:14] 開始處理排班統計表：20260902排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20260902排班統計表-台中 (19i44QU5zT__J0jimJpjAQDlkOY5ww8Bua3h4Xetu1Cs)
+[2026-09-02 07:41:16] 完成：20260902排班統計表-台中 → 2026排班統計表!DJ4 / rows=12
+[2026-09-02 07:41:18] 開始處理排班統計表：20261002排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261002排班統計表-台中 (17kRSPeg44T6S96CSo2VRbP8grZTKX3PBQcFZcpDMXBQ)
+[2026-09-02 07:41:19] 完成：20261002排班統計表-台中 → 2026排班統計表!DV4 / rows=3
+[2026-09-02 07:41:21] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成
