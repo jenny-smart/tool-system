@@ -578,10 +578,16 @@ def run_account(
         completed = True
         return [payment_path, refund_path]
     except Exception:
-        debug = output / "debug"
-        debug.mkdir(parents=True, exist_ok=True)
-        page.screenshot(path=debug / f"{period}-{account.area}.png", full_page=True)
-        (debug / f"{period}-{account.area}.html").write_text(page.content(), encoding="utf-8")
+        # 抓 debug 截圖時分頁可能已經死了（例如瀏覽器被關掉），這裡再噴一次
+        # 例外的話，外層看到的就會是「截圖失敗」蓋掉真正原因；截圖本身失敗
+        # 就算了，不要蓋掉真正的錯誤。
+        try:
+            debug = output / "debug"
+            debug.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=debug / f"{period}-{account.area}.png", full_page=True)
+            (debug / f"{period}-{account.area}.html").write_text(page.content(), encoding="utf-8")
+        except Exception:
+            pass
         raise
     finally:
         # 藍新的匯出按鈕偶爾會觸發兩次下載，第一次會被改名成正確檔名，
