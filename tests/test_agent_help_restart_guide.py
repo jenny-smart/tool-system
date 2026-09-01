@@ -28,6 +28,17 @@ def test_agent_help_does_not_show_obsolete_foreground_start():
     assert "離線超過 30 秒才執行" in source
 
 
+def test_agent_help_has_independent_guarded_git_pull_button():
+    source = _agent_help_source()
+
+    assert "⬇️ Git Pull 更新程式" in source
+    assert 'disabled=pull_disabled' in source
+    assert 'task.get("status") in {"running", "cancel_requested"}' in source
+    assert "create_git_pull_task" in source
+    assert "需要重啟 Agent 才會載入新版" in source
+    assert "git pull" in source
+
+
 def test_agent_cancel_import_has_deployment_fallback():
     source = Path("toolapp.py").read_text(encoding="utf-8")
     import_line = (

@@ -29,6 +29,7 @@ from tools.staff_payroll import AREAS as STAFF_PAYROLL_AREAS
 from tools.local_agent_queue import create_task as _create_local_agent_task_raw
 from tools.local_agent_queue import list_tasks as _list_local_agent_tasks_raw
 from tools.local_agent_queue import read_task_log as _read_local_agent_task_log_raw
+from tools.local_agent_queue import create_git_pull_task as _create_git_pull_task_raw
 try:
     from tools.local_agent_queue import request_task_cancel as _request_local_agent_task_cancel_raw
 except ImportError:
@@ -58,6 +59,20 @@ def create_local_agent_task(action, params, created_by="Tool System"):
         active_ids.insert(0, task_id)
         del active_ids[20:]
     return task
+
+
+def create_git_pull_task(created_by="Tool System"):
+    """Queue a guarded Git Pull and remember it for this session."""
+    ok, message, task = _create_git_pull_task_raw(created_by=created_by)
+    if task:
+        task_id = str(task.get("task_id") or "")
+        if task_id:
+            active_ids = st.session_state.setdefault("agent_active_task_ids", [])
+            if task_id in active_ids:
+                active_ids.remove(task_id)
+            active_ids.insert(0, task_id)
+            del active_ids[20:]
+    return ok, message, task
 
 from services.google_api_retry import install_googleapiclient_retry, install_gspread_retry
 
@@ -2077,13 +2092,17 @@ def render_agent_help() -> None:
     except Exception as exc:
         st.error(f"無法讀取 Agent 心跳：{exc}", icon="🔴")
 
+    agent_tasks = []
+    tasks_read_ok = True
     try:
+        agent_tasks = list_local_agent_tasks(limit=5000)
         running_tasks = [
-            task for task in list_local_agent_tasks(limit=100)
+            task for task in agent_tasks
             if task.get("status") in {"running", "cancel_requested"}
         ]
     except Exception as exc:
         running_tasks = []
+        tasks_read_ok = False
         st.warning(f"無法讀取目前工作：{exc}")
 
     st.markdown("**中止目前工作：**")
@@ -2115,6 +2134,53 @@ def render_agent_help() -> None:
             st.info("已送出中止要求，Agent 正在關閉目前工作的子程序。")
     else:
         st.caption("目前沒有執行中的工作。")
+
+    st.markdown("**更新程式：**")
+    pull_disabled = bool(running_tasks) or not tasks_read_ok
+    if st.button(
+        "⬇️ Git Pull 更新程式",
+        use_container_width=True,
+        disabled=pull_disabled,
+        key="agent_git_pull",
+    ):
+        ok, message, _task = create_git_pull_task(
+            created_by=st.session_state.get("username", "Tool System")
+        )
+        list_local_agent_tasks.clear()
+        if ok:
+            st.success(message)
+        else:
+            st.error(message)
+        st.rerun()
+    if running_tasks:
+        st.caption("Agent 有執行中或正在中止的工作，完成後才能更新程式。")
+    elif not tasks_read_ok:
+        st.caption("無法確認 Agent 是否閒置，暫停更新以確保安全。")
+
+    latest_pull = next(
+        (task for task in agent_tasks if task.get("action") == "system.git_pull"),
+        None,
+    )
+    if latest_pull:
+        pull_status = latest_pull.get("status", "")
+        if pull_status in {"pending", "queued", "running"}:
+            st.info(f"Git Pull：{latest_pull.get('message') or '等待 Local Agent 執行'}")
+        elif pull_status == "completed":
+            st.success("Git Pull 更新成功。需要重啟 Agent 才會載入新版。")
+        elif pull_status == "failed":
+            st.error("Git Pull 更新失敗；本機 repository 未被自動覆寫。")
+        if pull_status in {"completed", "failed"}:
+            try:
+                pull_log = read_local_agent_task_log(latest_pull.get("task_id", ""))
+            except Exception as exc:
+                pull_log = f"無法讀取完整 Log：{exc}\n\n{latest_pull.get('log', '')}"
+            st.code(
+                pull_log
+                or latest_pull.get("log")
+                or latest_pull.get("message")
+                or "無輸出",
+                language="text",
+            )
 
     st.markdown(
         """

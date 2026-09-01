@@ -588,6 +588,11 @@ def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_git_pull(_params: dict[str, Any]) -> list[str]:
+    """Update this checkout without rewriting local commits or modifications."""
+    return ["git", "-C", str(PROJECT_ROOT), "pull", "--ff-only"]
+
+
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
 register_action("cetustek.allowance", build_cetustek_allowance)
@@ -615,6 +620,7 @@ register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
 register_action("yuanta.download", build_yuanta_download)
 register_action("yuanta.salary_status", build_yuanta_salary_status)
+register_action("system.git_pull", build_git_pull)
 
 
 def parse_params(task: dict[str, str]) -> dict[str, Any]:
