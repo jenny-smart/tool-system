@@ -18,6 +18,7 @@ __all__ = [
     "append_task_log",
     "claim_next_task",
     "create_task",
+    "create_git_pull_task",
     "default_agent_id",
     "ensure_task_sheet",
     "list_tasks",
@@ -29,6 +30,8 @@ __all__ = [
     "update_task",
     "write_agent_heartbeat",
 ]
+
+ACTIVE_TASK_STATUSES = frozenset({"running", "cancel_requested"})
 
 
 SHEET_NAME = "本機Agent任務"
@@ -149,6 +152,31 @@ def create_task(
         body={"values": [[task[key] for key in HEADERS]]},
     ).execute()
     return task
+
+
+def create_git_pull_task(
+    *,
+    created_by: str = "Tool System",
+    service: Any | None = None,
+    spreadsheet_id: str = "",
+) -> tuple[bool, str, dict[str, Any] | None]:
+    """Queue a safe fast-forward-only pull when the Agent is idle."""
+    service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
+    active_tasks = [
+        task
+        for task in list_tasks(limit=5000, service=service, spreadsheet_id=spreadsheet_id)
+        if task.get("status") in ACTIVE_TASK_STATUSES
+    ]
+    if active_tasks:
+        return False, "Agent 有執行中或正在中止的工作，禁止更新程式", None
+    task = create_task(
+        "system.git_pull",
+        {},
+        created_by=created_by,
+        service=service,
+        spreadsheet_id=spreadsheet_id,
+    )
+    return True, "已送出 Git Pull 更新任務", task
 
 
 def list_tasks(
