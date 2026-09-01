@@ -29,6 +29,10 @@ tools/service_management/service_schedule.py
 選填：
   LOG_SPREADSHEET_ID            執行檔試算表（預設同 LEMON_TARGET_FILE_ID）
   NOTIFY_EMAIL / NOTIFY_PASSWORD / NOTIFY_TO
+  SERVICE_SCHEDULE_DEEP_CLEAN_START
+                                 大掃除起始月份（YYYY-MM-DD，只看年月）。設定後，
+                                 該月起 Step1 一次下載/更新 5 個月，之後每月遞減 1，
+                                 最低回落到 2 個月（本月＋次月）並維持。未設定則一律 2 個月。
 """
 
 from __future__ import annotations
@@ -67,6 +71,16 @@ CONFIG: dict[str, Any] = {
     # 目標試算表（台北台中排班統計表、每日回報所在）
     # 由 main() 動態載入（env SERVICE_TARGET_SPREADSHEET_ID 或主控試算表）
     "target_file_id": "",
+
+    # 每月正常只下載/更新「本月＋次月」共 2 個月。
+    "default_month_window": 2,
+
+    # 大掃除：從某個月份起，一次多下載/更新未來幾個月，之後逐月遞減，
+    # 最後回落到 default_month_window。由環境變數 SERVICE_SCHEDULE_DEEP_CLEAN_START
+    # （格式 YYYY-MM-DD，只看年月）控制起始月份，未設定則不啟用、維持 2 個月。
+    # 例：設定 2026-10-01 → 10月下載5個月、11月4個月、12月3個月、隔年1月2個月，之後維持2個月。
+    "deep_clean_start_months": 5,
+    "deep_clean_start_env": "SERVICE_SCHEDULE_DEEP_CLEAN_START",
 
     # 工作表名稱
     "target_sheet_name": "台北台中排班統計表",
@@ -379,6 +393,11 @@ def find_schedule_files(base: datetime) -> dict[str, dict[str, dict]]:
     current_month = fmt(local_base, "%Y%m")
     run_day = fmt(local_base, "%d")
 
+    month_window = _resolve_month_window(local_base)
+    max_year, max_month_num = _add_months(local_base.year, local_base.month, month_window - 1)
+    max_month = f"{max_year}{max_month_num:02d}"
+    log.info("本次視窗：%s ~ %s（共 %d 個月）", current_month, max_month, month_window)
+
     q = (
         f"'{CONFIG['source_folder_id']}' in parents and trashed=false and ("
         "mimeType='application/vnd.google-apps.spreadsheet' or "
@@ -403,7 +422,7 @@ def find_schedule_files(base: datetime) -> dict[str, dict[str, dict]]:
         if not parsed:
             continue
         month, day, city = parsed
-        if month < current_month or day != run_day:
+        if month < current_month or month > max_month or day != run_day:
             continue
         bucket = buckets.setdefault(month, {"台北": [], "台中": []})
         bucket[city].append(f)
@@ -452,6 +471,41 @@ def _month_offset(base: datetime, month: str) -> int:
     local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
     year, month_number = int(month[:4]), int(month[4:])
     return (year - local_base.year) * 12 + month_number - local_base.month
+
+
+def _resolve_month_window(base: datetime) -> int:
+    """依 CONFIG['deep_clean_start_env'] 計算本次應處理的月份數（本月起算幾個月）。
+
+    未設定該環境變數，或執行月份早於起始月份：回傳 default_month_window（2）。
+    從起始月份當月開始：deep_clean_start_months（5），之後每過一個月遞減 1，
+    最低回落到 default_month_window，不會再往下降。
+    """
+    default_window = CONFIG["default_month_window"]
+    start_raw = os.environ.get(CONFIG["deep_clean_start_env"], "").strip()
+    if not start_raw:
+        return default_window
+
+    try:
+        start_dt = datetime.fromisoformat(start_raw)
+    except ValueError:
+        log.warning(
+            "%s 格式錯誤（應為 YYYY-MM-DD）：%s，改用預設 %d 個月",
+            CONFIG["deep_clean_start_env"], start_raw, default_window,
+        )
+        return default_window
+
+    local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
+    months_since_start = (local_base.year - start_dt.year) * 12 + (local_base.month - start_dt.month)
+    if months_since_start < 0:
+        return default_window
+
+    window = CONFIG["deep_clean_start_months"] - months_since_start
+    return max(default_window, window)
+
+
+def _add_months(year: int, month: int, delta: int) -> tuple[int, int]:
+    total = (year * 12 + (month - 1)) + delta
+    return total // 12, total % 12 + 1
 
 
 def _read_import_values(
