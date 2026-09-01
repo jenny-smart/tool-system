@@ -440,6 +440,13 @@ def _a1_start(a1: str) -> tuple[int, int]:
     return int(m.group(2)), col
 
 
+def _bounded_clear_range(rng: str, row_count: int) -> str:
+    """把開放式欄位範圍（如 'G3:O'）換成明確結尾列（如 'G3:O5000'），
+    避免依賴 Sheets API 對開放式 A1 記法的解讀方式，確保整欄確實被清空。"""
+    start, end_col = rng.split(":")
+    return f"{start}:{end_col}{row_count}"
+
+
 def _month_offset(base: datetime, month: str) -> int:
     """計算 YYYYMM 相對於執行月份的月數，用來保留缺檔月份的槽位。"""
     local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
@@ -611,7 +618,12 @@ def step1_update_schedule_stats(
                 log.error("%s 來源讀取／驗證失敗，略過該月份：%s", month, exc)
                 continue
 
-            target_sh.batch_clear([slot["taipei"], slot["taichung"]])
+            clear_ranges = [
+                _bounded_clear_range(slot["taipei"], target_sh.row_count),
+                _bounded_clear_range(slot["taichung"], target_sh.row_count),
+            ]
+            target_sh.batch_clear(clear_ranges)
+            log.info("  已清除範圍：%s", clear_ranges)
             _write_import_values(target_sh, slot["taipei"], taipei_values)
             _write_import_values(target_sh, slot["taichung"], taichung_values)
             processed[month] = {
