@@ -1238,6 +1238,25 @@ def render_log(target=None) -> None:
     render_target.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
+@st.fragment(run_every="3s")
+def render_execution_log_panel() -> None:
+    """
+    「執行日誌」主面板：每 3 秒自動重畫一次。
+
+    本機 Agent 任務（富邦／元大／藍新／鯨躍／檸檬）的進度是靠
+    render_agent_task_progress 背景輪詢寫進 st.session_state.logs／
+    area_log，但那個 fragment 依規定不能直接動這裡的 LOG_PLACEHOLDER
+    （見 add_log 的說明）。如果這個面板只在使用者操作觸發完整重跑時
+    才畫一次，畫面就會停在「任務已建立」不動，要等使用者自己點什麼
+    才會看到後續進度。改成自己也是一個會自動重跑的 fragment、每次都
+    用自己建立的 placeholder 重畫，就能持續反映背景輪詢寫進去的最新
+    內容，不用等使用者互動。
+    """
+    global LOG_PLACEHOLDER
+    LOG_PLACEHOLDER = st.empty()
+    render_log(LOG_PLACEHOLDER)
+
+
 def mask_id(value: str) -> str:
     if not value:
         return "❌ 未設定"
@@ -3652,8 +3671,7 @@ if system_type == "finance_management" and selected_function == "【鯨躍發票
     render_invoice_create()
 
     # 沿用財務管理既有的執行日誌與 Agent 即時進度元件。
-    LOG_PLACEHOLDER = st.empty()
-    render_log()
+    render_execution_log_panel()
     render_agent_task_progress(("cetustek.",))
 
     if st.button("🗑️ 清除日誌", key="clear_invoice_log"):
@@ -4625,8 +4643,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 # ═══════════════════════════════════════════════════════════
 # UI — 日誌
 # ═══════════════════════════════════════════════════════════
-LOG_PLACEHOLDER = st.empty()
-render_log()
+render_execution_log_panel()
 
 if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】", "【財政部電子發票】")):
     render_agent_task_progress(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta.", "mofei."))
