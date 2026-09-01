@@ -328,41 +328,48 @@ def login(page: Page, account: AreaAccount) -> list[str]:
 
     page.on("dialog", show_dialog)
     page.on("response", show_login_response)
-    if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
-        expected_name = NEWEBPAY_COMPANY_NAMES.get(account.company_id)
-        if expected_name and page.get_by_text(expected_name).count() > 0:
-            print(f"[{account.area}] 沿用目前藍新登入狀態（{expected_name}）。")
-            return login_messages
-        print(f"[{account.area}] 目前藍新分頁登入的公司不是設定的帳號，先登出再重新登入。")
-        try:
-            logout(page, account.area)
-        except Exception:
-            pass
-    fill_enterprise_login(page, account)
+    try:
+        if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
+            expected_name = NEWEBPAY_COMPANY_NAMES.get(account.company_id)
+            if expected_name and page.get_by_text(expected_name).count() > 0:
+                print(f"[{account.area}] 沿用目前藍新登入狀態（{expected_name}）。")
+                return login_messages
+            print(f"[{account.area}] 目前藍新分頁登入的公司不是設定的帳號，先登出再重新登入。")
+            try:
+                logout(page, account.area)
+            except Exception:
+                pass
+        fill_enterprise_login(page, account)
 
-    max_retries = 3
-    print(f"\n[{account.area}] 企業帳密已預填。")
-    print(f"請直接在網頁輸入驗證碼，並點擊「企業會員登入」。若驗證碼填錯，最多可重新輸入 {max_retries} 次。")
+        max_retries = 3
+        print(f"\n[{account.area}] 企業帳密已預填。")
+        print(f"請直接在網頁輸入驗證碼，並點擊「企業會員登入」。若驗證碼填錯，最多可重新輸入 {max_retries} 次。")
 
-    retries = 0
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if "/sale/Sell_center/search_transaction" in page.url:
-            return login_messages
-        if "/main/login_center/single_login" in page.url:
-            company_id = visible_login_field(page, ('.MoComUbn', 'input[name="LoginUBN"]'))
-            if company_id is not None and not company_id.input_value().strip():
-                if retries >= max_retries:
-                    detail = f"；最後訊息：{login_messages[-1]}" if login_messages else ""
-                    raise RuntimeError(f"{account.area} 驗證碼已重試 {max_retries} 次仍失敗，停止等待{detail}")
-                retries += 1
-                fill_enterprise_login(page, account)
-                deadline = time.monotonic() + 30
-                print(f"[{account.area}] 已重新填入企業帳密（第 {retries}/{max_retries} 次重試），請輸入網頁上的新驗證碼。")
-        page.wait_for_timeout(500)
+        retries = 0
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if "/sale/Sell_center/search_transaction" in page.url:
+                return login_messages
+            if "/main/login_center/single_login" in page.url:
+                company_id = visible_login_field(page, ('.MoComUbn', 'input[name="LoginUBN"]'))
+                if company_id is not None and not company_id.input_value().strip():
+                    if retries >= max_retries:
+                        detail = f"；最後訊息：{login_messages[-1]}" if login_messages else ""
+                        raise RuntimeError(f"{account.area} 驗證碼已重試 {max_retries} 次仍失敗，停止等待{detail}")
+                    retries += 1
+                    fill_enterprise_login(page, account)
+                    deadline = time.monotonic() + 30
+                    print(f"[{account.area}] 已重新填入企業帳密（第 {retries}/{max_retries} 次重試），請輸入網頁上的新驗證碼。")
+            page.wait_for_timeout(500)
 
-    detail = f"；最後訊息：{login_messages[-1]}" if login_messages else ""
-    raise RuntimeError(f"{account.area} 等待登入逾時，目前頁面：{page.url}{detail}")
+        detail = f"；最後訊息：{login_messages[-1]}" if login_messages else ""
+        raise RuntimeError(f"{account.area} 等待登入逾時，目前頁面：{page.url}{detail}")
+    finally:
+        # 每個帳號都會呼叫一次 login()，同一個分頁若不移除上一個帳號註冊的
+        # dialog/response handler，訊息會越疊越多，導致終端機印出「上一個
+        # 地區」的訊息、跟實際在處理的地區對不上。
+        page.remove_listener("dialog", show_dialog)
+        page.remove_listener("response", show_login_response)
 
 
 def no_transaction_data(messages: list[str], start_index: int) -> bool:
@@ -644,6 +651,11 @@ def main() -> int:
                 except Exception as exc:
                     failures.append(f"{account.area}: {exc}")
                     print(f"  失敗：{exc}", file=sys.stderr)
+                    if shared_page.is_closed():
+                        # 分頁/瀏覽器掛掉時不要讓後面所有地區跟著全部失敗，
+                        # 開一個新分頁繼續處理剩下的地區。
+                        print("藍新分頁已中斷，開新分頁繼續處理剩下的地區。", file=sys.stderr)
+                        shared_page = context.new_page()
         finally:
             if not shared_page.is_closed():
                 shared_page.close()
