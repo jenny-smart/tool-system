@@ -75,6 +75,10 @@ CONFIG: dict[str, Any] = {
     # 每月正常只下載/更新「本月＋次月」共 2 個月。
     "default_month_window": 2,
 
+    # 清除範圍至少要涵蓋到第幾列（從第 3 列起算），即使工作表 row_count 異常偏小
+    # 也保證清到這裡，避免新資料列數變少時舊資料殘留。
+    "min_clear_rows": 120,
+
     # 大掃除：從某個月份起，一次多下載/更新未來幾個月，之後逐月遞減，
     # 最後回落到 default_month_window。由環境變數 SERVICE_SCHEDULE_DEEP_CLEAN_START
     # （格式 YYYY-MM-DD，只看年月）控制起始月份，未設定則不啟用、維持 2 個月。
@@ -672,9 +676,10 @@ def step1_update_schedule_stats(
                 log.error("%s 來源讀取／驗證失敗，略過該月份：%s", month, exc)
                 continue
 
+            clear_row_bound = max(target_sh.row_count, CONFIG["min_clear_rows"])
             clear_ranges = [
-                _bounded_clear_range(slot["taipei"], target_sh.row_count),
-                _bounded_clear_range(slot["taichung"], target_sh.row_count),
+                _bounded_clear_range(slot["taipei"], clear_row_bound),
+                _bounded_clear_range(slot["taichung"], clear_row_bound),
             ]
             target_sh.batch_clear(clear_ranges)
             log.info("  已清除範圍：%s", clear_ranges)
