@@ -512,6 +512,10 @@ def _add_months(year: int, month: int, delta: int) -> tuple[int, int]:
     return total // 12, total % 12 + 1
 
 
+class EmptySourceError(ValueError):
+    """來源檔案讀取成功，但內容沒有可貼入的資料列（跟技術性讀取失敗不同）。"""
+
+
 def _read_import_values(
     file_info: dict,
     drive,
@@ -574,7 +578,7 @@ def _read_import_values(
     values = [r for r in values if any(str(c).strip() for c in r)]
 
     if not values:
-        raise ValueError(f"來源沒有可貼入資料：{name}")
+        raise EmptySourceError(f"來源沒有可貼入資料：{name}")
     return values
 
 
@@ -646,6 +650,38 @@ def cleanup_previous_month_files(run_dt: datetime, drive) -> list[str]:
 # Step 1：更新排班統計表
 # ──────────────────────────────────────────────────────────
 
+def _process_city_slot(
+    target_sh: gspread.Worksheet,
+    label: str,
+    file_info: dict,
+    slot_range: str,
+    drive,
+    gc: gspread.Client,
+) -> str | None:
+    """獨立處理單一城市單一月份的槽位：不管另一個城市成功或失敗都會執行。
+
+    先無條件清空槽位，再嘗試讀取來源：
+    - 讀到資料 → 貼上，回傳來源檔名。
+    - 讀不到資料（來源確定是空的，或讀取技術性失敗）→ 保留清空後的空白，回傳 None。
+    """
+    clear_row_bound = max(target_sh.row_count, CONFIG["min_clear_rows"])
+    clear_range = _bounded_clear_range(slot_range, clear_row_bound)
+    target_sh.batch_clear([clear_range])
+    log.info("  已清除範圍（%s）：%s", label, clear_range)
+
+    try:
+        values = _read_import_values(file_info, drive, gc)
+    except EmptySourceError as exc:
+        log.warning("  %s：%s，保留空白", label, exc)
+        return None
+    except Exception as exc:
+        log.error("  %s 讀取失敗，保留空白：%s", label, exc)
+        return None
+
+    _write_import_values(target_sh, slot_range, values)
+    return file_info["name"]
+
+
 def step1_update_schedule_stats(
     run_dt: datetime, gc: gspread.Client, drive, run_id: str
 ) -> dict:
@@ -668,27 +704,16 @@ def step1_update_schedule_stats(
                 continue
 
             slot = slots[index]
-            try:
-                # 同月台北／台中都讀取並驗證完成後，才可清除目標。
-                taipei_values = _read_import_values(pair["taipei"], drive, gc)
-                taichung_values = _read_import_values(pair["taichung"], drive, gc)
-            except Exception as exc:
-                log.error("%s 來源讀取／驗證失敗，略過該月份：%s", month, exc)
-                continue
-
-            clear_row_bound = max(target_sh.row_count, CONFIG["min_clear_rows"])
-            clear_ranges = [
-                _bounded_clear_range(slot["taipei"], clear_row_bound),
-                _bounded_clear_range(slot["taichung"], clear_row_bound),
-            ]
-            target_sh.batch_clear(clear_ranges)
-            log.info("  已清除範圍：%s", clear_ranges)
-            _write_import_values(target_sh, slot["taipei"], taipei_values)
-            _write_import_values(target_sh, slot["taichung"], taichung_values)
-            processed[month] = {
-                "taipei": pair["taipei"]["name"],
-                "taichung": pair["taichung"]["name"],
-            }
+            # 台北／台中各自獨立處理：一邊技術性失敗不會擋到另一邊更新，
+            # 一邊確定沒有資料就清空該邊、不影響另一邊。
+            taipei_name = _process_city_slot(
+                target_sh, f"{month} 台北", pair["taipei"], slot["taipei"], drive, gc,
+            )
+            taichung_name = _process_city_slot(
+                target_sh, f"{month} 台中", pair["taichung"], slot["taichung"], drive, gc,
+            )
+            if taipei_name or taichung_name:
+                processed[month] = {"taipei": taipei_name, "taichung": taichung_name}
 
         if not processed:
             raise RuntimeError("沒有任何月份成功更新")
