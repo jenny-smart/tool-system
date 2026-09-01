@@ -1,0 +1,32 @@
+2026-09-01 00:57:35 [INFO] === 客服排程系統 run_id=17f80571 step=1 台北時間=2026-09-01 08:57:35 ===
+2026-09-01 00:57:35 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-09-01 00:57:35 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-09-01 00:57:54 [INFO] --- Step1_更新排班統計表 ---
+2026-09-01 00:57:56 [INFO] 訂單資料 找不到 202608 檔案（略過）
+2026-09-01 00:57:56 [INFO] 專員個資 找不到 202608 檔案（略過）
+2026-09-01 00:57:56 [INFO] 專員班表 找不到 202608 檔案（略過）
+2026-09-01 00:57:56 [INFO] 排班統計表 找不到 202608 檔案（略過）
+2026-09-01 00:57:56 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-09-01 00:57:56 [INFO] Drive 資料夾找到 12 個檔案
+2026-09-01 00:57:56 [INFO]   找到檔案：20261001排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260901排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20261001排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260901排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20261001排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20261001排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260901排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260901排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260931排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260931排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260931排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-01 00:57:56 [INFO]   找到檔案：20260931排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-01 00:57:56 [INFO] 排班檔確認 OK：{'202609': {'taipei': '20260901排班統計表-台北', 'taichung': '20260901排班統計表-台中'}, '202610': {'taipei': '20261001排班統計表-台北', 'taichung': '20261001排班統計表-台中'}}
+2026-09-01 00:57:57 [INFO]   匯入：20260901排班統計表-台北
+2026-09-01 00:57:58 [INFO]   匯入：20260901排班統計表-台中
+2026-09-01 00:58:02 [INFO]   → 寫入 76 列（起始 R3C7）
+2026-09-01 00:58:03 [INFO]   → 寫入 11 列（起始 R3C82）
+2026-09-01 00:58:03 [INFO]   匯入：20261001排班統計表-台北
+2026-09-01 00:58:04 [INFO]   匯入：20261001排班統計表-台中
+2026-09-01 00:58:05 [ERROR] 202610 來源讀取／驗證失敗，略過該月份：來源沒有可貼入資料：20261001排班統計表-台中
+2026-09-01 00:58:06 [INFO] Step 1 完成（11.2s）
+2026-09-01 00:58:08 [INFO] === 全部完成 run_id=17f80571（12.1s）===
