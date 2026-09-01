@@ -91,9 +91,11 @@ CONFIG: dict[str, Any] = {
     },
 
     # 依資料月份由近到遠寫入，清除時保留格式。
+    # 每個 slot 的清除範圍需與 _write_import_values 的實際寫入寬度（起始欄 +8，共 9 欄）對齊，
+    # 否則寫入寬度會超出清除範圍，殘留舊資料清不到。
     "schedule_import_slots": [
-        {"taipei": "G3:O",   "taichung": "CD3:CK"},
-        {"taipei": "V3:AD",  "taichung": "CS3:CZ"},
+        {"taipei": "G3:O",   "taichung": "CD3:CL"},
+        {"taipei": "V3:AD",  "taichung": "CS3:DA"},
         {"taipei": "AK3:AS", "taichung": "DH3:DP"},
         {"taipei": "AZ3:BH", "taichung": "DW3:EE"},
         {"taipei": "BO3:BW", "taichung": "EL3:ET"},
