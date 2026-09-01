@@ -3372,6 +3372,11 @@ MONTHLY_SCRIPT_MAP = {
     "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
 }
 
+# 儲值金結算／儲值金預收不套用「月排程系統」的承攬費總根目錄，
+# 而是存在財務自己的根目錄（YYYY/YYYYMM，無地區子資料夾）。
+STORED_VALUE_FUNCTIONS = {"儲值金結算", "儲值金預收"}
+STORED_VALUE_ROOT_FOLDER_ID = os.getenv("STORED_VALUE_ROOT_FOLDER_ID", "").strip() or "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv"
+
 DAILY_TARGET_MAP = {
     "一鍵執行日排程": "all",
     "排班統計表": "schedule_report",
@@ -5305,7 +5310,12 @@ if run_clicked:
                         result = results
 
                     else:
-                        args = [*base_args, "--folder-id", folder_id]
+                        target_folder_id = (
+                            STORED_VALUE_ROOT_FOLDER_ID
+                            if selected_function in STORED_VALUE_FUNCTIONS
+                            else folder_id
+                        )
+                        args = [*base_args, "--folder-id", target_folder_id]
 
                         # 0704_v3：
                         # 這裡不能再使用預設 all。
