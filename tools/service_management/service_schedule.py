@@ -660,27 +660,24 @@ def _process_city_slot(
 ) -> str | None:
     """獨立處理單一城市單一月份的槽位：不管另一個城市成功或失敗都會執行。
 
-    - 讀取成功且有資料 → 先清空槽位、再貼上，回傳來源檔名。
-    - 讀取成功但確定沒有資料（EmptySourceError）→ 清空槽位（維持誠實的空白），回傳 None。
-    - 讀取技術性失敗（其他例外）→ 維持原狀不清不寫，回傳 None。
+    先無條件清空槽位，再嘗試讀取來源：
+    - 讀到資料 → 貼上，回傳來源檔名。
+    - 讀不到資料（來源確定是空的，或讀取技術性失敗）→ 保留清空後的空白，回傳 None。
     """
-    try:
-        values = _read_import_values(file_info, drive, gc)
-    except EmptySourceError as exc:
-        log.warning("  %s：%s，清空槽位維持空白", label, exc)
-        clear_row_bound = max(target_sh.row_count, CONFIG["min_clear_rows"])
-        clear_range = _bounded_clear_range(slot_range, clear_row_bound)
-        target_sh.batch_clear([clear_range])
-        log.info("  已清除範圍（%s，來源為空）：%s", label, clear_range)
-        return None
-    except Exception as exc:
-        log.error("  %s 讀取失敗，維持原狀：%s", label, exc)
-        return None
-
     clear_row_bound = max(target_sh.row_count, CONFIG["min_clear_rows"])
     clear_range = _bounded_clear_range(slot_range, clear_row_bound)
     target_sh.batch_clear([clear_range])
     log.info("  已清除範圍（%s）：%s", label, clear_range)
+
+    try:
+        values = _read_import_values(file_info, drive, gc)
+    except EmptySourceError as exc:
+        log.warning("  %s：%s，保留空白", label, exc)
+        return None
+    except Exception as exc:
+        log.error("  %s 讀取失敗，保留空白：%s", label, exc)
+        return None
+
     _write_import_values(target_sh, slot_range, values)
     return file_info["name"]
 
