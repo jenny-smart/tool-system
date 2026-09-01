@@ -38,8 +38,8 @@ JOBS = {
     "half_month_orders_2": {"label": "下半月訂單", "script": "tools/scheduled_monthly/half_month_orders.py", "extra": ["--half", "2"], "needs_folder_id": True},
     "refund_report": {"label": "已退款", "script": "tools/scheduled_monthly/refund_report.py", "extra": [], "needs_folder_id": True},
     "prepaid_report": {"label": "預收", "script": "tools/scheduled_monthly/prepaid_report.py", "extra": [], "needs_folder_id": True},
-    "stored_value_settlement": {"label": "儲值金結算", "script": "tools/scheduled_monthly/stored_value_settlement.py", "extra": [], "needs_folder_id": True, "root_env": "STORED_VALUE_ROOT_FOLDER_ID"},
-    "stored_value_prepaid": {"label": "儲值金預收", "script": "tools/scheduled_monthly/stored_value_prepaid.py", "extra": [], "needs_folder_id": True, "root_env": "STORED_VALUE_ROOT_FOLDER_ID"},
+    "stored_value_settlement": {"label": "儲值金結算", "script": "tools/scheduled_monthly/stored_value_settlement.py", "extra": [], "needs_folder_id": True, "root_env": "STORED_VALUE_ROOT_FOLDER_ID", "root_default": "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv"},
+    "stored_value_prepaid": {"label": "儲值金預收", "script": "tools/scheduled_monthly/stored_value_prepaid.py", "extra": [], "needs_folder_id": True, "root_env": "STORED_VALUE_ROOT_FOLDER_ID", "root_default": "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv"},
 }
 
 
@@ -289,7 +289,9 @@ def main(target: str = "all", folder_id: str = "", area: str = "all", period: st
         root_env = job.get("root_env")
         if root_env:
             # 這些任務有自己獨立的雲端硬碟根目錄，不套用「{年}專員承攬服務費」這層包裝。
-            job_folder_id = os.getenv(root_env, "").strip()
+            # 環境變數優先；若當下執行環境沒設（例如 toolapp.py 直接 import 呼叫，
+            # 不是透過 GitHub Actions），退回寫死的預設根目錄。
+            job_folder_id = os.getenv(root_env, "").strip() or job.get("root_default", "")
             if not job_folder_id:
                 failed.append({"job": job_name, "status": "failed", "message": f"缺少 {root_env}"})
                 if target != "all":
