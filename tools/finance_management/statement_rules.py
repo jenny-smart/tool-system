@@ -22,20 +22,19 @@
   G 條件2比對
   H 條件2值
   I 設定I欄（符合就把財報 I 欄設成這個值）
-  J L欄月份位移（相對 K 欄的月份，例如 -2 表示往前兩個月；留空表示不改 L 欄）
+  J L欄月份位移（相對月份來源，例如 -2 表示往前兩個月；留空表示不改 L 欄）
   K L欄後綴文字（L 欄標記＝該月份 "YYYY.MM"＋"-"＋這個後綴；留空表示不改 L 欄）
   L 客訴金額搬移（TRUE＝把 F 欄金額搬到 E 欄且轉負數，E=-F，並把 F 欄清成 0，
            避免同一筆金額 E、F 兩欄都算到）
   M 列處理（更新原列／插入新列——插入新列時原列不動，複製一份新列在下面，
            只改新列的 I／L／E，其餘欄位照抄原列）
-  N 金額對半欄位（例如 E；有填時，這條規則跟同一列命中的「更新原列」規則
-           會各拿原始金額的一半——原始金額是整數且不能平分時，前面的規則
-           拿少 1 元的那一半、後面（插入新列）的規則拿多 1 元的那一半，
-           兩邊加起來等於原始金額，不會多算或少算。留空表示照抄原值，不分帳）
+  N 金額分攤份數（例如 2／6；同一筆命中的分攤規則必須全部填相同份數，程式
+           會把 E 欄原始金額平均分成指定份數。不能整除時會把餘數分配到後面的
+           列，所有分攤列加總仍等於原始金額。舊規則填 E 的寫法仍相容）
   O 條件關係（且／或，留空當「或」——例如 H含新訓 或 L含新訓；要「且」就填「且」，
            只有同時有條件1和條件2時才有意義）
-  P L欄年月來源（留空或 K＝依 K 欄日期；J＝讀取 J 欄開頭的 YYYYMM，亦接受
-           YYYY.MM／YYYY-MM／YYYY/MM）
+  P L欄年月來源（K＝依 K 欄日期；J＝讀取 J 欄開頭的 YYYYMM，亦接受
+           YYYY.MM／YYYY-MM／YYYY/MM；留空時若 J 有 YYYYMM 就優先用 J，否則用 K）
   Q 設定E欄固定金額（例如 -2406；留空表示保留原金額。可用於新增固定費用列）
 
 新增欄位一律加在既有欄位最後面（不要插在中間），避免手動插入分頁欄位時
@@ -58,11 +57,12 @@ RULES_SHEET_NAME = "財報篩選規則"
 RULES_HEADER = [
     "啟用", "規則名稱", "條件1欄位", "條件1比對", "條件1值",
     "條件2欄位", "條件2比對", "條件2值",
-    "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理", "金額對半欄位",
+    "設定I欄", "L欄月份位移", "L欄後綴", "客訴金額搬移(E=-F)", "列處理", "金額分攤份數",
     "條件關係(且/或)", "L欄年月來源", "設定E欄固定金額",
 ]
 
 # 預設規則（第一次建立分頁時寫入，之後只從分頁讀取，不再看這份清單）。
+# N 欄舊版使用金額欄位代號（例如 E）；解析器保留相容，避免既有規則失效。
 DEFAULT_RULES: list[list[object]] = [
     [True, "LC匯款收入", "L", "包含", "LC", "", "", "", "匯款收入", "", "", False, "更新原列", "", ""],
     [True, "客訴退費", "L", "包含", "客訴", "", "", "", "清潔-客訴退費(損壞、細膩度等)", "", "", True, "更新原列", "", ""],
@@ -82,7 +82,6 @@ INSERT_ACTION = "插入新列"
 TW_TZ = ZoneInfo("Asia/Taipei")
 COL_Q, COL_R = 17, 18
 
-# 條件比對容錯：允許直接打符號，不用硬記中文名稱。
 _COMPARATOR_ALIASES = {
     "<": "小於", "＜": "小於",
     "<=": "小於等於", "≦": "小於等於", "=<": "小於等於",
@@ -187,6 +186,33 @@ def _statement_row_date(row: list[object]):
     return None
 
 
+def _month_from_j(row: list[object]) -> tuple[int, int] | None:
+    marker = str(_cell_by_letter(row, "J") or "").strip()
+    match = re.match(r"^(\d{4})[./-]?(0[1-9]|1[0-2])", marker)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _split_integer_amount(total: float, parts: int) -> list[float]:
+    """把整數金額分成指定份數，總和保持不變；非整數則平均分配到各份。"""
+    if parts < 2:
+        raise ValueError("金額分攤份數至少要 2")
+    if float(total).is_integer():
+        integer_total = int(total)
+        sign = -1 if integer_total < 0 else 1
+        absolute_total = abs(integer_total)
+        base, remainder = divmod(absolute_total, parts)
+        shares = [base] * parts
+        for i in range(parts - remainder, parts):
+            shares[i] += 1
+        return [float(sign * value) for value in shares]
+    share = total / parts
+    shares = [share] * parts
+    shares[-1] += total - sum(shares)
+    return shares
+
+
 class Rule:
     def __init__(self, raw: list[object]):
         self.enabled = _to_bool(_cell(raw, 1))
@@ -202,11 +228,16 @@ class Rule:
         self.suffix = str(_cell(raw, 11) or "").strip()
         self.move_complaint_amount = _to_bool(_cell(raw, 12))
         self.action = str(_cell(raw, 13) or "").strip() or "更新原列"
-        # 容錯：欄位有時會被填成 "E/2" 這種寫法，只取開頭的英文字母當欄位代號。
-        raw_split_column = str(_cell(raw, 14) or "").strip().upper()
-        self.split_column = "".join(ch for ch in raw_split_column if ch.isalpha())
+
+        raw_split = str(_cell(raw, 14) or "").strip().upper()
+        numeric_parts = _to_int_or_none(raw_split)
+        self.split_parts = numeric_parts if numeric_parts is not None and numeric_parts >= 2 else None
+        # 舊版 N 欄填 E／F 等欄位代號仍可繼續使用。
+        self.split_column = "" if self.split_parts else "".join(ch for ch in raw_split if ch.isalpha())
+
         self.relation = str(_cell(raw, 15) or "").strip() or "或"
-        self.month_source = str(_cell(raw, 16) or "K").strip().upper() or "K"
+        # 保留空白，讓 l_value() 可以自動判斷：J 有 YYYYMM 就用 J，否則用 K。
+        self.month_source = str(_cell(raw, 16) or "").strip().upper()
         self.set_e = _to_number_or_none(_cell(raw, 17))
 
     def _one_condition_matches(self, row: list[object], col: str, cmp_: str, values: list[str]) -> bool:
@@ -256,7 +287,7 @@ class Rule:
                 if low <= row_date.day <= high:
                     return True
             return False
-        return any(v in text for v in values)  # 包含（預設）
+        return any(v in text for v in values)  # 包含（含「等於/包含」等自訂文字時也採包含）
 
     def matches(self, row: list[object]) -> bool:
         cond1 = self._one_condition_matches(row, self.col1, self.cmp1, self.values1)
@@ -270,17 +301,29 @@ class Rule:
     def l_value(self, row: list[object]) -> str | None:
         if self.month_offset is None or not self.suffix:
             return None
+
+        base_year = base_month = None
         if self.month_source == "J":
-            marker = str(_cell_by_letter(row, "J") or "").strip()
-            match = re.match(r"^(\d{4})[./-]?(0[1-9]|1[0-2])", marker)
-            if match is None:
-                return None
-            base_year, base_month = int(match.group(1)), int(match.group(2))
-        else:
+            parsed_month = _month_from_j(row)
+            if parsed_month:
+                base_year, base_month = parsed_month
+        elif self.month_source == "K":
             base_date = _parse_date(_cell_by_letter(row, "K"))
-            if base_date is None:
-                return None
-            base_year, base_month = base_date.year, base_date.month
+            if base_date is not None:
+                base_year, base_month = base_date.year, base_date.month
+        else:
+            # 新增／人工科目列通常只有 J 欄會寫 202609台北營業稅 這類月份標記；
+            # 銀行匯入資料則以 K 欄記帳日期為主。空白時自動兼容兩種資料來源。
+            parsed_month = _month_from_j(row)
+            if parsed_month:
+                base_year, base_month = parsed_month
+            else:
+                base_date = _parse_date(_cell_by_letter(row, "K"))
+                if base_date is not None:
+                    base_year, base_month = base_date.year, base_date.month
+
+        if base_year is None or base_month is None:
+            return None
         month_index = base_year * 12 + (base_month - 1) + self.month_offset
         if month_index < 0:
             return None
@@ -311,18 +354,27 @@ def _ensure_rules_sheet(service, spreadsheet_id: str) -> None:
 
 
 def _migrate_rules_sheet(service, spreadsheet_id: str) -> None:
-    """分頁已存在但欄位比目前 RULES_HEADER 少（例如程式新增了欄位）時，自動在
-    最後面補齊缺少的標題／預設值，不用手動去分頁裡插欄位。只會「往後補」，
-    不會動到既有欄位的位置或內容。"""
+    """分頁已存在但欄位比目前 RULES_HEADER 少時，只往最後面補欄位，不移動既有資料。"""
     last_col = _column_letter(len(RULES_HEADER))
     header_res = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id, range=f"'{RULES_SHEET_NAME}'!A1:{last_col}1"
     ).execute()
     existing_header = (header_res.get("values") or [[]])[0]
+
+    # N 欄只是標題語意由「對半欄位」改為「分攤份數」，位置不變，可安全更新標題；
+    # 既有 N=E 的資料仍由 Rule 保留相容，不改內容。
+    if len(existing_header) >= 14 and str(existing_header[13]).strip() != RULES_HEADER[13]:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{RULES_SHEET_NAME}'!N1",
+            valueInputOption="RAW",
+            body={"values": [[RULES_HEADER[13]]]},
+        ).execute()
+
     if len(existing_header) >= len(RULES_HEADER):
         return
 
-    missing_start = len(existing_header) + 1  # 1-based，缺少欄位的起始欄
+    missing_start = len(existing_header) + 1
     service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
         range=f"'{RULES_SHEET_NAME}'!{_column_letter(missing_start)}1:{last_col}1",
@@ -388,16 +440,10 @@ def _sheet_id_for_title(service, spreadsheet_id: str, title: str) -> int:
 
 
 def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
-    """套用「財報篩選規則」分頁裡的所有啟用規則到指定地區的財報富邦更新分頁。
+    """套用所有啟用規則到指定地區的財報「富邦更新」分頁。
 
-    start_date／end_date（date 物件，兩者皆可留空）會依 B 欄（帳務日）限制只處理
-    該區間內的列；沒給日期區間就處理整張表。
-
-    Q 欄已經有更新時間的列會直接跳過，不會重複套用規則——重複執行同一段
-    日期區間是安全的，不會把 F 欄清過一次的客訴列再清一次、也不會重複插入
-    水電費對半的新列。
-
-    每次執行都會在主控試算表的「財務工具執行記錄」分頁留下一筆記錄。
+    目標位置一律透過「財報設定」解析：例如執行地區＝台北，就只讀寫台北財報
+    的富邦更新；台中則讀寫台中財報，不共用或寫死任何試算表 ID/GID。
     """
     date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
     log_execution("財報富邦更新套用規則", area, "開始", f"日期區間：{date_range}")
@@ -422,12 +468,11 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
 
     service = get_sheets_service()
     value_updates: list[dict[str, object]] = []
-    # (row_idx, [new_row_values, ...])，row_idx 由大到小處理避免插入後索引跑掉
     pending_inserts: list[tuple[int, list[list[object]]]] = []
 
     for row_idx, row in enumerate(values[1:], start=2):
         if str(_cell(row, COL_Q)).strip():
-            continue  # Q欄已有更新時間，代表這列處理過了，不重複套規則
+            continue
 
         if start_date or end_date:
             row_date = _statement_row_date(row)
@@ -446,29 +491,48 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
             if rule.action == INSERT_ACTION:
                 insert_rules.append(rule)
             else:
-                in_place_rule = rule  # 同一列多條「更新原列」規則命中時，以最後一條為準
+                in_place_rule = rule
 
-        # 金額對半：同一列命中的「更新原列」規則＋「插入新列」規則，如果指定了
-        # 同一個金額對半欄位，就把原始金額拆成整數兩半（不能平分時，前面／
-        # 更新原列那份少 1、插入新列那份多 1），取代直接複製整筆金額。
+        # 分攤規則：新版 N 欄填份數（2／6），固定分攤 E 欄；舊版 N=E 仍依欄位代號處理。
         split_targets: list[tuple[str, int | None]] = []
         split_column = None
-        if in_place_rule is not None and in_place_rule.split_column:
-            split_column = in_place_rule.split_column
+        expected_parts = None
+
+        if in_place_rule is not None and (in_place_rule.split_parts or in_place_rule.split_column):
+            expected_parts = in_place_rule.split_parts
+            split_column = "E" if in_place_rule.split_parts else in_place_rule.split_column
             split_targets.append(("in_place", None))
+
         for i, rule in enumerate(insert_rules):
-            if rule.split_column and (split_column is None or rule.split_column == split_column):
-                split_column = split_column or rule.split_column
-                split_targets.append(("insert", i))
+            if not (rule.split_parts or rule.split_column):
+                continue
+            rule_column = "E" if rule.split_parts else rule.split_column
+            if split_column is not None and rule_column != split_column:
+                continue
+            if expected_parts is not None and rule.split_parts not in (None, expected_parts):
+                raise RuntimeError(
+                    f"第 {row_idx} 列命中的金額分攤規則份數不一致：{expected_parts} 與 {rule.split_parts}"
+                )
+            expected_parts = expected_parts or rule.split_parts
+            split_column = split_column or rule_column
+            split_targets.append(("insert", i))
+
         split_values: dict[tuple[str, int | None], float] = {}
         if split_column and len(split_targets) >= 2:
+            parts = expected_parts or len(split_targets)
+            if expected_parts is not None and len(split_targets) != expected_parts:
+                matched_names = []
+                if in_place_rule is not None and (in_place_rule.split_parts or in_place_rule.split_column):
+                    matched_names.append(in_place_rule.name)
+                matched_names.extend(
+                    rule.name for rule in insert_rules if rule.split_parts or rule.split_column
+                )
+                raise RuntimeError(
+                    f"第 {row_idx} 列金額分攤設定為 {expected_parts} 份，但只命中 {len(split_targets)} 條規則："
+                    + "、".join(matched_names)
+                )
             total = _to_number(_cell(row, _letter_to_index(split_column)))
-            parts = len(split_targets)
-            base = int(total // parts)
-            remainder = int(total - base * parts)
-            shares = [base] * parts
-            for i in range(parts - remainder, parts):
-                shares[i] += 1
+            shares = _split_integer_amount(total, parts)
             for target, share in zip(split_targets, shares):
                 split_values[target] = share
 
@@ -536,11 +600,11 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
                     new_row[5] = 0
                     changes.append(f"E={new_row[4]}, F=0")
                 if ("insert", i) in split_values:
-                    col_index = _letter_to_index(rule.split_column)
+                    col_index = _letter_to_index(split_column)
                     while len(new_row) < col_index:
                         new_row.append("")
                     new_row[col_index - 1] = split_values[("insert", i)]
-                    changes.append(f"{rule.split_column}={split_values[('insert', i)]}")
+                    changes.append(f"{split_column}={split_values[('insert', i)]}")
                 if rule.set_e is not None:
                     while len(new_row) < 5:
                         new_row.append("")
@@ -564,7 +628,7 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, in
     if pending_inserts:
         sheet_id = _sheet_id_for_title(service, spreadsheet_id, title)
         for row_idx, new_rows in sorted(pending_inserts, key=lambda item: item[0], reverse=True):
-            after_index = row_idx  # 0-based 索引正好等於「原列（1-based row_idx）之後」
+            after_index = row_idx
             service.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id,
                 body={"requests": [{
