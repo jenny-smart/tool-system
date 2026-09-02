@@ -3403,7 +3403,8 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【CRM】重新排序Raw",
         # 儲值金服務排程管理
         "【儲值】抓儲值金",
-        "【儲值】匯出VIP日曆對帳",
+        "【儲值】匯出VIP日曆",
+        "【儲值】建立VIP排程工作表",
         "【儲值】全跑（抓儲值金＋匯出VIP）",
     ],
     # ────────────────────────────────────────────────────────
@@ -3500,7 +3501,8 @@ SERVICE_STEP_MAP = {
 # ── ★ 儲值：功能 → stored_value.py --step 對應表 ─────────────
 SERVICE_STORED_VALUE_MAP = {
     "【儲值】抓儲值金":                  "1",
-    "【儲值】匯出VIP日曆對帳":           "2",
+    "【儲值】匯出VIP日曆":               "2",
+    "【儲值】建立VIP排程工作表":         "3",
     "【儲值】全跑（抓儲值金＋匯出VIP）":  "0",
 }
 
@@ -4217,7 +4219,7 @@ with date_col:
     elif system_type == "service_schedule":
         _today_date = datetime.now(TW_TZ).date()
 
-        if selected_function in ("【儲值】匯出VIP日曆對帳", "【儲值】全跑（抓儲值金＋匯出VIP）"):
+        if selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）"):
             st.markdown('<div class="field-label">📆 匯出設定</div>', unsafe_allow_html=True)
             _crm_mode = st.radio(
                 "匯出方式", ["期別（月份）", "日期區間"],

@@ -602,6 +602,13 @@ def parse_title(title: str) -> dict:
         "phone":   parts[1] if len(parts) > 1 else "",
     }
 
+def normalize_phone(phone: Any) -> str:
+    """將台灣手機號碼正規化為含開頭 0 的 10 碼文字。"""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == 9 and digits.startswith("9"):
+        digits = "0" + digits
+    return digits if len(digits) == 10 else str(phone or "").strip()
+
 def get_status(color: str) -> str:
     if color == COLOR_PAUSE:      return "暫停"
     if color == COLOR_UNARRANGED: return "未安排"
@@ -756,7 +763,7 @@ def _process_events(events: list, area_name: str) -> list[dict]:
             "service":    parsed["service"],
             "note":       parsed["note"],
             "name":       normalize_name(parsed["name"]),
-            "phone":      parsed["phone"],
+            "phone":      normalize_phone(parsed["phone"]),
             "address":    location,
             "start_dt":   start_dt,
             "date_str":   date_str,
@@ -824,6 +831,16 @@ def _write_vip_sheet(
         "當月預約總金額", "儲值金餘額", "差額", "LINE@",
     ]
 
+    # 最終輸出固定依 C 欄姓名排序，同名再依日期、開始時間排序。
+    rows = sorted(
+        rows,
+        key=lambda r: (
+            normalize_name_for_compare(r["name"]),
+            r["start_dt"],
+            r["start_str"],
+        ),
+    )
+
     out = [headers]
     shown_names: set[str] = set()
 
@@ -844,6 +861,12 @@ def _write_vip_sheet(
         ])
 
     sh.update(values=out, range_name="A1", value_input_option="USER_ENTERED")
+    if rows:
+        # D 欄以 RAW 文字覆寫，避免 Sheets 將手機號碼視為數字而移除開頭 0。
+        phones = [[normalize_phone(r["phone"])] for r in rows]
+        sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
+        # 交由 Google Sheets 依試算表語系排序，中文姓名順序才會與介面排序一致。
+        sh.sort((3, "asc"), range=f"A2:R{len(rows) + 1}")
     sh.freeze(rows=1)
 
     log.info("[%s] 定期VIP工作表寫入完成：%d 筆，工作表：%s", area_name, len(rows), sheet_name)
@@ -881,9 +904,6 @@ def step2_export_vip_calendar(
                 results[area_name] = {"count": 0, "sheet": "", "ok": True}
                 continue
 
-            # 排序：姓名 → 日期 → 開始時間
-            rows.sort(key=lambda r: (r["name"], r["start_dt"], r["start_str"]))
-
             # 帶入儲值金資料
             _area_target = area.get("target_spreadsheet_id", "")
             stored_info = _load_stored_value_info(gc, area_name, area_target_id=_area_target)
@@ -906,6 +926,151 @@ def step2_export_vip_calendar(
     if errors:
         raise RuntimeError("部分地區VIP日曆匯出失敗：\n" + "\n".join(errors))
 
+    return results
+
+
+VIP_SCHEDULE_FALLBACK_HEADERS = [
+    "服務人時", "備註", "姓名", "電話", "地址", "日期", "開始時間", "結束時間", "狀態",
+    "購買項目", "簡訊實際服務時間", "客人備註", "訂單編號", "結果", "原因", "沒班表日",
+    "餘額不足", "確認信", "日曆改色結果", "日曆改色內容", "日曆原色", "日曆新色",
+    "每月確認", "服務人員", "服務狀態", "車馬費", "客服備註", "服務日期", "服務時區", "服務時數",
+]
+
+
+def _schedule_row_key(row: list[Any]) -> tuple[str, ...]:
+    padded = list(row) + [""] * max(0, 8 - len(row))
+    return tuple(str(padded[i]).strip() for i in (2, 3, 4, 5, 6, 7))
+
+
+def _schedule_customer_key(row: list[Any]) -> tuple[str, str, str]:
+    padded = list(row) + [""] * max(0, 5 - len(row))
+    return (
+        normalize_name_for_compare(padded[2]),
+        normalize_phone(padded[3]),
+        normalize_address(padded[4]),
+    )
+
+
+def _month_keys(start_dt: datetime, end_dt: datetime) -> list[str]:
+    current = start_dt.replace(day=1)
+    end_month = end_dt.replace(day=1)
+    result = []
+    while current <= end_month:
+        result.append(current.strftime("%Y%m"))
+        current = (
+            current.replace(year=current.year + 1, month=1)
+            if current.month == 12
+            else current.replace(month=current.month + 1)
+        )
+    return result
+
+
+def _build_vip_schedule_sheet(
+    gc: gspread.Client,
+    area: dict,
+    period: str,
+) -> dict:
+    """由定期VIP日曆匯出表建立「地區yyyyMM」排程工作表。"""
+    area_name = area["name"]
+    target_id = area.get("target_spreadsheet_id", "") or _load_target_file_id()
+    if not target_id:
+        raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
+
+    ss = gc.open_by_key(target_id)
+    source_name = f"定期VIP_{area_name}_{period}"
+    target_name = f"{area_name}{period}"
+    source = ss.worksheet(source_name)
+    source_rows = source.get("A2:I")
+
+    existing_extra: dict[tuple[str, ...], list[Any]] = {}
+    pattern = re.compile(rf"^{re.escape(area_name)}(\d{{6}})$")
+    candidates = []
+    for worksheet in ss.worksheets():
+        match = pattern.fullmatch(worksheet.title)
+        if match and match.group(1) < period:
+            candidates.append((match.group(1), worksheet))
+    template = max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+    template_extra: dict[tuple[str, str, str], list[list[Any]]] = {}
+    if template:
+        template_rows = template.get("A2:AD", value_render_option="FORMULA")
+        for row in template_rows:
+            if not any(str(value).strip() for value in row):
+                continue
+            customer_key = _schedule_customer_key(row)
+            template_extra.setdefault(customer_key, []).append(
+                (list(row) + [""] * 30)[9:30]
+            )
+
+    try:
+        target = ss.worksheet(target_name)
+        existing = target.get("A2:AD", value_render_option="FORMULA")
+        for row in existing:
+            if any(str(value).strip() for value in row):
+                existing_extra[_schedule_row_key(row)] = (list(row) + [""] * 30)[9:30]
+    except gspread.WorksheetNotFound:
+        if template:
+            target = ss.duplicate_sheet(
+                template.id,
+                new_sheet_name=target_name,
+            )
+        else:
+            target = ss.add_worksheet(
+                title=target_name,
+                rows=max(len(source_rows) + 10, 200),
+                cols=30,
+            )
+
+    header = target.get("A1:AD1", value_render_option="FORMULA")
+    headers = (header[0] if header and len(header[0]) >= 30 else VIP_SCHEDULE_FALLBACK_HEADERS)
+    output = [headers[:30]]
+    customer_occurrences: dict[tuple[str, str, str], int] = {}
+    for source_row in source_rows:
+        first_nine = (list(source_row) + [""] * 9)[:9]
+        first_nine[3] = normalize_phone(first_nine[3])
+        customer_key = _schedule_customer_key(first_nine)
+        occurrence = customer_occurrences.get(customer_key, 0)
+        customer_occurrences[customer_key] = occurrence + 1
+        previous_rows = template_extra.get(customer_key, [])
+        previous_extra = previous_rows[min(occurrence, len(previous_rows) - 1)] if previous_rows else [""] * 21
+        # 重跑優先保留當月同一班次的作業結果；新建時才由上月同客戶資料帶入。
+        extras = existing_extra.get(_schedule_row_key(first_nine), previous_extra)
+        output.append(first_nine + extras)
+
+    target.clear()
+    target.update(values=output, range_name="A1", value_input_option="USER_ENTERED")
+    if source_rows:
+        phones = [[normalize_phone((list(row) + [""] * 4)[3])] for row in source_rows]
+        target.update(
+            values=phones,
+            range_name=f"D2:D{len(source_rows) + 1}",
+            value_input_option="RAW",
+        )
+        target.sort((3, "asc"), range=f"A2:AD{len(source_rows) + 1}")
+    target.freeze(rows=1)
+    log.info("[%s] VIP排程工作表建立完成：%s（%d 筆）", area_name, target_name, len(source_rows))
+    return {"sheet": target_name, "count": len(source_rows), "ok": True}
+
+
+def step3_build_vip_schedule_sheets(
+    gc: gspread.Client,
+    areas: list[dict],
+    start_dt: datetime,
+    end_dt: datetime,
+) -> dict:
+    results = {}
+    errors = []
+    for area in areas:
+        for period in _month_keys(start_dt, end_dt):
+            key = f"{area['name']}{period}"
+            try:
+                results[key] = _build_vip_schedule_sheet(gc, area, period)
+            except Exception as exc:
+                log.error("[%s] VIP排程工作表建立失敗：%s", key, exc)
+                errors.append(f"{key}: {exc}")
+                results[key] = {"ok": False, "error": str(exc)}
+    if errors:
+        raise RuntimeError("部分VIP排程工作表建立失敗：\n" + "\n".join(errors))
     return results
 
 
@@ -936,8 +1101,8 @@ def _load_target_file_id() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
-    parser.add_argument("--step",  type=int, choices=[0, 1, 2], default=0,
-                        help="0=全跑, 1=只抓儲值金, 2=只匯出VIP日曆（預設：0）")
+    parser.add_argument("--step",  type=int, choices=[0, 1, 2, 3], default=0,
+                        help="0=全跑, 1=只抓儲值金, 2=只匯出VIP日曆, 3=建立VIP排程工作表（預設：0）")
     parser.add_argument(
         "--area",
         type=str,
@@ -951,7 +1116,7 @@ def main() -> None:
                         help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
     args = parser.parse_args()
 
-    if args.step in (0, 2) and not (_load_target_file_id()):
+    if args.step in (0, 2, 3) and not (_load_target_file_id()):
         sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     # 日期範圍
@@ -991,6 +1156,7 @@ def main() -> None:
         0: "CRM／儲值全部執行",
         1: "【儲值】抓儲值金",
         2: "【CRM】產生 CRM",
+        3: "【儲值】建立VIP排程工作表",
     }[args.step]
 
     if not areas:
@@ -1024,6 +1190,14 @@ def main() -> None:
                 except Exception as e:
                     errors.append(str(e))
                     log.error("Step 2 失敗：%s", e)
+
+        if args.step == 3:
+            log.info("--- Step 3：建立VIP排程工作表 ---")
+            try:
+                step3_build_vip_schedule_sheets(gc, areas, start_dt, end_dt)
+            except Exception as e:
+                errors.append(str(e))
+                log.error("Step 3 失敗：%s", e)
 
     finally:
         elapsed_total = (now_tp() - t_total).total_seconds()
