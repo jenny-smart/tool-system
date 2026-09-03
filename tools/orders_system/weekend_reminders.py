@@ -422,6 +422,23 @@ def merge_tracking_rows(order_rows, existing_rows, scheduled_at=""):
     return merged
 
 
+def _tracking_message(raw, old):
+    message = str(raw.get("通知內容") or raw.get("LINE訊息") or old.get("通知內容") or "").strip()
+    if message:
+        return message
+    service_date = str(raw.get("服務日期") or old.get("服務日期") or "").strip()
+    if not service_date:
+        return ""
+    try:
+        return build_reminder_message({
+            "service_date": service_date,
+            "service_time": str(raw.get("服務時間") or old.get("服務時間") or "").strip(),
+            "address": str(raw.get("地址") or old.get("地址") or "").strip(),
+        })
+    except (TypeError, ValueError):
+        return ""
+
+
 def save_tracking_rows(rows):
     """依訂單編號 upsert；狀態首次改變時自動補台北時間。"""
     worksheet = _tracking_worksheet()
@@ -435,7 +452,7 @@ def save_tracking_rows(rows):
         row = {header: str(raw.get(header, "") or "") for header in TRACKING_HEADERS}
         old = existing.get(row["訂單編號"], {})
         if not row["通知內容"]:
-            row["通知內容"] = str(raw.get("LINE訊息") or old.get("通知內容") or "")
+            row["通知內容"] = _tracking_message(raw, old)
         if row["通知狀態"] == "已通知" and not row["通知時間"]:
             row["通知時間"] = old.get("通知時間") or now
         if row["回覆狀態"] == "已回覆" and not row["回覆時間"]:
