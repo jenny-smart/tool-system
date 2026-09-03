@@ -21,8 +21,8 @@ SCHEDULED_TRACKING_HEADERS = [
     "預約發送時間", "通知狀態", "通知時間", "回覆狀態", "回覆時間", "回覆備註", "最後更新",
 ]
 TRACKING_HEADERS = [
-    "訂單編號", "服務日期", "服務時間", "姓名", "電話", "地址", "LINE", "LINE ID",
-    "預約發送時間", "通知狀態", "通知時間", "回覆狀態", "回覆時間", "回覆備註",
+    "訂單編號", "服務日期", "服務時間", "姓名", "電話", "地址", "LINE", "通知內容",
+    "LINE ID", "預約發送時間", "通知狀態", "通知時間", "回覆狀態", "回覆時間", "回覆備註",
     "發送錯誤", "最後更新",
 ]
 NOTICE_STATUSES = ["待通知", "已排程", "已通知", "發送失敗"]
@@ -118,7 +118,7 @@ def schedule_line_reminders(rows, api_url, api_key):
         except (TypeError, ValueError):
             skipped.append({"訂單編號": row.get("訂單編號", ""), "原因": "預約發送時間格式錯誤"})
             continue
-        message = str(row.get("LINE訊息") or "").strip()
+        message = str(row.get("LINE訊息") or row.get("通知內容") or "").strip()
         if not message:
             skipped.append({"訂單編號": row.get("訂單編號", ""), "原因": "提醒訊息空白"})
             continue
@@ -404,18 +404,20 @@ def merge_tracking_rows(order_rows, existing_rows, scheduled_at=""):
     merged = []
     for item in order_rows:
         old = existing.get(item["order_no"], {})
+        message = item.get("message", "")
         merged.append({
             "資料狀態": "已存在" if old else "新增",
             "訂單編號": item["order_no"], "服務日期": item["service_date"],
             "服務時間": item.get("service_time", ""), "姓名": item.get("name", ""),
             "電話": item.get("phone", ""), "地址": item.get("address", ""),
-            "LINE": item.get("line_url", ""), "LINE ID": old.get("LINE ID", ""),
+            "LINE": item.get("line_url", ""), "通知內容": old.get("通知內容") or message,
+            "LINE ID": old.get("LINE ID", ""),
             "預約發送時間": old.get("預約發送時間") or scheduled_at,
             "通知狀態": old.get("通知狀態") or "待通知",
             "通知時間": old.get("通知時間", ""), "回覆狀態": old.get("回覆狀態") or "未回覆",
             "回覆時間": old.get("回覆時間", ""), "回覆備註": old.get("回覆備註", ""),
             "發送錯誤": old.get("發送錯誤", ""),
-            "最後更新": old.get("最後更新", ""), "LINE訊息": item.get("message", ""),
+            "最後更新": old.get("最後更新", ""), "LINE訊息": message,
         })
     return merged
 
@@ -432,6 +434,8 @@ def save_tracking_rows(rows):
     for raw in rows:
         row = {header: str(raw.get(header, "") or "") for header in TRACKING_HEADERS}
         old = existing.get(row["訂單編號"], {})
+        if not row["通知內容"]:
+            row["通知內容"] = str(raw.get("LINE訊息") or old.get("通知內容") or "")
         if row["通知狀態"] == "已通知" and not row["通知時間"]:
             row["通知時間"] = old.get("通知時間") or now
         if row["回覆狀態"] == "已回覆" and not row["回覆時間"]:
@@ -447,5 +451,5 @@ def save_tracking_rows(rows):
     old_row_count = len(worksheet.get_all_values())
     worksheet.update(range_name="A1", values=matrix)
     if old_row_count > len(matrix):
-        worksheet.batch_clear([f"A{len(matrix) + 1}:P{old_row_count}"])
+        worksheet.batch_clear([f"A{len(matrix) + 1}:Q{old_row_count}"])
     return len(incoming)
