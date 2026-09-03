@@ -22,7 +22,7 @@ SCHEDULED_TRACKING_HEADERS = [
 ]
 TRACKING_HEADERS = [
     "訂單編號", "服務日期", "服務時間", "姓名", "電話", "地址", "LINE", "通知內容",
-    "LINE ID", "預約發送時間", "通知狀態", "通知時間", "回覆狀態", "回覆時間", "回覆備註",
+    "預約發送時間", "通知狀態", "通知時間", "回覆狀態", "回覆時間", "回覆備註",
     "發送錯誤", "最後更新",
 ]
 NOTICE_STATUSES = ["待通知", "已排程", "已通知", "發送失敗"]
@@ -386,8 +386,12 @@ def _tracking_worksheet():
         migrated = [TRACKING_HEADERS]
         for values in old_values[1:]:
             old = dict(zip(current_headers, values + [""] * (len(current_headers) - len(values))))
+            if not str(old.get("通知內容") or "").strip():
+                old["通知內容"] = _tracking_message(old, {})
             migrated.append([old.get(header, "") for header in TRACKING_HEADERS])
         worksheet.update(range_name="A1", values=migrated)
+        if worksheet.col_count != len(TRACKING_HEADERS):
+            worksheet.resize(cols=len(TRACKING_HEADERS))
     elif current_headers != TRACKING_HEADERS:
         raise RuntimeError(f"Google Sheet「{TRACKING_SHEET_TITLE}」欄位格式不符，為避免覆蓋既有資料，已停止寫入")
     return worksheet
@@ -457,8 +461,6 @@ def save_tracking_rows(rows):
             row["通知時間"] = old.get("通知時間") or now
         if row["回覆狀態"] == "已回覆" and not row["回覆時間"]:
             row["回覆時間"] = old.get("回覆時間") or now
-        if not row["LINE ID"]:
-            row["LINE ID"] = line_id_from_chat_url(row["LINE"]) or old.get("LINE ID", "")
         row["最後更新"] = now
         incoming[row["訂單編號"]] = row
     existing.update(incoming)
@@ -468,5 +470,5 @@ def save_tracking_rows(rows):
     old_row_count = len(worksheet.get_all_values())
     worksheet.update(range_name="A1", values=matrix)
     if old_row_count > len(matrix):
-        worksheet.batch_clear([f"A{len(matrix) + 1}:Q{old_row_count}"])
+        worksheet.batch_clear([f"A{len(matrix) + 1}:P{old_row_count}"])
     return len(incoming)
