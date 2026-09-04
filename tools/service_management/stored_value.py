@@ -887,14 +887,6 @@ def _build_vip_schedule_sheet(
     source_rows = source.get("A2:J")
 
     existing_extra: dict[tuple[str, ...], list[Any]] = {}
-    pattern = re.compile(rf"^{re.escape(area_name)}(\d{{6}})$")
-    candidates = []
-    for worksheet in ss.worksheets():
-        match = pattern.fullmatch(worksheet.title)
-        if match and match.group(1) < period:
-            candidates.append((match.group(1), worksheet))
-    template = max(candidates, key=lambda item: item[0])[1] if candidates else None
-
     created = False
     try:
         target = ss.worksheet(target_name)
@@ -904,17 +896,12 @@ def _build_vip_schedule_sheet(
                 existing_extra[_schedule_row_key(row)] = (list(row) + [""] * 30)[10:30]
     except gspread.WorksheetNotFound:
         created = True
-        if template:
-            target = ss.duplicate_sheet(
-                template.id,
-                new_sheet_name=target_name,
-            )
-        else:
-            target = ss.add_worksheet(
-                title=target_name,
-                rows=max(len(source_rows) + 10, 200),
-                cols=30,
-            )
+        # 新月份直接建立乾淨工作表，不複製上月，因此不會帶入上月格式、底色或公式。
+        target = ss.add_worksheet(
+            title=target_name,
+            rows=max(len(source_rows) + 10, 200),
+            cols=30,
+        )
 
     header = target.get("A1:AD1", value_render_option="FORMULA")
     headers = (header[0] if header and len(header[0]) >= 30 else VIP_SCHEDULE_FALLBACK_HEADERS)
@@ -922,7 +909,7 @@ def _build_vip_schedule_sheet(
     for source_row in source_rows:
         first_ten = (list(source_row) + [""] * 10)[:10]
         first_ten[3] = normalize_phone(first_ten[3])
-        # A:J 一律以本月日曆匯出為準，因此 I 欄狀態也直接使用日曆匯出結果。
+        # A:J 一律以本月日曆匯出工作表內容為準，I 欄狀態也直接使用日曆匯出結果。
         # 新建工作表不沿用上月 K:AD；重跑既有月份才保留該月已產生的作業資料。
         extras = existing_extra.get(_schedule_row_key(first_ten), [""] * 20)
         output.append(first_ten + extras)
@@ -930,7 +917,6 @@ def _build_vip_schedule_sheet(
     target.clear()
     target.update(values=output, range_name="A1", value_input_option="USER_ENTERED")
     if created:
-        # 複製上月工作表時可能殘留公式/資料；新建月份的執行欄位必須保持空白。
         target.batch_clear([f"K2:AD{max(target.row_count, 2)}"])
     if source_rows:
         phones = [[normalize_phone((list(row) + [""] * 4)[3])] for row in source_rows]
