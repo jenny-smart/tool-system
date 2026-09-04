@@ -63,10 +63,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
-# ──────────────────────────────────────────────────────────
-# 基本設定
-# ──────────────────────────────────────────────────────────
-
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
 logging.basicConfig(
@@ -76,23 +72,18 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# backend API
 BACKEND_BASE = "https://backend.lemonclean.com.tw"
 LOGIN_URL = f"{BACKEND_BASE}/login"
 STORED_VALUE_EXPORT_URL = f"{BACKEND_BASE}/member/export_stored_value"
 
-# 客服儲值功能沿用月排程系統的儲值金結算試算表；台北、台中分別
-# 尋找並沿用「{地區}儲值金結算_YYYYMMDD」分頁。
 STORED_VALUE_SPREADSHEET_IDS: dict[str, str] = {
     "台北": "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE",
     "台中": "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE",
 }
 
-# 主控試算表地區設定工作表
 AREA_SHEET_NAME    = "客服地區設定"
 AREA_SHEET_HEADERS = ["地區名稱", "Calendar ID", "目標試算表ID", "啟用"]
 
-# 地區名稱 → Secrets key 前綴對應
 AREA_TO_SECRET_PREFIX: dict[str, str] = {
     "台北": "TAIPEI",
     "台中": "TAICHUNG",
@@ -105,18 +96,15 @@ AREA_TO_SECRET_PREFIX: dict[str, str] = {
     "宜蘭": "YILAN",
 }
 
-# 客服排程介面允許執行的區域。
-# 「全區」固定代表台北＋台中，避免設定表新增其他地區後被意外納入。
 SERVICE_AREA_GROUPS: dict[str, tuple[str, ...]] = {
     "全區": ("台北", "台中"),
     "台北": ("台北",),
     "台中": ("台中",),
 }
 
-# Calendar 行事曆顏色代碼
-COLOR_INTERNAL   = "7"   # 內部行程（排除）
-COLOR_PAUSE      = "10"  # 暫停
-COLOR_UNARRANGED = "3"   # 未安排
+COLOR_INTERNAL   = "7"
+COLOR_PAUSE      = "10"
+COLOR_UNARRANGED = "3"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -124,14 +112,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
-
-# ──────────────────────────────────────────────────────────
-# Google 認證
-# ──────────────────────────────────────────────────────────
-
-# ──────────────────────────────────────────────────────────
-# Google 認證（使用 tools.common.config_loader，支援 st.secrets）
-# ──────────────────────────────────────────────────────────
 
 def _get_credentials() -> Credentials:
     try:
@@ -148,10 +128,6 @@ def _calendar_service():
     return build("calendar", "v3", credentials=_get_credentials())
 
 
-# ──────────────────────────────────────────────────────────
-# 時間工具
-# ──────────────────────────────────────────────────────────
-
 def now_tp() -> datetime:
     return datetime.now(TZ_TAIPEI)
 
@@ -162,10 +138,6 @@ def today_tp() -> date:
     return now_tp().date()
 
 
-# ──────────────────────────────────────────────────────────
-# 打卡工具（同 lemon_schedule_sync 模式）
-# ──────────────────────────────────────────────────────────
-# process-level cache：避免重複讀取工作表造成 429
 _LOG_SHEET_CACHE: dict[str, gspread.Worksheet] = {}
 _SERVICE_LOG_CONTEXT = {
     "area": "全區",
@@ -226,7 +198,6 @@ def _checkin_service_schedule_log(
     note: str = "",
     elapsed: float = 0.0,
 ) -> None:
-    """將 CRM／儲值執行紀錄併入「客服排程執行Log」。"""
     if not spreadsheet_id:
         return
 
@@ -265,12 +236,7 @@ def _checkin_service_schedule_log(
         log.warning("[客服排程 Log 寫入失敗（非致命）] %s", e)
 
 
-# ──────────────────────────────────────────────────────────
-# 地區設定讀取（主控試算表）
-# ──────────────────────────────────────────────────────────
-
 def _ensure_area_sheet(gc: gspread.Client) -> gspread.Worksheet:
-    """確保主控試算表有「客服地區設定」工作表。"""
     from tools.common.config_loader import get_master_spreadsheet_id
     master_id = (
         os.environ.get("TOOLS_APP_LOG_SPREADSHEET_ID", "").strip()
@@ -296,10 +262,6 @@ def _ensure_area_sheet(gc: gspread.Client) -> gspread.Worksheet:
     return sh
 
 def load_area_config(gc: gspread.Client, filter_area: str | None = "全區") -> list[dict]:
-    """
-    從主控試算表讀取地區設定。
-    回傳 [{"name": "台北", "calendar_id": "...", "target_spreadsheet_id": "...", "enabled": True}, ...]
-    """
     selected_area = (filter_area or "全區").strip()
     if selected_area not in SERVICE_AREA_GROUPS:
         allowed = "、".join(SERVICE_AREA_GROUPS)
@@ -327,11 +289,9 @@ def load_area_config(gc: gspread.Client, filter_area: str | None = "全區") -> 
     return areas
 
 def get_secret_prefix(area_name: str) -> str:
-    """台北 → TAIPEI 等，找不到就用拼音大寫（使用者自訂）。"""
     return AREA_TO_SECRET_PREFIX.get(area_name, area_name.upper().replace(" ", "_"))
 
 def get_area_credentials(area_name: str) -> tuple[str, str]:
-    """沿用月排程儲值金結算的帳密來源，找不到就拋出例外。"""
     from tools.scheduled_monthly.stored_value_settlement import load_accounts
 
     account = load_accounts().get(area_name, {})
@@ -346,13 +306,7 @@ def get_area_credentials(area_name: str) -> tuple[str, str]:
     return email, password
 
 
-# ──────────────────────────────────────────────────────────
-# Step 1：下載並更新儲值金結算表
-# ──────────────────────────────────────────────────────────
-
 class _CsrfTokenParser(HTMLParser):
-    """Extract the Laravel login form's CSRF token without extra dependencies."""
-
     def __init__(self) -> None:
         super().__init__()
         self.token = ""
@@ -366,7 +320,6 @@ class _CsrfTokenParser(HTMLParser):
 
 
 def _login_backend_session(email: str, password: str, area_name: str) -> requests.Session:
-    """以後台網頁表單登入，回傳保留登入 cookie 的 Session。"""
     session = requests.Session()
     headers = {"User-Agent": "Mozilla/5.0"}
     resp = session.get(LOGIN_URL, headers=headers, timeout=30, allow_redirects=True)
@@ -390,7 +343,6 @@ def _login_backend_session(email: str, password: str, area_name: str) -> request
 
 
 def _download_stored_value_export(session: requests.Session, area_name: str) -> bytes:
-    """下載執行當下最新的儲值金結算 Excel。"""
     resp = session.get(
         STORED_VALUE_EXPORT_URL,
         headers={"User-Agent": "Mozilla/5.0"},
@@ -411,7 +363,6 @@ def _convert_stored_value_export(
     content: bytes,
     area_name: str,
 ) -> list[list[Any]]:
-    """將下載的 xlsx 暫存至 Drive、轉成 Google Sheet，再讀取內容。"""
     drive = build("drive", "v3", credentials=_get_credentials(), cache_discovery=False)
     token = uuid.uuid4().hex[:8]
     source_id = ""
@@ -465,7 +416,6 @@ def _write_stored_value_sheet(
     area_name: str,
     values: list[list[Any]],
 ) -> gspread.Worksheet:
-    """覆寫各區固定試算表中的同一張儲值金結算分頁，並更新日期名稱。"""
     target_id = STORED_VALUE_SPREADSHEET_IDS.get(area_name, "")
     if not target_id:
         raise EnvironmentError(f"[{area_name}] 尚未設定儲值金結算目的試算表")
@@ -476,7 +426,6 @@ def _write_stored_value_sheet(
     candidates = [worksheet for worksheet in ss.worksheets() if pattern.fullmatch(worksheet.title)]
 
     if candidates:
-        # 同一區原則上只會有一張；若歷史上有多張，沿用最末日期的一張。
         sh = max(candidates, key=lambda worksheet: worksheet.title)
         if sh.title != sheet_name:
             sh.update_title(sheet_name)
@@ -507,7 +456,6 @@ def step1_fetch_stored_value(
     areas: list[dict],
     run_id: str,
 ) -> dict:
-    """Step 1：各地區登入抓儲值金，寫入試算表。"""
     task = "Step1_抓取儲值金"
     t0 = now_tp()
     checkin_both(gc, run_id, task, "START", "RUNNING")
@@ -546,10 +494,6 @@ def step1_fetch_stored_value(
     return results
 
 
-# ──────────────────────────────────────────────────────────
-# 工具函式（對應 GAS 邏輯）
-# ──────────────────────────────────────────────────────────
-
 def normalize_text(value: Any) -> str:
     if value is None:
         return ""
@@ -578,7 +522,7 @@ def get_weekday_text(dt: datetime) -> str:
     return ["一", "二", "三", "四", "五", "六", "日"][dt.weekday()]
 
 def get_price_by_date(dt: datetime) -> int:
-    return 700 if dt.weekday() >= 5 else 600  # 六日 700，平日 600
+    return 700 if dt.weekday() >= 5 else 600
 
 def parse_service_people(service_text: str) -> int:
     m = re.search(r"(\d+)\s*人", str(service_text or ""))
@@ -603,7 +547,6 @@ def parse_title(title: str) -> dict:
     }
 
 def normalize_phone(phone: Any) -> str:
-    """將台灣手機號碼正規化為含開頭 0 的 10 碼文字。"""
     digits = re.sub(r"\D", "", str(phone or ""))
     if len(digits) == 9 and digits.startswith("9"):
         digits = "0" + digits
@@ -621,15 +564,7 @@ def to_number_safe(value: Any) -> float:
         return 0.0
 
 
-# ──────────────────────────────────────────────────────────
-# Step 2：匯出定期VIP日曆
-# ──────────────────────────────────────────────────────────
-
 def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: str = "") -> dict[str, dict]:
-    """
-    從各區固定試算表內最新的「{地區}儲值金結算_YYYYMMDD」讀取
-    姓名 → {totalBalance, lineValue}。
-    """
     target_id = STORED_VALUE_SPREADSHEET_IDS.get(area_name, "")
     if not target_id:
         return {}
@@ -649,7 +584,6 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: 
 
     name_map: dict[str, dict] = {}
     for r in records:
-        # 嘗試各種欄位名稱
         raw_name = r.get("客戶姓名") or r.get("name") or r.get("customer_name") or ""
         line_val = r.get("LINE@") or r.get("line_url") or r.get("line_id") or ""
         stored   = to_number_safe(r.get("剩餘儲值金") or r.get("stored_value") or r.get("stored_balance") or 0)
@@ -673,7 +607,6 @@ def _fetch_calendar_events(
     end_dt: datetime,
     area_name: str,
 ) -> list:
-    """從 Google Calendar API 抓行程。"""
     if not calendar_id:
         raise ValueError(f"[{area_name}] Calendar ID 未設定，請在主控試算表「客服地區設定」填入")
 
@@ -707,12 +640,6 @@ def _fetch_calendar_events(
 
 
 def _process_events(events: list, area_name: str) -> list[dict]:
-    """
-    篩選、解析行程，對應 GAS exportCalendarWithRange 核心邏輯：
-    - 排除 COLOR_INTERNAL 色碼的內部行程
-    - 只保留含手機號碼的行程
-    - 同客戶+地址+日期去重
-    """
     rows = []
     seen_keys: set[str] = set()
 
@@ -720,11 +647,9 @@ def _process_events(events: list, area_name: str) -> list[dict]:
         color = e.get("colorId", "")
         title = e.get("summary", "")
 
-        # 排除內部行程
         if color == COLOR_INTERNAL:
             continue
 
-        # 只保留有手機號碼的
         if not re.search(r"09\d{8}", title):
             continue
 
@@ -746,7 +671,6 @@ def _process_events(events: list, area_name: str) -> list[dict]:
         start_str = start_dt.strftime("%H:%M")
         end_str   = end_dt.strftime("%H:%M")
 
-        # 去重 key
         unique_key = normalize_name(parsed["name"]) + "|||" + normalize_address(location) + "|||" + date_str
         if unique_key in seen_keys:
             continue
@@ -774,7 +698,6 @@ def _process_events(events: list, area_name: str) -> list[dict]:
             "price":      price,
             "person_hrs": person_hrs,
             "amount":     amount,
-            # 以下由儲值金表回填
             "subtotal":   0.0,
             "balance":    0.0,
             "diff":       0.0,
@@ -785,8 +708,6 @@ def _process_events(events: list, area_name: str) -> list[dict]:
 
 
 def _enrich_with_stored_value(rows: list[dict], stored_info: dict[str, dict]) -> list[dict]:
-    """計算各客戶當月小計，並從儲值金表帶入餘額。"""
-    # 先算各人當月小計
     subtotal_map: dict[str, float] = {}
     for r in rows:
         key = normalize_name_for_compare(r["name"])
@@ -810,7 +731,6 @@ def _write_vip_sheet(
     start_dt: datetime,
     area_target_id: str = "",
 ) -> str:
-    """寫入地區目標試算表「定期VIP_{地區}_{yyyyMM}」工作表，回傳工作表名稱。"""
     target_id = area_target_id or _load_target_file_id()
     if not target_id:
         raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
@@ -831,7 +751,6 @@ def _write_vip_sheet(
         "當月預約總金額", "儲值金餘額", "差額", "LINE@",
     ]
 
-    # 最終輸出固定依 C 欄姓名排序，同名再依日期、開始時間排序。
     rows = sorted(
         rows,
         key=lambda r: (
@@ -862,10 +781,8 @@ def _write_vip_sheet(
 
     sh.update(values=out, range_name="A1", value_input_option="USER_ENTERED")
     if rows:
-        # D 欄以 RAW 文字覆寫，避免 Sheets 將手機號碼視為數字而移除開頭 0。
         phones = [[normalize_phone(r["phone"])] for r in rows]
         sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
-        # 交由 Google Sheets 依試算表語系排序，中文姓名順序才會與介面排序一致。
         sh.sort((3, "asc"), range=f"A2:R{len(rows) + 1}")
     sh.freeze(rows=1)
 
@@ -880,7 +797,6 @@ def step2_export_vip_calendar(
     start_dt: datetime,
     end_dt: datetime,
 ) -> dict:
-    """Step 2：各地區讀取 Google Calendar → 整理後寫入試算表。"""
     task = "Step2_匯出定期VIP日曆"
     t0   = now_tp()
     checkin_both(gc, run_id, task, "START", "RUNNING")
@@ -895,7 +811,6 @@ def step2_export_vip_calendar(
         log.info("=== [%s] 匯出定期VIP日曆 ===", area_name)
 
         try:
-            # 抓行程
             events = _fetch_calendar_events(cal_service, calendar_id, start_dt, end_dt, area_name)
             rows   = _process_events(events, area_name)
 
@@ -904,12 +819,10 @@ def step2_export_vip_calendar(
                 results[area_name] = {"count": 0, "sheet": "", "ok": True}
                 continue
 
-            # 帶入儲值金資料
             _area_target = area.get("target_spreadsheet_id", "")
             stored_info = _load_stored_value_info(gc, area_name, area_target_id=_area_target)
             rows        = _enrich_with_stored_value(rows, stored_info)
 
-            # 寫入工作表
             sheet_name = _write_vip_sheet(gc, area_name, rows, start_dt, area_target_id=_area_target)
             results[area_name] = {"count": len(rows), "sheet": sheet_name, "ok": True}
 
@@ -942,15 +855,6 @@ def _schedule_row_key(row: list[Any]) -> tuple[str, ...]:
     return tuple(str(padded[i]).strip() for i in (2, 3, 4, 5, 6, 7))
 
 
-def _schedule_customer_key(row: list[Any]) -> tuple[str, str, str]:
-    padded = list(row) + [""] * max(0, 5 - len(row))
-    return (
-        normalize_name_for_compare(padded[2]),
-        normalize_phone(padded[3]),
-        normalize_address(padded[4]),
-    )
-
-
 def _month_keys(start_dt: datetime, end_dt: datetime) -> list[str]:
     current = start_dt.replace(day=1)
     end_month = end_dt.replace(day=1)
@@ -980,65 +884,40 @@ def _build_vip_schedule_sheet(
     source_name = f"定期VIP_{area_name}_{period}"
     target_name = f"{area_name}{period}"
     source = ss.worksheet(source_name)
-    source_rows = source.get("A2:I")
+    source_rows = source.get("A2:J")
 
     existing_extra: dict[tuple[str, ...], list[Any]] = {}
-    pattern = re.compile(rf"^{re.escape(area_name)}(\d{{6}})$")
-    candidates = []
-    for worksheet in ss.worksheets():
-        match = pattern.fullmatch(worksheet.title)
-        if match and match.group(1) < period:
-            candidates.append((match.group(1), worksheet))
-    template = max(candidates, key=lambda item: item[0])[1] if candidates else None
-
-    template_extra: dict[tuple[str, str, str], list[list[Any]]] = {}
-    if template:
-        template_rows = template.get("A2:AD", value_render_option="FORMULA")
-        for row in template_rows:
-            if not any(str(value).strip() for value in row):
-                continue
-            customer_key = _schedule_customer_key(row)
-            template_extra.setdefault(customer_key, []).append(
-                (list(row) + [""] * 30)[9:30]
-            )
-
+    created = False
     try:
         target = ss.worksheet(target_name)
         existing = target.get("A2:AD", value_render_option="FORMULA")
         for row in existing:
             if any(str(value).strip() for value in row):
-                existing_extra[_schedule_row_key(row)] = (list(row) + [""] * 30)[9:30]
+                existing_extra[_schedule_row_key(row)] = (list(row) + [""] * 30)[10:30]
     except gspread.WorksheetNotFound:
-        if template:
-            target = ss.duplicate_sheet(
-                template.id,
-                new_sheet_name=target_name,
-            )
-        else:
-            target = ss.add_worksheet(
-                title=target_name,
-                rows=max(len(source_rows) + 10, 200),
-                cols=30,
-            )
+        created = True
+        # 新月份直接建立乾淨工作表，不複製上月，因此不會帶入上月格式、底色或公式。
+        target = ss.add_worksheet(
+            title=target_name,
+            rows=max(len(source_rows) + 10, 200),
+            cols=30,
+        )
 
     header = target.get("A1:AD1", value_render_option="FORMULA")
     headers = (header[0] if header and len(header[0]) >= 30 else VIP_SCHEDULE_FALLBACK_HEADERS)
     output = [headers[:30]]
-    customer_occurrences: dict[tuple[str, str, str], int] = {}
     for source_row in source_rows:
-        first_nine = (list(source_row) + [""] * 9)[:9]
-        first_nine[3] = normalize_phone(first_nine[3])
-        customer_key = _schedule_customer_key(first_nine)
-        occurrence = customer_occurrences.get(customer_key, 0)
-        customer_occurrences[customer_key] = occurrence + 1
-        previous_rows = template_extra.get(customer_key, [])
-        previous_extra = previous_rows[min(occurrence, len(previous_rows) - 1)] if previous_rows else [""] * 21
-        # 重跑優先保留當月同一班次的作業結果；新建時才由上月同客戶資料帶入。
-        extras = existing_extra.get(_schedule_row_key(first_nine), previous_extra)
-        output.append(first_nine + extras)
+        first_ten = (list(source_row) + [""] * 10)[:10]
+        first_ten[3] = normalize_phone(first_ten[3])
+        # A:J 一律以本月日曆匯出工作表內容為準，I 欄狀態也直接使用日曆匯出結果。
+        # 新建工作表不沿用上月 K:AD；重跑既有月份才保留該月已產生的作業資料。
+        extras = existing_extra.get(_schedule_row_key(first_ten), [""] * 20)
+        output.append(first_ten + extras)
 
     target.clear()
     target.update(values=output, range_name="A1", value_input_option="USER_ENTERED")
+    if created:
+        target.batch_clear([f"K2:AD{max(target.row_count, 2)}"])
     if source_rows:
         phones = [[normalize_phone((list(row) + [""] * 4)[3])] for row in source_rows]
         target.update(
@@ -1074,12 +953,7 @@ def step3_build_vip_schedule_sheets(
     return results
 
 
-# ──────────────────────────────────────────────────────────
-# 主程式
-# ──────────────────────────────────────────────────────────
-
 def _load_target_file_id() -> str:
-    """依序從 Secret 或主控試算表系統設定取得目標試算表 ID。"""
     val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
     if val:
         log.info("目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID")
@@ -1119,7 +993,6 @@ def main() -> None:
     if args.step in (0, 2, 3) and not (_load_target_file_id()):
         sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
-    # 日期範圍
     today = now_tp()
     if args.start:
         start_dt = datetime.fromisoformat(args.start).replace(
@@ -1133,7 +1006,6 @@ def main() -> None:
             hour=23, minute=59, second=59, tzinfo=TZ_TAIPEI
         )
     else:
-        # 本月最後一天
         if today.month == 12:
             last_day = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
         else:
@@ -1179,7 +1051,6 @@ def main() -> None:
 
         if args.step in (0, 2):
             log.info("--- Step 2：匯出定期VIP日曆 ---")
-            # Step 2 需要有 Calendar ID 的地區
             areas_with_cal = [a for a in areas if a["calendar_id"]]
             if not areas_with_cal:
                 log.warning("所有地區均未設定 Calendar ID，跳過 Step 2")
