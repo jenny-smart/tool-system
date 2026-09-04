@@ -6,7 +6,10 @@ from unittest.mock import MagicMock
 
 from tools.invoice_center.bridge import fetch_backend_order_invoice_payload
 from tools.lemon_backend.models import BackendOrder
-from tools.lemon_backend.orders import hydrate_order_from_edit_page
+from tools.lemon_backend.orders import (
+    hydrate_order_from_edit_page,
+    search_paid_stored_value_orders_by_phone,
+)
 
 
 def _order(**overrides) -> BackendOrder:
@@ -41,6 +44,7 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
                   <input name="invoice_type" value="2">
                   <input name="carrier_type_id" value="1">
                   <input name="carrier_info" value="member@example.com">
+                  <input name="company_no" value="19920908">
                 </form>
             """,
             raise_for_status=lambda: None,
@@ -84,25 +88,43 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
             paid_status="待付款",
             extra={"paid_at": "2026-04-01 10:00:00"},
         )
-        service = _order(
-            order_no="LC199",
-            items=["居家清潔"],
-            extra={"paid_at": "2026-05-01 10:00:00"},
-        )
         client = MagicMock()
         client.get_order.return_value = current
-        client.search_orders_by_phone.return_value = [service, unpaid, older, newest]
+        client.search_paid_stored_value_orders_by_phone.return_value = [
+            unpaid,
+            older,
+            newest,
+        ]
 
         order, payload = fetch_backend_order_invoice_payload(
             "台北", "LC200", backend_client=client
         )
 
-        client.search_orders_by_phone.assert_called_once_with("0912345678")
+        client.search_paid_stored_value_orders_by_phone.assert_called_once_with("0912345678")
         self.assertEqual(order.buyer_identifier, "70450942")
         self.assertEqual(order.buyer_name, "娜亞國際股份有限公司")
         self.assertEqual(order.extra["invoice_settings_source_order"], "LC180")
         self.assertEqual(payload.buyer_identifier, "70450942")
         self.assertEqual(payload.buyer_name, "娜亞國際股份有限公司")
+
+    def test_stored_value_history_uses_backend_buy_and_paid_filters(self) -> None:
+        response = SimpleNamespace(
+            text='purchaseList: {"data": []}',
+            raise_for_status=lambda: None,
+        )
+        session = MagicMock()
+        session.base_url = "https://backend.lemonclean.com.tw"
+        session.get.return_value = response
+
+        self.assertEqual(
+            search_paid_stored_value_orders_by_phone(session, "912-345-678"),
+            [],
+        )
+
+        params = session.get.call_args.kwargs["params"]
+        self.assertEqual(params["phone"], "0912345678")
+        self.assertEqual(params["buy"], "5")
+        self.assertEqual(params["purchase_status"], "1")
 
     def test_non_stored_value_payment_keeps_current_invoice_settings(self) -> None:
         current = _order(
@@ -119,7 +141,7 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
             "台北", "LC100", backend_client=client
         )
 
-        client.search_orders_by_phone.assert_not_called()
+        client.search_paid_stored_value_orders_by_phone.assert_not_called()
         self.assertEqual(order.buyer_identifier, "")
         self.assertEqual(payload.carrierid1, "member@example.com")
 

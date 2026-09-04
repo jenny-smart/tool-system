@@ -225,7 +225,7 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
     carrier_info = _text_value(item.get("carrier_info"))
     email = _text_value(item.get("email"))
 
-    if invoice_type == "3" or company_no:
+    if invoice_type == "3" or (not invoice_type and company_no):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -234,7 +234,7 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
             "carrier_no": "",
             "donate_code": "",
         }
-    if invoice_type == "1" or donate_code:
+    if invoice_type == "1" or (not invoice_type and donate_code):
         return {
             "invoice_type": "二聯式",
             "buyer_identifier": "",
@@ -611,7 +611,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
     company_no = _field_value(fields, "company_no", "companyNo")
     donate_code = _field_value(fields, "donate_code", "donateCode", "donatevat")
 
-    if invoice_type == "3" or company_no:
+    if invoice_type == "3" or (not invoice_type and company_no):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -620,7 +620,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
             "carrier_no": "",
             "donate_code": "",
         }
-    if invoice_type == "1" or donate_code:
+    if invoice_type == "1" or (not invoice_type and donate_code):
         return {
             "invoice_type": "二聯式",
             "buyer_identifier": "",
@@ -716,4 +716,20 @@ def get_order(session: LemonBackendSession, order_no: str) -> BackendOrder | Non
 
 def search_orders_by_phone(session: LemonBackendSession, phone: str) -> list[BackendOrder]:
     response = get_purchase_page(session, purchase_params(phone=normalize_phone(phone)))
+    return parse_purchase_list_page(response.text, session.base_url)
+
+
+def search_paid_stored_value_orders_by_phone(
+    session: LemonBackendSession,
+    phone: str,
+) -> list[BackendOrder]:
+    """Use backend filters so stored-value purchases cannot be hidden by pagination."""
+    response = get_purchase_page(
+        session,
+        purchase_params(
+            phone=normalize_phone(phone),
+            buy="5",
+            purchase_status="1",
+        ),
+    )
     return parse_purchase_list_page(response.text, session.base_url)
