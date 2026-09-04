@@ -8,7 +8,6 @@ from hybrid_batch_runner import run_process_web_direct_single, run_process_web_h
 
 
 def _bind_original_batch_to_single_runner() -> None:
-    """原批次建單固定真正逐筆，不再進 grouped_orders orchestration。"""
     for module in list(sys.modules.values()):
         if module is None:
             continue
@@ -50,7 +49,7 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
         sheet_name = st.text_input("工作表名稱", placeholder="例：台北202610", key="batch_opt_sheet_name").strip()
     with c3:
         row_spec = st.text_input("執行列號", placeholder="例：2,3,5-7", key="batch_opt_row_spec").strip()
-    st.markdown('<div class="hint-box">💡 列號支援：單列 <code>2</code>、逗號分隔 <code>2,3,5</code>、區間 <code>2,3,5-7</code></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hint-box">💡 列號支援：單列 <code>2</code>、逗號分隔 <code>2,3,5</code>、區間 <code>2,3,5-7</code>。範圍內不符合條件的列會略過，不會中止整批。</div>', unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
 
     batch_opt.step("3", "執行項目")
@@ -89,37 +88,42 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
             requested_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=region))
         if auto_missing_o:
             requested_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=region))
-        target_rows = sorted(requested_rows)
-        if not target_rows:
+        requested_rows = sorted(requested_rows)
+        if not requested_rows:
             raise ValueError("沒有指定列號，也沒有自動篩選到符合條件的列。")
 
         candidates = batch_opt._load_candidates(sheet_name)
         candidate_map = {int(row["__sheet_row__"]): row for _, row in candidates.iterrows()}
-        invalid, region_mismatch = [], []
-        for row_no in target_rows:
+        target_rows, invalid, region_mismatch = [], [], []
+        for row_no in requested_rows:
             row = candidate_map.get(row_no)
             if row is None:
                 invalid.append(row_no)
                 continue
             if batch_opt.get_region_by_address(batch_opt._text(row.get("地址")), ACCOUNTS) != region:
                 region_mismatch.append(row_no)
+                continue
+            target_rows.append(row_no)
+
         if invalid:
-            raise ValueError("以下列號不符合執行條件：" + "、".join(map(str, invalid)))
+            ui_log("⏭️ 略過不符合執行條件列：" + "、".join(map(str, invalid)))
         if region_mismatch:
-            raise ValueError(f"以下列號不屬於{region}：" + "、".join(map(str, region_mismatch)))
+            ui_log(f"⏭️ 略過非{region}列：" + "、".join(map(str, region_mismatch)))
+        if not target_rows:
+            raise ValueError("指定範圍內沒有符合執行條件的列。")
 
         email, password = _region_credentials(region, backend_email, backend_password)
         if not email or not password:
             raise RuntimeError(f"{region} 尚未設定後台帳號密碼")
-        ui_log(f"指定列號：{'、'.join(map(str, target_rows))}")
-        ui_log("批次優化：2 筆以上同組先批次；單筆組改走逐筆。建單先回填，日曆後處理。")
+        ui_log(f"實際執行列號：{'、'.join(map(str, target_rows))}")
+        ui_log("批次優化：2 筆以上同組先批次；單筆組改走逐筆。每個多筆組建單完成後一次 batch_update 回填該組結果，再處理日曆。")
         result = run_process_web_hybrid(
             env_name=env, region=region, backend_email=email, backend_password=password,
             sheet_name=sheet_name, start_row=min(target_rows), end_row=max(target_rows),
             selected_actions=selected_actions, logger=ui_log,
             allow_auto_lemon_shift=allow_auto_lemon, selected_rows=target_rows,
         ) or {}
-        st.success(f"執行完成：成功 {int(result.get('success_count', 0) or 0)}，失敗 {int(result.get('fail_count', 0) or 0)}。")
+        st.success(f"執行完成：成功 {int(result.get('success_count', 0) or 0)}，失敗 {int(result.get('fail_count', 0) or 0)}，略過 {len(invalid) + len(region_mismatch)}。")
     except Exception as exc:
         ui_log(f"❌ 執行失敗：{exc}")
         st.error(f"執行失敗：{exc}")
