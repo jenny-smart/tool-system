@@ -386,6 +386,8 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
 
     # 上次若已人工儲存、但 Agent 未完成回填，查詢頁仍可依訂單同列復原，
     # 必須在導向新的開立頁之前處理，避免重複開立。
+    recovered_rows: set[int] = set()
+    completed = 0
     for item in pending:
         row_no = int(item.get("_row") or 0)
         source_row = int(item.get("source_row") or 0)
@@ -395,12 +397,20 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
             continue
         write_invoice_result(area, source_row, order_no, invoice_no)
         update_payload_status(row_no, "completed", f"已從查詢頁復原並回填 O/AA：{invoice_no}")
+        recovered_rows.add(row_no)
+        completed += 1
         print(
             f"[{area}] {order_no}：查詢頁已有發票 {invoice_no}，"
             "已直接回填，未重複開立",
             flush=True,
         )
-        return 1
+    pending = [
+        item for item in pending
+        if int(item.get("_row") or 0) not in recovered_rows
+    ]
+    if not pending:
+        print(f"[{area}] 本次發票資料匯入：{completed} 筆")
+        return completed
 
     awaiting_orders = [
         str(item.get("order_no") or "").strip()
@@ -413,10 +423,6 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
             "但目前查詢頁找不到同訂單發票；為避免重複開立，已停止"
         )
 
-    _open_invoice_create(page)
-    _clear_dialog_handlers(page)
-
-    completed = 0
     for item in pending:
         row_no = int(item.get("_row") or 0)
         source_row = int(item.get("source_row") or 0)
@@ -426,6 +432,9 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
             update_payload_status(row_no, "failed", "Payload 空白")
             continue
         try:
+            # 每張發票按「否」後會回到查詢頁；下一筆必須重新進入開立頁。
+            _open_invoice_create(page)
+            _clear_dialog_handlers(page)
             _paste_one(page, payload_json)
             update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存")
             invoice_no = _wait_for_manual_save(page, order_no)
@@ -436,9 +445,6 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         except Exception as exc:
             update_payload_status(row_no, "failed", str(exc))
             raise RuntimeError(f"{order_no} 匯入發票資料失敗：{exc}") from exc
-
-        # 後續『下一步/儲存/O、AA 回填』尚未接好前，每次只處理一筆。
-        break
 
     print(f"[{area}] 本次發票資料匯入：{completed} 筆")
     return completed
