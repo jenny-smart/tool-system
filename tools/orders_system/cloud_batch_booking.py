@@ -9,7 +9,7 @@ import batch_booking_optimized as batch_opt
 from orders import get_region_by_address
 from batch_recovery_meta import install_patch as install_recovery_meta_patch
 from selected_row_status_guard import install_patch as install_selected_row_status_guard, _auto_filter_rows
-from batch_booking_safety import run_process_web_optimized
+from hybrid_batch_runner import run_process_web_hybrid
 
 install_selected_row_status_guard()
 install_recovery_meta_patch()
@@ -49,6 +49,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
     success_total = fail_total = 0
     started = time.monotonic()
     print(f"FILTER mode={filter_mode}; region={selected_region or 'auto'}; auto_lemon_shift={'ON' if allow_auto_lemon else 'OFF'}", flush=True)
+    print("STRATEGY multi-row-groups-first -> single-rows; Calendar only after order writeback", flush=True)
     while True:
         pending = load_pending(sheet_name, attempted, filter_mode, selected_region)
         if max_rows:
@@ -75,7 +76,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                 if not email or not password:
                     raise RuntimeError(f"{region} 尚未設定後台帳號密碼")
                 print(f"START {region}: rows={','.join(map(str, rows))}", flush=True)
-                result = run_process_web_optimized(
+                result = run_process_web_hybrid(
                     env_name="prod", region=region, backend_email=email, backend_password=password,
                     sheet_name=sheet_name, start_row=min(rows), end_row=max(rows), selected_actions=ACTIONS,
                     logger=lambda msg: print(str(msg), flush=True), allow_auto_lemon_shift=allow_auto_lemon,
@@ -110,10 +111,7 @@ def main():
     a = p.parse_args()
     if a.chunk_size < 1:
         p.error("--chunk-size 必須 >= 1")
-    return run(
-        a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0),
-        a.filter_mode, a.region.strip(), _bool_text(a.allow_auto_lemon),
-    )
+    return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(), _bool_text(a.allow_auto_lemon))
 
 
 if __name__ == "__main__":
