@@ -16,6 +16,8 @@ from batch_booking_safety import run_process_web_optimized
 install_selected_row_status_guard()
 install_recovery_meta_patch()
 
+# 雲端全自動只抓「未安排＋空白訂單編號」建立新單；已有單號的同步由指定列執行，
+# 避免每輪雲端工作重寄確認信。
 ACTIONS = ["建單", "寄確認信", "改 Google 日曆"]
 
 
@@ -25,6 +27,9 @@ def load_pending(sheet_name: str, excluded: set[int] | None = None):
     for _, row in batch_opt._load_candidates(sheet_name).sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
         if row_no in excluded:
+            continue
+        # 雲端自動待成單清單只包含空白單號；已有單號不是「待成單」。
+        if batch_opt._text(row.get("訂單編號")):
             continue
         address = batch_opt._text(row.get("地址"))
         region = get_region_by_address(address, ACCOUNTS)
@@ -66,7 +71,6 @@ def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds:
                     env_name="prod", region=region, backend_email=email, backend_password=password,
                     sheet_name=sheet_name, start_row=min(rows), end_row=max(rows),
                     selected_actions=ACTIONS, logger=lambda msg: print(str(msg), flush=True),
-                    # 只在核心判定「查無班表」時補檸檬人；既有已配班專員不會被覆蓋。
                     allow_auto_lemon_shift=True, selected_rows=rows,
                 ) or {}
                 success = int(result.get("success_count", 0) or 0)
@@ -86,7 +90,7 @@ def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds:
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
         if pause_seconds and load_pending(sheet_name, attempted):
             time.sleep(pause_seconds)
-    remaining = len(batch_opt._load_candidates(sheet_name))
+    remaining = len(load_pending(sheet_name, attempted))
     print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining}", flush=True)
     return 0 if fail_total == 0 else 2
 

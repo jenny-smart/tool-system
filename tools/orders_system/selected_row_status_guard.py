@@ -7,10 +7,10 @@ import pandas as pd
 import orders
 
 _INSTALLED = False
+_ORIGINAL_LOAD_WORKSHEET = orders.load_worksheet
 
 
 def _scalar(value):
-    """row.get() 遇到重複欄名時可能回傳 Series；只取第一個同名欄值。"""
     if isinstance(value, pd.Series):
         return value.iloc[0] if len(value) else ""
     if isinstance(value, (list, tuple)):
@@ -24,6 +24,18 @@ def normalize_status(value) -> str:
     return re.sub(r"\s+", "", text)
 
 
+def _dedupe_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df.columns.is_unique:
+        return df
+    # 不改 Sheet，只在程式記憶體中保留第一個同名欄，避免 pandas reindex 失敗。
+    return df.loc[:, ~df.columns.duplicated(keep="first")].copy()
+
+
+def _load_worksheet_unique(sheet_name: str):
+    ws, df = _ORIGINAL_LOAD_WORKSHEET(sheet_name)
+    return ws, _dedupe_dataframe(df)
+
+
 def _first_series(df: pd.DataFrame, name: str) -> pd.Series:
     selected = df.loc[:, df.columns == name]
     if selected.shape[1] == 0:
@@ -31,40 +43,46 @@ def _first_series(df: pd.DataFrame, name: str) -> pd.Series:
     return selected.iloc[:, 0]
 
 
-def _is_unarranged_blank_order(row) -> bool:
-    status = normalize_status(row.get("狀態", ""))
-    order_no = _scalar(row.get("訂單編號", ""))
-    return status == "未安排" and orders.is_blank(order_no)
+def _should_process_row(row) -> bool:
+    """已有訂單編號＝同步既有訂單；無單號時只有未安排可建單。"""
+    order_no = str(_scalar(row.get("訂單編號", "")) or "").strip()
+    if order_no:
+        return True
+    return normalize_status(row.get("狀態", "")) == "未安排"
+
+
+def _should_create_order(row) -> bool:
+    """只有未安排＋訂單編號空白才真的建立新訂單。"""
+    order_no = str(_scalar(row.get("訂單編號", "")) or "").strip()
+    return not order_no and normalize_status(row.get("狀態", "")) == "未安排"
 
 
 def _safe_load_candidates(batch_opt, sheet_name: str) -> pd.DataFrame:
-    """只抽取第一個同名欄位，避免 duplicate labels 造成 pandas reindex 失敗。"""
+    """人工批次優化：未安排空白單號可建單；已有單號可指定同步既有訂單。"""
     try:
-        _, df = batch_opt.load_worksheet(sheet_name)
+        _, df = _load_worksheet_unique(sheet_name)
     except Exception as exc:
         if type(exc).__name__ == "WorksheetNotFound":
             raise ValueError(f"找不到工作表分頁「{sheet_name}」") from exc
         raise
-
-    if "__sheet_row__" not in df.columns:
-        df = df.copy()
-        df["__sheet_row__"] = range(2, len(df) + 2)
 
     work = pd.DataFrame(index=df.index)
     work["__sheet_row__"] = _first_series(df, "__sheet_row__")
     for col in batch_opt.REQUIRED_COLUMNS:
         work[col] = _first_series(df, col).map(batch_opt._text)
 
-    work = work[
-        work["狀態"].map(normalize_status).eq("未安排")
-        & work["訂單編號"].eq("")
-        & work["姓名"].ne("")
+    required_ok = (
+        work["姓名"].ne("")
         & work["電話"].ne("")
         & work["地址"].ne("")
         & work["日期"].ne("")
         & work["開始時間"].ne("")
         & work["結束時間"].ne("")
-    ].copy()
+    )
+    create_ok = work["狀態"].map(normalize_status).eq("未安排") & work["訂單編號"].eq("")
+    existing_ok = work["訂單編號"].ne("")
+    work = work[required_ok & (create_ok | existing_ok)].copy()
+
     work.reset_index(drop=True, inplace=True)
     work["日期顯示"] = work["日期"].map(batch_opt._date_text)
     work["時段顯示"] = work.apply(
@@ -81,17 +99,20 @@ def install_patch() -> None:
     if _INSTALLED:
         return
 
-    orders.should_process_row = _is_unarranged_blank_order
-    orders.should_create_order = _is_unarranged_blank_order
+    # 批次核心統一使用去重後 DataFrame，避免任何後續 groupby/reindex 再爆 duplicate labels。
+    orders.load_worksheet = _load_worksheet_unique
+    orders.should_process_row = _should_process_row
+    orders.should_create_order = _should_create_order
+    orders.ORDERS_VERSION = "v2026.09.05-1"
+    orders.ORDERS_UPDATED_AT = "2026-09-05"
 
     try:
         import batch_booking_optimized as batch_opt
         from batch_booking_safety import run_process_web_optimized
 
+        batch_opt.load_worksheet = _load_worksheet_unique
         batch_opt._load_candidates = lambda sheet_name: _safe_load_candidates(batch_opt, sheet_name)
 
-        # 直接綁定人工「批次建單優化」入口，不再依賴 import/stack patch。
-        # 查無班表時允許核心補檸檬人；已有配班專員時核心不會覆蓋。
         def _optimized_runner_with_lemon_fallback(**kwargs):
             kwargs["allow_auto_lemon_shift"] = True
             return run_process_web_optimized(**kwargs)
