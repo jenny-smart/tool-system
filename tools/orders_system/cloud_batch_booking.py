@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""批次建單優化＋雲端批次成單：沿用人工優化版核心，並加上中斷復原。"""
+"""批次建單優化＋雲端批次成單。"""
 from __future__ import annotations
 import argparse
 import time
@@ -16,11 +16,19 @@ install_recovery_meta_patch()
 ACTIONS = ["建單", "寄確認信", "改 Google 日曆"]
 
 
-def load_pending(sheet_name: str, excluded: set[int] | None = None, filter_mode: str = "all"):
+def _bool_text(value) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = ""):
     excluded = excluded or set()
     allowed_rows = None
-    if filter_mode in ("no_schedule", "missing_order"):
-        allowed_rows = set(_auto_filter_rows(batch_opt, sheet_name, filter_mode))
+    if filter_mode != "all":
+        allowed_rows = set()
+        if filter_mode in ("no_schedule", "both"):
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None))
+        if filter_mode in ("missing_order", "both"):
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None))
     result = []
     for _, row in batch_opt._load_candidates(sheet_name).sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
@@ -30,17 +38,19 @@ def load_pending(sheet_name: str, excluded: set[int] | None = None, filter_mode:
             continue
         address = batch_opt._text(row.get("地址"))
         region = get_region_by_address(address, ACCOUNTS)
+        if selected_region and region != selected_region:
+            continue
         result.append((row_no, region or "", "" if region else f"無法依地址判斷地區：{address}"))
     return result
 
 
-def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds: int = 5, filter_mode: str = "all") -> int:
-    attempted: set[int] = set()
+def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False) -> int:
+    attempted = set()
     success_total = fail_total = 0
     started = time.monotonic()
-    print(f"FILTER mode={filter_mode}; auto_lemon_shift=ON", flush=True)
+    print(f"FILTER mode={filter_mode}; region={selected_region or 'auto'}; auto_lemon_shift={'ON' if allow_auto_lemon else 'OFF'}", flush=True)
     while True:
-        pending = load_pending(sheet_name, attempted, filter_mode)
+        pending = load_pending(sheet_name, attempted, filter_mode, selected_region)
         if max_rows:
             left = max_rows - len(attempted)
             if left <= 0:
@@ -49,7 +59,7 @@ def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds:
         batch = pending[:chunk_size]
         if not batch:
             break
-        by_region: dict[str, list[int]] = defaultdict(list)
+        by_region = defaultdict(list)
         for row_no, region, error in batch:
             attempted.add(row_no)
             if error:
@@ -68,7 +78,8 @@ def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds:
                 result = run_process_web_optimized(
                     env_name="prod", region=region, backend_email=email, backend_password=password,
                     sheet_name=sheet_name, start_row=min(rows), end_row=max(rows), selected_actions=ACTIONS,
-                    logger=lambda msg: print(str(msg), flush=True), allow_auto_lemon_shift=True, selected_rows=rows,
+                    logger=lambda msg: print(str(msg), flush=True), allow_auto_lemon_shift=allow_auto_lemon,
+                    selected_rows=rows,
                 ) or {}
                 success = int(result.get("success_count", 0) or 0)
                 fail = int(result.get("fail_count", 0) or 0)
@@ -80,9 +91,9 @@ def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds:
                 print(f"ERROR {region}: {exc}", flush=True)
         elapsed = max(time.monotonic() - started, .001)
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
-        if pause_seconds and load_pending(sheet_name, attempted, filter_mode):
+        if pause_seconds and load_pending(sheet_name, attempted, filter_mode, selected_region):
             time.sleep(pause_seconds)
-    remaining = len(load_pending(sheet_name, attempted, filter_mode))
+    remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region))
     print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining}", flush=True)
     return 0 if fail_total == 0 else 2
 
@@ -93,11 +104,16 @@ def main():
     p.add_argument("--chunk-size", type=int, default=50)
     p.add_argument("--max-rows", type=int, default=0)
     p.add_argument("--pause-seconds", type=int, default=5)
-    p.add_argument("--filter-mode", choices=["all", "no_schedule", "missing_order"], default="all")
+    p.add_argument("--filter-mode", choices=["all", "no_schedule", "missing_order", "both"], default="all")
+    p.add_argument("--region", default="")
+    p.add_argument("--allow-auto-lemon", default="false")
     a = p.parse_args()
     if a.chunk_size < 1:
         p.error("--chunk-size 必須 >= 1")
-    return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode)
+    return run(
+        a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0),
+        a.filter_mode, a.region.strip(), _bool_text(a.allow_auto_lemon),
+    )
 
 
 if __name__ == "__main__":
