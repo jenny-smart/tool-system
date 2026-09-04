@@ -9,8 +9,17 @@ import orders
 _INSTALLED = False
 
 
+def _scalar(value):
+    """row.get() 遇到重複欄名時可能回傳 Series；只取第一個同名欄值。"""
+    if isinstance(value, pd.Series):
+        return value.iloc[0] if len(value) else ""
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else ""
+    return value
+
+
 def normalize_status(value) -> str:
-    text = str(value or "")
+    text = str(_scalar(value) or "")
     text = text.replace("\u00a0", " ").replace("\ufeff", "").replace("\u200b", "")
     return re.sub(r"\s+", "", text)
 
@@ -23,7 +32,9 @@ def _first_series(df: pd.DataFrame, name: str) -> pd.Series:
 
 
 def _is_unarranged_blank_order(row) -> bool:
-    return normalize_status(row.get("狀態", "")) == "未安排" and orders.is_blank(row.get("訂單編號", ""))
+    status = normalize_status(row.get("狀態", ""))
+    order_no = _scalar(row.get("訂單編號", ""))
+    return status == "未安排" and orders.is_blank(order_no)
 
 
 def _safe_load_candidates(batch_opt, sheet_name: str) -> pd.DataFrame:
