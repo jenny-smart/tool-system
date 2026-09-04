@@ -507,6 +507,7 @@ def normalize_address(addr: Any) -> str:
     for old, new in [("－", "-"), ("–", "-"), ("—", "-"), ("，", ","), ("：", ":"), ("；", ";"), ("（", "("), ("）", ")")]:
         s = s.replace(old, new)
     s = re.sub(r"\s*-\s*", "-", s)
+    s = re.sub(r",+\s*$", "", s).rstrip()
     return s
 
 def build_customer_key(name: str, addr: str) -> str:
@@ -655,7 +656,7 @@ def _process_events(events: list, area_name: str) -> list[dict]:
 
         parsed   = parse_title(title)
         status   = get_status(color)
-        location = e.get("location", "")
+        location = normalize_address(e.get("location", ""))
 
         start_raw = e.get("start", {}).get("dateTime") or e.get("start", {}).get("date", "")
         end_raw   = e.get("end",   {}).get("dateTime") or e.get("end",   {}).get("date", "")
