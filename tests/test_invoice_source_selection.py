@@ -60,6 +60,66 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
         self.assertEqual(result.carrier_type, "會員載具")
         self.assertEqual(result.carrier_no, "member@example.com")
 
+    def test_edit_page_carrier_is_authoritative_when_invoice_type_is_blank(self) -> None:
+        order = _order(
+            buyer_identifier="19920908",
+            buyer_name="錯誤公司",
+            invoice_type="三聯式",
+            carrier_type="紙本",
+            edit_url="/purchase/edit/1",
+        )
+        response = SimpleNamespace(
+            text="""
+                <form>
+                  <input name="carrier_type_id" value="1">
+                  <input name="carrier_info" value="member@example.com">
+                  <input name="company_no" value="19920908">
+                </form>
+            """,
+            raise_for_status=lambda: None,
+        )
+        session = MagicMock()
+        session.get.return_value = response
+
+        result = hydrate_order_from_edit_page(session, order)
+
+        self.assertEqual(result.invoice_type, "二聯式")
+        self.assertEqual(result.buyer_identifier, "")
+        self.assertEqual(result.buyer_name, "")
+        self.assertEqual(result.carrier_type, "會員載具")
+        self.assertEqual(result.carrier_no, "member@example.com")
+
+    def test_stored_value_member_carrier_does_not_restore_stale_company_no(self) -> None:
+        current = _order(order_no="LC200")
+        source = _order(
+            order_no="LC180",
+            items=["儲值金-台北"],
+            invoice_type="二聯式",
+            buyer_identifier="",
+            buyer_name="",
+            carrier_type="會員載具",
+            carrier_no="member@example.com",
+            extra={
+                "paid_at": "2026-03-16 12:31:49",
+                "company_no": "19920908",
+                "company_title": "舊公司",
+            },
+        )
+        client = MagicMock()
+        client.get_order.return_value = current
+        client.search_paid_stored_value_orders_by_phone.return_value = [source]
+
+        order, payload = fetch_backend_order_invoice_payload(
+            "台北", "LC200", backend_client=client
+        )
+
+        self.assertEqual(order.invoice_type, "二聯式")
+        self.assertEqual(order.buyer_identifier, "")
+        self.assertEqual(order.buyer_name, "")
+        self.assertEqual(payload.buyer_identifier, "")
+        self.assertEqual(payload.carriertype, "EJ0011")
+        self.assertEqual(payload.carrierid1, "member@example.com")
+
     def test_stored_value_payment_uses_newest_paid_stored_value_purchase(self) -> None:
         current = _order(order_no="LC200")
         older = _order(

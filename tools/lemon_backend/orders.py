@@ -225,7 +225,7 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
     carrier_info = _text_value(item.get("carrier_info"))
     email = _text_value(item.get("email"))
 
-    if invoice_type == "3" or (not invoice_type and company_no):
+    if invoice_type == "3" or (not invoice_type and not carrier_type_id and company_no):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -611,7 +611,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
     company_no = _field_value(fields, "company_no", "companyNo")
     donate_code = _field_value(fields, "donate_code", "donateCode", "donatevat")
 
-    if invoice_type == "3" or (not invoice_type and company_no):
+    if invoice_type == "3" or (not invoice_type and not carrier_type_id and company_no):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -629,7 +629,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
             "carrier_no": "",
             "donate_code": donate_code or "8585",
         }
-    if invoice_type == "2":
+    if invoice_type == "2" or (not invoice_type and carrier_type_id):
         carrier_labels = {
             "1": "會員載具",
             "2": "手機載具",
