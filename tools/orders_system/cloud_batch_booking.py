@@ -66,7 +66,8 @@ def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds:
                     env_name="prod", region=region, backend_email=email, backend_password=password,
                     sheet_name=sheet_name, start_row=min(rows), end_row=max(rows),
                     selected_actions=ACTIONS, logger=lambda msg: print(str(msg), flush=True),
-                    allow_auto_lemon_shift=False, selected_rows=rows,
+                    # 只在核心判定「查無班表」時補檸檬人；既有已配班專員不會被覆蓋。
+                    allow_auto_lemon_shift=True, selected_rows=rows,
                 ) or {}
                 success = int(result.get("success_count", 0) or 0)
                 fail = int(result.get("fail_count", 0) or 0)
