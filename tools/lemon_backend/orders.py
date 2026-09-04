@@ -323,6 +323,8 @@ def _order_from_purchase_data(item: dict[str, Any], base_url: str = "") -> Backe
         source="purchase_json",
         extra={
             "purchase_data_loaded": True,
+            "created_at": _text_value(item.get("created_at")),
+            "paid_at": _text_value(item.get("paid_at")),
             "invoice_type_code": _text_value(item.get("invoice_type")),
             "carrier_type_id": _text_value(item.get("carrier_type_id")),
             "carrier_info": _text_value(item.get("carrier_info")),
@@ -675,12 +677,14 @@ def hydrate_order_from_edit_page(session: LemonBackendSession, order: BackendOrd
     if payway_code in payway_map:
         order.payway = payway_map[payway_code]
     if invoice_fields:
-        order.invoice_type = invoice_fields["invoice_type"] or order.invoice_type
-        order.buyer_identifier = invoice_fields["buyer_identifier"] or order.buyer_identifier
-        order.buyer_name = invoice_fields["buyer_name"] or order.buyer_name
-        order.carrier_type = invoice_fields["carrier_type"] or order.carrier_type
-        order.carrier_no = invoice_fields["carrier_no"] or order.carrier_no
-        order.donate_code = invoice_fields["donate_code"] or order.donate_code
+        # 編輯頁是單筆訂單的最終設定；空白也必須覆蓋清單中的舊值，
+        # 否則會員載具會因清單殘留 company_no 而被誤判為三聯式。
+        order.invoice_type = invoice_fields["invoice_type"]
+        order.buyer_identifier = invoice_fields["buyer_identifier"]
+        order.buyer_name = invoice_fields["buyer_name"]
+        order.carrier_type = invoice_fields["carrier_type"]
+        order.carrier_no = invoice_fields["carrier_no"]
+        order.donate_code = invoice_fields["donate_code"]
     order.extra["edit_page_loaded"] = True
     return order
 
