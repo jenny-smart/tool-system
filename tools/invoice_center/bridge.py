@@ -57,11 +57,8 @@ def _stored_value_invoice_source(backend_client: Any, order: Any) -> Any | None:
         return None
 
     candidates = []
-    for candidate in backend_client.search_orders_by_phone(phone):
+    for candidate in backend_client.search_paid_stored_value_orders_by_phone(phone):
         if _clean(getattr(candidate, "paid_status", "")) != "已付款":
-            continue
-        items = list(getattr(candidate, "items", []) or [])
-        if not any("儲值金" in _clean(item) for item in items):
             continue
         candidates.append(candidate)
     if not candidates:
