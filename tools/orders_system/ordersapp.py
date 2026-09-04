@@ -408,6 +408,7 @@ from cleaner_reminders import find_paid_cleaner_reminders
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
 import batch_booking_optimized
+import cloud_batch_booking_ui
 import reserve_menu
 
 try:
@@ -825,6 +826,8 @@ FUNCTION_OPTIONS = [
      "orders", "批次建單（Google Sheet）"),
     ("批次建單優化：會員一次選日期區間與多個時段，集中查班後批次建立訂單。",
      "orders", "批次建單優化"),
+    ("批次建單優化＋雲端批次成單：沿用批次優化核心，由雲端背景持續成單至完成。",
+     "orders", "批次建單優化＋雲端批次成單"),
     ("檸檬保留單建單：依日期區間、時段與保留率分析班表並批次成立保留單。",
      "orders", "檸檬保留單建單"),
     ("建立舊客訂單：電話查會員、帶入歷史資料建單；需求搜尋整合在此流程內。",
@@ -949,6 +952,10 @@ if _system_key == "memo":
 
 if mode == "批次建單優化":
     batch_booking_optimized.render(backend_email, backend_password, env)
+    st.stop()
+
+if mode == "批次建單優化＋雲端批次成單":
+    cloud_batch_booking_ui.render(env)
     st.stop()
 
 if mode == "檸檬保留單建單":
