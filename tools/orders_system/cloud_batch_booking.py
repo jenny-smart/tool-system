@@ -7,11 +7,13 @@ import time
 from collections import defaultdict
 
 from accounts import ACCOUNTS
-from batch_booking_optimized import _load_candidates, _text
+import batch_booking_optimized as batch_opt
 from orders import get_region_by_address
 from batch_recovery_meta import install_patch as install_recovery_meta_patch
+from selected_row_status_guard import install_patch as install_selected_row_status_guard
 from batch_booking_safety import run_process_web_optimized
 
+install_selected_row_status_guard()
 install_recovery_meta_patch()
 
 ACTIONS = ["建單", "寄確認信", "改 Google 日曆"]
@@ -20,11 +22,11 @@ ACTIONS = ["建單", "寄確認信", "改 Google 日曆"]
 def load_pending(sheet_name: str, excluded: set[int] | None = None):
     excluded = excluded or set()
     result = []
-    for _, row in _load_candidates(sheet_name).sort_values("__sheet_row__").iterrows():
+    for _, row in batch_opt._load_candidates(sheet_name).sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
         if row_no in excluded:
             continue
-        address = _text(row.get("地址"))
+        address = batch_opt._text(row.get("地址"))
         region = get_region_by_address(address, ACCOUNTS)
         result.append((row_no, region or "", "" if region else f"無法依地址判斷地區：{address}"))
     return result
@@ -83,7 +85,7 @@ def run(sheet_name: str, chunk_size: int = 50, max_rows: int = 0, pause_seconds:
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
         if pause_seconds and load_pending(sheet_name, attempted):
             time.sleep(pause_seconds)
-    remaining = len(_load_candidates(sheet_name))
+    remaining = len(batch_opt._load_candidates(sheet_name))
     print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining}", flush=True)
     return 0 if fail_total == 0 else 2
 

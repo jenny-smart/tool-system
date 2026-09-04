@@ -5,9 +5,12 @@ import requests
 import streamlit as st
 from batch_booking_optimized import _load_candidates
 from batch_recovery_meta import install_patch as install_recovery_meta_patch
+from selected_row_status_guard import install_patch as install_selected_row_status_guard
 from batch_booking_safety import install_streamlit_batch_hooks
 
-# 先安裝中斷復原的精確訂單資料查詢，再接上三個批次入口。
+# 先安裝指定列狀態防呆與中斷復原，再接上三個批次入口。
+# 指定列只有「未安排＋訂單編號空白」可建單；待確認／已安排／暫停／保留單不執行。
+install_selected_row_status_guard()
 install_recovery_meta_patch()
 install_streamlit_batch_hooks()
 
