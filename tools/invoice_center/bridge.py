@@ -78,16 +78,18 @@ def _stored_value_invoice_source(backend_client: Any, order: Any) -> Any | None:
 
 
 def _apply_invoice_settings(order: Any, source: Any) -> None:
+    invoice_type = _order_value(source, "invoice_type")
+    is_triplicate = "三聯" in invoice_type
+    buyer_identifier = _order_value(source, "buyer_identifier") if is_triplicate else ""
+    buyer_name = _order_value(source, "buyer_name") if is_triplicate else ""
+    if is_triplicate:
+        buyer_identifier = buyer_identifier or _order_value(source, "company_no")
+        buyer_name = buyer_name or _order_value(source, "company_title")
+
     values = {
-        "invoice_type": _order_value(source, "invoice_type"),
-        "buyer_identifier": (
-            _order_value(source, "buyer_identifier")
-            or _order_value(source, "company_no")
-        ),
-        "buyer_name": (
-            _order_value(source, "buyer_name")
-            or _order_value(source, "company_title")
-        ),
+        "invoice_type": invoice_type,
+        "buyer_identifier": buyer_identifier,
+        "buyer_name": buyer_name,
         "carrier_type": _order_value(source, "carrier_type"),
         "carrier_no": (
             _order_value(source, "carrier_no")
