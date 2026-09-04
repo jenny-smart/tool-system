@@ -188,7 +188,6 @@ def install(ui) -> None:
         area_key = key_by_label[area_label]
         st.caption(f"只執行：{area_label}")
 
-        active_area = st.session_state.get("invoice_active_area")
         try:
             task_snapshot = _find_invoice_task(area_label)
         except Exception as exc:
@@ -196,9 +195,6 @@ def install(ui) -> None:
             st.warning(f"讀取執行日誌失敗：{exc}")
         task_running = bool(
             task_snapshot and str(task_snapshot.get("status") or "") in {"pending", "running"}
-        )
-        active = task_running and (
-            not active_area or active_area == area_label
         )
 
         try:
