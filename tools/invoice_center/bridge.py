@@ -109,7 +109,6 @@ def _invoice_overrides_from_order(order: Any) -> dict[str, str]:
     carrier_type = _order_value(order, "carrier_type")
     carrier_no = _order_value(order, "carrier_no")
     donate_code = _order_value(order, "donate_code")
-    email = _order_value(order, "email")
 
     if buyer_identifier:
         return {
@@ -153,8 +152,8 @@ def _invoice_overrides_from_order(order: Any) -> dict[str, str]:
         }
     return {
         "carriertype": "EJ0011",
-        "carrierid1": carrier_no or email,
-        "carrierid2": carrier_no or email,
+        "carrierid1": carrier_no,
+        "carrierid2": carrier_no,
         "donate": "0",
         "donatevat": "",
     }
