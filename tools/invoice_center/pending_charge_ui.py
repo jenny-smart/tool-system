@@ -199,7 +199,7 @@ def install(ui) -> None:
 
         try:
             candidates = get_pending_invoice_candidates(area_label)
-            select_all = st.checkbox("全選", key=f"invoice_pending_select_all_{area_label}")
+            select_all = st.checkbox("全選", key=f"invoice_pending_select_all_v2_{area_label}")
             visible_rows = []
             for source in candidates:
                 item = {key: source.get(key, "") for key in DISPLAY_COLUMNS}
@@ -231,7 +231,7 @@ def install(ui) -> None:
                     "載具/捐贈碼": st.column_config.TextColumn("載具/捐贈碼"),
                     "API開立類型": st.column_config.SelectboxColumn("API開立類型", options=list(ui.INVOICE_TYPE_OPTIONS.keys())),
                 },
-                key=f"invoice_pending_picker_{area_label}_{int(select_all)}",
+                key=f"invoice_pending_picker_v2_{area_label}_{int(select_all)}",
             )
             edited_rows = _records(editor)
             selected = [row for row in edited_rows if row.get("選取")]
