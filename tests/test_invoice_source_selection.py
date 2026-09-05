@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 from tools.invoice_center.bridge import fetch_backend_order_invoice_payload
 from tools.lemon_backend.models import BackendOrder
 from tools.lemon_backend.orders import (
+    _order_from_purchase_data,
     hydrate_order_from_edit_page,
     search_paid_stored_value_orders_by_phone,
 )
@@ -30,6 +31,37 @@ def _order(**overrides) -> BackendOrder:
 
 
 class InvoiceSourceSelectionTest(unittest.TestCase):
+    def test_unlabeled_email_digits_are_not_inferred_as_company_invoice(self) -> None:
+        result = _order_from_purchase_data({
+            "order_no": "LC002150301",
+            "name": "陳冠逸",
+            "email": "ivan19920908@gmail.com",
+            "company_no": "19920908",
+            "company_title": "",
+            "invoice_type": "",
+            "carrier_type_id": "",
+        })
+
+        self.assertEqual(result.invoice_type, "二聯式")
+        self.assertEqual(result.buyer_identifier, "")
+        self.assertEqual(result.buyer_name, "")
+        self.assertEqual(result.carrier_type, "會員載具")
+        self.assertEqual(result.carrier_no, "")
+
+    def test_complete_legacy_company_fields_are_still_triplicate(self) -> None:
+        result = _order_from_purchase_data({
+            "order_no": "LC002061361",
+            "email": "anne@noah-intl.com",
+            "company_no": "70450942",
+            "company_title": "娜亞國際股份有限公司",
+            "invoice_type": "",
+            "carrier_type_id": "",
+        })
+
+        self.assertEqual(result.invoice_type, "三聯式")
+        self.assertEqual(result.buyer_identifier, "70450942")
+        self.assertEqual(result.buyer_name, "娜亞國際股份有限公司")
+
     def test_edit_page_member_carrier_clears_stale_company_fields(self) -> None:
         order = _order(
             buyer_identifier="19920908",
@@ -204,6 +236,28 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
         client.search_paid_stored_value_orders_by_phone.assert_not_called()
         self.assertEqual(order.buyer_identifier, "")
         self.assertEqual(payload.carrierid1, "member@example.com")
+
+
+    def test_member_carrier_does_not_use_customer_email_as_carrier_number(self) -> None:
+        current = _order(
+            payway="信用卡",
+            buyer_identifier="",
+            buyer_name="",
+            carrier_type="會員載具",
+            carrier_no="",
+            email="ivan19920908@gmail.com",
+        )
+        client = MagicMock()
+        client.get_order.return_value = current
+
+        order, payload = fetch_backend_order_invoice_payload(
+            "台北", "LC100", backend_client=client
+        )
+
+        self.assertEqual(order.buyer_identifier, "")
+        self.assertEqual(payload.carriertype, "EJ0011")
+        self.assertEqual(payload.carrierid1, "")
+        self.assertEqual(payload.carrierid2, "")
 
 
 if __name__ == "__main__":
