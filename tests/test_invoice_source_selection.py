@@ -9,6 +9,7 @@ from tools.lemon_backend.models import BackendOrder
 from tools.lemon_backend.orders import (
     _order_from_purchase_data,
     hydrate_order_from_edit_page,
+    parse_purchase_list_page,
     search_paid_stored_value_orders_by_phone,
 )
 
@@ -31,6 +32,55 @@ def _order(**overrides) -> BackendOrder:
 
 
 class InvoiceSourceSelectionTest(unittest.TestCase):
+    def test_visible_member_carrier_overrides_stale_purchase_json(self) -> None:
+        html = """
+            <script>
+              purchaseList: {"data": [{
+                "order_no": "LC002150301",
+                "email": "ivan19920908@gmail.com",
+                "company_no": "19920908",
+                "company_title": "",
+                "invoice_type": "3",
+                "carrier_type_id": ""
+              }]}
+            </script>
+            <table><tbody><tr>
+              <td>LC002150301</td>
+              <td>陳冠逸<br>ivan19920908@gmail.com</td>
+              <td>發票：DM51791913<br>二聯式：會員載具</td>
+            </tr></tbody></table>
+        """
+
+        result = parse_purchase_list_page(html)[0]
+
+        self.assertEqual(result.invoice_type, "二聯式")
+        self.assertEqual(result.buyer_identifier, "")
+        self.assertEqual(result.buyer_name, "")
+        self.assertEqual(result.carrier_type, "會員載具")
+        self.assertEqual(result.carrier_no, "")
+        self.assertEqual(result.extra["invoice_fields_source"], "visible_order_card")
+
+    def test_visible_company_invoice_keeps_title_and_tax_id(self) -> None:
+        html = """
+            <script>
+              purchaseList: {"data": [{
+                "order_no": "LC002061361",
+                "invoice_type": "",
+                "company_no": ""
+              }]}
+            </script>
+            <table><tbody><tr>
+              <td>LC002061361</td>
+              <td>三聯式：<br>娜亞國際股份有限公司<br>70450942</td>
+            </tr></tbody></table>
+        """
+
+        result = parse_purchase_list_page(html)[0]
+
+        self.assertEqual(result.invoice_type, "三聯式")
+        self.assertEqual(result.buyer_identifier, "70450942")
+        self.assertEqual(result.buyer_name, "娜亞國際股份有限公司")
+
     def test_unlabeled_email_digits_are_not_inferred_as_company_invoice(self) -> None:
         result = _order_from_purchase_data({
             "order_no": "LC002150301",
