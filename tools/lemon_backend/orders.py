@@ -223,9 +223,12 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
     donate_code = _text_value(item.get("donate_code"))
     carrier_type_id = _text_value(item.get("carrier_type_id"))
     carrier_info = _text_value(item.get("carrier_info"))
-    email = _text_value(item.get("email"))
-
-    if invoice_type == "3" or (not invoice_type and not carrier_type_id and company_no):
+    if invoice_type == "3" or (
+        not invoice_type
+        and not carrier_type_id
+        and company_no
+        and company_title
+    ):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -252,9 +255,7 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
     }
     carrier_type = carrier_labels.get(carrier_type_id, "會員載具")
     carrier_no = carrier_info
-    if carrier_type == "會員載具":
-        carrier_no = carrier_info or email
-    elif carrier_type == "紙本":
+    if carrier_type == "紙本":
         carrier_no = ""
 
     return {
@@ -466,7 +467,7 @@ def _extract_member_carrier(text: str, email: str) -> str:
         email_match = EMAIL_RE.search(value)
         if email_match:
             return email_match.group(1)
-    return email
+    return ""
 
 
 def _extract_donate_code(text: str) -> str:
@@ -611,7 +612,12 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
     company_no = _field_value(fields, "company_no", "companyNo")
     donate_code = _field_value(fields, "donate_code", "donateCode", "donatevat")
 
-    if invoice_type == "3" or (not invoice_type and not carrier_type_id and company_no):
+    if invoice_type == "3" or (
+        not invoice_type
+        and not carrier_type_id
+        and company_no
+        and company_title
+    ):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -638,9 +644,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
         }
         carrier_type = carrier_labels.get(carrier_type_id, "會員載具")
         carrier_no = carrier_info
-        if carrier_type == "會員載具":
-            carrier_no = carrier_info or email
-        elif carrier_type == "紙本":
+        if carrier_type == "紙本":
             carrier_no = ""
         return {
             "invoice_type": "二聯式",
