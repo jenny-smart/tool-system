@@ -396,7 +396,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta, datetime
 
-from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, run_backend_calendar_consistency_check, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet, fetch_member_edit_page, submit_member_preferences, fetch_recent_service_records
+from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, run_backend_calendar_consistency_check, get_calendar_compare_allowed_region, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet, fetch_member_edit_page, submit_member_preferences, fetch_recent_service_records
 from env import GOOGLE_CALENDAR_MAP
 from weekend_reminders import (
     upcoming_weekend, previous_workday, find_paid_weekend_orders,
@@ -1250,9 +1250,10 @@ elif mode == "後台／Google 日曆雙向比對":
         "黃色＝已安排、綠色＝暫停），只有黃色事件代表「已安排／應該已成單」，"
         "才會拿來跟後台已付款訂單互相比對。",
         "方向一（後台有、日曆沒有）：後台這段服務日期區間內的已付款訂單，"
-        "找不到日期／時段完全相符的黃色日曆事件。",
+        "找不到同一人／地址／日期時段完全相符的黃色日曆事件。",
         "方向二（日曆有、後台沒有）：日曆這段期間的黃色事件，找不到日期／時段"
-        "相符的後台已付款訂單。",
+        "且同一人／地址／日期時段相符的後台已付款訂單。",
+        "後台若同一人／地址／日期時段出現多筆訂單，也會另外列為異常。",
         "只能比對已設定 Google Calendar ID 的區域（目前為：" + "、".join(GOOGLE_CALENDAR_MAP.keys()) + "）。",
     ])
 
@@ -1261,7 +1262,11 @@ elif mode == "後台／Google 日曆雙向比對":
         cc_date_s = st.date_input("服務日期-起", value=date.today(), key="cc_date_s")
     with cc_date_c2:
         cc_date_e = st.date_input("服務日期-迄", value=date.today() + timedelta(days=7), key="cc_date_e")
-    cc_region = st.selectbox("只檢查特定區域（不指定則檢查全部已設定日曆的區域）", ["全部"] + list(GOOGLE_CALENDAR_MAP.keys()), key="cc_region")
+    cc_allowed_region = get_calendar_compare_allowed_region(backend_email)
+    cc_region_options = [cc_allowed_region] if cc_allowed_region else ["全部"] + list(GOOGLE_CALENDAR_MAP.keys())
+    cc_region = st.selectbox("比對區域", cc_region_options, key="cc_region")
+    if cc_allowed_region:
+        st.caption(f"此登入帳號只能比對{cc_allowed_region}區。")
 
     if st.button("🔍 開始雙向比對", use_container_width=True, key="cc_run_btn", type="primary"):
         if not backend_email.strip() or not backend_password.strip():
@@ -1288,9 +1293,14 @@ elif mode == "後台／Google 日曆雙向比對":
         st.markdown("#### 檢查結果")
         _backend_missing = cc_result.get("backend_missing_in_calendar") or []
         _calendar_missing = cc_result.get("calendar_missing_in_backend") or []
-        if not _backend_missing and not _calendar_missing:
+        _backend_duplicates = cc_result.get("backend_duplicates") or []
+        if not _backend_missing and not _calendar_missing and not _backend_duplicates:
             st.success("✅ 檢查通過，後台已付款訂單與 Google 日曆黃色事件皆一一對應。")
         else:
+            if _backend_duplicates:
+                st.error(f"⚠️ 後台同人同址同日期時段重複：{len(_backend_duplicates)} 組")
+                for _p in _backend_duplicates:
+                    st.warning(_p.get("issue"))
             if _backend_missing:
                 st.error(f"⚠️ 後台有、日曆沒有：{len(_backend_missing)} 筆")
                 for _p in _backend_missing:
