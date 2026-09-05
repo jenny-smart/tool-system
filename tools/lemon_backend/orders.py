@@ -573,6 +573,82 @@ def parse_order_block(block: PurchaseBlock) -> BackendOrder:
     )
 
 
+def _invoice_fields_from_order_block(lines: list[str]) -> dict[str, str] | None:
+    """Parse only the invoice line visibly rendered on an order card."""
+    cleaned = [str(line or "").strip() for line in lines if str(line or "").strip()]
+    for index, line in enumerate(cleaned):
+        if line.startswith("三聯式"):
+            nearby = [re.split(r"[：:]", line, maxsplit=1)[-1].strip()]
+            nearby.extend(cleaned[index + 1:index + 3])
+            company_no = next(
+                (value for value in nearby if re.fullmatch(r"\d{8}", value)),
+                "",
+            )
+            company_title = next(
+                (
+                    value for value in nearby
+                    if value
+                    and value != company_no
+                    and not re.fullmatch(r"\d{8}", value)
+                ),
+                "",
+            )
+            return {
+                "invoice_type": "三聯式",
+                "buyer_identifier": company_no,
+                "buyer_name": company_title,
+                "carrier_type": "紙本",
+                "carrier_no": "",
+                "donate_code": "",
+            }
+        if line.startswith("二聯式"):
+            rest = re.split(r"[：:]", line, maxsplit=1)[-1].strip()
+            carrier_type = "會員載具"
+            carrier_no = ""
+            if "手機載具" in rest:
+                carrier_type = "手機載具"
+                match = MOBILE_BARCODE_RE.search(rest)
+                carrier_no = match.group(1).upper() if match else ""
+            elif "自然人憑證" in rest:
+                carrier_type = "自然人憑證"
+                match = re.search(r"/[A-Za-z0-9]+", rest)
+                carrier_no = match.group(0) if match else ""
+            elif "紙本" in rest:
+                carrier_type = "紙本"
+            return {
+                "invoice_type": "二聯式",
+                "buyer_identifier": "",
+                "buyer_name": "",
+                "carrier_type": carrier_type,
+                "carrier_no": carrier_no,
+                "donate_code": "",
+            }
+        if line.startswith("捐贈"):
+            match = re.search(r"\d{3,7}", line)
+            return {
+                "invoice_type": "二聯式",
+                "buyer_identifier": "",
+                "buyer_name": "",
+                "carrier_type": "捐贈",
+                "carrier_no": "",
+                "donate_code": match.group(0) if match else "8585",
+            }
+    return None
+
+
+def _apply_visible_invoice_fields(order: BackendOrder, block: PurchaseBlock) -> None:
+    invoice_fields = _invoice_fields_from_order_block(block.lines)
+    if not invoice_fields:
+        return
+    order.invoice_type = invoice_fields["invoice_type"]
+    order.buyer_identifier = invoice_fields["buyer_identifier"]
+    order.buyer_name = invoice_fields["buyer_name"]
+    order.carrier_type = invoice_fields["carrier_type"]
+    order.carrier_no = invoice_fields["carrier_no"]
+    order.donate_code = invoice_fields["donate_code"]
+    order.extra["invoice_fields_source"] = "visible_order_card"
+
+
 def _form_fields_from_html(html: str) -> dict[str, str]:
     soup = BeautifulSoup(html or "", "html.parser")
     fields: dict[str, str] = {}
@@ -694,17 +770,22 @@ def hydrate_order_from_edit_page(session: LemonBackendSession, order: BackendOrd
 
 
 def parse_purchase_list_page(html: str, base_url: str = "") -> list[BackendOrder]:
+    blocks = extract_order_cards_from_purchase_html(html, base_url)
     json_orders = [
         _order_from_purchase_data(item, base_url)
         for item in _extract_purchase_list_data(html)
         if isinstance(item, dict) and _text_value(item.get("order_no"))
     ]
     if json_orders:
+        blocks_by_order = {block.order_no: block for block in blocks}
         seen: dict[str, BackendOrder] = {}
         for order in json_orders:
+            block = blocks_by_order.get(order.order_no)
+            if block:
+                _apply_visible_invoice_fields(order, block)
             seen[order.order_no] = order
         return list(seen.values())
-    return [parse_order_block(block) for block in extract_order_cards_from_purchase_html(html, base_url)]
+    return [parse_order_block(block) for block in blocks]
 
 
 def search_order(session: LemonBackendSession, order_no: str) -> list[BackendOrder]:
