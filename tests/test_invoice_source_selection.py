@@ -111,7 +111,30 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
         self.assertEqual(result.invoice_type, "三聯式")
         self.assertEqual(result.buyer_identifier, "70450942")
         self.assertEqual(result.buyer_name, "娜亞國際股份有限公司")
+    def test_edit_page_member_email_digits_are_not_tax_id(self) -> None:
+        order = _order(
+            email="member19920908@example.com",
+            buyer_identifier="19920908",
+            invoice_type="三聯式",
+            carrier_type="紙本",
+            edit_url="/purchase/edit/1",
+        )
+        response = SimpleNamespace(
+            text="""
+                <form><input name="invoice_no" value="DM51791913"></form>
+                <div>手機載具/統編：會員載具 member19920908@example.com</div>
+            """,
+            raise_for_status=lambda: None,
+        )
+        session = MagicMock()
+        session.get.return_value = response
 
+        result = hydrate_order_from_edit_page(session, order)
+
+        self.assertEqual(result.invoice_type, "二聯式")
+        self.assertEqual(result.buyer_identifier, "")
+        self.assertEqual(result.carrier_type, "會員載具")
+        self.assertEqual(result.carrier_no, "member19920908@example.com")
     def test_edit_page_member_carrier_clears_stale_company_fields(self) -> None:
         order = _order(
             buyer_identifier="19920908",
@@ -188,7 +211,10 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
             },
         )
         client = MagicMock()
-        client.get_order.return_value = current
+        client.get_order.side_effect = lambda order_no: {
+            "LC200": current,
+            "LC180": source,
+        }.get(order_no)
         client.search_paid_stored_value_orders_by_phone.return_value = [source]
 
         order, payload = fetch_backend_order_invoice_payload(
@@ -231,7 +257,11 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
             extra={"paid_at": "2026-04-01 10:00:00"},
         )
         client = MagicMock()
-        client.get_order.return_value = current
+        client.get_order.side_effect = lambda order_no: {
+            "LC200": current,
+            "LC150": older,
+            "LC180": newest,
+        }.get(order_no)
         client.search_paid_stored_value_orders_by_phone.return_value = [
             unpaid,
             older,

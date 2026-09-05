@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import streamlit as st
 
+from tools.lemon_backend import BackendClient
 from tools.local_agent_queue import create_task, list_tasks
 
 from .invoice_payload_queue import enqueue_payload
@@ -13,6 +15,7 @@ from .pending_charge import DISPLAY_COLUMNS, get_pending_invoice_candidates
 
 DELIVERY_OPTIONS = ["會員載具", "手機載具", "自然人憑證", "紙本", "捐贈"]
 BUYER_OPTIONS = ["自然人", "公司"]
+INVOICE_SETTINGS_CACHE_TTL_SECONDS = 300
 
 
 def _invoice_editor_disabled_columns() -> list[str]:
@@ -30,12 +33,44 @@ def _records(value: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in (value or [])]
 
 
+def _fresh_cached_value(entry: Any, now: float) -> dict[str, str] | None:
+    if not isinstance(entry, dict):
+        return None
+    cached_at = entry.get("cached_at")
+    value = entry.get("value")
+    if not isinstance(cached_at, (int, float)) or not isinstance(value, dict):
+        return None
+    if now - cached_at >= INVOICE_SETTINGS_CACHE_TTL_SECONDS:
+        return None
+    return dict(value)
+
+
 def install(ui) -> None:
     """Pick invoice rows once, show progress/payload, and dispatch Agent without a second user action."""
 
+    def _backend_client(area_key: str) -> BackendClient:
+        clients = st.session_state.setdefault("invoice_pending_backend_clients", {})
+        client = clients.get(area_key)
+        if client is None:
+            client = BackendClient(area_key)
+            clients[area_key] = client
+        return client
+
     def _current_invoice_settings(area_key: str, order_no: str) -> dict[str, str]:
         suffix = str(st.session_state.get("invoice_center_order_suffix", "-1") or "-1")
-        _order, payload = ui.fetch_backend_order_invoice_payload(area_key, order_no, suffix=suffix)
+        cache = st.session_state.setdefault("invoice_pending_settings_cache", {})
+        cache_key = (area_key, order_no, suffix)
+        now = time.monotonic()
+        cached = _fresh_cached_value(cache.get(cache_key), now)
+        if cached is not None:
+            return cached
+
+        _order, payload = ui.fetch_backend_order_invoice_payload(
+            area_key,
+            order_no,
+            suffix=suffix,
+            backend_client=_backend_client(area_key),
+        )
         buyer_identifier = str(getattr(payload, "buyer_identifier", "") or "").strip()
         buyer_name = str(getattr(payload, "buyer_name", "") or "").strip()
         carrier_type = str(getattr(payload, "carriertype", "") or "").strip()
@@ -56,7 +91,7 @@ def install(ui) -> None:
         else:
             delivery, carrier_value, buyer_type = "紙本", "", "自然人"
 
-        return {
+        result = {
             "發票對象": buyer_type,
             "發票方式": delivery,
             "公司抬頭": buyer_name if buyer_type == "公司" else "",
@@ -64,6 +99,8 @@ def install(ui) -> None:
             "載具/捐贈碼": carrier_value,
             "API開立類型": "一般發票",
         }
+        cache[cache_key] = {"cached_at": now, "value": result}
+        return result
 
     def _apply_override(row: dict[str, Any]) -> None:
         buyer_type = str(row.get("發票對象") or "自然人")
