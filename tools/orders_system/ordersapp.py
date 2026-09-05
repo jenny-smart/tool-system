@@ -1,10 +1,13 @@
 # ============================================================
 # 檔名：ordersapp.py
-# 版本：v8.77
+# 版本：v8.78
 # 模組：服務訂單系統主畫面
-# 最後更新：2026-08-14
+# 最後更新：2026-09-06
 #
 # Change Log
+# v8.78
+# - 修正 Streamlit 更新後仍快取舊版 orders.py 時，主程式直接匯入新函式而啟動失敗。
+# - 缺少必要函式時自動重載 orders.py；若部署檔案確實不完整，顯示缺少的函式名稱。
 # v8.77
 # - 補齊「批次建單優化」「檸檬保留單建單」「檸檬保留單取消」選單與路由。
 # v8.76
@@ -387,16 +390,64 @@
 # v7.7 - 儲值金補價差拆兩段按鈕
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.77"
+__version__ = "8.78"
 
 import html
+import importlib
 import re
 import json
 import streamlit as st
 import streamlit.components.v1 as components
 from datetime import date, timedelta, datetime
 
-from orders import run_process_web, get_region_by_address, run_standalone_consistency_check, run_backend_calendar_consistency_check, get_calendar_compare_allowed_region, find_orders_without_line_link, find_pending_stored_value_orders, add_bonus_note_to_order, apply_bonus_notes, load_worksheet, fetch_member_edit_page, submit_member_preferences, fetch_recent_service_records
+try:
+    import orders as orders_core
+except Exception as e:
+    st.error(f"orders.py 載入失敗：{type(e).__name__}: {e}")
+    st.stop()
+
+_REQUIRED_ORDERS_NAMES = [
+    "run_process_web",
+    "get_region_by_address",
+    "run_standalone_consistency_check",
+    "run_backend_calendar_consistency_check",
+    "get_calendar_compare_allowed_region",
+    "find_orders_without_line_link",
+    "find_pending_stored_value_orders",
+    "add_bonus_note_to_order",
+    "apply_bonus_notes",
+    "load_worksheet",
+    "fetch_member_edit_page",
+    "submit_member_preferences",
+    "fetch_recent_service_records",
+]
+
+# Streamlit 可能在 GitHub 更新後沿用記憶體中的舊版 orders 模組。只有在偵測到
+# 函式不完整時才重載一次，避免新版 ordersapp.py 因直接 from-import 而啟動失敗。
+_missing_orders_names = [
+    name for name in _REQUIRED_ORDERS_NAMES if not hasattr(orders_core, name)
+]
+if _missing_orders_names:
+    try:
+        orders_core = importlib.reload(orders_core)
+    except Exception as e:
+        st.error(f"orders.py 重新載入失敗：{type(e).__name__}: {e}")
+        st.stop()
+    _missing_orders_names = [
+        name for name in _REQUIRED_ORDERS_NAMES if not hasattr(orders_core, name)
+    ]
+
+if _missing_orders_names:
+    st.error(
+        "orders.py 目前版本不完整，請確認 Streamlit 已部署 GitHub main 最新版本。"
+        + "\n缺少："
+        + "、".join(_missing_orders_names)
+    )
+    st.stop()
+
+for _name in _REQUIRED_ORDERS_NAMES:
+    globals()[_name] = getattr(orders_core, _name)
+
 from env import GOOGLE_CALENDAR_MAP
 from weekend_reminders import (
     upcoming_weekend, previous_workday, find_paid_weekend_orders,
