@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from googleapiclient.errors import HttpError
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
@@ -58,6 +59,62 @@ def fill_deposit_refund(
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
 
 
+def _writeback_range(sheet_title: str, row: int) -> str:
+    return f"'{sheet_title}'!S{row}"
+
+
+def verify_writeback_access(
+    service,
+    spreadsheet_id: str,
+    sheet_title: str,
+    selected: list[dict[str, object]],
+) -> None:
+    """在進銀行前先確認所有待退款列的 S 欄可寫，避免退款後才遇到 403。"""
+    for item in selected:
+        row = int(item["sheet_row"])
+        cell_range = _writeback_range(sheet_title, row)
+        formula_res = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=cell_range,
+            valueRenderOption="FORMULA",
+        ).execute()
+        values = formula_res.get("values", [])
+        raw_value = str(values[0][0]).strip() if values and values[0] else ""
+        if raw_value:
+            raise ValueError(f"第 {row} 列 S 欄已有值，已停止避免重複退款")
+
+        # pending 資料的 S 欄必須為空白；寫回同樣的空白只用來驗證實際寫入權限，
+        # 不改變有效資料。若服務帳號只有檢視權限，會在任何銀行交易前先 403。
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=cell_range,
+            valueInputOption="USER_ENTERED",
+            body={"values": [[""]]},
+        ).execute()
+    print(f"已確認 {len(selected)} 筆 S 欄具備寫入權限。")
+
+
+def write_payment_date(
+    service,
+    spreadsheet_id: str,
+    sheet_title: str,
+    row: int,
+    payment_date: str,
+) -> None:
+    try:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=_writeback_range(sheet_title, row),
+            valueInputOption="USER_ENTERED",
+            body={"values": [[payment_date]]},
+        ).execute()
+    except HttpError as exc:
+        raise RuntimeError(
+            f"第 {row} 列退款已在富邦完成，但 S 欄日期回填失敗；"
+            "已停止，不會執行下一筆，請先人工確認此筆避免重複退款。"
+        ) from exc
+
+
 def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     values = read_report_values(DEPOSIT_REFUND_TYPE, area)
     candidates = pending_deposit_refunds(values)
@@ -65,29 +122,48 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     if not selected:
         raise ValueError("勾選列中沒有符合 H>0 且 S 欄空白的資料")
 
+    # 保持工作表原列順序，支援一次勾選多筆並逐筆完成。
+    selected.sort(key=lambda item: int(item["sheet_row"]))
+
     destination_name = read_destination_name(DEPOSIT_REFUND_TYPE, area)
     account = load_account("fubon", area, accounts_file.expanduser())
     spreadsheet_id, sheet_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
     service = get_sheets_service()
+
+    # 先驗證每一筆 S 欄都能實際寫入。若權限不足，銀行端完全不會開始退款。
+    verify_writeback_access(service, spreadsheet_id, sheet_title, selected)
+
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
         try:
             for item in selected:
-                print(f"準備第 {item['sheet_row']} 列：NT$ {item['amount']}／備註：{item['memo']}")
+                row = int(item["sheet_row"])
+                print(f"準備第 {row} 列：NT$ {item['amount']}／備註：{item['memo']}")
                 fill_deposit_refund(page, area, account.bank_account, destination_name, item)
-                # 每一筆都要等人工按「確認」真的送出後才回填，最後一筆也不
-                # 例外——不然腳本沒等最後一筆完成就結束，S 欄就不會回填，
-                # 這筆下次掃描還是會被當成待處理。
-                wait_user_completed_transfer(page)
-                payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
-                service.spreadsheets().values().update(
-                    spreadsheetId=spreadsheet_id,
-                    range=f"'{sheet_title}'!S{item['sheet_row']}",
-                    valueInputOption="USER_ENTERED",
-                    body={"values": [[payment_date]]},
-                ).execute()
-                print(f"已回填第 {item['sheet_row']} 列 S 欄：{payment_date}")
+
+                # 每筆都要確認富邦完成頁，而且金額必須對應本筆；成功後立即回填
+                # S 欄，回填成功才會進下一筆，避免多筆流程中發生重複退款。
+                completed_at = wait_user_completed_transfer(
+                    page,
+                    require_completed_at=True,
+                    expected_amount=str(item["amount"]),
+                )
+                if completed_at:
+                    payment_date = datetime.strptime(
+                        completed_at[:10], "%Y-%m-%d"
+                    ).strftime("%Y/%m/%d")
+                else:
+                    payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
+
+                write_payment_date(
+                    service,
+                    spreadsheet_id,
+                    sheet_title,
+                    row,
+                    payment_date,
+                )
+                print(f"已回填第 {row} 列 S 欄：{payment_date}")
                 page = current_fubon_page(context, page) or page
             print("全部勾選資料均已完成付款並回填 S 欄。")
         except Exception:

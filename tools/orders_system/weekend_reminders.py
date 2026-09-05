@@ -22,11 +22,12 @@ SCHEDULED_TRACKING_HEADERS = [
 ]
 TRACKING_HEADERS = [
     "訂單編號", "服務日期", "服務時間", "姓名", "電話", "地址", "LINE", "通知內容",
-    "預約發送時間", "通知狀態", "通知時間", "回覆狀態", "回覆時間", "回覆備註",
+    "訂單狀態", "預約發送時間", "通知狀態", "通知時間", "回覆狀態", "回覆時間", "回覆備註",
     "發送錯誤", "最後更新",
 ]
 NOTICE_STATUSES = ["待通知", "已排程", "已通知", "發送失敗"]
 REPLY_STATUSES = ["未回覆", "已回覆", "需追蹤"]
+TRACKED_ORDER_STATUSES = {"已付款", "取消訂單", "已退款"}
 
 
 def upcoming_weekend(reference=None):
@@ -290,7 +291,7 @@ def build_reminder_message(row):
 
 
 def find_paid_weekend_orders(env_name, backend_email, backend_password, clean_date_s, clean_date_e, max_pages=20):
-    """查詢服務日期區間內的已付款訂單；僅讀取後台，不修改訂單。"""
+    """查詢服務日期區間內已付款／取消／已退款訂單；回傳後由 merge 只顯示已付款提醒。"""
     _configure_backend(env_name)
     session = orders.requests.Session()
     if not orders.login(session, backend_email, backend_password):
@@ -303,10 +304,10 @@ def find_paid_weekend_orders(env_name, backend_email, backend_password, clean_da
         params.update({
             "clean_date_s": clean_date_s,
             "clean_date_e": clean_date_e,
-            "purchase_status": "1",
             "p_board": "on",
             "page": str(page),
         })
+        params.pop("purchase_status", None)
         response = session.get(orders.PURCHASE_URL, params=params, headers=orders.HEADERS, allow_redirects=True)
         if response.status_code != 200:
             hit_page_limit = False
@@ -319,7 +320,9 @@ def find_paid_weekend_orders(env_name, backend_email, backend_password, clean_da
         for block in blocks:
             lines = block.get("lines", [])
             joined = "\n".join(lines)
-            if not re.search(r"付款狀態[：:]\s*已付款", joined):
+            status_match = re.search(r"付款狀態[：:]\s*([^\n]+)", joined)
+            order_status = status_match.group(1).strip() if status_match else ""
+            if order_status not in TRACKED_ORDER_STATUSES:
                 continue
             listed_date, _ = _listed_service_date_time(lines)
             if not listed_date or not (clean_date_s <= listed_date <= clean_date_e):
@@ -335,15 +338,22 @@ def find_paid_weekend_orders(env_name, backend_email, backend_password, clean_da
                 "phone": phone,
                 "address": _address(lines),
                 "line_url": line_urls.get(order_no, ""),
+                "order_status": order_status,
             }
-            row["message"] = build_reminder_message(row)
+            row["message"] = build_reminder_message(row) if order_status == "已付款" else ""
             found[order_no] = row
         if len(blocks) < 20:
             hit_page_limit = False
             break
 
     rows = sorted(found.values(), key=lambda item: (item["service_date"], item["service_time"], item["name"]))
-    return rows, {"scanned": len(found), "hit_page_limit": hit_page_limit, "base_url": orders.BASE_URL}
+    paid_count = sum(1 for item in rows if item.get("order_status") == "已付款")
+    return rows, {
+        "scanned": len(found),
+        "paid": paid_count,
+        "hit_page_limit": hit_page_limit,
+        "base_url": orders.BASE_URL,
+    }
 
 
 def _tracking_worksheet():
@@ -388,6 +398,8 @@ def _tracking_worksheet():
             old = dict(zip(current_headers, values + [""] * (len(current_headers) - len(values))))
             if not str(old.get("通知內容") or "").strip():
                 old["通知內容"] = _tracking_message(old, {})
+            if not str(old.get("訂單狀態") or "").strip():
+                old["訂單狀態"] = "已付款"
             migrated.append([old.get(header, "") for header in TRACKING_HEADERS])
         worksheet.update(range_name="A1", values=migrated)
         if worksheet.col_count != len(TRACKING_HEADERS):
@@ -405,8 +417,24 @@ def load_tracking_rows():
 
 def merge_tracking_rows(order_rows, existing_rows, scheduled_at=""):
     existing = {row.get("訂單編號", ""): dict(row) for row in existing_rows}
+
+    status_updates = []
+    for item in order_rows:
+        order_no = item.get("order_no", "")
+        old = existing.get(order_no)
+        order_status = item.get("order_status", "")
+        if old and order_status and old.get("訂單狀態") != order_status:
+            updated = dict(old)
+            updated["訂單狀態"] = order_status
+            status_updates.append(updated)
+            existing[order_no] = updated
+    if status_updates:
+        save_tracking_rows(status_updates)
+
     merged = []
     for item in order_rows:
+        if item.get("order_status") != "已付款":
+            continue
         old = existing.get(item["order_no"], {})
         message = item.get("message", "")
         merged.append({
@@ -415,7 +443,7 @@ def merge_tracking_rows(order_rows, existing_rows, scheduled_at=""):
             "服務時間": item.get("service_time", ""), "姓名": item.get("name", ""),
             "電話": item.get("phone", ""), "地址": item.get("address", ""),
             "LINE": item.get("line_url", ""), "通知內容": old.get("通知內容") or message,
-            "LINE ID": old.get("LINE ID", ""),
+            "訂單狀態": "已付款",
             "預約發送時間": old.get("預約發送時間") or scheduled_at,
             "通知狀態": old.get("通知狀態") or "待通知",
             "通知時間": old.get("通知時間", ""), "回覆狀態": old.get("回覆狀態") or "未回覆",
@@ -457,6 +485,8 @@ def save_tracking_rows(rows):
         old = existing.get(row["訂單編號"], {})
         if not row["通知內容"]:
             row["通知內容"] = _tracking_message(raw, old)
+        if not row["訂單狀態"]:
+            row["訂單狀態"] = str(raw.get("訂單狀態") or old.get("訂單狀態") or "已付款")
         if row["通知狀態"] == "已通知" and not row["通知時間"]:
             row["通知時間"] = old.get("通知時間") or now
         if row["回覆狀態"] == "已回覆" and not row["回覆時間"]:
@@ -470,5 +500,5 @@ def save_tracking_rows(rows):
     old_row_count = len(worksheet.get_all_values())
     worksheet.update(range_name="A1", values=matrix)
     if old_row_count > len(matrix):
-        worksheet.batch_clear([f"A{len(matrix) + 1}:P{old_row_count}"])
+        worksheet.batch_clear([f"A{len(matrix) + 1}:Q{old_row_count}"])
     return len(incoming)

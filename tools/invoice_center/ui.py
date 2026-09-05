@@ -496,7 +496,7 @@ def _build_payload(area: str, order_no: str, suffix: str, rows: list[dict[str, A
         else st.session_state.get("invoice_center_buyer_name", "").strip()
     )
     delivery = st.session_state.get("invoice_center_delivery_method", "會員載具")
-    member_carrier = st.session_state.get("invoice_center_member_carrier", "").strip() or st.session_state.get("invoice_center_buyer_emailaddress", "").strip()
+    member_carrier = st.session_state.get("invoice_center_member_carrier", "").strip()
     mobile_barcode = st.session_state.get("invoice_center_mobile_barcode", "").strip().upper()
     citizen_cert = st.session_state.get("invoice_center_citizen_cert", "").strip()
     donate_code = st.session_state.get("invoice_center_donate_code", "").strip()

@@ -48,12 +48,67 @@ def _order_value(order: Any, key: str, default: str = "") -> str:
     return default
 
 
+def _stored_value_invoice_source(backend_client: Any, order: Any) -> Any | None:
+    """Find the customer's newest paid stored-value purchase for invoice settings."""
+    if _clean(getattr(order, "payway", "")) != "儲值金":
+        return None
+    phone = _clean(getattr(order, "phone", ""))
+    if not phone:
+        return None
+
+    candidates = []
+    for candidate in backend_client.search_paid_stored_value_orders_by_phone(phone):
+        if _clean(getattr(candidate, "paid_status", "")) != "已付款":
+            continue
+        candidates.append(candidate)
+    if not candidates:
+        return None
+
+    def recency_key(candidate: Any) -> tuple[str, int]:
+        extra = getattr(candidate, "extra", {}) or {}
+        date_value = ""
+        if isinstance(extra, Mapping):
+            date_value = _clean(extra.get("paid_at") or extra.get("created_at"))
+        if not date_value:
+            date_value = _clean(getattr(candidate, "service_date", ""))
+        order_digits = "".join(ch for ch in _clean(getattr(candidate, "order_no", "")) if ch.isdigit())
+        return date_value, int(order_digits or 0)
+
+    return max(candidates, key=recency_key)
+
+
+def _apply_invoice_settings(order: Any, source: Any) -> None:
+    invoice_type = _order_value(source, "invoice_type")
+    is_triplicate = "三聯" in invoice_type
+    buyer_identifier = _order_value(source, "buyer_identifier") if is_triplicate else ""
+    buyer_name = _order_value(source, "buyer_name") if is_triplicate else ""
+    if is_triplicate:
+        buyer_identifier = buyer_identifier or _order_value(source, "company_no")
+        buyer_name = buyer_name or _order_value(source, "company_title")
+
+    values = {
+        "invoice_type": invoice_type,
+        "buyer_identifier": buyer_identifier,
+        "buyer_name": buyer_name,
+        "carrier_type": _order_value(source, "carrier_type"),
+        "carrier_no": (
+            _order_value(source, "carrier_no")
+            or _order_value(source, "carrier_info")
+        ),
+        "donate_code": _order_value(source, "donate_code"),
+    }
+    for key, value in values.items():
+        setattr(order, key, value)
+    extra = getattr(order, "extra", None)
+    if isinstance(extra, dict):
+        extra["invoice_settings_source_order"] = _clean(getattr(source, "order_no", ""))
+
+
 def _invoice_overrides_from_order(order: Any) -> dict[str, str]:
     buyer_identifier = _order_value(order, "buyer_identifier")
     carrier_type = _order_value(order, "carrier_type")
     carrier_no = _order_value(order, "carrier_no")
     donate_code = _order_value(order, "donate_code")
-    email = _order_value(order, "email")
 
     if buyer_identifier:
         return {
@@ -97,8 +152,8 @@ def _invoice_overrides_from_order(order: Any) -> dict[str, str]:
         }
     return {
         "carriertype": "EJ0011",
-        "carrierid1": carrier_no or email,
-        "carrierid2": carrier_no or email,
+        "carrierid1": carrier_no,
+        "carrierid2": carrier_no,
         "donate": "0",
         "donatevat": "",
     }
@@ -170,6 +225,10 @@ def fetch_backend_order_invoice_payload(
     order = backend_client.get_order(_clean(order_no))
     if order is None:
         raise LookupError(f"查無 Lemon 訂單：{order_no}")
+
+    invoice_source = _stored_value_invoice_source(backend_client, order)
+    if invoice_source is not None:
+        _apply_invoice_settings(order, invoice_source)
 
     return order, build_invoice_payload_from_backend_order(area, order, suffix=suffix)
 

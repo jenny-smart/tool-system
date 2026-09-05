@@ -4,6 +4,9 @@
 Keeps the left order selector and right calendar selector at the same vertical
 level by removing the extra order caption row. This makes service date align
 with calendar date, and service period align with calendar period.
+
+Also installs the monthly-confirm status guard from vip_calendar_patch6:
+「每月確認」必須對應「待確認」（紫色），避免沿用舊的「未安排」語意或誤存成已安排。
 """
 
 
@@ -19,4 +22,8 @@ def apply_patch(vcs, vcp):
         return orders_list[labels.index(chosen)]
 
     patch4._select_order = _select_order
+
+    # ordersapp.py 目前最後套用 patch5；由這裡接續安裝 patch6，避免任何入口漏掉防呆。
+    import vip_calendar_patch6 as patch6
+    patch6.apply_patch(vcs, vcp)
     return vcs

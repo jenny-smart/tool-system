@@ -168,6 +168,42 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
         open_invoice.assert_not_called()
 
+    def test_processes_all_pending_in_sequence(self) -> None:
+        page = MagicMock()
+        pending = [
+            {
+                "_row": 7,
+                "source_row": 12,
+                "order_no": "LC001",
+                "payload_json": json.dumps({"orderid": "LC001"}),
+                "status": "pending",
+            },
+            {
+                "_row": 8,
+                "source_row": 13,
+                "order_no": "LC002",
+                "payload_json": json.dumps({"orderid": "LC002"}),
+                "status": "pending",
+            },
+        ]
+
+        with patch.object(paste, "list_pending_payloads", return_value=pending), patch.object(
+            paste, "_extract_invoice_no_for_order", return_value=""
+        ), patch.object(paste, "_open_invoice_create") as open_invoice, patch.object(
+            paste, "_clear_dialog_handlers"
+        ), patch.object(paste, "_paste_one") as paste_one, patch.object(
+            paste,
+            "_wait_for_manual_save",
+            side_effect=["AB12345678", "AB12345679"],
+        ), patch.object(paste, "write_invoice_result") as write_result, patch.object(
+            paste, "update_payload_status"
+        ):
+            self.assertEqual(paste.process_pending_invoice_payloads(page, "台北"), 2)
+
+        self.assertEqual(open_invoice.call_count, 2)
+        self.assertEqual(paste_one.call_count, 2)
+        self.assertEqual(write_result.call_count, 2)
+
     def test_extract_invoice_number_from_matching_order_row(self) -> None:
         page = MagicMock()
         page.evaluate.return_value = [

@@ -15,6 +15,15 @@ DELIVERY_OPTIONS = ["會員載具", "手機載具", "自然人憑證", "紙本",
 BUYER_OPTIONS = ["自然人", "公司"]
 
 
+def _invoice_editor_disabled_columns() -> list[str]:
+    """Only source columns are read-only; Agent activity must not lock selection."""
+    return list(DISPLAY_COLUMNS)
+
+
+def _invoice_action_label(task_running: bool) -> str:
+    return "➕ 加入等待佇列" if task_running else "▶ 執行"
+
+
 def _records(value: Any) -> list[dict[str, Any]]:
     if hasattr(value, "to_dict"):
         return value.to_dict("records")
@@ -179,7 +188,6 @@ def install(ui) -> None:
         area_key = key_by_label[area_label]
         st.caption(f"只執行：{area_label}")
 
-        active_area = st.session_state.get("invoice_active_area")
         try:
             task_snapshot = _find_invoice_task(area_label)
         except Exception as exc:
@@ -188,13 +196,10 @@ def install(ui) -> None:
         task_running = bool(
             task_snapshot and str(task_snapshot.get("status") or "") in {"pending", "running"}
         )
-        active = task_running and (
-            not active_area or active_area == area_label
-        )
 
         try:
             candidates = get_pending_invoice_candidates(area_label)
-            select_all = st.checkbox("全選", key=f"invoice_pending_select_all_{area_label}", disabled=active)
+            select_all = st.checkbox("全選", key=f"invoice_pending_select_all_v2_{area_label}")
             visible_rows = []
             for source in candidates:
                 item = {key: source.get(key, "") for key in DISPLAY_COLUMNS}
@@ -214,7 +219,7 @@ def install(ui) -> None:
                 visible_rows,
                 hide_index=True,
                 use_container_width=True,
-                disabled=list(DISPLAY_COLUMNS) if not active else ["選取", "變更發票", "發票對象", "發票方式", "公司抬頭", "統編", "載具/捐贈碼", "API開立類型", *DISPLAY_COLUMNS],
+                disabled=_invoice_editor_disabled_columns(),
                 column_order=["選取", *DISPLAY_COLUMNS, "變更發票", "發票對象", "發票方式", "公司抬頭", "統編", "載具/捐贈碼", "API開立類型"],
                 column_config={
                     "選取": st.column_config.CheckboxColumn("執行", default=False),
@@ -226,7 +231,7 @@ def install(ui) -> None:
                     "載具/捐贈碼": st.column_config.TextColumn("載具/捐贈碼"),
                     "API開立類型": st.column_config.SelectboxColumn("API開立類型", options=list(ui.INVOICE_TYPE_OPTIONS.keys())),
                 },
-                key=f"invoice_pending_picker_{area_label}_{int(select_all)}",
+                key=f"invoice_pending_picker_v2_{area_label}_{int(select_all)}",
             )
             edited_rows = _records(editor)
             selected = [row for row in edited_rows if row.get("選取")]
@@ -254,19 +259,23 @@ def install(ui) -> None:
         if invalid:
             st.warning("公司發票尚缺統編：" + "、".join(invalid))
 
-        if not active:
-            if st.button("▶ 執行", type="primary", use_container_width=True, disabled=not queue or bool(invalid)):
-                try:
-                    prepared = _prepare(queue, area_key)
-                    st.session_state["invoice_active_payloads"] = prepared
-                    st.session_state["invoice_active_area"] = area_label
-                    st.session_state["invoice_agent_dispatched"] = True
-                    _dispatch(prepared, area_label)
-                    st.rerun()
-                except Exception as exc:
-                    st.session_state.pop("invoice_active_payloads", None)
-                    st.session_state.pop("invoice_active_area", None)
-                    st.error(f"發票流程啟動失敗：{exc}")
+        if st.button(
+            _invoice_action_label(task_running),
+            type="primary",
+            use_container_width=True,
+            disabled=not queue or bool(invalid),
+        ):
+            try:
+                prepared = _prepare(queue, area_key)
+                st.session_state["invoice_active_payloads"] = prepared
+                st.session_state["invoice_active_area"] = area_label
+                st.session_state["invoice_agent_dispatched"] = True
+                _dispatch(prepared, area_label)
+                st.rerun()
+            except Exception as exc:
+                st.session_state.pop("invoice_active_payloads", None)
+                st.session_state.pop("invoice_active_area", None)
+                st.error(f"發票流程啟動失敗：{exc}")
 
         _render_active_payload()
 

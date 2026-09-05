@@ -51,6 +51,10 @@ class BackendClient:
         self.ensure_login()
         return orders.search_orders_by_phone(self.session, phone)
 
+    def search_paid_stored_value_orders_by_phone(self, phone: str) -> list[BackendOrder]:
+        self.ensure_login()
+        return orders.search_paid_stored_value_orders_by_phone(self.session, phone)
+
     def update_invoice_no(self, order_no: str, invoice_no: str) -> BackendResult:
         return BackendResult(
             success=False,

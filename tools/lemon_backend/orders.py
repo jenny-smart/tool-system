@@ -223,9 +223,12 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
     donate_code = _text_value(item.get("donate_code"))
     carrier_type_id = _text_value(item.get("carrier_type_id"))
     carrier_info = _text_value(item.get("carrier_info"))
-    email = _text_value(item.get("email"))
-
-    if invoice_type == "3" or company_no:
+    if invoice_type == "3" or (
+        not invoice_type
+        and not carrier_type_id
+        and company_no
+        and company_title
+    ):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -234,7 +237,7 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
             "carrier_no": "",
             "donate_code": "",
         }
-    if invoice_type == "1" or donate_code:
+    if invoice_type == "1" or (not invoice_type and donate_code):
         return {
             "invoice_type": "二聯式",
             "buyer_identifier": "",
@@ -252,9 +255,7 @@ def _invoice_fields_from_purchase_data(item: dict[str, Any]) -> dict[str, str]:
     }
     carrier_type = carrier_labels.get(carrier_type_id, "會員載具")
     carrier_no = carrier_info
-    if carrier_type == "會員載具":
-        carrier_no = carrier_info or email
-    elif carrier_type == "紙本":
+    if carrier_type == "紙本":
         carrier_no = ""
 
     return {
@@ -323,6 +324,8 @@ def _order_from_purchase_data(item: dict[str, Any], base_url: str = "") -> Backe
         source="purchase_json",
         extra={
             "purchase_data_loaded": True,
+            "created_at": _text_value(item.get("created_at")),
+            "paid_at": _text_value(item.get("paid_at")),
             "invoice_type_code": _text_value(item.get("invoice_type")),
             "carrier_type_id": _text_value(item.get("carrier_type_id")),
             "carrier_info": _text_value(item.get("carrier_info")),
@@ -464,7 +467,7 @@ def _extract_member_carrier(text: str, email: str) -> str:
         email_match = EMAIL_RE.search(value)
         if email_match:
             return email_match.group(1)
-    return email
+    return ""
 
 
 def _extract_donate_code(text: str) -> str:
@@ -570,6 +573,82 @@ def parse_order_block(block: PurchaseBlock) -> BackendOrder:
     )
 
 
+def _invoice_fields_from_order_block(lines: list[str]) -> dict[str, str] | None:
+    """Parse only the invoice line visibly rendered on an order card."""
+    cleaned = [str(line or "").strip() for line in lines if str(line or "").strip()]
+    for index, line in enumerate(cleaned):
+        if line.startswith("三聯式"):
+            nearby = [re.split(r"[：:]", line, maxsplit=1)[-1].strip()]
+            nearby.extend(cleaned[index + 1:index + 3])
+            company_no = next(
+                (value for value in nearby if re.fullmatch(r"\d{8}", value)),
+                "",
+            )
+            company_title = next(
+                (
+                    value for value in nearby
+                    if value
+                    and value != company_no
+                    and not re.fullmatch(r"\d{8}", value)
+                ),
+                "",
+            )
+            return {
+                "invoice_type": "三聯式",
+                "buyer_identifier": company_no,
+                "buyer_name": company_title,
+                "carrier_type": "紙本",
+                "carrier_no": "",
+                "donate_code": "",
+            }
+        if line.startswith("二聯式"):
+            rest = re.split(r"[：:]", line, maxsplit=1)[-1].strip()
+            carrier_type = "會員載具"
+            carrier_no = ""
+            if "手機載具" in rest:
+                carrier_type = "手機載具"
+                match = MOBILE_BARCODE_RE.search(rest)
+                carrier_no = match.group(1).upper() if match else ""
+            elif "自然人憑證" in rest:
+                carrier_type = "自然人憑證"
+                match = re.search(r"/[A-Za-z0-9]+", rest)
+                carrier_no = match.group(0) if match else ""
+            elif "紙本" in rest:
+                carrier_type = "紙本"
+            return {
+                "invoice_type": "二聯式",
+                "buyer_identifier": "",
+                "buyer_name": "",
+                "carrier_type": carrier_type,
+                "carrier_no": carrier_no,
+                "donate_code": "",
+            }
+        if line.startswith("捐贈"):
+            match = re.search(r"\d{3,7}", line)
+            return {
+                "invoice_type": "二聯式",
+                "buyer_identifier": "",
+                "buyer_name": "",
+                "carrier_type": "捐贈",
+                "carrier_no": "",
+                "donate_code": match.group(0) if match else "8585",
+            }
+    return None
+
+
+def _apply_visible_invoice_fields(order: BackendOrder, block: PurchaseBlock) -> None:
+    invoice_fields = _invoice_fields_from_order_block(block.lines)
+    if not invoice_fields:
+        return
+    order.invoice_type = invoice_fields["invoice_type"]
+    order.buyer_identifier = invoice_fields["buyer_identifier"]
+    order.buyer_name = invoice_fields["buyer_name"]
+    order.carrier_type = invoice_fields["carrier_type"]
+    order.carrier_no = invoice_fields["carrier_no"]
+    order.donate_code = invoice_fields["donate_code"]
+    order.extra["invoice_fields_source"] = "visible_order_card"
+
+
 def _form_fields_from_html(html: str) -> dict[str, str]:
     soup = BeautifulSoup(html or "", "html.parser")
     fields: dict[str, str] = {}
@@ -609,7 +688,12 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
     company_no = _field_value(fields, "company_no", "companyNo")
     donate_code = _field_value(fields, "donate_code", "donateCode", "donatevat")
 
-    if invoice_type == "3" or company_no:
+    if invoice_type == "3" or (
+        not invoice_type
+        and not carrier_type_id
+        and company_no
+        and company_title
+    ):
         return {
             "invoice_type": "三聯式",
             "buyer_identifier": company_no,
@@ -618,7 +702,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
             "carrier_no": "",
             "donate_code": "",
         }
-    if invoice_type == "1" or donate_code:
+    if invoice_type == "1" or (not invoice_type and donate_code):
         return {
             "invoice_type": "二聯式",
             "buyer_identifier": "",
@@ -627,7 +711,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
             "carrier_no": "",
             "donate_code": donate_code or "8585",
         }
-    if invoice_type == "2":
+    if invoice_type == "2" or (not invoice_type and carrier_type_id):
         carrier_labels = {
             "1": "會員載具",
             "2": "手機載具",
@@ -636,9 +720,7 @@ def _invoice_fields_from_codes(fields: dict[str, str], email: str) -> dict[str, 
         }
         carrier_type = carrier_labels.get(carrier_type_id, "會員載具")
         carrier_no = carrier_info
-        if carrier_type == "會員載具":
-            carrier_no = carrier_info or email
-        elif carrier_type == "紙本":
+        if carrier_type == "紙本":
             carrier_no = ""
         return {
             "invoice_type": "二聯式",
@@ -675,28 +757,35 @@ def hydrate_order_from_edit_page(session: LemonBackendSession, order: BackendOrd
     if payway_code in payway_map:
         order.payway = payway_map[payway_code]
     if invoice_fields:
-        order.invoice_type = invoice_fields["invoice_type"] or order.invoice_type
-        order.buyer_identifier = invoice_fields["buyer_identifier"] or order.buyer_identifier
-        order.buyer_name = invoice_fields["buyer_name"] or order.buyer_name
-        order.carrier_type = invoice_fields["carrier_type"] or order.carrier_type
-        order.carrier_no = invoice_fields["carrier_no"] or order.carrier_no
-        order.donate_code = invoice_fields["donate_code"] or order.donate_code
+        # 編輯頁是單筆訂單的最終設定；空白也必須覆蓋清單中的舊值，
+        # 否則會員載具會因清單殘留 company_no 而被誤判為三聯式。
+        order.invoice_type = invoice_fields["invoice_type"]
+        order.buyer_identifier = invoice_fields["buyer_identifier"]
+        order.buyer_name = invoice_fields["buyer_name"]
+        order.carrier_type = invoice_fields["carrier_type"]
+        order.carrier_no = invoice_fields["carrier_no"]
+        order.donate_code = invoice_fields["donate_code"]
     order.extra["edit_page_loaded"] = True
     return order
 
 
 def parse_purchase_list_page(html: str, base_url: str = "") -> list[BackendOrder]:
+    blocks = extract_order_cards_from_purchase_html(html, base_url)
     json_orders = [
         _order_from_purchase_data(item, base_url)
         for item in _extract_purchase_list_data(html)
         if isinstance(item, dict) and _text_value(item.get("order_no"))
     ]
     if json_orders:
+        blocks_by_order = {block.order_no: block for block in blocks}
         seen: dict[str, BackendOrder] = {}
         for order in json_orders:
+            block = blocks_by_order.get(order.order_no)
+            if block:
+                _apply_visible_invoice_fields(order, block)
             seen[order.order_no] = order
         return list(seen.values())
-    return [parse_order_block(block) for block in extract_order_cards_from_purchase_html(html, base_url)]
+    return [parse_order_block(block) for block in blocks]
 
 
 def search_order(session: LemonBackendSession, order_no: str) -> list[BackendOrder]:
@@ -712,4 +801,20 @@ def get_order(session: LemonBackendSession, order_no: str) -> BackendOrder | Non
 
 def search_orders_by_phone(session: LemonBackendSession, phone: str) -> list[BackendOrder]:
     response = get_purchase_page(session, purchase_params(phone=normalize_phone(phone)))
+    return parse_purchase_list_page(response.text, session.base_url)
+
+
+def search_paid_stored_value_orders_by_phone(
+    session: LemonBackendSession,
+    phone: str,
+) -> list[BackendOrder]:
+    """Use backend filters so stored-value purchases cannot be hidden by pagination."""
+    response = get_purchase_page(
+        session,
+        purchase_params(
+            phone=normalize_phone(phone),
+            buy="5",
+            purchase_status="1",
+        ),
+    )
     return parse_purchase_list_page(response.text, session.base_url)
