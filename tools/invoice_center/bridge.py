@@ -48,9 +48,18 @@ def _order_value(order: Any, key: str, default: str = "") -> str:
     return default
 
 
+def _is_stored_value_payment(order: Any) -> bool:
+    extra = getattr(order, "extra", {}) or {}
+    if isinstance(extra, Mapping):
+        payway_code = _clean(extra.get("payway_code"))
+        if payway_code:
+            return payway_code == "4"
+    return _clean(getattr(order, "payway", "")) == "儲值金"
+
+
 def _stored_value_invoice_source(backend_client: Any, order: Any) -> Any | None:
     """Find the customer's newest paid stored-value purchase for invoice settings."""
-    if _clean(getattr(order, "payway", "")) != "儲值金":
+    if not _is_stored_value_payment(order):
         return None
     phone = _clean(getattr(order, "phone", ""))
     if not phone:
@@ -60,7 +69,10 @@ def _stored_value_invoice_source(backend_client: Any, order: Any) -> Any | None:
     for candidate in backend_client.search_paid_stored_value_orders_by_phone(phone):
         if _clean(getattr(candidate, "paid_status", "")) != "已付款":
             continue
-        candidates.append(candidate)
+        # Search results are list-page snapshots. Re-load the source order from its
+        # edit page so we copy that order's actual invoice setting.
+        hydrated = backend_client.get_order(_clean(getattr(candidate, "order_no", "")))
+        candidates.append(hydrated or candidate)
     if not candidates:
         return None
 
@@ -222,10 +234,13 @@ def fetch_backend_order_invoice_payload(
 
         backend_client = BackendClient(area, env_name=env_name)
 
+    # Normal orders always use this original order's invoice settings.
     order = backend_client.get_order(_clean(order_no))
     if order is None:
         raise LookupError(f"查無 Lemon 訂單：{order_no}")
 
+    # Only stored-value payments inherit invoice settings from the newest paid
+    # stored-value purchase found by phone.
     invoice_source = _stored_value_invoice_source(backend_client, order)
     if invoice_source is not None:
         _apply_invoice_settings(order, invoice_source)
