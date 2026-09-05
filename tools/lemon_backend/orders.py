@@ -421,12 +421,15 @@ def _extract_invoice_no(text: str, order_no: str) -> str:
 
 
 def _extract_tax_id(text: str) -> str:
-    labeled = _label_value(text, ["統一編號", "統編", "公司統編", "買受人統編", "tax_id", "buyer_identifier"], 30)
+    # 後台會把二聯式顯示成「手機載具/統編：會員載具 foo19920908@example.com」；
+    # Email 中剛好連續 8 碼時不可誤認為統編。
+    text_without_emails = EMAIL_RE.sub(" ", text)
+    labeled = _label_value(text_without_emails, ["統一編號", "統編", "公司統編", "買受人統編", "tax_id", "buyer_identifier"], 30)
     match = TAX_ID_RE.search(labeled) if labeled else None
     if match:
         return match.group(1)
 
-    for line in text.splitlines():
+    for line in text_without_emails.splitlines():
         if any(label in line for label in ["統一編號", "統編", "公司統編", "買受人統編"]):
             match = TAX_ID_RE.search(line)
             if match:
