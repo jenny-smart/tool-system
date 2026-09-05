@@ -60,7 +60,11 @@ def _stored_value_invoice_source(backend_client: Any, order: Any) -> Any | None:
     for candidate in backend_client.search_paid_stored_value_orders_by_phone(phone):
         if _clean(getattr(candidate, "paid_status", "")) != "已付款":
             continue
-        candidates.append(candidate)
+        # Search results are list-page snapshots. Re-load the chosen candidates from
+        # their edit pages so stale company fields in purchaseList cannot override
+        # the order's actual invoice setting (e.g. member carrier with no tax ID).
+        hydrated = backend_client.get_order(_clean(getattr(candidate, "order_no", "")))
+        candidates.append(hydrated or candidate)
     if not candidates:
         return None
 
