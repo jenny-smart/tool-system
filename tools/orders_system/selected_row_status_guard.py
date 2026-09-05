@@ -128,14 +128,18 @@ def _process_one_group_with_lemon_retry(session, rows_with_idx, token, gcal_serv
         ) or {}
         assigned = pre.get("assigned", []) or []
         skipped = pre.get("skipped", []) or []
-        logger(f"🍋 第 {row_no} 列補檸檬人：成功 {len(assigned)} 人；略過 {len(skipped)} 人；{pre.get('message', '')}")
+        skipped_detail = "；".join(
+            f"{item.get('name', '')}:{item.get('reason', '')}"
+            for item in skipped[:8]
+            if isinstance(item, dict)
+        )
+        logger(f"🍋 第 {row_no} 列補檸檬人：成功 {len(assigned)} 人；略過 {len(skipped)} 人；{pre.get('message', '')}" + (f"；略過明細：{skipped_detail}" if skipped_detail else ""))
         if pre.get("success"):
             any_shift_added = True
 
     if not any_shift_added:
         return result
 
-    # 舊客成單也是補班後重新查 get_section；批次這裡同樣重新跑一次班表驗證。
     retry_token = orders.get_csrf_token(session)
     logger("🍋 已補檸檬人，重新查班表並再次嘗試本筆／本組。")
     return _ORIGINAL_PROCESS_ONE_GROUP(
@@ -148,12 +152,18 @@ def _process_one_group_with_lemon_retry(session, rows_with_idx, token, gcal_serv
 def install_patch():
     global _INSTALLED
     if _INSTALLED: return
+
+    # 先修正底層補班規則：上午已有班仍可補不衝突的下午班；反之亦然。
+    # 同一時段／全日班等真正衝突仍會跳過，且 POST 會保留原有 checked fields。
+    from lemon_shift_conflict_patch import install_patch as install_lemon_shift_conflict_patch
+    install_lemon_shift_conflict_patch()
+
     orders.load_worksheet = _load_worksheet_unique
     orders.update_sheet_rows = _update_sheet_rows_first_header
     orders.should_process_row = _should_process_row
     orders.should_create_order = _should_create_order
     orders.process_one_group = _process_one_group_with_lemon_retry
-    orders.ORDERS_VERSION = "v2026.09.05-5"
+    orders.ORDERS_VERSION = "v2026.09.05-6"
     orders.ORDERS_UPDATED_AT = "2026-09-05"
     try:
         import batch_booking_optimized as batch_opt
