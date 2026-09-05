@@ -7,7 +7,7 @@
 
 (() => {
   const TOOL_ID = "lemon-ei-fill-btn";
-  const TOOL_VERSION = "2026-08-23.1";
+  const TOOL_VERSION = "2026-09-05.1";
   if (window.__lemonEiToolVersion === TOOL_VERSION) return;
   window.__lemonEiToolVersion = TOOL_VERSION;
 
@@ -67,7 +67,7 @@
   const setTax = (d) => {
     const isTriplicate = Boolean(valueText(d.buyer_identifier));
     forceRadio("invoicetype07");
-    forceRadio(isTriplicate ? "hastax2" : (valueText(d.hastax) === "1" ? "hastax1" : "hastax2"));
+    forceRadio(isTriplicate ? "hastax1" : (valueText(d.hastax) === "1" ? "hastax1" : "hastax2"));
     const taxMap = { 1: "businesstax1", 2: "businesstax2", 3: "businesstax3", 4: "businesstax4" };
     forceRadio(taxMap[valueText(d.taxtype)] || "businesstax1");
     forceRadio(`roundnum${valueText(d.roundnum) || "4"}`);

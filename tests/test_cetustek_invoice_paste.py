@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import sys
 import types
 import unittest
@@ -11,6 +12,7 @@ queue_module = types.ModuleType("tools.invoice_center.invoice_payload_queue")
 queue_module.list_pending_payloads = MagicMock()
 queue_module.update_payload_status = MagicMock()
 queue_module.write_invoice_result = MagicMock()
+queue_module.enqueue_payload = MagicMock()
 sys.modules.setdefault("tools.invoice_center.invoice_payload_queue", queue_module)
 
 from tools.invoice_center import cetustek_invoice_paste as paste
@@ -41,6 +43,15 @@ def _invoice_page(order_id: str = "LC001") -> MagicMock:
 
 
 class CetustekInvoicePasteTest(unittest.TestCase):
+    def test_tampermonkey_triplicate_selects_tax_inclusive(self) -> None:
+        script = (
+            Path(__file__).parents[1]
+            / "tools/invoice_center/tampermonkey_ei_fill.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('isTriplicate ? "hastax1"', script)
+        self.assertNotIn('isTriplicate ? "hastax2"', script)
+
     def test_helper_button_alone_is_not_invoice_page(self) -> None:
         page = MagicMock()
         page.locator.return_value = _locator(count=0, visible=False)
