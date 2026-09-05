@@ -2,12 +2,14 @@
 """批次建單共用防呆：欄位去重、候選條件、回填欄位定位、無班表補檸檬人重試。"""
 from __future__ import annotations
 import re
+import types
 import pandas as pd
 import orders
 
 _INSTALLED = False
 _ORIGINAL_LOAD_WORKSHEET = orders.load_worksheet
 _ORIGINAL_PROCESS_ONE_GROUP = orders.process_one_group
+_ORIGINAL_RUN_PROCESS_WEB = orders.run_process_web
 
 
 def _scalar(value):
@@ -92,7 +94,6 @@ def _update_sheet_rows_first_header(ws, row_results):
 
 
 def _process_one_group_with_lemon_retry(session, rows_with_idx, token, gcal_service, region, backend_user_id=None, selected_actions=None, allow_auto_lemon_shift=False, used_order_nos=None, logger=print, group_no=None):
-    """沿用舊客成單規則：查無班表時先補檸檬人，再重新查班表；補不到才失敗。"""
     result = _ORIGINAL_PROCESS_ONE_GROUP(
         session, rows_with_idx, token, gcal_service, region, backend_user_id,
         selected_actions, allow_auto_lemon_shift=False,
@@ -100,7 +101,6 @@ def _process_one_group_with_lemon_retry(session, rows_with_idx, token, gcal_serv
     )
     if not allow_auto_lemon_shift:
         return result
-
     row_map = {int(row_no): row for row_no, row in rows_with_idx}
     no_slot_rows = []
     for row_no, info in (result or {}).items():
@@ -109,37 +109,22 @@ def _process_one_group_with_lemon_retry(session, rows_with_idx, token, gcal_serv
             no_slot_rows.append(int(row_no))
     if not no_slot_rows:
         return result
-
     any_shift_added = False
     for row_no in no_slot_rows:
         row = row_map.get(row_no)
-        if row is None:
-            continue
+        if row is None: continue
         date_s = orders.get_date_str(row["日期"])
         mapped = orders.map_to_system_slot(row["開始時間"], row["結束時間"], row["服務人時"])
         period_s = mapped["system_slot"]
         people, _hours = orders.parse_service_human_hour(row.get("服務人時", ""), row.get("開始時間", ""), row.get("結束時間", ""))
-        pre = orders.ensure_lemon_cleaner_shifts(
-            session=session,
-            base_url=orders.BASE_URL,
-            service_date=date_s,
-            period_s=period_s,
-            person_count=people,
-        ) or {}
+        pre = orders.ensure_lemon_cleaner_shifts(session=session, base_url=orders.BASE_URL, service_date=date_s, period_s=period_s, person_count=people) or {}
         assigned = pre.get("assigned", []) or []
         skipped = pre.get("skipped", []) or []
-        skipped_detail = "；".join(
-            f"{item.get('name', '')}:{item.get('reason', '')}"
-            for item in skipped[:8]
-            if isinstance(item, dict)
-        )
+        skipped_detail = "；".join(f"{item.get('name', '')}:{item.get('reason', '')}" for item in skipped[:8] if isinstance(item, dict))
         logger(f"🍋 第 {row_no} 列補檸檬人：成功 {len(assigned)} 人；略過 {len(skipped)} 人；{pre.get('message', '')}" + (f"；略過明細：{skipped_detail}" if skipped_detail else ""))
-        if pre.get("success"):
-            any_shift_added = True
-
+        if pre.get("success"): any_shift_added = True
     if not any_shift_added:
         return result
-
     retry_token = orders.get_csrf_token(session)
     logger("🍋 已補檸檬人，重新查班表並再次嘗試本筆／本組。")
     return _ORIGINAL_PROCESS_ONE_GROUP(
@@ -149,12 +134,28 @@ def _process_one_group_with_lemon_retry(session, rows_with_idx, token, gcal_serv
     )
 
 
+def _direct_single_dispatch(env_name, region, backend_email, backend_password, sheet_name, start_row, end_row, selected_actions=None, logger=print, allow_auto_lemon_shift=False, selected_rows=None):
+    """讓 ordersapp.py 已經 `from orders import run_process_web` 的舊 reference 也永久改走單筆 runner。"""
+    return _batch_direct_single_runner(
+        env_name=env_name, region=region, backend_email=backend_email,
+        backend_password=backend_password, sheet_name=sheet_name,
+        start_row=start_row, end_row=end_row, selected_actions=selected_actions,
+        logger=logger, allow_auto_lemon_shift=allow_auto_lemon_shift,
+        selected_rows=selected_rows,
+    )
+
+
 def install_patch():
     global _INSTALLED
-    if _INSTALLED: return
+    if _INSTALLED:
+        # Streamlit rerun 時 ordersapp.py 會重新做 from-import；再次固定入口。
+        try:
+            from batch_ui_consistency import _bind_original_batch_to_single_runner
+            _bind_original_batch_to_single_runner()
+        except Exception:
+            pass
+        return
 
-    # 先修正底層補班規則：上午已有班仍可補不衝突的下午班；反之亦然。
-    # 同一時段／全日班等真正衝突仍會跳過，且 POST 會保留原有 checked fields。
     from lemon_shift_conflict_patch import install_patch as install_lemon_shift_conflict_patch
     install_lemon_shift_conflict_patch()
 
@@ -163,16 +164,40 @@ def install_patch():
     orders.should_process_row = _should_process_row
     orders.should_create_order = _should_create_order
     orders.process_one_group = _process_one_group_with_lemon_retry
-    orders.ORDERS_VERSION = "v2026.09.05-6"
+    orders.ORDERS_VERSION = "v2026.09.05-7"
     orders.ORDERS_UPDATED_AT = "2026-09-05"
     try:
         import batch_booking_optimized as batch_opt
         import batch_booking_safety as batch_safety
+        from hybrid_batch_runner import run_process_web_direct_single
+
         batch_opt.load_worksheet = _load_worksheet_unique
         batch_opt._load_candidates = lambda sheet_name: _safe_load_candidates(batch_opt, sheet_name)
         batch_safety._BASE_UPDATE_SHEET_ROWS = _update_sheet_rows_first_header
         batch_safety._orders.update_sheet_rows = _update_sheet_rows_first_header
+
+        # batch_safety 的優化流程必須保留原本 grouped core；先複製一份真正原始函式，
+        # 再改動 ordersapp 已 from-import 的函式物件本身，兩者從此不會互相覆蓋。
+        grouped_core = types.FunctionType(
+            _ORIGINAL_RUN_PROCESS_WEB.__code__,
+            _ORIGINAL_RUN_PROCESS_WEB.__globals__,
+            name=_ORIGINAL_RUN_PROCESS_WEB.__name__,
+            argdefs=_ORIGINAL_RUN_PROCESS_WEB.__defaults__,
+            closure=_ORIGINAL_RUN_PROCESS_WEB.__closure__,
+        )
+        grouped_core.__kwdefaults__ = getattr(_ORIGINAL_RUN_PROCESS_WEB, "__kwdefaults__", None)
+        batch_safety._BASE_RUN_PROCESS_WEB = grouped_core
+
+        orders._batch_direct_single_runner = run_process_web_direct_single
+        # ordersapp.py 在本模組安裝前已 from-import run_process_web；單純 setattr 無效。
+        # 因此直接改「同一個函式物件」的 code，既有 reference 也會立即改走單筆入口。
+        _ORIGINAL_RUN_PROCESS_WEB.__code__ = _direct_single_dispatch.__code__
+        _ORIGINAL_RUN_PROCESS_WEB.__defaults__ = _direct_single_dispatch.__defaults__
+        _ORIGINAL_RUN_PROCESS_WEB.__kwdefaults__ = _direct_single_dispatch.__kwdefaults__
+        orders.run_process_web = _ORIGINAL_RUN_PROCESS_WEB
+
         from batch_ui_consistency import install as install_batch_ui_consistency
         install_batch_ui_consistency()
-    except Exception: pass
+    except Exception:
+        pass
     _INSTALLED = True
