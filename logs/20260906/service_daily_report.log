@@ -1,0 +1,9 @@
+2026-09-05 23:31:31 [INFO] === 客服排程系統 run_id=da4735c6 step=2 台北時間=2026-09-06 07:31:31 ===
+2026-09-05 23:31:31 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-09-05 23:31:31 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-09-05 23:31:37 [WARNING] [主控表打卡失敗（非致命）] <HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8/values/%E9%8C%AF%E8%AA%A4%E8%BF%BD%E8%B9%A4Log%21A1%3AZ1?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'window_start_time': '1788651043', 'quota_location': 'global', 'quota_unit': '1/min/{project}/{user}', 'quota_limit_value': '60', 'service': 'sheets.googleapis.com', 'quota_metric': 'sheets.googleapis.com/read_requests', 'consumer': 'projects/1042663213860', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+2026-09-05 23:31:38 [INFO] --- Step2_更新每日回報 ---
+2026-09-05 23:31:42 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-09-05 23:31:42 [INFO] Step 2 完成，row=2395（3.6s）
+2026-09-05 23:31:43 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-09-05 23:31:43 [INFO] === 全部完成 run_id=da4735c6（4.2s）===
