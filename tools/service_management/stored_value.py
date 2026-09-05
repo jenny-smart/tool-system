@@ -102,9 +102,20 @@ SERVICE_AREA_GROUPS: dict[str, tuple[str, ...]] = {
     "台中": ("台中",),
 }
 
-COLOR_INTERNAL   = "7"
-COLOR_PAUSE      = "10"
-COLOR_UNARRANGED = "3"
+# Google Calendar 事件標籤顏色（colorId）→ 排程狀態。
+# 只接受明確指定的五種標籤；其他顏色或未標籤一律留白，不得推定為「已安排」。
+COLOR_PENDING_CONFIRM = "11"  # 紅：待確認
+COLOR_SCHEDULED       = "5"   # 黃：已安排
+COLOR_PAUSE           = "10"  # 綠：暫停
+COLOR_RESERVED        = "7"   # 藍：保留單
+COLOR_UNARRANGED      = "3"   # 紫：未安排
+STATUS_BY_COLOR = {
+    COLOR_PENDING_CONFIRM: "待確認",
+    COLOR_SCHEDULED: "已安排",
+    COLOR_PAUSE: "暫停",
+    COLOR_RESERVED: "保留單",
+    COLOR_UNARRANGED: "未安排",
+}
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -507,7 +518,6 @@ def normalize_address(addr: Any) -> str:
     for old, new in [("－", "-"), ("–", "-"), ("—", "-"), ("，", ","), ("：", ":"), ("；", ";"), ("（", "("), ("）", ")")]:
         s = s.replace(old, new)
     s = re.sub(r"\s*-\s*", "-", s)
-    s = re.sub(r",+\s*$", "", s).rstrip()
     return s
 
 def build_customer_key(name: str, addr: str) -> str:
@@ -554,9 +564,7 @@ def normalize_phone(phone: Any) -> str:
     return digits if len(digits) == 10 else str(phone or "").strip()
 
 def get_status(color: str) -> str:
-    if color == COLOR_PAUSE:      return "暫停"
-    if color == COLOR_UNARRANGED: return "未安排"
-    return "已安排"
+    return STATUS_BY_COLOR.get(str(color or "").strip(), "")
 
 def to_number_safe(value: Any) -> float:
     try:
@@ -648,15 +656,12 @@ def _process_events(events: list, area_name: str) -> list[dict]:
         color = e.get("colorId", "")
         title = e.get("summary", "")
 
-        if color == COLOR_INTERNAL:
-            continue
-
         if not re.search(r"09\d{8}", title):
             continue
 
         parsed   = parse_title(title)
         status   = get_status(color)
-        location = normalize_address(e.get("location", ""))
+        location = e.get("location", "")
 
         start_raw = e.get("start", {}).get("dateTime") or e.get("start", {}).get("date", "")
         end_raw   = e.get("end",   {}).get("dateTime") or e.get("end",   {}).get("date", "")
