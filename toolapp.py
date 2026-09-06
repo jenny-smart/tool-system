@@ -3406,6 +3406,9 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【儲值】匯出VIP日曆",
         "【儲值】建立VIP排程工作表",
         "【儲值】全跑（抓儲值金＋匯出VIP）",
+        # 年節大掃除 VIP 通知／Email 合併清單
+        "【大掃除】年度設定",
+        "【大掃除】更新VIP通知清單",
     ],
     # ────────────────────────────────────────────────────────
     # ── ★ 新增：gmail401 ────────────────────────
@@ -3511,6 +3514,13 @@ SERVICE_CRM_MAP = {
     "【CRM】更新排程決策報表":           "4",
     "【CRM】更新三個月未排名單":         "5",
     "【CRM】重新排序Raw":               "6",
+}
+
+SERVICE_DEEP_CLEAN_SETTINGS = "【大掃除】年度設定"
+SERVICE_DEEP_CLEAN_UPDATE = "【大掃除】更新VIP通知清單"
+SERVICE_DEEP_CLEAN_FUNCTIONS = {
+    SERVICE_DEEP_CLEAN_SETTINGS,
+    SERVICE_DEEP_CLEAN_UPDATE,
 }
 # ────────────────────────────────────────────────────────────
 
@@ -3751,6 +3761,19 @@ monthly_date_mode = "期別"
 resume_target_sheet = ""
 cetustek_serial_qyear = ""
 cetustek_serial_qmonth = ""
+deep_clean_phase1_start = None
+deep_clean_phase1_end = None
+deep_clean_phase2_start = None
+deep_clean_phase2_end = None
+deep_clean_phase1_weekday_rate = 0
+deep_clean_phase1_weekend_rate = 0
+deep_clean_phase2_weekday_rate = 0
+deep_clean_phase2_weekend_rate = 0
+deep_clean_reply_deadline = ""
+deep_clean_booking_start = None
+deep_clean_booking_end = None
+deep_clean_settings_spreadsheet_id = MASTER_CONFIG_SPREADSHEET_ID
+deep_clean_season_year = datetime.now(TW_TZ).year
 
 date_col, area_col = st.columns([2, 1])
 
@@ -4219,7 +4242,61 @@ with date_col:
     elif system_type == "service_schedule":
         _today_date = datetime.now(TW_TZ).date()
 
-        if selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）"):
+        if selected_function in SERVICE_DEEP_CLEAN_FUNCTIONS:
+            st.markdown('<div class="field-label">🧹 大掃除年度</div>', unsafe_allow_html=True)
+            deep_clean_season_year = int(st.number_input(
+                "年度",
+                min_value=2020,
+                max_value=2100,
+                value=_today_date.year,
+                step=1,
+                label_visibility="collapsed",
+                key="deep_clean_season_year",
+            ))
+            deep_clean_settings_spreadsheet_id = MASTER_CONFIG_SPREADSHEET_ID
+            st.caption(
+                "試算表位置由主控表「大掃除設定」的根目錄 ID 自動尋找："
+                "根目錄／YYYY／YYYY年終大掃除系統調整、YYYY年終大掃除VIP"
+            )
+
+            if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
+                st.markdown('<div class="field-label">📆 兩階段期間與價格</div>', unsafe_allow_html=True)
+                _p1a, _p1b = st.columns(2)
+                with _p1a:
+                    deep_clean_phase1_start = st.date_input("PART 1 開始", value=datetime(deep_clean_season_year, 12, 15).date(), key=f"deep_clean_p1_start_{deep_clean_season_year}")
+                    deep_clean_phase1_weekday_rate = st.number_input("PART 1 平日加價", min_value=0, step=50, value=0, key=f"deep_clean_p1_weekday_{deep_clean_season_year}")
+                with _p1b:
+                    deep_clean_phase1_end = st.date_input("PART 1 結束", value=datetime(deep_clean_season_year + 1, 1, 21).date(), key=f"deep_clean_p1_end_{deep_clean_season_year}")
+                    deep_clean_phase1_weekend_rate = st.number_input("PART 1 週六＋週日加價", min_value=0, step=50, value=0, key=f"deep_clean_p1_weekend_{deep_clean_season_year}")
+                _p2a, _p2b = st.columns(2)
+                with _p2a:
+                    deep_clean_phase2_start = st.date_input("PART 2 開始", value=datetime(deep_clean_season_year + 1, 1, 22).date(), key=f"deep_clean_p2_start_{deep_clean_season_year}")
+                    deep_clean_phase2_weekday_rate = st.number_input("PART 2 平日加價", min_value=0, step=50, value=0, key=f"deep_clean_p2_weekday_{deep_clean_season_year}")
+                with _p2b:
+                    deep_clean_phase2_end = st.date_input("PART 2 結束", value=datetime(deep_clean_season_year + 1, 2, 4).date(), key=f"deep_clean_p2_end_{deep_clean_season_year}")
+                    deep_clean_phase2_weekend_rate = st.number_input("PART 2 週六＋週日加價", min_value=0, step=50, value=0, key=f"deep_clean_p2_weekend_{deep_clean_season_year}")
+
+                deep_clean_reply_deadline = st.text_input(
+                    "定期 VIP 回覆截止時間（未定可留白）",
+                    placeholder="例如：2026/11/03（二）17:00",
+                    key=f"deep_clean_reply_deadline_{deep_clean_season_year}",
+                )
+                _bc1, _bc2 = st.columns(2)
+                with _bc1:
+                    deep_clean_booking_start = st.date_input("非定期 VIP 開放預約日", value=datetime(deep_clean_season_year, 11, 5).date(), key=f"deep_clean_booking_start_{deep_clean_season_year}")
+                with _bc2:
+                    deep_clean_booking_end = st.date_input("非定期 VIP 預約截止日", value=datetime(deep_clean_season_year, 11, 10).date(), key=f"deep_clean_booking_end_{deep_clean_season_year}")
+                st.info("儲存後會同時產生該年度的「系統更新內容」分頁。四項價格必須填妥。", icon="ℹ️")
+            else:
+                st.info(
+                    "讀取已儲存的年度設定，從 Google Calendar 產生定期 VIP；"
+                    "再從檸檬後台匯出儲值金名單，扣除定期 VIP 後產生非定期 VIP。"
+                    "兩份都會含 Email 合併內文、LINE 連結與寄送狀態。",
+                    icon="📨",
+                )
+            start_date_value = end_date_value = None
+
+        elif selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）"):
             st.markdown('<div class="field-label">📆 匯出設定</div>', unsafe_allow_html=True)
             _crm_mode = st.radio(
                 "匯出方式", ["期別（月份）", "日期區間"],
@@ -5465,7 +5542,52 @@ if run_clicked:
                         _svc_env["SERVICE_TARGET_SPREADSHEET_ID"] = _target_id
 
                 # ── 儲值功能 ──────────────────────────────────
-                if selected_function in SERVICE_STORED_VALUE_MAP:
+                if selected_function in SERVICE_DEEP_CLEAN_FUNCTIONS:
+                    cmd = [
+                        sys.executable, "-u", "-m",
+                        "tools.service_management.deep_clean_notice",
+                        "--season-year", str(deep_clean_season_year),
+                        "--master-spreadsheet-id", deep_clean_settings_spreadsheet_id.strip(),
+                    ]
+                    if selected_area_value:
+                        cmd += ["--area", selected_area_value]
+
+                    if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
+                        rates = [
+                            deep_clean_phase1_weekday_rate,
+                            deep_clean_phase1_weekend_rate,
+                            deep_clean_phase2_weekday_rate,
+                            deep_clean_phase2_weekend_rate,
+                        ]
+                        if any(float(rate) <= 0 for rate in rates):
+                            raise ValueError("請先填妥四項年節加價")
+                        if (
+                            deep_clean_phase1_start > deep_clean_phase1_end
+                            or deep_clean_phase2_start > deep_clean_phase2_end
+                            or deep_clean_phase1_end >= deep_clean_phase2_start
+                        ):
+                            raise ValueError("請確認兩階段日期順序")
+                        if deep_clean_booking_start > deep_clean_booking_end:
+                            raise ValueError("非定期 VIP 開放預約日不可晚於截止日")
+                        cmd += [
+                            "--mode", "save-settings",
+                            "--phase1-start", deep_clean_phase1_start.strftime("%Y-%m-%d"),
+                            "--phase1-end", deep_clean_phase1_end.strftime("%Y-%m-%d"),
+                            "--phase2-start", deep_clean_phase2_start.strftime("%Y-%m-%d"),
+                            "--phase2-end", deep_clean_phase2_end.strftime("%Y-%m-%d"),
+                            "--phase1-weekday-rate", str(deep_clean_phase1_weekday_rate),
+                            "--phase1-weekend-rate", str(deep_clean_phase1_weekend_rate),
+                            "--phase2-weekday-rate", str(deep_clean_phase2_weekday_rate),
+                            "--phase2-weekend-rate", str(deep_clean_phase2_weekend_rate),
+                            "--reply-deadline", deep_clean_reply_deadline.strip(),
+                            "--booking-start", deep_clean_booking_start.strftime("%Y-%m-%d"),
+                            "--booking-end", deep_clean_booking_end.strftime("%Y-%m-%d"),
+                        ]
+                    else:
+                        cmd += ["--mode", "update-all"]
+                    add_log(f"大掃除執行：{selected_function}／{deep_clean_season_year}", "info")
+
+                elif selected_function in SERVICE_STORED_VALUE_MAP:
                     step = SERVICE_STORED_VALUE_MAP[selected_function]
                     cmd = [
                         sys.executable, "-u", "-m",

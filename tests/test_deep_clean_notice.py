@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
 from tools.service_management.deep_clean_notice import (
+    DeepCleanSettings,
     _extra_charge,
     build_nonroutine_notice,
+    build_nonroutine_notice_rows,
     build_notice_rows,
+    resolve_deep_clean_sheet_ids,
 )
 
 
@@ -75,3 +78,66 @@ def test_nonroutine_notice_uses_open_window_and_correct_customer_label():
     assert "《VIP 客戶年節大掃除加價收費說明》" in notice
     assert "VIP 開放預約時間：2026/11/05～2026/11/10" in notice
     assert "VIP 定期客戶" not in notice
+
+
+def test_nonroutine_list_subtracts_calendar_regular_vip_by_phone():
+    settings = DeepCleanSettings(
+        2026,
+        datetime(2026, 12, 15, tzinfo=TZ),
+        datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        100,
+        250,
+        datetime(2027, 1, 22, tzinfo=TZ),
+        datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        200,
+        300,
+        "2026/11/03 17:00",
+        datetime(2026, 11, 5, tzinfo=TZ),
+        datetime(2026, 11, 10, tzinfo=TZ),
+    )
+    regular_row = ["台北", "定期VIP", "王小明", "0912345678"]
+    members = [
+        {"area": "台北", "member_id": "1", "name": "王小明", "phone": "0912345678", "email": "a@example.com"},
+        {"area": "台北", "member_id": "2", "name": "陳小華", "phone": "0987654321", "email": "b@example.com"},
+    ]
+
+    output = build_nonroutine_notice_rows(members, [regular_row], settings)
+
+    assert len(output) == 1
+    assert output[0][2] == "陳小華"
+    assert output[0][11] == "待寄送"
+
+
+def test_resolve_year_files_from_master_root(monkeypatch):
+    class FakeWorksheet:
+        def get(self, _range):
+            return [
+                ["設定項目", "設定值"],
+                ["大掃除根目錄資料夾 ID", "root-id"],
+            ]
+
+    class FakeSpreadsheet:
+        def worksheet(self, _name):
+            return FakeWorksheet()
+
+    class FakeGspread:
+        def open_by_key(self, _key):
+            return FakeSpreadsheet()
+
+    class FakeDrive:
+        def __init__(self, _service):
+            pass
+
+        def find_folder(self, parent_id, name):
+            assert (parent_id, name) == ("root-id", "2026")
+            return {"id": "year-folder"}
+
+        def find_google_sheet_by_name(self, folder_id, name):
+            assert folder_id == "year-folder"
+            return [{"id": "settings-id" if name.endswith("系統調整") else "notice-id"}]
+
+    monkeypatch.setattr("tools.service_management.deep_clean_notice._gc", lambda: FakeGspread())
+    monkeypatch.setattr("services.google_auth.get_drive_service", lambda: object())
+    monkeypatch.setattr("services.google_drive.DriveService", FakeDrive)
+
+    assert resolve_deep_clean_sheet_ids(2026, "master-id") == ("settings-id", "notice-id")
