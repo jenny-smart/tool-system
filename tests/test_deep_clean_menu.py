@@ -13,3 +13,5 @@ def test_service_schedule_exposes_deep_clean_settings_and_update():
     assert '"--master-spreadsheet-id"' in source
     assert '"--mode", "save-settings"' in source
     assert 'cmd += ["--mode", "update-all"]' in source
+    assert "失敗原因：{failure_reason}" in source
+    assert "請先執行「【大掃除】年度設定」" in source
