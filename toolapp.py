@@ -4289,7 +4289,8 @@ with date_col:
                 st.info("儲存後會同時產生該年度的「系統更新內容」分頁。四項價格必須填妥。", icon="ℹ️")
             else:
                 st.info(
-                    "讀取已儲存的年度設定，從 Google Calendar 產生定期 VIP；"
+                    "請先執行「【大掃除】年度設定」並儲存該年度的期間與四項價格。"
+                    "本功能會讀取已儲存的年度設定，從 Google Calendar 產生定期 VIP；"
                     "再從檸檬後台匯出儲值金名單，扣除定期 VIP 後產生非定期 VIP。"
                     "兩份都會含 Email 合併內文、LINE 連結與寄送狀態。",
                     icon="📨",
@@ -5655,8 +5656,12 @@ if run_clicked:
                     for fl in failed_steps[-5:]:
                         add_log(fl.strip(), "error")
                 else:
+                    stderr_lines = [line.strip() for line in (completed.stderr or "").splitlines() if line.strip()]
+                    failure_reason = stderr_lines[-1] if stderr_lines else "子程序未提供錯誤內容"
+                    add_log(f"失敗原因：{failure_reason}", "error")
                     raise RuntimeError(
-                        f"執行失敗（exit {completed.returncode}）：{selected_function}"
+                        f"執行失敗（exit {completed.returncode}）：{selected_function}\n"
+                        f"原因：{failure_reason}"
                     )
             # ────────────────────────────────────────────────────────
 

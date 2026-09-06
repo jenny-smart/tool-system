@@ -545,7 +545,10 @@ def load_deep_clean_settings(
             settings = _settings_from_row(row)
             _validate_settings(settings)
             return settings
-    raise ValueError(f"找不到 {season_year} 年度大掃除設定")
+    raise ValueError(
+        f"找不到 {season_year} 年度大掃除設定；"
+        "請先回到客服排程系統，執行「【大掃除】年度設定」"
+    )
 
 
 def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
