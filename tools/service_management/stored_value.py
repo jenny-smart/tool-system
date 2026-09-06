@@ -595,16 +595,19 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: 
     for r in records:
         raw_name = r.get("客戶姓名") or r.get("name") or r.get("customer_name") or ""
         line_val = r.get("LINE@") or r.get("line_url") or r.get("line_id") or ""
+        email_val = r.get("Email") or r.get("email") or r.get("電子信箱") or r.get("信箱") or ""
         stored   = to_number_safe(r.get("剩餘儲值金") or r.get("stored_value") or r.get("stored_balance") or 0)
         shopping = to_number_safe(r.get("剩餘購物金") or r.get("shopping_value") or r.get("shopping_balance") or 0)
         name_key = normalize_name_for_compare(raw_name)
         if not name_key:
             continue
         if name_key not in name_map:
-            name_map[name_key] = {"totalBalance": 0.0, "lineValue": ""}
+            name_map[name_key] = {"totalBalance": 0.0, "lineValue": "", "email": ""}
         name_map[name_key]["totalBalance"] += stored + shopping
         if not name_map[name_key]["lineValue"] and line_val:
             name_map[name_key]["lineValue"] = str(line_val)
+        if not name_map[name_key]["email"] and email_val:
+            name_map[name_key]["email"] = str(email_val).strip()
 
     return name_map
 
