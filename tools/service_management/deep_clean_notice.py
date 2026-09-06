@@ -3,16 +3,20 @@ from __future__ import annotations
 import argparse
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
 import gspread
+
+from tools.lemon_backend.members import export_stored_value_members, normalize_member_phone
 
 from tools.service_management.stored_value import (
     TZ_TAIPEI,
     _calendar_service,
     _fetch_calendar_events,
     _gc,
+    _get_credentials,
     _load_stored_value_info,
     _load_target_file_id,
     _process_events,
@@ -42,6 +46,172 @@ NOTICE_HEADERS = [
     "寄送狀態",
     "寄送時間",
 ]
+
+NONROUTINE_NOTICE_HEADERS = [
+    "地區",
+    "客戶類型",
+    "姓名",
+    "電話",
+    "Email",
+    "地址",
+    "LINE連結",
+    "會員等級",
+    "剩餘儲值金",
+    "Email主旨",
+    "通知內容",
+    "寄送狀態",
+    "寄送時間",
+]
+
+SETTINGS_HEADERS = [
+    "年度",
+    "PART1開始",
+    "PART1結束",
+    "PART1平日加價",
+    "PART1週末加價",
+    "PART2開始",
+    "PART2結束",
+    "PART2平日加價",
+    "PART2週末加價",
+    "定期VIP回覆截止",
+    "非定期VIP開放",
+    "非定期VIP截止",
+    "通知輸出試算表ID",
+    "更新時間",
+]
+
+DEFAULT_SETTINGS_SPREADSHEET_ID = "1u9boCPWeQk2yWVJ4an7GH0DXNHuLDA0sjp9jKJEG1v8"
+DEFAULT_NOTICE_SPREADSHEET_ID = "1AsU4YF6t8gt-lVb0p4C656CWdbveWkuHetPe1nwC7BE"
+DEFAULT_MASTER_SPREADSHEET_ID = "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
+SETTINGS_SHEET_NAME = "大掃除設定"
+MASTER_ID_SHEET_NAME = "大掃除設定"
+
+
+def _output_gc() -> gspread.Client:
+    """年度大掃除檔案屬於檸檬 Google 帳號，優先使用同帳號 OAuth。"""
+    try:
+        from services.google_auth import get_gspread_client
+
+        return get_gspread_client()
+    except Exception:
+        return _gc()
+
+
+def resolve_deep_clean_sheet_ids(
+    season_year: int,
+    master_spreadsheet_id: str = DEFAULT_MASTER_SPREADSHEET_ID,
+) -> tuple[str, str]:
+    gc = _gc()
+    ss = gc.open_by_key(master_spreadsheet_id.strip() or DEFAULT_MASTER_SPREADSHEET_ID)
+    try:
+        rows = ss.worksheet(MASTER_ID_SHEET_NAME).get("A1:B20")
+    except gspread.WorksheetNotFound as exc:
+        raise ValueError(f"主控表尚未建立「{MASTER_ID_SHEET_NAME}」工作表") from exc
+    values = {
+        str(row[0]).strip(): str(row[1]).strip()
+        for row in rows[1:]
+        if len(row) >= 2 and str(row[0]).strip() and str(row[1]).strip()
+    }
+    root_folder_id = values.get("大掃除根目錄資料夾 ID", "")
+    if not root_folder_id:
+        raise ValueError("主控表「大掃除設定」尚未填寫大掃除根目錄資料夾 ID")
+
+    from services.google_drive import DriveService
+
+    try:
+        from services.google_auth import get_drive_service
+
+        drive_api = get_drive_service()
+    except Exception:
+        from googleapiclient.discovery import build
+
+        drive_api = build("drive", "v3", credentials=_get_credentials(), cache_discovery=False)
+    drive = DriveService(drive_api)
+    year_folder = drive.find_folder(root_folder_id, str(season_year))
+    if not year_folder:
+        raise ValueError(f"大掃除根目錄下找不到 {season_year} 資料夾")
+
+    settings_name = f"{season_year}年終大掃除系統調整"
+    notice_name = f"{season_year}年終大掃除VIP"
+    settings_files = drive.find_google_sheet_by_name(year_folder["id"], settings_name)
+    notice_files = drive.find_google_sheet_by_name(year_folder["id"], notice_name)
+    if len(settings_files) != 1:
+        raise ValueError(f"{season_year} 資料夾內需且只能有一份「{settings_name}」Google Sheet")
+    if len(notice_files) != 1:
+        raise ValueError(f"{season_year} 資料夾內需且只能有一份「{notice_name}」Google Sheet")
+    return settings_files[0]["id"], notice_files[0]["id"]
+
+
+@dataclass(frozen=True)
+class DeepCleanSettings:
+    season_year: int
+    phase1_start: datetime
+    phase1_end: datetime
+    phase1_weekday_rate: float
+    phase1_weekend_rate: float
+    phase2_start: datetime
+    phase2_end: datetime
+    phase2_weekday_rate: float
+    phase2_weekend_rate: float
+    reply_deadline: str
+    booking_start: datetime
+    booking_end: datetime
+    notice_spreadsheet_id: str = DEFAULT_NOTICE_SPREADSHEET_ID
+
+
+def _validate_settings(settings: DeepCleanSettings) -> None:
+    if settings.phase1_start > settings.phase1_end or settings.phase2_start > settings.phase2_end:
+        raise ValueError("階段開始日期不可晚於結束日期")
+    if settings.phase1_end >= settings.phase2_start:
+        raise ValueError("第一階段結束日期必須早於第二階段開始日期")
+    if settings.booking_start > settings.booking_end:
+        raise ValueError("非定期 VIP 開放預約日不可晚於截止日")
+    rates = [
+        settings.phase1_weekday_rate,
+        settings.phase1_weekend_rate,
+        settings.phase2_weekday_rate,
+        settings.phase2_weekend_rate,
+    ]
+    if any(rate <= 0 for rate in rates):
+        raise ValueError("四項年節加價尚未全部設定")
+
+
+def _settings_row(settings: DeepCleanSettings) -> list[Any]:
+    return [
+        settings.season_year,
+        settings.phase1_start.strftime("%Y-%m-%d"),
+        settings.phase1_end.strftime("%Y-%m-%d"),
+        settings.phase1_weekday_rate,
+        settings.phase1_weekend_rate,
+        settings.phase2_start.strftime("%Y-%m-%d"),
+        settings.phase2_end.strftime("%Y-%m-%d"),
+        settings.phase2_weekday_rate,
+        settings.phase2_weekend_rate,
+        settings.reply_deadline,
+        settings.booking_start.strftime("%Y-%m-%d"),
+        settings.booking_end.strftime("%Y-%m-%d"),
+        settings.notice_spreadsheet_id,
+        datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M:%S"),
+    ]
+
+
+def _settings_from_row(row: list[Any]) -> DeepCleanSettings:
+    values = list(row) + [""] * max(0, len(SETTINGS_HEADERS) - len(row))
+    return DeepCleanSettings(
+        season_year=int(values[0]),
+        phase1_start=_parse_date(str(values[1])),
+        phase1_end=_parse_date(str(values[2]), end_of_day=True),
+        phase1_weekday_rate=float(values[3]),
+        phase1_weekend_rate=float(values[4]),
+        phase2_start=_parse_date(str(values[5])),
+        phase2_end=_parse_date(str(values[6]), end_of_day=True),
+        phase2_weekday_rate=float(values[7]),
+        phase2_weekend_rate=float(values[8]),
+        reply_deadline=str(values[9] or ""),
+        booking_start=_parse_date(str(values[10])),
+        booking_end=_parse_date(str(values[11]), end_of_day=True),
+        notice_spreadsheet_id=str(values[12] or DEFAULT_NOTICE_SPREADSHEET_ID).strip(),
+    )
 
 
 def _parse_date(value: str, end_of_day: bool = False) -> datetime:
@@ -296,7 +466,7 @@ def save_nonroutine_notice(
 ) -> str:
     if not name.strip() or not email.strip():
         raise ValueError("姓名與 Email 為必填")
-    gc = _gc()
+    gc = _output_gc()
     target_id = target_spreadsheet_id.strip() or _load_target_file_id()
     if not target_id:
         raise EnvironmentError("尚未設定客服排程系統目標試算表 ID")
@@ -314,6 +484,116 @@ def save_nonroutine_notice(
         value_input_option="USER_ENTERED",
     )
     return sheet_name
+
+
+def _get_or_create_sheet(
+    ss: Any,
+    title: str,
+    rows: int,
+    cols: int,
+):
+    try:
+        return ss.worksheet(title)
+    except gspread.WorksheetNotFound:
+        return ss.add_worksheet(title=title, rows=rows, cols=cols)
+
+
+def save_deep_clean_settings(
+    settings: DeepCleanSettings,
+    settings_spreadsheet_id: str = DEFAULT_SETTINGS_SPREADSHEET_ID,
+) -> str:
+    _validate_settings(settings)
+    gc = _output_gc()
+    ss = gc.open_by_key(settings_spreadsheet_id.strip() or DEFAULT_SETTINGS_SPREADSHEET_ID)
+    sh = _get_or_create_sheet(ss, SETTINGS_SHEET_NAME, 100, len(SETTINGS_HEADERS))
+    values = sh.get_all_values()
+    if not values:
+        sh.update(values=[SETTINGS_HEADERS], range_name="A1", value_input_option="USER_ENTERED")
+        values = [SETTINGS_HEADERS]
+
+    target_row = None
+    for index, row in enumerate(values[1:], start=2):
+        if row and str(row[0]).strip() == str(settings.season_year):
+            target_row = index
+            break
+    row_values = _settings_row(settings)
+    if target_row:
+        sh.update(
+            values=[row_values],
+            range_name=f"A{target_row}:N{target_row}",
+            value_input_option="USER_ENTERED",
+        )
+    else:
+        sh.append_row(row_values, value_input_option="USER_ENTERED")
+    sh.freeze(rows=1)
+    _write_system_update_sheet(ss, settings)
+    return SETTINGS_SHEET_NAME
+
+
+def load_deep_clean_settings(
+    season_year: int,
+    settings_spreadsheet_id: str = DEFAULT_SETTINGS_SPREADSHEET_ID,
+) -> DeepCleanSettings:
+    gc = _output_gc()
+    ss = gc.open_by_key(settings_spreadsheet_id.strip() or DEFAULT_SETTINGS_SPREADSHEET_ID)
+    try:
+        values = ss.worksheet(SETTINGS_SHEET_NAME).get_all_values()
+    except gspread.WorksheetNotFound as exc:
+        raise ValueError(f"尚未建立 {season_year} 年度大掃除設定") from exc
+    for row in values[1:]:
+        if row and str(row[0]).strip() == str(season_year):
+            settings = _settings_from_row(row)
+            _validate_settings(settings)
+            return settings
+    raise ValueError(f"找不到 {season_year} 年度大掃除設定")
+
+
+def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
+    title = f"{settings.season_year}大掃除系統更新"
+    sh = _get_or_create_sheet(ss, title, 100, 4)
+    rows = [
+        ["分類", "設定項目", "內容", "系統處理方式"],
+        ["期間", "PART 1", _date_range(settings.phase1_start, settings.phase1_end), "日曆服務落在此區間者依 PART 1 計價"],
+        ["期間", "PART 2", _date_range(settings.phase2_start, settings.phase2_end), "日曆服務落在此區間者依 PART 2 計價"],
+        ["價格", "PART 1 平日／週末", f"{_money(settings.phase1_weekday_rate)}／{_money(settings.phase1_weekend_rate)}", "週一～週五／週六＋週日"],
+        ["價格", "PART 2 平日／週末", f"{_money(settings.phase2_weekday_rate)}／{_money(settings.phase2_weekend_rate)}", "週一～週五／週六＋週日"],
+        ["定期VIP", "回覆截止", settings.reply_deadline or "未設定", "從 Google Calendar 更新服務日期、次數、加價與年後首次服務"],
+        ["非定期VIP", "優先預約", _date_range(settings.booking_start, settings.booking_end), "後台儲值金匯出名單－日曆定期VIP"],
+        ["名單比對", "比對鍵", "電話優先，姓名輔助", "避免同名或格式差異造成誤判"],
+        ["Email合併", "輸出檔", settings.notice_spreadsheet_id, "產生主旨、通知內容、LINE連結、寄送狀態與時間欄位"],
+    ]
+    sh.clear()
+    sh.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")
+    sh.freeze(rows=1)
+    return title
+
+
+def append_master_execution_log(
+    master_spreadsheet_id: str,
+    season_year: int,
+    action: str,
+    area: str,
+    status: str,
+    detail: str,
+) -> None:
+    try:
+        ss = _gc().open_by_key(master_spreadsheet_id.strip() or DEFAULT_MASTER_SPREADSHEET_ID)
+        sh = ss.worksheet("客服排程執行Log")
+        sh.append_row([
+            datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M:%S"),
+            "客服排程系統",
+            f"大掃除／{action}",
+            "手動",
+            area,
+            str(season_year),
+            "年度大掃除試算表",
+            "",
+            status,
+            detail,
+        ])
+    except Exception:
+        # 主功能成功時，Log 寫入失敗不應破壞已產出的名單。
+        pass
 
 
 def generate_notice_data(
@@ -339,7 +619,8 @@ def generate_notice_data(
 
     overall_start = min(phase1_start, phase2_start)
     overall_end = max(phase1_end, phase2_end) + timedelta(days=90)
-    gc = _gc()
+    source_gc = _gc()
+    output_gc = _output_gc()
     target_id = target_spreadsheet_id.strip() or _load_target_file_id()
     if not target_id:
         raise EnvironmentError("尚未設定客服排程系統目標試算表 ID")
@@ -347,14 +628,14 @@ def generate_notice_data(
     cal = _calendar_service()
     all_rows: list[list[Any]] = []
     counts: dict[str, int] = {}
-    for area_cfg in load_area_config(gc, filter_area=area):
+    for area_cfg in load_area_config(source_gc, filter_area=area):
         area_name = area_cfg["name"]
         calendar_id = area_cfg.get("calendar_id", "")
         if not calendar_id:
             continue
         events = _fetch_calendar_events(cal, calendar_id, overall_start, overall_end, area_name)
         rows = _process_events(events, area_name)
-        stored_info = _load_stored_value_info(gc, area_name, area_cfg.get("target_spreadsheet_id", ""))
+        stored_info = _load_stored_value_info(source_gc, area_name, area_cfg.get("target_spreadsheet_id", ""))
         notice_rows = build_notice_rows(
             area_name,
             rows,
@@ -373,24 +654,253 @@ def generate_notice_data(
         all_rows.extend(notice_rows)
 
     year = phase1_start.year
-    sheet_name = _write_notice_sheet(gc, target_id, year, all_rows)
-    return {"sheet": sheet_name, "count": len(all_rows), "areas": counts}
+    sheet_name = _write_notice_sheet(output_gc, target_id, year, all_rows)
+    return {"sheet": sheet_name, "count": len(all_rows), "areas": counts, "rows": all_rows}
+
+
+def _regular_identity_sets(regular_rows: list[list[Any]]) -> tuple[set[str], set[str]]:
+    phones = {
+        normalize_member_phone(row[3])
+        for row in regular_rows
+        if len(row) > 3 and normalize_member_phone(row[3])
+    }
+    names = {
+        normalize_name_for_compare(str(row[2]))
+        for row in regular_rows
+        if (
+            len(row) > 3
+            and not normalize_member_phone(row[3])
+            and normalize_name_for_compare(str(row[2]))
+        )
+    }
+    return phones, names
+
+
+def build_nonroutine_notice_rows(
+    members: list[dict[str, Any]],
+    regular_rows: list[list[Any]],
+    settings: DeepCleanSettings,
+) -> list[list[Any]]:
+    regular_phones, regular_names = _regular_identity_sets(regular_rows)
+    output: list[list[Any]] = []
+    seen: set[str] = set()
+    for member in members:
+        phone = normalize_member_phone(member.get("phone"))
+        name = str(member.get("name") or "").strip()
+        normalized_name = normalize_name_for_compare(name)
+        if (phone and phone in regular_phones) or (normalized_name and normalized_name in regular_names):
+            continue
+        unique_key = str(member.get("member_id") or "").strip() or phone or str(member.get("email") or "").lower()
+        if not unique_key or unique_key in seen:
+            continue
+        seen.add(unique_key)
+        notice = build_nonroutine_notice(
+            name,
+            settings.phase1_start,
+            settings.phase1_end,
+            settings.phase2_start,
+            settings.phase2_end,
+            settings.phase1_weekday_rate,
+            settings.phase1_weekend_rate,
+            settings.phase2_weekday_rate,
+            settings.phase2_weekend_rate,
+            settings.booking_start,
+            settings.booking_end,
+        )
+        line_url = str(member.get("line_url") or "").strip()
+        line_cell = f'=HYPERLINK("{line_url}","開啟 LINE")' if re.match(r"^https?://", line_url) else line_url
+        email = str(member.get("email") or "").strip()
+        output.append([
+            str(member.get("area") or ""),
+            "非定期VIP",
+            name,
+            phone,
+            email,
+            str(member.get("address") or ""),
+            line_cell,
+            str(member.get("member_level") or ""),
+            float(member.get("stored_value") or 0),
+            f"【檸檬家事服務】{settings.season_year}年節大掃除－VIP優先預約通知",
+            notice,
+            "待寄送" if email else "缺Email",
+            "",
+        ])
+    return sorted(output, key=lambda row: (str(row[0]), str(row[2]), str(row[3])))
+
+
+def _write_nonroutine_notice_sheet(
+    gc: gspread.Client,
+    target_id: str,
+    year: int,
+    rows: list[list[Any]],
+) -> str:
+    ss = gc.open_by_key(target_id)
+    sheet_name = f"{year}大掃除非定期VIP通知"
+    sh = _get_or_create_sheet(ss, sheet_name, max(len(rows) + 20, 200), len(NONROUTINE_NOTICE_HEADERS))
+    sh.clear()
+    sh.update(
+        values=[NONROUTINE_NOTICE_HEADERS] + rows,
+        range_name="A1",
+        value_input_option="USER_ENTERED",
+    )
+    if rows:
+        phones = [[str(row[3])] for row in rows]
+        sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
+    sh.freeze(rows=1)
+    return sheet_name
+
+
+def update_all_vip_notices(
+    season_year: int,
+    area: str = "全區",
+    settings_spreadsheet_id: str = DEFAULT_SETTINGS_SPREADSHEET_ID,
+    notice_spreadsheet_id: str = "",
+) -> dict[str, Any]:
+    settings = load_deep_clean_settings(season_year, settings_spreadsheet_id)
+    target_notice_id = notice_spreadsheet_id.strip() or settings.notice_spreadsheet_id
+    regular = generate_notice_data(
+        area,
+        settings.phase1_start,
+        settings.phase1_end,
+        settings.phase2_start,
+        settings.phase2_end,
+        settings.phase1_weekday_rate,
+        settings.phase1_weekend_rate,
+        settings.phase2_weekday_rate,
+        settings.phase2_weekend_rate,
+        settings.reply_deadline,
+        target_notice_id,
+    )
+
+    target_areas = list(regular["areas"].keys())
+    if area != "全區" and area not in target_areas:
+        target_areas = [area]
+    members: list[dict[str, Any]] = []
+    backend_counts: dict[str, int] = {}
+    for area_name in target_areas:
+        area_members = export_stored_value_members(area_name)
+        backend_counts[area_name] = len(area_members)
+        members.extend(area_members)
+
+    nonroutine_rows = build_nonroutine_notice_rows(members, regular["rows"], settings)
+    gc = _output_gc()
+    nonroutine_sheet = _write_nonroutine_notice_sheet(
+        gc,
+        target_notice_id,
+        settings.season_year,
+        nonroutine_rows,
+    )
+    return {
+        "regular_sheet": regular["sheet"],
+        "regular_count": regular["count"],
+        "nonroutine_sheet": nonroutine_sheet,
+        "nonroutine_count": len(nonroutine_rows),
+        "backend_counts": backend_counts,
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="建立大掃除 VIP 通知資料")
+    parser.add_argument("--mode", choices=["regular", "save-settings", "update-all"], default="regular")
     parser.add_argument("--area", choices=["全區", "台北", "台中"], default="全區")
-    parser.add_argument("--phase1-start", required=True)
-    parser.add_argument("--phase1-end", required=True)
-    parser.add_argument("--phase2-start", required=True)
-    parser.add_argument("--phase2-end", required=True)
-    parser.add_argument("--phase1-weekday-rate", required=True, type=float)
-    parser.add_argument("--phase1-weekend-rate", required=True, type=float)
-    parser.add_argument("--phase2-weekday-rate", required=True, type=float)
-    parser.add_argument("--phase2-weekend-rate", required=True, type=float)
+    parser.add_argument("--season-year", type=int)
+    parser.add_argument("--phase1-start")
+    parser.add_argument("--phase1-end")
+    parser.add_argument("--phase2-start")
+    parser.add_argument("--phase2-end")
+    parser.add_argument("--phase1-weekday-rate", type=float)
+    parser.add_argument("--phase1-weekend-rate", type=float)
+    parser.add_argument("--phase2-weekday-rate", type=float)
+    parser.add_argument("--phase2-weekend-rate", type=float)
     parser.add_argument("--reply-deadline", default="")
+    parser.add_argument("--booking-start")
+    parser.add_argument("--booking-end")
+    parser.add_argument("--master-spreadsheet-id", default=DEFAULT_MASTER_SPREADSHEET_ID)
+    parser.add_argument("--settings-spreadsheet-id", default="")
+    parser.add_argument("--notice-spreadsheet-id", default="")
     parser.add_argument("--target-spreadsheet-id", default="")
     args = parser.parse_args()
+
+    if args.mode in {"save-settings", "update-all"}:
+        if not args.season_year:
+            parser.error("--season-year 為必填")
+        master_settings_id, master_notice_id = resolve_deep_clean_sheet_ids(
+            args.season_year,
+            args.master_spreadsheet_id,
+        )
+    else:
+        master_settings_id = DEFAULT_SETTINGS_SPREADSHEET_ID
+        master_notice_id = DEFAULT_NOTICE_SPREADSHEET_ID
+    settings_spreadsheet_id = args.settings_spreadsheet_id.strip() or master_settings_id
+    notice_spreadsheet_id = args.notice_spreadsheet_id.strip() or master_notice_id
+
+    if args.mode == "update-all":
+        result = update_all_vip_notices(
+            args.season_year,
+            args.area,
+            settings_spreadsheet_id,
+            notice_spreadsheet_id,
+        )
+        append_master_execution_log(
+            args.master_spreadsheet_id,
+            args.season_year,
+            "更新VIP通知清單",
+            args.area,
+            "成功",
+            f"定期 {result['regular_count']} 位／非定期 {result['nonroutine_count']} 位",
+        )
+        print(
+            f"大掃除 VIP 通知更新完成："
+            f"定期 {result['regular_count']} 位／非定期 {result['nonroutine_count']} 位"
+        )
+        print(f"定期清單：{result['regular_sheet']}")
+        print(f"非定期清單：{result['nonroutine_sheet']}")
+        return
+
+    required_values = {
+        "--phase1-start": args.phase1_start,
+        "--phase1-end": args.phase1_end,
+        "--phase2-start": args.phase2_start,
+        "--phase2-end": args.phase2_end,
+        "--phase1-weekday-rate": args.phase1_weekday_rate,
+        "--phase1-weekend-rate": args.phase1_weekend_rate,
+        "--phase2-weekday-rate": args.phase2_weekday_rate,
+        "--phase2-weekend-rate": args.phase2_weekend_rate,
+    }
+    missing = [name for name, value in required_values.items() if value is None or value == ""]
+    if missing:
+        parser.error(f"缺少參數：{', '.join(missing)}")
+
+    if args.mode == "save-settings":
+        if not args.season_year or not args.booking_start or not args.booking_end:
+            parser.error("save-settings 需要 --season-year、--booking-start、--booking-end")
+        settings = DeepCleanSettings(
+            season_year=args.season_year,
+            phase1_start=_parse_date(args.phase1_start),
+            phase1_end=_parse_date(args.phase1_end, end_of_day=True),
+            phase1_weekday_rate=args.phase1_weekday_rate,
+            phase1_weekend_rate=args.phase1_weekend_rate,
+            phase2_start=_parse_date(args.phase2_start),
+            phase2_end=_parse_date(args.phase2_end, end_of_day=True),
+            phase2_weekday_rate=args.phase2_weekday_rate,
+            phase2_weekend_rate=args.phase2_weekend_rate,
+            reply_deadline=args.reply_deadline,
+            booking_start=_parse_date(args.booking_start),
+            booking_end=_parse_date(args.booking_end, end_of_day=True),
+            notice_spreadsheet_id=notice_spreadsheet_id,
+        )
+        sheet_name = save_deep_clean_settings(settings, settings_spreadsheet_id)
+        append_master_execution_log(
+            args.master_spreadsheet_id,
+            args.season_year,
+            "年度設定",
+            "全區",
+            "成功",
+            f"已更新 {sheet_name} 與 {args.season_year}大掃除系統更新",
+        )
+        print(f"{args.season_year} 年度大掃除設定已儲存：{sheet_name}")
+        print(f"系統更新內容已同步：{args.season_year}大掃除系統更新")
+        return
 
     result = generate_notice_data(
         args.area,
@@ -403,7 +913,7 @@ def main() -> None:
         args.phase2_weekday_rate,
         args.phase2_weekend_rate,
         args.reply_deadline,
-        args.target_spreadsheet_id,
+        args.target_spreadsheet_id or notice_spreadsheet_id,
     )
     print(f"大掃除通知資料完成：{result['sheet']}，共 {result['count']} 位客戶")
     for area_name, count in result["areas"].items():
