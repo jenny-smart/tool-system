@@ -957,11 +957,11 @@ _MEMO_SECTION_MAP = {
 # 改選功能項目，不會誤跑到任何功能。
 _CATEGORY_HEADERS_BY_INDEX = {
     0: "A. 建單／成單流程",
-    8: "B. 訂單附屬功能",
-    15: "C. 稽核比對工具",
-    18: "D. LINE 通知／提醒",
-    21: "E. 會員／客戶管理",
-    24: "F. 財務功能",
+    9: "B. 訂單附屬功能",
+    16: "C. 稽核比對工具",
+    19: "D. LINE 通知／提醒",
+    22: "E. 會員／客戶管理",
+    25: "F. 財務功能",
 }
 _menu_display_options = []
 _menu_option_targets = []  # 與 _menu_display_options 一一對應；None 代表該列是標題列
