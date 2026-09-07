@@ -172,8 +172,8 @@ def _validate_settings(settings: DeepCleanSettings) -> None:
         settings.phase2_weekday_rate,
         settings.phase2_weekend_rate,
     ]
-    if any(rate <= 0 for rate in rates):
-        raise ValueError("四項年節加價尚未全部設定")
+    if any(rate < 0 for rate in rates):
+        raise ValueError("年節加價不可為負數")
 
 
 def _settings_row(settings: DeepCleanSettings) -> list[Any]:
@@ -617,8 +617,8 @@ def generate_notice_data(
     if phase1_end >= phase2_start:
         raise ValueError("第一階段結束日期必須早於第二階段開始日期")
     rates = [phase1_weekday_rate, phase1_weekend_rate, phase2_weekday_rate, phase2_weekend_rate]
-    if any(rate <= 0 for rate in rates):
-        raise ValueError("四項年節加價尚未全部設定")
+    if any(rate < 0 for rate in rates):
+        raise ValueError("年節加價不可為負數")
 
     overall_start = min(phase1_start, phase2_start)
     overall_end = max(phase1_end, phase2_end) + timedelta(days=90)
