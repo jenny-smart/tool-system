@@ -4349,9 +4349,13 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
     tz = timezone(timedelta(hours=8))
     day_start = datetime.strptime(date_range_start, "%Y-%m-%d").replace(tzinfo=tz)
     day_end = datetime.strptime(date_range_end, "%Y-%m-%d").replace(tzinfo=tz) + timedelta(days=1)
+    roster_start = day_start.replace(day=1)
+    roster_end_month = datetime.strptime(date_range_end, "%Y-%m-%d").replace(tzinfo=tz, day=1)
+    roster_end = (roster_end_month + timedelta(days=32)).replace(day=1)
 
     calendar_events_by_region = {}
     all_events_by_region = {}
+    roster_events_by_region = {}
     for r in regions_to_check:
         calendar_id = GOOGLE_CALENDAR_MAP[r]
         events = service.events().list(
@@ -4364,6 +4368,14 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         ).execute().get("items", [])
         all_events_by_region[r] = events
         calendar_events_by_region[r] = [e for e in events if str(e.get("colorId", "")) == COLOR_YELLOW]
+        roster_events_by_region[r] = service.events().list(
+            calendarId=calendar_id,
+            timeMin=roster_start.isoformat(),
+            timeMax=roster_end.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=2500,
+        ).execute().get("items", [])
 
     def _event_local_range(event):
         start_raw = event.get("start", {}).get("dateTime") or event.get("start", {}).get("date")
@@ -4443,7 +4455,15 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             counts[name] = counts.get(name, 0) + 1
         return "、".join(f"{name}x{n}" for name, n in counts.items())
 
+    # 以該月份日曆曾出現的人員為母名單；非日曆管理客戶不列入後台反查。
+    backend_orders = [
+        order for order in backend_orders
+        if any(_event_person_match(order, event)
+               for event in roster_events_by_region.get(order["region"], []))
+    ]
+
     matched_event_ids = set()
+    reported_event_ids = set()
     result = {
         "backend_missing_in_calendar": [],
         "calendar_missing_in_backend": [],
@@ -4529,12 +4549,19 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             extra = "同時段在日曆上完全找不到任何事件。"
         same_time_yellow = [
             e for e in calendar_events_by_region.get(order["region"], [])
-            if _event_time_match(order, e)
+            if (e.get("id") not in matched_event_ids
+                and e.get("id") not in reported_event_ids
+                and _event_time_match(order, e))
         ]
-        if same_time_yellow and any(_event_person_match(order, e) for e in same_time_yellow):
+        same_person_event = next((e for e in same_time_yellow if _event_person_match(order, e)), None)
+        same_address_event = next((e for e in same_time_yellow
+                                   if _event_addr_core_match(order["address"], e)), None)
+        if same_person_event:
             reason = "同一人、同日期時段，但日曆地址不同。"
-        elif same_time_yellow and any(_event_addr_core_match(order["address"], e) for e in same_time_yellow):
+            reported_event_ids.add(same_person_event.get("id"))
+        elif same_address_event:
             reason = "同地址、同日期時段，但日曆是其他客人。"
+            reported_event_ids.add(same_address_event.get("id"))
         else:
             reason = "找不到同一人／地址／日期時段完全相符的黃色日曆事件。"
         result["backend_missing_in_calendar"].append({
@@ -4555,7 +4582,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
     # ---------- 方向二：日曆有、後台沒有 ----------
     for r, events in calendar_events_by_region.items():
         for event in events:
-            if event.get("id") in matched_event_ids:
+            if event.get("id") in matched_event_ids or event.get("id") in reported_event_ids:
                 continue
             start_local, end_local = _event_local_range(event)
             service_date = start_local.strftime("%Y-%m-%d") if start_local else ""
