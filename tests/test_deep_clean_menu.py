@@ -15,3 +15,5 @@ def test_service_schedule_exposes_deep_clean_settings_and_update():
     assert 'cmd += ["--mode", "update-all"]' in source
     assert "失敗原因：{failure_reason}" in source
     assert "請先執行「【大掃除】年度設定」" in source
+    assert "💾 儲存年度設定" in source
+    assert "加價未定時可先填 0" in source

@@ -4260,33 +4260,36 @@ with date_col:
             )
 
             if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
+                _saved_form_key = f"deep_clean_saved_form_{deep_clean_season_year}"
+                _saved_form = st.session_state.get(_saved_form_key, {})
                 st.markdown('<div class="field-label">📆 兩階段期間與價格</div>', unsafe_allow_html=True)
                 _p1a, _p1b = st.columns(2)
                 with _p1a:
-                    deep_clean_phase1_start = st.date_input("PART 1 開始", value=datetime(deep_clean_season_year, 12, 15).date(), key=f"deep_clean_p1_start_{deep_clean_season_year}")
-                    deep_clean_phase1_weekday_rate = st.number_input("PART 1 平日加價", min_value=0, step=50, value=0, key=f"deep_clean_p1_weekday_{deep_clean_season_year}")
+                    deep_clean_phase1_start = st.date_input("PART 1 開始", value=_saved_form.get("phase1_start", datetime(deep_clean_season_year, 12, 15).date()), key=f"deep_clean_p1_start_{deep_clean_season_year}")
+                    deep_clean_phase1_weekday_rate = st.number_input("PART 1 平日加價", min_value=0, step=50, value=_saved_form.get("phase1_weekday_rate", 0), key=f"deep_clean_p1_weekday_{deep_clean_season_year}")
                 with _p1b:
-                    deep_clean_phase1_end = st.date_input("PART 1 結束", value=datetime(deep_clean_season_year + 1, 1, 21).date(), key=f"deep_clean_p1_end_{deep_clean_season_year}")
-                    deep_clean_phase1_weekend_rate = st.number_input("PART 1 週六＋週日加價", min_value=0, step=50, value=0, key=f"deep_clean_p1_weekend_{deep_clean_season_year}")
+                    deep_clean_phase1_end = st.date_input("PART 1 結束", value=_saved_form.get("phase1_end", datetime(deep_clean_season_year + 1, 1, 21).date()), key=f"deep_clean_p1_end_{deep_clean_season_year}")
+                    deep_clean_phase1_weekend_rate = st.number_input("PART 1 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase1_weekend_rate", 0), key=f"deep_clean_p1_weekend_{deep_clean_season_year}")
                 _p2a, _p2b = st.columns(2)
                 with _p2a:
-                    deep_clean_phase2_start = st.date_input("PART 2 開始", value=datetime(deep_clean_season_year + 1, 1, 22).date(), key=f"deep_clean_p2_start_{deep_clean_season_year}")
-                    deep_clean_phase2_weekday_rate = st.number_input("PART 2 平日加價", min_value=0, step=50, value=0, key=f"deep_clean_p2_weekday_{deep_clean_season_year}")
+                    deep_clean_phase2_start = st.date_input("PART 2 開始", value=_saved_form.get("phase2_start", datetime(deep_clean_season_year + 1, 1, 22).date()), key=f"deep_clean_p2_start_{deep_clean_season_year}")
+                    deep_clean_phase2_weekday_rate = st.number_input("PART 2 平日加價", min_value=0, step=50, value=_saved_form.get("phase2_weekday_rate", 0), key=f"deep_clean_p2_weekday_{deep_clean_season_year}")
                 with _p2b:
-                    deep_clean_phase2_end = st.date_input("PART 2 結束", value=datetime(deep_clean_season_year + 1, 2, 4).date(), key=f"deep_clean_p2_end_{deep_clean_season_year}")
-                    deep_clean_phase2_weekend_rate = st.number_input("PART 2 週六＋週日加價", min_value=0, step=50, value=0, key=f"deep_clean_p2_weekend_{deep_clean_season_year}")
+                    deep_clean_phase2_end = st.date_input("PART 2 結束", value=_saved_form.get("phase2_end", datetime(deep_clean_season_year + 1, 2, 4).date()), key=f"deep_clean_p2_end_{deep_clean_season_year}")
+                    deep_clean_phase2_weekend_rate = st.number_input("PART 2 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase2_weekend_rate", 0), key=f"deep_clean_p2_weekend_{deep_clean_season_year}")
 
                 deep_clean_reply_deadline = st.text_input(
                     "定期 VIP 回覆截止時間（未定可留白）",
                     placeholder="例如：2026/11/03（二）17:00",
+                    value=_saved_form.get("reply_deadline", ""),
                     key=f"deep_clean_reply_deadline_{deep_clean_season_year}",
                 )
                 _bc1, _bc2 = st.columns(2)
                 with _bc1:
-                    deep_clean_booking_start = st.date_input("非定期 VIP 開放預約日", value=datetime(deep_clean_season_year, 11, 5).date(), key=f"deep_clean_booking_start_{deep_clean_season_year}")
+                    deep_clean_booking_start = st.date_input("非定期 VIP 開放預約日", value=_saved_form.get("booking_start", datetime(deep_clean_season_year, 11, 5).date()), key=f"deep_clean_booking_start_{deep_clean_season_year}")
                 with _bc2:
-                    deep_clean_booking_end = st.date_input("非定期 VIP 預約截止日", value=datetime(deep_clean_season_year, 11, 10).date(), key=f"deep_clean_booking_end_{deep_clean_season_year}")
-                st.info("儲存後會同時產生該年度的「系統更新內容」分頁。四項價格必須填妥。", icon="ℹ️")
+                    deep_clean_booking_end = st.date_input("非定期 VIP 預約截止日", value=_saved_form.get("booking_end", datetime(deep_clean_season_year, 11, 10).date()), key=f"deep_clean_booking_end_{deep_clean_season_year}")
+                st.info("儲存後會同時產生該年度的「系統更新內容」分頁。加價未定時可先填 0，仍可更新 VIP 清單。", icon="ℹ️")
             else:
                 st.info(
                     "請先執行「【大掃除】年度設定」並儲存該年度的期間與四項價格。"
@@ -4768,7 +4771,8 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
     except Exception as exc:
         st.error(f"讀取清潔用品採購資料失敗：{exc}")
 
-run_clicked = st.button("▶ 執行", use_container_width=True)
+_run_button_label = "💾 儲存年度設定" if selected_function == SERVICE_DEEP_CLEAN_SETTINGS else "▶ 執行"
+run_clicked = st.button(_run_button_label, use_container_width=True)
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -5560,8 +5564,8 @@ if run_clicked:
                             deep_clean_phase2_weekday_rate,
                             deep_clean_phase2_weekend_rate,
                         ]
-                        if any(float(rate) <= 0 for rate in rates):
-                            raise ValueError("請先填妥四項年節加價")
+                        if any(float(rate) < 0 for rate in rates):
+                            raise ValueError("年節加價不可為負數")
                         if (
                             deep_clean_phase1_start > deep_clean_phase1_end
                             or deep_clean_phase2_start > deep_clean_phase2_end
@@ -5649,6 +5653,20 @@ if run_clicked:
 
                 if completed.returncode == 0:
                     result = f"✅ {selected_function} 全部成功"
+                    if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
+                        st.session_state[f"deep_clean_saved_form_{deep_clean_season_year}"] = {
+                            "phase1_start": deep_clean_phase1_start,
+                            "phase1_end": deep_clean_phase1_end,
+                            "phase1_weekday_rate": deep_clean_phase1_weekday_rate,
+                            "phase1_weekend_rate": deep_clean_phase1_weekend_rate,
+                            "phase2_start": deep_clean_phase2_start,
+                            "phase2_end": deep_clean_phase2_end,
+                            "phase2_weekday_rate": deep_clean_phase2_weekday_rate,
+                            "phase2_weekend_rate": deep_clean_phase2_weekend_rate,
+                            "reply_deadline": deep_clean_reply_deadline,
+                            "booking_start": deep_clean_booking_start,
+                            "booking_end": deep_clean_booking_end,
+                        }
                 elif success_steps and failed_steps:
                     # 部分成功：不拋例外，顯示 warning
                     result = f"⚠️ 部分完成：{len(success_steps)} 個步驟成功，{len(failed_steps)} 個步驟失敗"
