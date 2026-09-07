@@ -100,6 +100,22 @@ def parse_zhongdian_region(body_text: str, region: str = "台北") -> tuple[int,
     return total, f"google廣告費{google_ad}＋google服務費{google_service}={total}"
 
 
+def parse_zhongdian_invoice_total(body_text: str) -> tuple[int, str]:
+    """以眾點信件中的發票總額（含服含稅）為準。"""
+    text = re.sub(r"\s+", " ", body_text.replace("NT$", "$"))
+    match = re.search(
+        r"發票金額(?:（含服含稅）|\(\s*含服含稅\s*\))?\s*(?:總計)?\s*(?:為|[:：])?\s*\$?\s*([\d,]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("眾點信件找不到發票金額（含服含稅）")
+    total = int(match.group(1).replace(",", ""))
+    google_ad = _round_twd(Decimal(total) / Decimal("1.1"))
+    google_service = total - google_ad
+    return total, f"google廣告費{google_ad}＋google服務費{google_service}={total}"
+
+
 def _plain_body(msg) -> str:
     plain = ""
     html_body = ""

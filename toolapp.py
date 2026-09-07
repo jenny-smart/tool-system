@@ -2931,11 +2931,11 @@ def run_taipei_fixed_expense_billing(*, month="", start_date=None, end_date=None
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
     result = submit_taipei_fixed_expenses(period)
     detail = "、".join(
-        f"{item['label']}={item['amount'] if item['amount'] is not None else '失敗'}"
+        f"{item['label']}={item['amount'] if item['amount'] is not None else ('略過' if item['status'].startswith('略過') else '失敗')}"
         for item in result["items"]
     )
     summary = (
-        f"完成：執行期別 {result['period_label']}（AWS/震旦行/眾點標記為 {result['mail_period_label']}）"
+        f"完成：執行期別 {result['period_label']}（AWS 標記為 {result['mail_period_label']}；震旦行/眾點標記為 {result['period_label']}）"
         f"已新增 {result['rows_added']} 筆請款記錄｜{detail}"
     )
     if result["errors"]:

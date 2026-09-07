@@ -17,8 +17,7 @@ from tools.bank_statement.internal_payment_registry import PAYMENT_REQUEST_TYPE,
 from tools.common.config_loader import get_sheets_service
 from tools.finance_management.execution_log import log_execution
 from tools.finance_management.taipei_fixed_expense_invoice_helpers import (
-    parse_zhongdian_region,
-    sum_newebpay_invoices,
+    parse_zhongdian_invoice_total,
     sum_tradevan_invoices,
 )
 
@@ -31,8 +30,6 @@ AWS_SUBJECT = "Amazon Web Services Tax Invoice Available"
 ZHENDAN_SUBJECT = "震旦集團電子發票加值中心通知信"
 ZHONGDIAN_SUBJECT = "各分店每月發票金額確認"
 TRADEVAN_SUBJECT = "台灣連線股份有限公司電子發票開立通知"
-NEWEBPAY_SUBJECT = "藍新金流電子發票開立通知"
-NEWEBPAY_COMPANIES = ("泳檬有限公司", "檸檬專業清潔有限公司", "竹盟有限公司")
 
 AWS_CHARGE_RE = re.compile(r"AWS Service Charges\s*USD\s*([\d,]+\.\d{2})", re.I)
 FX_RATE_RE = re.compile(r"1\s*USD\s*=\s*([\d.]+)\s*TWD", re.I)
@@ -180,6 +177,12 @@ def _period_window(period: str) -> tuple[datetime, datetime]:
     return start, end
 
 
+def _next_period(period: str) -> str:
+    year, month = int(period[:4]), int(period[4:6])
+    year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return f"{year:04d}{month:02d}"
+
+
 def _previous_period_label(period: str) -> str:
     year, month = int(period[:4]), int(period[4:6])
     year, month = (year - 1, 12) if month == 1 else (year, month - 1)
@@ -203,6 +206,8 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
     mail_label = _previous_period_label(period)
     start, end = _period_window(period)
     since, before = _imap_date(start), _imap_date(end)
+    invoice_start, invoice_end = _period_window(_next_period(period))
+    invoice_since, invoice_before = _imap_date(invoice_start), _imap_date(invoice_end)
     now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
     spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, AREA)
     service = get_sheets_service()
@@ -218,25 +223,30 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
         rows.append(["待付款", "", now, category, memo, amount, "", payee, ""])
         items.append({"label": label, "amount": amount, "matched": None, "status": "成功"})
 
-    mail_labels = ["Amazon Web Services", "震旦行", "眾點", "台灣連線", *[f"藍新金流-{c}" for c in NEWEBPAY_COMPANIES]]
-    needs_mail = any(not _already_submitted(existing, f"{mail_label}-{label}") for label in mail_labels)
+    expected_mail_memos = [
+        f"{mail_label}-Amazon Web Services",
+        f"{period_label}-震旦行",
+        f"{period_label}-眾點",
+        f"{mail_label}-台灣連線",
+    ]
+    needs_mail = any(not _already_submitted(existing, memo) for memo in expected_mail_memos)
     if needs_mail:
         try:
             imap, mailbox_user = _imap_connect()
             imap.select("INBOX")
             try:
                 singles = [
-                    ("Amazon Web Services", AWS_SUBJECT, "其他行銷", "彥妃信用卡", parse_aws_invoice),
-                    ("震旦行", ZHENDAN_SUBJECT, "其他租金", "震旦行", parse_zhendan_invoice),
-                    ("眾點", ZHONGDIAN_SUBJECT, "行銷費用", "眾點", lambda body: parse_zhongdian_region(body, "台北")),
+                    ("Amazon Web Services", AWS_SUBJECT, "其他行銷", "彥妃信用卡", parse_aws_invoice, mail_label, since, before),
+                    ("震旦行", ZHENDAN_SUBJECT, "其他租金", "震旦行", parse_zhendan_invoice, period_label, invoice_since, invoice_before),
+                    ("眾點", ZHONGDIAN_SUBJECT, "行銷費用", "眾點", parse_zhongdian_invoice_total, period_label, invoice_since, invoice_before),
                 ]
-                for label, subject, category, payee, parser in singles:
-                    base = f"{mail_label}-{label}"
+                for label, subject, category, payee, parser, memo_period, search_since, search_before in singles:
+                    base = f"{memo_period}-{label}"
                     if _already_submitted(existing, base):
                         items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
                         continue
                     try:
-                        messages = _matching_messages(imap, subject, since, before)
+                        messages = _matching_messages(imap, subject, search_since, search_before)
                         result = None
                         last = None
                         for msg in messages:
@@ -247,8 +257,9 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                                 last = exc
                         if result is None:
                             raise last or RuntimeError("找到的信件都解析失敗")
-                        append_row(label, category, payee, result[0], result[1])
-                        items[-1]["matched"] = len(messages)
+                        memo = base + (f"，{result[1]}" if result[1] else "")
+                        rows.append(["待付款", "", now, category, memo, result[0], "", payee, ""])
+                        items.append({"label": label, "amount": result[0], "matched": len(messages), "status": "成功"})
                     except Exception as exc:
                         errors.append(f"{label}：{exc}")
                         items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
@@ -266,23 +277,6 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                         errors.append(f"{label}：{exc}")
                         items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
 
-                pending_companies = [c for c in NEWEBPAY_COMPANIES if not _already_submitted(existing, f"{mail_label}-藍新金流-{c}")]
-                for company in NEWEBPAY_COMPANIES:
-                    if company not in pending_companies:
-                        items.append({"label": f"藍新金流-{company}", "amount": None, "matched": None, "status": "略過（本期已新增過）"})
-                if pending_companies:
-                    try:
-                        messages = _matching_messages(imap, NEWEBPAY_SUBJECT, since, before)
-                        totals, matched = sum_newebpay_invoices(messages, tuple(pending_companies))
-                        for company in pending_companies:
-                            amount = totals[company]
-                            if amount <= 0:
-                                raise ValueError(f"找不到{company}的藍新金流發票")
-                            append_row(f"藍新金流-{company}", "金流手續費", "藍新金流", amount, memo_label=f"藍新金流-{company}")
-                            items[-1]["matched"] = matched
-                    except Exception as exc:
-                        errors.append(f"藍新金流：{exc}")
-                        items.append({"label": "藍新金流", "amount": None, "matched": 0, "status": f"失敗：{exc}"})
             finally:
                 try:
                     imap.logout()
