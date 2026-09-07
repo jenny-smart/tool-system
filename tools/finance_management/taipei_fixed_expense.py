@@ -271,7 +271,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                     try:
                         messages = _matching_messages(imap, TRADEVAN_SUBJECT, since, before)
                         amount, detail = sum_tradevan_invoices(messages)
-                        append_row(label, "行銷費用", "台灣連線股份有限公司", amount, detail)
+                        append_row(label, "行銷費用", "Jenny", amount, detail)
                         items[-1]["matched"] = len(messages)
                     except Exception as exc:
                         errors.append(f"{label}：{exc}")
