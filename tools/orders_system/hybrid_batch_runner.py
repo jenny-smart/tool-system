@@ -150,7 +150,7 @@ def run_process_web_direct_single(
     core_actions = _without_calendar(selected_actions)
     _safety._configure_runtime(env_name)
 
-    logger(f"程式版本：{RUNNER_VERSION}（更新日期：2026-09-05）")
+    logger(f"程式版本：{RUNNER_VERSION}（更新日期：{_orders.ORDERS_UPDATED_AT}）")
     logger(f"目前環境：{env_name}")
     logger(f"BASE_URL：{_orders.BASE_URL}")
     logger(f"執行區域：{region}")

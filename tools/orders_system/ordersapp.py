@@ -1202,7 +1202,7 @@ if mode == "批次建單（Google Sheet）":
         total_processed = 0
         with st.spinner("執行中，請稍候…"):
             row_label = "、".join(map(str, target_rows))
-            ui_log(f"▶ 一次送入指定列 {row_label}，先依姓名／電話／地址／人數時數分組…")
+            ui_log(f"▶ 指定列 {row_label}，依列號逐筆單筆成單，不分組…")
             try:
                 result = run_process_web(
                     env_name=env, region=region,
