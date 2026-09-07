@@ -16,9 +16,17 @@ import batch_booking_safety as _safety
 from accounts import ACCOUNTS
 
 
-RUNNER_VERSION = "v2026.09.05-8"
+RUNNER_VERSION = "v2026.09.07-1"
 _orders.ORDERS_VERSION = RUNNER_VERSION
-_orders.ORDERS_UPDATED_AT = "2026-09-05"
+_orders.ORDERS_UPDATED_AT = "2026-09-07"
+
+
+def _phone_address_group_key(row):
+    """優化／雲端模式只依電話＋地址分組。"""
+    return (
+        _orders.normalize_phone(row.get("電話", "")),
+        _orders.normalize_addr_for_match(row.get("地址", "")),
+    )
 
 
 def _without_calendar(actions):
@@ -310,7 +318,7 @@ def run_process_web_hybrid(
 
     grouped = defaultdict(list)
     for row_no, row in create_rows:
-        grouped[_orders.build_group_key(row)].append((row_no, row))
+        grouped[_phone_address_group_key(row)].append((row_no, row))
 
     # 效率優先：真正有 2 筆以上的組才使用 grouped submit；1 筆組直接走單筆。
     multi_groups = [items for items in grouped.values() if len(items) >= 2]

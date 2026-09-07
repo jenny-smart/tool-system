@@ -228,6 +228,33 @@ def _checkpoint(ws, row_numbers, message="已建立建單斷點；若程式中�
         _orders.update_sheet_rows(ws, payload)
 
 
+def _build_recovered_result(session, row, order_no):
+    """既有訂單命中後建立 K:AA 的完整回填資料。"""
+    meta = _orders.fetch_order_meta_by_order_no(session, order_no)
+    try:
+        fetched_notice = _orders._fetch_order_edit_notice(session, order_no)
+    except Exception:
+        fetched_notice = None
+    service_notice = (
+        str(row.get("客服備註", "") or "") if fetched_notice is None else str(fetched_notice)
+    )
+    mapped = _orders.map_to_system_slot(
+        row.get("開始時間", ""), row.get("結束時間", ""), row.get("服務人時", "")
+    )
+    sms_time = mapped.get("original_slot", "") if mapped.get("need_note") else ""
+    return _orders.build_row_result(
+        order_no=order_no,
+        result=_RECOVERED_RESULT,
+        reason="偵測到後台已成立但工作表尚未回填；已補回完整資料，避免重複成單。",
+        sms_time=sms_time,
+        customer_note=f"服務時間：{sms_time}" if sms_time else "",
+        service_notice=service_notice,
+        staff=meta.get("服務人員", "無人力"),
+        service_status=meta.get("服務狀態", "未處理"),
+        fare=meta.get("車馬費", "0"),
+    )
+
+
 def _recover_before_create(
     env_name, region, backend_email, backend_password, sheet_name,
     start_row, end_row, selected_rows, selected_actions, logger,
@@ -237,12 +264,6 @@ def _recover_before_create(
     work = _selected_df(df, selected_rows, start_row, end_row, region)
     if work.empty:
         return ws, [], [], [], 0
-
-    all_recorded = {
-        str(value).strip()
-        for value in df.get("訂單編號", []).tolist()
-        if str(value).strip() not in ("", "nan", "None")
-    }
 
     blanks = []
     for _, row in work.iterrows():
@@ -273,6 +294,7 @@ def _recover_before_create(
         rows_by_key[key].append((row_no, row))
 
     blocks_by_phone = {}
+    claimed_order_nos = set()
     recovered = []
     blocked = []
     remaining = []
@@ -285,7 +307,7 @@ def _recover_before_create(
         candidates = []
         for parsed in blocks_by_phone[phone]:
             order_no = parsed.get("order_no")
-            if not order_no or order_no in all_recorded:
+            if not order_no or order_no in claimed_order_nos:
                 continue
             if parsed.get("phone") and parsed.get("phone") != phone:
                 continue
@@ -310,22 +332,14 @@ def _recover_before_create(
             continue
 
         for (row_no, row), order_no in zip(row_items, candidates):
-            meta = _orders.fetch_order_meta_by_order_no(session, order_no)
-            result = _orders.build_row_result(
-                order_no=order_no,
-                result=_RECOVERED_RESULT,
-                reason="偵測到後台已成立但工作表尚未回填；已補回訂單編號，避免重複成單。",
-                staff=meta.get("服務人員", "無人力"),
-                service_status=meta.get("服務狀態", "未處理"),
-                fare=meta.get("車馬費", "0"),
-            )
+            result = _build_recovered_result(session, row, order_no)
             if "寄確認信" in (selected_actions or []):
                 result["確認信"] = "待確認（中斷復原不自動重寄）"
             if "改 Google 日曆" in (selected_actions or []):
                 result.update(_calendar_recover(row, region, gcal_service))
             _orders.update_sheet_rows(ws, {row_no: result})
             recovered.append(row_no)
-            all_recorded.add(order_no)
+            claimed_order_nos.add(order_no)
             logger(f"♻️ 第 {row_no} 列：後台已有 {order_no}，已補回工作表；不重複建單、不自動重寄確認信。")
 
         recovered_set = set(recovered)
@@ -360,7 +374,7 @@ def _merge_counts(results, recovered_count=0, blocked_count=0):
 
 
 def _optimized_groups(sheet_name, remaining, region):
-    """依 orders.run_process_web 相同 group key 切組，讓每一組獨立呼叫核心並立即回填。"""
+    """只依電話＋地址切組，讓每一組獨立呼叫核心並立即回填。"""
     _, df = _orders.load_worksheet(sheet_name)
     wanted = set(int(x) for x in remaining)
     work = df[df["__sheet_row__"].isin(wanted)]
@@ -371,7 +385,11 @@ def _optimized_groups(sheet_name, remaining, region):
         row_no = int(row["__sheet_row__"])
         if row_no not in wanted:
             continue
-        groups[_orders.build_group_key(row)].append(row_no)
+        key = (
+            _orders.normalize_phone(row.get("電話", "")),
+            _orders.normalize_addr_for_match(row.get("地址", "")),
+        )
+        groups[key].append(row_no)
     return [sorted(rows) for rows in groups.values() if rows]
 
 

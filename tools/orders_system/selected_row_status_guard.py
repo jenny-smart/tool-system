@@ -164,8 +164,8 @@ def install_patch():
     orders.should_process_row = _should_process_row
     orders.should_create_order = _should_create_order
     orders.process_one_group = _process_one_group_with_lemon_retry
-    orders.ORDERS_VERSION = "v2026.09.05-7"
-    orders.ORDERS_UPDATED_AT = "2026-09-05"
+    orders.ORDERS_VERSION = "v2026.09.07-1"
+    orders.ORDERS_UPDATED_AT = "2026-09-07"
     try:
         import batch_booking_optimized as batch_opt
         import batch_booking_safety as batch_safety
