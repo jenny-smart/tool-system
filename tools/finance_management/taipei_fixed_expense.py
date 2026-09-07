@@ -183,12 +183,6 @@ def _next_period(period: str) -> str:
     return f"{year:04d}{month:02d}"
 
 
-def _previous_period_label(period: str) -> str:
-    year, month = int(period[:4]), int(period[4:6])
-    year, month = (year - 1, 12) if month == 1 else (year, month - 1)
-    return f"{year}.{month:02d}"
-
-
 def _existing_memos(service, spreadsheet_id: str, sheet_title: str) -> set[str]:
     result = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"'{sheet_title}'!E:E").execute()
     return {str(r[0]).strip() for r in result.get("values", []) if r and str(r[0]).strip()}
@@ -203,9 +197,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
     period_label = f"{period[:4]}.{period[4:6]}"
-    mail_label = _previous_period_label(period)
-    start, end = _period_window(period)
-    since, before = _imap_date(start), _imap_date(end)
+    mail_label = period_label
     invoice_start, invoice_end = _period_window(_next_period(period))
     invoice_since, invoice_before = _imap_date(invoice_start), _imap_date(invoice_end)
     now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
@@ -236,7 +228,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
             imap.select("INBOX")
             try:
                 singles = [
-                    ("Amazon Web Services", AWS_SUBJECT, "其他行銷", "彥妃信用卡", parse_aws_invoice, mail_label, since, before),
+                    ("Amazon Web Services", AWS_SUBJECT, "其他行銷", "台新信用卡妃公用", parse_aws_invoice, mail_label, invoice_since, invoice_before),
                     ("震旦行", ZHENDAN_SUBJECT, "其他租金", "震旦行", parse_zhendan_invoice, period_label, invoice_since, invoice_before),
                     ("眾點", ZHONGDIAN_SUBJECT, "行銷費用", "眾點", parse_zhongdian_invoice_total, period_label, invoice_since, invoice_before),
                 ]
@@ -269,7 +261,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                     items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
                 else:
                     try:
-                        messages = _matching_messages(imap, TRADEVAN_SUBJECT, since, before)
+                        messages = _matching_messages(imap, TRADEVAN_SUBJECT, invoice_since, invoice_before)
                         amount, detail = sum_tradevan_invoices(messages)
                         append_row(label, "行銷費用", "Jenny", amount, detail)
                         items[-1]["matched"] = len(messages)

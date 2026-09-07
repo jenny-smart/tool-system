@@ -2935,7 +2935,7 @@ def run_taipei_fixed_expense_billing(*, month="", start_date=None, end_date=None
         for item in result["items"]
     )
     summary = (
-        f"完成：執行期別 {result['period_label']}（AWS 標記為 {result['mail_period_label']}；震旦行/眾點標記為 {result['period_label']}）"
+        f"完成：執行期別 {result['period_label']}（郵件費用標記為 {result['mail_period_label']}）"
         f"已新增 {result['rows_added']} 筆請款記錄｜{detail}"
     )
     if result["errors"]:
