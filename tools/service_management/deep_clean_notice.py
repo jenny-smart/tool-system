@@ -46,6 +46,9 @@ NOTICE_HEADERS = [
     "通知內容",
     "寄送狀態",
     "寄送時間",
+    "非2人服務",
+    "日曆備註",
+    "服務狀態",
 ]
 
 NONROUTINE_NOTICE_HEADERS = [
@@ -235,10 +238,34 @@ def _date_range(start: datetime, end: datetime) -> str:
 
 
 def _service_label(row: dict[str, Any]) -> str:
-    return (
+    label = (
         f"{row['date_str']}（週{row['weekday']}）"
         f" {row['start_str']}–{row['end_str']}"
         f"｜{row['service'] or '定期清潔'}"
+    )
+    note = str(row.get("note") or "").strip()
+    status = str(row.get("status") or "").strip()
+    if note:
+        label += f"｜備註：{note}"
+    if status:
+        label += f"｜狀態：{status}"
+    return label
+
+
+def _dated_values(rows: list[dict[str, Any]], field: str) -> str:
+    return "\n".join(
+        f"{row['date_str']}：{value}"
+        for row in rows
+        if (value := str(row.get(field) or "").strip())
+    )
+
+
+def _non_two_person_services(rows: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        f"{row['date_str']}：{service}"
+        for row in rows
+        if (service := str(row.get("service") or "").strip())
+        and parse_service_people(service) != 2
     )
 
 
@@ -426,6 +453,7 @@ def build_notice_rows(
         )
         line_url = target["line"]
         line_cell = f'=HYPERLINK("{line_url}","開啟 LINE")' if re.match(r"^https?://", line_url) else line_url
+        detail_rows = p1 + p2 + ([next_service] if next_service else [])
         output.append([
             area_name,
             "定期VIP",
@@ -445,6 +473,9 @@ def build_notice_rows(
             notice,
             "待寄送" if target["email"] else "缺Email",
             "",
+            _non_two_person_services(detail_rows),
+            _dated_values(detail_rows, "note"),
+            _dated_values(detail_rows, "status"),
         ])
 
     return sorted(output, key=lambda row: (str(row[2]), str(row[5])))
@@ -464,6 +495,7 @@ def _write_notice_sheet(
     except gspread.WorksheetNotFound:
         sh = ss.add_worksheet(title=sheet_name, rows=max(len(rows) + 20, 200), cols=len(NOTICE_HEADERS))
 
+    sh.resize(rows=max(len(rows) + 20, 200), cols=len(NOTICE_HEADERS))
     values = [NOTICE_HEADERS] + rows
     sh.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
     if rows:

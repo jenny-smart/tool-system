@@ -14,7 +14,16 @@ from tools.service_management.deep_clean_notice import (
 TZ = timezone(timedelta(hours=8))
 
 
-def _row(day, name="王小明", person_hrs=6, service="2人", start_hour=9, end_hour=12):
+def _row(
+    day,
+    name="王小明",
+    person_hrs=6,
+    service="2人",
+    start_hour=9,
+    end_hour=12,
+    note="",
+    status="",
+):
     start = datetime.fromisoformat(day).replace(hour=start_hour, tzinfo=TZ)
     return {
         "start_dt": start,
@@ -23,6 +32,8 @@ def _row(day, name="王小明", person_hrs=6, service="2人", start_hour=9, end_
         "start_str": f"{start_hour:02d}:00",
         "end_str": f"{end_hour:02d}:00",
         "service": service,
+        "note": note,
+        "status": status,
         "person_hrs": person_hrs,
         "name": name,
         "phone": "0912345678",
@@ -89,6 +100,30 @@ def test_regular_notice_contains_mail_merge_fields_and_next_service():
     assert "2027/02/12" in row[9]
     assert row[16] == "待寄送"
     assert "如改期，將依實際服務日期重新計算" in row[15]
+
+
+def test_regular_notice_keeps_calendar_service_note_and_status_fields():
+    rows = [
+        _row("2026-12-18", service="3人", note="每月確認", status="待確認"),
+        _row("2027-01-23", status="暫停"),
+        _row("2027-02-12", note="請先聯絡", status="保留單"),
+    ]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300,
+    )
+
+    row = output[0]
+    assert "3人｜備註：每月確認｜狀態：待確認" in row[7]
+    assert "狀態：暫停" in row[8]
+    assert "備註：請先聯絡｜狀態：保留單" in row[9]
+    assert row[18] == "2026/12/18：3人"
+    assert row[19] == "2026/12/18：每月確認\n2027/02/12：請先聯絡"
+    assert row[20] == (
+        "2026/12/18：待確認\n2027/01/23：暫停\n2027/02/12：保留單"
+    )
 
 
 def test_nonroutine_notice_uses_open_window_and_correct_customer_label():
