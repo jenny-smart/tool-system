@@ -23,6 +23,7 @@ from tools.service_management.stored_value import (
     load_area_config,
     normalize_address,
     normalize_name_for_compare,
+    parse_service_people,
 )
 
 
@@ -245,10 +246,26 @@ def _service_date_label(row: dict[str, Any]) -> str:
     return f"{row['date_str']}({row['weekday']})"
 
 
+def _billable_person_hours(row: dict[str, Any]) -> float:
+    """依服務人數與起訖時間重算人時，不信任可能已失真的彙整欄位。"""
+    people = float(row.get("people") or parse_service_people(str(row.get("service") or "")))
+    hours = float(row.get("hours") or 0)
+    if hours <= 0:
+        match_start = re.fullmatch(r"(\d{1,2}):(\d{2})", str(row.get("start_str") or "").strip())
+        match_end = re.fullmatch(r"(\d{1,2}):(\d{2})", str(row.get("end_str") or "").strip())
+        if match_start and match_end:
+            start_minutes = int(match_start.group(1)) * 60 + int(match_start.group(2))
+            end_minutes = int(match_end.group(1)) * 60 + int(match_end.group(2))
+            hours = max((end_minutes - start_minutes) / 60.0, 0.0)
+    if people > 0 and hours > 0:
+        return people * hours
+    return float(row.get("person_hrs") or 0)
+
+
 def _extra_charge(row: dict[str, Any], weekday_rate: float, weekend_rate: float) -> float:
     # 加價單位沿用年節規則：每 2 人 1 小時一個單位。
     rate = weekend_rate if row["start_dt"].weekday() >= 5 else weekday_rate
-    return rate * (float(row.get("person_hrs") or 0) / 2.0)
+    return rate * (_billable_person_hours(row) / 2.0)
 
 
 def _price_text(start: datetime, end: datetime, weekday_rate: float, weekend_rate: float) -> str:

@@ -14,15 +14,15 @@ from tools.service_management.deep_clean_notice import (
 TZ = timezone(timedelta(hours=8))
 
 
-def _row(day, name="王小明", person_hrs=6):
-    start = datetime.fromisoformat(day).replace(hour=9, tzinfo=TZ)
+def _row(day, name="王小明", person_hrs=6, service="2人", start_hour=9, end_hour=12):
+    start = datetime.fromisoformat(day).replace(hour=start_hour, tzinfo=TZ)
     return {
         "start_dt": start,
         "date_str": start.strftime("%Y/%m/%d"),
         "weekday": "一",
-        "start_str": "09:00",
-        "end_str": "12:00",
-        "service": "2人",
+        "start_str": f"{start_hour:02d}:00",
+        "end_str": f"{end_hour:02d}:00",
+        "service": service,
         "person_hrs": person_hrs,
         "name": name,
         "phone": "0912345678",
@@ -35,6 +35,35 @@ def test_extra_charge_uses_weekend_rate():
     weekend = _row("2026-12-19")
     assert _extra_charge(weekday, 100, 250) == 300
     assert _extra_charge(weekend, 100, 250) == 750
+
+
+def test_extra_charge_recomputes_people_times_hours_instead_of_trusting_stale_total():
+    saturday_three_hours = _row(
+        "2027-01-09", person_hrs=9, service="2人", start_hour=14, end_hour=17,
+    )
+    two_people_six_hours = _row(
+        "2027-01-09", person_hrs=999, service="2人", start_hour=9, end_hour=15,
+    )
+    three_people_four_hours = _row(
+        "2027-01-09", person_hrs=999, service="3人", start_hour=9, end_hour=13,
+    )
+
+    assert _extra_charge(saturday_three_hours, 150, 200) == 600
+    assert _extra_charge(two_people_six_hours, 150, 200) == 1200
+    assert _extra_charge(three_people_four_hours, 150, 200) == 1200
+
+
+def test_part1_saturday_notice_uses_600_for_two_people_three_hours():
+    rows = [_row("2027-01-09", person_hrs=9, service="2人", start_hour=14, end_hour=17)]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        150, 200, 200, 250,
+    )
+
+    assert output[0][12] == 600
+    assert "PART 1 次數／年節加價金額：1 次／NT$600" in output[0][15]
 
 
 def test_regular_notice_contains_mail_merge_fields_and_next_service():
