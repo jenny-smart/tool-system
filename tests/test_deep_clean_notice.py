@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from tools.service_management.deep_clean_notice import (
     DeepCleanSettings,
     _extra_charge,
+    _canonical_settings_values,
     _validate_settings,
     build_nonroutine_notice,
     build_nonroutine_notice_rows,
@@ -188,6 +189,35 @@ def test_zero_rates_are_valid_while_prices_are_undecided():
     )
 
     _validate_settings(settings)
+
+
+def test_settings_save_repairs_missing_header_and_duplicate_year_rows():
+    settings = DeepCleanSettings(
+        2026,
+        datetime(2026, 12, 15, tzinfo=TZ),
+        datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        150,
+        200,
+        datetime(2027, 1, 22, tzinfo=TZ),
+        datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        200,
+        250,
+        "",
+        datetime(2026, 11, 5, tzinfo=TZ),
+        datetime(2026, 11, 10, tzinfo=TZ),
+        "notice-id",
+    )
+    malformed = [
+        [2026, "old"],
+        [2026, "newer-but-replaced"],
+        [2025, "preserved"],
+    ]
+
+    repaired = _canonical_settings_values(malformed, settings)
+
+    assert repaired[0][0:3] == ["年度", "PART1開始", "PART1結束"]
+    assert [row[0] for row in repaired[1:]] == [2025, 2026]
+    assert repaired[2][1] == "2026-12-15"
 
 
 def test_nonroutine_list_subtracts_calendar_regular_vip_by_phone():
