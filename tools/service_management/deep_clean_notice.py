@@ -578,6 +578,30 @@ def _get_or_create_sheet(
         return ss.add_worksheet(title=title, rows=rows, cols=cols)
 
 
+def _settings_data_rows(values: list[list[Any]]) -> list[list[Any]]:
+    if values and list(values[0][: len(SETTINGS_HEADERS)]) == SETTINGS_HEADERS:
+        return values[1:]
+    return values
+
+
+def _canonical_settings_values(
+    values: list[list[Any]],
+    settings: DeepCleanSettings,
+) -> list[list[Any]]:
+    """Restore the header and keep only the latest row for each season year."""
+    rows_by_year: dict[int, list[Any]] = {}
+    for row in _settings_data_rows(values):
+        if not row:
+            continue
+        try:
+            year = int(str(row[0]).strip())
+        except (TypeError, ValueError):
+            continue
+        rows_by_year[year] = (list(row) + [""] * len(SETTINGS_HEADERS))[: len(SETTINGS_HEADERS)]
+    rows_by_year[settings.season_year] = _settings_row(settings)
+    return [SETTINGS_HEADERS] + [rows_by_year[year] for year in sorted(rows_by_year)]
+
+
 def save_deep_clean_settings(
     settings: DeepCleanSettings,
     settings_spreadsheet_id: str = DEFAULT_SETTINGS_SPREADSHEET_ID,
@@ -587,24 +611,17 @@ def save_deep_clean_settings(
     ss = gc.open_by_key(settings_spreadsheet_id.strip() or DEFAULT_SETTINGS_SPREADSHEET_ID)
     sh = _get_or_create_sheet(ss, SETTINGS_SHEET_NAME, 100, len(SETTINGS_HEADERS))
     values = sh.get_all_values()
-    if not values:
-        sh.update(values=[SETTINGS_HEADERS], range_name="A1", value_input_option="USER_ENTERED")
-        values = [SETTINGS_HEADERS]
-
-    target_row = None
-    for index, row in enumerate(values[1:], start=2):
-        if row and str(row[0]).strip() == str(settings.season_year):
-            target_row = index
-            break
-    row_values = _settings_row(settings)
-    if target_row:
-        sh.update(
-            values=[row_values],
-            range_name=f"A{target_row}:N{target_row}",
-            value_input_option="USER_ENTERED",
-        )
-    else:
-        sh.append_row(row_values, value_input_option="USER_ENTERED")
+    canonical_values = _canonical_settings_values(values, settings)
+    sh.clear()
+    sh.update(values=canonical_values, range_name="A1", value_input_option="USER_ENTERED")
+    sh.format(
+        "A1:N1",
+        {
+            "backgroundColor": {"red": 0.93, "green": 0.93, "blue": 0.93},
+            "textFormat": {"bold": True},
+            "wrapStrategy": "WRAP",
+        },
+    )
     sh.freeze(rows=1)
     _write_system_update_sheet(ss, settings)
     return SETTINGS_SHEET_NAME
@@ -620,7 +637,7 @@ def load_deep_clean_settings(
         values = ss.worksheet(SETTINGS_SHEET_NAME).get_all_values()
     except gspread.WorksheetNotFound as exc:
         raise ValueError(f"尚未建立 {season_year} 年度大掃除設定") from exc
-    for row in values[1:]:
+    for row in _settings_data_rows(values):
         if row and str(row[0]).strip() == str(season_year):
             settings = _settings_from_row(row)
             _validate_settings(settings)
