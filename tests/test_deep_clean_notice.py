@@ -104,7 +104,7 @@ def test_regular_notice_contains_mail_merge_fields_and_next_service():
 
 def test_regular_notice_keeps_calendar_service_note_and_status_fields():
     rows = [
-        _row("2026-12-18", service="3人", note="每月確認", status="待確認"),
+        _row("2026-12-18", service="3人", note="每月確認", status="已安排"),
         _row("2027-01-23", status="暫停"),
         _row("2027-02-12", note="請先聯絡", status="保留單"),
     ]
@@ -124,6 +124,32 @@ def test_regular_notice_keeps_calendar_service_note_and_status_fields():
     assert row[20] == (
         "2026/12/18：待確認\n2027/01/23：暫停\n2027/02/12：保留單"
     )
+
+
+def test_monthly_confirmation_hides_schedule_and_asks_for_date_by_deadline():
+    rows = [
+        _row("2026-12-17", note="每月確認", status="已安排"),
+        _row("2026-12-31", note="每月確認", status="未安排"),
+        _row("2027-02-11", note="每月確認", status="已安排"),
+    ]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300,
+        "2026/11/03（二）17:00",
+    )
+
+    row = output[0]
+    notice = row[15]
+    assert "🕓 請於 2026/11/03 前告知欲安排的日期。" in notice
+    assert "您原訂週期於年節期間" not in notice
+    assert "年節加價服務日期" not in notice
+    assert "PART 1 次數／年節加價金額" not in notice
+    assert "年節後第一次服務日期" not in notice
+    assert "2026/12/17：待確認" in row[20]
+    assert "2026/12/31：待確認" in row[20]
+    assert "2027/02/11：待確認" in row[20]
 
 
 def test_nonroutine_notice_uses_open_window_and_correct_customer_label():

@@ -273,6 +273,18 @@ def _service_date_label(row: dict[str, Any]) -> str:
     return f"{row['date_str']}({row['weekday']})"
 
 
+def _is_monthly_confirmation(row: dict[str, Any]) -> bool:
+    return "每月確認" in str(row.get("note") or "")
+
+
+def _reply_deadline_date(reply_deadline: str) -> str:
+    match = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", reply_deadline)
+    if not match:
+        return ""
+    year, month, day = (int(value) for value in match.groups())
+    return f"{year:04d}/{month:02d}/{day:02d}"
+
+
 def _billable_person_hours(row: dict[str, Any]) -> float:
     """依服務人數與起訖時間重算人時，不信任可能已失真的彙整欄位。"""
     people = float(row.get("people") or parse_service_people(str(row.get("service") or "")))
@@ -321,10 +333,31 @@ def _build_notice_text(
     reply_deadline: str,
 ) -> str:
     all_rows = phase1_rows + phase2_rows
+    monthly_confirmation = any(_is_monthly_confirmation(row) for row in all_rows)
     service_dates = ", ".join(_service_date_label(row) for row in all_rows) or "目前無排程"
     service_times = "、".join(sorted({f"{row['start_str']}–{row['end_str']}" for row in all_rows})) or "目前無排程"
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
     deadline = f"建議您於 {reply_deadline} 前，" if reply_deadline.strip() else "如需調整，建議您儘早"
+    deadline_date = _reply_deadline_date(reply_deadline)
+    if monthly_confirmation:
+        arrangement = (
+            f"🕓 請於 {deadline_date} 前告知欲安排的日期。\n\n"
+            if deadline_date
+            else "🕓 請儘早告知欲安排的日期。\n\n"
+        )
+        contact = "請透過官方 LINE@ 與我們聯繫。\n"
+        estimate_note = ""
+    else:
+        arrangement = (
+            f"🕓 您原訂週期於年節期間（{_date_range(phase1_start, phase2_end)}）之服務安排如下：\n\n"
+            f"年節加價服務日期：{service_dates}\n"
+            f"服務時段：{service_times}\n\n"
+            f"PART 1 次數／年節加價金額：{len(phase1_rows)} 次／{_money(phase1_total)}\n"
+            f"PART 2 次數／年節加價金額：{len(phase2_rows)} 次／{_money(phase2_total)}\n\n"
+            f"年節後第一次服務日期：{next_label}\n\n"
+        )
+        contact = f"{deadline}透過官方 LINE@ 與我們聯繫。\n"
+        estimate_note = "以上金額依目前排程估算；如改期，將依實際服務日期重新計算。\n"
     return (
         f"❤️親愛的 {name} 您好：\n\n"
         "🎉 感謝您長期支持檸檬家事服務 🎉\n"
@@ -336,15 +369,10 @@ def _build_notice_text(
         f"📍PART 2：{_price_text(phase2_start, phase2_end, phase2_weekday_rate, phase2_weekend_rate)}\n\n"
         "💰「年節加價」將自動從您的「儲值金」帳戶扣除，無需現場付款；"
         "惟「車馬費」仍須於現場支付。\n\n"
-        f"🕓 您原訂週期於年節期間（{_date_range(phase1_start, phase2_end)}）之服務安排如下：\n\n"
-        f"年節加價服務日期：{service_dates}\n"
-        f"服務時段：{service_times}\n\n"
-        f"PART 1 次數／年節加價金額：{len(phase1_rows)} 次／{_money(phase1_total)}\n"
-        f"PART 2 次數／年節加價金額：{len(phase2_rows)} 次／{_money(phase2_total)}\n\n"
-        f"年節後第一次服務日期：{next_label}\n\n"
+        f"{arrangement}"
         "💛《VIP 定期客戶優先預約》\n"
-        f"{deadline}透過官方 LINE@ 與我們聯繫。\n"
-        "以上金額依目前排程估算；如改期，將依實際服務日期重新計算。\n"
+        f"{contact}"
+        f"{estimate_note}"
         "我們將優先為您安排大掃除服務，謝謝您！\n\n"
         "檸檬家事服務 🍋\n陪您一起迎新年、好運滿滿過好年 🌟"
     )
@@ -404,6 +432,9 @@ def build_notice_rows(
     )
 
     for row in rows:
+        row = dict(row)
+        if _is_monthly_confirmation(row):
+            row["status"] = "待確認"
         service_dt = row["start_dt"]
         name = str(row.get("name") or "").strip()
         address = str(row.get("address") or "").strip()
