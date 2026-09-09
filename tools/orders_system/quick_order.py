@@ -1,9 +1,13 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.62
+# 版本：v8.63
 # 最後更新：2026-08-12
 #
 # Change Log
+# v8.63
+# - LINE 通知產生器合併多筆訂單前，先逐筆核對服務地址。若地址
+#   不同，停止產生合併訊息並列出每筆訂單的地址，避免誤用第一筆
+#   訂單地址；客服確認後可改為每行一筆，分別產生通知。
 # v8.62
 # - 修正合併多個不同服務日期的儲值金／VIP 訂單 LINE 通知：combined_period
 #   已包含每筆完整日期，訊息範本不再額外加上第一筆日期，避免第一行日期重複。
@@ -4011,6 +4015,30 @@ def build_line_message_from_order_no(env_name, backend_email, backend_password, 
     return result, build_line_message(result)
 
 
+def _validate_combined_order_addresses(orders_info):
+    """合併訂單只能共用同一個服務地址。
+
+    後台地址偶爾會帶有斷行或多餘空白，比對時忽略這些排版差異；
+    其他任何文字差異都視為不同地址，不自行猜測或合併。
+    """
+    normalized_addresses = {
+        re.sub(r"\s+", "", str(order.get("address") or ""))
+        for order in orders_info
+    }
+    if len(normalized_addresses) <= 1:
+        return
+
+    address_details = "\n".join(
+        f"{order.get('order_no') or '（無訂單編號）'}：{order.get('address') or '（無地址）'}"
+        for order in orders_info
+    )
+    raise Exception(
+        "合併的訂單服務地址不同，已停止產生 LINE 訊息，請先確認地址：\n"
+        f"{address_details}\n"
+        "確認後請將不同地址的訂單改為每行一筆，分別產生通知。"
+    )
+
+
 def build_combined_line_message_from_order_nos(env_name, backend_email, backend_password, order_nos, fallback_region="台北"):
     base_url = _configure_environment(env_name)
     session = requests.Session()
@@ -4043,6 +4071,7 @@ def build_combined_line_message_from_order_nos(env_name, backend_email, backend_
         if not payway:
             raise Exception(f"訂單 {ono} 無法判斷付款方式，請至後台確認")
         orders_info.append({"order_no": ono, "service_date": service_date, "period_s": service_time, "actual_period": actual_time, "person": person_extracted, "address": address, "fare": fare, "payway": payway, "service_amount": service_amount, "region": region, "service_label": _extract_service_type_label(lines)})
+    _validate_combined_order_addresses(orders_info)
     payways = {o["payway"] for o in orders_info if o["payway"]}
     if len(payways) > 1:
         raise Exception(f"合併的訂單付款方式不同（{', '.join(payways)}），請分開輸入分別產生通知。")

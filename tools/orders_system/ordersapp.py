@@ -1896,7 +1896,7 @@ else:
     if single_feature == "LINE 通知產生器":
         col_left, col_right = st.columns([3, 1])
         with col_left:
-            info_panel("使用說明", ["輸入已成立訂單編號，每行一個，可一次輸入多筆。", "系統讀取訂單日期、地址、付款方式與金額，區域由地址自動判斷。"])
+            info_panel("使用說明", ["每行一組：同地址的合併訂單可用半形逗號分隔；不同地址請分行輸入。", "系統會逐筆核對訂單日期、地址、付款方式與金額；合併訂單地址不同時會停止並列出地址供確認。"])
             line_order_nos_input = st.text_area("訂單編號（每行一個）", value="", height=120, placeholder="LC00211537\nLC00211538", key="line_order_nos")
             if st.button("產生 LINE 訊息", use_container_width=True, key="make-line-from-order-no"):
                 if not backend_email.strip() or not backend_password.strip():
