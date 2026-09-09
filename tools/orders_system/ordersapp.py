@@ -1301,6 +1301,7 @@ elif mode == "後台／Google 日曆雙向比對":
         "黃色＝已安排、綠色＝暫停），只有黃色事件代表「已安排／應該已成單」，"
         "才會拿來跟後台已付款訂單互相比對。",
         "後台反查以該月份日曆曾出現的人員為母名單，非日曆管理客戶不列異常。",
+        "日曆姓名後方的「-XXXX」視為地址標籤，例如「陳靜萱-文山區」會和後台文山區地址配對。",
         "方向一（後台有、日曆沒有）：後台這段服務日期區間內的已付款訂單，"
         "找不到同一人／地址／日期時段完全相符的黃色日曆事件。",
         "方向二（日曆有、後台沒有）：日曆這段期間的黃色事件，找不到日期／時段"
@@ -1357,7 +1358,7 @@ elif mode == "後台／Google 日曆雙向比對":
             if _backend_missing:
                 st.error(f"⚠️ 後台有、日曆沒有：{len(_backend_missing)} 筆")
                 for _p in _backend_missing:
-                    st.warning(f"訂單 {_p.get('order_no')}：{_p.get('issue')}")
+                    st.warning(_p.get("issue"))
             if _calendar_missing:
                 st.error(f"⚠️ 日曆有、後台沒有：{len(_calendar_missing)} 筆")
                 for _p in _calendar_missing:

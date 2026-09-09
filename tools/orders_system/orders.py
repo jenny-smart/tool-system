@@ -2368,8 +2368,10 @@ def prepare_base_order_data(row, member_payload, address_info, clean_type_id, pe
         "memoProcess": str(member.get("memo_process") or ""),
         "memoFinance": str(member.get("memo_finance") or ""),
         "addressId": str(address_info.get("addressId") or ""),
-        "country_id": str(address_info.get("country_id") or pick("country_id", "12")),
-        "address": str(row["地址"]).strip(),
+        # 縣市／行政區由 country_id 下拉承接；address 只送路街巷號樓。
+        # 禁止退回 12（大安區），否則文山區等地址會被錯加「大安區」前綴。
+        "country_id": str(address_info.get("country_id") or ""),
+        "address": str(address_info.get("submit_address") or row["地址"]).strip(),
         "ping": str(pick("ping", "4")),
         "room": str(pick("room", "0")),
         "bathroom": str(pick("bathroom", "0")),
@@ -2575,6 +2577,15 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
 
     selected_address = str(best_addr.get("address") or target_address).strip()
 
+    # 沿用快速建單的地址拆分規則，明確地址優先於會員舊資料中的錯誤區域值。
+    from quick_order import _split_booking_address
+    address_parts = _split_booking_address(selected_address)
+    if address_parts.get("city") and address_parts.get("district"):
+        if not address_parts.get("country_id"):
+            raise Exception(f"地址無法對應後台行政區：{selected_address}")
+        best_addr["country_id"] = address_parts["country_id"]
+        best_addr["submit_address"] = address_parts["detail"]
+
     geo_lat, geo_lng = geocode_address(selected_address)
     if geo_lat and geo_lng:
         best_addr["lat"] = geo_lat
@@ -2687,6 +2698,8 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         system_period,
         mapped,
     )
+    if not str(base_data.get("country_id") or "").strip():
+        raise Exception(f"地址缺少後台行政區，已停止成單：{selected_address}")
 
     # 強制套用查詢地址後取得的區域/車馬費資料
     base_data["fare"] = first_nonzero(best_addr.get("fare"), base_data.get("fare"), default="0")
@@ -4409,16 +4422,27 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         ]))
 
     def _event_name_phone(event):
-        """從日曆事件的 summary／description 解析姓名與電話。"""
+        """解析姓名與電話；姓名後的「-XXXX」是地址標籤，不屬於姓名。"""
         blob = " ".join([event.get("summary", "") or "", event.get("description", "") or ""])
         phone_m = re.search(r"(09\d{8})", blob)
         phone = phone_m.group(1) if phone_m else ""
         name = ""
         if phone_m:
             before = blob[:phone_m.start()]
-            name_m = re.search(r"([\u4e00-\u9fffA-Za-z]+)[,，]?\s*$", before)
+            name_m = re.search(
+                r"([\u4e00-\u9fffA-Za-z]+?)(?:[-－—][^,，\s]+)?[,，]?\s*$",
+                before,
+            )
             name = name_m.group(1) if name_m else ""
         return name, phone
+
+    def _event_address_label(event):
+        """例：陳靜萱-文山區,0919... 中的「文山區」。"""
+        blob = " ".join([event.get("summary", "") or "", event.get("description", "") or ""])
+        phone_m = re.search(r"09\d{8}", blob)
+        before = blob[:phone_m.start()] if phone_m else blob
+        label_m = re.search(r"[-－—]([^,，\s]+)[,，]?\s*$", before)
+        return label_m.group(1).strip() if label_m else ""
 
     def _event_phone_match(order_phone, event):
         phone_norm = normalize_phone(order_phone) if order_phone else ""
@@ -4431,7 +4455,10 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             event.get("location", "") or "",
         ]))
         addr_norm = normalize_addr_for_match(order_address)
-        return bool(addr_norm) and addr_norm in blob
+        label_norm = normalize_addr_for_match(_event_address_label(event))
+        return bool(addr_norm) and (
+            addr_norm in blob or (bool(label_norm) and label_norm in addr_norm)
+        )
 
     def _event_person_match(order, event):
         event_name, event_phone = _event_name_phone(event)
@@ -4527,26 +4554,6 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         if order.get("_matched"):
             continue
 
-        # v2026.08.14：找不到黃色事件時，額外查同時段／同區域是否有「其他顏色
-        # （或根本沒設色）」的事件——這樣才分得出「日曆真的完全沒排」跟
-        # 「其實有排、只是顏色沒被標成黃色」這兩種不同狀況。顏色只彙總計數
-        # （例如「香蕉黃x6、葡萄紫x1」），不逐筆列出，避免同時段候選一多，
-        # 訊息裡出現同一個顏色名稱重複好幾次、反而不好讀。
-        same_time_any_color = [
-            e for e in all_events_by_region.get(order["region"], [])
-            if _event_time_match(order, e)
-        ]
-        if same_time_any_color:
-            yellow_events = [e for e in same_time_any_color if str(e.get("colorId", "")) == COLOR_YELLOW]
-            other_events = [e for e in same_time_any_color if str(e.get("colorId", "")) != COLOR_YELLOW]
-            parts = []
-            if yellow_events:
-                parts.append(f"{len(yellow_events)} 筆是黃色，但同時段訂單數比黃色事件數多，已被其他訂單配走")
-            if other_events:
-                parts.append(f"{len(other_events)} 筆顏色不是黃色（{_color_breakdown(other_events)}）")
-            extra = f"同時段在日曆上共找到 {len(same_time_any_color)} 筆事件：" + "；".join(parts) + "。"
-        else:
-            extra = "同時段在日曆上完全找不到任何事件。"
         same_time_yellow = [
             e for e in calendar_events_by_region.get(order["region"], [])
             if (e.get("id") not in matched_event_ids
@@ -4557,13 +4564,24 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         same_address_event = next((e for e in same_time_yellow
                                    if _event_addr_core_match(order["address"], e)), None)
         if same_person_event:
-            reason = "同一人、同日期時段，但日曆地址不同。"
+            calendar_label = _event_address_label(same_person_event) or "未標示地址"
+            reason = (
+                f"後台訂單 {order['order_no']} 是 {order['service_date']} {order['service_time']}；"
+                f"同一人、同日期時段，但地址不同：日曆標示「{calendar_label}」，"
+                f"後台地址是「{order['address']}」。"
+            )
             reported_event_ids.add(same_person_event.get("id"))
         elif same_address_event:
-            reason = "同地址、同日期時段，但日曆是其他客人。"
+            reason = (
+                f"後台訂單 {order['order_no']} 是 {order['service_date']} {order['service_time']}；"
+                "同地址、同日期時段，但日曆是其他客人。"
+            )
             reported_event_ids.add(same_address_event.get("id"))
         else:
-            reason = "找不到同一人／地址／日期時段完全相符的黃色日曆事件。"
+            reason = (
+                f"後台訂單 {order['order_no']} 是 {order['service_date']} {order['service_time']}，"
+                "日曆找不到同一人、同地址、相同日期與時段的黃色事件。"
+            )
         result["backend_missing_in_calendar"].append({
             "order_no": order["order_no"],
             "name": order["name"],
@@ -4572,11 +4590,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             "region": order["region"],
             "service_date": order["service_date"],
             "service_time": order["service_time"],
-            "issue": (
-                f"{reason} 後台訂單 {order['order_no']}（{order['name'] or '姓名不明'}，"
-                f"{order['phone'] or '電話不明'}，{order['region']}，服務日期 "
-                f"{order['service_date']} {order['service_time']}）。{extra}"
-            ),
+            "issue": reason,
         })
 
     # ---------- 方向二：日曆有、後台沒有 ----------
@@ -4598,7 +4612,12 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             same_address_orders = [order for order in same_time_orders
                                    if _event_addr_core_match(order["address"], event)]
             if same_person_orders:
-                reason = "同一人、同日期時段，但日曆地址不同。"
+                backend_address = same_person_orders[0]["address"]
+                calendar_label = _event_address_label(event) or "未標示地址"
+                reason = (
+                    f"同一人、同日期時段，但地址不同：日曆標示「{calendar_label}」，"
+                    f"後台地址是「{backend_address}」。"
+                )
             elif same_address_orders:
                 reason = "同地址、同日期時段，但日曆是其他客人。"
             else:
