@@ -1,0 +1,23 @@
+📋 log_spreadsheet_id 已從設定檔載入
+⚠️ 外場排程打卡失敗：<HttpError 503 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "The service is currently unavailable.". Details: "The service is currently unavailable.">
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.schedule_stats --date 20260910 --system-name 外場排程系統 --run-type 排程
+[2026-09-10 07:40:29] 開始處理排班統計表：20260910排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1wdcijn7yuhqIakMrTXPLXAkuoxHCCNfol9XlMEF40vI
+🗑️ 已刪除來源暫存 Google Sheet：1wdcijn7yuhqIakMrTXPLXAkuoxHCCNfol9XlMEF40vI
+[2026-09-10 07:40:41] 完成：20260910排班統計表-台北.xlsx → 2026排班統計表!DJ4 / rows=78
+[2026-09-10 07:40:52] 開始處理排班統計表：20261010排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1XCkTi6nAsGMjCo0xfkto3ToM0_1RFWoOkYAXoUwIMbc
+🗑️ 已刪除來源暫存 Google Sheet：1XCkTi6nAsGMjCo0xfkto3ToM0_1RFWoOkYAXoUwIMbc
+[2026-09-10 07:41:00] 完成：20261010排班統計表-台北.xlsx → 2026排班統計表!DV4 / rows=58
+[2026-09-10 07:41:02] 開始處理排班統計表：20260910排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1flz35lxcNgLW3KWm0h2GLAKpMmGwcZTzzQn4ldVsBqo
+🗑️ 已刪除來源暫存 Google Sheet：1flz35lxcNgLW3KWm0h2GLAKpMmGwcZTzzQn4ldVsBqo
+[2026-09-10 07:41:11] 完成：20260910排班統計表-台中.xlsx → 2026排班統計表!DJ4 / rows=13
+[2026-09-10 07:41:12] 開始處理排班統計表：20261010排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1L5E9orfdxWOznyta0bAELKR6RgxkZOEi59pAoJJcHlA
+🗑️ 已刪除來源暫存 Google Sheet：1L5E9orfdxWOznyta0bAELKR6RgxkZOEi59pAoJJcHlA
+[2026-09-10 07:41:19] 完成：20261010排班統計表-台中.xlsx → 2026排班統計表!DV4 / rows=9
+[2026-09-10 07:41:20] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成
