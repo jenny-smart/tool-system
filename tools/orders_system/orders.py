@@ -4499,6 +4499,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
 
     # 同一人、同一地址、同一日期時段若後台有多筆，本身即屬異常。
     duplicate_groups = {}
+    duplicate_order_nos = set()
     for order in backend_orders:
         person_key = normalize_phone(order["phone"]) or re.sub(r"\s+", "", order["name"]).lower()
         key = (
@@ -4513,6 +4514,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             continue
         first = group[0]
         order_nos = [item["order_no"] for item in group]
+        duplicate_order_nos.update(order_nos)
         result["backend_duplicates"].append({
             "order_nos": order_nos,
             "name": first["name"],
@@ -4551,7 +4553,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
                 break
 
     for order in backend_orders:
-        if order.get("_matched"):
+        if order.get("_matched") or order["order_no"] in duplicate_order_nos:
             continue
 
         same_time_yellow = [
