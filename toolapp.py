@@ -3767,8 +3767,12 @@ deep_clean_phase2_start = None
 deep_clean_phase2_end = None
 deep_clean_phase1_weekday_rate = 0
 deep_clean_phase1_weekend_rate = 0
+deep_clean_phase1_nonvip_weekday_rate = 0
+deep_clean_phase1_nonvip_weekend_rate = 0
 deep_clean_phase2_weekday_rate = 0
 deep_clean_phase2_weekend_rate = 0
+deep_clean_phase2_nonvip_weekday_rate = 0
+deep_clean_phase2_nonvip_weekend_rate = 0
 deep_clean_reply_deadline = ""
 deep_clean_booking_start = None
 deep_clean_booking_end = None
@@ -4266,17 +4270,27 @@ with date_col:
                 _p1a, _p1b = st.columns(2)
                 with _p1a:
                     deep_clean_phase1_start = st.date_input("PART 1 開始", value=_saved_form.get("phase1_start", datetime(deep_clean_season_year, 12, 15).date()), key=f"deep_clean_p1_start_{deep_clean_season_year}")
-                    deep_clean_phase1_weekday_rate = st.number_input("PART 1 平日加價", min_value=0, step=50, value=_saved_form.get("phase1_weekday_rate", 0), key=f"deep_clean_p1_weekday_{deep_clean_season_year}")
                 with _p1b:
                     deep_clean_phase1_end = st.date_input("PART 1 結束", value=_saved_form.get("phase1_end", datetime(deep_clean_season_year + 1, 1, 21).date()), key=f"deep_clean_p1_end_{deep_clean_season_year}")
-                    deep_clean_phase1_weekend_rate = st.number_input("PART 1 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase1_weekend_rate", 0), key=f"deep_clean_p1_weekend_{deep_clean_season_year}")
+                _p1vip, _p1nonvip = st.columns(2)
+                with _p1vip:
+                    deep_clean_phase1_weekday_rate = st.number_input("PART 1 VIP 平日加價", min_value=0, step=50, value=_saved_form.get("phase1_weekday_rate", 0), key=f"deep_clean_p1_weekday_{deep_clean_season_year}")
+                    deep_clean_phase1_weekend_rate = st.number_input("PART 1 VIP 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase1_weekend_rate", 0), key=f"deep_clean_p1_weekend_{deep_clean_season_year}")
+                with _p1nonvip:
+                    deep_clean_phase1_nonvip_weekday_rate = st.number_input("PART 1 非VIP 平日加價", min_value=0, step=50, value=_saved_form.get("phase1_nonvip_weekday_rate", 0), key=f"deep_clean_p1_nonvip_weekday_{deep_clean_season_year}")
+                    deep_clean_phase1_nonvip_weekend_rate = st.number_input("PART 1 非VIP 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase1_nonvip_weekend_rate", 0), key=f"deep_clean_p1_nonvip_weekend_{deep_clean_season_year}")
                 _p2a, _p2b = st.columns(2)
                 with _p2a:
                     deep_clean_phase2_start = st.date_input("PART 2 開始", value=_saved_form.get("phase2_start", datetime(deep_clean_season_year + 1, 1, 22).date()), key=f"deep_clean_p2_start_{deep_clean_season_year}")
-                    deep_clean_phase2_weekday_rate = st.number_input("PART 2 平日加價", min_value=0, step=50, value=_saved_form.get("phase2_weekday_rate", 0), key=f"deep_clean_p2_weekday_{deep_clean_season_year}")
                 with _p2b:
                     deep_clean_phase2_end = st.date_input("PART 2 結束", value=_saved_form.get("phase2_end", datetime(deep_clean_season_year + 1, 2, 4).date()), key=f"deep_clean_p2_end_{deep_clean_season_year}")
-                    deep_clean_phase2_weekend_rate = st.number_input("PART 2 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase2_weekend_rate", 0), key=f"deep_clean_p2_weekend_{deep_clean_season_year}")
+                _p2vip, _p2nonvip = st.columns(2)
+                with _p2vip:
+                    deep_clean_phase2_weekday_rate = st.number_input("PART 2 VIP 平日加價", min_value=0, step=50, value=_saved_form.get("phase2_weekday_rate", 0), key=f"deep_clean_p2_weekday_{deep_clean_season_year}")
+                    deep_clean_phase2_weekend_rate = st.number_input("PART 2 VIP 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase2_weekend_rate", 0), key=f"deep_clean_p2_weekend_{deep_clean_season_year}")
+                with _p2nonvip:
+                    deep_clean_phase2_nonvip_weekday_rate = st.number_input("PART 2 非VIP 平日加價", min_value=0, step=50, value=_saved_form.get("phase2_nonvip_weekday_rate", 0), key=f"deep_clean_p2_nonvip_weekday_{deep_clean_season_year}")
+                    deep_clean_phase2_nonvip_weekend_rate = st.number_input("PART 2 非VIP 週六＋週日加價", min_value=0, step=50, value=_saved_form.get("phase2_nonvip_weekend_rate", 0), key=f"deep_clean_p2_nonvip_weekend_{deep_clean_season_year}")
 
                 deep_clean_reply_deadline = st.text_input(
                     "定期 VIP 回覆截止時間（未定可留白）",
@@ -4292,7 +4306,7 @@ with date_col:
                 st.info("儲存後會同時產生該年度的「系統更新內容」分頁。加價未定時可先填 0，仍可更新 VIP 清單。", icon="ℹ️")
             else:
                 st.info(
-                    "請先執行「【大掃除】年度設定」並儲存該年度的期間與四項價格。"
+                    "請先執行「【大掃除】年度設定」並儲存該年度的期間與八項價格。"
                     "本功能會讀取已儲存的年度設定，從 Google Calendar 產生定期 VIP；"
                     "再從檸檬後台匯出儲值金名單，扣除定期 VIP 後產生非定期 VIP。"
                     "兩份都會含 Email 合併內文、LINE 連結與寄送狀態。",
@@ -5561,8 +5575,12 @@ if run_clicked:
                         rates = [
                             deep_clean_phase1_weekday_rate,
                             deep_clean_phase1_weekend_rate,
+                            deep_clean_phase1_nonvip_weekday_rate,
+                            deep_clean_phase1_nonvip_weekend_rate,
                             deep_clean_phase2_weekday_rate,
                             deep_clean_phase2_weekend_rate,
+                            deep_clean_phase2_nonvip_weekday_rate,
+                            deep_clean_phase2_nonvip_weekend_rate,
                         ]
                         if any(float(rate) < 0 for rate in rates):
                             raise ValueError("年節加價不可為負數")
@@ -5582,8 +5600,12 @@ if run_clicked:
                             "--phase2-end", deep_clean_phase2_end.strftime("%Y-%m-%d"),
                             "--phase1-weekday-rate", str(deep_clean_phase1_weekday_rate),
                             "--phase1-weekend-rate", str(deep_clean_phase1_weekend_rate),
+                            "--phase1-nonvip-weekday-rate", str(deep_clean_phase1_nonvip_weekday_rate),
+                            "--phase1-nonvip-weekend-rate", str(deep_clean_phase1_nonvip_weekend_rate),
                             "--phase2-weekday-rate", str(deep_clean_phase2_weekday_rate),
                             "--phase2-weekend-rate", str(deep_clean_phase2_weekend_rate),
+                            "--phase2-nonvip-weekday-rate", str(deep_clean_phase2_nonvip_weekday_rate),
+                            "--phase2-nonvip-weekend-rate", str(deep_clean_phase2_nonvip_weekend_rate),
                             "--reply-deadline", deep_clean_reply_deadline.strip(),
                             "--booking-start", deep_clean_booking_start.strftime("%Y-%m-%d"),
                             "--booking-end", deep_clean_booking_end.strftime("%Y-%m-%d"),
@@ -5659,10 +5681,14 @@ if run_clicked:
                             "phase1_end": deep_clean_phase1_end,
                             "phase1_weekday_rate": deep_clean_phase1_weekday_rate,
                             "phase1_weekend_rate": deep_clean_phase1_weekend_rate,
+                            "phase1_nonvip_weekday_rate": deep_clean_phase1_nonvip_weekday_rate,
+                            "phase1_nonvip_weekend_rate": deep_clean_phase1_nonvip_weekend_rate,
                             "phase2_start": deep_clean_phase2_start,
                             "phase2_end": deep_clean_phase2_end,
                             "phase2_weekday_rate": deep_clean_phase2_weekday_rate,
                             "phase2_weekend_rate": deep_clean_phase2_weekend_rate,
+                            "phase2_nonvip_weekday_rate": deep_clean_phase2_nonvip_weekday_rate,
+                            "phase2_nonvip_weekend_rate": deep_clean_phase2_nonvip_weekend_rate,
                             "reply_deadline": deep_clean_reply_deadline,
                             "booking_start": deep_clean_booking_start,
                             "booking_end": deep_clean_booking_end,

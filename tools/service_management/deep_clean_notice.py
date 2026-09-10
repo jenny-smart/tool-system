@@ -71,12 +71,16 @@ SETTINGS_HEADERS = [
     "年度",
     "PART1開始",
     "PART1結束",
-    "PART1平日加價",
-    "PART1週末加價",
+    "PART1 VIP平日加價",
+    "PART1 VIP週末加價",
+    "PART1 非VIP平日加價",
+    "PART1 非VIP週末加價",
     "PART2開始",
     "PART2結束",
-    "PART2平日加價",
-    "PART2週末加價",
+    "PART2 VIP平日加價",
+    "PART2 VIP週末加價",
+    "PART2 非VIP平日加價",
+    "PART2 非VIP週末加價",
     "定期VIP回覆截止",
     "非定期VIP開放",
     "非定期VIP截止",
@@ -161,6 +165,10 @@ class DeepCleanSettings:
     booking_start: datetime
     booking_end: datetime
     notice_spreadsheet_id: str = DEFAULT_NOTICE_SPREADSHEET_ID
+    phase1_nonvip_weekday_rate: float = 0
+    phase1_nonvip_weekend_rate: float = 0
+    phase2_nonvip_weekday_rate: float = 0
+    phase2_nonvip_weekend_rate: float = 0
 
 
 def _validate_settings(settings: DeepCleanSettings) -> None:
@@ -173,8 +181,12 @@ def _validate_settings(settings: DeepCleanSettings) -> None:
     rates = [
         settings.phase1_weekday_rate,
         settings.phase1_weekend_rate,
+        settings.phase1_nonvip_weekday_rate,
+        settings.phase1_nonvip_weekend_rate,
         settings.phase2_weekday_rate,
         settings.phase2_weekend_rate,
+        settings.phase2_nonvip_weekday_rate,
+        settings.phase2_nonvip_weekend_rate,
     ]
     if any(rate < 0 for rate in rates):
         raise ValueError("年節加價不可為負數")
@@ -187,10 +199,14 @@ def _settings_row(settings: DeepCleanSettings) -> list[Any]:
         settings.phase1_end.strftime("%Y-%m-%d"),
         settings.phase1_weekday_rate,
         settings.phase1_weekend_rate,
+        settings.phase1_nonvip_weekday_rate,
+        settings.phase1_nonvip_weekend_rate,
         settings.phase2_start.strftime("%Y-%m-%d"),
         settings.phase2_end.strftime("%Y-%m-%d"),
         settings.phase2_weekday_rate,
         settings.phase2_weekend_rate,
+        settings.phase2_nonvip_weekday_rate,
+        settings.phase2_nonvip_weekend_rate,
         settings.reply_deadline,
         settings.booking_start.strftime("%Y-%m-%d"),
         settings.booking_end.strftime("%Y-%m-%d"),
@@ -200,21 +216,38 @@ def _settings_row(settings: DeepCleanSettings) -> list[Any]:
 
 
 def _settings_from_row(row: list[Any]) -> DeepCleanSettings:
-    values = list(row) + [""] * max(0, len(SETTINGS_HEADERS) - len(row))
+    values = list(row)
+    is_new_format = len(values) >= len(SETTINGS_HEADERS)
+    values += [""] * max(0, len(SETTINGS_HEADERS) - len(values))
+    if is_new_format:
+        p1_nonvip_weekday, p1_nonvip_weekend = float(values[5] or 0), float(values[6] or 0)
+        p2_start_index = 7
+        p2_nonvip_weekday, p2_nonvip_weekend = float(values[11] or 0), float(values[12] or 0)
+        tail_index = 13
+    else:
+        # 舊版 14 欄只有 VIP 四項價格；升級時保留原價，非 VIP 預設為 0。
+        p1_nonvip_weekday = p1_nonvip_weekend = 0
+        p2_start_index = 5
+        p2_nonvip_weekday = p2_nonvip_weekend = 0
+        tail_index = 9
     return DeepCleanSettings(
         season_year=int(values[0]),
         phase1_start=_parse_date(str(values[1])),
         phase1_end=_parse_date(str(values[2]), end_of_day=True),
         phase1_weekday_rate=float(values[3]),
         phase1_weekend_rate=float(values[4]),
-        phase2_start=_parse_date(str(values[5])),
-        phase2_end=_parse_date(str(values[6]), end_of_day=True),
-        phase2_weekday_rate=float(values[7]),
-        phase2_weekend_rate=float(values[8]),
-        reply_deadline=str(values[9] or ""),
-        booking_start=_parse_date(str(values[10])),
-        booking_end=_parse_date(str(values[11]), end_of_day=True),
-        notice_spreadsheet_id=str(values[12] or DEFAULT_NOTICE_SPREADSHEET_ID).strip(),
+        phase2_start=_parse_date(str(values[p2_start_index])),
+        phase2_end=_parse_date(str(values[p2_start_index + 1]), end_of_day=True),
+        phase2_weekday_rate=float(values[p2_start_index + 2]),
+        phase2_weekend_rate=float(values[p2_start_index + 3]),
+        reply_deadline=str(values[tail_index] or ""),
+        booking_start=_parse_date(str(values[tail_index + 1])),
+        booking_end=_parse_date(str(values[tail_index + 2]), end_of_day=True),
+        notice_spreadsheet_id=str(values[tail_index + 3] or DEFAULT_NOTICE_SPREADSHEET_ID).strip(),
+        phase1_nonvip_weekday_rate=p1_nonvip_weekday,
+        phase1_nonvip_weekend_rate=p1_nonvip_weekend,
+        phase2_nonvip_weekday_rate=p2_nonvip_weekday,
+        phase2_nonvip_weekend_rate=p2_nonvip_weekend,
     )
 
 
@@ -597,7 +630,10 @@ def _canonical_settings_values(
             year = int(str(row[0]).strip())
         except (TypeError, ValueError):
             continue
-        rows_by_year[year] = (list(row) + [""] * len(SETTINGS_HEADERS))[: len(SETTINGS_HEADERS)]
+        try:
+            rows_by_year[year] = _settings_row(_settings_from_row(row))
+        except (TypeError, ValueError):
+            rows_by_year[year] = (list(row) + [""] * len(SETTINGS_HEADERS))[: len(SETTINGS_HEADERS)]
     rows_by_year[settings.season_year] = _settings_row(settings)
     return [SETTINGS_HEADERS] + [rows_by_year[year] for year in sorted(rows_by_year)]
 
@@ -615,7 +651,7 @@ def save_deep_clean_settings(
     sh.clear()
     sh.update(values=canonical_values, range_name="A1", value_input_option="USER_ENTERED")
     sh.format(
-        "A1:N1",
+        "A1:R1",
         {
             "backgroundColor": {"red": 0.93, "green": 0.93, "blue": 0.93},
             "textFormat": {"bold": True},
@@ -655,8 +691,10 @@ def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
         ["分類", "設定項目", "內容", "系統處理方式"],
         ["期間", "PART 1", _date_range(settings.phase1_start, settings.phase1_end), "日曆服務落在此區間者依 PART 1 計價"],
         ["期間", "PART 2", _date_range(settings.phase2_start, settings.phase2_end), "日曆服務落在此區間者依 PART 2 計價"],
-        ["價格", "PART 1 平日／週末", f"{_money(settings.phase1_weekday_rate)}／{_money(settings.phase1_weekend_rate)}", "週一～週五／週六＋週日"],
-        ["價格", "PART 2 平日／週末", f"{_money(settings.phase2_weekday_rate)}／{_money(settings.phase2_weekend_rate)}", "週一～週五／週六＋週日"],
+        ["價格", "PART 1 VIP 平日／週末", f"{_money(settings.phase1_weekday_rate)}／{_money(settings.phase1_weekend_rate)}", "週一～週五／週六＋週日"],
+        ["價格", "PART 1 非VIP 平日／週末", f"{_money(settings.phase1_nonvip_weekday_rate)}／{_money(settings.phase1_nonvip_weekend_rate)}", "週一～週五／週六＋週日"],
+        ["價格", "PART 2 VIP 平日／週末", f"{_money(settings.phase2_weekday_rate)}／{_money(settings.phase2_weekend_rate)}", "週一～週五／週六＋週日"],
+        ["價格", "PART 2 非VIP 平日／週末", f"{_money(settings.phase2_nonvip_weekday_rate)}／{_money(settings.phase2_nonvip_weekend_rate)}", "週一～週五／週六＋週日"],
         ["定期VIP", "回覆截止", settings.reply_deadline or "未設定", "從 Google Calendar 更新服務日期、次數、加價與年後首次服務"],
         ["非定期VIP", "優先預約", _date_range(settings.booking_start, settings.booking_end), "後台儲值金匯出名單－日曆定期VIP"],
         ["名單比對", "比對鍵", "電話優先，姓名輔助", "避免同名或格式差異造成誤判"],
@@ -910,8 +948,12 @@ def main() -> None:
     parser.add_argument("--phase2-end")
     parser.add_argument("--phase1-weekday-rate", type=float)
     parser.add_argument("--phase1-weekend-rate", type=float)
+    parser.add_argument("--phase1-nonvip-weekday-rate", type=float, default=0)
+    parser.add_argument("--phase1-nonvip-weekend-rate", type=float, default=0)
     parser.add_argument("--phase2-weekday-rate", type=float)
     parser.add_argument("--phase2-weekend-rate", type=float)
+    parser.add_argument("--phase2-nonvip-weekday-rate", type=float, default=0)
+    parser.add_argument("--phase2-nonvip-weekend-rate", type=float, default=0)
     parser.add_argument("--reply-deadline", default="")
     parser.add_argument("--booking-start")
     parser.add_argument("--booking-end")
@@ -988,6 +1030,10 @@ def main() -> None:
             booking_start=_parse_date(args.booking_start),
             booking_end=_parse_date(args.booking_end, end_of_day=True),
             notice_spreadsheet_id=notice_spreadsheet_id,
+            phase1_nonvip_weekday_rate=args.phase1_nonvip_weekday_rate,
+            phase1_nonvip_weekend_rate=args.phase1_nonvip_weekend_rate,
+            phase2_nonvip_weekday_rate=args.phase2_nonvip_weekday_rate,
+            phase2_nonvip_weekend_rate=args.phase2_nonvip_weekend_rate,
         )
         sheet_name = save_deep_clean_settings(settings, settings_spreadsheet_id)
         append_master_execution_log(
