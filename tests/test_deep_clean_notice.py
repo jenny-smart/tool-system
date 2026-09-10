@@ -4,6 +4,8 @@ from tools.service_management.deep_clean_notice import (
     DeepCleanSettings,
     _extra_charge,
     _canonical_settings_values,
+    _settings_from_row,
+    _settings_row,
     _validate_settings,
     build_nonroutine_notice,
     build_nonroutine_notice_rows,
@@ -189,6 +191,52 @@ def test_zero_rates_are_valid_while_prices_are_undecided():
     )
 
     _validate_settings(settings)
+
+
+def test_settings_support_vip_and_nonvip_rates_for_both_parts():
+    settings = DeepCleanSettings(
+        2026,
+        datetime(2026, 12, 15, tzinfo=TZ),
+        datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        150,
+        200,
+        datetime(2027, 1, 22, tzinfo=TZ),
+        datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        200,
+        250,
+        "",
+        datetime(2026, 11, 5, tzinfo=TZ),
+        datetime(2026, 11, 10, tzinfo=TZ),
+        "notice-id",
+        300,
+        350,
+        400,
+        450,
+    )
+
+    row = _settings_row(settings)
+    loaded = _settings_from_row(row)
+
+    assert len(row) == 18
+    assert row[3:7] == [150, 200, 300, 350]
+    assert row[9:13] == [200, 250, 400, 450]
+    assert loaded.phase1_nonvip_weekday_rate == 300
+    assert loaded.phase2_nonvip_weekend_rate == 450
+
+
+def test_legacy_settings_keep_old_rates_as_vip_and_default_nonvip_to_zero():
+    legacy_row = [
+        2026, "2026-12-15", "2027-01-21", 150, 200,
+        "2027-01-22", "2027-02-04", 200, 250, "",
+        "2026-11-05", "2026-11-10", "notice-id", "2026-09-08 06:23:23",
+    ]
+
+    loaded = _settings_from_row(legacy_row)
+
+    assert loaded.phase1_weekday_rate == 150
+    assert loaded.phase2_weekend_rate == 250
+    assert loaded.phase1_nonvip_weekday_rate == 0
+    assert loaded.phase2_nonvip_weekend_rate == 0
 
 
 def test_settings_save_repairs_missing_header_and_duplicate_year_rows():

@@ -17,3 +17,9 @@ def test_service_schedule_exposes_deep_clean_settings_and_update():
     assert "請先執行「【大掃除】年度設定」" in source
     assert "💾 儲存年度設定" in source
     assert "加價未定時可先填 0" in source
+    assert "PART 1 VIP 平日加價" in source
+    assert "PART 1 非VIP 平日加價" in source
+    assert "PART 2 VIP 週六＋週日加價" in source
+    assert "PART 2 非VIP 週六＋週日加價" in source
+    assert '"--phase1-nonvip-weekday-rate"' in source
+    assert '"--phase2-nonvip-weekend-rate"' in source
