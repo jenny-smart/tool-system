@@ -1,0 +1,27 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場專員班表 / running
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.staff_schedule --date 20260912 --system-name 外場排程系統 --run-type 排程
+[2026-09-12 07:42:51] 開始處理專員班表：20260912專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1-2VK2miOmYqJOVi0yVCfvCgEhrzpVeBHjS5NsgxQsM4
+🗑️ 已刪除來源暫存 Google Sheet：1-2VK2miOmYqJOVi0yVCfvCgEhrzpVeBHjS5NsgxQsM4
+[2026-09-12 07:43:00] 目標分頁已是當日名稱：專員班表查詢本月_0912
+[2026-09-12 07:43:01] 完成：20260912專員班表-台北.xls → '專員班表查詢本月_0912'!A:G / rows=1518
+[2026-09-12 07:43:03] 開始處理專員班表：20261012專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1wQezvMS1JDlT8RlDM-x_0-29Yw7r0wLEyMHRZj1X7os
+🗑️ 已刪除來源暫存 Google Sheet：1wQezvMS1JDlT8RlDM-x_0-29Yw7r0wLEyMHRZj1X7os
+[2026-09-12 07:43:11] 目標分頁已是當日名稱：專員班表查詢次月_0912
+[2026-09-12 07:43:11] 完成：20261012專員班表-台北.xls → '專員班表查詢次月_0912'!A:G / rows=1140
+[2026-09-12 07:43:13] 開始處理專員班表：20260912專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：14VBF-dUtRHaqQIQd66TyvI1j6uLTYvwh2RsxLDpfI0U
+🗑️ 已刪除來源暫存 Google Sheet：14VBF-dUtRHaqQIQd66TyvI1j6uLTYvwh2RsxLDpfI0U
+[2026-09-12 07:43:24] 目標分頁已是當日名稱：專員班表查詢本月_0912
+[2026-09-12 07:43:25] 完成：20260912專員班表-台中.xls → '專員班表查詢本月_0912'!A:G / rows=207
+[2026-09-12 07:43:27] 開始處理專員班表：20261012專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1qmyHuTgY5DqOfJON7uNqxFtn6om4aenAkj9fqoHgIdQ
+🗑️ 已刪除來源暫存 Google Sheet：1qmyHuTgY5DqOfJON7uNqxFtn6om4aenAkj9fqoHgIdQ
+[2026-09-12 07:43:34] 目標分頁已是當日名稱：專員班表查詢次月_0912
+[2026-09-12 07:43:35] 完成：20261012專員班表-台中.xls → '專員班表查詢次月_0912'!A:G / rows=217
+[2026-09-12 07:43:36] staff_schedule.py 全部完成
+
+📝 外場排程打卡：外場專員班表 / success
+field_management scheduler 全部完成
