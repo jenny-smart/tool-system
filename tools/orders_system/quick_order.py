@@ -1511,6 +1511,38 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
     return rows
 
 
+def _query_booking_slot_with_lemon_retry(session, base_url, payway, data, token, slot, allow_auto_lemon_shift):
+    """與批次一致：查完整班表，必要時補班、更新 token 並重新查詢。"""
+    raw = orders.get_all_sections_raw(session, data, token)
+    found = slot_exists_in_section_response(raw, slot)
+    cleaners = extract_cleaners_from_section_response(raw, slot) if found else []
+    need = int(data["person"])
+    pre = {}
+    # checkbox 存在但沒有姓名，不代表無人；批次以後台 checkbox 為準。
+    shortage = not found or (bool(cleaners) and len(cleaners) < need)
+    if shortage and allow_auto_lemon_shift:
+        service_date, period = slot.split("_", 1)
+        pre = ensure_lemon_cleaner_shifts(
+            session=session, base_url=base_url, service_date=service_date,
+            period_s=period, person_count=str(max(1, need - len(cleaners))),
+        ) or {}
+        token = _get_booking_token_for_payway(session, base_url, payway)
+        raw = orders.get_all_sections_raw(session, data, token)
+        found = slot_exists_in_section_response(raw, slot)
+    if not found:
+        details = [str(pre.get("message") or "")]
+        for item in pre.get("skipped", []) or []:
+            if isinstance(item, dict):
+                details.append(f"{item.get('name', '')}：{item.get('reason') or item.get('message') or ''}")
+        shift_message = "；".join(x for x in details if x)
+        raise Exception(
+            f"後台未回傳可預約時段：{slot}。"
+            + (f"補檸檬人結果：{shift_message}。" if shift_message else "")
+            + f"後台班表回覆：{str(raw)[:300]}"
+        )
+    return raw, token, pre
+
+
 def quick_create_order(
     env_name, payway, region, lookup_result, address, clean_type_id,
     date_s, period_s, hour, person="2", fallback_fare="0", discount_code="",
@@ -1611,46 +1643,10 @@ def quick_create_order(
     if base_data["price"] in ("", "0", "0.0") and payway != "儲值金":
         raise Exception("計算時數後金額為 0，請確認坪數/時數設定是否正確")
     slot = f"{date_s}_{period_s}"
-    raw_section = get_section_raw(session, base_data, token, slot)
-    _slot_found = slot_exists_in_section_response(raw_section, slot)
-    _auto_shift_ok = False
-    if (not _slot_found or not extract_cleaners_from_section_response(raw_section, slot)) and allow_auto_lemon_shift:
-        # v8.13：該時段查無班表 → 去勾檸檬人班表，再重查。
-        # 只有在客服明確勾選「查無班表時自動補檸檬人」時才會執行，
-        # 預設不自動執行，避免查不到班表就自動幫忙勾人。
-        _pre = ensure_lemon_cleaner_shifts(
-            session=session,
-            base_url=base_url,
-            service_date=date_s, period_s=period_s, person_count=str(person),
-        )
-        _auto_shift_ok = bool(_pre.get("success"))
-        time.sleep(2)
-        raw_section = get_section_raw(session, base_data, token, slot)
-        _slot_found = slot_exists_in_section_response(raw_section, slot)
-    # v8.30：依規定，查無班表或人數不足時一律擋單，不能成單（不論服務日期
-    # 遠近，不再是「查無班表就標記待配班、照樣送出訂單」）。
-    cleaners = extract_cleaners_from_section_response(raw_section, slot) if _slot_found else []
-    _need = int(person) if str(person).isdigit() else 2
-    _has_explicit_cleaners = bool(cleaners)
-    if _slot_found and _has_explicit_cleaners and len(cleaners) < _need and allow_auto_lemon_shift:
-        _pre2 = ensure_lemon_cleaner_shifts(
-            session=session,
-            base_url=base_url,
-            service_date=date_s, period_s=period_s, person_count=str(_need - len(cleaners)),
-        )
-        _auto_shift_ok = bool(_pre2.get("success"))
-        time.sleep(2)
-        raw_section = get_section_raw(session, base_data, token, slot)
-        _slot_found = slot_exists_in_section_response(raw_section, slot)
-        cleaners = extract_cleaners_from_section_response(raw_section, slot) if _slot_found else []
-        _has_explicit_cleaners = bool(cleaners)
-    if not _slot_found or not _has_explicit_cleaners or len(cleaners) < _need:
-        raise Exception(
-            f"查無班表或人數不足（需要 {_need} 人，目前排班頁只有 {len(cleaners)} 人可指派），"
-            f"依規定人數不足不能成單，請先確認/補足班表後再建單。"
-            f"\n🔧 除錯：area_id={best_addr.get('area_id')}　company_id={best_addr.get('company_id')}"
-            f"\nget_section 原始回應前300字：{str(raw_section)[:300]}"
-        )
+    raw_section, token, auto_shift_result = _query_booking_slot_with_lemon_retry(
+        session, base_url, payway, base_data, token, slot, allow_auto_lemon_shift,
+    )
+    cleaners = extract_cleaners_from_section_response(raw_section, slot)
     # v2026.07.10：修正重大 bug——前面 check_contain 若失敗，可能借用過
     # /booking/single 頁面的 token（見上面 v8.5 的備援邏輯），並把 token
     # 變數永久換成借來的那個。如果送出建單時仍沿用這個借來的 token，會導致
@@ -2370,37 +2366,12 @@ def _set_cleaner_shift_if_available(session, base_url, cleaner_id, cleaner_name,
 
 
 def ensure_lemon_cleaner_shifts(session, base_url, service_date, period_s, person_count):
-    target_shift_code = _period_to_shift_code(period_s)
-    if not target_shift_code:
-        return {"success": False, "message": f"無法判斷服務時段 {period_s} 對應班別", "assigned": [], "skipped": []}
-    cleaners = _search_lemon_cleaners(session, base_url, target_month=str(service_date)[:7], min_needed=int(person_count))
-    if not cleaners:
-        return {"success": False, "message": "找不到檸檬人清單", "assigned": [], "skipped": []}
-    need = int(person_count)
-    assigned = []
-    assigned_ids = []
-    skipped = []
-    seen_candidate_names = set()
-    seen_candidate_ids = set()
-    for cleaner_id, cleaner_name in cleaners:
-        if str(cleaner_id) in seen_candidate_ids or str(cleaner_name) in seen_candidate_names:
-            continue
-        seen_candidate_ids.add(str(cleaner_id))
-        seen_candidate_names.add(str(cleaner_name))
-        if len(assigned) >= need:
-            break
-        result = _set_cleaner_shift_if_available(session, base_url, cleaner_id, cleaner_name, service_date, target_shift_code)
-        if result.get("success"):
-            assigned.append(cleaner_name)
-            assigned_ids.append(str(cleaner_id))
-        else:
-            skipped.append(result)
-    ok = len(assigned) >= need
-    return {
-        "success": ok,
-        "message": f"已預先補勾檸檬人：{'、'.join(assigned)}" if ok else f"可用檸檬人不足：需要 {need} 位，找到 {len(assigned)} 位",
-        "assigned": assigned, "assigned_ids": assigned_ids, "skipped": skipped, "target_shift_code": target_shift_code,
-    }
+    """沿用批次的補班與衝突保護，不再維護第二套實作。"""
+    from lemon_shift_conflict_patch import install_patch
+    install_patch()
+    return orders.ensure_lemon_cleaner_shifts(
+        session, base_url, service_date, period_s, person_count,
+    )
 
 
 def _get_schedule_edit_info(session, base_url, date_str, purchase_id):
@@ -2851,25 +2822,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
     service_amount_a_int = stage1_result["service_amount_a_int"]
     person_a = stage1_result["person_a"]
 
-    member = member_payload.get("member", {})
-    best_addr = pick_best_address_info(member_payload, address_a)
-    if not best_addr:
-        raise Exception(f"找不到地址資料：{address_a}")
-    selected_address = str(best_addr.get("address") or address_a).strip()
-    geo_lat, geo_lng = geocode_address(selected_address)
-    if geo_lat and geo_lng:
-        best_addr["lat"] = geo_lat
-        best_addr["lng"] = geo_lng
-    token_for_calc = _get_booking_token_for_payway(session, base_url, payway_a)
-    addr_check = check_contain(
-        session, member.get("member_id", ""), selected_address,
-        best_addr.get("lat", ""), best_addr.get("lng", ""), token_for_calc, clean_type_id,
-    )
-    if addr_check:
-        area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
-        if area_info:
-            best_addr["area_id"] = area_info.get("area_id", best_addr.get("area_id"))
-            best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
+    # 地址與補班由下方 quick_create_order 共用流程處理。
 
     today_str = date.today().strftime("%Y-%m-%d")
     new_order_results = []
