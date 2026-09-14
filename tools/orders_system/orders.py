@@ -1315,6 +1315,9 @@ def check_contain(session, member_id, address, lat, lng, token, clean_type_id):
 
 def calculate_hour(session, order_data, token):
     data = order_data.copy()
+    # 原生「計算時數」清空計算結果；保留呼叫端選定的人時供後續查班表。
+    for field in ("hour", "price", "price_vvip", "fare"):
+        data[field] = ""
     data["_token"] = token
 
     resp = session.post(CALCULATE_HOUR_URL, data=data, headers=HEADERS, allow_redirects=True)

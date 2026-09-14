@@ -1632,12 +1632,7 @@ def quick_create_order(
     if not calc_result:
         raise Exception("計算時數失敗")
     calc_fields = extract_calc_fields(calc_result, fallback_hours=base_data["hour"], fallback_fare=best_addr.get("fare", "0"))
-    day_type = _day_type_from_date(date_s)
-    unit_price = 700 if day_type == "週末" else 600
-    person_hours = int(person) * int(float(hour))
-    formula_price_with_tax = unit_price * person_hours
-    formula_price_no_tax = int(round(formula_price_with_tax / TAX_RATE))
-    base_data["price"] = str(formula_price_no_tax)
+    base_data["price"] = str(calc_fields.get("price") or "0")
     base_data["price_vvip"] = str(calc_fields.get("price_vvip") or "0")
     base_data["fare"] = first_nonzero(calc_fields.get("fare"), best_addr.get("fare"), default="0")
     if base_data["price"] in ("", "0", "0.0") and payway != "儲值金":
@@ -1745,7 +1740,7 @@ def quick_create_order(
             order_no = sorted(new_order_nos)[-1]
     meta = fetch_order_meta_by_order_no(session, order_no)
     price_no_tax = base_data["price"]
-    price_with_tax = formula_price_with_tax
+    price_with_tax = int(round(float(price_no_tax) * TAX_RATE))
     # v8.13：建單成功後檢查此訂單編號是否重複對應到多張訂單卡片
     _is_dup, _dup_count = _check_order_no_duplicate(session, order_no)
     _dup_warning = (
