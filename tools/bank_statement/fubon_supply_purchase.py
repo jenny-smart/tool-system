@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
@@ -20,7 +21,9 @@ from tools.bank_statement.fubon_transfer_common import (
 from tools.bank_statement.internal_payment_registry import (
     SUPPLY_PURCHASE_TYPE,
     read_report_values,
+    resolve_report_location,
 )
+from tools.common.config_loader import get_sheets_service
 from tools.bank_statement.open_login import current_fubon_page
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
@@ -71,22 +74,52 @@ def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str
     if not selected:
         raise ValueError("勾選列中沒有符合採購月份、且 N/O 欄皆非空白的資料")
 
+    spreadsheet_id, sheet_title = resolve_report_location(SUPPLY_PURCHASE_TYPE, area)
+    service = get_sheets_service()
     account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
         try:
-            for index, item in enumerate(selected):
+            for item in selected:
                 rows_desc = "、".join(str(r) for r in item["rows"])
                 print(
                     f"準備第 {rows_desc} 列（{item['supplier']}）／"
                     f"{item['bank_code']}／{item['account_number']}／NT$ {item['amount']}"
                 )
                 fill_supply_purchase(page, area, account.bank_account, month, item)
-                if index + 1 < len(selected):
-                    wait_user_completed_transfer(page)
-                    page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已準備完成；每一筆都請人工核對並自行按「確認」送出。")
+                completed_at = wait_user_completed_transfer(
+                    page,
+                    require_completed_at=True,
+                    expected_amount=str(item["amount"]),
+                    expected_account=str(item["account_number"]),
+                )
+                payment_date = datetime.strptime(
+                    completed_at[:10], "%Y-%m-%d"
+                ).strftime("%Y/%m/%d")
+                escaped_title = sheet_title.replace("'", "''")
+                try:
+                    service.spreadsheets().values().batchUpdate(
+                        spreadsheetId=spreadsheet_id,
+                        body={
+                            "valueInputOption": "USER_ENTERED",
+                            "data": [
+                                {
+                                    "range": f"'{escaped_title}'!Q{row}",
+                                    "values": [[payment_date]],
+                                }
+                                for row in item["rows"]
+                            ],
+                        },
+                    ).execute()
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"第 {rows_desc} 列付款已完成，但 Q 欄日期回填失敗；"
+                        "已停止，請人工確認，勿重複付款。"
+                    ) from exc
+                print(f"已回填第 {rows_desc} 列 Q 欄：{payment_date}")
+                page = current_fubon_page(context, page) or page
+            print("全部勾選資料均已完成付款並回填 Q 欄。")
         except Exception:
             # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
             raise
