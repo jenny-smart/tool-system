@@ -410,7 +410,7 @@ def find_schedule_files(base: datetime) -> dict[str, dict[str, dict]]:
     files = _list_drive_files(
         drive,
         q=q,
-        fields="files(id,name,mimeType,modifiedTime)",
+        fields="nextPageToken,files(id,name,mimeType,modifiedTime)",
         pageSize=1000,
         supportsAllDrives=True,
         includeItemsFromAllDrives=True,
@@ -1030,13 +1030,16 @@ def _parse_mail(body: str, month_str: str, date_str: str) -> dict:
     return {"daily_value": daily, "total_count": count, "total_amount": amount}
 
 
-def step3_import_revenue(gc: gspread.Client, run_id: str) -> dict:
+def step3_import_revenue(gc: gspread.Client, run_id: str, run_dt: datetime | None = None) -> dict:
     task = "Step3_更新前一天營業分數及營業額"
     t0 = now_tp()
     checkin_both(gc, run_id, task, "START", "RUNNING")
 
     try:
-        yesterday  = yesterday_tp()
+        base = run_dt if run_dt is not None else now_tp()
+        local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
+        yesterday  = local_base - timedelta(days=1)
+        log.info("信件日期（台北時間）：%s", fmt(yesterday, "%Y-%m-%d"))
         date_str   = fmt(yesterday, "%Y-%m-%d")
         month_str  = fmt(yesterday, "%Y-%m")
 
@@ -1205,7 +1208,7 @@ def main() -> None:
         if step == 0:
             log.info("等待 60 秒讓 Sheets API 每分鐘配額恢復...")
             time.sleep(60)
-        run(3, step3_import_revenue, gc, run_id)
+        run(3, step3_import_revenue, gc, run_id, run_dt)
 
     elapsed_total = (now_tp() - t_total).total_seconds()
     final_status  = "ERROR" if errors else "SUCCESS"
