@@ -287,6 +287,14 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
         values=rows,
         value_input_option="RAW",
     )
+    if bank == "fubon":
+        worksheet.format(
+            f"E{start_row}:G{start_row + len(rows) - 1}",
+            {
+                "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
+                "horizontalAlignment": "RIGHT",
+            },
+        )
     return len(rows)
 
 

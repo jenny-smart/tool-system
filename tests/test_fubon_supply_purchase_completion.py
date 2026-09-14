@@ -1,5 +1,6 @@
 import ast
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -20,7 +21,7 @@ def run_purchase(*, completion_error=False, write_error=False):
     if completion_error:
         wait.side_effect = RuntimeError('not completed')
     item = dict(sheet_row=2, rows=[2, 5], supplier='supplier', bank_code='012', account_number='123', amount='300')
-    ns = dict(Path=Path, datetime=datetime, SUPPLY_PURCHASE_TYPE='清潔用品採購',
+    ns = dict(Path=Path, datetime=datetime, ZoneInfo=ZoneInfo, run_download=MagicMock(), SUPPLY_PURCHASE_TYPE='清潔用品採購',
               read_report_values=MagicMock(return_value=[]),
               pending_supply_purchases=MagicMock(return_value=[item]),
               resolve_report_location=MagicMock(return_value=('sheet-id', '進貨明細表-台北')),
@@ -36,6 +37,7 @@ def run_purchase(*, completion_error=False, write_error=False):
 def test_last_payment_writes_date_to_every_grouped_row():
     ns, service = run_purchase()
     assert ns['run']('台北', '202609', {2}, Path('.'), 'cdp') == 0
+    ns['run_download'].assert_called_once()
     ns['wait_user_completed_transfer'].assert_called_once()
     assert ns['wait_user_completed_transfer'].call_args.kwargs == dict(
         require_completed_at=True, expected_amount='300', expected_account='123')
@@ -51,6 +53,7 @@ def test_unconfirmed_payment_does_not_write_date():
     with pytest.raises(RuntimeError, match='not completed'):
         ns['run']('台北', '202609', {2}, Path('.'), 'cdp')
     service.spreadsheets().values().batchUpdate.assert_not_called()
+    ns['run_download'].assert_not_called()
 
 
 def test_write_failure_stops_with_paid_warning():
@@ -58,3 +61,4 @@ def test_write_failure_stops_with_paid_warning():
     with pytest.raises(RuntimeError, match='付款已完成.*回填失敗'):
         ns['run']('台北', '202609', {2}, Path('.'), 'cdp')
     ns['current_fubon_page'].assert_not_called()
+    ns['run_download'].assert_not_called()

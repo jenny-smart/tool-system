@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login
+from tools.bank_statement.fubon_agent import ensure_login, run_download
 from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
@@ -120,6 +121,9 @@ def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str
                 print(f"已回填第 {rows_desc} 列 Q 欄：{payment_date}")
                 page = current_fubon_page(context, page) or page
             print("全部勾選資料均已完成付款並回填 Q 欄。")
+            print("開始下載今日富邦明細。")
+            today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+            page = run_download(context, page, account, today, today)
         except Exception:
             # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
             raise

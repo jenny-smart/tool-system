@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login
+from tools.bank_statement.fubon_agent import ensure_login, run_download
 from tools.bank_statement.fubon_payment_request_filter import pending_payment_requests
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
@@ -106,6 +106,9 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
                 print(f"已回填第 {item['sheet_row']} 列：已付款／{payment_date}")
                 page = current_fubon_page(context, page) or page
             print("全部勾選資料均已完成付款並回填 A/B 欄。")
+            print("開始下載今日富邦明細。")
+            today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+            page = run_download(context, page, account, today, today)
         except Exception:
             # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
             raise
