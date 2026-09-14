@@ -1420,10 +1420,16 @@ def resolve_backend_booking_address(session, member_payload, address, token, cle
     address_parts = _split_booking_address(selected_address)
     # country_id 是後台縣市區下拉值，與服務區域 area_id 不同。
     best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
-    addr_check = check_contain(
-        session, member.get("member_id", ""), selected_address,
-        best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id,
-    )
+    if best_addr.get("lat") and best_addr.get("lng"):
+        addr_check = check_contain(
+            session, member.get("member_id", ""), selected_address,
+            best_addr["lat"], best_addr["lng"], token, clean_type_id,
+        )
+    else:
+        from backend_address_form import query_native_address
+        addr_check = query_native_address(
+            session, orders.BASE_URL, member.get("member_id", ""), selected_address, clean_type_id,
+        )
     addr_check = addr_check if isinstance(addr_check, dict) else {}
     code = addr_check.get("return_code")
     if code not in (None, "", "0000"):
@@ -1435,7 +1441,7 @@ def resolve_backend_booking_address(session, member_payload, address, token, cle
             if area.get(field) not in (None, "", 0, "0"):
                 best_addr[field] = area[field]
     # 查詢未提供區域時保留會員既有值，未存的欄位留空交由後台驗證。
-    # 不呼叫外部 geocoder、不指定預設區域，也不改寫客戶地址。
+    # 由後台原生按鈕定位及判定區域，不指定預設區域，也不改寫客戶地址。
     return best_addr, address_parts, addr_check
 
 

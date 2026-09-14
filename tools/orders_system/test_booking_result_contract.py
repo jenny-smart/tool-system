@@ -5,6 +5,11 @@ import quick_order as q
 
 
 class BookingResultTest(unittest.TestCase):
+    def setUp(self):
+        native = patch('backend_address_form.query_native_address', return_value={'area': {'area_id': '34', 'company_id': '1'}})
+        native.start()
+        self.addCleanup(native.stop)
+
     def run_booking(self, candidates, count=0, payway='信用卡'):
         session = Mock()
         session.post.return_value.json.return_value = {'count': count}

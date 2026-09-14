@@ -6,10 +6,16 @@ ADDRESS = '新北市汐止區建成路142巷45弄5號2樓'
 
 
 class BackendAddressTest(unittest.TestCase):
+    def setUp(self):
+        native = patch('backend_address_form.query_native_address', return_value={})
+        native.start()
+        self.addCleanup(native.stop)
+
     def resolve(self, reply, items=None):
         payload = {'member': {'member_id': '1', 'memberAddressList': items or []}}
         with patch.object(q, 'geocode_address', side_effect=AssertionError('must not call Google')), \
-             patch.object(q, 'check_contain', return_value=reply):
+             patch.object(q, 'check_contain', return_value=reply), \
+             patch('backend_address_form.query_native_address', return_value=reply):
             return q.resolve_backend_booking_address(object(), payload, ADDRESS, 'token', '1')
 
     def test_empty_backend_reply_does_not_reject_complete_address(self):

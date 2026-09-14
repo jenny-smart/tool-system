@@ -4,6 +4,11 @@ import quick_order as q
 
 
 class CalculationContractTest(unittest.TestCase):
+    def setUp(self):
+        native = patch('backend_address_form.query_native_address', return_value={'area': {'area_id': '25', 'company_id': '1'}})
+        native.start()
+        self.addCleanup(native.stop)
+
     def test_calculation_clears_only_hour_without_changing_selected_slot(self):
         session = Mock()
         session.post.return_value = Mock(status_code=200, url='https://example.invalid/ajax/calculate_hour')
