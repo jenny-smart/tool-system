@@ -993,6 +993,22 @@ def get_csrf_token(session):
     return token
 
 
+def _checked_booking_sections_response(resp, order_data):
+    """缺少服務區域時的空回應不能用來判定人力不足。"""
+    result = _booking_backend_response(resp, "查詢班表")
+    if result == []:
+        missing = [key for key in ("area_id", "company_id")
+                   if str(order_data.get(key) or "").strip() in ("", "0")]
+        if missing:
+            raise Exception(
+                "後台班表回覆 []；本次查詢未帶入服務區域欄位："
+                + "、".join(missing)
+                + "。無法據此判定人數不足，未執行補檸檬人。"
+                + "請先完成後台查詢地區，取得其回傳值後再查班表。"
+            )
+    return resp.text
+
+
 def get_all_sections_raw(session, order_data, token):
     """依後台 get_section 按鈕流程，未勾日期前送出完整表單取得所有 checkbox。"""
     data = order_data.copy()
@@ -1000,7 +1016,7 @@ def get_all_sections_raw(session, order_data, token):
     data["date_s"] = ""
     data.pop("date_list[]", None)
     resp = session.post(GET_SECTION_URL, data=data, headers=HEADERS, allow_redirects=True)
-    return resp.text if resp.status_code == 200 else ""
+    return _checked_booking_sections_response(resp, data)
 
 
 def get_member(session, phone, token, clean_type_id):
@@ -1369,7 +1385,7 @@ def get_section_raw(session, order_data, token, date_slot):
     data["date_list[]"] = date_slot
 
     resp = session.post(GET_SECTION_URL, data=data, headers=HEADERS, allow_redirects=True)
-    return resp.text if resp.status_code == 200 else ""
+    return _checked_booking_sections_response(resp, data)
 
 
 def extract_cleaners_from_section_response(raw_text, date_slot):
