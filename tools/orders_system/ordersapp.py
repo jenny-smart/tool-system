@@ -2423,6 +2423,21 @@ else:
 
         nc_d_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="nc_d_allow_auto_lemon")
 
+        # 會員查詢後若表單已改動，不能再用舊的日期／時段快照送單。
+        _nc_form_snapshot = {
+            "env": env, "account": backend_email.strip(), "raw": nc_raw,
+            "clean_type": nc_clean_type, "entries": [dict(entry) for entry in nc_entries],
+            "manual_payway": st.session_state.get("nc_payway_manual_select", ""),
+            "allow_lemon": nc_d_allow_auto_lemon,
+            "actual_time": nc_actual_time, "memo": nc_memo, "notice": nc_notice,
+            "details": [nc_service_type, nc_room, nc_bathroom, nc_balcony,
+                        nc_livingroom, nc_kitchen, nc_window, nc_shutter, nc_clothes],
+        }
+        _pending_before_submit = st.session_state.get("nc_pending_old")
+        if _pending_before_submit and _pending_before_submit.get("form_snapshot") != _nc_form_snapshot:
+            st.session_state.nc_pending_old = None
+            st.info("預約資料已變更，請按「建立新客訂單」重新查詢會員，將使用目前畫面的日期與時段。")
+
         if st.button("🚀 建立新客訂單", use_container_width=True, key="nc_create_d", type="primary"):
             # v8.15：開始新的一次建單嘗試前，先清空上一次殘留在畫面下方的舊結果
             # （包含成功訊息、LINE 訊息），避免這次失敗/拆解失敗時，
@@ -2478,6 +2493,7 @@ else:
                         _m_existing = _nc_lookup["member_payload"].get("member", {})
                         _addrs_existing = [a.get("address", "") for a in _nc_lookup["member_payload"].get("member", {}).get("memberAddressList", []) if a.get("address")]
                         st.session_state.nc_pending_old = {
+                            "form_snapshot": _nc_form_snapshot,
                             "lookup": _nc_lookup,
                             "member_name": _m_existing.get("name", ""),
                             "existing_addresses": _addrs_existing,
@@ -2565,6 +2581,7 @@ else:
                 f"（姓名：{_nc_pending['member_name']}），不是新客！"
                 + (f" 既有地址：{'、'.join(_nc_pending['existing_addresses'])}" if _nc_pending['existing_addresses'] else "")
             )
+            st.caption(f"本次預約：{_nc_pending['date_s']} {_nc_pending['period_s']}｜{_nc_pending['person']}人 × {_nc_pending['hour']}小時；補檸檬人使用相同時段。")
             if st.button("➡️ 用舊客身份送出此預約", use_container_width=True, key="nc_to_old_submit_btn", type="primary"):
                 try:
                     with st.spinner("以舊客身份建立訂單…"):
