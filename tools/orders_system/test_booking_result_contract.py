@@ -10,7 +10,7 @@ class BookingResultTest(unittest.TestCase):
         native.start()
         self.addCleanup(native.stop)
 
-    def run_booking(self, candidates, count=0, payway='信用卡'):
+    def run_booking(self, candidates, count=0, payway='信用卡', total=2800, fare=0):
         session = Mock()
         session.post.return_value.json.return_value = {'count': count}
         stack = ExitStack()
@@ -28,7 +28,7 @@ class BookingResultTest(unittest.TestCase):
         mock('_parse_service_date_time_loose', return_value=('2026-09-20', '09:00-11:00'))
         mock('_extract_payway_line', return_value=payway)
         mock('fetch_order_meta_by_order_no', return_value={})
-        mock('_fetch_purchase_block_for_order_no', return_value={'lines': ['總金額：2800']})
+        mock('_fetch_purchase_block_for_order_no', return_value={'lines': [f'總金額：{total}', f'車馬費：{fare}']})
         mock('_check_order_no_duplicate', return_value=(False, 1))
         stack.enter_context(patch.object(q.time, 'sleep'))
         return q.quick_create_order('dev', payway, '',
@@ -39,6 +39,13 @@ class BookingResultTest(unittest.TestCase):
         result = self.run_booking(['NEW'])
         self.assertEqual(result['order_no'], 'NEW')
         self.assertEqual(result['price_with_tax'], 2800)
+
+    def test_service_amount_excludes_separately_listed_fare(self):
+        result = self.run_booking(['NEW'], total=4400, fare=200)
+        self.assertEqual(result['order_total'], 4400)
+        self.assertEqual(result['service_amount'], 4200)
+        self.assertEqual(result['price_with_tax'], 4200)
+        self.assertEqual(str(result['fare']), '200')
 
     def test_never_reuses_old_order(self):
         with self.assertRaisesRegex(Exception, '結果待確認'):

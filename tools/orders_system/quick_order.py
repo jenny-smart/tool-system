@@ -1716,8 +1716,12 @@ def quick_create_order(
     meta = fetch_order_meta_by_order_no(session, order_no)
     price_no_tax = base_data["price"]
     confirmed_block = _fetch_purchase_block_for_order_no(session, order_no)
-    backend_total = _extract_total_amount_line("\n".join(confirmed_block.get("lines", [])))
-    price_with_tax = int(float(backend_total)) if backend_total not in (None, "") else ""
+    confirmed_text = "\n".join(confirmed_block.get("lines", []))
+    backend_total = _extract_total_amount_line(confirmed_text)
+    backend_fare = _extract_fare_line(confirmed_text)
+    base_data["fare"] = backend_fare if backend_fare not in (None, "") else base_data["fare"]
+    order_total = int(float(backend_total)) if backend_total not in (None, "") else ""
+    price_with_tax = max(order_total - int(float(base_data["fare"] or 0)), 0) if order_total != "" else ""
     # v8.13：建單成功後檢查此訂單編號是否重複對應到多張訂單卡片
     _is_dup, _dup_count = _check_order_no_duplicate(session, order_no)
     _dup_warning = (
@@ -1751,6 +1755,7 @@ def quick_create_order(
         "order_no": order_no, "address": selected_address, "date": date_s,
         "period": display_period, "period_s": period_s, "person": str(person),
         "price": price_no_tax, "price_with_tax": price_with_tax, "service_amount": price_with_tax,
+        "order_total": order_total,
         "fare": base_data["fare"], "payway": payway, "region": region,
         "clean_type_id": str(clean_type_id),
         "staff": meta.get("服務人員") or staff_display, "service_status": meta.get("服務狀態", "未處理"),
