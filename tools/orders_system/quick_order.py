@@ -1412,6 +1412,33 @@ def get_unserved_paid_orders(session, phone, member_payload, known_addresses, to
     return upcoming
 
 
+def resolve_backend_booking_address(session, member_payload, address, token, clean_type_id):
+    """新客、舊客、批次及查班表共用後台地址查詢；不自行判定服務區域。"""
+    member = (member_payload or {}).get("member", {}) or {}
+    best_addr = dict(pick_best_address_info(member_payload, address) or {})
+    selected_address = str(best_addr.get("address") or address).strip()
+    address_parts = _split_booking_address(selected_address)
+    # country_id 是後台縣市區下拉值，與服務區域 area_id 不同。
+    best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
+    addr_check = check_contain(
+        session, member.get("member_id", ""), selected_address,
+        best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id,
+    )
+    addr_check = addr_check if isinstance(addr_check, dict) else {}
+    code = addr_check.get("return_code")
+    if code not in (None, "", "0000"):
+        message = addr_check.get("description") or addr_check.get("message") or str(code)
+        raise Exception(f"後台地址查詢回覆：{message}")
+    area = addr_check.get("area")
+    if isinstance(area, dict):
+        for field in ("area_id", "company_id", "lat", "lng"):
+            if area.get(field) not in (None, "", 0, "0"):
+                best_addr[field] = area[field]
+    # 查詢未提供區域時保留會員既有值，未存的欄位留空交由後台驗證。
+    # 不呼叫外部 geocoder、不指定預設區域，也不改寫客戶地址。
+    return best_addr, address_parts, addr_check
+
+
 def quick_check_available_slots(env_name, payway, lookup_result, address, clean_type_id, date_s, hour, person="2", periods=None, period_hours=None):
     base_url = _configure_environment(env_name)
     session = lookup_result["session"]
@@ -1420,41 +1447,11 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
     if not member_payload:
         raise Exception("此電話查無會員資料，請先查詢會員")
     member = member_payload.get("member", {})
-    best_addr = pick_best_address_info(member_payload, address)
-    if not best_addr:
-        # v2026.07.06 修正：查可預約時段時，舊客地址不在既有清單裡不再直接擋掉，
-        # 當作新地址處理（跟 quick_create_order 的新地址邏輯一致）。
-        best_addr = {}
-    selected_address = str(best_addr.get("address") or address).strip()
-    address_parts = _split_booking_address(selected_address)
-    _assert_address_region_resolved(address_parts, selected_address, context="查詢可預約地址")
-    selected_address_for_lookup = address_parts["full"]
-    selected_address_for_submit = address_parts["detail"]
-    geo_lat, geo_lng = geocode_address(selected_address_for_lookup)
-    if geo_lat and geo_lng:
-        best_addr["lat"] = geo_lat
-        best_addr["lng"] = geo_lng
-    addr_check = check_contain(session, member.get("member_id", ""), selected_address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
-    if not addr_check and lookup_result.get("token") and lookup_result.get("token") != token:
-        addr_check = check_contain(session, member.get("member_id", ""), selected_address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
-    if not addr_check and payway == "儲值金":
-        # v8.5：stored_value_routine 頁面的 token 有時無法用於 check_contain，
-        # 改向 /booking/single 借一個可靠的 token 重試
-        _fallback_token = _fetch_csrf_from_url(session, f"{base_url}/booking/single")
-        if _fallback_token and _fallback_token != token and _fallback_token != lookup_result.get("token"):
-            addr_check = check_contain(session, member.get("member_id", ""), selected_address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
-            if addr_check:
-                token = _fallback_token
-    if not addr_check:
-        raise Exception(f"查詢地址/地區失敗：{selected_address_for_lookup}")
-    area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
-    if area_info:
-        address_parts = _complete_missing_district(address_parts, area_info, selected_address_for_lookup, context="查詢可預約地址")
-        selected_address_for_lookup = address_parts["full"]
-        selected_address_for_submit = address_parts["detail"]
-        best_addr["area_id"] = area_info.get("area_id", best_addr.get("area_id"))
-        best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
-        best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
+    best_addr, address_parts, addr_check = resolve_backend_booking_address(
+        session, member_payload, address, token, clean_type_id,
+    )
+    selected_address_for_lookup = str(address).strip()
+    selected_address_for_submit = str(best_addr.get("address") or address).strip()
     old_purchase = best_addr.get("purchase", {}) if isinstance(best_addr.get("purchase"), dict) else {}
 
     def pick(key, default=""):
@@ -1494,8 +1491,6 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
         "lng": str(best_addr.get("lng") or pick("lng", "")),
     }
     rows = []
-    if not str(base_data.get("country_id") or "").strip():
-        raise Exception(f"地址「{selected_address_for_lookup}」無法判斷縣市/區域下拉選單，已停止查詢，不會自動改成大安區。")
     for period in periods or []:
         slot = f"{date_s}_{period}"
         data = base_data.copy()
@@ -1533,57 +1528,12 @@ def quick_create_order(
     if not member_payload:
         raise Exception("此電話查無會員資料，請先走新客人資訊收集流程建立會員後再建單")
     member = member_payload.get("member", {})
-    best_addr = pick_best_address_info(member_payload, address)
-    if not best_addr:
-        # v2026.07.06 修正：舊客地址不在既有清單裡不再直接擋掉查詢，
-        # 當作新地址處理（跟 quick_create_order 的新地址邏輯一致）。
-        best_addr = {}
-    selected_address = str(best_addr.get("address") or address).strip()
-    address_parts = _split_booking_address(selected_address)
-    _assert_address_region_resolved(address_parts, selected_address, context="舊客地址")
-    address_for_lookup = address_parts["full"]
-    address_for_submit = address_parts["detail"]
-    geo_lat, geo_lng = geocode_address(address_for_lookup)
-    # 經緯度查詢失敗不代表地址無效；仍交由後台查詢區域，
-    # 並由下方 area_id 必填與大安區誤判檢查決定是否可繼續。
-    if geo_lat and geo_lng:
-        best_addr["lat"] = geo_lat
-        best_addr["lng"] = geo_lng
-    # 2026-07-08：避免新單成單時被 check_contain 誤判成大安區。
-    # 若會員既有地址已經有 area_id/company_id，就直接用既有資料，不再重新查詢區域覆蓋。
-    # 只有在既有地址完全沒有 area_id 時，才呼叫後台 check_contain；查不到就擋下，不套預設大安區。
-    addr_check = {}
-    if not str(best_addr.get("area_id") or best_addr.get("areaId") or "").strip():
-        addr_check = check_contain(session, member.get("member_id", ""), address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id)
-        if not addr_check and lookup_result.get("token") and lookup_result.get("token") != token:
-            addr_check = check_contain(session, member.get("member_id", ""), address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), lookup_result["token"], clean_type_id)
-        if not addr_check and payway == "儲值金":
-            _fallback_token = _fetch_csrf_from_url(session, f"{base_url}/booking/single")
-            if _fallback_token and _fallback_token != token and _fallback_token != lookup_result.get("token"):
-                addr_check = check_contain(session, member.get("member_id", ""), address_for_lookup, best_addr.get("lat", ""), best_addr.get("lng", ""), _fallback_token, clean_type_id)
-                if addr_check:
-                    token = _fallback_token
-        area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
-        if not area_info.get("area_id"):
-            route = BOOKING_ENDPOINT_MAP.get(payway, "/booking/single")
-            raise Exception(f"地址缺少已存區域，且查詢地址/地區失敗（{payway}：{route}）：{address_for_lookup}，請先到會員地址或後台手動確認區域")
-        address_parts = _complete_missing_district(address_parts, area_info, address_for_lookup, context="舊客新地址")
-        address_for_lookup = address_parts["full"]
-        address_for_submit = address_parts["detail"]
-        _validate_area_not_known_bad(address_for_lookup, area_info, context="舊客新地址")
-        best_addr["area_id"] = area_info.get("area_id")
-        best_addr["company_id"] = area_info.get("company_id", best_addr.get("company_id"))
-        best_addr["country_id"] = address_parts.get("country_id") or area_info.get("country_id", best_addr.get("country_id"))
-        if not str(best_addr.get("country_id") or "").strip():
-            raise Exception(f"地址「{address_for_lookup}」無法判斷縣市/區域下拉選單，已停止成單，不會自動改成大安區。")
-    else:
-        if best_addr.get("areaId") and not best_addr.get("area_id"):
-            best_addr["area_id"] = best_addr.get("areaId")
-        if best_addr.get("companyId") and not best_addr.get("company_id"):
-            best_addr["company_id"] = best_addr.get("companyId")
-        if best_addr.get("countryId") and not best_addr.get("country_id"):
-            best_addr["country_id"] = best_addr.get("countryId")
-
+    best_addr, address_parts, addr_check = resolve_backend_booking_address(
+        session, member_payload, address, token, clean_type_id,
+    )
+    address_for_lookup = str(best_addr.get("address") or address).strip()
+    address_for_submit = address_for_lookup
+    selected_address = address_for_lookup
     area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
     purchase_info = addr_check.get("purchase") if isinstance(addr_check.get("purchase"), dict) else {}
     fare_from_check = first_nonzero(
@@ -1645,19 +1595,6 @@ def quick_create_order(
     }
     if extra_fields:
         base_data.update(extra_fields)
-
-    # 不再用 area_id=25/company_id=1 當預設值；缺少區域就擋下，避免誤成大安區。
-    if not str(base_data.get("country_id") or "").strip():
-        raise Exception(
-            f"地址「{address_for_lookup}」缺少明確縣市/區域下拉選單，已停止成單，"
-            "不會自動改成大安區。"
-        )
-    if not str(base_data.get("area_id") or "").strip() or not str(base_data.get("company_id") or "").strip():
-        raise Exception(
-            f"地址「{address_for_lookup}」缺少明確 area_id/company_id，已停止成單，"
-            "請先在會員地址或後台手動確認區域，避免系統誤判成大安區。"
-        )
-    _validate_address_before_submit(address_for_lookup, base_data.get("area_id"), context="舊客建單")
 
     calc_result = calculate_hour(session, base_data, token)
     if not calc_result:
@@ -4714,7 +4651,6 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     # 之前地址缺少行政區時可能猜成大安區，導致新單區域錯誤；現在只修正既有行政區順序，不再補猜。
     address = _fix_address_district_order(address, fallback_district="")
     address_parts = _split_booking_address(address)
-    _assert_address_region_resolved(address_parts, address, context="新客地址")
     address_for_lookup = address_parts["full"]
     address_for_submit = address_parts["detail"]
     payway = str(customer["payway"]).strip()
