@@ -922,6 +922,8 @@ FUNCTION_OPTIONS = [
     ("專員隔日上班提醒：依服務日期篩選已付款訂單、彙整每位專員班次與 LINE 聊天連結。",
      "orders", "專員隔日上班提醒"),
     # ---------- E. 會員／客戶管理 ----------
+    ("會員手機查詢：貼上姓名／LINE 或讀取 Google Sheet 指定列，查詢手機並核對會員。",
+     "orders", "會員手機查詢"),
     ("會員喜好設定：輸入電話查會員，設定喜愛專員性別，並可勾選設為喜愛／不喜愛專員。",
      "orders", "會員喜好設定"),
     ("整理預約下次服務：搜尋評價日期區間內有填「預約下次服務」的評價，整理成一份名單。",
@@ -955,20 +957,20 @@ _MEMO_SECTION_MAP = {
 # 讓 A~F 六大類在畫面上看得出分界，不用另外拆成兩層選單。標題列前面加
 # 「──」跟一般編號選項區分；萬一使用者真的選到標題列，下面會擋下並提示
 # 改選功能項目，不會誤跑到任何功能。
-_CATEGORY_HEADERS_BY_INDEX = {
-    0: "A. 建單／成單流程",
-    9: "B. 訂單附屬功能",
-    16: "C. 稽核比對工具",
-    19: "D. LINE 通知／提醒",
-    22: "E. 會員／客戶管理",
-    25: "F. 財務功能",
+_CATEGORY_HEADERS_BY_FEATURE = {
+    "批次建單（Google Sheet）": "A. 建單／成單流程",
+    "取消訂單": "B. 訂單附屬功能",
+    "雙向訂單檢查": "C. 稽核比對工具",
+    "LINE 通知產生器": "D. LINE 通知／提醒",
+    "會員手機查詢": "E. 會員／客戶管理",
+    "台北/台中區對帳": "F. 財務功能",
 }
 _menu_display_options = []
 _menu_option_targets = []  # 與 _menu_display_options 一一對應；None 代表該列是標題列
 _menu_counter = 0
 for _opt_idx, _opt in enumerate(FUNCTION_OPTIONS):
-    if _opt_idx in _CATEGORY_HEADERS_BY_INDEX:
-        _menu_display_options.append(f"── {_CATEGORY_HEADERS_BY_INDEX[_opt_idx]} ──")
+    if _opt[2] in _CATEGORY_HEADERS_BY_FEATURE:
+        _menu_display_options.append(f"── {_CATEGORY_HEADERS_BY_FEATURE[_opt[2]]} ──")
         _menu_option_targets.append(None)
     _menu_counter += 1
     _menu_display_options.append(f"{_menu_counter}. {_opt[0]}")
@@ -1893,7 +1895,11 @@ else:
     # --------------------------------------------------
     # LINE 通知產生器
     # --------------------------------------------------
-    if single_feature == "LINE 通知產生器":
+    if single_feature == "會員手機查詢":
+        from member_phone_lookup_ui import render_member_phone_lookup
+        render_member_phone_lookup(env, backend_email, backend_password)
+
+    elif single_feature == "LINE 通知產生器":
         col_left, col_right = st.columns([3, 1])
         with col_left:
             info_panel("使用說明", ["每行一組：要合併的訂單可用半形逗號分隔。", "系統會逐筆核對訂單日期、地址、付款方式與金額；若合併訂單有多個地址，會在每筆服務時間下方顯示對應地址。"])
