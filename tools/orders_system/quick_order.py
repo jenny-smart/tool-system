@@ -1534,7 +1534,6 @@ def quick_create_order(
         raise Exception("此電話查無會員資料，請先走新客人資訊收集流程建立會員後再建單")
     member = member_payload.get("member", {})
     best_addr = pick_best_address_info(member_payload, address)
-    is_new_address = not bool(best_addr)
     if not best_addr:
         # v2026.07.06 修正：舊客地址不在既有清單裡不再直接擋掉查詢，
         # 當作新地址處理（跟 quick_create_order 的新地址邏輯一致）。
@@ -1545,11 +1544,8 @@ def quick_create_order(
     address_for_lookup = address_parts["full"]
     address_for_submit = address_parts["detail"]
     geo_lat, geo_lng = geocode_address(address_for_lookup)
-    if is_new_address and (not geo_lat or not geo_lng):
-        raise Exception(
-            f"新地址「{address_for_lookup}」無法取得經緯度，已停止成單，"
-            "避免後台用空座標誤判成大安區。請確認地址是否完整到路段/門牌，或改用後台手動建單。"
-        )
+    # 經緯度查詢失敗不代表地址無效；仍交由後台查詢區域，
+    # 並由下方 area_id 必填與大安區誤判檢查決定是否可繼續。
     if geo_lat and geo_lng:
         best_addr["lat"] = geo_lat
         best_addr["lng"] = geo_lng
