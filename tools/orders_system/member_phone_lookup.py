@@ -129,7 +129,7 @@ def match_entry(entry, members, complete=True):
     if not complete:
         status = '查詢未完整，請縮小搜尋範圍'
     elif len(exact) > 1:
-        status = '多筆相符，請人工確認'
+        status = f'有多筆（{len(exact)} 筆），請人工確認'
     elif not exact:
         status = '姓名有候選但 LINE 不符' if entry.get('line') and members else '查無完全相符會員'
     results = []
