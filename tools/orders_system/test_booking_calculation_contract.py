@@ -4,7 +4,7 @@ import quick_order as q
 
 
 class CalculationContractTest(unittest.TestCase):
-    def test_calculation_clears_results_without_changing_selected_slot(self):
+    def test_calculation_clears_only_hour_without_changing_selected_slot(self):
         session = Mock()
         session.post.return_value = Mock(status_code=200, url='https://example.invalid/ajax/calculate_hour')
         session.post.return_value.json.return_value = {'data': {'hour': 2, 'price': 2286}}
@@ -13,8 +13,9 @@ class CalculationContractTest(unittest.TestCase):
         original = data.copy()
         q.orders.calculate_hour(session, data, 'token')
         sent = session.post.call_args.kwargs['data']
-        for key in ('hour', 'price', 'price_vvip', 'fare'):
-            self.assertEqual(sent[key], '')
+        self.assertEqual(sent['hour'], '')
+        for key in ('price', 'price_vvip', 'fare'):
+            self.assertEqual(sent[key], original[key])
         self.assertEqual(sent['area_id'], '25')
         self.assertEqual(sent['company_id'], '1')
         self.assertEqual(data, original)

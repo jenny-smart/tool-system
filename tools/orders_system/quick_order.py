@@ -1667,27 +1667,6 @@ def quick_create_order(
         if new_order_nos:
             break
 
-    def _booking_count_success(resp):
-        try:
-            payload = resp.json()
-        except Exception:
-            return False
-        try:
-            return int(payload.get("count", 0)) > 0
-        except Exception:
-            return False
-
-    def _booking_balance_error(resp):
-        """v8.5：儲值金訂單若餘額不足，後台會回 JSON 帶 stored_value_balance 且 count=0。
-        找到就回傳餘額數字，否則回傳 None（代表不是餘額不足的情況）。"""
-        try:
-            payload = resp.json()
-        except Exception:
-            return None
-        if isinstance(payload, dict) and payload.get("stored_value_balance") is not None and int(payload.get("count", 1)) == 0:
-            return payload.get("stored_value_balance", 0)
-        return None
-
     def _find_matching_order_after_submit():
         blocks = _fetch_purchase_blocks_for_phone(session, phone, name=member_name)
         target_addr_norm = normalize_addr_for_match(selected_address)
@@ -1713,34 +1692,26 @@ def quick_create_order(
             if target_period_compact and target_period_compact not in time_compact and target_display_compact not in time_compact:
                 continue
             matched.append(order_no_candidate)
-        for candidate in matched:
-            if candidate not in before_order_nos:
-                return candidate
-        return matched[0] if matched else None
+        new_matches = set(matched) - before_order_nos
+        return next(iter(new_matches)) if len(new_matches) == 1 else None
 
-    if not new_order_nos:
-        _balance_err = _booking_balance_error(booking_resp) if payway == "儲值金" else None
-        if _balance_err is not None:
-            raise Exception(f"儲值金餘額不足（目前餘額：{_balance_err} 元），無法建立此訂單，請改用信用卡或ATM付款方式。")
-        order_no = _find_matching_order_after_submit() if _booking_count_success(booking_resp) else None
-        if not order_no:
-            debug_snippet = booking_resp.text[:300].replace("\n", " ").strip()
-            extra_hint = "後台回傳 count > 0，但訂單列表回查不到符合條件的新訂單；請檢查訂單管理是否已建立。" if _booking_count_success(booking_resp) else ""
-            raise Exception(f"建單失敗：系統未產生新訂單編號。\n{extra_hint}\n回應狀態：{booking_resp.status_code}，網址：{booking_resp.url}\n片段：{debug_snippet}")
-    elif len(new_order_nos) == 1:
-        order_no = next(iter(new_order_nos))
-    else:
-        order_no = None
-        for candidate in new_order_nos:
-            meta = fetch_order_meta_by_order_no(session, candidate)
-            if meta.get("服務日期") == date_s and display_period.replace(" ", "") in str(meta.get("服務時間", "")).replace(" ", ""):
-                order_no = candidate
-                break
-        if not order_no:
-            order_no = sorted(new_order_nos)[-1]
+    # 一律比對本次新單的地址、日期、時段及付款方式；不拿舊單或任意候選兜底。
+    order_no = _find_matching_order_after_submit()
+    if not order_no:
+        if payway == "儲值金":
+            try:
+                reply = booking_resp.json()
+                failed_count = int(reply["count"])
+            except (ValueError, TypeError, KeyError):
+                failed_count = 0
+            if failed_count > 0:
+                raise Exception(f"後台回覆儲值金／購物金餘額不足，有 {failed_count} 筆無法成立訂單。")
+        raise Exception("送單結果待確認：尚未找到唯一符合本次資料的新訂單。請先查後台訂單，避免重複送單。")
     meta = fetch_order_meta_by_order_no(session, order_no)
     price_no_tax = base_data["price"]
-    price_with_tax = int(round(float(price_no_tax) * TAX_RATE))
+    confirmed_block = _fetch_purchase_block_for_order_no(session, order_no)
+    backend_total = _extract_total_amount_line("\n".join(confirmed_block.get("lines", [])))
+    price_with_tax = int(float(backend_total)) if backend_total not in (None, "") else ""
     # v8.13：建單成功後檢查此訂單編號是否重複對應到多張訂單卡片
     _is_dup, _dup_count = _check_order_no_duplicate(session, order_no)
     _dup_warning = (
