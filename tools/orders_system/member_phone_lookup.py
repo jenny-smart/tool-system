@@ -148,16 +148,67 @@ def match_entry(entry, members, complete=True):
     return results
 
 
-def lookup_entries(client, entries):
+def backend_keyword(link):
+    parsed = urlparse(str(link).strip())
+    if (parsed.scheme != 'https' or parsed.hostname not in {
+        'backend.lemonclean.com.tw', 'backend-dev.lemonclean.com.tw'
+    } or parsed.path.rstrip('/') != '/member' or parsed.username or parsed.password):
+        raise ValueError('不是支援的後台會員搜尋連結（/member?keyword=…）')
+    keywords = parse_qs(parsed.query).get('keyword', [])
+    if len(keywords) != 1 or not keywords[0].strip():
+        raise ValueError('後台會員連結缺少唯一的搜尋關鍵字')
+    return keywords[0].strip()
+
+
+def lookup_entries(client, entries, basis='legacy'):
     results = []
-    for entry in entries:
-        if not entry['name'].strip():
+    for original in entries:
+        entry = dict(original)
+        link = entry.get('line', '')
+        note = ''
+        keyword = entry['name'].strip()
+        if basis == 'backend' and link:
+            try:
+                keyword = backend_keyword(link)
+            except ValueError as exc:
+                row = match_entry(entry, [])[0]
+                row['比對狀態'] = str(exc) + '；請切換依據或修正連結'
+                results.append(row)
+                continue
+            entry['line'] = ''
+            entry['name'] = keyword
+            note = '後台連結關鍵字：' + keyword + '；'
+        elif basis == 'name':
+            entry['line'] = ''
+        elif basis == 'line' and link:
+            parsed = urlparse(link)
+            if parsed.hostname not in {'chat.line.biz', 'manager.line.biz', 'line.me', 'lin.ee'}:
+                row = match_entry(entry, [])[0]
+                row['比對狀態'] = '此連結不是 LINE；請選擇後台會員連結或修正連結'
+                results.append(row)
+                continue
+        if basis in {'backend', 'line'} and not link:
+            note = '無連結，改以姓名查詢；'
+        if not keyword:
             row = match_entry(entry, [])[0]
             row['比對狀態'] = '僅有 LINE：請補姓名，後台不支援 LINE 搜尋'
             results.append(row)
             continue
-        members, complete = client.search(entry['name'])
-        results.extend(match_entry(entry, members, complete))
+        members, complete = client.search(keyword)
+        if basis == 'backend' and link:
+            # A member search URL is a keyword search, not proof of a unique account.
+            matched = [m for m in members if clean_name(m['name']) == clean_name(keyword)
+                       or str(m.get('phone', '')).strip() == keyword]
+            normalized = [dict(m, name=keyword) for m in matched]
+            rows = match_entry(entry, normalized, complete)
+            for row, member in zip(rows, matched):
+                row['會員姓名'] = member['name']
+        else:
+            rows = match_entry(entry, members, complete)
+        for row in rows:
+            row['查詢姓名'] = original['name'] or keyword
+            row['比對狀態'] = note + row['比對狀態']
+        results.extend(rows)
     return results
 
 

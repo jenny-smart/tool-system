@@ -8,11 +8,14 @@ from member_phone_lookup import (
 
 def render_member_phone_lookup(env, email, password):
     st.caption('依姓名查會員手機；有 LINE 連結時再核對。同名多筆全部列出，供人工確認。')
+    basis_label = st.radio('查詢依據', ['後台會員連結', 'LINE 連結', '純姓名文字'], horizontal=True, key='mpl_basis')
+    basis = {'後台會員連結': 'backend', 'LINE 連結': 'line', '純姓名文字': 'name'}[basis_label]
+    st.caption('後台會員連結：使用 keyword 查詢（沿用上方選定環境）；LINE：姓名搜尋後核對連結。沒有連結的列改用姓名並標示。')
     source = st.radio('名單來源', ['Google Sheet 指定列', '貼上名單'], horizontal=True, key='mpl_source')
     text, url, start, end, column, line_column = '', '', 1, 1, 'C', None
     ready = True
     if source == '貼上名單':
-        text = st.text_area('每行一筆：姓名，或姓名＋LINE 連結', height=160,
+        text = st.text_area('每行一筆：姓名，或姓名＋所選類型的連結', height=160,
                             placeholder='王小明\n陳小美 https://chat.line.biz/官方帳號/chat/客戶識別碼', key='mpl_text')
         st.caption('只貼 LINE 無法直接反查手機，請同時提供姓名。每次最多 100 筆。')
     else:
@@ -45,8 +48,9 @@ def render_member_phone_lookup(env, email, password):
             label = lambda c: f"{c} — {schema['columns'][c] or '無標題'}"
             a, b = st.columns(2)
             column = a.selectbox('依據欄位（姓名）', columns, index=preferred, format_func=label, key='mpl_name_column')
-            line_column = b.selectbox('LINE 核對欄位（選填）', [None] + columns,
-                                      format_func=lambda c: '使用姓名格內的超連結' if c is None else label(c), key='mpl_line_column')
+            if basis != 'name':
+                line_column = b.selectbox('連結來源欄位', [None] + columns,
+                                          format_func=lambda c: '使用姓名格內的超連結' if c is None else label(c), key='mpl_line_column')
             a, b = st.columns(2)
             start = int(a.number_input('起始列', min_value=1, value=188, step=1, key='mpl_start'))
             end = int(b.number_input('結束列', min_value=1, value=206, step=1, key='mpl_end'))
@@ -54,7 +58,7 @@ def render_member_phone_lookup(env, email, password):
         else:
             st.info('貼上連結後按「讀取欄位」，再選擇姓名欄與查詢列數。')
 
-    context = (env, email.strip(), source, text, url, start, end, column, line_column)
+    context = (env, email.strip(), source, text, url, start, end, column, line_column, basis)
     if st.session_state.get('mpl_context') != context:
         st.session_state.pop('mpl_results', None)
         st.session_state['mpl_context'] = context
@@ -69,7 +73,7 @@ def render_member_phone_lookup(env, email, password):
                 entries = parse_pasted(text) if source == '貼上名單' else load_sheet_entries(url, start, end, column, line_column)
                 from env import BASE_URL_DEV, BASE_URL_PROD
                 client = MemberClient(BASE_URL_DEV if env == 'dev' else BASE_URL_PROD, email.strip(), password.strip())
-                results = lookup_entries(client, entries)
+                results = lookup_entries(client, entries, basis=basis)
                 st.session_state['mpl_results'] = results
         except ValueError as exc:
             st.error(str(exc))
