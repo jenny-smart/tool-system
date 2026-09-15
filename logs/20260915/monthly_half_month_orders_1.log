@@ -1,0 +1,124 @@
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+📁 月排程年度資料夾：2026專員承攬服務費 (1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK)
+📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
+📂 本次使用年度：2026
+📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+📝 月排程打卡：上半月訂單 / running
+⚠️ 月排程 secrets TOML 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+📌 期別：202609-1
+📌 日期：2026-09-01 ~ 2026-09-15
+📌 執行區域：all
+📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+
+=== 處理 台北 ===
+✅ 登入成功：jenny@lemonclean.com.tw
+📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 使用既有資料夾：202609-1 / 1RJ_K07v8q9AZO5ErS0oYZYlacARq3t4-
+📁 期別資料夾：202609-1 / 1RJ_K07v8q9AZO5ErS0oYZYlacARq3t4-
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+ 1540= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+ 1560  4 4 4 4 4 4 4 4 4 4 4 4 4 3 2 2 2 2 2 2 
+ 1580  2 2 2 2 2 2 2 
+🗑️ 已刪除舊項目：202609-1訂單-台北.xlsx
+☁️ 已上傳新檔：202609-1訂單-台北.xlsx → folder_id=1RJ_K07v8q9AZO5ErS0oYZYlacARq3t4- https://docs.google.com/spreadsheets/d/18sPoCIc2GPOq2tTIreR4geJBLUXdH89q/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1訂單-台北.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202609-1 / 1g76fSE0x3zSlAPPSJ68HgYj4SMmQaQy1
+📁 期別資料夾：202609-1 / 1g76fSE0x3zSlAPPSJ68HgYj4SMmQaQy1
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  120= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  140  4 4 3 2 2 
+🗑️ 已刪除舊項目：202609-1訂單-台中.xlsx
+☁️ 已上傳新檔：202609-1訂單-台中.xlsx → folder_id=1g76fSE0x3zSlAPPSJ68HgYj4SMmQaQy1 https://docs.google.com/spreadsheets/d/13BJd-FkBT6Qsumwe2RwRk6lKrV3nXdL5/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1訂單-台中.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202609-1 / 1ZL5DrXxavkRbkfbsJWUAhH7UCWXqTlQK
+📁 期別資料夾：202609-1 / 1ZL5DrXxavkRbkfbsJWUAhH7UCWXqTlQK
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  440= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  460  4 3 2 2 2 2 
+🗑️ 已刪除舊項目：202609-1訂單-桃園.xlsx
+☁️ 已上傳新檔：202609-1訂單-桃園.xlsx → folder_id=1ZL5DrXxavkRbkfbsJWUAhH7UCWXqTlQK https://docs.google.com/spreadsheets/d/1nFXQPfnYgNrAK4htjnZnOQ1_3Sufo88F/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1訂單-桃園.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202609-1 / 1XE8CRbpCkPZ0KghM_zhjL8_hZcrva9Nh
+📁 期別資料夾：202609-1 / 1XE8CRbpCkPZ0KghM_zhjL8_hZcrva9Nh
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   80= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  100  4 4 4 3 2 
+🗑️ 已刪除舊項目：202609-1原訂單-新竹.xlsx
+☁️ 已上傳新檔：202609-1原訂單-新竹.xlsx → folder_id=1XE8CRbpCkPZ0KghM_zhjL8_hZcrva9Nh https://docs.google.com/spreadsheets/d/1TVOgV2o9C7i4s6lZoNytvmTRk6VDcoVN/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1原訂單-新竹.xlsx
+🗑️ 已刪除舊項目：202609-1儲值金-新竹.xlsx
+☁️ 已上傳新檔：202609-1儲值金-新竹.xlsx → folder_id=1XE8CRbpCkPZ0KghM_zhjL8_hZcrva9Nh https://docs.google.com/spreadsheets/d/1Ol_rigo4Ne_sKlPUGbIITBqPEh4goiH_/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1儲值金-新竹.xlsx
+✅ 新竹 儲值金抓到 0 筆（付款日期 2026-09-01 ~ 2026-09-15 / 儲值金 / 已付款）
+✅ 新竹 合併完成：原訂單 29 + 儲值金 0 → 合併 29 筆
+🗑️ 已刪除舊項目：202609-1訂單-新竹.xlsx
+☁️ 已上傳新檔：202609-1訂單-新竹.xlsx → folder_id=1XE8CRbpCkPZ0KghM_zhjL8_hZcrva9Nh https://docs.google.com/spreadsheets/d/1r4Vi43sit7LsGyFCxykdVVrg8IybHiRf/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1訂單-新竹.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202609-1 / 1bAIEvE54HZ7t2RLACy9_rbfGLx6hMHOa
+📁 期別資料夾：202609-1 / 1bAIEvE54HZ7t2RLACy9_rbfGLx6hMHOa
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   40  4 4 4 4 4 4 3 2 
+✅ 高雄 原訂單抓到 16 筆
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 3 2 
+✅ 台南 原訂單抓到 2 筆
+🗑️ 已刪除舊項目：202609-1原訂單-高雄.xlsx
+☁️ 已上傳新檔：202609-1原訂單-高雄.xlsx → folder_id=1bAIEvE54HZ7t2RLACy9_rbfGLx6hMHOa https://docs.google.com/spreadsheets/d/147RFr2E87kdpK436YhcdvmdWlxNHcJn4/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1原訂單-高雄.xlsx
+🗑️ 已刪除舊項目：202609-1儲值金-高雄.xlsx
+☁️ 已上傳新檔：202609-1儲值金-高雄.xlsx → folder_id=1bAIEvE54HZ7t2RLACy9_rbfGLx6hMHOa https://docs.google.com/spreadsheets/d/1gIbrcZb7XBcL0BtXzyXPIMJ4pnq90Riz/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1儲值金-高雄.xlsx
+✅ 高雄 儲值金抓到 0 筆（付款日期 2026-09-01 ~ 2026-09-15 / 儲值金 / 已付款）
+✅ 高雄 合併完成：原訂單 18 + 儲值金 0 → 合併 18 筆
+🗑️ 已刪除舊項目：202609-1訂單-高雄.xlsx
+☁️ 已上傳新檔：202609-1訂單-高雄.xlsx → folder_id=1bAIEvE54HZ7t2RLACy9_rbfGLx6hMHOa https://docs.google.com/spreadsheets/d/1rly5lKgeLx7P5S2MJXjZqradotsHXI8O/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202609-1/202609-1訂單-高雄.xlsx
+✅ 已寫入月排程 Log
+
+✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄
+🎉 half_month_orders.py 全部完成
+
+📝 月排程打卡：上半月訂單 / success
+scheduled_monthly scheduler 全部完成
