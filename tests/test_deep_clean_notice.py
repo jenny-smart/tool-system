@@ -5,7 +5,9 @@ from tools.service_management.deep_clean_notice import (
     _extra_charge,
     _canonical_settings_values,
     _comparison_values,
+    _engineer_price_text,
     _service_intro,
+    _write_engineer_system_sheet,
     _settings_from_row,
     _settings_row,
     _validate_settings,
@@ -202,7 +204,12 @@ def test_price_comparison_uses_matching_part_customer_type_and_day_type():
     )
 
     assert _comparison_values(settings, 2, False) == [600, 250, 700, 450, 700, 450, 800, 550]
-    assert _comparison_values(settings, 2, True) == [3000, 2650, 3500, 3250, 3100, 2850, 3600, 3350]
+    assert _comparison_values(settings, 2, True) == [3000, 2650, 3100, 2850, 3100, 2850, 3200, 2950]
+    engineer_text = _engineer_price_text(settings, vip=False)
+    assert "PART 1 2026/12/15～2027/01/21" in engineer_text
+    assert "週末每2人1小時年節加價NT$350" in engineer_text
+    assert "PART 2 2027/01/22～2027/02/04" in engineer_text
+    assert "週末每2人1小時年節加價NT$400" in engineer_text
 
 
 def test_service_intro_uses_full_period_and_three_hour_minimum():
@@ -213,6 +220,48 @@ def test_service_intro_uses_full_period_and_three_hour_minimum():
 
     assert "2026/12/15～2027/02/04" in intro
     assert "2 人 3 小時起" in intro
+
+
+def test_engineer_system_sheet_contains_current_system_changes():
+    class FakeSheet:
+        col_count = 5
+
+        def clear(self):
+            pass
+
+        def update(self, values, range_name, value_input_option):
+            self.values = values
+
+        def format(self, _range, _format):
+            pass
+
+        def freeze(self, rows):
+            pass
+
+    class FakeSpreadsheet:
+        def __init__(self):
+            self.sheet = FakeSheet()
+
+        def worksheet(self, _title):
+            return self.sheet
+
+    settings = DeepCleanSettings(
+        2026,
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        125, 225,
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        225, 275, "",
+        datetime(2026, 11, 5, tzinfo=TZ), datetime(2026, 11, 10, tzinfo=TZ),
+        "notice-id", 300, 350, 350, 400,
+    )
+    spreadsheet = FakeSpreadsheet()
+
+    title = _write_engineer_system_sheet(spreadsheet, settings)
+
+    assert title == "2026系統工作表修改資料"
+    assert spreadsheet.sheet.values[1][3] == "2026/12/15～2027/02/04"
+    assert spreadsheet.sheet.values[8][3] == "每 2 人 1 小時 NT$1,200"
+    assert "PART 2 2027/01/22～2027/02/04" in spreadsheet.sheet.values[6][3]
 
 
 def test_zero_rates_are_valid_while_prices_are_undecided():

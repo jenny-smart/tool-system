@@ -26,7 +26,8 @@ def test_service_schedule_exposes_deep_clean_settings_and_update():
     assert "完整年節大掃除期間" in source
     assert "基本時數：2 人 3 小時起" in source
     assert "加價與服務總額即時試算" in source
-    assert "非大掃除基準價：平日每 2 人 1 小時 NT$1,200；週末 NT$1,400" in source
+    assert "年節大掃除總額基準：平日、週末均為每 2 人 1 小時 NT$1,200" in source
+    assert "系統工作表修改資料" in source
     assert "load_deep_clean_settings" in source
     assert "deep_clean_settings_form_values" in source
     assert "已載入 {deep_clean_season_year} 年度已儲存設定" in source

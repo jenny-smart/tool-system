@@ -4339,7 +4339,7 @@ with date_col:
                         deep_clean_phase2_nonvip_weekday_rate, deep_clean_phase2_weekday_rate,
                         deep_clean_phase2_nonvip_weekend_rate, deep_clean_phase2_weekend_rate,
                     ]
-                    _preview_bases = [1200, 1200, 1400, 1400, 1200, 1200, 1400, 1400]
+                    _preview_bases = [1200] * 8
                     _preview_hours = [2, 3, 4, 6, 8]
                     _extra_rows = [
                         [f"2人{hours}小時", *[hours * rate for rate in _preview_rates]]
@@ -4355,7 +4355,7 @@ with date_col:
                     st.write("年節加價")
                     st.dataframe(pd.DataFrame(_extra_rows, columns=_preview_columns), hide_index=True, use_container_width=True)
                     st.write("服務總額（非大掃除基準價＋年節加價）")
-                    st.caption("非大掃除基準價：平日每 2 人 1 小時 NT$1,200；週末 NT$1,400")
+                    st.caption("年節大掃除總額基準：平日、週末均為每 2 人 1 小時 NT$1,200")
                     st.dataframe(pd.DataFrame(_total_rows, columns=_preview_columns), hide_index=True, use_container_width=True)
 
                 deep_clean_reply_deadline = st.text_input(
@@ -4369,7 +4369,7 @@ with date_col:
                     deep_clean_booking_start = st.date_input("非定期 VIP 開放預約日", value=_saved_form.get("booking_start", datetime(deep_clean_season_year, 11, 5).date()), key=f"deep_clean_booking_start_{deep_clean_season_year}")
                 with _bc2:
                     deep_clean_booking_end = st.date_input("非定期 VIP 預約截止日", value=_saved_form.get("booking_end", datetime(deep_clean_season_year, 11, 10).date()), key=f"deep_clean_booking_end_{deep_clean_season_year}")
-                st.info("儲存後會同步產生完整期間、2 人 3 小時起、加價與服務總額比較表。加價未定時可先填 0。", icon="ℹ️")
+                st.info("儲存後會同步產生加價／總額比較表及「系統工作表修改資料」供工程師使用。加價未定時可先填 0。", icon="ℹ️")
             else:
                 st.info(
                     "請先執行「【大掃除】年度設定」並儲存該年度的期間與八項價格。"
