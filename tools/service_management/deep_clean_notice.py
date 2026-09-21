@@ -94,7 +94,8 @@ DEFAULT_MASTER_SPREADSHEET_ID = "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
 SETTINGS_SHEET_NAME = "大掃除設定"
 MASTER_ID_SHEET_NAME = "大掃除設定"
 BASE_WEEKDAY_RATE = 1200
-BASE_WEEKEND_RATE = 1400
+# 年節大掃除總額試算不套用一般週末基準價；兩階段週末均維持 NT$1,200。
+BASE_WEEKEND_RATE = 1200
 MINIMUM_SERVICE_HOURS = 3
 COMPARISON_HOURS = (2, 3, 4, 6, 8)
 
@@ -403,6 +404,31 @@ def _comparison_values(settings: DeepCleanSettings, hours: int, include_base: bo
         BASE_WEEKEND_RATE,
     )
     return [hours * (rate + (base if include_base else 0)) for rate, base in zip(rates, bases)]
+
+
+def _engineer_price_text(settings: DeepCleanSettings, vip: bool) -> str:
+    if vip:
+        rates = (
+            settings.phase1_weekday_rate,
+            settings.phase1_weekend_rate,
+            settings.phase2_weekday_rate,
+            settings.phase2_weekend_rate,
+        )
+    else:
+        rates = (
+            settings.phase1_nonvip_weekday_rate,
+            settings.phase1_nonvip_weekend_rate,
+            settings.phase2_nonvip_weekday_rate,
+            settings.phase2_nonvip_weekend_rate,
+        )
+    return (
+        f"PART 1 {_date_range(settings.phase1_start, settings.phase1_end)}\n"
+        f"平日每2人1小時年節加價{_money(rates[0])}（含稅）\n"
+        f"週末每2人1小時年節加價{_money(rates[1])}（含稅）\n"
+        f"PART 2 {_date_range(settings.phase2_start, settings.phase2_end)}\n"
+        f"平日每2人1小時年節加價{_money(rates[2])}（含稅）\n"
+        f"週末每2人1小時年節加價{_money(rates[3])}（含稅）"
+    )
 
 
 def _build_notice_text(
@@ -717,6 +743,7 @@ def save_deep_clean_settings(
     )
     sh.freeze(rows=1)
     _write_system_update_sheet(ss, settings)
+    _write_engineer_system_sheet(ss, settings)
     return SETTINGS_SHEET_NAME
 
 
@@ -784,6 +811,38 @@ def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
     ]
     sh.clear()
     sh.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")
+    sh.freeze(rows=1)
+    return title
+
+
+def _write_engineer_system_sheet(ss: Any, settings: DeepCleanSettings) -> str:
+    """Generate the values an engineer should apply to the existing 「系統」 sheet."""
+    title = f"{settings.season_year}系統工作表修改資料"
+    sh = _get_or_create_sheet(ss, title, 100, 5)
+    rows = [
+        ["修改區域", "系統工作表項目", "對象", "應修改內容", "工程師備註"],
+        ["共用", "年節大掃除期間", "全部", _date_range(settings.phase1_start, settings.phase2_end), "未註明 PART 時使用完整期間"],
+        ["共用", "基本時數", "全部", f"2 人 {MINIMUM_SERVICE_HOURS} 小時起", "共 6 人時"],
+        ["共用", "服務說明", "全部", "大掃除服務主要為方便需求6–8小時客戶，服務內容同居家清潔，以人時計價。", ""],
+        ["前台", "大掃除服務開放時間", "VIP", _date_range(settings.booking_start, settings.booking_end), "非定期 VIP 優先預約期間"],
+        ["前台", "大掃除服務開放時間", "一般客", "尚未設定", "請工程師確認一般客開放日"],
+        ["後台", "訂單管理－代客預訂調整", "代客預訂－單次（非VIP）", _engineer_price_text(settings, vip=False), "依 PART／平日週末套用"],
+        ["後台", "訂單管理－代客預訂調整", "代客預訂－定期（VIP）", _engineer_price_text(settings, vip=True), "依 PART／平日週末套用"],
+        ["計價", "服務總額基準", "全部", f"每 2 人 1 小時 {_money(BASE_WEEKDAY_RATE)}", "PART 1、PART 2 的平日與週末均使用此基準，再加年節加價"],
+        ["通知", "定期 VIP 回覆截止", "定期 VIP", settings.reply_deadline or "尚未設定", ""],
+        ["通知", "Email／LINE 通知輸出", "VIP", settings.notice_spreadsheet_id, "通知表單試算表 ID"],
+        ["更新資訊", "設定更新時間", "工程師", datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M:%S"), "由年度設定產生"],
+    ]
+    sh.clear()
+    sh.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")
+    sh.format(
+        "A1:E1",
+        {
+            "backgroundColor": {"red": 0.93, "green": 0.93, "blue": 0.93},
+            "textFormat": {"bold": True},
+            "wrapStrategy": "WRAP",
+        },
+    )
     sh.freeze(rows=1)
     return title
 
@@ -1124,10 +1183,11 @@ def main() -> None:
             "年度設定",
             "全區",
             "成功",
-            f"已更新 {sheet_name} 與 {args.season_year}大掃除系統更新",
+            f"已更新 {sheet_name}、{args.season_year}大掃除系統更新與系統工作表修改資料",
         )
         print(f"{args.season_year} 年度大掃除設定已儲存：{sheet_name}")
         print(f"系統更新內容已同步：{args.season_year}大掃除系統更新")
+        print(f"工程師修改資料已同步：{args.season_year}系統工作表修改資料")
         return
 
     result = generate_notice_data(
