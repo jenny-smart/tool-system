@@ -93,6 +93,10 @@ DEFAULT_NOTICE_SPREADSHEET_ID = "1AsU4YF6t8gt-lVb0p4C656CWdbveWkuHetPe1nwC7BE"
 DEFAULT_MASTER_SPREADSHEET_ID = "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
 SETTINGS_SHEET_NAME = "大掃除設定"
 MASTER_ID_SHEET_NAME = "大掃除設定"
+BASE_WEEKDAY_RATE = 1200
+BASE_WEEKEND_RATE = 1400
+MINIMUM_SERVICE_HOURS = 3
+COMPARISON_HOURS = (2, 3, 4, 6, 8)
 
 
 def _output_gc() -> gspread.Client:
@@ -348,6 +352,38 @@ def _price_text(start: datetime, end: datetime, weekday_rate: float, weekend_rat
     )
 
 
+def _service_intro(phase1_start: datetime, phase2_end: datetime) -> str:
+    return (
+        f"{phase1_start.year}年節大掃除期間：{_date_range(phase1_start, phase2_end)}\n"
+        f"基本時數為 2 人 {MINIMUM_SERVICE_HOURS} 小時起\n"
+        "大掃除服務主要為方便需求6–8小時客戶，服務內容同居家清潔，以人時計價。"
+    )
+
+
+def _comparison_values(settings: DeepCleanSettings, hours: int, include_base: bool) -> list[float]:
+    rates = (
+        settings.phase1_nonvip_weekday_rate,
+        settings.phase1_weekday_rate,
+        settings.phase1_nonvip_weekend_rate,
+        settings.phase1_weekend_rate,
+        settings.phase2_nonvip_weekday_rate,
+        settings.phase2_weekday_rate,
+        settings.phase2_nonvip_weekend_rate,
+        settings.phase2_weekend_rate,
+    )
+    bases = (
+        BASE_WEEKDAY_RATE,
+        BASE_WEEKDAY_RATE,
+        BASE_WEEKEND_RATE,
+        BASE_WEEKEND_RATE,
+        BASE_WEEKDAY_RATE,
+        BASE_WEEKDAY_RATE,
+        BASE_WEEKEND_RATE,
+        BASE_WEEKEND_RATE,
+    )
+    return [hours * (rate + (base if include_base else 0)) for rate, base in zip(rates, bases)]
+
+
 def _build_notice_text(
     name: str,
     phase1_start: datetime,
@@ -394,10 +430,10 @@ def _build_notice_text(
     return (
         f"❤️親愛的 {name} 您好：\n\n"
         "🎉 感謝您長期支持檸檬家事服務 🎉\n"
-        f"年節大掃除期間：{_date_range(phase1_start, phase2_end)}\n"
+        f"{_service_intro(phase1_start, phase2_end)}\n"
         "✨VIP 專屬 — 優先預約年節大掃除服務正式開放✨\n\n"
         "🧽《VIP 定期客戶年節大掃除加價收費說明》\n"
-        "大掃除期間，單次服務為 2 人 3 小時起\n\n"
+        "\n"
         f"📍PART 1：{_price_text(phase1_start, phase1_end, phase1_weekday_rate, phase1_weekend_rate)}\n\n"
         f"📍PART 2：{_price_text(phase2_start, phase2_end, phase2_weekday_rate, phase2_weekend_rate)}\n\n"
         "💰「年節加價」將自動從您的「儲值金」帳戶扣除，無需現場付款；"
@@ -427,10 +463,10 @@ def build_nonroutine_notice(
     return (
         f"❤️親愛的 {name} 您好：\n\n"
         "🎉 感謝您長期支持檸檬家事服務 🎉\n"
-        f"年節大掃除期間：{_date_range(phase1_start, phase2_end)}\n"
+        f"{_service_intro(phase1_start, phase2_end)}\n"
         "✨VIP 專屬 — 優先預約年節大掃除服務正式開放✨\n\n"
         "🧽《VIP 客戶年節大掃除加價收費說明》\n"
-        "大掃除期間，單次服務為 2 人 3 小時起\n\n"
+        "\n"
         f"📍PART 1：{_price_text(phase1_start, phase1_end, phase1_weekday_rate, phase1_weekend_rate)}\n\n"
         f"📍PART 2：{_price_text(phase2_start, phase2_end, phase2_weekday_rate, phase2_weekend_rate)}\n\n"
         "💰「年節加價」將自動從您的「儲值金」帳戶扣除，無需現場付款；"
@@ -686,9 +722,26 @@ def load_deep_clean_settings(
 
 def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
     title = f"{settings.season_year}大掃除系統更新"
-    sh = _get_or_create_sheet(ss, title, 100, 4)
+    sh = _get_or_create_sheet(ss, title, 100, 9)
+    if getattr(sh, "col_count", 9) < 9:
+        sh.resize(cols=9)
+    comparison_headers = [
+        "時數",
+        "PART1 非VIP平日",
+        "PART1 VIP平日",
+        "PART1 非VIP週末",
+        "PART1 VIP週末",
+        "PART2 非VIP平日",
+        "PART2 VIP平日",
+        "PART2 非VIP週末",
+        "PART2 VIP週末",
+    ]
     rows = [
         ["分類", "設定項目", "內容", "系統處理方式"],
+        ["說明", "完整大掃除期間", _date_range(settings.phase1_start, settings.phase2_end), "未特別註明 PART 時，一律顯示完整區間"],
+        ["說明", "基本時數", f"2 人 {MINIMUM_SERVICE_HOURS} 小時起", "最低 6 人時"],
+        ["說明", "服務內容", "大掃除服務主要為方便需求6–8小時客戶，服務內容同居家清潔，以人時計價。", "依實際人數 × 時數計價"],
+        ["基準價", "非大掃除期間平日／週末", f"{_money(BASE_WEEKDAY_RATE)}／{_money(BASE_WEEKEND_RATE)}", "每 2 人 1 小時"],
         ["期間", "PART 1", _date_range(settings.phase1_start, settings.phase1_end), "日曆服務落在此區間者依 PART 1 計價"],
         ["期間", "PART 2", _date_range(settings.phase2_start, settings.phase2_end), "日曆服務落在此區間者依 PART 2 計價"],
         ["價格", "PART 1 VIP 平日／週末", f"{_money(settings.phase1_weekday_rate)}／{_money(settings.phase1_weekend_rate)}", "週一～週五／週六＋週日"],
@@ -699,6 +752,14 @@ def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
         ["非定期VIP", "優先預約", _date_range(settings.booking_start, settings.booking_end), "後台儲值金匯出名單－日曆定期VIP"],
         ["名單比對", "比對鍵", "電話優先，姓名輔助", "避免同名或格式差異造成誤判"],
         ["Email合併", "輸出檔", settings.notice_spreadsheet_id, "產生主旨、通知內容、LINE連結、寄送狀態與時間欄位"],
+        [],
+        ["年節加價比較表"] + [""] * 8,
+        comparison_headers,
+        *[[f"2人{hours}小時", *_comparison_values(settings, hours, False)] for hours in COMPARISON_HOURS],
+        [],
+        ["大掃除服務總額比較表（基準價＋年節加價）"] + [""] * 8,
+        comparison_headers,
+        *[[f"2人{hours}小時", *_comparison_values(settings, hours, True)] for hours in COMPARISON_HOURS],
     ]
     sh.clear()
     sh.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")

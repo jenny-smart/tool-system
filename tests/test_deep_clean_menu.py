@@ -23,3 +23,7 @@ def test_service_schedule_exposes_deep_clean_settings_and_update():
     assert "PART 2 非VIP 週六＋週日加價" in source
     assert '"--phase1-nonvip-weekday-rate"' in source
     assert '"--phase2-nonvip-weekend-rate"' in source
+    assert "完整年節大掃除期間" in source
+    assert "基本時數：2 人 3 小時起" in source
+    assert "加價與服務總額即時試算" in source
+    assert "非大掃除基準價：平日每 2 人 1 小時 NT$1,200；週末 NT$1,400" in source

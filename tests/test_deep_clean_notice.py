@@ -4,6 +4,8 @@ from tools.service_management.deep_clean_notice import (
     DeepCleanSettings,
     _extra_charge,
     _canonical_settings_values,
+    _comparison_values,
+    _service_intro,
     _settings_from_row,
     _settings_row,
     _validate_settings,
@@ -172,6 +174,44 @@ def test_nonroutine_notice_uses_open_window_and_correct_customer_label():
     assert "《VIP 客戶年節大掃除加價收費說明》" in notice
     assert "VIP 開放預約時間：2026/11/05～2026/11/10" in notice
     assert "VIP 定期客戶" not in notice
+    assert "2026年節大掃除期間：2026/12/15～2027/02/04" in notice
+    assert "基本時數為 2 人 3 小時起" in notice
+    assert "服務內容同居家清潔，以人時計價" in notice
+
+
+def test_price_comparison_uses_matching_part_customer_type_and_day_type():
+    settings = DeepCleanSettings(
+        2026,
+        datetime(2026, 12, 15, tzinfo=TZ),
+        datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        125,
+        225,
+        datetime(2027, 1, 22, tzinfo=TZ),
+        datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        225,
+        275,
+        "",
+        datetime(2026, 11, 5, tzinfo=TZ),
+        datetime(2026, 11, 10, tzinfo=TZ),
+        "notice-id",
+        300,
+        350,
+        350,
+        400,
+    )
+
+    assert _comparison_values(settings, 2, False) == [600, 250, 700, 450, 700, 450, 800, 550]
+    assert _comparison_values(settings, 2, True) == [3000, 2650, 3500, 3250, 3100, 2850, 3600, 3350]
+
+
+def test_service_intro_uses_full_period_and_three_hour_minimum():
+    intro = _service_intro(
+        datetime(2026, 12, 15, tzinfo=TZ),
+        datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+    )
+
+    assert "2026/12/15～2027/02/04" in intro
+    assert "2 人 3 小時起" in intro
 
 
 def test_zero_rates_are_valid_while_prices_are_undecided():
