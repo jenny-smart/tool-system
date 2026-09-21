@@ -175,6 +175,27 @@ class DeepCleanSettings:
     phase2_nonvip_weekend_rate: float = 0
 
 
+def deep_clean_settings_form_values(settings: DeepCleanSettings) -> dict[str, Any]:
+    """Convert persisted settings into stable Streamlit widget defaults."""
+    return {
+        "phase1_start": settings.phase1_start.date(),
+        "phase1_end": settings.phase1_end.date(),
+        "phase1_weekday_rate": int(round(settings.phase1_weekday_rate)),
+        "phase1_weekend_rate": int(round(settings.phase1_weekend_rate)),
+        "phase1_nonvip_weekday_rate": int(round(settings.phase1_nonvip_weekday_rate)),
+        "phase1_nonvip_weekend_rate": int(round(settings.phase1_nonvip_weekend_rate)),
+        "phase2_start": settings.phase2_start.date(),
+        "phase2_end": settings.phase2_end.date(),
+        "phase2_weekday_rate": int(round(settings.phase2_weekday_rate)),
+        "phase2_weekend_rate": int(round(settings.phase2_weekend_rate)),
+        "phase2_nonvip_weekday_rate": int(round(settings.phase2_nonvip_weekday_rate)),
+        "phase2_nonvip_weekend_rate": int(round(settings.phase2_nonvip_weekend_rate)),
+        "reply_deadline": settings.reply_deadline,
+        "booking_start": settings.booking_start.date(),
+        "booking_end": settings.booking_end.date(),
+    }
+
+
 def _validate_settings(settings: DeepCleanSettings) -> None:
     if settings.phase1_start > settings.phase1_end or settings.phase2_start > settings.phase2_end:
         raise ValueError("階段開始日期不可晚於結束日期")

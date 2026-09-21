@@ -27,3 +27,6 @@ def test_service_schedule_exposes_deep_clean_settings_and_update():
     assert "基本時數：2 人 3 小時起" in source
     assert "加價與服務總額即時試算" in source
     assert "非大掃除基準價：平日每 2 人 1 小時 NT$1,200；週末 NT$1,400" in source
+    assert "load_deep_clean_settings" in source
+    assert "deep_clean_settings_form_values" in source
+    assert "已載入 {deep_clean_season_year} 年度已儲存設定" in source

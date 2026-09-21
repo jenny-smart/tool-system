@@ -12,6 +12,7 @@ from tools.service_management.deep_clean_notice import (
     build_nonroutine_notice,
     build_nonroutine_notice_rows,
     build_notice_rows,
+    deep_clean_settings_form_values,
     resolve_deep_clean_sheet_ids,
 )
 
@@ -262,6 +263,13 @@ def test_settings_support_vip_and_nonvip_rates_for_both_parts():
     assert row[9:13] == [200, 250, 400, 450]
     assert loaded.phase1_nonvip_weekday_rate == 300
     assert loaded.phase2_nonvip_weekend_rate == 450
+
+    form = deep_clean_settings_form_values(loaded)
+    assert form["phase1_start"].isoformat() == "2026-12-15"
+    assert form["phase1_weekday_rate"] == 150
+    assert form["phase1_nonvip_weekday_rate"] == 300
+    assert form["phase2_weekend_rate"] == 250
+    assert form["phase2_nonvip_weekend_rate"] == 450
 
 
 def test_legacy_settings_keep_old_rates_as_vip_and_default_nonvip_to_zero():
