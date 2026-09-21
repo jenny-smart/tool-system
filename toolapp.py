@@ -4265,7 +4265,39 @@ with date_col:
 
             if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
                 _saved_form_key = f"deep_clean_saved_form_{deep_clean_season_year}"
-                _saved_form = st.session_state.get(_saved_form_key, {})
+                _load_status_key = f"deep_clean_load_status_{deep_clean_season_year}"
+                if _saved_form_key not in st.session_state:
+                    try:
+                        from tools.service_management.deep_clean_notice import (
+                            deep_clean_settings_form_values,
+                            load_deep_clean_settings,
+                            resolve_deep_clean_sheet_ids,
+                        )
+
+                        _year_settings_id, _ = resolve_deep_clean_sheet_ids(
+                            deep_clean_season_year,
+                            deep_clean_settings_spreadsheet_id,
+                        )
+                        _persisted_settings = load_deep_clean_settings(
+                            deep_clean_season_year,
+                            _year_settings_id,
+                        )
+                        st.session_state[_saved_form_key] = deep_clean_settings_form_values(
+                            _persisted_settings
+                        )
+                        st.session_state[_load_status_key] = "loaded"
+                    except ValueError as _load_error:
+                        st.session_state[_saved_form_key] = {}
+                        st.session_state[_load_status_key] = f"missing:{_load_error}"
+                    except Exception as _load_error:
+                        st.session_state[_saved_form_key] = {}
+                        st.session_state[_load_status_key] = f"error:{_load_error}"
+                _saved_form = st.session_state[_saved_form_key]
+                _load_status = st.session_state.get(_load_status_key, "")
+                if _load_status == "loaded":
+                    st.success(f"已載入 {deep_clean_season_year} 年度已儲存設定。", icon="✅")
+                elif _load_status.startswith("error:"):
+                    st.warning(f"讀取已儲存設定失敗：{_load_status.removeprefix('error:')}")
                 st.markdown('<div class="field-label">📆 兩階段期間與價格</div>', unsafe_allow_html=True)
                 _p1a, _p1b = st.columns(2)
                 with _p1a:
@@ -5727,6 +5759,7 @@ if run_clicked:
                             "booking_start": deep_clean_booking_start,
                             "booking_end": deep_clean_booking_end,
                         }
+                        st.session_state[f"deep_clean_load_status_{deep_clean_season_year}"] = "loaded"
                 elif success_steps and failed_steps:
                     # 部分成功：不拋例外，顯示 warning
                     result = f"⚠️ 部分完成：{len(success_steps)} 個步驟成功，{len(failed_steps)} 個步驟失敗"
