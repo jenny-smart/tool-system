@@ -86,6 +86,8 @@ SETTINGS_HEADERS = [
     "非定期VIP開放",
     "非定期VIP截止",
     "通知輸出試算表ID",
+    "農曆年休假開始",
+    "農曆年休假結束",
     "更新時間",
 ]
 
@@ -175,6 +177,8 @@ class DeepCleanSettings:
     phase1_nonvip_weekend_rate: float = 0
     phase2_nonvip_weekday_rate: float = 0
     phase2_nonvip_weekend_rate: float = 0
+    lunar_new_year_start: datetime | None = None
+    lunar_new_year_end: datetime | None = None
 
 
 def deep_clean_settings_form_values(settings: DeepCleanSettings) -> dict[str, Any]:
@@ -195,6 +199,8 @@ def deep_clean_settings_form_values(settings: DeepCleanSettings) -> dict[str, An
         "reply_deadline": settings.reply_deadline,
         "booking_start": settings.booking_start.date(),
         "booking_end": settings.booking_end.date(),
+        "lunar_new_year_start": settings.lunar_new_year_start.date() if settings.lunar_new_year_start else None,
+        "lunar_new_year_end": settings.lunar_new_year_end.date() if settings.lunar_new_year_end else None,
     }
 
 
@@ -205,6 +211,10 @@ def _validate_settings(settings: DeepCleanSettings) -> None:
         raise ValueError("第一階段結束日期必須早於第二階段開始日期")
     if settings.booking_start > settings.booking_end:
         raise ValueError("非定期 VIP 開放預約日不可晚於截止日")
+    if bool(settings.lunar_new_year_start) != bool(settings.lunar_new_year_end):
+        raise ValueError("農曆年休假開始與結束日期必須同時設定")
+    if settings.lunar_new_year_start and settings.lunar_new_year_start > settings.lunar_new_year_end:
+        raise ValueError("農曆年休假開始日期不可晚於結束日期")
     rates = [
         settings.phase1_weekday_rate,
         settings.phase1_weekend_rate,
@@ -238,13 +248,16 @@ def _settings_row(settings: DeepCleanSettings) -> list[Any]:
         settings.booking_start.strftime("%Y-%m-%d"),
         settings.booking_end.strftime("%Y-%m-%d"),
         settings.notice_spreadsheet_id,
+        settings.lunar_new_year_start.strftime("%Y-%m-%d") if settings.lunar_new_year_start else "",
+        settings.lunar_new_year_end.strftime("%Y-%m-%d") if settings.lunar_new_year_end else "",
         datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M:%S"),
     ]
 
 
 def _settings_from_row(row: list[Any]) -> DeepCleanSettings:
     values = list(row)
-    is_new_format = len(values) >= len(SETTINGS_HEADERS)
+    is_new_format = len(values) >= 18
+    has_lunar_dates = len(values) >= len(SETTINGS_HEADERS)
     values += [""] * max(0, len(SETTINGS_HEADERS) - len(values))
     if is_new_format:
         p1_nonvip_weekday, p1_nonvip_weekend = float(values[5] or 0), float(values[6] or 0)
@@ -275,6 +288,8 @@ def _settings_from_row(row: list[Any]) -> DeepCleanSettings:
         phase1_nonvip_weekend_rate=p1_nonvip_weekend,
         phase2_nonvip_weekday_rate=p2_nonvip_weekday,
         phase2_nonvip_weekend_rate=p2_nonvip_weekend,
+        lunar_new_year_start=_parse_date(str(values[17])) if has_lunar_dates and values[17] else None,
+        lunar_new_year_end=_parse_date(str(values[18]), end_of_day=True) if has_lunar_dates and values[18] else None,
     )
 
 
@@ -350,6 +365,25 @@ def _service_datetime_line(row: dict[str, Any]) -> str:
     return f"{row['date_str']}（週{row['weekday']}）{row['start_str']}–{row['end_str']}"
 
 
+def _is_hidden_reminder_service(row: dict[str, Any]) -> bool:
+    status = str(row.get("status") or "")
+    return "待確認" in status or "暫停" in status
+
+
+def _holiday_pause_block(
+    holiday_rows: list[dict[str, Any]],
+    lunar_new_year_start: datetime | None,
+    lunar_new_year_end: datetime | None,
+) -> str:
+    if not lunar_new_year_start or not lunar_new_year_end:
+        return ""
+    original_services = "\n".join(_service_datetime_line(row) for row in holiday_rows) or "無"
+    return (
+        f"農曆年休假暫停服務日期：{lunar_new_year_start:%Y/%m/%d}-{lunar_new_year_end:%Y/%m/%d}\n"
+        f"該地址原訂服務日期：\n{original_services}\n\n"
+    )
+
+
 def _service_reminder_text(
     name: str,
     address: str,
@@ -357,15 +391,26 @@ def _service_reminder_text(
     next_service: dict[str, Any] | None,
     phase1_start: datetime,
     phase2_end: datetime,
+    holiday_rows: list[dict[str, Any]],
+    lunar_new_year_start: datetime | None,
+    lunar_new_year_end: datetime | None,
 ) -> str:
-    schedule = "\n".join(_service_datetime_line(row) for row in month_rows) or "目前無排程"
+    visible_rows = [row for row in month_rows if not _is_hidden_reminder_service(row)]
+    if not visible_rows and not holiday_rows:
+        return ""
+    schedule = "\n".join(_service_datetime_line(row) for row in visible_rows) or "目前無排程"
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
+    holiday_block = _holiday_pause_block(
+        holiday_rows, lunar_new_year_start, lunar_new_year_end,
+    )
     return (
         f"❤️親愛的 {name} 您好：\n\n"
         f"服務地址：{address or '未提供'}\n"
         f"提醒您目前該服務地址{_month_range(phase1_start, phase2_end)}的服務日期/時段如下：\n"
         f"{schedule}\n\n"
-        f"年節後第一次服務日期：{next_label}"
+        f"{holiday_block}"
+        f"年節後第一次服務日期：{next_label}\n\n"
+        "請您協助確認，若需要調整，請連繫我們～"
     )
 
 
@@ -482,10 +527,13 @@ def _build_notice_text(
     phase1_rows: list[dict[str, Any]],
     phase2_rows: list[dict[str, Any]],
     month_rows: list[dict[str, Any]],
+    holiday_rows: list[dict[str, Any]],
     phase1_total: float,
     phase2_total: float,
     next_service: dict[str, Any] | None,
     reply_deadline: str,
+    lunar_new_year_start: datetime | None,
+    lunar_new_year_end: datetime | None,
 ) -> str:
     all_rows = phase1_rows + phase2_rows
     monthly_confirmation = any(_is_monthly_confirmation(row) for row in all_rows)
@@ -494,6 +542,9 @@ def _build_notice_text(
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
     deadline = f"建議您於 {reply_deadline} 前，" if reply_deadline.strip() else "如需調整，建議您儘早"
     deadline_date = _reply_deadline_date(reply_deadline)
+    holiday_block = _holiday_pause_block(
+        holiday_rows, lunar_new_year_start, lunar_new_year_end,
+    )
     if monthly_confirmation:
         arrangement = (
             f"服務地址：{address or '未提供'}\n"
@@ -501,6 +552,7 @@ def _build_notice_text(
             if deadline_date
             else f"服務地址：{address or '未提供'}\n🕓 請儘早告知欲安排的日期。\n\n"
         )
+        arrangement += holiday_block
         contact = "請透過官方 LINE@ 與我們聯繫。\n"
         estimate_note = ""
     else:
@@ -518,6 +570,7 @@ def _build_notice_text(
             f"服務時段：{service_times}\n\n"
             f"PART 1 次數／年節加價金額：{len(phase1_rows)} 次／{_money(phase1_total)}\n"
             f"PART 2 次數／年節加價金額：{len(phase2_rows)} 次／{_money(phase2_total)}\n\n"
+            f"{holiday_block}"
             f"年節後第一次服務日期：{next_label}\n\n"
         )
         contact = f"{deadline}透過官方 LINE@ 與我們聯繫。\n"
@@ -587,10 +640,12 @@ def build_notice_rows(
     phase2_weekday_rate: float,
     phase2_weekend_rate: float,
     reply_deadline: str = "",
+    lunar_new_year_start: datetime | None = None,
+    lunar_new_year_end: datetime | None = None,
 ) -> list[list[Any]]:
     grouped: dict[tuple[str, str], dict[str, Any]] = defaultdict(
         lambda: {
-            "phase1": [], "phase2": [], "months": [], "after": [], "phone": "", "email": "",
+            "phase1": [], "phase2": [], "months": [], "holiday": [], "after": [], "phone": "", "email": "",
             "line": "", "name": "", "address": "",
         }
     )
@@ -613,6 +668,16 @@ def build_notice_rows(
         target["line"] = target["line"] or str(stored.get("lineValue") or "")
         target["email"] = target["email"] or str(stored.get("email") or "")
 
+        in_lunar_holiday = bool(
+            lunar_new_year_start
+            and lunar_new_year_end
+            and lunar_new_year_start <= service_dt <= lunar_new_year_end
+        )
+        if in_lunar_holiday:
+            row["status"] = "暫停服務"
+            target["holiday"].append(row)
+            continue
+
         if month_start <= service_dt < month_end_exclusive:
             target["months"].append(row)
 
@@ -627,9 +692,11 @@ def build_notice_rows(
     for target in grouped.values():
         p1 = sorted(target["phase1"], key=lambda row: row["start_dt"])
         p2 = sorted(target["phase2"], key=lambda row: row["start_dt"])
-        if not p1 and not p2:
+        holiday = sorted(target["holiday"], key=lambda row: row["start_dt"])
+        if not p1 and not p2 and not holiday:
             continue
-        after = sorted(target["after"], key=lambda row: row["start_dt"])
+        after_all = sorted(target["after"], key=lambda row: row["start_dt"])
+        after = [row for row in after_all if not _is_hidden_reminder_service(row)]
         month_rows = sorted(target["months"], key=lambda row: row["start_dt"])
         next_service = after[0] if after else None
         p1_total = sum(_extra_charge(row, phase1_weekday_rate, phase1_weekend_rate) for row in p1)
@@ -648,14 +715,17 @@ def build_notice_rows(
             p1,
             p2,
             month_rows,
+            holiday,
             p1_total,
             p2_total,
             next_service,
             reply_deadline,
+            lunar_new_year_start,
+            lunar_new_year_end,
         )
         line_url = target["line"]
         line_cell = f'=HYPERLINK("{line_url}","開啟 LINE")' if re.match(r"^https?://", line_url) else line_url
-        detail_rows = p1 + p2 + ([next_service] if next_service else [])
+        detail_rows = p1 + p2 + holiday + (after_all[:1] if after_all else [])
         output.append([
             area_name,
             "定期VIP",
@@ -680,7 +750,8 @@ def build_notice_rows(
             _dated_values(detail_rows, "status"),
             _service_reminder_text(
                 target["name"], target["address"], month_rows, next_service,
-                phase1_start, phase2_end,
+                phase1_start, phase2_end, holiday,
+                lunar_new_year_start, lunar_new_year_end,
             ),
         ])
 
@@ -793,7 +864,7 @@ def save_deep_clean_settings(
     sh.clear()
     sh.update(values=canonical_values, range_name="A1", value_input_option="USER_ENTERED")
     sh.format(
-        "A1:R1",
+        "A1:T1",
         {
             "backgroundColor": {"red": 0.93, "green": 0.93, "blue": 0.93},
             "textFormat": {"bold": True},
@@ -851,6 +922,7 @@ def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
         ["基準價", "非大掃除期間平日／週末", f"{_money(BASE_WEEKDAY_RATE)}／{_money(BASE_WEEKEND_RATE)}", "每 2 人 1 小時"],
         ["期間", "PART 1", _date_range(settings.phase1_start, settings.phase1_end), "日曆服務落在此區間者依 PART 1 計價"],
         ["期間", "PART 2", _date_range(settings.phase2_start, settings.phase2_end), "日曆服務落在此區間者依 PART 2 計價"],
+        ["期間", "農曆年休假暫停服務", _date_range(settings.lunar_new_year_start, settings.lunar_new_year_end) if settings.lunar_new_year_start and settings.lunar_new_year_end else "未設定", "休假區間內服務一律標示暫停且不計費"],
         ["價格", "PART 1 VIP 平日／週末", f"{_money(settings.phase1_weekday_rate)}／{_money(settings.phase1_weekend_rate)}", "週一～週五／週六＋週日"],
         ["價格", "PART 1 非VIP 平日／週末", f"{_money(settings.phase1_nonvip_weekday_rate)}／{_money(settings.phase1_nonvip_weekend_rate)}", "週一～週五／週六＋週日"],
         ["價格", "PART 2 VIP 平日／週末", f"{_money(settings.phase2_weekday_rate)}／{_money(settings.phase2_weekend_rate)}", "週一～週五／週六＋週日"],
@@ -890,6 +962,11 @@ def _write_engineer_system_sheet(ss: Any, settings: DeepCleanSettings) -> str:
     rows[5][3:6] = ["VIP PART2", tax(settings.phase2_weekday_rate), tax(settings.phase2_weekend_rate)]
     rows[7][3:6] = ["一般 PART1", tax(settings.phase1_nonvip_weekday_rate), tax(settings.phase1_nonvip_weekend_rate)]
     rows[8][3:6] = ["一般 PART2", tax(settings.phase2_nonvip_weekday_rate), tax(settings.phase2_nonvip_weekend_rate)]
+    rows[9][1:3] = [
+        "農曆年休假暫停服務日期",
+        _date_range(settings.lunar_new_year_start, settings.lunar_new_year_end)
+        if settings.lunar_new_year_start and settings.lunar_new_year_end else "尚未設定",
+    ]
     rows[12][1:3] = ["VIP開放期間", _date_range(settings.booking_start, settings.booking_end)]
     rows[13][1:3] = ["一般客開放期間", "尚未設定"]
     sh.clear()
@@ -946,6 +1023,8 @@ def generate_notice_data(
     phase2_weekend_rate: float,
     reply_deadline: str = "",
     target_spreadsheet_id: str = "",
+    lunar_new_year_start: datetime | None = None,
+    lunar_new_year_end: datetime | None = None,
 ) -> dict[str, Any]:
     if phase1_start > phase1_end or phase2_start > phase2_end:
         raise ValueError("階段開始日期不可晚於結束日期")
@@ -987,6 +1066,8 @@ def generate_notice_data(
             phase2_weekday_rate,
             phase2_weekend_rate,
             reply_deadline,
+            lunar_new_year_start,
+            lunar_new_year_end,
         )
         counts[area_name] = len(notice_rows)
         all_rows.extend(notice_rows)
@@ -1108,6 +1189,8 @@ def update_all_vip_notices(
         settings.phase2_weekend_rate,
         settings.reply_deadline,
         target_notice_id,
+        settings.lunar_new_year_start,
+        settings.lunar_new_year_end,
     )
 
     target_areas = list(regular["areas"].keys())
@@ -1157,6 +1240,8 @@ def main() -> None:
     parser.add_argument("--reply-deadline", default="")
     parser.add_argument("--booking-start")
     parser.add_argument("--booking-end")
+    parser.add_argument("--lunar-new-year-start")
+    parser.add_argument("--lunar-new-year-end")
     parser.add_argument("--master-spreadsheet-id", default=DEFAULT_MASTER_SPREADSHEET_ID)
     parser.add_argument("--settings-spreadsheet-id", default="")
     parser.add_argument("--notice-spreadsheet-id", default="")
@@ -1234,6 +1319,8 @@ def main() -> None:
             phase1_nonvip_weekend_rate=args.phase1_nonvip_weekend_rate,
             phase2_nonvip_weekday_rate=args.phase2_nonvip_weekday_rate,
             phase2_nonvip_weekend_rate=args.phase2_nonvip_weekend_rate,
+            lunar_new_year_start=_parse_date(args.lunar_new_year_start) if args.lunar_new_year_start else None,
+            lunar_new_year_end=_parse_date(args.lunar_new_year_end, end_of_day=True) if args.lunar_new_year_end else None,
         )
         sheet_name = save_deep_clean_settings(settings, settings_spreadsheet_id)
         append_master_execution_log(
@@ -1261,6 +1348,8 @@ def main() -> None:
         args.phase2_weekend_rate,
         args.reply_deadline,
         args.target_spreadsheet_id or notice_spreadsheet_id,
+        _parse_date(args.lunar_new_year_start) if args.lunar_new_year_start else None,
+        _parse_date(args.lunar_new_year_end, end_of_day=True) if args.lunar_new_year_end else None,
     )
     print(f"大掃除通知資料完成：{result['sheet']}，共 {result['count']} 位客戶")
     for area_name, count in result["areas"].items():

@@ -114,6 +114,51 @@ def test_regular_notice_contains_mail_merge_fields_and_next_service():
     assert "提醒您目前該服務地址2026/12～2027/02的服務日期/時段如下" in row[21]
     assert "2026/12/07（週一）09:00–12:00" in row[21]
     assert "年節後第一次服務日期：2027/02/12(一)" in row[21]
+    assert "請您協助確認，若需要調整，請連繫我們～" in row[21]
+
+
+def test_service_reminder_hides_pending_paused_and_lunar_holiday_services():
+    rows = [
+        _row("2026-12-18"),
+        _row("2027-01-06", status="待確認"),
+        _row("2027-02-03", status="暫停"),
+        _row("2027-02-06"),
+        _row("2027-03-03"),
+    ]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300, "",
+        datetime(2027, 2, 5, tzinfo=TZ), datetime(2027, 2, 10, 23, 59, tzinfo=TZ),
+    )
+
+    reminder = output[0][21]
+    assert "2026/12/18" in reminder
+    assert "2027/01/06" not in reminder
+    assert "2027/02/03" not in reminder
+    assert "農曆年休假暫停服務日期：2027/02/05-2027/02/10" in reminder
+    assert "該地址原訂服務日期：\n2027/02/06（週一）09:00–12:00" in reminder
+    assert "年節後第一次服務日期：2027/03/03(一)" in reminder
+    notice = output[0][15]
+    assert "農曆年休假暫停服務日期：2027/02/05-2027/02/10" in notice
+    assert "該地址原訂服務日期：\n2027/02/06（週一）09:00–12:00" in notice
+    assert notice.index("農曆年休假暫停服務日期") < notice.index("年節後第一次服務日期")
+
+
+def test_service_reminder_is_blank_when_all_dates_are_pending_or_paused():
+    rows = [
+        _row("2026-12-18", status="待確認"),
+        _row("2027-01-23", status="暫停"),
+    ]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300,
+    )
+
+    assert output[0][21] == ""
 
 
 def test_regular_notice_keeps_calendar_service_note_and_status_fields():
@@ -324,7 +369,7 @@ def test_settings_support_vip_and_nonvip_rates_for_both_parts():
     row = _settings_row(settings)
     loaded = _settings_from_row(row)
 
-    assert len(row) == 18
+    assert len(row) == 20
     assert row[3:7] == [150, 200, 300, 350]
     assert row[9:13] == [200, 250, 400, 450]
     assert loaded.phase1_nonvip_weekday_rate == 300
@@ -336,6 +381,24 @@ def test_settings_support_vip_and_nonvip_rates_for_both_parts():
     assert form["phase1_nonvip_weekday_rate"] == 300
     assert form["phase2_weekend_rate"] == 250
     assert form["phase2_nonvip_weekend_rate"] == 450
+
+
+def test_settings_persist_lunar_new_year_holiday_dates():
+    settings = DeepCleanSettings(
+        2026,
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        150, 200,
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        200, 250, "",
+        datetime(2026, 11, 5, tzinfo=TZ), datetime(2026, 11, 10, tzinfo=TZ),
+        "notice-id", 300, 350, 400, 450,
+        datetime(2027, 2, 5, tzinfo=TZ), datetime(2027, 2, 10, 23, 59, tzinfo=TZ),
+    )
+
+    loaded = _settings_from_row(_settings_row(settings))
+
+    assert loaded.lunar_new_year_start.date().isoformat() == "2027-02-05"
+    assert loaded.lunar_new_year_end.date().isoformat() == "2027-02-10"
 
 
 def test_legacy_settings_keep_old_rates_as_vip_and_default_nonvip_to_zero():
