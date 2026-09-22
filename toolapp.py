@@ -3776,6 +3776,8 @@ deep_clean_phase2_nonvip_weekend_rate = 0
 deep_clean_reply_deadline = ""
 deep_clean_booking_start = None
 deep_clean_booking_end = None
+deep_clean_lunar_new_year_start = None
+deep_clean_lunar_new_year_end = None
 deep_clean_settings_spreadsheet_id = MASTER_CONFIG_SPREADSHEET_ID
 deep_clean_season_year = datetime.now(TW_TZ).year
 
@@ -4328,6 +4330,19 @@ with date_col:
                     f"完整年節大掃除期間：{deep_clean_phase1_start:%Y/%m/%d}～"
                     f"{deep_clean_phase2_end:%Y/%m/%d}｜基本時數：2 人 3 小時起"
                 )
+                _lny1, _lny2 = st.columns(2)
+                with _lny1:
+                    deep_clean_lunar_new_year_start = st.date_input(
+                        "農曆年休假開始",
+                        value=_saved_form.get("lunar_new_year_start") or deep_clean_phase2_end + timedelta(days=1),
+                        key=f"deep_clean_lunar_start_{deep_clean_season_year}",
+                    )
+                with _lny2:
+                    deep_clean_lunar_new_year_end = st.date_input(
+                        "農曆年休假結束",
+                        value=_saved_form.get("lunar_new_year_end") or deep_clean_phase2_end + timedelta(days=6),
+                        key=f"deep_clean_lunar_end_{deep_clean_season_year}",
+                    )
                 with st.expander("💰 加價與服務總額即時試算", expanded=False):
                     _preview_columns = [
                         "時數", "P1 非VIP平日", "P1 VIP平日", "P1 非VIP週末", "P1 VIP週末",
@@ -5658,6 +5673,8 @@ if run_clicked:
                             raise ValueError("請確認兩階段日期順序")
                         if deep_clean_booking_start > deep_clean_booking_end:
                             raise ValueError("非定期 VIP 開放預約日不可晚於截止日")
+                        if deep_clean_lunar_new_year_start > deep_clean_lunar_new_year_end:
+                            raise ValueError("農曆年休假開始日期不可晚於結束日期")
                         cmd += [
                             "--mode", "save-settings",
                             "--phase1-start", deep_clean_phase1_start.strftime("%Y-%m-%d"),
@@ -5675,6 +5692,8 @@ if run_clicked:
                             "--reply-deadline", deep_clean_reply_deadline.strip(),
                             "--booking-start", deep_clean_booking_start.strftime("%Y-%m-%d"),
                             "--booking-end", deep_clean_booking_end.strftime("%Y-%m-%d"),
+                            "--lunar-new-year-start", deep_clean_lunar_new_year_start.strftime("%Y-%m-%d"),
+                            "--lunar-new-year-end", deep_clean_lunar_new_year_end.strftime("%Y-%m-%d"),
                         ]
                     else:
                         cmd += ["--mode", "update-all"]
@@ -5758,6 +5777,8 @@ if run_clicked:
                             "reply_deadline": deep_clean_reply_deadline,
                             "booking_start": deep_clean_booking_start,
                             "booking_end": deep_clean_booking_end,
+                            "lunar_new_year_start": deep_clean_lunar_new_year_start,
+                            "lunar_new_year_end": deep_clean_lunar_new_year_end,
                         }
                         st.session_state[f"deep_clean_load_status_{deep_clean_season_year}"] = "loaded"
                 elif success_steps and failed_steps:
