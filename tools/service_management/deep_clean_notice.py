@@ -49,6 +49,7 @@ NOTICE_HEADERS = [
     "非2人服務",
     "日曆備註",
     "服務狀態",
+    "服務日期提醒內容",
 ]
 
 NONROUTINE_NOTICE_HEADERS = [
@@ -296,6 +297,19 @@ def _date_range(start: datetime, end: datetime) -> str:
     return f"{start:%Y/%m/%d}～{end:%Y/%m/%d}"
 
 
+def _month_range(start: datetime, end: datetime) -> str:
+    return f"{start:%Y/%m}～{end:%Y/%m}"
+
+
+def _month_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    month_start = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if end.month == 12:
+        next_month = end.replace(year=end.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        next_month = end.replace(month=end.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return month_start, next_month
+
+
 def _service_label(row: dict[str, Any]) -> str:
     label = (
         f"{row['date_str']}（週{row['weekday']}）"
@@ -330,6 +344,29 @@ def _non_two_person_services(rows: list[dict[str, Any]]) -> str:
 
 def _service_date_label(row: dict[str, Any]) -> str:
     return f"{row['date_str']}({row['weekday']})"
+
+
+def _service_datetime_line(row: dict[str, Any]) -> str:
+    return f"{row['date_str']}（週{row['weekday']}）{row['start_str']}–{row['end_str']}"
+
+
+def _service_reminder_text(
+    name: str,
+    address: str,
+    month_rows: list[dict[str, Any]],
+    next_service: dict[str, Any] | None,
+    phase1_start: datetime,
+    phase2_end: datetime,
+) -> str:
+    schedule = "\n".join(_service_datetime_line(row) for row in month_rows) or "目前無排程"
+    next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
+    return (
+        f"❤️親愛的 {name} 您好：\n\n"
+        f"服務地址：{address or '未提供'}\n"
+        f"提醒您目前該服務地址{_month_range(phase1_start, phase2_end)}的服務日期/時段如下：\n"
+        f"{schedule}\n\n"
+        f"年節後第一次服務日期：{next_label}"
+    )
 
 
 def _is_monthly_confirmation(row: dict[str, Any]) -> bool:
@@ -433,6 +470,7 @@ def _engineer_price_text(settings: DeepCleanSettings, vip: bool) -> str:
 
 def _build_notice_text(
     name: str,
+    address: str,
     phase1_start: datetime,
     phase1_end: datetime,
     phase2_start: datetime,
@@ -443,6 +481,7 @@ def _build_notice_text(
     phase2_weekend_rate: float,
     phase1_rows: list[dict[str, Any]],
     phase2_rows: list[dict[str, Any]],
+    month_rows: list[dict[str, Any]],
     phase1_total: float,
     phase2_total: float,
     next_service: dict[str, Any] | None,
@@ -457,14 +496,23 @@ def _build_notice_text(
     deadline_date = _reply_deadline_date(reply_deadline)
     if monthly_confirmation:
         arrangement = (
+            f"服務地址：{address or '未提供'}\n"
             f"🕓 請於 {deadline_date} 前告知欲安排的日期。\n\n"
             if deadline_date
-            else "🕓 請儘早告知欲安排的日期。\n\n"
+            else f"服務地址：{address or '未提供'}\n🕓 請儘早告知欲安排的日期。\n\n"
         )
         contact = "請透過官方 LINE@ 與我們聯繫。\n"
         estimate_note = ""
     else:
+        month_dates = "\n".join(_service_date_label(row) for row in month_rows) or "目前無排程"
+        month_times = "、".join(
+            sorted({f"{row['start_str']}–{row['end_str']}" for row in month_rows})
+        ) or "目前無排程"
         arrangement = (
+            f"服務地址：{address or '未提供'}\n"
+            f"🕓 您原訂週期於（{_month_range(phase1_start, phase2_end)}）之服務安排如下：\n\n"
+            f"{month_dates}\n"
+            f"服務時段：{month_times}\n\n"
             f"🕓 您原訂週期於年節期間（{_date_range(phase1_start, phase2_end)}）之服務安排如下：\n\n"
             f"年節加價服務日期：{service_dates}\n"
             f"服務時段：{service_times}\n\n"
@@ -542,10 +590,11 @@ def build_notice_rows(
 ) -> list[list[Any]]:
     grouped: dict[tuple[str, str], dict[str, Any]] = defaultdict(
         lambda: {
-            "phase1": [], "phase2": [], "after": [], "phone": "", "email": "",
+            "phase1": [], "phase2": [], "months": [], "after": [], "phone": "", "email": "",
             "line": "", "name": "", "address": "",
         }
     )
+    month_start, month_end_exclusive = _month_bounds(phase1_start, phase2_end)
 
     for row in rows:
         row = dict(row)
@@ -564,6 +613,9 @@ def build_notice_rows(
         target["line"] = target["line"] or str(stored.get("lineValue") or "")
         target["email"] = target["email"] or str(stored.get("email") or "")
 
+        if month_start <= service_dt < month_end_exclusive:
+            target["months"].append(row)
+
         if phase1_start <= service_dt <= phase1_end:
             target["phase1"].append(row)
         elif phase2_start <= service_dt <= phase2_end:
@@ -578,11 +630,13 @@ def build_notice_rows(
         if not p1 and not p2:
             continue
         after = sorted(target["after"], key=lambda row: row["start_dt"])
+        month_rows = sorted(target["months"], key=lambda row: row["start_dt"])
         next_service = after[0] if after else None
         p1_total = sum(_extra_charge(row, phase1_weekday_rate, phase1_weekend_rate) for row in p1)
         p2_total = sum(_extra_charge(row, phase2_weekday_rate, phase2_weekend_rate) for row in p2)
         notice = _build_notice_text(
             target["name"],
+            target["address"],
             phase1_start,
             phase1_end,
             phase2_start,
@@ -593,6 +647,7 @@ def build_notice_rows(
             phase2_weekend_rate,
             p1,
             p2,
+            month_rows,
             p1_total,
             p2_total,
             next_service,
@@ -623,6 +678,10 @@ def build_notice_rows(
             _non_two_person_services(detail_rows),
             _dated_values(detail_rows, "note"),
             _dated_values(detail_rows, "status"),
+            _service_reminder_text(
+                target["name"], target["address"], month_rows, next_service,
+                phase1_start, phase2_end,
+            ),
         ])
 
     return sorted(output, key=lambda row: (str(row[2]), str(row[5])))
@@ -818,25 +877,25 @@ def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
 def _write_engineer_system_sheet(ss: Any, settings: DeepCleanSettings) -> str:
     """Generate the values an engineer should apply to the existing 「系統」 sheet."""
     title = f"{settings.season_year}系統工作表修改資料"
-    sh = _get_or_create_sheet(ss, title, 100, 5)
-    rows = [
-        ["修改區域", "系統工作表項目", "對象", "應修改內容", "工程師備註"],
-        ["共用", "年節大掃除期間", "全部", _date_range(settings.phase1_start, settings.phase2_end), "未註明 PART 時使用完整期間"],
-        ["共用", "基本時數", "全部", f"2 人 {MINIMUM_SERVICE_HOURS} 小時起", "共 6 人時"],
-        ["共用", "服務說明", "全部", "大掃除服務主要為方便需求6–8小時客戶，服務內容同居家清潔，以人時計價。", ""],
-        ["前台", "大掃除服務開放時間", "VIP", _date_range(settings.booking_start, settings.booking_end), "非定期 VIP 優先預約期間"],
-        ["前台", "大掃除服務開放時間", "一般客", "尚未設定", "請工程師確認一般客開放日"],
-        ["後台", "訂單管理－代客預訂調整", "代客預訂－單次（非VIP）", _engineer_price_text(settings, vip=False), "依 PART／平日週末套用"],
-        ["後台", "訂單管理－代客預訂調整", "代客預訂－定期（VIP）", _engineer_price_text(settings, vip=True), "依 PART／平日週末套用"],
-        ["計價", "服務總額基準", "全部", f"每 2 人 1 小時 {_money(BASE_WEEKDAY_RATE)}", "PART 1、PART 2 的平日與週末均使用此基準，再加年節加價"],
-        ["通知", "定期 VIP 回覆截止", "定期 VIP", settings.reply_deadline or "尚未設定", ""],
-        ["通知", "Email／LINE 通知輸出", "VIP", settings.notice_spreadsheet_id, "通知表單試算表 ID"],
-        ["更新資訊", "設定更新時間", "工程師", datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d %H:%M:%S"), "由年度設定產生"],
-    ]
+    sh = _get_or_create_sheet(ss, title, 100, 6)
+    if getattr(sh, "col_count", 6) < 6:
+        sh.resize(cols=6)
+    tax = lambda value: f"{int(round(value)):,}元(含稅)"
+    rows = [[""] * 6 for _ in range(14)]
+    rows[0] = ["工程師修改『系統』工作表資料", "項目", "設定內容", "客戶／階段", "平日", "週末"]
+    rows[1][1:3] = ["大掃除期間", _date_range(settings.phase1_start, settings.phase2_end)]
+    rows[2][1:3] = ["大掃除PART1期間", _date_range(settings.phase1_start, settings.phase1_end)]
+    rows[3][1:3] = ["大掃除PART2期間", _date_range(settings.phase2_start, settings.phase2_end)]
+    rows[4][3:6] = ["VIP PART1", tax(settings.phase1_weekday_rate), tax(settings.phase1_weekend_rate)]
+    rows[5][3:6] = ["VIP PART2", tax(settings.phase2_weekday_rate), tax(settings.phase2_weekend_rate)]
+    rows[7][3:6] = ["一般 PART1", tax(settings.phase1_nonvip_weekday_rate), tax(settings.phase1_nonvip_weekend_rate)]
+    rows[8][3:6] = ["一般 PART2", tax(settings.phase2_nonvip_weekday_rate), tax(settings.phase2_nonvip_weekend_rate)]
+    rows[12][1:3] = ["VIP開放期間", _date_range(settings.booking_start, settings.booking_end)]
+    rows[13][1:3] = ["一般客開放期間", "尚未設定"]
     sh.clear()
     sh.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")
     sh.format(
-        "A1:E1",
+        "A1:F1",
         {
             "backgroundColor": {"red": 0.93, "green": 0.93, "blue": 0.93},
             "textFormat": {"bold": True},
@@ -896,7 +955,7 @@ def generate_notice_data(
     if any(rate < 0 for rate in rates):
         raise ValueError("年節加價不可為負數")
 
-    overall_start = min(phase1_start, phase2_start)
+    overall_start, _ = _month_bounds(phase1_start, phase2_end)
     overall_end = max(phase1_end, phase2_end) + timedelta(days=90)
     source_gc = _gc()
     output_gc = _output_gc()
