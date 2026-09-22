@@ -137,13 +137,28 @@ def test_service_reminder_hides_pending_paused_and_lunar_holiday_services():
     assert "2026/12/18" in reminder
     assert "2027/01/06" not in reminder
     assert "2027/02/03" not in reminder
-    assert "農曆年休假暫停服務日期：2027/02/05-2027/02/10" in reminder
-    assert "該地址原訂服務日期：\n2027/02/06（週一）09:00–12:00" in reminder
+    assert "農曆年暫停服務期間：2027/02/05-2027/02/10" in reminder
+    assert "原訂服務日期：\n2027/02/06（週一）09:00–12:00 暫停一次" in reminder
     assert "年節後第一次服務日期：2027/03/03(一)" in reminder
     notice = output[0][15]
-    assert "農曆年休假暫停服務日期：2027/02/05-2027/02/10" in notice
-    assert "該地址原訂服務日期：\n2027/02/06（週一）09:00–12:00" in notice
-    assert notice.index("農曆年休假暫停服務日期") < notice.index("年節後第一次服務日期")
+    assert "農曆年暫停服務期間：2027/02/05-2027/02/10" in notice
+    assert "原訂服務日期：\n2027/02/06（週一）09:00–12:00 暫停一次" in notice
+    assert notice.index("農曆年暫停服務期間") < notice.index("年節後第一次服務日期")
+
+
+def test_holiday_block_omits_original_service_label_when_address_has_none():
+    rows = [_row("2026-12-18"), _row("2027-03-03")]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300, "",
+        datetime(2027, 2, 5, tzinfo=TZ), datetime(2027, 2, 10, 23, 59, tzinfo=TZ),
+    )
+
+    for content in (output[0][15], output[0][21]):
+        assert "農曆年暫停服務期間：2027/02/05-2027/02/10" in content
+        assert "原訂服務日期" not in content
 
 
 def test_service_reminder_is_blank_when_all_dates_are_pending_or_paused():

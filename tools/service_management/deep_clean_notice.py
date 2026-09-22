@@ -377,11 +377,13 @@ def _holiday_pause_block(
 ) -> str:
     if not lunar_new_year_start or not lunar_new_year_end:
         return ""
-    original_services = "\n".join(_service_datetime_line(row) for row in holiday_rows) or "無"
-    return (
-        f"農曆年休假暫停服務日期：{lunar_new_year_start:%Y/%m/%d}-{lunar_new_year_end:%Y/%m/%d}\n"
-        f"該地址原訂服務日期：\n{original_services}\n\n"
+    period = f"農曆年暫停服務期間：{lunar_new_year_start:%Y/%m/%d}-{lunar_new_year_end:%Y/%m/%d}\n"
+    if not holiday_rows:
+        return f"{period}\n"
+    original_services = "\n".join(
+        f"{_service_datetime_line(row)} 暫停一次" for row in holiday_rows
     )
+    return f"{period}原訂服務日期：\n{original_services}\n\n"
 
 
 def _service_reminder_text(
