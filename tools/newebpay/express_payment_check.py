@@ -66,7 +66,7 @@ def _transaction_link(page: Page, transaction_no: str) -> Locator | None:
     return None
 
 
-def _detail_value(page: Page, labels: Iterable[str]) -> str:
+def _find_detail_value(page: Page, labels: Iterable[str]) -> str | None:
     for context in [page, *page.frames]:
         for label in labels:
             matches = context.get_by_text(label, exact=True)
@@ -74,13 +74,25 @@ def _detail_value(page: Page, labels: Iterable[str]) -> str:
                 item = matches.nth(index)
                 if not item.is_visible():
                     continue
-                cell = item.locator("xpath=ancestor::*[self::th or self::td][1]")
+                cell = item.locator("xpath=ancestor-or-self::*[self::th or self::td][1]")
                 if not cell.count():
                     continue
                 value = cell.locator("xpath=following-sibling::*[self::th or self::td][1]")
                 if value.count() and value.first.is_visible():
                     return " ".join(_clean_lines(value.first.inner_text()))
-    raise RuntimeError(f"交易明細找不到欄位：{'／'.join(labels)}")
+    return None
+
+
+def _detail_value(page: Page, labels: Iterable[str], timeout_ms: int = 15_000) -> str:
+    labels = tuple(labels)
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        value = _find_detail_value(page, labels)
+        if value is not None:
+            return value
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"交易明細找不到欄位：{'／'.join(labels)}（等待 {timeout_ms}ms）")
+        page.wait_for_timeout(250)
 
 
 def _close_detail(page: Page) -> None:
