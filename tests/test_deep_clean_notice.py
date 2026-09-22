@@ -86,7 +86,7 @@ def test_part1_saturday_notice_uses_600_for_two_people_three_hours():
 
 
 def test_regular_notice_contains_mail_merge_fields_and_next_service():
-    rows = [_row("2026-12-18"), _row("2027-01-23"), _row("2027-02-12")]
+    rows = [_row("2026-12-07"), _row("2026-12-18"), _row("2027-01-23"), _row("2027-02-12")]
     output = build_notice_rows(
         "台北",
         rows,
@@ -108,6 +108,12 @@ def test_regular_notice_contains_mail_merge_fields_and_next_service():
     assert "2027/02/12" in row[9]
     assert row[16] == "待寄送"
     assert "如改期，將依實際服務日期重新計算" in row[15]
+    assert "服務地址：台北市測試路1號" in row[15]
+    assert "您原訂週期於（2026/12～2027/02）" in row[15]
+    assert "2026/12/07(一)" in row[15]
+    assert "提醒您目前該服務地址2026/12～2027/02的服務日期/時段如下" in row[21]
+    assert "2026/12/07（週一）09:00–12:00" in row[21]
+    assert "年節後第一次服務日期：2027/02/12(一)" in row[21]
 
 
 def test_regular_notice_keeps_calendar_service_note_and_status_fields():
@@ -151,6 +157,7 @@ def test_monthly_confirmation_hides_schedule_and_asks_for_date_by_deadline():
     row = output[0]
     notice = row[15]
     assert "🕓 請於 2026/11/03 前告知欲安排的日期。" in notice
+    assert "服務地址：台北市測試路1號" in notice
     assert "您原訂週期於年節期間" not in notice
     assert "年節加價服務日期" not in notice
     assert "PART 1 次數／年節加價金額" not in notice
@@ -226,6 +233,9 @@ def test_engineer_system_sheet_contains_current_system_changes():
     class FakeSheet:
         col_count = 5
 
+        def resize(self, cols):
+            self.col_count = cols
+
         def clear(self):
             pass
 
@@ -259,9 +269,16 @@ def test_engineer_system_sheet_contains_current_system_changes():
     title = _write_engineer_system_sheet(spreadsheet, settings)
 
     assert title == "2026系統工作表修改資料"
-    assert spreadsheet.sheet.values[1][3] == "2026/12/15～2027/02/04"
-    assert spreadsheet.sheet.values[8][3] == "每 2 人 1 小時 NT$1,200"
-    assert "PART 2 2027/01/22～2027/02/04" in spreadsheet.sheet.values[6][3]
+    values = spreadsheet.sheet.values
+    assert values[1][2] == "2026/12/15～2027/02/04"  # C2
+    assert values[2][2] == "2026/12/15～2027/01/21"  # C3
+    assert values[3][2] == "2027/01/22～2027/02/04"  # C4
+    assert values[4][4:6] == ["125元(含稅)", "225元(含稅)"]  # E5:F5
+    assert values[5][4:6] == ["225元(含稅)", "275元(含稅)"]  # E6:F6
+    assert values[7][4:6] == ["300元(含稅)", "350元(含稅)"]  # E8:F8
+    assert values[8][4:6] == ["350元(含稅)", "400元(含稅)"]  # E9:F9
+    assert values[12][2] == "2026/11/05～2026/11/10"  # C13
+    assert values[13][2] == "尚未設定"  # C14
 
 
 def test_zero_rates_are_valid_while_prices_are_undecided():
