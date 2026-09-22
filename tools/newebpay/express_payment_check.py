@@ -77,7 +77,21 @@ def _find_detail_value(page: Page, labels: Iterable[str]) -> str | None:
                 cell = item.locator("xpath=ancestor-or-self::*[self::th or self::td][1]")
                 if not cell.count():
                     continue
-                value = cell.locator("xpath=following-sibling::*[self::th or self::td][1]")
+                # 明細是上列標題、下列資料；右側儲存格是另一個標題。
+                column = cell.evaluate("""cell => {
+                    let column = 0;
+                    for (const sibling of cell.parentElement.cells) {
+                        if (sibling === cell) break;
+                        column += sibling.colSpan;
+                    }
+                    return column;
+                }""")
+                row = cell.locator("xpath=ancestor::tr[1]")
+                value = row.locator(
+                    "xpath=following-sibling::tr[1]/*[self::th or self::td]"
+                    f"[sum(preceding-sibling::*/@colspan) + "
+                    f"count(preceding-sibling::*[not(@colspan)]) = {column}]"
+                )
                 if value.count() and value.first.is_visible():
                     return " ".join(_clean_lines(value.first.inner_text()))
     return None
