@@ -137,9 +137,13 @@ def test_service_reminder_hides_pending_paused_and_lunar_holiday_services():
     assert "2026/12/18" in reminder
     assert "2027/01/06" not in reminder
     assert "2027/02/03" not in reminder
-    assert "2027/02/06" not in reminder
-    assert "農曆年休假暫停服務日期：2027/02/05～2027/02/10" in reminder
+    assert "農曆年休假暫停服務日期：2027/02/05-2027/02/10" in reminder
+    assert "該地址原訂服務日期：\n2027/02/06（週一）09:00–12:00" in reminder
     assert "年節後第一次服務日期：2027/03/03(一)" in reminder
+    notice = output[0][15]
+    assert "農曆年休假暫停服務日期：2027/02/05-2027/02/10" in notice
+    assert "該地址原訂服務日期：\n2027/02/06（週一）09:00–12:00" in notice
+    assert notice.index("農曆年休假暫停服務日期") < notice.index("年節後第一次服務日期")
 
 
 def test_service_reminder_is_blank_when_all_dates_are_pending_or_paused():

@@ -370,6 +370,20 @@ def _is_hidden_reminder_service(row: dict[str, Any]) -> bool:
     return "待確認" in status or "暫停" in status
 
 
+def _holiday_pause_block(
+    holiday_rows: list[dict[str, Any]],
+    lunar_new_year_start: datetime | None,
+    lunar_new_year_end: datetime | None,
+) -> str:
+    if not lunar_new_year_start or not lunar_new_year_end:
+        return ""
+    original_services = "\n".join(_service_datetime_line(row) for row in holiday_rows) or "無"
+    return (
+        f"農曆年休假暫停服務日期：{lunar_new_year_start:%Y/%m/%d}-{lunar_new_year_end:%Y/%m/%d}\n"
+        f"該地址原訂服務日期：\n{original_services}\n\n"
+    )
+
+
 def _service_reminder_text(
     name: str,
     address: str,
@@ -377,25 +391,24 @@ def _service_reminder_text(
     next_service: dict[str, Any] | None,
     phase1_start: datetime,
     phase2_end: datetime,
+    holiday_rows: list[dict[str, Any]],
     lunar_new_year_start: datetime | None,
     lunar_new_year_end: datetime | None,
 ) -> str:
     visible_rows = [row for row in month_rows if not _is_hidden_reminder_service(row)]
-    if not visible_rows:
+    if not visible_rows and not holiday_rows:
         return ""
-    schedule = "\n".join(_service_datetime_line(row) for row in visible_rows)
+    schedule = "\n".join(_service_datetime_line(row) for row in visible_rows) or "目前無排程"
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
-    holiday_line = ""
-    if lunar_new_year_start and lunar_new_year_end:
-        holiday_line = (
-            f"農曆年休假暫停服務日期：{_date_range(lunar_new_year_start, lunar_new_year_end)}\n\n"
-        )
+    holiday_block = _holiday_pause_block(
+        holiday_rows, lunar_new_year_start, lunar_new_year_end,
+    )
     return (
         f"❤️親愛的 {name} 您好：\n\n"
         f"服務地址：{address or '未提供'}\n"
         f"提醒您目前該服務地址{_month_range(phase1_start, phase2_end)}的服務日期/時段如下：\n"
         f"{schedule}\n\n"
-        f"{holiday_line}"
+        f"{holiday_block}"
         f"年節後第一次服務日期：{next_label}\n\n"
         "請您協助確認，若需要調整，請連繫我們～"
     )
@@ -514,10 +527,13 @@ def _build_notice_text(
     phase1_rows: list[dict[str, Any]],
     phase2_rows: list[dict[str, Any]],
     month_rows: list[dict[str, Any]],
+    holiday_rows: list[dict[str, Any]],
     phase1_total: float,
     phase2_total: float,
     next_service: dict[str, Any] | None,
     reply_deadline: str,
+    lunar_new_year_start: datetime | None,
+    lunar_new_year_end: datetime | None,
 ) -> str:
     all_rows = phase1_rows + phase2_rows
     monthly_confirmation = any(_is_monthly_confirmation(row) for row in all_rows)
@@ -526,6 +542,9 @@ def _build_notice_text(
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
     deadline = f"建議您於 {reply_deadline} 前，" if reply_deadline.strip() else "如需調整，建議您儘早"
     deadline_date = _reply_deadline_date(reply_deadline)
+    holiday_block = _holiday_pause_block(
+        holiday_rows, lunar_new_year_start, lunar_new_year_end,
+    )
     if monthly_confirmation:
         arrangement = (
             f"服務地址：{address or '未提供'}\n"
@@ -533,6 +552,7 @@ def _build_notice_text(
             if deadline_date
             else f"服務地址：{address or '未提供'}\n🕓 請儘早告知欲安排的日期。\n\n"
         )
+        arrangement += holiday_block
         contact = "請透過官方 LINE@ 與我們聯繫。\n"
         estimate_note = ""
     else:
@@ -550,6 +570,7 @@ def _build_notice_text(
             f"服務時段：{service_times}\n\n"
             f"PART 1 次數／年節加價金額：{len(phase1_rows)} 次／{_money(phase1_total)}\n"
             f"PART 2 次數／年節加價金額：{len(phase2_rows)} 次／{_money(phase2_total)}\n\n"
+            f"{holiday_block}"
             f"年節後第一次服務日期：{next_label}\n\n"
         )
         contact = f"{deadline}透過官方 LINE@ 與我們聯繫。\n"
@@ -694,10 +715,13 @@ def build_notice_rows(
             p1,
             p2,
             month_rows,
+            holiday,
             p1_total,
             p2_total,
             next_service,
             reply_deadline,
+            lunar_new_year_start,
+            lunar_new_year_end,
         )
         line_url = target["line"]
         line_cell = f'=HYPERLINK("{line_url}","開啟 LINE")' if re.match(r"^https?://", line_url) else line_url
@@ -726,7 +750,8 @@ def build_notice_rows(
             _dated_values(detail_rows, "status"),
             _service_reminder_text(
                 target["name"], target["address"], month_rows, next_service,
-                phase1_start, phase2_end, lunar_new_year_start, lunar_new_year_end,
+                phase1_start, phase2_end, holiday,
+                lunar_new_year_start, lunar_new_year_end,
             ),
         ])
 
