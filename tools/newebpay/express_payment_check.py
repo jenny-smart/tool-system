@@ -87,8 +87,14 @@ def _find_detail_value(page: Page, labels: Iterable[str]) -> str | None:
                     return column;
                 }""")
                 row = cell.locator("xpath=ancestor::tr[1]")
-                value = row.locator(
-                    "xpath=following-sibling::tr[1]/*[self::th or self::td]"
+                data_row = row.locator("xpath=following-sibling::tr[1]")
+                if not data_row.count():
+                    data_row = row.locator(
+                        "xpath=parent::*[self::thead or self::tbody or self::tfoot]"
+                        "/following-sibling::*[self::thead or self::tbody or self::tfoot][1]/tr[1]"
+                    )
+                value = data_row.locator(
+                    "xpath=./*[self::th or self::td]"
                     f"[sum(preceding-sibling::*/@colspan) + "
                     f"count(preceding-sibling::*[not(@colspan)]) = {column}]"
                 )
