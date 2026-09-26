@@ -8,13 +8,13 @@ def _agent_help_source() -> str:
     return source[start:end]
 
 
-def test_agent_help_uses_background_supervisor_commands():
+def test_agent_help_uses_control_buttons():
     source = _agent_help_source()
 
-    assert "./scripts/local_agent_service.sh restart" in source
-    assert "./scripts/local_agent_service.sh status" in source
-    assert "./scripts/local_agent_service.sh logs" in source
-    assert "5 秒後自動重啟" in source
+    assert "🔄 重啟 Agent" in source
+    assert "📊 檢查狀態" in source
+    assert "📋 查看 Agent Log" in source
+    assert "⬇️ 更新程式＋重啟 Agent" in source
 
 
 def test_agent_help_does_not_show_obsolete_foreground_start():
@@ -25,7 +25,7 @@ def test_agent_help_does_not_show_obsolete_foreground_start():
     assert "Control + C" in source
     assert "⏹️ 中止目前工作" in source
     assert "_request_local_agent_task_cancel_raw" in source
-    assert "離線超過 30 秒才執行" in source
+    assert "./scripts/local_agent_service.sh restart" not in source
 
 
 def test_agent_help_has_independent_guarded_git_pull_button():
@@ -36,7 +36,6 @@ def test_agent_help_has_independent_guarded_git_pull_button():
     assert 'task.get("status") in {"running", "cancel_requested"}' in source
     assert "create_git_pull_task" in source
     assert "需要重啟 Agent 才會載入新版" in source
-    assert "git pull" in source
 
 
 def test_agent_cancel_import_has_deployment_fallback():

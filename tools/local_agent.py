@@ -613,6 +613,24 @@ def build_git_pull(_params: dict[str, Any]) -> list[str]:
     return ["git", "-C", str(PROJECT_ROOT), "pull", "--ff-only"]
 
 
+def build_agent_status(_params: dict[str, Any]) -> list[str]:
+    return [str(PROJECT_ROOT / "scripts" / "local_agent_service.sh"), "status"]
+
+
+def build_agent_logs(_params: dict[str, Any]) -> list[str]:
+    return [str(PROJECT_ROOT / "scripts" / "local_agent_service.sh"), "logs"]
+
+
+def build_agent_restart(_params: dict[str, Any]) -> list[str]:
+    # The running child must not call restart on itself. Mark this task complete,
+    # then exit below so the existing user-session supervisor restarts a fresh child.
+    return ["/usr/bin/true"]
+
+
+def build_git_pull_restart(_params: dict[str, Any]) -> list[str]:
+    return ["git", "-C", str(PROJECT_ROOT), "pull", "--ff-only"]
+
+
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
 register_action("cetustek.prize_update", build_cetustek_prize_update)
@@ -642,6 +660,10 @@ register_action("yuanta.login", build_yuanta_login)
 register_action("yuanta.download", build_yuanta_download)
 register_action("yuanta.salary_status", build_yuanta_salary_status)
 register_action("system.git_pull", build_git_pull)
+register_action("system.agent_status", build_agent_status)
+register_action("system.agent_logs", build_agent_logs)
+register_action("system.agent_restart", build_agent_restart)
+register_action("system.git_pull_restart", build_git_pull_restart)
 
 
 def parse_params(task: dict[str, str]) -> dict[str, Any]:
@@ -920,7 +942,18 @@ def main() -> int:
             stop_event.wait(max(1.0, args.poll_seconds))
             continue
         if task:
-            run_task(task, service=service, spreadsheet_id=spreadsheet_id)
+            return_code = run_task(task, service=service, spreadsheet_id=spreadsheet_id)
+            if (
+                return_code == 0
+                and task.get("action") in {"system.agent_restart", "system.git_pull_restart"}
+            ):
+                print(
+                    "Agent control task completed; exiting child so the user-session supervisor "
+                    "can reload the current code.",
+                    flush=True,
+                )
+                stop_event.set()
+                break
             if args.once:
                 return 0
         elif args.once:
