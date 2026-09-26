@@ -291,8 +291,9 @@ def _is_workday(d: date) -> bool:
     return d.weekday() < 5 and d not in TAIWAN_PUBLIC_HOLIDAYS
 
 
-def _is_weekend_or_holiday(d: date) -> bool:
-    return not _is_workday(d)
+def _is_weekend(d: date) -> bool:
+    """服務價格的週末只指星期六、星期日；國定假日不影響平日/週末價格。"""
+    return d.weekday() >= 5
 
 
 def _count_workdays_before(service_date: date, today: date = None) -> int:
@@ -685,27 +686,67 @@ def build_refund_row(order: dict, change_fee_info: dict, service_note: str,
 # 階段 A-3b：加時 / 減時（按人時計價，平日／假日不同費率）
 # ============================================================
 
-TIME_RATE_WEEKDAY = 600  # 平日每人時
-TIME_RATE_WEEKEND = 700  # 週末／例假日每人時
+TIME_RATE_WEEKDAY = 600  # 一般期間：週一～週五每人時
+TIME_RATE_WEEKEND = 700  # 一般期間：週六、週日每人時
 TIME_RATE_DAY_TYPE_DIFF = TIME_RATE_WEEKEND - TIME_RATE_WEEKDAY  # 平日/週末互轉每人時差額
+
+# 大掃除期間可在這裡加入兩階段（或更多階段）的起訖日期與平日/週末單價。
+# 有日期範圍的規則優先；都未命中時使用「一般」價格。
+# 範例：
+# TIME_RATE_PERIODS = [
+#     {"name": "大掃除第1階段", "start": date(2027, 1, 1), "end": date(2027, 1, 15),
+#      "weekday": 0, "weekend": 0},
+#     {"name": "大掃除第2階段", "start": date(2027, 1, 16), "end": date(2027, 1, 31),
+#      "weekday": 0, "weekend": 0},
+# ]
+TIME_RATE_PERIODS = []
+
+
+def _get_time_rate(service_date: date) -> dict:
+    """依服務日期取得一般/大掃除階段與 Mon-Fri / Sat-Sun 單價。"""
+    is_weekend = _is_weekend(service_date) if service_date else False
+    day_key = "weekend" if is_weekend else "weekday"
+
+    if service_date:
+        for period in TIME_RATE_PERIODS:
+            start = period.get("start")
+            end = period.get("end")
+            if start and end and start <= service_date <= end:
+                return {
+                    "period": period.get("name") or "自訂期間",
+                    "rate": _money_int(period.get(day_key)),
+                    "is_weekend": is_weekend,
+                }
+
+    return {
+        "period": "一般",
+        "rate": TIME_RATE_WEEKEND if is_weekend else TIME_RATE_WEEKDAY,
+        "is_weekend": is_weekend,
+    }
 
 
 def calc_time_change_fee(service_date: date, hours: float, person: int) -> dict:
     """
-    加時／減時金額試算：平日每人時 $600，週末／例假日每人時 $700。
-    回傳 dict: {amount, rate, is_weekend, calc_note}
+    加時／減時金額試算。
+    價格分類只看星期：週一～週五為平日、週六日為週末；國定假日不改變價格分類。
+    大掃除期間則先依服務日期套用 TIME_RATE_PERIODS 的階段價格。
+    回傳 dict: {amount, rate, is_weekend, period, calc_note}
     """
-    is_weekend = _is_weekend_or_holiday(service_date) if service_date else False
-    rate = TIME_RATE_WEEKEND if is_weekend else TIME_RATE_WEEKDAY
+    price = _get_time_rate(service_date)
+    is_weekend = price["is_weekend"]
+    rate = price["rate"]
+    period = price["period"]
     amount = round((hours or 0) * (person or 0) * rate)
-    day_label = "週末/例假日" if is_weekend else "平日"
-    calc_note = f"{day_label}：{hours}小時 × {person}人 × ${rate}/人時 = ${amount}"
+    day_label = "週末" if is_weekend else "平日"
+    period_label = f"{period}／" if period != "一般" else ""
+    calc_note = f"{period_label}{day_label}：{hours}小時 × {person}人 × ${rate}/人時 = ${amount}"
     return {
         "amount": amount,
         "rate": rate,
         "hours": hours,
         "person": person,
         "is_weekend": is_weekend,
+        "period": period,
         "calc_note": calc_note,
     }
 
