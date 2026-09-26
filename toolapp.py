@@ -2100,6 +2100,25 @@ def render_agent_help() -> None:
             task for task in agent_tasks
             if task.get("status") in {"running", "cancel_requested"}
         ]
+        if online_agents:
+            online_agent_ids = {
+                str(row.get("agent_id") or "")
+                for row in online_agents
+                if str(row.get("agent_id") or "")
+            }
+            stale_running_tasks = [
+                task for task in running_tasks
+                if str(task.get("agent_id") or "") not in online_agent_ids
+            ]
+            running_tasks = [
+                task for task in running_tasks
+                if str(task.get("agent_id") or "") in online_agent_ids
+            ]
+            for stale_task in stale_running_tasks:
+                st.caption(
+                    f"忽略舊的未收尾工作：{stale_task.get('action', '未知工作')}｜"
+                    f"{stale_task.get('started_at', '')}｜{stale_task.get('status', '')}"
+                )
     except Exception as exc:
         running_tasks = []
         tasks_read_ok = False
