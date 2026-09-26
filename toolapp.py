@@ -2101,18 +2101,16 @@ def render_agent_help() -> None:
             if task.get("status") in {"running", "cancel_requested"}
         ]
         if online_agents:
-            online_agent_ids = {
-                str(row.get("agent_id") or "")
-                for row in online_agents
-                if str(row.get("agent_id") or "")
-            }
+            newest_heartbeat = max(
+                str(row.get("last_seen") or "") for row in online_agents
+            )
             stale_running_tasks = [
                 task for task in running_tasks
-                if str(task.get("agent_id") or "") not in online_agent_ids
+                if str(task.get("started_at") or "") < newest_heartbeat
             ]
             running_tasks = [
                 task for task in running_tasks
-                if str(task.get("agent_id") or "") in online_agent_ids
+                if str(task.get("started_at") or "") >= newest_heartbeat
             ]
             for stale_task in stale_running_tasks:
                 st.caption(
