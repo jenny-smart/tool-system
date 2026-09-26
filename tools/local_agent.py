@@ -90,6 +90,26 @@ def build_cetustek_login(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_cetustek_prize_update(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    period = str(params.get("period") or params.get("month") or "").strip()
+    if not area or area == "全區":
+        raise ValueError("中獎發票更新請選擇單一區域")
+    if not period:
+        raise ValueError("中獎發票更新請輸入 8 碼期別")
+    return [
+        sys.executable,
+        "-m",
+        "tools.invoice_center.prize_update",
+        "--area",
+        area,
+        "--period",
+        period,
+        "--cdp-url",
+        cdp_url,
+    ]
+
+
 def build_cetustek_download(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     month = str(params.get("month") or "").strip()
@@ -595,6 +615,7 @@ def build_git_pull(_params: dict[str, Any]) -> list[str]:
 
 register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.download", build_cetustek_download)
+register_action("cetustek.prize_update", build_cetustek_prize_update)
 register_action("cetustek.allowance", build_cetustek_allowance)
 register_action("cetustek.paper_invoice_pdf", build_cetustek_paper_invoice_pdf)
 register_action("cetustek.serial_import", build_cetustek_serial_import)
