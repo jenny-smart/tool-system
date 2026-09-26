@@ -4693,7 +4693,26 @@ if system_type == "finance_management" and selected_function == "【鯨躍發票
         from tools.lemon_backend.stored_value_sheet import get_worksheet
         from tools.invoice_center.allowance_filter import pending_allowances
         _allowance_candidates = pending_allowances(get_worksheet(selected_area_value).get_all_values())
-        _allowance_editor = st.data_editor(pd.DataFrame([{"執行": False, "列數": item["sheet_row"], "訂單編號": item["order_no"], "發票號碼": item["invoice_no"], "折讓未稅價": item["untaxed_amount"]} for item in _allowance_candidates]), hide_index=True, use_container_width=True, disabled=["列數", "訂單編號", "發票號碼", "折讓未稅價"], column_config={"執行": st.column_config.CheckboxColumn("執行")}, key=f"cetustek_allowance_editor_{selected_area_value}")
+        _allowance_editor = st.data_editor(
+            pd.DataFrame([
+                {
+                    "執行": False,
+                    "列數": item["sheet_row"],
+                    "訂單編號": item["order_no"],
+                    "訂單姓名": item["customer"],
+                    "原因": item["reason"],
+                    "發票號碼": item["invoice_no"],
+                    "含稅金額": item["refund_amount"],
+                    "折讓未稅價": item["untaxed_amount"],
+                }
+                for item in _allowance_candidates
+            ]),
+            hide_index=True,
+            use_container_width=True,
+            disabled=["列數", "訂單編號", "訂單姓名", "原因", "發票號碼", "含稅金額", "折讓未稅價"],
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
+            key=f"cetustek_allowance_editor_{selected_area_value}",
+        )
         allowance_selected_rows = [int(row["列數"]) for _, row in _allowance_editor.iterrows() if bool(row["執行"])]
         st.caption(f"待退款折讓：{len(_allowance_candidates)} 筆；已勾選：{len(allowance_selected_rows)} 筆")
     except Exception as exc:
