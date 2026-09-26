@@ -21,6 +21,8 @@ def pending_allowances(values: list[list[object]]) -> list[dict[str, object]]:
         result.append({
             "sheet_row": sheet_row,
             "order_no": cells[6],
+            "customer": cells[7],
+            "reason": cells[10],
             "invoice_no": cells[23],
             "refund_amount": _amount(cells[18]),
             "untaxed_amount": _amount(cells[25]),
