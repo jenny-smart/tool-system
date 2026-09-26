@@ -36,8 +36,11 @@ def validate(config):
         for tier in ('vip', 'regular'):
             for day in ('weekday', 'weekend'):
                 value = period['rates'][tier][day]
-                if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0 or int(value) != value:
-                    raise ValueError(f'{label}單價須為大於0的整數')
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(f'{label}單價須為大於0、最多小數2位的數字')
+                amount = Decimal(str(value))
+                if not amount.is_finite() or amount <= 0 or amount != amount.quantize(Decimal('0.01')):
+                    raise ValueError(f'{label}單價須為大於0、最多小數2位的數字')
         if key != 'normal':
             start, end = period['start'], period['end']
             if bool(start) != bool(end):
@@ -142,7 +145,7 @@ def apply_booking_price(payload, tier, config=None):
 def render_settings(st):
     with st.expander('服務金額設定：非大掃除／大掃除 PART1／PART2'):
         config = load_config()
-        st.caption('金額單位：含稅元／人時。初始600／700僅沿用舊值，請填妥後啟用。日期含起訖日，範圍外適用非大掃除。')
+        st.caption('金額單位：含稅元／人時，可輸入小數點後2位。初始600／700僅沿用舊值，請填妥後啟用。日期含起訖日，範圍外適用非大掃除。')
         with st.form('service_pricing_settings'):
             config['enabled'] = st.checkbox('啟用自訂服務金額', value=config['enabled'])
             for key, label in PERIODS.items():
@@ -154,7 +157,7 @@ def render_settings(st):
                     period['end'] = b.text_input('結束日期 YYYY-MM-DD', period['end'], key=f'{key}_end')
                 cols = st.columns(4)
                 for col, (tier, day, title) in zip(cols, [('vip','weekday','VIP 平日'), ('vip','weekend','VIP 週末'), ('regular','weekday','非VIP 平日'), ('regular','weekend','非VIP 週末')]):
-                    period['rates'][tier][day] = col.number_input(title, min_value=1, value=int(period['rates'][tier][day]), step=1, key=f'price_{key}_{tier}_{day}')
+                    period['rates'][tier][day] = col.number_input(title, min_value=0.01, value=float(period['rates'][tier][day]), step=0.01, format='%.2f', key=f'price_{key}_{tier}_{day}')
             if st.form_submit_button('儲存服務金額設定'):
                 try:
                     save_config(config)

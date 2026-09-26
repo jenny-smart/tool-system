@@ -29,6 +29,18 @@ class PricingTest(unittest.TestCase):
                 self.assertEqual(p.unit_price(weekday, tier, config), base + i * 100)
                 self.assertEqual(p.unit_price(weekend, tier, config), base + i * 100 + 50)
 
+    def test_decimal_rates_preserve_cents(self):
+        config = configured()
+        config['periods']['normal']['rates']['vip']['weekday'] = 600.25
+        self.assertEqual(p.unit_price('2026-12-25', 'vip', p.validate(config)), 600.25)
+        payload = dict(date_s='2026-12-25', hour='4', person='2')
+        p.apply_booking_price(payload, 'vip', config)
+        self.assertEqual(payload['price'], '4573')
+        for invalid in (600.251, 0, -1, float('inf'), float('nan')):
+            config['periods']['normal']['rates']['vip']['weekday'] = invalid
+            with self.assertRaises(ValueError):
+                p.validate(config)
+
     def test_inclusive_boundaries_and_outside(self):
         config = configured()
         for day, expected in [('2026-12-31','normal'), ('2027-01-01','part1'), ('2027-01-10','part1'), ('2027-01-11','part2'), ('2027-01-20','part2'), ('2027-01-21','normal')]:
@@ -119,11 +131,11 @@ class PricingIntegrationTest(unittest.TestCase):
             app = AppTest.from_string('import streamlit as st\nfrom service_pricing import render_settings\nrender_settings(st)').run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.number_input), 12)
-            app.number_input[0].set_value(555)
+            app.number_input[0].set_value(555.25)
             app.checkbox[0].check()
             app.button[0].click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(p.load_config()['periods']['normal']['rates']['vip']['weekday'], 555)
+            self.assertEqual(p.load_config()['periods']['normal']['rates']['vip']['weekday'], 555.25)
 
 
 if __name__ == '__main__':
