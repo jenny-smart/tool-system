@@ -2182,36 +2182,85 @@ def render_agent_help() -> None:
                 language="text",
             )
 
+    supported_actions = set()
+    if online_agents:
+        supported_actions = {
+            item.strip()
+            for item in str(online_agents[0].get("actions") or "").split(",")
+            if item.strip()
+        }
+
+    st.markdown("**Agent 控制：**")
+    control_cols = st.columns(3)
+    with control_cols[0]:
+        if st.button(
+            "🔄 重啟 Agent",
+            use_container_width=True,
+            disabled=bool(running_tasks) or "system.agent_restart" not in supported_actions,
+            key="agent_restart_button",
+        ):
+            task = create_local_agent_task(
+                "system.agent_restart",
+                {},
+                created_by=st.session_state.get("username", "Tool System"),
+            )
+            st.success(f"已送出重啟任務：{task['task_id']}")
+            st.rerun()
+    with control_cols[1]:
+        if st.button(
+            "📊 檢查狀態",
+            use_container_width=True,
+            disabled="system.agent_status" not in supported_actions,
+            key="agent_status_button",
+        ):
+            task = create_local_agent_task(
+                "system.agent_status",
+                {},
+                created_by=st.session_state.get("username", "Tool System"),
+            )
+            st.success(f"已送出狀態檢查：{task['task_id']}")
+            st.rerun()
+    with control_cols[2]:
+        if st.button(
+            "📋 查看 Agent Log",
+            use_container_width=True,
+            disabled="system.agent_logs" not in supported_actions,
+            key="agent_logs_button",
+        ):
+            task = create_local_agent_task(
+                "system.agent_logs",
+                {},
+                created_by=st.session_state.get("username", "Tool System"),
+            )
+            st.success(f"已送出 Log 讀取：{task['task_id']}")
+            st.rerun()
+
+    if st.button(
+        "⬇️ 更新程式＋重啟 Agent",
+        use_container_width=True,
+        disabled=bool(running_tasks) or "system.git_pull_restart" not in supported_actions,
+        key="agent_git_pull_restart_button",
+    ):
+        task = create_local_agent_task(
+            "system.git_pull_restart",
+            {},
+            created_by=st.session_state.get("username", "Tool System"),
+        )
+        st.success(f"已送出更新＋重啟任務：{task['task_id']}")
+        st.rerun()
+
+    if online_agents and "system.agent_restart" not in supported_actions:
+        st.info(
+            "目前 Agent 尚未載入新版控制功能。這次請先用上方「Git Pull 更新程式」更新；"
+            "新版 Agent 載入後，之後重啟、狀態、Log、更新＋重啟都可直接按按鈕。"
+        )
+
     st.markdown(
         """
-Agent 已由背景監督程序管理。Agent 子程序若異常退出，會在約 5 秒後自動重啟，不需要按任何按鈕；更新程式（`git pull`）後則需執行一次 `restart` 才會載入新版。
+Agent 由使用者 Terminal session 啟動的監督程序管理。Agent 子程序異常退出時會自動重啟。
 
-⚠️ 不要按 `Control + C` 重啟，也不要使用 `launchctl kickstart`；兩者都可能造成 Agent Offline 或 macOS 阻擋 `~/Documents`。
+⚠️ 不要使用 `launchctl kickstart`，也不要用 `Control + C` 當作重啟方式。
         """
-    )
-
-    st.markdown("**離線超過 30 秒才執行：**")
-    st.code(
-        "cd ~/Documents/codex-workspace/tool-system\n"
-        "./scripts/local_agent_service.sh restart\n"
-        "./scripts/local_agent_service.sh status",
-        language="bash",
-    )
-
-    st.markdown("**更新程式後重啟：**")
-    st.code(
-        "cd ~/Documents/codex-workspace/tool-system\n"
-        "git pull\n"
-        "./scripts/local_agent_service.sh restart\n"
-        "./scripts/local_agent_service.sh status",
-        language="bash",
-    )
-
-    st.markdown("**若仍然離線，查看錯誤 Log：**")
-    st.code(
-        "cd ~/Documents/codex-workspace/tool-system\n"
-        "./scripts/local_agent_service.sh logs",
-        language="bash",
     )
 
 
@@ -2361,6 +2410,20 @@ def queue_cetustek_prize_update(*, month="", start_date=None, end_date=None, are
         raise ValueError("中獎發票更新請輸入 8 碼期別，例如 20260708")
     if not area or area == "全區":
         raise ValueError("中獎發票更新請選擇單一區域")
+    try:
+        online_agents = [row for row in list_local_agent_status(max_age_seconds=30) if row.get("online")]
+    except Exception:
+        online_agents = []
+    if online_agents:
+        actions = {
+            item.strip()
+            for item in str(online_agents[0].get("actions") or "").split(",")
+            if item.strip()
+        }
+        if "cetustek.prize_update" not in actions:
+            raise RuntimeError(
+                "Local Agent 尚未載入「中獎發票更新」新版。請先到 🖥️Agent 頁面更新程式並重啟 Agent，再執行。"
+            )
     task = create_local_agent_task(
         "cetustek.prize_update",
         {
