@@ -573,6 +573,30 @@ class InvoiceArchiveProcessor:
             spreadsheet_id = _find_or_create_annual_spreadsheet(self.drive, folders.prize_annual_parent, prize_period[:4], area)
             return import_prize(self.sheets, spreadsheet_id, prize_period, path)
 
+    def archive_prize_period(self, *, area: str, period8: str, prize_path: Path) -> str:
+        if not re.fullmatch(r"\d{8}", period8):
+            raise ValueError("中獎期別請輸入 8 碼，例如 20260506")
+        start_month, end_month = int(period8[4:6]), int(period8[6:8])
+        if start_month not in {1, 3, 5, 7, 9, 11} or end_month != start_month + 1:
+            raise ValueError("中獎期別需為 0102、0304、0506、0708、0910 或 1112")
+        config = self.configs.get(area)
+        if not config:
+            raise RuntimeError(f"{CONFIG_SHEET} 找不到已啟用的 {area} 設定")
+        if config.finance_root_id:
+            annual_parent = get_or_create_finance_year_folder(
+                self.drive, config.finance_root_id, period8[:4], area
+            )
+            folder_id = get_or_create_period_folder(self.drive, annual_parent, period8[4:])
+        else:
+            if not config.contractor_root_id:
+                raise RuntimeError(f"{area} 尚未設定承攬費總根目錄ID")
+            contractor_year = get_or_create_folder(
+                self.drive, config.contractor_root_id, f"{period8[:4]}專員承攬服務費"
+            )
+            area_parent = get_or_create_folder(self.drive, contractor_year, AREA_FOLDER_NAMES[area])
+            folder_id = get_or_create_folder(self.drive, area_parent, f"{period8[:6]}-2")
+        return upload_replacing(self.drive, prize_path, folder_id)
+
     def update_prize_period(self, *, area: str, period8: str) -> int:
         if not re.fullmatch(r"\d{8}", period8):
             raise ValueError("中獎期別請輸入 8 碼，例如 20260506")
