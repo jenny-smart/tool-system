@@ -2355,13 +2355,22 @@ def run_cetustek_paper_update(*, month="", start_date=None, end_date=None, area=
     return run_invoice_update("paper", month_text, area)
 
 
-def run_cetustek_prize_update(*, month="", start_date=None, end_date=None, area="全區"):
+def queue_cetustek_prize_update(*, month="", start_date=None, end_date=None, area="全區"):
     month_text = str(month or "").strip()
     if not month_text:
-        raise ValueError("中獎發票更新請輸入 8 碼期別，例如 20260506")
-    from tools.invoice_center.invoice_archive import run_invoice_update
-
-    return run_invoice_update("prize", month_text, area)
+        raise ValueError("中獎發票更新請輸入 8 碼期別，例如 20260708")
+    if not area or area == "全區":
+        raise ValueError("中獎發票更新請選擇單一區域")
+    task = create_local_agent_task(
+        "cetustek.prize_update",
+        {
+            "period": month_text,
+            "area": area,
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent；Drive 缺檔時會自動檢查鯨躍登入並下載）"
 
 
 def queue_cetustek_paper_invoice_pdf(*, month="", start_date=None, end_date=None, area="全區"):
@@ -3314,7 +3323,7 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【鯨躍發票】紙本發票更新", "handler": run_cetustek_paper_update, "enabled": True},
     {"name": "【鯨躍發票】紙本發票PDF建檔", "handler": queue_cetustek_paper_invoice_pdf, "enabled": True},
-    {"name": "【鯨躍發票】中獎發票更新", "handler": run_cetustek_prize_update, "enabled": True},
+    {"name": "【鯨躍發票】中獎發票更新", "handler": queue_cetustek_prize_update, "enabled": True},
     {"name": "【鯨躍發票】開立折讓單", "handler": queue_cetustek_allowance, "enabled": True},
     {"name": "【鯨躍發票】電子發票字軌號碼匯入", "handler": queue_cetustek_serial_import, "enabled": True},
     {"name": "【鯨躍發票】電子發票字軌號碼配號", "handler": queue_cetustek_serial_section_query, "enabled": True},
