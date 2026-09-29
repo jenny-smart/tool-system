@@ -608,22 +608,12 @@ def main() -> int:
                 credentials = credentials_for(area, accounts)
                 print(f"\n開始處理：{credentials.label}")
                 try:
-                    reused_existing_ei = (
-                        index == 0
-                        and portal_page is None
-                        and existing_ei_page is not None
+                    from tools.invoice_center.ei_session import prepare_download_session
+
+                    portal_page, current_ei_page = find_invoice_pages(context)
+                    portal_page, ei_page, reused_existing_ei = prepare_download_session(
+                        context, portal_page, current_ei_page, accounts, credentials,
                     )
-                    if reused_existing_ei:
-                        ei_page = existing_ei_page
-                    else:
-                        if portal_page is None or "cetustek.com.tw" not in portal_page.url:
-                            portal_page = context.new_page()
-                        login_portal(portal_page, accounts)
-                        ei_page = open_second_login(context, portal_page)
-                    if index and "cetustek.com.tw" not in portal_page.url:
-                        portal_page = context.new_page()
-                        portal_page.goto(PORTAL_MEMBER_URL, wait_until="domcontentloaded")
-                    login_second(ei_page, credentials)
                     area_dir = (
                         output_dir(area, accounts, yyyymm, args.output_root)
                         if range_mode or args.output_root is not None
