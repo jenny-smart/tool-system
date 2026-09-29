@@ -346,6 +346,9 @@ def detect_download_format(path: Path) -> str:
         raise RuntimeError("EI 下載結果是空檔案")
 
     if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            if "xl/workbook.xml" in archive.namelist():
+                return "xlsx"
         return "zip"
 
     header = path.read_bytes()[:8192]
@@ -374,7 +377,7 @@ def detect_download_format(path: Path) -> str:
 
 def final_download_path(target: Path, detected: str, suggested_filename: str) -> Path:
     """保留自訂檔名，但使用實際內容所對應的正確副檔名。"""
-    suffix_map = {"zip": ".zip", "csv": ".csv", "xls": ".xls"}
+    suffix_map = {"zip": ".zip", "csv": ".csv", "xls": ".xls", "xlsx": ".xlsx"}
     suffix = suffix_map.get(detected)
     if suffix is None:
         suggested_suffix = Path(suggested_filename).suffix.lower()
@@ -450,11 +453,12 @@ def export_invoices(
 def archive_as_zip(downloaded: Path, archive_path: Path) -> Path:
     """鯨躍原檔可能是 CSV/XLS/ZIP；對外一律保存為指定 ZIP 名稱。"""
     archive_path.parent.mkdir(parents=True, exist_ok=True)
-    if downloaded.resolve() == archive_path.resolve() and zipfile.is_zipfile(downloaded):
+    is_archive = detect_download_format(downloaded) == "zip"
+    if downloaded.resolve() == archive_path.resolve() and is_archive:
         return archive_path
     if archive_path.exists():
         archive_path.unlink()
-    if zipfile.is_zipfile(downloaded):
+    if is_archive:
         shutil.move(str(downloaded), str(archive_path))
         return archive_path
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -500,24 +504,36 @@ def _select_prize_period(page: Page, period8: str) -> None:
         raise RuntimeError(f"中獎清冊找不到查詢期別選項：{period8}")
 
 
+def _check_prize_option(page: Page, label: str) -> None:
+    radio = page.get_by_label(label, exact=True)
+    if radio.count() != 1:
+        # 舊版頁面可能沒有 label；只讀每個 input 後、下一個 input 前的文字。
+        choices = page.locator('input[type="radio"]')
+        matches = choices.evaluate_all("""(radios, wanted) => radios.flatMap((r, i) => {
+            let text = '';
+            for (let n = r.nextSibling; n; n = n.nextSibling) {
+                if (n.nodeType === 1 && (n.matches('input') || n.querySelector('input'))) break;
+                text += n.textContent || '';
+            }
+            return text.trim() === wanted ? [i] : [];
+        })""", label)
+        if len(matches) != 1:
+            raise RuntimeError(f"中獎清冊無法唯一辨識選項：{label}")
+        radio = choices.nth(matches[0])
+    radio.check()
+    if not radio.is_checked():
+        raise RuntimeError(f"中獎清冊選項未生效：{label}")
+
+
 def export_prize_invoices(page: Page, period8: str, target: Path) -> Path:
     page.goto(EI_PRIZE_EXPORT_URL, wait_until="domcontentloaded")
     if page.locator("#userid").count() and page.locator("#userid").first.is_visible():
         raise RuntimeError("第二層登入已失效")
     _select_prize_period(page, period8)
 
-    # 依畫面設定：未列印、Excel。不同帳號頁面的 input id 可能不同，
-    # 以同列文字定位並直接勾選 radio。
-    page.evaluate(
-        """() => {
-          const radios = Array.from(document.querySelectorAll('input[type=radio]'));
-          const choose = (word) => {
-            const hit = radios.find(r => ((r.closest('tr') || r.parentElement)?.innerText || '').includes(word));
-            if (hit) { hit.checked = true; hit.dispatchEvent(new Event('change', {bubbles:true})); }
-          };
-          choose('未列印'); choose('Excel');
-        }"""
-    )
+    # 精確選擇單一選項，不能以整列文字匹配第一個 radio。
+    for label in ("全部", "Excel"):
+        _check_prize_option(page, label)
     target.parent.mkdir(parents=True, exist_ok=True)
     with page.expect_download(timeout=60_000) as info:
         page.get_by_text("直接匯出", exact=False).click()

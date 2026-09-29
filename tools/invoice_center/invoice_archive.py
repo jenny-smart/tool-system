@@ -42,6 +42,8 @@ NEW_PERIOD_HEADER = [
     "課稅別", "銷售合計", "營業稅", "總計", "檢查碼", "付款方式", "備註",
     "狀態", "隨機碼", "", "link",
 ]
+PRIZE_HEADERS = ["發票日期", "發票號碼", "發票金額", "中獎獎別", "中獎金額",
+                 "公司統編", "發票格式", "載具類別", "載具顯碼", "備註"]
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
@@ -293,6 +295,9 @@ def get_or_create_finance_year_folder(drive: Any, parent_id: str, year: str, are
 
 
 def get_or_create_period_folder(drive: Any, parent_id: str, period4: str) -> str:
+    period4 = str(period4).replace("-", "")
+    if period4 not in {"0102", "0304", "0506", "0708", "0910", "1112"}:
+        raise ValueError("資料夾期別必須是雙月，例如 09-10")
     aliases = {period4, f"{period4[:2]}-{period4[2:]}"}
     query = f"'{_escape(parent_id)}' in parents and mimeType='{FOLDER_MIME}' and trashed=false"
     files = drive.files().list(
@@ -401,6 +406,9 @@ def _read_csv(data: bytes) -> pd.DataFrame:
 def _archive_members(path: Path) -> Iterable[tuple[str, bytes]]:
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as archive:
+            if "xl/workbook.xml" in archive.namelist():
+                yield path.stem + ".xlsx", path.read_bytes()
+                return
             for name in archive.namelist():
                 if not name.endswith("/"):
                     yield name, archive.read(name)
@@ -430,6 +438,7 @@ def paper_rows(path: Path) -> list[list[Any]]:
 
 def prize_rows(path: Path) -> list[list[Any]]:
     rows: list[list[Any]] = []
+    found_sheet = False
     for name, data in _archive_members(path):
         suffix = Path(name).suffix.lower()
         if suffix not in {".xls", ".xlsx"}:
@@ -438,7 +447,16 @@ def prize_rows(path: Path) -> list[list[Any]]:
             frame = _read_excel(data, name, "發票中獎資料")
         except ValueError:
             continue
-        rows.extend([[_clean_value(value) for value in row[:10]] for row in frame.values.tolist()])
+        found_sheet = True
+        if list(frame.columns[:10]) != PRIZE_HEADERS:
+            raise RuntimeError(f"{name} 的中獎清冊欄位不符，停止匯入")
+        for row in frame.dropna(how="all").values.tolist():
+            cleaned = [_clean_value(value) for value in row[:10]]
+            if not re.fullmatch(r"[A-Z]{2}\d{8}", str(cleaned[1]).strip()):
+                raise RuntimeError(f"{name} 含無效發票號碼，停止匯入")
+            rows.append(cleaned)
+    if not found_sheet:
+        raise RuntimeError(f"{path.name} 找不到「發票中獎資料」工作表")
     return rows
 
 
@@ -507,20 +525,61 @@ def import_paper(sheets: Any, spreadsheet_id: str, period: str, path: Path) -> i
     return len(rows)
 
 
-def import_prize(sheets: Any, spreadsheet_id: str, period: str, path: Path) -> int:
-    checksum = _checksum(path)
-    if _already_imported(sheets, spreadsheet_id, "中獎", period, checksum):
-        return 0
+def import_prize(sheets: Any, spreadsheet_id: str, period: str, path: Path, *, area: str = "") -> int:
     rows = prize_rows(path)
     if not rows:
-        raise RuntimeError(f"{path.name} 找不到「發票中獎資料」A:J")
-    _ensure_sheet(sheets, spreadsheet_id, "中獎發票")
-    current = sheets.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range="'中獎發票'!C:C").execute().get("values", [])
-    start_row = max(len(current) + 1, 2)
-    sheets.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id, range=f"'中獎發票'!C{start_row}", valueInputOption="USER_ENTERED", body={"values": rows}
+        print(f"{period} 中獎清冊有效，但沒有中獎資料")
+        return 0
+    checksum = _checksum(path)
+    imported = _already_imported(sheets, spreadsheet_id, "中獎", period, checksum)
+    if imported and not area:
+        return 0
+    # 客戶查詢全部成功後才寫入；重試依發票號碼更新，不重複追加。
+    customers = {}
+    if area:
+        from tools.invoice_center.prize_customers import lookup_customers
+        customers = lookup_customers(area, [str(row[1]).strip() for row in rows])
+    sheet_id = _ensure_sheet(sheets, spreadsheet_id, "中獎發票")
+    current = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range="'中獎發票'!A:L"
+    ).execute().get("values", [])
+    existing = {}
+    for index, row in enumerate(current[1:], 2):
+        if len(row) > 3 and row[3]:
+            number = str(row[3]).strip()
+            if number in existing:
+                raise RuntimeError(f"中獎發票已有重複號碼 {number}，請先確認")
+            existing[number] = index
+    next_row = max(len(current) + 1, 2)
+    updates, links = [], []
+    if not current:
+        updates.append({"range": "'中獎發票'!A1", "values": [["姓名", "地址", *PRIZE_HEADERS]]})
+    elif area and not any(current[0][:2]):
+        updates.append({"range": "'中獎發票'!A1:B1", "values": [["姓名", "地址"]]})
+    for row in rows:
+        number = str(row[1]).strip()
+        index = existing.get(number)
+        if index is None:
+            index = next_row
+            next_row += 1
+            existing[number] = index
+        updates.append({"range": f"'中獎發票'!C{index}:L{index}", "values": [row]})
+        if area:
+            name, address, link = customers[number]
+            updates.append({"range": f"'中獎發票'!A{index}:B{index}", "values": [[name, address]]})
+            links.append({"repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": index - 1, "endRowIndex": index,
+                          "startColumnIndex": 0, "endColumnIndex": 1},
+                "cell": {"userEnteredFormat": {"textFormat": {"link": {"uri": link}} if link else {}}},
+                "fields": "userEnteredFormat.textFormat.link",
+            }})
+    sheets.spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id, body={"valueInputOption": "RAW", "data": updates}
     ).execute()
-    _write_import_log(sheets, spreadsheet_id, "中獎", period, path, checksum, len(rows))
+    if links:
+        sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": links}).execute()
+    if not imported:
+        _write_import_log(sheets, spreadsheet_id, "中獎", period, path, checksum, len(rows))
     return len(rows)
 
 
@@ -571,7 +630,7 @@ class InvoiceArchiveProcessor:
         with tempfile.TemporaryDirectory(prefix="ei_prize_update_") as temp_dir:
             path = self._download_named(folders.prize_invoice, name, Path(temp_dir) / name)
             spreadsheet_id = _find_or_create_annual_spreadsheet(self.drive, folders.prize_annual_parent, prize_period[:4], area)
-            return import_prize(self.sheets, spreadsheet_id, prize_period, path)
+            return import_prize(self.sheets, spreadsheet_id, prize_period, path, area=area)
 
     def archive_prize_period(self, *, area: str, period8: str, prize_path: Path) -> str:
         if not re.fullmatch(r"\d{8}", period8):
@@ -626,7 +685,7 @@ class InvoiceArchiveProcessor:
             spreadsheet_id = _find_or_create_annual_spreadsheet(
                 self.drive, annual_parent, period8[:4], area
             )
-            return import_prize(self.sheets, spreadsheet_id, period8, path)
+            return import_prize(self.sheets, spreadsheet_id, period8, path, area=area)
 
     def _find_named(self, folder_id: str, name: str) -> str:
         query = f"'{_escape(folder_id)}' in parents and name='{_escape(name)}' and trashed=false"

@@ -44,14 +44,7 @@ def run(area: str, period8: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
     period8 = _validate_period(period8)
     processor = InvoiceArchiveProcessor()
 
-    try:
-        count = processor.update_prize_period(area=area, period8=period8)
-        print(f"[{area}] Drive 已有 {period8} 中獎發票檔，直接更新完成：{count} 筆")
-        return count
-    except Exception as exc:
-        if not _is_missing_archive(exc, area, period8):
-            raise
-        print(f"[{area}] Drive 缺少 {period8} 中獎發票檔，開始檢查鯨躍登入狀態並下載")
+    print(f"[{area}] 重新匯出 {period8} 中獎清冊（全部／Excel）")
 
     accounts = load_accounts(None)
     credentials = credentials_for(area, accounts)
@@ -91,7 +84,7 @@ def run(area: str, period8: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="中獎發票更新；Drive 缺檔時自動登入鯨躍下載")
+    parser = argparse.ArgumentParser(description="中獎發票更新；重新匯出全部清冊並補上客戶資料")
     parser.add_argument("--area", required=True)
     parser.add_argument("--period", required=True)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
