@@ -144,7 +144,7 @@ def test_cancel_browser_fixture(source, backend):
     plan = prepare("taipei", source, backend)
     html = '''<label><input type="radio">已開立發票</label>
     <table><tr><td>發票號碼</td><td><input><input></td></tr>
-    <tr><td>發票日期</td><td><input><input></td></tr></table>
+    <tr><td>發票日期</td><td><input id="date1" readonly value="115/09/24"><input id="date2" readonly></td></tr></table>
     <button>搜尋</button>
     <table><tr><td>2026/08/31</td><td>DM51791909</td><td>2026/08/31</td>
     <td>LC00215020</td><td></td><td>測試客戶</td><td>4,800</td><td>0</td><td>4,800</td>
@@ -163,3 +163,10 @@ def test_cancel_browser_fixture(source, backend):
         assert page.locator("#state").inner_text() == "已作廢"
         assert runner._field_row(page, "發票日期").locator("input").first.input_value() == "115/08/31"
         browser.close()
+
+
+def test_cancel_date_reset_stops_before_search():
+    field = MagicMock()
+    field.input_value.return_value = "115/09/24"
+    with pytest.raises(RuntimeError, match="禁止搜尋或作廢"):
+        runner._set_cancel_date(field, "115/08/31")
