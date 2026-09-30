@@ -20,6 +20,19 @@ def _field_row(page, label):
     return page.get_by_text(label, exact=True).locator("xpath=ancestor::tr[1]")
 
 
+
+def _set_cancel_date(field, value: str) -> None:
+    # EI date-picker inputs are readonly; the submitted value still lives on the input.
+    field.evaluate("""(el, value) => {
+        el.value = value;
+        for (const name of ['input', 'change', 'blur']) {
+            el.dispatchEvent(new Event(name, {bubbles: true}));
+        }
+    }""", value)
+    if field.input_value().strip() != value:
+        raise RuntimeError(f"發票日期未成功設定為 {value}，禁止搜尋或作廢")
+
+
 def cancel_original(page, plan, before_submit) -> None:
     from .cetustek_invoice_paste import _clear_dialog_handlers
     from .invoice import to_ei_roc_date
@@ -39,9 +52,12 @@ def cancel_original(page, plan, before_submit) -> None:
         raise RuntimeError("作廢查詢欄位與預期不符，未送出")
     for index in range(2):
         numbers.nth(index).fill(old)
-    dates.nth(0).fill(to_ei_roc_date(plan["paid_date"]))
-    dates.nth(1).fill(to_ei_roc_date(datetime.now(ZoneInfo("Asia/Taipei")).date()))
-    dates.nth(1).press("Tab")
+    expected_dates = [to_ei_roc_date(plan["paid_date"]),
+                      to_ei_roc_date(datetime.now(ZoneInfo("Asia/Taipei")).date())]
+    for index, value in enumerate(expected_dates):
+        _set_cancel_date(dates.nth(index), value)
+    if [dates.nth(i).input_value().strip() for i in range(2)] != expected_dates:
+        raise RuntimeError("發票日期被日期元件重設，禁止搜尋或作廢")
     page.get_by_text("搜尋", exact=True).click()
     result = page.locator("tr").filter(has=page.get_by_role("cell", name=old, exact=True))
     result.wait_for(state="visible", timeout=15000)
