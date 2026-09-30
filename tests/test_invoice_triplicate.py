@@ -75,7 +75,7 @@ def test_result_keeps_original_and_payment_status(source, backend):
     ws.get.return_value = [row_for(source)]
     complete(ws, prepare("taipei", source, backend), "AA12345678")
     updates = ws.batch_update.call_args.args[0]
-    assert {u["range"] for u in updates} == {"O303", "AA303"}
+    assert {u["range"] for u in updates} == {"O303", "AA303", "B303", "K303"}
     with pytest.raises(ValueError):
         complete(ws, prepare("taipei", source, backend), "DM51791909")
     changed = row_for(source)
@@ -316,3 +316,38 @@ def test_disappearing_allowance_confirmation_recovers_success():
     page.locator.return_value.click.side_effect = TimeoutError('not visible')
     assert allowance._finish_allowance_save(page) == 'AL1234567890'
     page.locator.return_value.click.assert_called_once()
+
+
+def test_invoice_result_rejects_order_and_repairs_known_bad_value(source, backend):
+    plan = prepare('taipei', source, backend)
+    ws = MagicMock()
+    row = row_for(source)
+    row[14] = source['order_no']
+    ws.get.return_value = [row]
+    with pytest.raises(ValueError, match='訂單號'):
+        complete(ws, plan, source['order_no'])
+    ws.batch_update.assert_not_called()
+    complete(ws, plan, 'AA12345678')
+    updates = ws.batch_update.call_args.args[0]
+    assert {'range':'O303','values':[['AA12345678']]} in updates
+    assert {'range':'B303','values':[['已處理發票']]} in updates
+
+
+def test_reissue_reference_cannot_be_extracted_as_new_invoice():
+    from tools.invoice_center.cetustek_invoice_paste import _invoice_candidates
+    assert _invoice_candidates('LC00215020 DM51791909', 'LC00215020-RDM51791909') == []
+    assert _invoice_candidates('LC00215020 DM51791909 AA12345678', 'LC00215020-RDM51791909') == ['AA12345678']
+
+
+def test_completion_appends_invoice_audit_note_only_once(source, backend):
+    plan = prepare('taipei', source, backend)
+    row = row_for(source)
+    ws = MagicMock()
+    ws.get.return_value = [row]
+    complete(ws, plan, 'AA12345678')
+    note = next(x['values'][0][0] for x in ws.batch_update.call_args.args[0] if x['range']=='K303')
+    assert note.startswith(source['note'])
+    assert note.endswith('原發票號碼：DM51791909\n新發票號碼：AA12345678')
+    row[10], row[14], row[1] = note, 'AA12345678', '已處理發票'
+    complete(ws, plan, 'AA12345678')
+    assert not any(x['range']=='K303' for x in ws.batch_update.call_args.args[0])
