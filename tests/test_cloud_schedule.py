@@ -46,14 +46,24 @@ class ScheduleTests(unittest.TestCase):
                     if m.plan(when): self.assertIn((hour,minute),slots)
 
     def test_existing_run_is_not_dispatched_again(self):
-        when=dt.datetime.now(m.TZ).replace(second=0,microsecond=0)
+        now=dt.datetime.now(m.TZ)
+        when=now.replace(minute=(now.minute//10)*10,second=0,microsecond=0)
         slot=when.strftime('%Y%m%dT%H%M')
         with patch.object(m,'plan',return_value=[('scheduled_service.yml',{'target':'service_all'})]), patch.object(m,'api',return_value={'workflow_runs':[{'display_title':'cloud-'+slot}]}) as api, patch('sys.argv',['cloud_schedule','--timestamp',str(int(when.timestamp()))]):
             m.main()
             self.assertEqual(api.call_count,1)
 
+    def test_cloud_clock_skew(self):
+        self.assertEqual(m.scheduled_time(1790755153).isoformat(), "2026-09-30T16:00:00+08:00")
+        self.assertIn(("scheduled_fubon_statement.yml", {}), m.plan(m.scheduled_time(1790755153)))
+        for text in ["2026-10-01T00:00", "2026-10-01T01:10", "2026-10-01T01:20", "2026-10-01T00:30", "2026-10-01T00:40"]:
+            target=dt.datetime.fromisoformat(text).replace(tzinfo=m.TZ)
+            for offset in [-120,-47,0,45,120]:
+                self.assertEqual(m.scheduled_time(int(target.timestamp())+offset),target)
+            with self.assertRaises(ValueError): m.scheduled_time(int(target.timestamp())+121)
+
     def test_stale_timestamp_is_rejected(self):
-        with patch('sys.argv',['cloud_schedule','--timestamp','1']), patch.object(m,'api') as api:
+        with patch('sys.argv',['cloud_schedule','--timestamp','600']), patch.object(m,'api') as api:
             with self.assertRaises(SystemExit): m.main()
             api.assert_not_called()
 

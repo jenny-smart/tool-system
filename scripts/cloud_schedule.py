@@ -10,6 +10,13 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo('Asia/Taipei')
 
+def scheduled_time(stamp):
+    """Allow up to two minutes of clock skew around ten-minute slots."""
+    slot_stamp = ((stamp + 300) // 600) * 600
+    if abs(stamp - slot_stamp) > 120:
+        raise ValueError("雲端時間戳未落在原定時段前後兩分鐘內")
+    return dt.datetime.fromtimestamp(slot_stamp, TZ)
+
 def plan(when):
     when = when.astimezone(TZ)
     hm = when.strftime('%H:%M')
@@ -61,9 +68,9 @@ def main():
     args = parser.parse_args()
     stamp = int(args.timestamp)
     now = dt.datetime.now(dt.timezone.utc)
-    when = dt.datetime.fromtimestamp(stamp, TZ).replace(second=0, microsecond=0)
+    when = scheduled_time(stamp)
     age = (now - when).total_seconds()
-    if not args.dry_run and not -60 <= age <= 900:
+    if not args.dry_run and not -120 <= age <= 900:
         raise SystemExit('拒絕過期或未來的排程（容許 15 分鐘啟動延遲）；請人工確認後補跑。')
     jobs = plan(when)
     slot = when.strftime('%Y%m%dT%H%M')
