@@ -274,11 +274,15 @@ def test_full_allowance_checks_amount_year_and_save_boundary(monkeypatch):
     assert events == ['checkpoint', 'save']
     locate('#qyear').select_option.assert_called_once_with(value='115')
     reason.assert_called_once_with(page, full_refund=True)
+    locate('#unitprice').fill.assert_not_called()
     events.clear()
     with pytest.raises(RuntimeError, match='全額折讓金額不符'):
         allowance._create_one(page, 'DM51791909', '4700', invoice_year=2026,
                               require_full=True, before_save=lambda: events.append('checkpoint'))
     assert events == []
+    allowance._create_one(page, 'DM51791909', '4700')
+    locate('#unitprice').fill.assert_called_once_with('4700')
+    reason.assert_called_with(page, full_refund=False)
 
 
 def test_resume_supplied_allowance_number_skips_creation(monkeypatch, source, backend):

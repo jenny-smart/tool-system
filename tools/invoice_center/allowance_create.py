@@ -131,7 +131,8 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
     sales_amount = _money(sales_match.group(1)) if sales_match else Decimal("-1")
     if require_full and (sales_amount <= 0 or _money(untaxed) != sales_amount):
         raise RuntimeError("原票可折讓銷售額與全額折讓金額不符，禁止重複或部分折讓")
-    _select_allowance_reason(page, full_refund=_money(untaxed) == sales_amount)
+    full_refund = _money(untaxed) == sales_amount
+    _select_allowance_reason(page, full_refund=full_refund)
 
     page.locator("img[title='發票明細查詢']").click()
     products = page.locator("#processresult a[onclick^='setInvoiceDetail']")
@@ -142,7 +143,10 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
     select_product.click()
     page.locator("#unitprice").wait_for(state="visible")
 
-    page.locator("#unitprice").fill(untaxed)
+    # Full allowance uses the invoice detail exactly as EI populated it.
+    # Editing unit price triggers recalculation of amount/tax on old two-copy invoices.
+    if not full_refund:
+        page.locator("#unitprice").fill(untaxed)
     page.locator("a[onclick='goDetail();']").click()
     confirm = page.get_by_text("確定", exact=True)
     confirm.wait_for(state="visible")
