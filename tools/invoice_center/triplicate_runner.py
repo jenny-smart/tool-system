@@ -33,6 +33,27 @@ def _set_cancel_date(field, value: str) -> None:
         raise RuntimeError(f"發票日期未成功設定為 {value}，禁止搜尋或作廢")
 
 
+def _action_button(page, label: str):
+    """Match visible native controls, ignoring decorative icons and spacing."""
+    controls = page.locator("a,button,input[type='button'],input[type='submit'],[role='button']")
+    matches = []
+    for index in range(controls.count()):
+        control = controls.nth(index)
+        if not control.is_visible():
+            continue
+        text = control.evaluate("""el => {
+            if (el.tagName === 'INPUT') return el.value;
+            const copy = el.cloneNode(true);
+            copy.querySelectorAll('i,svg,[aria-hidden="true"]').forEach(n => n.remove());
+            return copy.textContent || '';
+        }""")
+        if re.sub(r"[\W_]+", "", text or "") == re.sub(r"[\W_]+", "", label):
+            matches.append(control)
+    if len(matches) != 1:
+        raise RuntimeError(f"找不到唯一可見的「{label}」操作按鈕（{len(matches)} 個），未送出")
+    return matches[0]
+
+
 def cancel_original(page, plan, before_submit) -> None:
     from .cetustek_invoice_paste import _clear_dialog_handlers
     from .invoice import to_ei_roc_date
@@ -58,8 +79,10 @@ def cancel_original(page, plan, before_submit) -> None:
         _set_cancel_date(dates.nth(index), value)
     if [dates.nth(i).input_value().strip() for i in range(2)] != expected_dates:
         raise RuntimeError("發票日期被日期元件重設，禁止搜尋或作廢")
-    page.get_by_text("搜尋", exact=True).click()
-    result = page.locator("tr").filter(has=page.get_by_role("cell", name=old, exact=True))
+    result = page.locator("#result #data > tbody > tr").filter(has=page.get_by_role("cell", name=old, exact=True))
+    # EI can retain a valid result after search/navigation. Use that row directly.
+    if result.count() != 1 or not result.is_visible():
+        _action_button(page, "搜尋").click()
     result.wait_for(state="visible", timeout=15000)
     cells = result.locator(":scope > td").all_text_contents()
     if len(cells) < 10 or cells[3].strip() != order or cells[4].strip():
@@ -68,7 +91,9 @@ def cancel_original(page, plan, before_submit) -> None:
         raise RuntimeError("原發票日期與後台付款日期不符")
     if to_decimal(cells[8]) != to_decimal(plan["total"]):
         raise RuntimeError("原發票總額與後台金額不符")
-    result.locator('img[title="作廢"][src$="Abort.png"]').click()
+    result.locator("a[onclick^='invoicecance(']").filter(
+        has=page.locator('img[title="作廢"][src$="Abort.png"]')
+    ).click()
     reason = _field_row(page, "作廢原因").locator('input:not([type="hidden"])')
     reason.fill("開立錯誤")
     if reason.input_value() != "開立錯誤":
@@ -84,8 +109,9 @@ def cancel_original(page, plan, before_submit) -> None:
 
     page.on("dialog", on_dialog)
     try:
+        confirm = _action_button(page, "確認作廢")
         before_submit()
-        page.get_by_text("確認作廢", exact=True).click()
+        confirm.click()
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             texts = messages + [page.locator("body").inner_text()]
@@ -94,8 +120,8 @@ def cancel_original(page, plan, before_submit) -> None:
             # Same invoice row must explicitly report cancelled, not merely disappear.
             if result.count() == 1:
                 status = result.locator(":scope > td").nth(9)
-                status_text = status.inner_text() + " ".join(status.locator("img").evaluate_all(
-                    "els => els.map(e => (e.title || '') + ' ' + (e.alt || ''))"))
+                status_text = status.inner_text() + " ".join(status.locator("img,[data-title]").evaluate_all(
+                    "els => els.map(e => (e.title || '') + ' ' + (e.alt || '') + ' ' + (e.getAttribute('data-title') || ''))"))
                 if "已作廢" in status_text:
                     return
             page.wait_for_timeout(300)

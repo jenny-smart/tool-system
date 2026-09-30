@@ -138,21 +138,24 @@ def test_awaiting_save_does_not_reissue(monkeypatch, source, backend):
     assert events == ["issued", "completed"]
 
 
+@pytest.mark.parametrize("result_ready", [False, True])
 @pytest.mark.parametrize("original_buyer_id", ["", "93370180"])
-def test_cancel_browser_fixture(source, backend, original_buyer_id):
+def test_cancel_browser_fixture(source, backend, original_buyer_id, result_ready):
     """Exercise selectors and confirmation on a local synthetic page, never EI."""
     from playwright.sync_api import sync_playwright
     plan = prepare("taipei", source, backend)
     html = '''<label><input type="radio">已開立發票</label>
     <table><tr><td>發票號碼</td><td><input><input></td></tr>
     <tr><td>發票日期</td><td><input id="date1" readonly value="115/09/24"><input id="date2" readonly></td></tr></table>
-    <button>搜尋</button>
-    <table><tr><td>2026/08/31</td><td>DM51791909</td><td>2026/08/31</td>
+    <a href="#" onclick="document.getElementById('data').hidden=false;window.searched=true">搜&nbsp;尋 <i>arrow_forward</i> ❯</a>
+    <div id="result"><table id="data"><tr><td>2026/08/31</td><td>DM51791909</td><td>2026/08/31</td>
     <td>LC00215020</td><td></td><td>測試客戶</td><td>4,800</td><td>0</td><td>4,800</td>
-    <td id="state">有效</td><td><img title="作廢" src="images/Abort.png"
-    onclick="document.getElementById('modal').hidden=false"></td></tr></table>
+    <td id="state">有效</td><td><a href="javascript:void(0)" onclick="invoicecance('168315957');"><img title="作廢" src="images/Abort.png"></a></td></tr></table></div>
+    <script>function invoicecance(id) {document.getElementById('modal').hidden=false;}</script>
     <div id="modal" hidden><table><tr><td>作廢原因</td><td><input></td></tr></table>
-    <button onclick="document.getElementById('state').innerText='已作廢';alert('發票作廢成功')">確認作廢</button></div>'''
+    <button onclick="document.getElementById('state').innerText='已作廢';alert('發票作廢成功')">確認作廢 <i>arrow_forward</i> ❯</button></div>'''
+    if not result_ready:
+        html = html.replace('<table id="data">', '<table id="data" hidden>')
     html = html.replace("<td>LC00215020</td><td></td>",
                         f"<td>LC00215020</td><td>{original_buyer_id}</td>")
     with sync_playwright() as p:
@@ -169,6 +172,7 @@ def test_cancel_browser_fixture(source, backend, original_buyer_id):
             return
         runner.cancel_original(page, plan, lambda: calls.append("submit"))
         assert calls == ["submit"]
+        assert bool(page.evaluate("window.searched")) == (not result_ready)
         assert page.locator("#state").inner_text() == "已作廢"
         assert runner._field_row(page, "發票日期").locator("input").first.input_value() == "115/08/31"
         browser.close()
