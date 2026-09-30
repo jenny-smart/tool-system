@@ -3399,6 +3399,7 @@ FINANCE_TASKS = [
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
     {"name": "【鯨躍發票】開立發票", "handler": None, "enabled": True},
+    {"name": "【鯨躍發票】二聯改三聯", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【鯨躍發票】紙本發票更新", "handler": run_cetustek_paper_update, "enabled": True},
@@ -3816,6 +3817,16 @@ with func_col:
             label_visibility="collapsed",
             key="selected_function",
         )
+
+if system_type == "finance_management" and selected_function == "【鯨躍發票】二聯改三聯":
+    st.markdown("</div>", unsafe_allow_html=True)
+    from tools.invoice_center.triplicate_ui import render_triplicate
+
+    render_triplicate()
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("cetustek.",))
+    st.stop()
 
 if system_type == "finance_management" and selected_function == "【鯨躍發票】開立發票":
     st.markdown("</div>", unsafe_allow_html=True)
