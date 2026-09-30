@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import time
 from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -79,6 +80,31 @@ def _select_allowance_reason(page: Page, full_refund: bool) -> None:
     raise RuntimeError(f"鯨躍折讓原因找不到「{expected}」選項；實際選項：{labels}")
 
 
+def _finish_allowance_save(page: Page) -> str:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    notice = page.locator("#msg").filter(has_text=re.compile("折讓開立成功"))
+    confirmation_attempted = False
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        # Saving may finish before the alert's entrance/exit animation settles.
+        # Success wins; never require clicking an already dismissed confirmation.
+        if notice.is_visible():
+            text = notice.inner_text()
+            matches = re.findall(r"[A-Z]{2}\d{8,}", text)
+            if matches:
+                return matches[-1]
+            raise RuntimeError("折讓已成功，但訊息缺少折讓單號，請填入已開立單號接續")
+        confirm = page.locator("#alertify-ok")
+        if not confirmation_attempted and confirm.is_visible():
+            confirmation_attempted = True
+            try:
+                confirm.click(timeout=1000)
+            except PlaywrightTimeoutError:
+                pass  # It can disappear because saving already completed.
+        page.wait_for_timeout(200)
+    raise RuntimeError("未讀到折讓成功單號；如已開立，請填入已開立折讓單號接續新發票")
+
+
 def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int | None = None,
                 require_full: bool = False, before_save=None) -> str:
     year = page.locator("#qyear")
@@ -125,16 +151,7 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
     if before_save is not None:
         before_save()
     page.locator("#save2").click()
-    save_confirm = page.get_by_text("確定", exact=True)
-    save_confirm.wait_for(state="visible")
-    save_confirm.click()
-    notice = page.locator("#msg").filter(has_text=re.compile("折讓開立成功"))
-    notice.wait_for(state="visible")
-    text = notice.inner_text()
-    matches = re.findall(r"[A-Z]{2}\d{8,}", text)
-    if not matches:
-        raise RuntimeError(f"{invoice_no} 儲存後找不到折讓單號")
-    return matches[-1]
+    return _finish_allowance_save(page)
 
 
 def _existing_allowance(values: list[list[str]], sheet_row: int) -> tuple[str, str]:

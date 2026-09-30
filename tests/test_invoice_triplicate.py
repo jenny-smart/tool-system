@@ -279,3 +279,36 @@ def test_full_allowance_checks_amount_year_and_save_boundary(monkeypatch):
         allowance._create_one(page, 'DM51791909', '4700', invoice_year=2026,
                               require_full=True, before_save=lambda: events.append('checkpoint'))
     assert events == []
+
+
+def test_resume_supplied_allowance_number_skips_creation(monkeypatch, source, backend):
+    plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
+    plan = prepare('taipei', source, backend, original_action='allowance')
+    state.update(plan=plan, stage='allowance_submitting')
+    ws.get.side_effect = lambda address: [] if address.startswith('AB') else [row_for(source)]
+    monkeypatch.setattr(runner, 'allowance_original', lambda *a: pytest.fail('must not reissue allowance'))
+    runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei', resume_allowance_no='AL1234567890')
+    assert events == ['allowed','open','awaiting_save','fill','issued','completed']
+    assert ws.batch_update.call_args_list[0].args[0] == [{'range':'AB303','values':[['AL1234567890']]}]
+
+
+def test_successful_allowance_does_not_click_dismissed_confirmation():
+    from tools.invoice_center import allowance_create as allowance
+    page = MagicMock()
+    notice = page.locator.return_value.filter.return_value
+    notice.is_visible.return_value = True
+    notice.inner_text.return_value = '折讓開立成功 AL1234567890'
+    assert allowance._finish_allowance_save(page) == 'AL1234567890'
+    page.locator.return_value.click.assert_not_called()
+
+
+def test_disappearing_allowance_confirmation_recovers_success():
+    from tools.invoice_center import allowance_create as allowance
+    from playwright.sync_api import TimeoutError
+    page = MagicMock()
+    notice = page.locator.return_value.filter.return_value
+    notice.is_visible.side_effect = [False, True]
+    notice.inner_text.return_value = '折讓開立成功 AL1234567890'
+    page.locator.return_value.click.side_effect = TimeoutError('not visible')
+    assert allowance._finish_allowance_save(page) == 'AL1234567890'
+    page.locator.return_value.click.assert_called_once()
