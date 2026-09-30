@@ -36,7 +36,7 @@ def render_triplicate() -> None:
                   **({"作廢原因": "開立錯誤"} if action == "cancel" else {"折讓範圍": "原票全額", "折讓金額": plan["total"]}),
                   "買方名稱": data["buyer_name"], "買方統編": data["buyer_identifier"],
                   "發票地址": data["buyer_address"] or "（空白）", "含稅總額": data["totalamount"]})
-        st.caption("K 欄其他需求請一併核對。新發票回填 O／AA，X／Y 保留原發票記錄，折讓單號記錄於 AB。")
+        st.caption("K 欄其他需求請一併核對。新發票回填 O／AA，B 改為已處理發票，K 加註原票與新票號碼；X／Y 保留，折讓單號記錄於 AB。")
         resume_no = ""
         if action == "allowance":
             resume_no = st.text_input("已開立折讓單號（僅接續新發票時填）",

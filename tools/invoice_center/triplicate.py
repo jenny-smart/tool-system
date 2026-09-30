@@ -100,19 +100,27 @@ def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: s
 def complete(ws: Any, plan: dict[str, Any], invoice_no: str) -> None:
     from tools.local_agent_queue import now_text
     source = plan["source"]
-    if not INVOICE_RE.fullmatch(invoice_no) or invoice_no == source["old_invoice"]:
-        raise ValueError("新發票號碼無效或仍是原發票")
+    if not INVOICE_RE.fullmatch(invoice_no) or invoice_no in {source["old_invoice"], source["order_no"], plan["payload"]["orderid"]}:
+        raise ValueError("新發票號碼無效、為訂單號或仍是原發票")
     n = source["source_row"]
     rows = ws.get(f"A{n}:AA{n}")
     row = list(rows[0] if rows else []) + [""] * 27
     if str(row[6]).strip() != source["order_no"] or str(row[23]).strip().upper() != source["old_invoice"]:
         raise ValueError("回填前來源訂單／原發票已變更")
-    if row[14] and str(row[14]).strip() != invoice_no:
+    mistaken_order = str(row[14]).strip() == source["order_no"]
+    if row[14] and str(row[14]).strip() != invoice_no and not mistaken_order:
         raise ValueError("O 欄已有其他新發票，禁止覆蓋")
     if not row[14]:
         validate_source(ws, source)
-    # X/Y retain the original invoice audit trail; no unrelated payment status change.
-    updates = [{"range": f"O{n}", "values": [[invoice_no]]}]
+    # X/Y retain the original invoice audit trail; B records invoice completion.
+    updates = [{"range": f"O{n}", "values": [[invoice_no]]},
+               {"range": f"B{n}", "values": [["已處理發票"]]}]
+    note = str(row[10] or "").rstrip()
+    for line in (f"原發票號碼：{source['old_invoice']}", f"新發票號碼：{invoice_no}"):
+        if line not in note.splitlines():
+            note = f"{note}\n{line}" if note else line
+    if note != str(row[10] or ""):
+        updates.append({"range": f"K{n}", "values": [[note]]})
     if not row[26]:
         updates.append({"range": f"AA{n}", "values": [[now_text()]]})
     ws.batch_update(updates, value_input_option="RAW")

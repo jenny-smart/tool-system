@@ -221,11 +221,15 @@ def _extract_invoice_no(page: Any) -> str:
 
 def _invoice_candidates(text: str, order_no: str) -> list[str]:
     """Return invoice-shaped values, excluding the order number itself."""
-    order_base = re.sub(r"-\d+$", "", re.sub(r"\s+", "", str(order_no or "")).upper())
+    reference = re.sub(r"\s+", "", str(order_no or "")).upper()
+    # References include both numeric suffixes and -R<original invoice> on reissue.
+    # Neither the base order nor any invoice embedded in that reference is a new invoice.
+    excluded = {reference.split("-", 1)[0], reference}
+    excluded.update(re.findall(r"[A-Z]{2}\d{8}", reference))
     result: list[str] = []
     for prefix, digits in INVOICE_NO_RE.findall(str(text or "").upper()):
         candidate = f"{prefix}{digits}"
-        if candidate == order_base or candidate in result:
+        if candidate in excluded or candidate in result:
             continue
         result.append(candidate)
     return result
