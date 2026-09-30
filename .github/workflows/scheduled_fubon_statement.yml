@@ -1,5 +1,7 @@
 name: Scheduled Fubon Statement Download
 
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
 on:
   schedule:
     # UTC 時間；台北時間需加 8 小時
@@ -8,13 +10,20 @@ on:
     - cron: "0 4 * * *"   # 台北 12:00
     - cron: "0 6 * * *"   # 台北 14:00
     - cron: "0 8 * * *"   # 台北 16:00
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   queue-fubon-download:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

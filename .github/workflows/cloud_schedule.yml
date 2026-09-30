@@ -1,0 +1,35 @@
+name: Cloud Schedule Router
+run-name: cloud-router-${{ inputs.timestamp }}
+on:
+  workflow_dispatch:
+    inputs:
+      timestamp:
+        description: Unix timestamp supplied by cron-job.org
+        required: true
+        type: string
+      dry_run:
+        description: Validate the schedule without dispatching tasks
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: cloud-schedule-router
+  cancel-in-progress: false
+jobs:
+  route:
+    if: vars.EXTERNAL_SCHEDULER_ENABLED == 'true' || inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dispatch original Taipei schedule
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLOT_TIMESTAMP: ${{ inputs.timestamp }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python3 scripts/cloud_schedule.py --timestamp "$SLOT_TIMESTAMP" "${args[@]}"
