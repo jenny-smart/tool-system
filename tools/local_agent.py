@@ -76,6 +76,16 @@ def _common_invoice_args(params: dict[str, Any]) -> tuple[str, str]:
     return area, cdp_url
 
 
+def build_cetustek_triplicate(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    plan = params.get("plan")
+    if not area or area == "全區" or not isinstance(plan, dict):
+        raise ValueError("二聯改三聯需要指定地區及預覽資料")
+    return [sys.executable, "-m", "tools.invoice_center.triplicate_runner",
+            "--area", area, "--cdp-url", cdp_url,
+            "--plan", json.dumps(plan, ensure_ascii=False)]
+
+
 def build_cetustek_login(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     command = [
@@ -632,6 +642,7 @@ def build_git_pull_restart(_params: dict[str, Any]) -> list[str]:
 
 
 register_action("cetustek.login", build_cetustek_login)
+register_action("cetustek.triplicate", build_cetustek_triplicate)
 register_action("cetustek.download", build_cetustek_download)
 register_action("cetustek.prize_update", build_cetustek_prize_update)
 register_action("cetustek.allowance", build_cetustek_allowance)
