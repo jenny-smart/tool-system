@@ -57,7 +57,7 @@ def test_payload_preserves_total_clears_carrier_and_address(source, backend):
     assert prepare("taipei", source, backend)["payload"]["buyer_address"] == "原地址"
 
 
-@pytest.mark.parametrize("field,value", [("invoice_no", "AA12345678"), ("invoice_type", "三聯式"),
+@pytest.mark.parametrize("field,value", [("invoice_no", "AA12345678"),
                                         ("paid_status", "待付款"), ("extra", {}), ("amount", "0")])
 def test_backend_mismatch_stops(source, backend, field, value):
     setattr(backend.get_order.return_value, field, value)
@@ -138,7 +138,8 @@ def test_awaiting_save_does_not_reissue(monkeypatch, source, backend):
     assert events == ["issued", "completed"]
 
 
-def test_cancel_browser_fixture(source, backend):
+@pytest.mark.parametrize("original_buyer_id", ["", "93370180"])
+def test_cancel_browser_fixture(source, backend, original_buyer_id):
     """Exercise selectors and confirmation on a local synthetic page, never EI."""
     from playwright.sync_api import sync_playwright
     plan = prepare("taipei", source, backend)
@@ -152,12 +153,20 @@ def test_cancel_browser_fixture(source, backend):
     onclick="document.getElementById('modal').hidden=false"></td></tr></table>
     <div id="modal" hidden><table><tr><td>作廢原因</td><td><input></td></tr></table>
     <button onclick="document.getElementById('state').innerText='已作廢';alert('發票作廢成功')">確認作廢</button></div>'''
+    html = html.replace("<td>LC00215020</td><td></td>",
+                        f"<td>LC00215020</td><td>{original_buyer_id}</td>")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.route("**/*", lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=html)
                    if route.request.is_navigation_request() else route.abort())
         calls = []
+        if original_buyer_id:
+            with pytest.raises(RuntimeError, match="二聯訂單"):
+                runner.cancel_original(page, plan, lambda: calls.append("submit"))
+            assert calls == []
+            browser.close()
+            return
         runner.cancel_original(page, plan, lambda: calls.append("submit"))
         assert calls == ["submit"]
         assert page.locator("#state").inner_text() == "已作廢"
@@ -170,3 +179,15 @@ def test_cancel_date_reset_stops_before_search():
     field.input_value.return_value = "115/09/24"
     with pytest.raises(RuntimeError, match="禁止搜尋或作廢"):
         runner._set_cancel_date(field, "115/08/31")
+
+
+def test_updated_company_setting_does_not_reclassify_original_invoice(source, backend):
+    order = backend.get_order.return_value
+    order.invoice_type = "三聯式"
+    order.buyer_identifier = "93370180"
+    order.buyer_name = "川岩國際有限公司"
+    plan = prepare("taipei", source, backend)
+    assert plan["source"]["old_type"] == "二聯"
+    assert plan["source"]["old_invoice"] == "DM51791909"
+    assert plan["payload"]["buyer_identifier"] == "93370180"
+    assert plan["payload"]["totalamount"] == "4800"
