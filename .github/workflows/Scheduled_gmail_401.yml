@@ -1,16 +1,25 @@
 name: Scheduled Gmail 401 Archive
 
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
 on:
   schedule:
-    - cron: "0 16 20 * *"  # 台灣時間每月20日 00:00（UTC 16:00 前一天）
+    - cron: "0 16 19 * *"  # 台灣時間每月20日 00:00（UTC 16:00 前一天）
 
   workflow_dispatch:
+    inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
   run-gmail-401:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
 
     env:
