@@ -60,8 +60,11 @@ def prepare(area: str, item: dict[str, Any], backend: Any) -> dict[str, Any]:
     order = backend.get_order(item["order_no"])
     if order is None or order.order_no != item["order_no"]:
         raise ValueError("檸檬後台找不到相同訂單")
-    if order.invoice_no.strip().upper() != old or "二聯" not in order.invoice_type:
-        raise ValueError("後台原發票／二聯式與清潔異動表不符")
+    # The edit page may already contain the requested company invoice settings.
+    # It does not describe the invoice already issued. X/Y identify that original;
+    # cancel_original additionally requires its EI buyer tax ID to be blank.
+    if order.invoice_no.strip().upper() != old:
+        raise ValueError(f"原發票號碼不符：後台 {order.invoice_no or '空白'}／清潔異動表 {old}")
     if order.paid_status != "已付款":
         raise ValueError("訂單尚未付款")
     paid = str((order.extra or {}).get("paid_at") or "")
