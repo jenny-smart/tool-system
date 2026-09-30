@@ -79,9 +79,23 @@ def _select_allowance_reason(page: Page, full_refund: bool) -> None:
     raise RuntimeError(f"鯨躍折讓原因找不到「{expected}」選項；實際選項：{labels}")
 
 
-def _create_one(page: Page, invoice_no: str, untaxed: str) -> str:
+def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int | None = None,
+                require_full: bool = False, before_save=None) -> str:
     year = page.locator("#qyear")
-    year.select_option(index=1)
+    if invoice_year is None:
+        year.select_option(index=1)
+    else:
+        choices = []
+        for option in year.locator("option").all():
+            value = str(option.get_attribute("value") or "")
+            label = option.inner_text().strip()
+            if value in {str(invoice_year), str(invoice_year - 1911)} or label in {
+                str(invoice_year), str(invoice_year - 1911), f"{invoice_year}年", f"{invoice_year - 1911}年"
+            }:
+                choices.append(value)
+        if len(choices) != 1:
+            raise RuntimeError("找不到原發票年度，禁止折讓")
+        year.select_option(value=choices[0])
     page.locator("#invoicenumber").fill(invoice_no)
     page.locator("a[onclick='SearchInvoice();']").click()
     page.locator("#s_remark").wait_for(state="visible")
@@ -89,11 +103,16 @@ def _create_one(page: Page, invoice_no: str, untaxed: str) -> str:
     available_text = page.locator("body").inner_text()
     sales_match = re.search(r"銷售額[\s\S]*?應稅:\$\s*([\d,]+(?:\.\d+)?)", available_text)
     sales_amount = _money(sales_match.group(1)) if sales_match else Decimal("-1")
+    if require_full and (sales_amount <= 0 or _money(untaxed) != sales_amount):
+        raise RuntimeError("原票可折讓銷售額與全額折讓金額不符，禁止重複或部分折讓")
     _select_allowance_reason(page, full_refund=_money(untaxed) == sales_amount)
 
     page.locator("img[title='發票明細查詢']").click()
-    select_product = page.locator("#processresult a[onclick^='setInvoiceDetail']").first
+    products = page.locator("#processresult a[onclick^='setInvoiceDetail']")
+    select_product = products.first
     select_product.wait_for(state="visible")
+    if require_full and products.count() != 1:
+        raise RuntimeError("原票有多筆明細，請先人工核對全額折讓，未送出")
     select_product.click()
     page.locator("#unitprice").wait_for(state="visible")
 
@@ -103,6 +122,8 @@ def _create_one(page: Page, invoice_no: str, untaxed: str) -> str:
     confirm.wait_for(state="visible")
     confirm.click()
     page.locator("#save2").wait_for(state="visible")
+    if before_save is not None:
+        before_save()
     page.locator("#save2").click()
     save_confirm = page.get_by_text("確定", exact=True)
     save_confirm.wait_for(state="visible")

@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .triplicate import complete, prepare, validate_source
+from .triplicate import complete, prepare, record_allowance, validate_source
 
 CANCEL_URL = "https://www.ei.com.tw/InvoiceRent/invoicecancel.jsp"
 STATE_DIR = Path(__file__).resolve().parents[2] / "outputs" / "invoice_triplicate"
@@ -130,11 +130,24 @@ def cancel_original(page, plan, before_submit) -> None:
         page.remove_listener("dialog", on_dialog)
 
 
+def allowance_original(page, plan, before_submit):
+    from .allowance_create import _create_one, _open_allowance
+    from .cetustek_invoice_paste import _clear_dialog_handlers
+    _clear_dialog_handlers(page)
+    _open_allowance(page)
+    return _create_one(page, plan["source"]["old_invoice"], plan["total"],
+                       invoice_year=int(plan["paid_date"][:4]), require_full=True,
+                       before_save=before_submit)
+
+
 def process(page, ws, plan, state, save, backend, area):
     from .cetustek_invoice_paste import (
         _extract_invoice_no_for_order, _open_invoice_create, _paste_one, _wait_for_manual_save,
     )
     source = plan["source"]
+    action = plan.get("original_action", "cancel")
+    if action not in {"cancel", "allowance"}:
+        raise ValueError("不支援的原發票處理方式")
     if state.get("plan") and state["plan"] != plan:
         raise RuntimeError("此原發票已有不同的處理記錄，請先核對既有進度")
     if state.get("invoice_no"):
@@ -144,26 +157,37 @@ def process(page, ws, plan, state, save, backend, area):
         return
     validate_source(ws, source)
     stage = state.get("stage", "new")
-    if stage == "cancel_submitting":
-        raise RuntimeError("上次作廢結果尚未確認，請人工核對；禁止自動重試或開立")
+    if stage in {"cancel_submitting", "allowance_submitting"}:
+        raise RuntimeError("上次原票處理結果尚未確認，請人工核對；禁止自動重試或開立")
     if stage == "new":
-        fresh = prepare(area, source, backend)
+        fresh = prepare(area, source, backend, original_action=action)
         if fresh != plan:
             raise RuntimeError("後台資料已變更，請回功能頁重新預覽")
-        print(f"核對完成：{source['order_no']}／{source['old_invoice']}；開始作廢", flush=True)
-        cancel_original(page, plan, lambda: save({"plan": plan, "stage": "cancel_submitting"}))
-        save({"stage": "cancelled"})
-        stage = "cancelled"
+        print(f"核對完成：{source['order_no']}／{source['old_invoice']}；原票處理：{action}", flush=True)
+        if action == "allowance":
+            existing = ws.get(f"AB{source['source_row']}")
+            if existing and existing[0] and str(existing[0][0]).strip():
+                raise RuntimeError("AB 欄已有折讓單號，請核對既有結果，禁止重複折讓")
+            number = allowance_original(page, plan, lambda: save({"plan": plan, "stage": "allowance_submitting"}))
+            save({"stage": "allowed", "allowance_no": number})
+            stage = "allowed"
+        else:
+            cancel_original(page, plan, lambda: save({"plan": plan, "stage": "cancel_submitting"}))
+            save({"stage": "cancelled"})
+            stage = "cancelled"
+    if stage == "allowed":
+        record_allowance(ws, plan, state["allowance_no"])
+        print(f"全額折讓完成：{state['allowance_no']}；已回填 AB", flush=True)
     if stage == "awaiting_save":
         number = _extract_invoice_no_for_order(page, plan["payload"]["orderid"])
         if not number or number == source["old_invoice"]:
             raise RuntimeError("已填入三聯表單，請完成儲存並停留查詢結果，再重試回填；不會重開")
-    elif stage == "cancelled":
+    elif stage in {"cancelled", "allowed"}:
         _open_invoice_create(page)
         # Persist before filling: a crash must not cause an unnoticed second issue.
         save({"stage": "awaiting_save"})
         _paste_one(page, json.dumps(plan["payload"], ensure_ascii=False))
-        print("原票已作廢；三聯已填入，請按下一步及儲存", flush=True)
+        print("原票處理完成；三聯已填入，請按下一步及儲存", flush=True)
         number = _wait_for_manual_save(page, plan["payload"]["orderid"])
     else:
         raise RuntimeError(f"未知處理狀態：{stage}")
