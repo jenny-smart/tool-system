@@ -62,6 +62,15 @@ class ScheduleTests(unittest.TestCase):
                 self.assertEqual(m.scheduled_time(int(target.timestamp())+offset),target)
             with self.assertRaises(ValueError): m.scheduled_time(int(target.timestamp())+121)
 
+    def test_delivery_window_and_same_day_catchup(self):
+        slot=dt.datetime(2026,9,30,10,0,tzinfo=m.TZ)
+        for minutes in [-30, -15, 0, 15, 30, 31, 90, 600]:
+            m.validate_delivery(slot, slot+dt.timedelta(minutes=minutes))
+        with self.assertRaises(SystemExit):
+            m.validate_delivery(slot, slot-dt.timedelta(minutes=31))
+        with self.assertRaises(SystemExit):
+            m.validate_delivery(slot, slot+dt.timedelta(days=1))
+
     def test_stale_timestamp_is_rejected(self):
         with patch('sys.argv',['cloud_schedule','--timestamp','600']), patch.object(m,'api') as api:
             with self.assertRaises(SystemExit): m.main()
