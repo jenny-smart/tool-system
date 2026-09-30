@@ -195,3 +195,87 @@ def test_updated_company_setting_does_not_reclassify_original_invoice(source, ba
     assert plan["source"]["old_invoice"] == "DM51791909"
     assert plan["payload"]["buyer_identifier"] == "93370180"
     assert plan["payload"]["totalamount"] == "4800"
+
+
+def test_allowance_branch_records_number_then_issues(monkeypatch, source, backend):
+    plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
+    plan = prepare('taipei', source, backend, original_action='allowance')
+    ws.get.side_effect = lambda address: [] if address.startswith('AB') else [row_for(source)]
+    def allow(page, data, before):
+        assert data['total'] == '4800'
+        before()
+        return 'AL1234567890'
+    monkeypatch.setattr(runner, 'allowance_original', allow)
+    monkeypatch.setattr(runner, 'cancel_original', lambda *a: pytest.fail('must not cancel'))
+    runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
+    assert events == ['allowance_submitting', 'allowed', 'open', 'awaiting_save', 'fill', 'issued', 'completed']
+    assert state['allowance_no'] == 'AL1234567890'
+    assert ws.batch_update.call_args_list[0].args[0] == [{'range':'AB303','values':[['AL1234567890']]}]
+
+
+def test_allowance_uncertain_result_blocks_retry_and_mode_change(monkeypatch, source, backend):
+    plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
+    plan = prepare('taipei', source, backend, original_action='allowance')
+    ws.get.side_effect = lambda address: [] if address.startswith('AB') else [row_for(source)]
+    def fail(page, data, before):
+        before()
+        raise RuntimeError('unknown')
+    monkeypatch.setattr(runner, 'allowance_original', fail)
+    with pytest.raises(RuntimeError):
+        runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
+    with pytest.raises(RuntimeError, match='禁止自動重試'):
+        runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
+    cancel_plan = prepare('taipei', source, backend)
+    with pytest.raises(RuntimeError, match='不同的處理記錄'):
+        runner.process(MagicMock(), ws, cancel_plan, state, save, backend, 'taipei')
+    assert events == ['allowance_submitting']
+
+
+def test_resume_after_allowance_never_repeats_allowance(monkeypatch, source, backend):
+    plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
+    plan = prepare('taipei', source, backend, original_action='allowance')
+    state.update(plan=plan, stage='allowed', allowance_no='AL1234567890')
+    ws.get.side_effect = lambda address: [['AL1234567890']] if address.startswith('AB') else [row_for(source)]
+    monkeypatch.setattr(runner, 'allowance_original', lambda *a: pytest.fail('duplicate allowance'))
+    runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
+    assert events == ['open','awaiting_save','fill','issued','completed']
+
+
+def test_existing_allowance_blocks_new_attempt(monkeypatch, source, backend):
+    plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
+    plan = prepare('taipei', source, backend, original_action='allowance')
+    ws.get.side_effect = lambda address: [['AL1234567890']] if address.startswith('AB') else [row_for(source)]
+    with pytest.raises(RuntimeError, match='禁止重複折讓'):
+        runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
+    assert events == []
+
+
+def test_full_allowance_checks_amount_year_and_save_boundary(monkeypatch):
+    from tools.invoice_center import allowance_create as allowance
+    page = MagicMock()
+    controls = {}
+    def locate(selector):
+        return controls.setdefault(selector, MagicMock())
+    page.locator.side_effect = locate
+    option = MagicMock()
+    option.get_attribute.return_value = '115'
+    option.inner_text.return_value = '115年'
+    locate('#qyear').locator.return_value.all.return_value = [option]
+    locate('body').inner_text.return_value = '銷售額 應稅:$4,800'
+    locate("#processresult a[onclick^='setInvoiceDetail']").count.return_value = 1
+    locate('#msg').filter.return_value.inner_text.return_value = '折讓開立成功 AL1234567890'
+    reason = MagicMock()
+    monkeypatch.setattr(allowance, '_select_allowance_reason', reason)
+    events = []
+    locate('#save2').click.side_effect = lambda: events.append('save')
+    result = allowance._create_one(page, 'DM51791909', '4800', invoice_year=2026,
+                                  require_full=True, before_save=lambda: events.append('checkpoint'))
+    assert result == 'AL1234567890'
+    assert events == ['checkpoint', 'save']
+    locate('#qyear').select_option.assert_called_once_with(value='115')
+    reason.assert_called_once_with(page, full_refund=True)
+    events.clear()
+    with pytest.raises(RuntimeError, match='全額折讓金額不符'):
+        allowance._create_one(page, 'DM51791909', '4700', invoice_year=2026,
+                              require_full=True, before_save=lambda: events.append('checkpoint'))
+    assert events == []

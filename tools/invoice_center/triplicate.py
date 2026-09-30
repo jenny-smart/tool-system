@@ -49,10 +49,12 @@ def validate_source(ws: Any, expected: dict[str, Any]) -> None:
         raise ValueError(f"清潔異動第 {n} 列已變更或已有新發票，請重新讀取")
 
 
-def prepare(area: str, item: dict[str, Any], backend: Any) -> dict[str, Any]:
+def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: str = "cancel") -> dict[str, Any]:
     from .bridge import build_invoice_payload_from_backend_order
     from .invoice import build_add_invoice_payload
 
+    if original_action not in {"cancel", "allowance"}:
+        raise ValueError("不支援的原發票處理方式")
     requirements = parse_requirements(item["note"])
     old = item["old_invoice"]
     if not INVOICE_RE.fullmatch(old) or "二聯" not in item["old_type"]:
@@ -91,7 +93,8 @@ def prepare(area: str, item: dict[str, Any], backend: Any) -> dict[str, Any]:
     payload.taxamount = total - payload.saleamount
     payload.totalamount = total
     return {"source": item, "paid_date": paid_date, "total": format_amount(total),
-            "payload": build_add_invoice_payload(payload)}
+            "payload": build_add_invoice_payload(payload),
+            **({"original_action": "allowance"} if original_action == "allowance" else {})}
 
 
 def complete(ws: Any, plan: dict[str, Any], invoice_no: str) -> None:
@@ -113,3 +116,16 @@ def complete(ws: Any, plan: dict[str, Any], invoice_no: str) -> None:
     if not row[26]:
         updates.append({"range": f"AA{n}", "values": [[now_text()]]})
     ws.batch_update(updates, value_input_option="RAW")
+
+
+def record_allowance(ws: Any, plan: dict[str, Any], allowance_no: str) -> None:
+    if not re.fullmatch(r"[A-Z]{2}\d{8,}", allowance_no):
+        raise ValueError("折讓單號無效，禁止繼續開立")
+    validate_source(ws, plan["source"])
+    n = plan["source"]["source_row"]
+    values = ws.get(f"AB{n}")
+    existing = str(values[0][0]).strip() if values and values[0] else ""
+    if existing and existing != allowance_no:
+        raise ValueError("AB 欄已有其他折讓單號，禁止覆蓋")
+    if not existing:
+        ws.batch_update([{"range": f"AB{n}", "values": [[allowance_no]]}], value_input_option="RAW")
