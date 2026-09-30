@@ -26,6 +26,6 @@ Authorization 使用限定 tool-system 的 GitHub Actions read/write token，僅
 
 Router 以 concurrency 序列化，使用 scheduled_slot 的執行標題確認是否已派送，避免重試時重複派送。
 既有失敗的工作不自動重跑，應檢查原因後使用 GitHub rerun。
-若啟動超過原時段 15 分鐘，拒絕派送並回報失敗，避免跨日期處理錯誤。
+執行時間在原時段正負 30 分鐘內正常處理；同日延遲超過 30 分鐘仍派送並記錄 warning，不因超時漏跑。跨日期或超前超過 30 分鐘則回報失敗，需確認資料日期後補跑。外部時鐘前後兩分鐘偏差會正規化到最近的十分鐘時段；這與 runner 等待時間是不同的檢查。
 cron-job.org HTTP 成功只代表 GitHub 接受觸發，工作是否成功仍需看 GitHub Actions。
 外部排程消除 GitHub schedule 事件延遲，仍不能保證 runner 秒級啟動或服務不中斷。

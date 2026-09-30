@@ -61,6 +61,16 @@ def api(path, payload=None):
         body = response.read()
         return json.loads(body) if body else {}
 
+def validate_delivery(when, now):
+    now = now.astimezone(TZ)
+    age = (now - when).total_seconds()
+    if now.date() != when.date():
+        raise SystemExit("排程已跨日期，請確認資料日期與期別後補跑；未自動執行。")
+    if age < -1800:
+        raise SystemExit("排程時間超前超過 30 分鐘，請檢查時間戳。")
+    if age > 1800:
+        print("::warning::排程延遲超過 30 分鐘，仍執行同日原定任務。")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--timestamp', required=True)
@@ -69,9 +79,8 @@ def main():
     stamp = int(args.timestamp)
     now = dt.datetime.now(dt.timezone.utc)
     when = scheduled_time(stamp)
-    age = (now - when).total_seconds()
-    if not args.dry_run and not -120 <= age <= 900:
-        raise SystemExit('拒絕過期或未來的排程（容許 15 分鐘啟動延遲）；請人工確認後補跑。')
+    if not args.dry_run:
+        validate_delivery(when, now)
     jobs = plan(when)
     slot = when.strftime('%Y%m%dT%H%M')
     print('Taipei slot:', when.isoformat(), 'tasks:', jobs)
