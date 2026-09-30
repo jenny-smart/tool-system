@@ -1,0 +1,30 @@
+2026-09-30 01:00:13 [INFO] === 客服排程系統 run_id=04f24bc5 step=1 台北時間=2026-09-30 09:00:13 ===
+2026-09-30 01:00:13 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-09-30 01:00:13 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-09-30 01:00:23 [INFO] --- Step1_更新排班統計表 ---
+2026-09-30 01:00:25 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-09-30 01:00:25 [INFO] 本次視窗：202609 ~ 202610（共 2 個月）
+2026-09-30 01:00:26 [INFO] Drive 資料夾找到 8 個檔案
+2026-09-30 01:00:26 [INFO]   找到檔案：20261030排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-09-30 01:00:26 [INFO]   找到檔案：20261030排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-09-30 01:00:26 [INFO]   找到檔案：20260930排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-09-30 01:00:26 [INFO]   找到檔案：20260930排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-09-30 01:00:26 [INFO]   找到檔案：20261030排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-30 01:00:26 [INFO]   找到檔案：20260930排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-30 01:00:26 [INFO]   找到檔案：20261030排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-30 01:00:26 [INFO]   找到檔案：20260930排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-09-30 01:00:26 [INFO] 排班檔確認 OK：{'202609': {'taipei': '20260930排班統計表-台北', 'taichung': '20260930排班統計表-台中'}, '202610': {'taipei': '20261030排班統計表-台北', 'taichung': '20261030排班統計表-台中'}}
+2026-09-30 01:00:27 [INFO]   已清除範圍（202609 台北）：G3:O1026
+2026-09-30 01:00:27 [INFO]   匯入：20260930排班統計表-台北
+2026-09-30 01:00:28 [INFO]   → 寫入 84 列（起始 R3C7）
+2026-09-30 01:00:28 [INFO]   已清除範圍（202609 台中）：CD3:CL1026
+2026-09-30 01:00:28 [INFO]   匯入：20260930排班統計表-台中
+2026-09-30 01:00:30 [INFO]   → 寫入 12 列（起始 R3C82）
+2026-09-30 01:00:30 [INFO]   已清除範圍（202610 台北）：V3:AD1026
+2026-09-30 01:00:30 [INFO]   匯入：20261030排班統計表-台北
+2026-09-30 01:00:32 [INFO]   → 寫入 78 列（起始 R3C22）
+2026-09-30 01:00:32 [INFO]   已清除範圍（202610 台中）：CS3:DA1026
+2026-09-30 01:00:32 [INFO]   匯入：20261030排班統計表-台中
+2026-09-30 01:00:33 [INFO]   → 寫入 9 列（起始 R3C97）
+2026-09-30 01:00:34 [INFO] Step 1 完成（10.0s）
+2026-09-30 01:00:35 [INFO] === 全部完成 run_id=04f24bc5（10.9s）===
