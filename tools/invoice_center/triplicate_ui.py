@@ -37,9 +37,16 @@ def render_triplicate() -> None:
                   "買方名稱": data["buyer_name"], "買方統編": data["buyer_identifier"],
                   "發票地址": data["buyer_address"] or "（空白）", "含稅總額": data["totalamount"]})
         st.caption("K 欄其他需求請一併核對。新發票回填 O／AA，X／Y 保留原發票記錄，折讓單號記錄於 AB。")
-        if st.button("執行二聯改三聯", type="primary"):
+        resume_no = ""
+        if action == "allowance":
+            resume_no = st.text_input("已開立折讓單號（僅接續新發票時填）",
+                                      key=f"triplicate_resume_{label}_{item['old_invoice']}").strip().upper()
+            st.caption("折讓已成功但流程中斷時，填入單號後只回填折讓單號並接續新發票，不再開折讓。")
+        button_label = "回填折讓單號並接續新發票" if resume_no else "執行二聯改三聯"
+        if st.button(button_label, type="primary"):
             validate_source(ws, item)
-            create_task("cetustek.triplicate", {"area": label, "plan": plan},
+            dispatch_plan = {**plan, **({"resume_allowance_no": resume_no} if resume_no else {})}
+            create_task("cetustek.triplicate", {"area": label, "plan": dispatch_plan},
                         created_by=st.session_state.get("username", "Tool System"))
             st.session_state.pop("triplicate_plan", None)
             st.success("已加入本機 Agent 佇列；請查看執行進度及鯨躍畫面")

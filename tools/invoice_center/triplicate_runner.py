@@ -140,7 +140,7 @@ def allowance_original(page, plan, before_submit):
                        before_save=before_submit)
 
 
-def process(page, ws, plan, state, save, backend, area):
+def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no=""):
     from .cetustek_invoice_paste import (
         _extract_invoice_no_for_order, _open_invoice_create, _paste_one, _wait_for_manual_save,
     )
@@ -157,6 +157,15 @@ def process(page, ws, plan, state, save, backend, area):
         return
     validate_source(ws, source)
     stage = state.get("stage", "new")
+    if resume_allowance_no:
+        if action != "allowance" or stage not in {"new", "allowance_submitting", "allowed"}:
+            raise RuntimeError("目前進度不能改為接續折讓，請保留既有新發票處理")
+        if not re.fullmatch(r"[A-Z]{2}\d{8,}", resume_allowance_no):
+            raise ValueError("已開立折讓單號格式不符")
+        if state.get("allowance_no") and state["allowance_no"] != resume_allowance_no:
+            raise ValueError("與已記錄的折讓單號不符")
+        save({"plan": plan, "stage": "allowed", "allowance_no": resume_allowance_no})
+        stage = "allowed"
     if stage in {"cancel_submitting", "allowance_submitting"}:
         raise RuntimeError("上次原票處理結果尚未確認，請人工核對；禁止自動重試或開立")
     if stage == "new":
@@ -209,6 +218,8 @@ def run(area: str, plan: dict, cdp_url: str) -> None:
     from .chrome_cdp import connect_existing_chrome
     from .config import normalize_area
 
+    plan = dict(plan)
+    resume_allowance_no = str(plan.pop("resume_allowance_no", "") or "").strip().upper()
     key = normalize_area(area)
     identity = hashlib.sha256(f"{key}:{plan['source']['old_invoice']}".encode()).hexdigest()
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -227,7 +238,8 @@ def run(area: str, plan: dict, cdp_url: str) -> None:
         with sync_playwright() as playwright:
             _browser, context = connect_existing_chrome(playwright, cdp_url)
             page = _login(context, area, load_accounts(None))
-            process(page, get_worksheet(area), plan, state, save, BackendClient(key), key)
+            process(page, get_worksheet(area), plan, state, save, BackendClient(key), key,
+                    resume_allowance_no=resume_allowance_no)
 
 
 if __name__ == "__main__":
