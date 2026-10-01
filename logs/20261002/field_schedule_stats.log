@@ -1,0 +1,23 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.schedule_stats --date 20261002 --system-name 外場排程系統 --run-type 排程
+[2026-10-02 06:01:19] 開始處理排班統計表：20261002排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1hoor40UosdEDSDY4nQ_eQqDWFYaQsBsTWlz-0UbF3T0
+🗑️ 已刪除來源暫存 Google Sheet：1hoor40UosdEDSDY4nQ_eQqDWFYaQsBsTWlz-0UbF3T0
+[2026-10-02 06:01:31] 完成：20261002排班統計表-台北.xlsx → 2026排班統計表!DV4 / rows=78
+[2026-10-02 06:01:43] 開始處理排班統計表：20261102排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1kt5j0dAY5wojR17hlU1AfaUnaMlBprI91TThO6i5R-A
+🗑️ 已刪除來源暫存 Google Sheet：1kt5j0dAY5wojR17hlU1AfaUnaMlBprI91TThO6i5R-A
+[2026-10-02 06:01:52] 完成：20261102排班統計表-台北.xlsx → 2026排班統計表!EH4 / rows=13
+[2026-10-02 06:01:53] 開始處理排班統計表：20261002排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261002排班統計表-台中 (1nl1of9sruxa3lzhMJqdQ7695ZawHry_EJutYh0Ogpfk)
+[2026-10-02 06:01:57] 完成：20261002排班統計表-台中 → 2026排班統計表!DV4 / rows=11
+[write_target_log] 目標執行檔打卡失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1MKadGGTkIefcbPpEVCEPo0SS_wnqsmZSfqjcdhxg6Gk?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'window_start_time': '1790892071', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'quota_unit': '1/min/{project}/{user}', 'quota_metric': 'sheets.googleapis.com/read_requests', 'service': 'sheets.googleapis.com', 'quota_location': 'global', 'consumer': 'projects/1042663213860', 'quota_limit_value': '60'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[2026-10-02 06:01:57] 開始處理排班統計表：20261102排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261102排班統計表-台中 (1IM3igHfbgDExClcrinm7IIgoSvCC-t6L4OWGM62eBy4)
+[2026-10-02 06:01:59] 完成：20261102排班統計表-台中 → 2026排班統計表!EH4 / rows=2
+[write_target_log] 目標執行檔打卡失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1MKadGGTkIefcbPpEVCEPo0SS_wnqsmZSfqjcdhxg6Gk?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_location': 'global', 'consumer': 'projects/1042663213860', 'window_start_time': '1790892071', 'quota_unit': '1/min/{project}/{user}', 'quota_limit_value': '60', 'service': 'sheets.googleapis.com', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[2026-10-02 06:01:59] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成
