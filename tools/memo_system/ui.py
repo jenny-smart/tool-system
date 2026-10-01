@@ -1474,7 +1474,7 @@ def render_memo_system(forced_main_section=None, shared_backend_email=None, shar
 
     def render_change_order_stage_b():
         step("3", "讀取清潔異動工作表待處理列")
-        st.markdown('<div class="info-strip"><b>掃描條件</b><ul><li>B 欄為待收款、待退款、已收款、已退款</li><li>金額欄位已填寫</li></ul><b>列號篩選（選填）</b><ul><li>不填 → 掃描整個工作表全部符合條件的列</li><li>填寫 → 只掃描指定列號，例如 <code>19</code>、<code>19,21</code>、<code>19-22</code></li></ul><b>回填結果</b><ul><li>依狀態寫回後台</li><li>AD 欄寫入系統回填時間</li><li>不會自動修改 B 欄狀態</li></ul></div>', unsafe_allow_html=True)
+        st.markdown('<div class="info-strip"><b>掃描條件</b><ul><li>B 欄為待收款／待加收、待退款、已收款／已加收、已退款，含待扣／已扣／待返／已返儲值金</li><li>金額欄位已填寫</li></ul><b>列號篩選（選填）</b><ul><li>不填 → 掃描整個工作表全部符合條件的列</li><li>填寫 → 只掃描指定列號，例如 <code>19</code>、<code>19,21</code>、<code>19-22</code></li></ul><b>回填結果</b><ul><li>依狀態寫回後台</li><li>M 欄回填加收日期、AC 欄回填退款日期；AD 欄寫入台北時區系統回填時間</li><li>不會自動修改 B 欄狀態</li></ul></div>', unsafe_allow_html=True)
         c_region, c_rows = st.columns([1, 3])
         with c_region:
             region = st.selectbox("地區", ["台北", "台中"], key="co_region_b")
