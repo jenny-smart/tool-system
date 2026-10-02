@@ -8,6 +8,7 @@ TARGET_PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/LemonToolsAgent"
 PID_FILE="$HOME/Library/Application Support/LemonToolsAgent/local-agent.pid"
 LAUNCHER="$HOME/Library/Application Support/LemonToolsAgent/start-local-agent.sh"
+LOGIN_COMMAND="$HOME/Library/Application Support/LemonToolsAgent/login-agent.command"
 OLD_RUNTIME_DIR="$HOME/Library/Application Support/LemonToolsAgent/tool-system"
 
 require_project() {
@@ -85,16 +86,25 @@ install_service() {
   mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR" "${PID_FILE:h}"
   write_launcher
   launchctl bootout "gui/$UID/$LABEL" >/dev/null 2>&1 || true
-  cat > "$TARGET_PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>$LABEL</string>
-<key>ProgramArguments</key><array><string>/usr/bin/true</string></array>
-<key>RunAtLoad</key><false/>
-</dict></plist>
+  # Terminal retains the user's Documents access; launchd must not run Python directly.
+  cat > "$LOGIN_COMMAND" <<EOF
+#!/bin/zsh
+exec ${(q)PROJECT_DIR}/scripts/local_agent_service.sh start
 EOF
+  chmod 700 "$LOGIN_COMMAND"
+  /usr/bin/python3 - "$TARGET_PLIST" "$LABEL" "$LOGIN_COMMAND" <<'PY'
+import plistlib
+import sys
+with open(sys.argv[1], "wb") as output:
+    plistlib.dump({
+        "Label": sys.argv[2],
+        "ProgramArguments": ["/usr/bin/open", "-g", "-a", "Terminal", sys.argv[3]],
+        "RunAtLoad": True,
+        "LimitLoadToSessionType": "Aqua",
+    }, output)
+PY
   plutil -lint "$TARGET_PLIST" >/dev/null
+  launchctl bootstrap "gui/$UID" "$TARGET_PLIST"
   start_agent
   echo "installed: $LABEL"
   echo "project: $PROJECT_DIR"
@@ -119,7 +129,7 @@ case "${1:-status}" in
   uninstall)
     stop_agent
     launchctl bootout "gui/$UID/$LABEL" >/dev/null 2>&1 || true
-    rm -f "$TARGET_PLIST" "$LAUNCHER" "$PID_FILE"
+    rm -f "$TARGET_PLIST" "$LAUNCHER" "$LOGIN_COMMAND" "$PID_FILE"
     echo "uninstalled: $LABEL"
     ;;
   cleanup-old-runtime)
