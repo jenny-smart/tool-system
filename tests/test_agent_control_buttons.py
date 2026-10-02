@@ -8,14 +8,14 @@ def _agent_help_source() -> str:
     return source[start:end]
 
 
-def test_agent_help_uses_buttons_instead_of_terminal_snippets():
+def test_agent_help_has_buttons_and_offline_recovery():
     source = _agent_help_source()
     assert "🔄 重啟 Agent" in source
     assert "📊 檢查狀態" in source
     assert "📋 查看 Agent Log" in source
     assert "⬇️ 更新程式＋重啟 Agent" in source
-    assert "./scripts/local_agent_service.sh restart" not in source
-    assert "./scripts/local_agent_service.sh logs" not in source
+    assert "./scripts/local_agent_service.sh restart" in source
+    assert "./scripts/local_agent_service.sh logs" in source
 
 
 def test_prize_update_requires_loaded_agent_action():

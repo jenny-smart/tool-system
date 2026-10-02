@@ -1,5 +1,7 @@
 name: Scheduled Daily Jobs
 
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
 on:
   schedule:
     # UTC 時間；台北時間需加 8 小時
@@ -12,6 +14,11 @@ on:
 
   workflow_dispatch:
     inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
       target:
         description: "要執行的任務"
         required: true
@@ -31,6 +38,7 @@ permissions:
 
 jobs:
   run-daily-jobs:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 

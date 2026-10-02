@@ -1,5 +1,7 @@
 name: Performance Report
 
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
 on:
   schedule:
     - cron: "0 16 * * *"  # 台灣 00:00
@@ -8,12 +10,19 @@ on:
     - cron: "0 10 * * *"  # 台灣 18:00
 
   workflow_dispatch:
+    inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
   performance-report:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
 
     env:

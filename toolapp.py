@@ -692,6 +692,12 @@ st.markdown(
     background: #135b84 !important;
   }
 
+  .stButton > button:disabled {
+    background: #d4dce2 !important;
+    color: #626d77 !important;
+    cursor: not-allowed;
+  }
+
   .log-box {
     background: #0c2835;
     color: #d7ecf5;
@@ -2068,6 +2074,7 @@ def render_agent_help() -> None:
             st.rerun()
     with refresh_col:
         if st.button("🔄 重新檢查心跳", use_container_width=True, key="agent_help_refresh"):
+            list_local_agent_tasks.clear()
             st.rerun()
 
     agent_rows = []
@@ -2092,6 +2099,23 @@ def render_agent_help() -> None:
     except Exception as exc:
         st.error(f"無法讀取 Agent 心跳：{exc}", icon="🔴")
 
+    if not online_agents:
+        st.info(
+            "目前無法確認 Agent 在線，遠端重啟、狀態、Log 與更新按鈕暫停使用。"
+            "這些指令需要本機 Agent 接收；中止按鈕也只是送出要求，需等 Agent 恢復才會處理。"
+            "返回主控台與重新檢查心跳仍可使用。"
+        )
+        st.markdown("**離線超過 30 秒：在執行 Agent 的 Mac Terminal 復原**")
+        st.caption("先檢查本機狀態與 Log；若需要重啟，請注意重啟會中斷仍在執行的工作。")
+        st.code(
+            'cd "$HOME/Documents/codex-workspace/tool-system"\n'
+            './scripts/local_agent_service.sh status\n'
+            './scripts/local_agent_service.sh logs',
+            language="bash",
+        )
+        st.code('./scripts/local_agent_service.sh restart', language="bash")
+        st.caption("重啟後等候約 30 秒，再按「重新檢查心跳」。若專案放在其他位置，請修改 cd 路徑。")
+
     agent_tasks = []
     tasks_read_ok = True
     try:
@@ -2106,18 +2130,17 @@ def render_agent_help() -> None:
                 for row in online_agents
                 if str(row.get("agent_id") or "")
             }
-            stale_running_tasks = [
+            unmatched_running_tasks = [
                 task for task in running_tasks
                 if str(task.get("agent_id") or "") not in online_agent_ids
             ]
-            running_tasks = [
-                task for task in running_tasks
-                if str(task.get("agent_id") or "") in online_agent_ids
-            ]
-            for stale_task in stale_running_tasks:
+            # A different hostname or missing heartbeat does not prove a task stopped.
+            # Keep these tasks cancellable and keep the update/restart guards active.
+            for stale_task in unmatched_running_tasks:
                 st.caption(
-                    f"忽略舊的未收尾工作：{stale_task.get('action', '未知工作')}｜"
-                    f"{stale_task.get('started_at', '')}｜{stale_task.get('status', '')}"
+                    f"尚未確認執行端的工作：{stale_task.get('action', '未知工作')}｜"
+                    f"{stale_task.get('started_at', '')}｜{stale_task.get('status', '')}｜"
+                    f"Agent：{stale_task.get('agent_id') or '未記錄'}"
                 )
     except Exception as exc:
         running_tasks = []
@@ -2127,6 +2150,23 @@ def render_agent_help() -> None:
     st.markdown("**中止目前工作：**")
     if running_tasks:
         current_task = running_tasks[0]
+        if len(running_tasks) > 1:
+            selected_id = st.selectbox(
+                "選擇要中止的工作",
+                options=[task["task_id"] for task in running_tasks],
+                format_func=lambda task_id: next(
+                    f"{task.get('action', '未知工作')}｜{task.get('started_at', '')}｜"
+                    f"{task.get('status', '')}｜{task_id}"
+                    for task in running_tasks if task["task_id"] == task_id
+                ),
+                key="agent_cancel_task_selection",
+            )
+            current_task = next(task for task in running_tasks if task["task_id"] == selected_id)
+        owner_online = any(
+            row.get("agent_id") == current_task.get("agent_id") for row in online_agents
+        )
+        if not owner_online:
+            st.warning("尚未確認這筆工作的 Agent 在線。仍可送出中止要求，但需由執行該工作的 Agent 接收後才會停止。")
         st.caption(
             f"{current_task.get('action', '未知工作')}｜"
             f"開始時間 {current_task.get('started_at', '')}｜"
@@ -2150,12 +2190,16 @@ def render_agent_help() -> None:
                 st.error(message)
             st.rerun()
         if cancel_pending:
-            st.info("已送出中止要求，Agent 正在關閉目前工作的子程序。")
+            st.info(
+                "已送出中止要求，等待 Agent 處理。"
+                if owner_online else "已送出中止要求；尚未確認執行端在線，無法確認工作已停止。"
+            )
     else:
-        st.caption("目前沒有執行中的工作。")
+        st.button("⏹️ 中止目前工作", use_container_width=True, disabled=True, key="agent_cancel_idle")
+        st.caption("目前沒有執行中的工作。" if tasks_read_ok else "無法讀取目前工作，請重新檢查心跳後再試。")
 
     st.markdown("**更新程式：**")
-    pull_disabled = bool(running_tasks) or not tasks_read_ok
+    pull_disabled = not online_agents or bool(running_tasks) or not tasks_read_ok
     if st.button(
         "⬇️ Git Pull 更新程式",
         use_container_width=True,
@@ -2273,6 +2317,23 @@ def render_agent_help() -> None:
             "目前 Agent 尚未載入新版控制功能。這次請先用上方「Git Pull 更新程式」更新；"
             "新版 Agent 載入後，之後重啟、狀態、Log、更新＋重啟都可直接按按鈕。"
         )
+
+    for action, label in (
+        ("system.agent_status", "Agent 狀態"),
+        ("system.agent_logs", "Agent Log"),
+        ("system.agent_restart", "重啟 Agent"),
+        ("system.git_pull_restart", "更新＋重啟 Agent"),
+    ):
+        latest_control = next((task for task in agent_tasks if task.get("action") == action), None)
+        if latest_control:
+            with st.expander(f"{label}｜{latest_control.get('status', '')}", expanded=True):
+                st.write(latest_control.get("message") or "等待 Agent 執行；請按重新檢查心跳更新結果。")
+                try:
+                    control_log = read_local_agent_task_log(latest_control.get("task_id", ""))
+                except Exception as exc:
+                    control_log = f"無法讀取 Log：{exc}"
+                if control_log:
+                    st.code(control_log, language="text")
 
     st.markdown(
         """
@@ -3401,6 +3462,7 @@ FINANCE_TASKS = [
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
     {"name": "【鯨躍發票】開立發票", "handler": None, "enabled": True},
+    {"name": "【鯨躍發票】二聯改三聯", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
     {"name": "【鯨躍發票】鯨躍發票下載", "handler": queue_cetustek_download, "enabled": True},
     {"name": "【鯨躍發票】紙本發票更新", "handler": run_cetustek_paper_update, "enabled": True},
@@ -3818,6 +3880,16 @@ with func_col:
             label_visibility="collapsed",
             key="selected_function",
         )
+
+if system_type == "finance_management" and selected_function == "【鯨躍發票】二聯改三聯":
+    st.markdown("</div>", unsafe_allow_html=True)
+    from tools.invoice_center.triplicate_ui import render_triplicate
+
+    render_triplicate()
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("cetustek.",))
+    st.stop()
 
 if system_type == "finance_management" and selected_function == "【鯨躍發票】開立發票":
     st.markdown("</div>", unsafe_allow_html=True)

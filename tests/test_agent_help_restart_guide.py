@@ -25,7 +25,7 @@ def test_agent_help_does_not_show_obsolete_foreground_start():
     assert "Control + C" in source
     assert "⏹️ 中止目前工作" in source
     assert "_request_local_agent_task_cancel_raw" in source
-    assert "./scripts/local_agent_service.sh restart" not in source
+    assert "./scripts/local_agent_service.sh restart" in source
 
 
 def test_agent_help_has_independent_guarded_git_pull_button():

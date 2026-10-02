@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import os
+import json
+from service_pricing import load_config
 import requests
 import streamlit as st
 import batch_booking_optimized as batch_opt
@@ -42,6 +44,7 @@ def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon
             "sheet_name":sheet, "chunk_size":str(chunk_size), "max_rows":str(max_rows),
             "filter_mode":filter_mode, "region":region,
             "allow_auto_lemon":"true" if allow_auto_lemon else "false",
+            "pricing_json": json.dumps(load_config()),
         }},
         timeout=30,
     )

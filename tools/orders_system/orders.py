@@ -458,7 +458,8 @@ def is_weekend(date_value):
 
 
 def get_unit_price_by_date(date_value):
-    return 700 if is_weekend(date_value) else 600
+    from service_pricing import unit_price
+    return unit_price(date_value, "vip")
 
 
 def parse_time_slot(start_time_str, end_time_str):
@@ -2724,6 +2725,8 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         payload["person"] = str(base_data.get("person") or payload.get("person") or "")
         payload["price"] = str(calc_fields.get("price") or "0")
         payload["price_vvip"] = str(calc_fields.get("price_vvip") or "0")
+        from service_pricing import apply_booking_price
+        apply_booking_price(payload, "vip")
 
         print("[DEBUG] calc_fields =", calc_fields)
         try:

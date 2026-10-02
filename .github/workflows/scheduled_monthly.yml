@@ -1,5 +1,7 @@
 name: Scheduled Monthly Jobs
 
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
 on:
   schedule:
     - cron: "0 9 15 * *"      # 台灣每月 15 日 17:00：上半月訂單
@@ -10,6 +12,11 @@ on:
     - cron: "40 16 28-31 * *" # 台灣每月 1 日 00:40：儲值金預收（UTC 為前一日）
   workflow_dispatch:
     inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
       target:
         description: "要執行的任務"
         required: true
@@ -34,6 +41,7 @@ permissions:
 
 jobs:
   run-monthly-jobs:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
     env:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}

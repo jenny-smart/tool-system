@@ -1,16 +1,25 @@
 name: Scheduled Fubon Pending Check
 
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
 on:
   schedule:
     # UTC 時間；台北時間需加 8 小時。每週二／五 台北 10:00 = UTC 02:00。
     - cron: "0 2 * * 2,5"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   check-fubon-pending:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
