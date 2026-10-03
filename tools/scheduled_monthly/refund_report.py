@@ -43,6 +43,11 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 try:
+    from tools.scheduled_monthly.southern_exports import export_south_sources
+except ModuleNotFoundError:
+    from southern_exports import export_south_sources
+
+try:
     from tools.common.config_loader import load_monthly_config
 except Exception:
     load_monthly_config = None
@@ -590,25 +595,18 @@ def export_city(session: requests.Session, city: str, temp_dir: str, tag: str, s
 
 
 def export_kaohsiung(session: requests.Session, temp_dir: str, tag: str, start: str, end: str) -> list[str]:
-    dfs = []
-    raw_files = []
+    files = []
+    for mode, label in (("charge", "已退款全部加收"), ("refund", "已退款全部退款")):
+        def download_frame(region):
+            url, _ = build_export_url(mode, start, end, region)
+            frame = read_excel_from_bytes(download(session, url)).copy()
+            frame["類型"] = "加收" if mode == "charge" else "退款"
+            return frame
 
-    for mode in ["charge", "refund"]:
-        for region in ["高雄", "台南"]:
-            df, path = export_one(session, temp_dir, tag, "高雄", region, mode, start, end)
-            raw_files.append(path)
-            if df is not None:
-                dfs.append(df)
-
-    if dfs:
-        merged = pd.concat(dfs, ignore_index=True).drop_duplicates()
-        merged_path = os.path.join(temp_dir, f"{tag}已退款-高雄.xlsx")
-        merged.to_excel(merged_path, index=False)
-        log(f"✅ 高雄合併完成：{merged_path}")
-        return [merged_path]
-
-    log("⚠️ 高雄無法合併，改上傳原始檔")
-    return raw_files
+        _, source_paths, merged_path = export_south_sources(download_frame, temp_dir, tag, label)
+        files.extend([*source_paths, merged_path])
+        log(f"✅ {label}：台南接入高雄並去重 → {os.path.basename(merged_path)}")
+    return files
 
 
 def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], service, rng: dict[str, str]) -> None:
