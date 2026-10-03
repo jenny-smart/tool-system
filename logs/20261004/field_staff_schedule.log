@@ -1,0 +1,27 @@
+📋 log_spreadsheet_id 已從設定檔載入
+⚠️ 外場排程打卡失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8/values/%E5%AE%A2%E6%9C%8D%E6%8E%92%E7%A8%8B%E5%9F%B7%E8%A1%8CLog%21A1%3AZ1?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_limit': 'ReadRequestsPerMinutePerUser', 'quota_location': 'global', 'window_start_time': '1791064884', 'service': 'sheets.googleapis.com', 'quota_limit_value': '60', 'consumer': 'projects/1042663213860', 'quota_unit': '1/min/{project}/{user}', 'quota_metric': 'sheets.googleapis.com/read_requests'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.staff_schedule --date 20261004 --system-name 外場排程系統 --run-type 排程
+[2026-10-04 06:02:20] 開始處理專員班表：20261004專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1TEOeWCW6TWr2WGrvvVhk1guva3BhcYXvodvqXcBFRIk
+🗑️ 已刪除來源暫存 Google Sheet：1TEOeWCW6TWr2WGrvvVhk1guva3BhcYXvodvqXcBFRIk
+[2026-10-04 06:02:27] 目標分頁已是當日名稱：專員班表查詢本月_1004
+[2026-10-04 06:02:27] 完成：20261004專員班表-台北.xls → '專員班表查詢本月_1004'!A:G / rows=1480
+[2026-10-04 06:02:29] 開始處理專員班表：20261104專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：16zDrRymRbtyWQ7lz2edPM6sCvOQwpvKvc_IZ2E8Y22Q
+🗑️ 已刪除來源暫存 Google Sheet：16zDrRymRbtyWQ7lz2edPM6sCvOQwpvKvc_IZ2E8Y22Q
+[2026-10-04 06:02:35] 目標分頁已是當日名稱：專員班表查詢次月_1004
+[2026-10-04 06:02:36] 完成：20261104專員班表-台北.xls → '專員班表查詢次月_1004'!A:G / rows=629
+[2026-10-04 06:02:37] 開始處理專員班表：20261004專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1CU-RRzFwLUarT8-uD-HNOZ2wVL5DTjGNAjB9h8BRHfU
+🗑️ 已刪除來源暫存 Google Sheet：1CU-RRzFwLUarT8-uD-HNOZ2wVL5DTjGNAjB9h8BRHfU
+[2026-10-04 06:02:46] 目標分頁已是當日名稱：專員班表查詢本月_1004
+[2026-10-04 06:02:46] 完成：20261004專員班表-台中.xls → '專員班表查詢本月_1004'!A:G / rows=235
+[2026-10-04 06:02:48] 開始處理專員班表：20261104專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：11yIEFpHk2zbdQpwhsdNguezb6eVP_Zg2-VjJEvBBfkw
+🗑️ 已刪除來源暫存 Google Sheet：11yIEFpHk2zbdQpwhsdNguezb6eVP_Zg2-VjJEvBBfkw
+[2026-10-04 06:02:55] 目標分頁已是當日名稱：專員班表查詢次月_1004
+[2026-10-04 06:02:56] 完成：20261104專員班表-台中.xls → '專員班表查詢次月_1004'!A:G / rows=37
+[2026-10-04 06:02:57] staff_schedule.py 全部完成
+
+📝 外場排程打卡：外場專員班表 / success
+field_management scheduler 全部完成
