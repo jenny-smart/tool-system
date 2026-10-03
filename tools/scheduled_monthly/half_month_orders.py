@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """上下半月訂單下載與上傳。
 
-新竹、高雄的原訂單需用地址關鍵字搜尋，因此另外依付款日期抓取已付款儲值金，
+新竹、高雄的原訂單需用地址關鍵字搜尋，因此另外依服務日期抓取已付款儲值金，按客戶姓名查詢地址並分流，
 保留「原訂單」「儲值金」兩份來源檔，再產出合併後的「訂單」檔。
 """
 
@@ -14,6 +14,8 @@ import argparse
 import calendar
 import json
 import os
+import re
+import unicodedata
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -210,10 +212,8 @@ def build_export_url(start: str, end: str, keyword: str = "", *, stored_value: b
     params = {
         "keyword": keyword, "name": "", "phone": "", "orderNo": "",
         "date_s": "", "date_e": "",
-        "clean_date_s": "" if stored_value else start,
-        "clean_date_e": "" if stored_value else end,
-        "paid_at_s": start if stored_value else "",
-        "paid_at_e": end if stored_value else "",
+        "clean_date_s": start, "clean_date_e": end,
+        "paid_at_s": "", "paid_at_e": "",
         "refundDateS": "", "refundDateE": "",
         "buy": "5" if stored_value else "",
         "area_id": "", "isCharge": "", "isRefund": "", "payway": "",
@@ -334,6 +334,97 @@ def export_original(session: requests.Session, city: str, start: str, end: str) 
     return read_excel(download_export(session, start, end, keyword))
 
 
+def purchase_records(session: requests.Session, **filters) -> list[dict[str, Any]]:
+    """讀取訂單搜尋的全部分頁；登入失效或資料格式異常時停止。"""
+    records = []
+    for page in range(1, 1001):
+        res = session.get(
+            EXPORT_URL.rsplit("/", 1)[0], params={**filters, "page": page},
+            headers=HEADERS, allow_redirects=True, timeout=60,
+        )
+        res.raise_for_status()
+        match = re.search(r"purchaseList\s*:\s*", res.text)
+        if "login" in res.url.lower() or not match:
+            raise RuntimeError("訂單搜尋未取得 purchaseList，請確認登入狀態")
+        payload, _ = json.JSONDecoder().raw_decode(res.text[match.end():].lstrip())
+        if not isinstance(payload.get("data"), list):
+            raise RuntimeError("訂單搜尋資料格式異常")
+        records.extend(payload["data"])
+        if page >= int(payload.get("last_page", 1)):
+            return records
+    raise RuntimeError("訂單搜尋超過 1000 頁，停止避免漏資料")
+
+
+def _customer_key(value: Any) -> str:
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")))
+
+
+def _address_city(address: Any) -> str:
+    text = _customer_key(address).replace("臺", "台")
+    if text.startswith(("新竹市", "新竹縣")):
+        return "新竹"
+    if text.startswith(("台南市", "高雄市")):
+        return "高雄"
+    return "其他" if text else ""
+
+
+def stored_value_customer_city(session: requests.Session, order: dict[str, Any]) -> str:
+    """姓名搜尋不帶期別／品項／付款限制，並核對會員或電話避免同名誤配。"""
+    name = str(order.get("name") or "").strip()
+    if not name:
+        raise RuntimeError(f"儲值金訂單 {order.get('order_no')} 缺少客戶姓名")
+    member_id = str(order.get("member_id") or "")
+    phone = re.sub(r"\D", "", str(order.get("phone") or ""))
+    cities = set()
+    for item in purchase_records(session, name=name, p_board="on"):
+        if _customer_key(item.get("name")) != _customer_key(name):
+            continue
+        if member_id and member_id != "0":
+            if str(item.get("member_id") or "") != member_id:
+                continue
+        elif phone and re.sub(r"\D", "", str(item.get("phone") or "")) != phone:
+            continue
+        city = _address_city(item.get("address"))
+        if city:
+            cities.add(city)
+    if len(cities) != 1:
+        raise RuntimeError(f"儲值金訂單 {order.get('order_no')}（{name}）地址無法唯一分區：{sorted(cities)}")
+    return cities.pop()
+
+
+def export_stored_value(session: requests.Session, city: str, start: str, end: str) -> pd.DataFrame:
+    """只併入本服務期間、已付款，且客戶地址屬於目標地區的儲值金訂單。"""
+    records = purchase_records(
+        session, clean_date_s=start, clean_date_e=end,
+        buy="5", purchase_status="1", p_board="on",
+    )
+    selected = set()
+    cache = {}
+    for order in records:
+        key = (_customer_key(order.get("name")), str(order.get("member_id") or ""), str(order.get("phone") or ""))
+        if key not in cache:
+            cache[key] = stored_value_customer_city(session, order)
+        if cache[key] == city:
+            order_no = str(order.get("order_no") or "").strip()
+            if not order_no:
+                raise RuntimeError("儲值金訂單缺少訂單編號")
+            selected.add(order_no)
+    df = read_excel(download_export(session, start, end, stored_value=True))
+    if df.empty:
+        if selected:
+            raise RuntimeError("儲值金搜尋有資料但匯出為空，停止上傳")
+        return df
+    columns = [col for col in df.columns if _customer_key(col) in {"訂單編號", "訂單號碼"}]
+    if len(columns) != 1:
+        raise RuntimeError("儲值金匯出找不到唯一的訂單編號欄")
+    order_numbers = df[columns[0]].fillna("").astype(str).str.strip()
+    if selected - set(order_numbers):
+        raise RuntimeError("儲值金搜尋與匯出訂單不一致，停止上傳")
+    result = df.loc[order_numbers.isin(selected)].copy()
+    log(f"✅ {city} 儲值金地址核對：候選 {len(records)} 筆 → 本區 {len(result)} 筆")
+    return result
+
+
 def save_snapshot(local_path: str, snapshot_root: str, tag: str, meta: dict[str, Any]) -> None:
     snapshot_dir = Path(snapshot_root) / tag
     snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -368,17 +459,17 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
             original_df = export_original(session, city, start, end)
 
             if city in STORED_VALUE_MERGE_CITIES:
+                stored_df = export_stored_value(session, city, start, end)
                 original_path = os.path.join(temp_dir, f"{tag}原訂單-{city}.xlsx")
                 original_df.to_excel(original_path, index=False)
                 persist_file(service, original_path, tag_folder_id, args, tag, city, start, end, "原訂單")
                 source_files.append(os.path.basename(original_path))
 
-                stored_df = read_excel(download_export(session, start, end, stored_value=True))
                 stored_path = os.path.join(temp_dir, f"{tag}儲值金-{city}.xlsx")
                 stored_df.to_excel(stored_path, index=False)
                 persist_file(service, stored_path, tag_folder_id, args, tag, city, start, end, "儲值金")
                 source_files.append(os.path.basename(stored_path))
-                log(f"✅ {city} 儲值金抓到 {len(stored_df)} 筆（付款日期 {start} ~ {end} / 儲值金 / 已付款）")
+                log(f"✅ {city} 儲值金抓到 {len(stored_df)} 筆（服務日期 {start} ~ {end} / 儲值金 / 已付款 / 客戶地址核對）")
 
                 frames = [df for df in (original_df, stored_df) if not df.empty]
                 merged_df = pd.concat(frames, ignore_index=True).drop_duplicates() if frames else pd.DataFrame(columns=original_df.columns)
