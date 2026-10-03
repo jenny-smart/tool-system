@@ -1,5 +1,6 @@
 """以隔離環境測試月訂單的真實函數，不登入後台或寫入 Drive。"""
 import ast
+import sys
 import calendar
 import json
 import os
@@ -13,6 +14,9 @@ from unittest.mock import Mock
 from urllib.parse import parse_qs, urlencode, urlparse
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from tools.scheduled_monthly.southern_exports import export_south_sources
+
 SOURCE = Path(__file__).parents[1] / 'tools/scheduled_monthly/half_month_orders.py'
 
 
@@ -23,7 +27,7 @@ def functions():
     nodes += [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     def request(method, url, params):
         return SimpleNamespace(prepare=lambda: SimpleNamespace(url=url + '?' + urlencode(params)))
-    ns = dict(re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, log=lambda *args: None)
+    ns = dict(export_south_sources=export_south_sources, download_export=lambda *a: b'file', read_excel=lambda *a: pd.DataFrame({'訂單編號':['LC1']}), re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, log=lambda *args: None)
     exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(SOURCE), 'exec'), ns)
     return ns
 
@@ -95,7 +99,7 @@ class StoredValueTests(unittest.TestCase):
             args = SimpleNamespace(folder_id='root')
             ns['process_city'](city,args,{city:{'email':'test','password':'test'}},object(),'2026-09-16','2026-09-30','202609-2')
             expected = ['LC1','LC2'] if city in {'新竹','高雄'} else ['LC1']
-            self.assertEqual(saved[f'202609-2訂單-{city}.xlsx']['訂單編號'].tolist(), expected)
+            self.assertEqual(saved['202609-2-訂單-高雄.xlsx' if city == '高雄' else f'202609-2訂單-{city}.xlsx']['訂單編號'].tolist(), expected)
             self.assertEqual(ns['export_stored_value'].call_count, 1 if city in {'新竹','高雄'} else 0)
 
     def test_lookup_failure_does_not_upload_partial_files(self):

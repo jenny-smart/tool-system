@@ -32,6 +32,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
+try:
+    from tools.scheduled_monthly.southern_exports import export_south_sources
+except ModuleNotFoundError:
+    from southern_exports import export_south_sources
+
 from tools.common.config_loader import load_monthly_config
 
 try:
@@ -49,7 +54,7 @@ EXPORT_URL = "https://backend.lemonclean.com.tw/purchase/export_order"
 HEADERS = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/x-www-form-urlencoded"}
 TZ = timezone(timedelta(hours=8))
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-KAOHSIUNG_MERGE_REGIONS = ["高雄", "台南"]
+KAOHSIUNG_MERGE_REGIONS = ["台南", "高雄"]
 STORED_VALUE_MERGE_CITIES = {"新竹", "高雄"}
 AREA_FOLDER_NAMES = {
     "台北": "01.台北專員", "台中": "02.台中專員", "桃園": "03.桃園專員",
@@ -456,14 +461,26 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
     status, message, source_files = "失敗", "", []
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
-            original_df = export_original(session, city, start, end)
+            south_paths = []
+            if city == "高雄":
+                original_df, south_paths, _ = export_south_sources(
+                    lambda region: read_excel(download_export(session, start, end, region)),
+                    temp_dir, tag, "訂單",
+                )
+            else:
+                original_df = export_original(session, city, start, end)
 
             if city in STORED_VALUE_MERGE_CITIES:
                 stored_df = export_stored_value(session, city, start, end)
-                original_path = os.path.join(temp_dir, f"{tag}原訂單-{city}.xlsx")
-                original_df.to_excel(original_path, index=False)
-                persist_file(service, original_path, tag_folder_id, args, tag, city, start, end, "原訂單")
-                source_files.append(os.path.basename(original_path))
+                if city == "高雄":
+                    for path in south_paths:
+                        persist_file(service, path, tag_folder_id, args, tag, city, start, end, "原訂單")
+                        source_files.append(os.path.basename(path))
+                else:
+                    original_path = os.path.join(temp_dir, f"{tag}原訂單-{city}.xlsx")
+                    original_df.to_excel(original_path, index=False)
+                    persist_file(service, original_path, tag_folder_id, args, tag, city, start, end, "原訂單")
+                    source_files.append(os.path.basename(original_path))
 
                 stored_path = os.path.join(temp_dir, f"{tag}儲值金-{city}.xlsx")
                 stored_df.to_excel(stored_path, index=False)
@@ -473,7 +490,7 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
 
                 frames = [df for df in (original_df, stored_df) if not df.empty]
                 merged_df = pd.concat(frames, ignore_index=True).drop_duplicates() if frames else pd.DataFrame(columns=original_df.columns)
-                final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
+                final_path = os.path.join(temp_dir, f"{tag}-訂單-高雄.xlsx" if city == "高雄" else f"{tag}訂單-{city}.xlsx")
                 merged_df.to_excel(final_path, index=False)
                 log(f"✅ {city} 合併完成：原訂單 {len(original_df)} + 儲值金 {len(stored_df)} → 合併 {len(merged_df)} 筆")
             else:
