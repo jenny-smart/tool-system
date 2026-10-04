@@ -3919,7 +3919,6 @@ monthly_order_functions = ["上半月訂單", "下半月訂單"]
 
 period = ""
 start_date_value = None
-vip_schedule_compare_only = False
 end_date_value = None
 monthly_date_mode = "期別"
 resume_target_sheet = ""
@@ -4602,11 +4601,9 @@ with date_col:
                 st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
 
             if selected_function == "【儲值】建立VIP排程工作表":
-                vip_schedule_compare_only = st.checkbox(
-                    "只比對差異，不更新排程工作表", value=False, key="vip_schedule_compare_only",
-                )
-                st.caption("更新時會標示新增／異動列；已有單號的列保留原排程與成單資訊。"
-                           "無法唯一比對或未見於本次匯出的列需人工核對，不會自動重新成單。")
+                st.caption("自動比對並更新 A:J、標示異動列；既有 K:AG 與右側自訂資料保留。"
+                           "異動前後內容及更新日期時間直接顯示在 AG 右側；已有訂單編號不會清除或重新成單。"
+                           "無法唯一對應的列保留原資料並註記核對原因。")
 
         elif selected_function in ("【儲值】抓儲值金", "【CRM】更新排程決策報表",
                                    "【CRM】更新三個月未排名單", "【CRM】重新排序Raw"):
@@ -5896,8 +5893,6 @@ if run_clicked:
                         "tools.service_management.stored_value",
                         "--step", step,
                     ]
-                    if step == "3" and vip_schedule_compare_only:
-                        cmd += ["--compare-only"]
                     if step != "1" and start_date_value and end_date_value:
                         cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
                                 "--end",   end_date_value.strftime("%Y-%m-%d")]
