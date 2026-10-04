@@ -995,18 +995,8 @@ def get_csrf_token(session):
 
 
 def _checked_booking_sections_response(resp, order_data):
-    """缺少服務區域時的空回應不能用來判定人力不足。"""
-    result = _booking_backend_response(resp, "查詢班表")
-    if result == []:
-        missing = [key for key in ("area_id", "company_id")
-                   if str(order_data.get(key) or "").strip() in ("", "0")]
-        if missing:
-            raise Exception(
-                "後台班表回覆 []；本次查詢未帶入服務區域欄位："
-                + "、".join(missing)
-                + "。無法據此判定人數不足，未執行補檸檬人。"
-                + "請先完成後台查詢地區，取得其回傳值後再查班表。"
-            )
+    """只依後台回覆處理班表，不額外檢查區域或座標。"""
+    _booking_backend_response(resp, "查詢班表")
     return resp.text
 
 
@@ -1234,15 +1224,25 @@ def pick_best_address_info(member_payload, target_address):
     for item in member_address_list:
         item_addr = str(item.get("address", "")).strip()
         if normalize_addr_for_match(item_addr) == target_norm:
+            purchase = item.get("purchase") if isinstance(item.get("purchase"), dict) else {}
+
+            def saved_field(address_key, purchase_key):
+                # get_member 的地址外層可能是 0；同一地址的 purchase 才存有
+                # 有效區域與座標。只沿用已匹配地址的資料，不借用其他地址。
+                for value in (item.get(address_key), purchase.get(purchase_key)):
+                    if value is not None and str(value).strip() not in ("", "0", "0.0"):
+                        return value
+                return ""
+
             return {
                 "addressId": str(item.get("id", "")).strip(),
-                "country_id": item.get("countryId", ""),
-                "area_id": item.get("areaId", ""),
+                "country_id": saved_field("countryId", "country_id"),
+                "area_id": saved_field("areaId", "area_id"),
                 "address": item_addr,
-                "lat": item.get("lat", ""),
-                "lng": item.get("lng", ""),
-                "company_id": item.get("companyId", ""),
-                "purchase": item.get("purchase", {}) if isinstance(item.get("purchase"), dict) else {},
+                "lat": saved_field("lat", "lat"),
+                "lng": saved_field("lng", "lng"),
+                "company_id": saved_field("companyId", "company_id"),
+                "purchase": purchase,
             }
 
     return {}
