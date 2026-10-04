@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import json
+import re
 from service_pricing import load_config
 import requests
 import streamlit as st
@@ -50,6 +51,83 @@ def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon
     )
     if r.status_code != 204:
         raise RuntimeError(f"啟動雲端批次失敗：{r.status_code} {r.text[:300]}")
+
+
+
+def _github_get(path):
+    response = requests.get(
+        f"https://api.github.com/repos/{REPO}/{path}",
+        headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {_token()}",
+                 "X-GitHub-Api-Version": "2022-11-28"},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response
+
+
+def _latest_run():
+    runs = _github_get(
+        f"actions/workflows/{WORKFLOW}/runs?per_page=1&branch=main&event=workflow_dispatch"
+    ).json().get("workflow_runs", [])
+    return runs[0] if runs else None
+
+
+def _run_summary(run_id):
+    jobs = _github_get(f"actions/runs/{run_id}/jobs").json().get("jobs", [])
+    for job in jobs:
+        if job.get("name") == "booking":
+            log = _github_get(f"actions/jobs/{job['id']}/logs").text
+            matches = re.findall(r"FINISH attempted=(\d+) success=(\d+) fail=(\d+) remaining=(\d+)", log)
+            if matches:
+                return tuple(map(int, matches[-1]))
+    return None
+
+
+@st.fragment(run_every="15s")
+def _render_cloud_status():
+    if not _token():
+        return
+    st.markdown("#### 最近一次雲端批次執行")
+    st.button("更新執行狀態", key="optimized_cloud_refresh")
+    try:
+        run = _latest_run()
+        if not run:
+            st.info("尚無雲端批次執行紀錄。")
+            return
+        st.markdown(f"[第 {run['run_number']} 次執行・查看日誌]({run['html_url']})")
+        if run.get("status") != "completed":
+            if run.get("status") == "in_progress":
+                st.info("雲端批次執行中；每 15 秒更新狀態。")
+            else:
+                st.info("雲端批次排隊或準備中；每 15 秒更新狀態。")
+            return
+        conclusion = run.get("conclusion")
+        cache_key = f"optimized_cloud_summary_{run['id']}"
+        summary = st.session_state.get(cache_key)
+        if summary is None and conclusion in ("success", "failure"):
+            try:
+                summary = _run_summary(run['id'])
+                if summary is not None:
+                    st.session_state[cache_key] = summary
+            except Exception:
+                st.caption("暫時無法取得筆數，請查看執行日誌。")
+        if summary is not None:
+            attempted, success, failed, remaining = summary
+            message = f"已執行完成：處理 {attempted} 列，成功 {success} 列，失敗 {failed} 列，尚待處理 {remaining} 列。"
+            if failed:
+                st.warning(message)
+            elif conclusion == "success":
+                st.success(message)
+            else:
+                st.error(message + " 工作流程仍有錯誤，請查看日誌。")
+        elif conclusion == "success":
+            st.success("雲端批次已執行完成。")
+        elif conclusion == "cancelled":
+            st.warning("雲端批次已取消。")
+        else:
+            st.error(f"雲端批次已結束（{conclusion}），請查看日誌確認原因。")
+    except Exception:
+        st.warning("暫時無法取得雲端狀態，請稍後更新或至 GitHub Actions 查看。")
 
 
 def render(env: str):
@@ -129,3 +207,5 @@ def render(env: str):
             st.markdown(f"[查看雲端執行進度](https://github.com/{REPO}/actions/workflows/{WORKFLOW})")
         except Exception as exc:
             st.error(str(exc))
+
+    _render_cloud_status()
