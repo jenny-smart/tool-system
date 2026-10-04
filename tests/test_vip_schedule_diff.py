@@ -169,8 +169,8 @@ def test_writer_never_writes_booked_business_cells_and_keeps_rows_in_place():
     source = source_row(row, **{'0': '2人'})
     sync(book, [source])
     assert sheet.data[1][:30] == row[:30]
-    assert all(u['range'] in ('AE2', 'AF2', 'AG2') for batch, _ in sheet.batches for u in batch)
-    assert sheet.formats[0]['range'] == 'A2:AG2'
+    assert all(u['range'] in ('AH2', 'AI2', 'AJ2', 'AK2') for batch, _ in sheet.batches for u in batch)
+    assert sheet.formats[0]['range'] == 'A2:AK2'
     report = book.sheets['排程差異_台北202611']
     before = len(report.data)
     sync(book, [source])
@@ -228,7 +228,7 @@ def test_legacy_30_column_schedule_is_extended_without_overwriting_order():
         return original_get(range_name, **kwargs)
     sheet.get = get
     sync(Book([sheet]), [source_row(old_row(), **{'0': '2人'})])
-    assert sheet.col_count == 33
+    assert sheet.col_count == 37
     assert sheet.data[1][:30] == row[:30]
 
 
@@ -244,9 +244,9 @@ def test_custom_ae_ag_are_preserved_and_tracking_columns_reused():
     assert sheet.data[1][30:33] == custom
     assert sheet.data[0][33:36] == ['日曆事件ID', '日曆異動', '日曆異動內容']
     assert sheet.data[1][33] == 'event1'
-    assert sheet.col_count == 36
+    assert sheet.col_count == 37
     sync(book, [source])
-    assert sheet.col_count == 36
+    assert sheet.col_count == 37
     assert sheet.data[1][30:33] == custom
 
 
@@ -288,3 +288,61 @@ def test_existing_business_headers_and_unbooked_k_ag_are_preserved():
     assert sheet.data[0][:33] == original_header
     assert sheet.data[1][0] == '2人'
     assert sheet.data[1][10:33] == row[10:33]
+
+
+def test_recreated_events_match_same_customer_date_without_false_review():
+    rows = [old_row(date=f'2026/11/{day}', order=f'LC{day}', event=f'old{day}') for day in (5, 12, 19, 26)]
+    for row in rows: row[8] = '已安排'
+    sources = [source_row(row, **{'8': '未安排', '30': f'new{i}'}) for i, row in enumerate(rows)]
+    plan = plan_schedule(rows, sources, '台北202611')
+    assert not plan['changes']
+    assert all(u['values'][:30] == rows[u['row'] - 2][:30] for u in plan['updates'])
+    assert plan['count'] == 4
+
+
+def test_recreated_event_changed_hours_still_reports_real_difference():
+    row = old_row(order='LC123', event='old')
+    row[8] = '已安排'
+    plan = plan_schedule([row], [source_row(row, **{'6': '8:30', '8': '未安排', '30': 'new'})], '台北202611')
+    assert plan['changes'][0]['kind'] == '已成單異動'
+    assert '開始時間' in plan['changes'][0]['detail']
+    assert '狀態' not in plan['changes'][0]['detail']
+    assert plan['updates'][0]['values'][:30] == row[:30]
+
+
+def test_inline_change_details_and_date_do_not_refresh_on_identical_rerun():
+    row = old_row(order='LC123')
+    sheet = Sheet('台北202611', [row])
+    book = Book([sheet])
+    source = source_row(row, **{'6': '8:30'})
+    sync(book, [source])
+    assert sheet.data[0][36] == '更新日期'
+    assert '開始時間：9:00 → 8:30' in sheet.data[1][35]
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', sheet.data[1][36])
+    sheet.batches.clear()
+    sync(book, [source])
+    assert not sheet.batches
+
+
+def test_resolved_false_review_is_cleared_on_original_row():
+    row = old_row(order='LC123', event='old')
+    row[31:33] = ['需人工核對', '先前誤判']
+    sheet = Sheet('台北202611', [row])
+    sync(Book([sheet]), [source_row(row, **{'30': 'new'})])
+    assert sheet.data[1][34:36] == ['', '']
+    assert sheet.data[1][:30] == row[:30]
+
+
+@pytest.mark.parametrize('booked', [True, False])
+def test_additional_paused_event_does_not_flag_existing_customer_rows(booked):
+    rows = [old_row(date=f'2026/11/{day}', order=f'LC{day}' if booked else '', event=f'active{day}') for day in (5, 12, 19, 26)]
+    if booked:
+        for row in rows: row[8] = '已安排'
+    sources = [source_row(row, **{'8': '未安排'}) for row in rows]
+    sources.append(source_row(rows[-1], **{'6': '8:30', '7': '12:30', '8': '暫停', '30': 'paused26'}))
+    plan = plan_schedule(rows, sources, '台北202611')
+    assert [item['kind'] for item in plan['changes']] == ['新增']
+    added = next(u for u in plan['updates'] if u['old'] is None)
+    assert added['values'][8] == '暫停'
+    assert added['values'][30] == 'paused26'
+    assert plan['count'] == 5
