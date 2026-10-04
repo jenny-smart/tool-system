@@ -32,7 +32,8 @@ def test_booked_event_date_people_and_hours_changes_keep_all_order_fields():
     plan = plan_schedule([original], [source], '台北202611')
     change = plan['updates'][0]
     assert change['row'] == 2
-    assert change['values'][:30] == original[:30]
+    assert change['values'][:9] == source[:9]
+    assert change['values'][9:30] == original[9:30]
     assert change['kind'] == '已成單異動'
     assert '1人 → 2人' in change['values'][32]
     assert '2026/11/10 → 2026/11/12' in change['values'][32]
@@ -162,20 +163,20 @@ def test_preview_missing_schedule_does_not_create_schedule():
     assert '台北202611' not in book.sheets
 
 
-def test_writer_never_writes_booked_business_cells_and_keeps_rows_in_place():
+def test_writer_updates_booked_calendar_cells_preserving_k_ag_and_row_position():
     row = old_row(order='LC123')
     sheet = Sheet('台北202611', [row])
     book = Book([sheet])
     source = source_row(row, **{'0': '2人'})
     sync(book, [source])
-    assert sheet.data[1][:30] == row[:30]
-    assert all(u['range'] in ('AH2', 'AI2', 'AJ2', 'AK2') for batch, _ in sheet.batches for u in batch)
+    assert sheet.data[1][10:30] == row[10:30]
+    assert all(u['range'] in ('A2:J2', 'D2', 'AH2', 'AI2', 'AJ2', 'AK2') for batch, _ in sheet.batches for u in batch)
     assert sheet.formats[0]['range'] == 'A2:AK2'
     report = book.sheets['排程差異_台北202611']
     before = len(report.data)
     sync(book, [source])
     assert len(report.data) == before
-    assert sheet.data[1][:30] == row[:30]
+    assert sheet.data[1][10:30] == row[10:30]
 
 
 @pytest.mark.parametrize('period,previous', [('202611', '202610'), ('202601', '202512')])
@@ -229,7 +230,7 @@ def test_legacy_30_column_schedule_is_extended_without_overwriting_order():
     sheet.get = get
     sync(Book([sheet]), [source_row(old_row(), **{'0': '2人'})])
     assert sheet.col_count == 37
-    assert sheet.data[1][:30] == row[:30]
+    assert sheet.data[1][10:30] == row[10:30]
 
 
 def test_custom_ae_ag_are_preserved_and_tracking_columns_reused():
@@ -240,7 +241,7 @@ def test_custom_ae_ag_are_preserved_and_tracking_columns_reused():
     book = Book([sheet])
     source = source_row(row, **{'0': '2人'})
     sync(book, [source])
-    assert sheet.data[1][:30] == row[:30]
+    assert sheet.data[1][10:30] == row[10:30]
     assert sheet.data[1][30:33] == custom
     assert sheet.data[0][33:36] == ['日曆事件ID', '日曆異動', '日曆異動內容']
     assert sheet.data[1][33] == 'event1'
@@ -307,7 +308,9 @@ def test_recreated_event_changed_hours_still_reports_real_difference():
     assert plan['changes'][0]['kind'] == '已成單異動'
     assert '開始時間' in plan['changes'][0]['detail']
     assert '狀態' not in plan['changes'][0]['detail']
-    assert plan['updates'][0]['values'][:30] == row[:30]
+    assert plan['updates'][0]['values'][6] == '8:30'
+    assert plan['updates'][0]['values'][8] == '已安排'
+    assert plan['updates'][0]['values'][10:30] == row[10:30]
 
 
 def test_inline_change_details_and_date_do_not_refresh_on_identical_rerun():
@@ -330,7 +333,7 @@ def test_resolved_false_review_is_cleared_on_original_row():
     sheet = Sheet('台北202611', [row])
     sync(Book([sheet]), [source_row(row, **{'30': 'new'})])
     assert sheet.data[1][34:36] == ['', '']
-    assert sheet.data[1][:30] == row[:30]
+    assert sheet.data[1][10:30] == row[10:30]
 
 
 @pytest.mark.parametrize('booked', [True, False])
@@ -346,3 +349,32 @@ def test_additional_paused_event_does_not_flag_existing_customer_rows(booked):
     assert added['values'][8] == '暫停'
     assert added['values'][30] == 'paused26'
     assert plan['count'] == 5
+
+
+def test_booked_address_change_refreshes_j_formula_and_preserves_all_k_ag():
+    row = old_row(order='LC123', status='已安排')
+    extra = ['原沒班表', '原餘額不足', '原改色原因']
+    sheet = Sheet('台北202611', [row[:30] + extra])
+    sheet.data[0][30:33] = ['沒班表日期', '餘額不足未送', '日曆改色原因']
+    original = deepcopy(sheet.data[1][10:33])
+    source = source_row(row, **{'4': '台北市新地址', '5': '2026/11/12', '8': '未安排'})
+    book = Book([sheet])
+    sync(book, [source])
+    assert sheet.data[1][4] == '台北市新地址'
+    assert sheet.data[1][5] == '2026/11/12'
+    assert sheet.data[1][8] == '已安排'
+    assert sheet.data[1][9] == "=xlookup(E2,'台北202610'!E:E,'台北202610'!J:J)"
+    assert sheet.data[1][10:33] == original
+    assert '台北市大安區 → 台北市新地址' in sheet.data[1][35]
+    assert sheet.data[1][36]
+    sheet.batches.clear()
+    sync(book, [source])
+    assert not sheet.batches
+
+
+def test_website_has_no_compare_only_checkbox_or_dispatch_argument():
+    from pathlib import Path
+    source = (Path(__file__).parents[1] / 'toolapp.py').read_text()
+    assert 'vip_schedule_compare_only' not in source
+    assert '只比對差異，不更新排程工作表' not in source
+    assert 'cmd += ["--compare-only"]' not in source

@@ -116,10 +116,12 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
         kind = ""
         if detail:
             kind = "已成單異動" if _text(before[12]) else "未成單異動"
-            if not _text(before[12]): values[:9] = after[:9]
+            values[:9] = after[:9]
+            if _text(before[12]) and before[8] == "已安排" and after[8] == "未安排":
+                values[8] = before[8]
             values[31:33] = [kind, detail]
             record(row, kind, before, after, detail,
-                   "保留原排程與成單資訊，人工確認是否需異動訂單" if _text(before[12]) else "更新日曆欄位，保留既有作業結果")
+                   "更新 A:J、保留 K:AG 成單資訊；已有訂單須人工確認是否同步異動" if _text(before[12]) else "更新 A:J，保留 K:AG 既有作業結果")
         if not detail and values[31] in ("需人工核對", "本次日曆未見"):
             values[31:33] = ["", ""]
         if values != before:
@@ -225,7 +227,7 @@ def _internal_rows(rows, columns):
 
 
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False, coverage=None):
-    """Write only changed cells; preserve booked A:AD and never clear a schedule."""
+    """Update calendar A:J; preserve existing K:AG and never clear a schedule."""
     period = target_name[-6:]
     in_month = []
     for source_row in source_rows:
@@ -298,11 +300,18 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 phones.append({"range": f"D{row}", "values": [[values[3]]]})
             else:
                 if values[:9] != before[:9]:
-                    updates.append({"range": f"A{row}:I{row}", "values": [values[:9]]})
+                    if _canonical(values[4], 4) != _canonical(before[4], 4):
+                        values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
+                        if values[9] != before[9]:
+                            values[32] += f"；購買項目：{_text(before[9]) or '空白'} → 上月地址查詢公式"
+                            for item in plan["changes"]:
+                                if item["sheet"] == target_name and item["row"] == row:
+                                    item["detail"] = values[32]
+                    updates.append({"range": f"A{row}:J{row}", "values": [values[:10]]})
                     phones.append({"range": f"D{row}", "values": [[values[3]]]})
             for column, value in zip(columns[:3], values[30:33]):
                 updates.append({"range": f"{_column(column)}{row}", "values": [[value]]})
-            if before is None or values[31:33] != before[31:33]:
+            if before is None or values[:10] != before[:10] or values[31:33] != before[31:33]:
                 updates.append({"range": f"{_column(columns[3])}{row}", "values": [[updated_at]]})
             if change["kind"]:
                 colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
