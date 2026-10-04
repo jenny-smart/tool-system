@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import cloud_batch_booking as cloud
@@ -28,27 +28,87 @@ class CloudCandidatesTest(unittest.TestCase):
         self.df.loc[self.df['__sheet_row__'].eq(3), '結果'] = ''
         self.assertEqual([x[0] for x in cloud.load_pending('sheet')], [2, 3])
 
-    def test_auto_lemon_exception_applies_to_all_filter_modes(self):
+    def test_explicit_retry_applies_to_all_filter_modes(self):
         self.df.loc[self.df['__sheet_row__'].eq(3), '原因'] = '無班表；找不到訂單編號'
         for mode in ('all', 'no_schedule', 'missing_order', 'both'):
             with self.subTest(mode=mode):
-                self.assertIn(3, [x[0] for x in cloud.load_pending('sheet', filter_mode=mode, allow_auto_lemon=True)])
+                self.assertIn(3, [x[0] for x in cloud.load_pending('sheet', filter_mode=mode, retry_failed=True)])
                 self.assertNotIn(3, [x[0] for x in cloud.load_pending('sheet', filter_mode=mode)])
+                self.assertNotIn(3, [x[0] for x in cloud.load_pending('sheet', filter_mode=mode, allow_auto_lemon=True)])
+
+    def test_local_optimized_includes_failed_rows(self):
+        self.assertEqual(cloud.batch_opt._load_candidates('sheet')['__sheet_row__'].tolist(), [2, 3, 4])
+        self.assertEqual(guard._auto_filter_rows(cloud.batch_opt, 'sheet', 'no_schedule', allow_failed=True), [2, 3])
+
+    def test_retry_respects_region_exclusions_and_pending_status(self):
+        self.assertEqual([x[0] for x in cloud.load_pending('sheet', excluded={2}, selected_region='台北', retry_failed=True)], [3])
+        self.assertEqual(cloud.load_pending('sheet', selected_region='高雄', retry_failed=True), [])
 
     def test_existing_order_retained_for_followup_but_not_pending(self):
         self.assertIn(4, guard._safe_load_candidates(cloud.batch_opt, 'sheet')['__sheet_row__'].tolist())
-        self.assertNotIn(4, [x[0] for x in cloud.load_pending('sheet', allow_auto_lemon=True)])
-        self.assertNotIn(5, [x[0] for x in cloud.load_pending('sheet', allow_auto_lemon=True)])
+        self.assertNotIn(4, [x[0] for x in cloud.load_pending('sheet', retry_failed=True)])
+        self.assertNotIn(5, [x[0] for x in cloud.load_pending('sheet', retry_failed=True)])
 
     def test_runner_forwards_exception_to_pending_and_processing(self):
         account = {'email': 'test', 'password': 'test'}
         with patch.object(cloud, 'load_pending', side_effect=[[(3, '台北', '')], [], []]) as pending, \
              patch.dict(cloud.ACCOUNTS, {'台北': account}), \
              patch.object(cloud, 'run_process_web_hybrid', return_value={'success_count': 1}) as runner:
-            self.assertEqual(cloud.run('sheet', pause_seconds=0, allow_auto_lemon=True), 0)
+            self.assertEqual(cloud.run('sheet', pause_seconds=0, allow_auto_lemon=True, retry_failed=True), 0)
         self.assertTrue(all(call.args[-1] is True for call in pending.call_args_list))
         self.assertTrue(runner.call_args.kwargs['allow_auto_lemon_shift'])
         self.assertEqual(runner.call_args.kwargs['selected_rows'], [3])
+
+    def test_failed_rows_attempted_once_per_cloud_run(self):
+        def fail_rows(**kwargs):
+            rows = kwargs['selected_rows']
+            self.df.loc[self.df['__sheet_row__'].isin(rows), '結果'] = '失敗'
+            return {'fail_count': len(rows)}
+        with patch.dict(cloud.ACCOUNTS, {'台北': {'email': 'test', 'password': 'test'}}), \
+             patch.object(cloud, 'run_process_web_hybrid', side_effect=fail_rows) as runner:
+            self.assertEqual(cloud.run('sheet', chunk_size=1, pause_seconds=0, retry_failed=True), 2)
+        self.assertEqual([call.kwargs['selected_rows'] for call in runner.call_args_list], [[2], [3]])
+
+
+class CloudDispatchTest(unittest.TestCase):
+    def test_retry_flag_is_sent_to_workflow(self):
+        for retry in (False, True):
+            with self.subTest(retry=retry), patch.object(ui, '_token', return_value='test'), \
+                 patch.object(ui, '_latest_run', return_value=None), \
+                 patch.object(ui, 'load_config', return_value={}), \
+                 patch.object(ui.requests, 'post', return_value=Mock(status_code=204)) as post:
+                ui._dispatch('sheet', 50, 0, 'all', '台北', False, retry_failed=retry)
+                inputs = post.call_args.kwargs['json']['inputs']
+                self.assertEqual(inputs['retry_failed'], str(retry).lower())
+                self.assertEqual(inputs['allow_auto_lemon'], 'false')
+
+    def test_ui_uses_same_retry_flag_for_count_and_dispatch(self):
+        class Session(dict):
+            __getattr__ = dict.__getitem__
+            __setattr__ = dict.__setitem__
+
+        for retry in (False, True):
+            with self.subTest(retry=retry):
+                st = MagicMock()
+                st.session_state = Session()
+                cols = [Mock(), Mock(), Mock()]
+                cols[0].selectbox.return_value = '台北'
+                cols[1].text_input.return_value = 'sheet'
+                cols[0].number_input.return_value = 50
+                cols[1].number_input.return_value = 0
+                st.columns.side_effect = [cols, cols[:2]]
+                st.checkbox.side_effect = lambda *a, **kw: {
+                    'optimized_cloud_retry_failed': retry,
+                    'optimized_cloud_confirm': True,
+                }.get(kw.get('key'), False)
+                st.button.return_value = True
+                with patch.object(ui, 'st', st), patch.object(ui, '_render_cloud_status'), \
+                     patch.object(cloud, 'load_pending', return_value=[(3, '台北', '')]) as pending, \
+                     patch.object(ui, '_dispatch', return_value={}) as dispatch:
+                    ui.render('prod')
+                self.assertIs(pending.call_args.kwargs['retry_failed'], retry)
+                self.assertIs(dispatch.call_args.args[-1], retry)
+                self.assertEqual(st.session_state['optimized_cloud_pending_key'], ('sheet', '台北', 'all', False, retry))
 
 
 class CloudStatusTest(unittest.TestCase):

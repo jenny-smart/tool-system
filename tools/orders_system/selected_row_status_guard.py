@@ -57,7 +57,7 @@ def _safe_load_candidates(batch_opt, sheet_name, allow_failed=False):
     work["__o_col__"] = df.iloc[:, 14].map(batch_opt._text) if df.shape[1] > 14 else ""
     for col in ("結果", "原因", "沒班表日期"): work[col] = _first_series(df, col).map(batch_opt._text) if col in df.columns else ""
     required_ok = work["姓名"].ne("") & work["電話"].ne("") & work["地址"].ne("") & work["日期"].ne("") & work["開始時間"].ne("") & work["結束時間"].ne("")
-    # N 欄失敗列預設不自動建單；清空結果或雲端明確允許補檸檬人時可重試。
+    # 雲端預設排除失敗列；本機入口或雲端明確確認重試時傳入 allow_failed=True。
     create_ok = (work["狀態"].map(normalize_status).eq("未安排")
                  & work["訂單編號"].eq("")
                  & (allow_failed | work["結果"].map(normalize_status).ne("失敗")))
@@ -175,7 +175,7 @@ def install_patch():
         from hybrid_batch_runner import run_process_web_direct_single
 
         batch_opt.load_worksheet = _load_worksheet_unique
-        batch_opt._load_candidates = lambda sheet_name: _safe_load_candidates(batch_opt, sheet_name)
+        batch_opt._load_candidates = lambda sheet_name: _safe_load_candidates(batch_opt, sheet_name, allow_failed=True)
         batch_safety._BASE_UPDATE_SHEET_ROWS = _update_sheet_rows_first_header
         batch_safety._orders.update_sheet_rows = _update_sheet_rows_first_header
 

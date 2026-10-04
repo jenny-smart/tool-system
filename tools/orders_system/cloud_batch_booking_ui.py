@@ -34,7 +34,7 @@ def _token():
     return ""
 
 
-def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon):
+def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon, retry_failed=False):
     token = _token()
     if not token:
         raise RuntimeError("尚未設定 ORDERS_GITHUB_TOKEN；需提供可啟動 orders-system Actions 的 GitHub Token。")
@@ -50,6 +50,7 @@ def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon
             "sheet_name":sheet, "chunk_size":str(chunk_size), "max_rows":str(max_rows),
             "filter_mode":filter_mode, "region":region,
             "allow_auto_lemon":"true" if allow_auto_lemon else "false",
+            "retry_failed":"true" if retry_failed else "false",
             "pricing_json": json.dumps(load_config()),
         }},
         timeout=30,
@@ -206,6 +207,11 @@ def render(env: str):
         "查無班表時自動補檸檬人（不動其他客人已配班專員）",
         value=False, key="optimized_cloud_allow_auto_lemon",
     )
+    retry_failed = st.checkbox(
+        "我確認已調整，重試失敗列",
+        value=False, key="optimized_cloud_retry_failed",
+        help="已補班、要自動補檸檬人，或客人已重新儲值時勾選；仍依區域及篩選條件選取未安排、訂單編號空白的列。",
+    )
     auto_no_slot = st.checkbox(
         "自動篩選：狀態未安排＋訂單編號空白＋無班表",
         value=False, key="optimized_cloud_no_schedule",
@@ -224,14 +230,15 @@ def render(env: str):
     if auto_missing_o:
         modes.append("missing_order")
     filter_mode = "both" if len(modes) == 2 else (modes[0] if modes else "all")
-    pending_key = (sheet, region, filter_mode, allow_auto_lemon)
-    st.caption("N 欄結果為「失敗」且無單號的列會略過；清空結果可重試，勾選自動補檸檬人時也會列入處理。")
+    pending_key = (sheet, region, filter_mode, allow_auto_lemon, retry_failed)
+    st.caption("雲端預設略過 N 欄結果為「失敗」的列；調整後勾選「重試失敗列」，不必清空結果。要補檸檬人時請同時勾選上方補檸檬人選項。同一次執行中，每列處理後不會在下一輪重複執行。")
 
     if st.button("檢查待成單筆數", disabled=not sheet, key="optimized_cloud_check"):
         try:
             from cloud_batch_booking import load_pending
             rows = [row_no for row_no, _, _ in load_pending(
                 sheet, filter_mode=filter_mode, selected_region=region, allow_auto_lemon=allow_auto_lemon,
+                retry_failed=retry_failed,
             )]
             st.session_state.optimized_cloud_pending = len(rows)
             st.session_state.optimized_cloud_pending_rows = rows
@@ -247,7 +254,7 @@ def render(env: str):
     confirm = st.checkbox("我確認執行：建單＋寄確認信＋同步 Google 日曆", key="optimized_cloud_confirm")
     if st.button("🚀  開始雲端批次成單", type="primary", use_container_width=True, disabled=not(sheet and confirm), key="optimized_cloud_start"):
         try:
-            st.session_state['optimized_cloud_dispatch'] = _dispatch(sheet, int(chunk), int(max_rows), filter_mode, region, allow_auto_lemon)
+            st.session_state['optimized_cloud_dispatch'] = _dispatch(sheet, int(chunk), int(max_rows), filter_mode, region, allow_auto_lemon, retry_failed)
             st.success("已交給 GitHub Actions 雲端執行；可關閉瀏覽器或電腦。")
             st.markdown(f"[查看雲端執行進度](https://github.com/{REPO}/actions/workflows/{WORKFLOW})")
         except Exception as exc:

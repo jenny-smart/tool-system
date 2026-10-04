@@ -20,17 +20,17 @@ def _bool_text(value) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = "", allow_auto_lemon=False):
+def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = "", allow_auto_lemon=False, retry_failed=False):
     excluded = excluded or set()
     allowed_rows = None
     if filter_mode != "all":
         allowed_rows = set()
         if filter_mode in ("no_schedule", "both"):
-            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None, allow_failed=allow_auto_lemon))
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None, allow_failed=retry_failed))
         if filter_mode in ("missing_order", "both"):
-            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None, allow_failed=allow_auto_lemon))
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None, allow_failed=retry_failed))
     result = []
-    for _, row in _safe_load_candidates(batch_opt, sheet_name, allow_failed=allow_auto_lemon).sort_values("__sheet_row__").iterrows():
+    for _, row in _safe_load_candidates(batch_opt, sheet_name, allow_failed=retry_failed).sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
         if row_no in excluded or (allowed_rows is not None and row_no not in allowed_rows):
             continue
@@ -44,14 +44,14 @@ def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selec
     return result
 
 
-def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False) -> int:
+def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False, retry_failed=False) -> int:
     attempted = set()
     success_total = fail_total = 0
     started = time.monotonic()
-    print(f"FILTER mode={filter_mode}; region={selected_region or 'auto'}; auto_lemon_shift={'ON' if allow_auto_lemon else 'OFF'}", flush=True)
+    print(f"FILTER mode={filter_mode}; region={selected_region or 'auto'}; auto_lemon_shift={'ON' if allow_auto_lemon else 'OFF'}; retry_failed={'ON' if retry_failed else 'OFF'}", flush=True)
     print("STRATEGY multi-row-groups-first -> single-rows; Calendar only after order writeback", flush=True)
     while True:
-        pending = load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon)
+        pending = load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed)
         if max_rows:
             left = max_rows - len(attempted)
             if left <= 0:
@@ -92,9 +92,9 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                 print(f"ERROR {region}: {exc}", flush=True)
         elapsed = max(time.monotonic() - started, .001)
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
-        if pause_seconds and load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon):
+        if pause_seconds and load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed):
             time.sleep(pause_seconds)
-    remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon))
+    remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed))
     print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining}", flush=True)
     return 0 if fail_total == 0 else 2
 
@@ -108,10 +108,11 @@ def main():
     p.add_argument("--filter-mode", choices=["all", "no_schedule", "missing_order", "both"], default="all")
     p.add_argument("--region", default="")
     p.add_argument("--allow-auto-lemon", default="false")
+    p.add_argument("--retry-failed", default="false", help="已調整後，明確允許重試 N 欄失敗列")
     a = p.parse_args()
     if a.chunk_size < 1:
         p.error("--chunk-size 必須 >= 1")
-    return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(), _bool_text(a.allow_auto_lemon))
+    return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(), _bool_text(a.allow_auto_lemon), _bool_text(a.retry_failed))
 
 
 if __name__ == "__main__":

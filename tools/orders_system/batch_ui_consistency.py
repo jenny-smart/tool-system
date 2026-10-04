@@ -60,6 +60,7 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
     )
     st.markdown('<div class="hint-box">建單與回填優先；只有勾選改日曆且該筆已有訂單編號後，才初始化 Google Calendar。</div>', unsafe_allow_html=True)
     allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="batch_opt_allow_auto_lemon")
+    st.caption("指定範圍及自動篩選可包含失敗列；調整後可直接重試，不必清空 N 欄結果。")
     auto_no_slot = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="batch_opt_auto_no_slot")
     auto_missing_o = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="batch_opt_auto_missing_o")
 
@@ -85,9 +86,9 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
     try:
         requested_rows = set(_parse_rows(batch_opt, row_spec))
         if auto_no_slot:
-            requested_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=region))
+            requested_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=region, allow_failed=True))
         if auto_missing_o:
-            requested_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=region))
+            requested_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=region, allow_failed=True))
         requested_rows = sorted(requested_rows)
         if not requested_rows:
             raise ValueError("沒有指定列號，也沒有自動篩選到符合條件的列。")
