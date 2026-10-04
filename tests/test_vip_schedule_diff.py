@@ -410,3 +410,39 @@ def test_same_day_matching_normalizes_date_name_and_address():
     second[2] = ' 王小明 '
     second[4] = '台北市 大安區'
     assert _same_day_rows([first, second], []) == [2, 3]
+
+
+@pytest.mark.parametrize('q,marked', [('1,200', True), (100, True), (0, False), ('-50', False), ('', False), ('無', False)])
+def test_no_new_order_with_positive_vip_q_is_highlighted(q, marked):
+    row = old_row()
+    row[14] = '系統未產生新訂單編號'
+    sheet = Sheet('台北202611', [row])
+    source = source_row(row)
+    source[16] = q
+    before = deepcopy(row[:30])
+    sync(Book([sheet]), [source])
+    red = {'red': 1, 'green': .80, 'blue': .80}
+    assert any(item['format']['backgroundColor'] == red for item in sheet.formats) == marked
+    assert sheet.data[1][:30] == before
+
+
+def test_q_displayed_once_applies_to_other_visits_for_same_customer():
+    from tools.service_management.vip_schedule_diff import _balance_attention_rows
+    first, second = old_row(), old_row(event='second', date='2026/11/17')
+    second[14] = '系統未產生新訂單編號'
+    sources = [source_row(first), source_row(second)]
+    sources[0][16] = '500'
+    assert _balance_attention_rows([first, second], [], sources) == [3]
+    second[12] = 'LC123'
+    assert _balance_attention_rows([first, second], [], sources) == []
+
+
+def test_q_highlight_does_not_match_different_customer_or_missing_source():
+    from tools.service_management.vip_schedule_diff import _balance_attention_rows
+    row = old_row()
+    row[14] = '系統未產生新訂單編號'
+    other = old_row(event='other')
+    other[2], other[3] = '另一客戶', '0987654321'
+    source = source_row(other)
+    source[16] = '500'
+    assert _balance_attention_rows([row], [], [source]) == []
