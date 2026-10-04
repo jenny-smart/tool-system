@@ -170,6 +170,37 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
     return {"updates": updates, "changes": changes, "count": len(old) + sum(u["old"] is None for u in updates)}
 
 
+def _column(index):
+    result = ""
+    index += 1
+    while index:
+        index, digit = divmod(index - 1, 26)
+        result = chr(65 + digit) + result
+    return result
+
+
+def _tracking_columns(header, rows):
+    # Blank headers can still have user data underneath; append after all used cells.
+    used = max([30] + [i + 1 for row in [header] + list(rows)
+                           for i, value in enumerate(row) if _text(value)])
+    columns = []
+    for name in META_HEADERS:
+        matches = [i for i, value in enumerate(header) if i >= 30 and value == name]
+        if len(matches) > 1:
+            raise RuntimeError(f"追蹤欄位重複：{name}，未更新排程")
+        if matches:
+            columns.append(matches[0])
+        else:
+            columns.append(used)
+            used += 1
+    return columns
+
+
+def _internal_rows(rows, columns):
+    return [(list(row[:30]) + [""] * max(0, 30 - len(row)) +
+             [row[col] if col < len(row) else "" for col in columns]) for row in rows]
+
+
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False, coverage=None):
     """Write only changed cells; preserve booked A:AD and never clear a schedule."""
     period = target_name[-6:]
@@ -188,17 +219,18 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
     created = False
     try:
         target = ss.worksheet(target_name)
-        last_column = {30: "AD", 31: "AE", 32: "AF"}.get(target.col_count, "AG")
+        last_column = _column(target.col_count - 1)
         existing_range = f"A2:{last_column}"
-        existing = target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
-        current_header = target.get(f"A1:{last_column}1", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
-        if current_header:
-            for offset, name in enumerate(META_HEADERS, 30):
-                if len(current_header[0]) > offset and _text(current_header[0][offset]) not in ("", name):
-                    raise RuntimeError("AE:AG 已有其他欄位，請先保留原資料並調整欄位，未更新排程")
-        if current_header and len(current_header[0]) >= 30: headers = current_header[0][:30]
+        physical_rows = target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
+        header_range = f"A1:{last_column}1"
+        current_header = target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
+        header = current_header[0] if current_header else []
+        columns = _tracking_columns(header, physical_rows)
+        existing = _internal_rows(physical_rows, columns)
+        if len(header) >= 30: headers = header[:30]
     except worksheet_not_found:
         target, existing = None, []
+        columns = [30, 31, 32]
         created = True
     # Detect moves to another month by stable event identity, avoiding duplicate orders.
     area = target_name[:-6]
@@ -207,19 +239,28 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
     if source_ids:
         for sheet in ss.worksheets():
             if sheet.title == target_name or sheet.col_count < 31 or not re.fullmatch(re.escape(area) + r"\d{6}", sheet.title): continue
-            for row_num, row in enumerate(sheet.get("A2:AE", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING"), 2):
-                values = (list(row) + [""] * 33)[:33]
+            foreign_header = sheet.get(f"A1:{_column(sheet.col_count - 1)}1", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
+            foreign_header = foreign_header[0] if foreign_header else []
+            if META_HEADERS[0] not in foreign_header[30:]: continue
+            foreign_rows = sheet.get(f"A2:{_column(sheet.col_count - 1)}", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
+            foreign_columns = _tracking_columns(foreign_header, foreign_rows)
+            for row_num, values in enumerate(_internal_rows(foreign_rows, foreign_columns), 2):
                 if values[30] in source_ids: foreign[values[30]].append((sheet.title, row_num, values))
     plan = plan_schedule(existing, source_rows, target_name, foreign, coverage=export_range)
     if not compare_only:
-        if target is not None and target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != existing:
+        if target is not None and (target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != physical_rows or
+                                   target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != current_header):
             raise RuntimeError("排程在比對期間已有更新，未覆寫；請待成單完成後重新比對")
         required_rows = max([len(existing) + 1, 2] + [u["row"] for u in plan["updates"]])
+        required_cols = max(columns) + 1
         if target is None:
-            target = ss.add_worksheet(title=target_name, rows=max(required_rows + 10, 200), cols=33)
-        elif target.col_count < 33 or target.row_count < required_rows:
-            target.resize(rows=max(target.row_count, required_rows), cols=max(target.col_count, 33))
-        target.update(values=[list(headers[:30]) + META_HEADERS], range_name="A1:AG1", value_input_option="RAW")
+            target = ss.add_worksheet(title=target_name, rows=max(required_rows + 10, 200), cols=required_cols)
+        elif target.col_count < required_cols or target.row_count < required_rows:
+            target.resize(rows=max(target.row_count, required_rows), cols=max(target.col_count, required_cols))
+        if created:
+            target.update(values=[list(headers[:30])], range_name="A1:AD1", value_input_option="RAW")
+        for column, name in zip(columns, META_HEADERS):
+            target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
         year, month = int(target_name[-6:-2]), int(target_name[-2:])
         previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
         lookup_sheet = f"{area}{previous}"
@@ -228,15 +269,16 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             row, values, before = change["row"], change["values"], change["old"]
             if before is None:
                 values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
-                updates.append({"range": f"A{row}:AG{row}", "values": [values]})
+                updates.append({"range": f"A{row}:AD{row}", "values": [values[:30]]})
                 phones.append({"range": f"D{row}", "values": [[values[3]]]})
             else:
                 if values[:9] != before[:9]:
                     updates.append({"range": f"A{row}:I{row}", "values": [values[:9]]})
                     phones.append({"range": f"D{row}", "values": [[values[3]]]})
-                updates.append({"range": f"AE{row}:AG{row}", "values": [values[30:33]]})
+            for column, value in zip(columns, values[30:33]):
+                updates.append({"range": f"{_column(column)}{row}", "values": [[value]]})
             if change["kind"]:
-                colors.append({"range": f"A{row}:AG{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
+                colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
         if updates: target.batch_update(updates, value_input_option="USER_ENTERED")
         if phones: target.batch_update(phones, value_input_option="RAW")
         if colors: target.batch_format(colors)

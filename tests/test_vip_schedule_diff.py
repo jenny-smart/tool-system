@@ -97,7 +97,7 @@ def test_cross_month_existing_event_is_not_added():
 class Sheet:
     def __init__(self, title, rows=()):
         self.title = title
-        self.data = [[''] * 33] + deepcopy(list(rows))
+        self.data = [[''] * 30 + ['日曆事件ID', '日曆異動', '日曆異動內容']] + deepcopy(list(rows))
         self.row_count, self.col_count = 200, 33
         self.batches, self.formats = [], []
 
@@ -107,7 +107,11 @@ class Sheet:
         return deepcopy(self.data[1:])
 
     def update(self, values, range_name, **kwargs):
-        self.data[0] = deepcopy(values[0])
+        col = re.match(r'([A-Z]+)', range_name).group(1)
+        index = 0
+        for char in col: index = index * 26 + ord(char) - 64
+        while len(self.data[0]) < index - 1 + len(values[0]): self.data[0].append('')
+        self.data[0][index - 1:index - 1 + len(values[0])] = deepcopy(values[0])
 
     def batch_update(self, updates, **kwargs):
         self.batches.append((deepcopy(updates), kwargs))
@@ -117,6 +121,7 @@ class Sheet:
             for char in col: index = index * 26 + ord(char) - 64
             while len(self.data) < int(row): self.data.append([''] * 33)
             values = update['values'][0]
+            while len(self.data[int(row) - 1]) < index - 1 + len(values): self.data[int(row) - 1].append('')
             self.data[int(row) - 1][index - 1:index - 1 + len(values)] = values
 
     def append_rows(self, values, **kwargs): self.data.extend(deepcopy(values))
@@ -164,7 +169,7 @@ def test_writer_never_writes_booked_business_cells_and_keeps_rows_in_place():
     source = source_row(row, **{'0': '2人'})
     sync(book, [source])
     assert sheet.data[1][:30] == row[:30]
-    assert all(u['range'] == 'AE2:AG2' for batch, _ in sheet.batches for u in batch)
+    assert all(u['range'] in ('AE2', 'AF2', 'AG2') for batch, _ in sheet.batches for u in batch)
     assert sheet.formats[0]['range'] == 'A2:AG2'
     report = book.sheets['排程差異_台北202611']
     before = len(report.data)
@@ -216,6 +221,7 @@ def test_legacy_30_column_schedule_is_extended_without_overwriting_order():
     row = old_row(event='', order='LC123')
     sheet = Sheet('台北202611', [row[:30]])
     sheet.col_count = 30
+    sheet.data[0] = sheet.data[0][:30]
     original_get = sheet.get
     def get(range_name, **kwargs):
         assert range_name not in ('A2:AG', 'A1:AG1')
@@ -224,3 +230,61 @@ def test_legacy_30_column_schedule_is_extended_without_overwriting_order():
     sync(Book([sheet]), [source_row(old_row(), **{'0': '2人'})])
     assert sheet.col_count == 33
     assert sheet.data[1][:30] == row[:30]
+
+
+def test_custom_ae_ag_are_preserved_and_tracking_columns_reused():
+    row = old_row(order='LC123')
+    custom = ['自訂值', '=SUM(A2:A9)', '保留資料']
+    sheet = Sheet('台北202611', [row[:30] + custom])
+    sheet.data[0][30:33] = ['自訂一', '自訂二', '自訂三']
+    book = Book([sheet])
+    source = source_row(row, **{'0': '2人'})
+    sync(book, [source])
+    assert sheet.data[1][:30] == row[:30]
+    assert sheet.data[1][30:33] == custom
+    assert sheet.data[0][33:36] == ['日曆事件ID', '日曆異動', '日曆異動內容']
+    assert sheet.data[1][33] == 'event1'
+    assert sheet.col_count == 36
+    sync(book, [source])
+    assert sheet.col_count == 36
+    assert sheet.data[1][30:33] == custom
+
+
+def test_unnamed_columns_with_data_are_preserved():
+    row = old_row(event='')[:30] + [''] * 10 + ['不可覆蓋']
+    sheet = Sheet('台北202611', [row])
+    sheet.data[0] = [''] * 41
+    sheet.col_count = 41
+    sync(Book([sheet]), [source_row(old_row(), **{'0': '2人'})])
+    assert sheet.data[1][40] == '不可覆蓋'
+    assert sheet.data[0][41:44] == ['日曆事件ID', '日曆異動', '日曆異動內容']
+    assert sheet.data[1][10:30] == row[10:30]
+
+
+def test_preview_with_custom_columns_does_not_modify_schedule():
+    sheet = Sheet('台北202611', [old_row()[:30] + ['甲', '乙', '丙']])
+    sheet.data[0][30:33] = ['自訂一', '自訂二', '自訂三']
+    before = deepcopy(sheet.data)
+    sync(Book([sheet]), [source_row(old_row())], compare_only=True)
+    assert sheet.data == before and not sheet.batches and not sheet.formats
+
+
+def test_relocated_foreign_event_prevents_cross_month_duplicate():
+    foreign = Sheet('台北202611', [old_row(order='LC123')[:30] + ['自訂值', 'event1', '', '']])
+    foreign.col_count = 34
+    foreign.data[0] = [''] * 30 + ['自訂欄', '日曆事件ID', '日曆異動', '日曆異動內容']
+    book = Book([foreign])
+    result = sync(book, [source_row(old_row(date='2026/12/10'))], name='台北202612')
+    assert result['differences'] == {'跨月異動': 1}
+    assert len(book.sheets['台北202612'].data) == 1
+
+
+def test_existing_business_headers_and_unbooked_k_ag_are_preserved():
+    row = old_row(event='')[:30] + ['甲', '乙', '丙']
+    sheet = Sheet('台北202611', [row])
+    sheet.data[0] = [''] * 10 + ['客製欄'] + [''] * 22
+    original_header = deepcopy(sheet.data[0])
+    sync(Book([sheet]), [source_row(old_row(), **{'0': '2人'})])
+    assert sheet.data[0][:33] == original_header
+    assert sheet.data[1][0] == '2人'
+    assert sheet.data[1][10:33] == row[10:33]
