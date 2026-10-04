@@ -566,6 +566,26 @@ def normalize_phone(phone: Any) -> str:
 def get_status(color: str) -> str:
     return STATUS_BY_COLOR.get(str(color or "").strip(), "")
 
+
+def _calendar_label_statuses(calendar: dict) -> dict[str, str]:
+    names = {
+        "待確認": "待確認", "已安排": "已安排", "已預約": "已安排",
+        "暫停": "暫停", "保留單": "保留單", "未安排": "未安排",
+    }
+    return {
+        label["id"]: names.get(str(label.get("name", "")).strip(), "")
+        for label in calendar.get("labelProperties", {}).get("eventLabels", [])
+        if label.get("id")
+    }
+
+
+def _event_schedule_status(event: dict, label_statuses: dict[str, str]) -> str:
+    label_id = event.get("eventLabelId")
+    if label_id:
+        # 自訂標籤優先；未知標籤不得再以相近的舊色碼推定狀態。
+        return label_statuses.get(label_id, "")
+    return get_status(event.get("colorId", ""))
+
 def to_number_safe(value: Any) -> float:
     try:
         return float(str(value).replace(",", "")) if value not in (None, "") else 0.0
@@ -622,6 +642,9 @@ def _fetch_calendar_events(
     if not calendar_id:
         raise ValueError(f"[{area_name}] Calendar ID 未設定，請在主控試算表「客服地區設定」填入")
 
+    calendar = cal_service.calendars().get(calendarId=calendar_id).execute()
+    label_statuses = _calendar_label_statuses(calendar)
+
     time_min = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     time_max = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -641,6 +664,8 @@ def _fetch_calendar_events(
 
         resp  = cal_service.events().list(**kwargs).execute()
         items = resp.get("items", [])
+        for event in items:
+            event["_schedule_status"] = _event_schedule_status(event, label_statuses)
         events.extend(items)
 
         page_token = resp.get("nextPageToken")
@@ -663,7 +688,7 @@ def _process_events(events: list, area_name: str) -> list[dict]:
             continue
 
         parsed   = parse_title(title)
-        status   = get_status(color)
+        status   = e.get("_schedule_status", get_status(color))
         location = e.get("location", "")
 
         start_raw = e.get("start", {}).get("dateTime") or e.get("start", {}).get("date", "")
