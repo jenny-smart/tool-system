@@ -226,6 +226,44 @@ def _internal_rows(rows, columns):
              [row[col] if col < len(row) else "" for col in columns[:3]]) for row in rows]
 
 
+def _same_day_rows(existing, updates):
+    rows = {i + 2: row for i, row in enumerate(existing)}
+    rows.update({item["row"]: item["values"] for item in updates})
+    groups = defaultdict(list)
+    for row_num, values in rows.items():
+        key = _key(values, (2, 4, 5))
+        if all(key): groups[key].append(row_num)
+    return sorted(row for group in groups.values() if len(group) > 1 for row in group)
+
+
+def _positive_amount(value):
+    try:
+        return float(_text(value).replace(",", "").replace("NT$", "").replace("$", "")) > 0
+    except (ValueError, TypeError):
+        return False
+
+
+def _balance_attention_rows(existing, updates, sources):
+    rows = {i + 2: row for i, row in enumerate(existing)}
+    rows.update({item["row"]: item["values"] for item in updates})
+    by_id, by_slot, customer_q = defaultdict(list), defaultdict(list), {}
+    for source in sources:
+        if len(source) < 17: continue
+        customer = _key(source, (2, 3))
+        # Export displays the monthly Q amount on the customer's first row only.
+        if _text(source[16]): customer_q[customer] = source[16]
+        if len(source) > 18 and _text(source[18]): by_id[_text(source[18])].append(source)
+        by_slot[_key(source, (2, 3, 4, 5, 6, 7))].append(source)
+    highlighted = []
+    for row_num, values in rows.items():
+        if _text(values[12]) or "系統未產生新訂單編號" not in _text(values[14]): continue
+        candidates = by_id.get(_text(values[30]), []) or by_slot.get(_key(values, (2, 3, 4, 5, 6, 7)), [])
+        if any(_positive_amount(source[16] if _text(source[16]) else customer_q.get(_key(source, (2, 3)), ""))
+               for source in candidates):
+            highlighted.append(row_num)
+    return sorted(highlighted)
+
+
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False, coverage=None):
     """Update calendar A:J; preserve existing K:AG and never clear a schedule."""
     period = target_name[-6:]
@@ -320,6 +358,14 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 if any(u["row"] == row_num for u in plan["updates"]): continue
                 for column, value in zip(columns[:3], values[30:33]):
                     if value: updates.append({"range": f"{_column(column)}{row_num}", "values": [[value]]})
+        # Both active and paused calendar events can legitimately share a day.
+        # Highlight every member of the group, without changing order data/status.
+        for row in _same_day_rows(existing, plan["updates"]):
+            colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}",
+                           "format": {"backgroundColor": {"red": .90, "green": .85, "blue": 1}}})
+        for row in _balance_attention_rows(existing, plan["updates"], source_rows):
+            colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}",
+                           "format": {"backgroundColor": {"red": 1, "green": .80, "blue": .80}}})
         if updates: target.batch_update(updates, value_input_option="USER_ENTERED")
         if phones: target.batch_update(phones, value_input_option="RAW")
         if colors: target.batch_format(colors)

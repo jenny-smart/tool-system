@@ -79,8 +79,8 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
         def freeze(self, **kwargs):
             pass
 
-        def sort(self, *args, **kwargs):
-            self.sort_args = (args, kwargs)
+        def batch_format(self, formats):
+            self.formats = formats
 
     sheet = Sheet()
     client = SimpleNamespace(
@@ -108,9 +108,17 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
         "range_name": "D2:D3",
         "value_input_option": "RAW",
     }
-    assert sheet.sort_args == (((3, "asc"),), {"range": "A2:S3"})
+    assert sheet.formats[0]["range"] == "A2:S200"
     assert [row[18] for row in sheet.updates[0]["values"][1:]] == ["event-li", "event-wang"]
     assert sheet.updates[2]["range_name"] == "T1:U2"
+    # Export itself also highlights both active and paused same-day visits.
+    duplicate = {**rows[0], "address": "台北市", "event_id": "event-wang-paused", "status": "暫停"}
+    rows[0]["address"] = "台北市"
+    sheet.updates.clear()
+    functions["_write_vip_sheet"](client, "台北", rows + [duplicate], datetime(2026, 10, 1), area_target_id="sheet-id")
+    assert [item["range"] for item in sheet.formats[1:]] == ["A3:S3", "A4:S4"]
+    assert sheet.updates[0]["values"][3][8] == "暫停"
+
 
 
 def test_calendar_export_writes_empty_snapshots_for_each_selected_month():

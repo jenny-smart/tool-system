@@ -3559,6 +3559,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【儲值】匯出VIP日曆",
         "【儲值】建立VIP排程工作表",
         "【儲值】全跑（抓儲值金＋匯出VIP）",
+        "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）",
         # 年節大掃除 VIP 通知／Email 合併清單
         "【大掃除】年度設定",
         "【大掃除】更新VIP通知清單",
@@ -3660,6 +3661,7 @@ SERVICE_STORED_VALUE_MAP = {
     "【儲值】匯出VIP日曆":               "2",
     "【儲值】建立VIP排程工作表":         "3",
     "【儲值】全跑（抓儲值金＋匯出VIP）":  "0",
+    "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）": "4",
 }
 
 # ── ★ CRM：功能 → crm.py --step 對應表 ───────────────────────
@@ -4558,7 +4560,7 @@ with date_col:
                 )
             start_date_value = end_date_value = None
 
-        elif selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）"):
+        elif selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
             st.markdown('<div class="field-label">📆 匯出設定</div>', unsafe_allow_html=True)
             _crm_mode = st.radio(
                 "匯出方式", ["期別（月份）", "日期區間"],
@@ -4600,10 +4602,10 @@ with date_col:
                     end_date_value = st.date_input("結束日期", value=_today_date, key="crm_end_date")
                 st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
 
-            if selected_function == "【儲值】建立VIP排程工作表":
+            if selected_function in ("【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
                 st.caption("自動比對並更新 A:J、標示異動列；既有 K:AG 與右側自訂資料保留。"
                            "異動前後內容及更新日期時間直接顯示在 AG 右側；已有訂單編號不會清除或重新成單。"
-                           "無法唯一對應的列保留原資料並註記核對原因。")
+                           "無法唯一對應的列保留原資料並註記核對原因；同姓名、地址、日期多筆列標為淡紫色，可能為該次人數／時數異動。")
 
         elif selected_function in ("【儲值】抓儲值金", "【CRM】更新排程決策報表",
                                    "【CRM】更新三個月未排名單", "【CRM】重新排序Raw"):
