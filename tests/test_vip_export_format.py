@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 SOURCE = Path(__file__).parents[1] / "tools/service_management/stored_value.py"
 
@@ -30,6 +32,36 @@ def test_normalize_phone_adds_leading_zero_and_keeps_ten_digits():
     normalize_phone = _load_functions("normalize_phone")["normalize_phone"]
     assert normalize_phone("912345678") == "0912345678"
     assert normalize_phone("0912-345-678") == "0912345678"
+
+
+@pytest.mark.parametrize("area,period,previous", [("台北", "202611", "202610"), ("台中", "202601", "202512")])
+def test_schedule_writes_purchase_lookup_after_sorting(area, period, previous):
+    functions = _load_functions("normalize_phone", "_schedule_row_key", "_build_vip_schedule_sheet")
+    functions["VIP_SCHEDULE_FALLBACK_HEADERS"] = [""] * 30
+    calls = []
+    target = SimpleNamespace(
+        get=lambda *args, **kwargs: [],
+        clear=lambda: None,
+        update=lambda **kwargs: calls.append(kwargs),
+        sort=lambda *args, **kwargs: calls.append("sort"),
+        freeze=lambda **kwargs: None,
+    )
+    source = SimpleNamespace(get=lambda _range: [["", "", "王小明", "912345678", "地址"]] * 2)
+    client = SimpleNamespace(open_by_key=lambda _key: SimpleNamespace(
+        worksheet=lambda name: source if name.startswith("定期VIP_") else target,
+    ))
+    functions["_build_vip_schedule_sheet"](
+        client, {"name": area, "target_spreadsheet_id": "test"}, period
+    )
+    assert calls[-2] == "sort"
+    assert calls[-1] == {
+        "values": [
+            [f"=xlookup(E2,'{area}{previous}'!E:E,'{area}{previous}'!J:J)"],
+            [f"=xlookup(E3,'{area}{previous}'!E:E,'{area}{previous}'!J:J)"],
+        ],
+        "range_name": "J2:J3",
+        "value_input_option": "USER_ENTERED",
+    }
 
 
 def test_schedule_customer_key_uses_name_phone_and_address():
