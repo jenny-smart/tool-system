@@ -55,9 +55,12 @@ def _safe_load_candidates(batch_opt, sheet_name):
     work = pd.DataFrame(index=df.index); work["__sheet_row__"] = _first_series(df, "__sheet_row__")
     for col in batch_opt.REQUIRED_COLUMNS: work[col] = _first_series(df, col).map(batch_opt._text)
     work["__o_col__"] = df.iloc[:, 14].map(batch_opt._text) if df.shape[1] > 14 else ""
-    for col in ("原因", "沒班表日期"): work[col] = _first_series(df, col).map(batch_opt._text) if col in df.columns else ""
+    for col in ("結果", "原因", "沒班表日期"): work[col] = _first_series(df, col).map(batch_opt._text) if col in df.columns else ""
     required_ok = work["姓名"].ne("") & work["電話"].ne("") & work["地址"].ne("") & work["日期"].ne("") & work["開始時間"].ne("") & work["結束時間"].ne("")
-    create_ok = work["狀態"].map(normalize_status).eq("未安排") & work["訂單編號"].eq("")
+    # N 欄已標記失敗的列不再自動建單；清空結果後才重新列入候選。
+    create_ok = (work["狀態"].map(normalize_status).eq("未安排")
+                 & work["訂單編號"].eq("")
+                 & work["結果"].map(normalize_status).ne("失敗"))
     work = work[required_ok & (create_ok | work["訂單編號"].ne(""))].copy().reset_index(drop=True)
     work["日期顯示"] = work["日期"].map(batch_opt._date_text)
     work["時段顯示"] = work.apply(lambda r: f"{batch_opt._time_text(r['開始時間'])}-{batch_opt._time_text(r['結束時間'])}", axis=1)
