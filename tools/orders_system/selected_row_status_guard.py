@@ -47,7 +47,7 @@ def _should_create_order(row):
     return not str(_scalar(row.get("訂單編號", "")) or "").strip() and normalize_status(row.get("狀態", "")) == "未安排"
 
 
-def _safe_load_candidates(batch_opt, sheet_name):
+def _safe_load_candidates(batch_opt, sheet_name, allow_failed=False):
     try: _, df = _load_worksheet_unique(sheet_name)
     except Exception as exc:
         if type(exc).__name__ == "WorksheetNotFound": raise ValueError(f"找不到工作表分頁「{sheet_name}」") from exc
@@ -57,10 +57,10 @@ def _safe_load_candidates(batch_opt, sheet_name):
     work["__o_col__"] = df.iloc[:, 14].map(batch_opt._text) if df.shape[1] > 14 else ""
     for col in ("結果", "原因", "沒班表日期"): work[col] = _first_series(df, col).map(batch_opt._text) if col in df.columns else ""
     required_ok = work["姓名"].ne("") & work["電話"].ne("") & work["地址"].ne("") & work["日期"].ne("") & work["開始時間"].ne("") & work["結束時間"].ne("")
-    # N 欄已標記失敗的列不再自動建單；清空結果後才重新列入候選。
+    # N 欄失敗列預設不自動建單；清空結果或雲端明確允許補檸檬人時可重試。
     create_ok = (work["狀態"].map(normalize_status).eq("未安排")
                  & work["訂單編號"].eq("")
-                 & work["結果"].map(normalize_status).ne("失敗"))
+                 & (allow_failed | work["結果"].map(normalize_status).ne("失敗")))
     work = work[required_ok & (create_ok | work["訂單編號"].ne(""))].copy().reset_index(drop=True)
     work["日期顯示"] = work["日期"].map(batch_opt._date_text)
     work["時段顯示"] = work.apply(lambda r: f"{batch_opt._time_text(r['開始時間'])}-{batch_opt._time_text(r['結束時間'])}", axis=1)
@@ -68,8 +68,8 @@ def _safe_load_candidates(batch_opt, sheet_name):
     return work
 
 
-def _auto_filter_rows(batch_opt, sheet_name, mode, region=None):
-    work = _safe_load_candidates(batch_opt, sheet_name)
+def _auto_filter_rows(batch_opt, sheet_name, mode, region=None, allow_failed=False):
+    work = _safe_load_candidates(batch_opt, sheet_name, allow_failed=allow_failed)
     work = work[work["狀態"].map(normalize_status).eq("未安排") & work["訂單編號"].eq("")].copy()
     if region:
         work = work[work.apply(lambda row: batch_opt.get_region_by_address(batch_opt._text(row.get("地址")), __import__("accounts").ACCOUNTS) == region, axis=1)].copy()

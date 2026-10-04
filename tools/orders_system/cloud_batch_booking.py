@@ -8,7 +8,7 @@ from accounts import ACCOUNTS
 import batch_booking_optimized as batch_opt
 from orders import get_region_by_address
 from batch_recovery_meta import install_patch as install_recovery_meta_patch
-from selected_row_status_guard import install_patch as install_selected_row_status_guard, _auto_filter_rows
+from selected_row_status_guard import install_patch as install_selected_row_status_guard, _auto_filter_rows, _safe_load_candidates
 from hybrid_batch_runner import run_process_web_hybrid
 
 install_selected_row_status_guard()
@@ -20,17 +20,17 @@ def _bool_text(value) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = ""):
+def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = "", allow_auto_lemon=False):
     excluded = excluded or set()
     allowed_rows = None
     if filter_mode != "all":
         allowed_rows = set()
         if filter_mode in ("no_schedule", "both"):
-            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None))
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None, allow_failed=allow_auto_lemon))
         if filter_mode in ("missing_order", "both"):
-            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None))
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None, allow_failed=allow_auto_lemon))
     result = []
-    for _, row in batch_opt._load_candidates(sheet_name).sort_values("__sheet_row__").iterrows():
+    for _, row in _safe_load_candidates(batch_opt, sheet_name, allow_failed=allow_auto_lemon).sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
         if row_no in excluded or (allowed_rows is not None and row_no not in allowed_rows):
             continue
@@ -51,7 +51,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
     print(f"FILTER mode={filter_mode}; region={selected_region or 'auto'}; auto_lemon_shift={'ON' if allow_auto_lemon else 'OFF'}", flush=True)
     print("STRATEGY multi-row-groups-first -> single-rows; Calendar only after order writeback", flush=True)
     while True:
-        pending = load_pending(sheet_name, attempted, filter_mode, selected_region)
+        pending = load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon)
         if max_rows:
             left = max_rows - len(attempted)
             if left <= 0:
@@ -92,9 +92,9 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                 print(f"ERROR {region}: {exc}", flush=True)
         elapsed = max(time.monotonic() - started, .001)
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
-        if pause_seconds and load_pending(sheet_name, attempted, filter_mode, selected_region):
+        if pause_seconds and load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon):
             time.sleep(pause_seconds)
-    remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region))
+    remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon))
     print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining}", flush=True)
     return 0 if fail_total == 0 else 2
 

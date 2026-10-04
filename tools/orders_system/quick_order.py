@@ -1418,20 +1418,16 @@ def resolve_backend_booking_address(session, member_payload, address, token, cle
     """新客、舊客、批次及查班表共用後台地址查詢；不自行判定服務區域。"""
     member = (member_payload or {}).get("member", {}) or {}
     best_addr = dict(pick_best_address_info(member_payload, address) or {})
-    selected_address = str(best_addr.get("address") or address).strip()
+    selected_address = str(address).strip()
+    best_addr["address"] = selected_address
     address_parts = _split_booking_address(selected_address)
     # country_id 是後台縣市區下拉值，與服務區域 area_id 不同。
     best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
-    if best_addr.get("lat") and best_addr.get("lng"):
-        addr_check = check_contain(
-            session, member.get("member_id", ""), selected_address,
-            best_addr["lat"], best_addr["lng"], token, clean_type_id,
-        )
-    else:
-        from backend_address_form import query_native_address
-        addr_check = query_native_address(
-            session, orders.BASE_URL, member.get("member_id", ""), selected_address, clean_type_id,
-        )
+    # 照成單欄位送後台；新地址座標留空，不等待或比對 Google Maps。
+    addr_check = check_contain(
+        session, member.get("member_id", ""), selected_address,
+        best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id,
+    )
     addr_check = addr_check if isinstance(addr_check, dict) else {}
     code = addr_check.get("return_code")
     if code not in (None, "", "0000"):
@@ -1443,7 +1439,7 @@ def resolve_backend_booking_address(session, member_payload, address, token, cle
             if area.get(field) not in (None, "", 0, "0"):
                 best_addr[field] = area[field]
     # 查詢未提供區域時保留會員既有值，未存的欄位留空交由後台驗證。
-    # 由後台原生按鈕定位及判定區域，不指定預設區域，也不改寫客戶地址。
+    # 不指定預設區域，也不改寫客戶地址。
     return best_addr, address_parts, addr_check
 
 
@@ -4597,9 +4593,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
     tel = str(customer.get("tel", "")).strip()
     line = str(customer.get("line", "")).strip()
     address = str(customer["address"]).strip()
-    # 2026-07-08：移除 geocode 猜行政區。
-    # 之前地址缺少行政區時可能猜成大安區，導致新單區域錯誤；現在只修正既有行政區順序，不再補猜。
-    address = _fix_address_district_order(address, fallback_district="")
+    # 成單保留使用者輸入的地址，不自動補猜或改寫。
     address_parts = _split_booking_address(address)
     address_for_lookup = address_parts["full"]
     address_for_submit = address_parts["detail"]
