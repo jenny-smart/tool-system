@@ -892,6 +892,9 @@ def _build_vip_schedule_sheet(
     ss = gc.open_by_key(target_id)
     source_name = f"定期VIP_{area_name}_{period}"
     target_name = f"{area_name}{period}"
+    year, month = int(period[:4]), int(period[4:])
+    previous_period = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
+    lookup_sheet = f"{area_name}{previous_period}"
     source = ss.worksheet(source_name)
     source_rows = source.get("A2:J")
 
@@ -918,7 +921,7 @@ def _build_vip_schedule_sheet(
     for source_row in source_rows:
         first_ten = (list(source_row) + [""] * 10)[:10]
         first_ten[3] = normalize_phone(first_ten[3])
-        # A:J 一律以本月日曆匯出工作表內容為準，I 欄狀態也直接使用日曆匯出結果。
+        # A:I 以本月日曆匯出工作表內容為準；J 欄於排序後填入購買項目查找公式。
         # 新建工作表不沿用上月 K:AD；重跑既有月份才保留該月已產生的作業資料。
         extras = existing_extra.get(_schedule_row_key(first_ten), [""] * 20)
         output.append(first_ten + extras)
@@ -935,6 +938,14 @@ def _build_vip_schedule_sheet(
             value_input_option="RAW",
         )
         target.sort((3, "asc"), range=f"A2:AD{len(source_rows) + 1}")
+        target.update(
+            values=[
+                [f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"]
+                for row in range(2, len(source_rows) + 2)
+            ],
+            range_name=f"J2:J{len(source_rows) + 1}",
+            value_input_option="USER_ENTERED",
+        )
     target.freeze(rows=1)
     log.info("[%s] VIP排程工作表建立完成：%s（%d 筆）", area_name, target_name, len(source_rows))
     return {"sheet": target_name, "count": len(source_rows), "ok": True}
