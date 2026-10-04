@@ -824,7 +824,14 @@ def _write_vip_sheet(
     if rows:
         phones = [[normalize_phone(r["phone"])] for r in rows]
         sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
-        sh.sort((3, "asc"), range=f"A2:S{len(rows) + 1}")
+        # Rows already sorted above; keep their positions for duplicate highlighting.
+        from tools.service_management.vip_schedule_diff import _same_day_rows
+        formats = [{"range": f"A2:S{max(getattr(sh, 'row_count', 200), len(rows) + 1)}",
+                    "format": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}}]
+        for row_num in _same_day_rows(out[1:], []):
+            formats.append({"range": f"A{row_num}:S{row_num}",
+                            "format": {"backgroundColor": {"red": .90, "green": .85, "blue": 1}}})
+        sh.batch_format(formats)
     sh.update(
         values=[["匯出開始日期", "匯出結束日期"],
                 [start_dt.strftime("%Y-%m-%d"), (end_dt or start_dt).strftime("%Y-%m-%d")]],

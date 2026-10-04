@@ -226,6 +226,16 @@ def _internal_rows(rows, columns):
              [row[col] if col < len(row) else "" for col in columns[:3]]) for row in rows]
 
 
+def _same_day_rows(existing, updates):
+    rows = {i + 2: row for i, row in enumerate(existing)}
+    rows.update({item["row"]: item["values"] for item in updates})
+    groups = defaultdict(list)
+    for row_num, values in rows.items():
+        key = _key(values, (2, 4, 5))
+        if all(key): groups[key].append(row_num)
+    return sorted(row for group in groups.values() if len(group) > 1 for row in group)
+
+
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False, coverage=None):
     """Update calendar A:J; preserve existing K:AG and never clear a schedule."""
     period = target_name[-6:]
@@ -320,6 +330,11 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 if any(u["row"] == row_num for u in plan["updates"]): continue
                 for column, value in zip(columns[:3], values[30:33]):
                     if value: updates.append({"range": f"{_column(column)}{row_num}", "values": [[value]]})
+        # Both active and paused calendar events can legitimately share a day.
+        # Highlight every member of the group, without changing order data/status.
+        for row in _same_day_rows(existing, plan["updates"]):
+            colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}",
+                           "format": {"backgroundColor": {"red": .90, "green": .85, "blue": 1}}})
         if updates: target.batch_update(updates, value_input_option="USER_ENTERED")
         if phones: target.batch_update(phones, value_input_option="RAW")
         if colors: target.batch_format(colors)
