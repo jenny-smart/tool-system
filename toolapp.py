@@ -3919,6 +3919,7 @@ monthly_order_functions = ["上半月訂單", "下半月訂單"]
 
 period = ""
 start_date_value = None
+vip_schedule_compare_only = False
 end_date_value = None
 monthly_date_mode = "期別"
 resume_target_sheet = ""
@@ -4599,6 +4600,13 @@ with date_col:
                 with _d2:
                     end_date_value = st.date_input("結束日期", value=_today_date, key="crm_end_date")
                 st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
+
+            if selected_function == "【儲值】建立VIP排程工作表":
+                vip_schedule_compare_only = st.checkbox(
+                    "只比對差異，不更新排程工作表", value=False, key="vip_schedule_compare_only",
+                )
+                st.caption("更新時會標示新增／異動列；已有單號的列保留原排程與成單資訊。"
+                           "無法唯一比對或未見於本次匯出的列需人工核對，不會自動重新成單。")
 
         elif selected_function in ("【儲值】抓儲值金", "【CRM】更新排程決策報表",
                                    "【CRM】更新三個月未排名單", "【CRM】重新排序Raw"):
@@ -5888,6 +5896,8 @@ if run_clicked:
                         "tools.service_management.stored_value",
                         "--step", step,
                     ]
+                    if step == "3" and vip_schedule_compare_only:
+                        cmd += ["--compare-only"]
                     if step != "1" and start_date_value and end_date_value:
                         cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
                                 "--end",   end_date_value.strftime("%Y-%m-%d")]
@@ -5937,6 +5947,20 @@ if run_clicked:
 
                 # 解析各 Step 結果，顯示部分成功
                 stdout_text = completed.stdout or ""
+                for _line in stdout_text.splitlines():
+                    if _line.startswith("VIP_SCHEDULE_DIFF="):
+                        try:
+                            _diff_result = json.loads(_line.split("=", 1)[1])
+                            _diff_counts = _diff_result.get("differences", {})
+                            st.info(f"{_diff_result['sheet']}：" + ("、".join(
+                                f"{_kind} {_count} 筆" for _kind, _count in _diff_counts.items()
+                            ) or "無新增差異"))
+                            if _diff_result.get("report_url"):
+                                st.markdown(f"[開啟排程差異表]({_diff_result['report_url']})")
+                            st.caption(f"詳細差異請查看工作表「{_diff_result['report']}」。"
+                                       + ("本次只比對，排程尚未更新。" if _diff_result.get("compare_only") else ""))
+                        except (ValueError, KeyError, TypeError):
+                            pass
                 success_steps = [l for l in stdout_text.splitlines() if "完成" in l and "ERROR" not in l and "失敗" not in l]
                 failed_steps  = [l for l in stdout_text.splitlines() if "失敗" in l and "[ERROR]" in l]
 
