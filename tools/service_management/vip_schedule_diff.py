@@ -8,7 +8,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 FIELDS = ["服務人時", "備註", "姓名", "電話", "地址", "日期", "開始時間", "結束時間", "狀態"]
-META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容"]
+META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容", "更新日期"]
 COLORS = {
     "新增": {"red": 1, "green": .96, "blue": .72},
     "未成單異動": {"red": 1, "green": .96, "blue": .72},
@@ -51,8 +51,10 @@ def _key(values, columns):
 
 
 def _diff(old, new):
+    # Booking writes 已安排 to Sheets; calendar 未安排 is not a service change.
+    ignored = {8} if _text(old[12]) and _canonical(old[8], 8) == "已安排" and _canonical(new[8], 8) == "未安排" else set()
     return "；".join(f"{FIELDS[c]}：{_text(old[c]) or '空白'} → {_text(new[c]) or '空白'}"
-                    for c in range(9) if _canonical(old[c], c) != _canonical(new[c], c))
+                    for c in range(9) if c not in ignored and _canonical(old[c], c) != _canonical(new[c], c))
 
 
 def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=None):
@@ -74,7 +76,7 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
     unmatched_old, unmatched_new = set(old), set(range(len(incoming)))
     pairs = {}
 
-    def match(key_old, key_new):
+    def match(key_old, key_new, allow_recreated=False):
         left, right = defaultdict(list), defaultdict(list)
         for row in sorted(unmatched_old):
             key = key_old(old[row])
@@ -86,7 +88,7 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
             if len(left[key]) == len(right[key]) == 1:
                 row, index = left[key][0], right[key][0]
                 # Known IDs must not be paired with a different known event.
-                if old[row][30] and incoming[index][30] and old[row][30] != incoming[index][30]:
+                if not allow_recreated and old[row][30] and incoming[index][30] and old[row][30] != incoming[index][30]:
                     continue
                 pairs[index] = row
                 unmatched_old.remove(row)
@@ -95,7 +97,8 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
     match(lambda v: v[30], lambda v: v[30])
     # Retrofit existing sheets conservatively, before their first event-ID snapshot.
     for columns in ((2, 3, 4, 5, 6, 7), (2, 3, 4, 5), (2, 3, 4, 6, 7), (2, 3, 4), (2, 3)):
-        match(lambda v, c=columns: _key(v, c), lambda v, c=columns: _key(v, c))
+        match(lambda v, c=columns: _key(v, c), lambda v, c=columns: _key(v, c),
+              allow_recreated=columns in ((2, 3, 4, 5, 6, 7), (2, 3, 4, 5)))
 
     updates, changes = [], []
 
@@ -117,10 +120,13 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
             values[31:33] = [kind, detail]
             record(row, kind, before, after, detail,
                    "保留原排程與成單資訊，人工確認是否需異動訂單" if _text(before[12]) else "更新日曆欄位，保留既有作業結果")
+        if not detail and values[31] in ("需人工核對", "本次日曆未見"):
+            values[31:33] = ["", ""]
         if values != before:
             updates.append({"row": row, "values": values, "old": before, "kind": kind})
 
     ambiguous = set()
+    proposed = defaultdict(list)
     next_row = max(len(existing) + 2, max(old, default=1) + 1)
     for index in sorted(unmatched_new):
         after = incoming[index]
@@ -130,17 +136,21 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
                 record(row, "跨月異動", before, after, _diff(before, after),
                        "另一月份已有同一日曆事件；不新增排程，請人工核對", foreign_sheet)
             continue
-        related = [row for row in unmatched_old if _key(old[row], (2, 3, 4)) == _key(after, (2, 3, 4))]
+        related = [row for row in unmatched_old if _canonical(after[8], 8) != "暫停" and _key(old[row], (2, 3, 4)) == _key(after, (2, 3, 4))]
         if related:
             ambiguous.update(related)
+            for candidate in related:
+                proposed[candidate].append(after)
             record("", "需人工核對", old[related[0]], after,
                    "同一客戶有多筆未對應排程，無法唯一判定日期／時段異動",
                    "不新增待成單列；請依日曆事件ID核對原列")
             continue
         # A different known event for an existing booked customer can also be a deleted/recreated event.
-        booked_related = [row for row in old if _text(old[row][12]) and _key(old[row], (2, 3)) == _key(after, (2, 3))]
+        booked_related = [row for row in old if _canonical(after[8], 8) != "暫停" and _text(old[row][12]) and _key(old[row], (2, 3)) == _key(after, (2, 3))]
         if booked_related:
             ambiguous.update(booked_related)
+            for candidate in booked_related:
+                proposed[candidate].append(after)
             record("", "需人工核對", old[booked_related[0]], after,
                    "同一客戶已有成單，新增事件可能是刪除重建或額外服務",
                    "不新增待成單列，人工確認後再加入排程")
@@ -159,8 +169,12 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
                 continue
         values = before.copy()
         kind = "需人工核對" if row in ambiguous else "本次日曆未見"
-        detail = ("無法唯一比對日曆異動，請核對差異表" if row in ambiguous
+        detail = ("同一客戶有多筆排程，尚無法唯一對應日曆；保留原訂單，請核對此列日期與時段" if row in ambiguous
                   else "本次日曆匯出未包含此列；可能取消、移至其他月份或匯出範圍不同")
+        if row in ambiguous:
+            candidates = [f"日曆候選 {_text(item[5])} {_text(item[6])}–{_text(item[7])}：{_diff(before, item) or 'A:I 相同'}"
+                          for item in proposed[row]]
+            detail += "；" + "；".join(dict.fromkeys(candidates))
         if not _text(before[12]) and _canonical(before[8], 8) == "未安排": values[8] = "待確認"
         values[31:33] = [kind, detail]
         if values != before:
@@ -181,11 +195,11 @@ def _column(index):
 
 def _tracking_columns(header, rows):
     # Blank headers can still have user data underneath; append after all used cells.
-    used = max([30] + [i + 1 for row in [header] + list(rows)
+    used = max([33] + [i + 1 for row in [header] + list(rows)
                            for i, value in enumerate(row) if _text(value)])
     columns = []
     for name in META_HEADERS:
-        matches = [i for i, value in enumerate(header) if i >= 30 and value == name]
+        matches = [i for i, value in enumerate(header) if i >= 33 and value == name]
         if len(matches) > 1:
             raise RuntimeError(f"追蹤欄位重複：{name}，未更新排程")
         if matches:
@@ -196,9 +210,18 @@ def _tracking_columns(header, rows):
     return columns
 
 
+def _read_tracking_columns(header, write_columns):
+    # Read legacy AE:AG snapshots once; all new writes go after AG.
+    result = []
+    for name, fallback in zip(META_HEADERS, write_columns):
+        matches = [i for i, value in enumerate(header) if i >= 30 and value == name]
+        result.append(next((i for i in matches if i >= 33), matches[0] if matches else fallback))
+    return result
+
+
 def _internal_rows(rows, columns):
     return [(list(row[:30]) + [""] * max(0, 30 - len(row)) +
-             [row[col] if col < len(row) else "" for col in columns]) for row in rows]
+             [row[col] if col < len(row) else "" for col in columns[:3]]) for row in rows]
 
 
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False, coverage=None):
@@ -226,11 +249,12 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         current_header = target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
         header = current_header[0] if current_header else []
         columns = _tracking_columns(header, physical_rows)
-        existing = _internal_rows(physical_rows, columns)
+        read_columns = _read_tracking_columns(header, columns)
+        existing = _internal_rows(physical_rows, read_columns)
         if len(header) >= 30: headers = header[:30]
     except worksheet_not_found:
         target, existing = None, []
-        columns = [30, 31, 32]
+        columns = [33, 34, 35, 36]
         created = True
     # Detect moves to another month by stable event identity, avoiding duplicate orders.
     area = target_name[:-6]
@@ -244,7 +268,7 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             if META_HEADERS[0] not in foreign_header[30:]: continue
             foreign_rows = sheet.get(f"A2:{_column(sheet.col_count - 1)}", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
             foreign_columns = _tracking_columns(foreign_header, foreign_rows)
-            for row_num, values in enumerate(_internal_rows(foreign_rows, foreign_columns), 2):
+            for row_num, values in enumerate(_internal_rows(foreign_rows, _read_tracking_columns(foreign_header, foreign_columns)), 2):
                 if values[30] in source_ids: foreign[values[30]].append((sheet.title, row_num, values))
     plan = plan_schedule(existing, source_rows, target_name, foreign, coverage=export_range)
     if not compare_only:
@@ -264,6 +288,7 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         year, month = int(target_name[-6:-2]), int(target_name[-2:])
         previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
         lookup_sheet = f"{area}{previous}"
+        updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
         updates, phones, colors = [], [], []
         for change in plan["updates"]:
             row, values, before = change["row"], change["values"], change["old"]
@@ -275,10 +300,17 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 if values[:9] != before[:9]:
                     updates.append({"range": f"A{row}:I{row}", "values": [values[:9]]})
                     phones.append({"range": f"D{row}", "values": [[values[3]]]})
-            for column, value in zip(columns, values[30:33]):
+            for column, value in zip(columns[:3], values[30:33]):
                 updates.append({"range": f"{_column(column)}{row}", "values": [[value]]})
+            if before is None or values[31:33] != before[31:33]:
+                updates.append({"range": f"{_column(columns[3])}{row}", "values": [[updated_at]]})
             if change["kind"]:
                 colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
+        if not created and read_columns[:3] != columns[:3]:
+            for row_num, values in enumerate(existing, 2):
+                if any(u["row"] == row_num for u in plan["updates"]): continue
+                for column, value in zip(columns[:3], values[30:33]):
+                    if value: updates.append({"range": f"{_column(column)}{row_num}", "values": [[value]]})
         if updates: target.batch_update(updates, value_input_option="USER_ENTERED")
         if phones: target.batch_update(phones, value_input_option="RAW")
         if colors: target.batch_format(colors)

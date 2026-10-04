@@ -162,6 +162,8 @@ def test_same_customer_same_day_events_keep_distinct_ids_and_times():
          "end": {"dateTime": f"2026-11-10T{end}:00:00+00:00"}}
         for event_id, start, end in (("morning", "09", "12"), ("afternoon", "14", "17"))
     ]
+    events[1]["_schedule_status"] = "暫停"
     rows = functions["_process_events"](events, "台北", "calendar")
     assert [row["event_id"] for row in rows] == ["calendar:morning", "calendar:afternoon"]
     assert [row["start_str"] for row in rows] == ["09:00", "14:00"]
+    assert [row["status"] for row in rows] == ["未安排", "暫停"]
