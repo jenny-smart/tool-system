@@ -993,8 +993,8 @@ def _load_target_file_id() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
-    parser.add_argument("--step",  type=int, choices=[0, 1, 2, 3], default=0,
-                        help="0=全跑, 1=只抓儲值金, 2=只匯出VIP日曆, 3=建立VIP排程工作表（預設：0）")
+    parser.add_argument("--step",  type=int, choices=[0, 1, 2, 3, 4], default=0,
+                        help="0=抓儲值金＋匯出VIP, 1=只抓儲值金, 2=只匯出VIP日曆, 3=建立VIP排程工作表, 4=抓儲值金＋匯出VIP＋建立排程工作表（預設：0）")
     parser.add_argument(
         "--area",
         type=str,
@@ -1010,7 +1010,7 @@ def main() -> None:
                         help="Step 3 只產生差異工作表，不更新排程內容或底色")
     args = parser.parse_args()
 
-    if args.step in (0, 2, 3) and not (_load_target_file_id()):
+    if args.step in (0, 2, 3, 4) and not (_load_target_file_id()):
         sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     today = now_tp()
@@ -1049,6 +1049,7 @@ def main() -> None:
         1: "【儲值】抓儲值金",
         2: "【CRM】產生 CRM",
         3: "【儲值】建立VIP排程工作表",
+        4: "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）",
     }[args.step]
 
     if not areas:
@@ -1061,7 +1062,7 @@ def main() -> None:
     errors  = []
 
     try:
-        if args.step in (0, 1):
+        if args.step in (0, 1, 4):
             log.info("--- Step 1：抓取儲值金 ---")
             try:
                 step1_fetch_stored_value(gc, areas, run_id)
@@ -1069,10 +1070,14 @@ def main() -> None:
                 errors.append(str(e))
                 log.error("Step 1 失敗：%s", e)
 
-        if args.step in (0, 2):
+        if args.step in (0, 2, 4):
             log.info("--- Step 2：匯出定期VIP日曆 ---")
             areas_with_cal = [a for a in areas if a["calendar_id"]]
+            if args.step == 4 and areas_with_cal and len(areas_with_cal) != len(areas):
+                errors.append("部分啟用地區未設定 Calendar ID，跳過建立排程以避免使用舊資料")
             if not areas_with_cal:
+                if args.step == 4:
+                    errors.append("所有地區均未設定 Calendar ID，無法匯出 VIP 日曆")
                 log.warning("所有地區均未設定 Calendar ID，跳過 Step 2")
                 log.warning("請在主控試算表「客服地區設定」填入各地區的 Calendar ID")
             else:
@@ -1082,7 +1087,9 @@ def main() -> None:
                     errors.append(str(e))
                     log.error("Step 2 失敗：%s", e)
 
-        if args.step == 3:
+        if args.step == 4 and errors:
+            log.error("前置步驟失敗，跳過建立排程工作表，避免使用舊日曆資料")
+        if args.step == 3 or (args.step == 4 and not errors):
             log.info("--- Step 3：建立VIP排程工作表 ---")
             try:
                 step3_build_vip_schedule_sheets(gc, areas, start_dt, end_dt, compare_only=args.compare_only)
