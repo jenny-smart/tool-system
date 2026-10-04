@@ -1,0 +1,22 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.16/x64/bin/python -u -m tools.field_management.schedule_stats --date 20261005 --system-name 外場排程系統 --run-type 排程
+[2026-10-05 06:01:29] 開始處理排班統計表：20261005排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1YRmAa7W8iSFvAFUPlKvdU_BQNhUE6YTQZdfD3kcGcjk
+🗑️ 已刪除來源暫存 Google Sheet：1YRmAa7W8iSFvAFUPlKvdU_BQNhUE6YTQZdfD3kcGcjk
+[2026-10-05 06:01:41] 完成：20261005排班統計表-台北.xlsx → 2026排班統計表!DV4 / rows=79
+[2026-10-05 06:01:52] 開始處理排班統計表：20261105排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1nKA_3E5_nQRTYl6lzWsIJu0DLrrY4LBQse7RneeJdSk
+🗑️ 已刪除來源暫存 Google Sheet：1nKA_3E5_nQRTYl6lzWsIJu0DLrrY4LBQse7RneeJdSk
+[2026-10-05 06:02:03] 完成：20261105排班統計表-台北.xlsx → 2026排班統計表!EH4 / rows=35
+[2026-10-05 06:02:05] 開始處理排班統計表：20261005排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261005排班統計表-台中 (1Vg85I7YiTPbkAF11moSGmAIA-AVFIkwmHc11ebEPXGQ)
+[2026-10-05 06:02:07] 完成：20261005排班統計表-台中 → 2026排班統計表!DV4 / rows=13
+[2026-10-05 06:02:08] 開始處理排班統計表：20261105排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261105排班統計表-台中 (1RMqxCzOOmlehF1Ca2X_7F_rsDi-FMPGH9nE_PTv18mQ)
+[2026-10-05 06:02:11] 完成：20261105排班統計表-台中 → 2026排班統計表!EH4 / rows=5
+[write_target_log] 目標執行檔打卡失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1MKadGGTkIefcbPpEVCEPo0SS_wnqsmZSfqjcdhxg6Gk/values/%E5%A4%96%E5%A0%B4%E6%8E%92%E7%A8%8B%E7%B3%BB%E7%B5%B1%E5%9F%B7%E8%A1%8CLog%21A1%3AZ1?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_limit': 'ReadRequestsPerMinutePerUser', 'consumer': 'projects/1042663213860', 'quota_location': 'global', 'quota_limit_value': '60', 'service': 'sheets.googleapis.com', 'window_start_time': '1791151278', 'quota_unit': '1/min/{project}/{user}', 'quota_metric': 'sheets.googleapis.com/read_requests'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[2026-10-05 06:02:11] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成
