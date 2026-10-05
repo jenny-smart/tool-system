@@ -253,6 +253,7 @@ import re
 import json
 import time
 import html
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
@@ -4174,20 +4175,65 @@ def _calchk_address_from_lines(lines):
     return ""
 
 
-def _calchk_phone_from_lines(lines):
-    for line in lines:
-        if re.fullmatch(r"09\d{8}", str(line).strip()):
-            return str(line).strip()
+def _calchk_address_key(address):
+    """只統一文字格式，不查地圖或推測地址。"""
+    return normalize_addr_for_match(unicodedata.normalize("NFKC", str(address or ""))).replace("臺", "台")
+
+
+def _calchk_phone_line(line):
+    text = unicodedata.normalize("NFKC", str(line or "")).strip()
+    if re.fullmatch(r"09[\d\s()\-]+", text):
+        phone = normalize_phone(text)
+        if re.fullmatch(r"09\d{8}", phone):
+            return phone
     return ""
+
+
+def _calchk_phone_from_lines(lines):
+    return next((phone for line in lines if (phone := _calchk_phone_line(line))), "")
 
 
 def _calchk_name_from_lines(lines):
-    """訂購人姓名固定緊接在電話號碼那一行之前（比照 weekend_reminders._name_
-    phone 的判斷方式）。"""
+    """姓名緊接在電話行之前；電話格式與電話解析採相同規則。"""
     for idx, line in enumerate(lines):
-        if re.fullmatch(r"09\d{8}", str(line).strip()):
+        if _calchk_phone_line(line):
             return str(lines[idx - 1]).strip() if idx else ""
     return ""
+
+
+def _calchk_duplicate_groups(orders):
+    """同一人同一服務分組，缺電話時只接受無歧義的姓名配對。"""
+    slots = defaultdict(list)
+    seen = set()
+    for order in orders:
+        if order["order_no"] in seen:
+            continue
+        seen.add(order["order_no"])
+        key = (order["region"], _calchk_address_key(order["address"]),
+               order["service_date"], order["service_time"])
+        slots[key].append(order)
+    groups = []
+    for slot in slots.values():
+        by_person = defaultdict(list)
+        unnamed_phone = []
+        for order in slot:
+            phone = normalize_phone(order.get("phone") or "")
+            if phone:
+                by_person[("phone", phone)].append(order)
+            else:
+                unnamed_phone.append(order)
+        for order in unnamed_phone:
+            name = normalize_text_for_parse(order.get("name") or "").lower()
+            if not name:
+                continue
+            candidates = [key for key, group in by_person.items()
+                          if key[0] == "phone" and any(
+                              normalize_text_for_parse(item.get("name") or "").lower() == name
+                              for item in group)]
+            key = candidates[0] if len(candidates) == 1 else ("name", name)
+            by_person[key].append(order)
+        groups.extend(group for group in by_person.values() if len(group) > 1)
+    return groups
 
 
 def get_calendar_compare_allowed_region(backend_email):
@@ -4451,13 +4497,13 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
         return bool(phone_norm) and phone_norm in _event_blob(event)
 
     def _event_addr_core_match(order_address, event):
-        blob = normalize_addr_for_match(" ".join([
+        blob = _calchk_address_key(" ".join([
             event.get("summary", "") or "",
             event.get("description", "") or "",
             event.get("location", "") or "",
         ]))
-        addr_norm = normalize_addr_for_match(order_address)
-        label_norm = normalize_addr_for_match(_event_address_label(event))
+        addr_norm = _calchk_address_key(order_address)
+        label_norm = _calchk_address_key(_event_address_label(event))
         return bool(addr_norm) and (
             addr_norm in blob or (bool(label_norm) and label_norm in addr_norm)
         )
@@ -4500,20 +4546,8 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
     }
 
     # 同一人、同一地址、同一日期時段若後台有多筆，本身即屬異常。
-    duplicate_groups = {}
     duplicate_order_nos = set()
-    for order in backend_orders:
-        person_key = normalize_phone(order["phone"]) or re.sub(r"\s+", "", order["name"]).lower()
-        key = (
-            person_key,
-            normalize_addr_for_match(order["address"]),
-            order["service_date"],
-            order["service_time"],
-        )
-        duplicate_groups.setdefault(key, []).append(order)
-    for group in duplicate_groups.values():
-        if len(group) < 2:
-            continue
+    for group in _calchk_duplicate_groups(backend_orders):
         first = group[0]
         order_nos = [item["order_no"] for item in group]
         duplicate_order_nos.update(order_nos)
