@@ -15,7 +15,9 @@ class ScheduleTests(unittest.TestCase):
     def test_original_daily_times(self):
         for hm, task in [('01:00','schedule_report'),('01:10','staff_schedule'),('01:20','orders_report'),('01:30','staff_info'),('07:00','notify')]:
             self.assertIn(('scheduled_daily.yml', {'target':task}),self.jobs('2026-09-30T'+hm))
-        self.assertEqual(self.jobs('2026-09-30T06:00'), [('scheduled_field.yml',{'target':'field_all'}),('scheduled_service.yml',{'target':'service_all'})])
+        self.assertEqual(self.jobs('2026-09-30T05:00'), [('scheduled_field.yml',{'target':'field_all'})])
+        self.assertEqual(self.jobs('2026-09-30T05:30'), [('scheduled_service.yml',{'target':'service_all'})])
+        self.assertEqual(self.jobs('2026-09-30T06:00'), [])
         self.assertEqual(self.jobs('2026-09-30T06:01'), [])
 
     def test_month_end_and_leap_year(self):
@@ -38,7 +40,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-21T00:00'))
 
     def test_five_cloud_expressions_cover_all_slots(self):
-        slots={(h,0) for h in [0,1,6,7,8,10,12,14,16,17,18,22]} | {(1,10),(1,20),(0,30),(1,30),(0,40)}
+        slots={(h,0) for h in [0,1,5,7,8,10,12,14,16,17,18,22]} | {(1,10),(1,20),(0,30),(1,30),(5,30),(0,40)}
         for day in range(1,32):
             for hour in range(24):
                 for minute in [0,10,20,30,40,50]:
