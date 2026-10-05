@@ -446,3 +446,98 @@ def test_q_highlight_does_not_match_different_customer_or_missing_source():
     source = source_row(other)
     source[16] = '500'
     assert _balance_attention_rows([row], [], [source]) == []
+
+
+def test_unique_unbooked_recreated_event_updates_original_date_status_and_id():
+    row = old_row(event='old-event', date='2026/11/19', status='待確認')
+    row[1] = '每月確認'
+    row[31:33] = ['需人工核對', '先前誤判多筆排程']
+    source = source_row(row, **{'1': '已確認', '5': '2026/11/05', '8': '未安排', '30': 'new-event'})
+    plan = plan_schedule([row], [source], '台北202611', coverage=('2026-11-01', '2026-11-30'))
+    assert plan['count'] == 1 and len(plan['updates']) == 1
+    change = plan['updates'][0]
+    assert change['row'] == 2 and change['old'] is not None
+    assert change['values'][:9] == source[:9]
+    assert change['values'][9:30] == row[9:30]
+    assert change['values'][30] == 'new-event'
+    assert change['kind'] == '未成單異動'
+    assert '日曆事件ID：old-event → new-event' in change['values'][32]
+    assert plan_schedule([change['values']], [source], '台北202611')['updates'] == []
+
+
+def test_recreated_event_different_date_with_existing_order_stays_for_review():
+    row = old_row(event='old-event', order='LC123', date='2026/11/19', status='已安排')
+    source = source_row(row, **{'5': '2026/11/05', '30': 'new-event'})
+    plan = plan_schedule([row], [source], '台北202611')
+    assert plan['count'] == 1
+    assert all(change['old'] is not None and change['values'][:30] == row[:30] for change in plan['updates'])
+    assert all(change['values'][30] == 'old-event' for change in plan['updates'])
+    assert any(change['kind'] == '需人工核對' for change in plan['changes'])
+    assert all('有多筆' not in change['detail'] for change in plan['changes'])
+
+
+def test_recreated_event_does_not_match_only_remaining_visit_of_multiple_visits():
+    first = old_row(event='first', date='2026/11/05')
+    second = old_row(event='second', date='2026/11/19')
+    sources = [source_row(first), source_row(second, **{'5': '2026/11/26', '30': 'recreated'})]
+    plan = plan_schedule([first, second], sources, '台北202611')
+    assert plan['count'] == 2
+    change = next(change for change in plan['updates'] if change['row'] == 3)
+    assert change['values'][5] == '2026/11/19' and change['values'][30] == 'second'
+    assert change['kind'] == '需人工核對'
+    assert all(change['old'] is not None for change in plan['updates'])
+
+
+@pytest.mark.parametrize('same_phone', [True, False])
+def test_recreated_event_requires_same_phone_and_address(same_phone):
+    row = old_row(event='old-event', date='2026/11/19')
+    source = source_row(row, **{'5': '2026/11/05', '30': 'new-event',
+                               '4' if same_phone else '3': '不同地址' if same_phone else '0999999999'})
+    plan = plan_schedule([row], [source], '台北202611')
+    assert all(change['values'][5] == '2026/11/19' for change in plan['updates'] if change['row'] == 2)
+
+
+def test_recreated_event_outside_partial_export_is_not_replaced():
+    row = old_row(event='old-event', date='2026/11/19')
+    source = source_row(row, **{'5': '2026/11/05', '30': 'new-event'})
+    plan = plan_schedule([row], [source], '台北202611', coverage=('2026-11-01', '2026-11-10'))
+    assert all(change['values'][5] == '2026/11/19' and change['values'][30] == 'old-event'
+               for change in plan['updates'] if change['row'] == 2)
+
+
+def test_unique_recreated_event_does_not_override_other_month_identity():
+    row = old_row(event='old-event', date='2026/11/19')
+    source = source_row(row, **{'5': '2026/11/05', '30': 'new-event'})
+    foreign = {'new-event': [('台北202610', 10, old_row(event='new-event', date='2026/10/29'))]}
+    plan = plan_schedule([row], [source], '台北202611', foreign)
+    assert any(change['kind'] == '跨月異動' for change in plan['changes'])
+    assert all(change['old'] is not None and change['values'][5] == '2026/11/19' for change in plan['updates'])
+
+
+def test_writer_updates_unique_recreated_event_in_place_and_keeps_k_ag():
+    row = old_row(event='old-event', date='2026/11/19', status='待確認')
+    sheet = Sheet('台北202611', [row[:30] + ['作業欄AE', '作業欄AF', '作業欄AG'] + row[30:33] + ['舊更新日期']])
+    sheet.col_count = 37
+    sheet.data[0] = ['原欄位'] * 33 + ['日曆事件ID', '日曆異動', '日曆異動內容', '更新日期']
+    source = source_row(row, **{'1': '已確認', '5': '2026/11/05', '8': '未安排', '30': 'new-event'})
+    original = deepcopy(sheet.data[1])
+    book = Book([sheet])
+    result = sync(book, [source])
+    assert result['differences'] == {'未成單異動': 1}
+    assert len(sheet.data) == 2
+    assert sheet.data[1][:9] == source[:9]
+    assert sheet.data[1][10:33] == original[10:33]
+    assert sheet.data[1][33] == 'new-event'
+    report_count = len(book.sheets[result['report']].data)
+    sync(book, [source])
+    assert len(book.sheets[result['report']].data) == report_count
+
+
+def test_recreated_event_with_multiple_source_visits_stays_for_review():
+    row = old_row(event='old-event', date='2026/11/19')
+    sources = [source_row(row, **{'5': '2026/11/05', '30': 'new-first'}),
+               source_row(row, **{'5': '2026/11/26', '30': 'new-second'})]
+    plan = plan_schedule([row], sources, '台北202611')
+    assert plan['count'] == 1
+    assert all(change['old'] is not None and change['values'][5] == '2026/11/19' for change in plan['updates'])
+    assert '來源 2 筆、既有排程 1 筆' in plan['updates'][0]['values'][32]

@@ -100,6 +100,32 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
         match(lambda v, c=columns: _key(v, c), lambda v, c=columns: _key(v, c),
               allow_recreated=columns in ((2, 3, 4, 5, 6, 7), (2, 3, 4, 5)))
 
+    # Deleted/recreated events can change both ID and date. Only replace an
+    # unbooked customer's sole visit in the entire snapshot, not merely the
+    # last unmatched visit after other dates have already been paired.
+    old_customers = Counter(_key(v, (2, 3)) for v in old.values())
+    new_customers = Counter(_key(v, (2, 3)) for v in incoming)
+    old_ids = Counter(v[30] for v in old.values() if v[30])
+    for index in sorted(unmatched_new):
+        after = incoming[index]
+        customer = _key(after, (2, 3))
+        if not all(_key(after, (2, 3, 4))) or new_customers[customer] != 1 or old_customers[customer] != 1:
+            continue
+        if not after[30] or after[30] in foreign_events or after[30] in old_ids:
+            continue
+        for row in sorted(unmatched_old):
+            before = old[row]
+            if _key(before, (2, 3, 4)) != _key(after, (2, 3, 4)) or _text(before[12]):
+                continue
+            if not before[30] or old_ids[before[30]] != 1 or before[30] in event_counts:
+                continue
+            if coverage and not (coverage[0] <= _canonical(before[5], 5) <= coverage[1]):
+                continue
+            pairs[index] = row
+            unmatched_old.remove(row)
+            unmatched_new.remove(index)
+            break
+
     updates, changes = [], []
 
     def record(row, kind, before, after, detail, action, target_sheet=sheet_name):
@@ -111,6 +137,8 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
     for index, row in sorted(pairs.items(), key=lambda pair: pair[1]):
         before, after = old[row], incoming[index]
         detail = _diff(before, after)
+        if before[30] and after[30] and before[30] != after[30] and not _text(before[12]):
+            detail = "；".join(filter(None, [detail, f"日曆事件ID：{before[30]} → {after[30]}"]))
         values = before.copy()
         if after[30]: values[30] = after[30]
         kind = ""
@@ -144,7 +172,8 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
             for candidate in related:
                 proposed[candidate].append(after)
             record("", "需人工核對", old[related[0]], after,
-                   "同一客戶有多筆未對應排程，無法唯一判定日期／時段異動",
+                   f"同一姓名／電話的來源 {new_customers[_key(after, (2, 3))]} 筆、"
+                   f"既有排程 {old_customers[_key(after, (2, 3))]} 筆；事件ID或日期未能安全對應",
                    "不新增待成單列；請依日曆事件ID核對原列")
             continue
         # A different known event for an existing booked customer can also be a deleted/recreated event.
@@ -171,7 +200,9 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
                 continue
         values = before.copy()
         kind = "需人工核對" if row in ambiguous else "本次日曆未見"
-        detail = ("同一客戶有多筆排程，尚無法唯一對應日曆；保留原訂單，請核對此列日期與時段" if row in ambiguous
+        detail = (f"同一姓名／電話的來源 {new_customers[_key(before, (2, 3))]} 筆、"
+                  f"既有排程 {old_customers[_key(before, (2, 3))]} 筆；"
+                  "來源與既有排程未能安全對應，請核對此列日期、時段與日曆事件ID" if row in ambiguous
                   else "本次日曆匯出未包含此列；可能取消、移至其他月份或匯出範圍不同")
         if row in ambiguous:
             candidates = [f"日曆候選 {_text(item[5])} {_text(item[6])}–{_text(item[7])}：{_diff(before, item) or 'A:I 相同'}"
