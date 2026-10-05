@@ -3859,6 +3859,58 @@ def _order_edit_line_url_is_blank(session, order_no, edit_id=None):
     return not str(line_input.get("value") or "").strip()
 
 
+def _purchase_json_from_edit_html(html):
+    """讀取 Vue 的 purchase 資料，不依賴 JSON 後方的樣板排版。"""
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.find_all("script"):
+        source = script.get_text()
+        for match in re.finditer(r'\bpurchase\s*:\s*(?=\{)', source):
+            try:
+                value, _ = json.JSONDecoder().raw_decode(source[match.end():])
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                return value
+    return {}
+
+
+def _notice_from_edit_html(html, purchase_json):
+    # JSON 的空值也是真實值，不能退回 Vue 尚未渲染的 textarea 樣板。
+    if "notice" in purchase_json:
+        return str(purchase_json["notice"] or "").strip()
+    soup = BeautifulSoup(html, "html.parser")
+    notice = soup.find("textarea", attrs={"name": "notice"}) or soup.find("input", attrs={"name": "notice"})
+    if notice is None:
+        return None
+    value = notice.get("value") if notice.name == "input" else notice.get_text()
+    value = str(value or "").strip()
+    return None if "{{" in value else value
+
+
+def _merge_bonus_notice(old_notice, bonus_names):
+    """相同獎金行只保留一次；其他備註與不同的獎金行原樣保留。"""
+    bonus_line = "獎金：" + "X".join(bonus_names)
+
+    def bonus_key(line):
+        match = re.fullmatch(r"\s*獎金\s*[:：]\s*(.*?)\s*", line)
+        if not match:
+            return None
+        return tuple(n.strip() for n in re.split(r"[XxＸ]", match.group(1)))
+
+    target = bonus_key(bonus_line)
+    lines = []
+    found = False
+    for line in old_notice.splitlines():
+        if bonus_key(line) == target:
+            if found:
+                continue
+            found = True
+        lines.append(line)
+    if not found:
+        lines.append(bonus_line)
+    return "\n".join(lines)
+
+
 def _fetch_order_edit_notice(session, order_no, edit_id=None):
     edit_id = edit_id or _fetch_order_edit_id(session, order_no) or _purchase_edit_id_from_order_no(order_no)
     if not edit_id:
@@ -3866,12 +3918,7 @@ def _fetch_order_edit_notice(session, order_no, edit_id=None):
     resp = session.get(f"{BASE_URL}/purchase/edit/{edit_id}", headers=HEADERS, allow_redirects=True)
     if resp.status_code != 200:
         return None
-    soup = BeautifulSoup(resp.text, "html.parser")
-    notice = soup.find("textarea", attrs={"name": "notice"}) or soup.find("input", attrs={"name": "notice"})
-    if notice is None:
-        return None
-    value = notice.get("value") if notice.name == "input" else notice.get_text()
-    return str(value or "").strip()
+    return _notice_from_edit_html(resp.text, _purchase_json_from_edit_html(resp.text))
 
 
 def _fetch_order_edit_id(session, order_no):
@@ -3934,14 +3981,7 @@ def add_bonus_note_to_order(session, base_url, order_no, bonus_names, edit_id=No
             existing[m2.group(1)] = m2.group(2).strip()
 
         # 用頁面內嵌的 purchase JSON 蓋掉容易被靜態 HTML 解析錯的欄位
-        json_m = re.search(r'purchase:\s*(\{.*?\})\s*\n?\s*\}\s*\n?\s*\}', get_resp.text, re.S)
-        if json_m:
-            try:
-                purchase_json = json.loads(json_m.group(1))
-            except Exception:
-                purchase_json = {}
-        else:
-            purchase_json = {}
+        purchase_json = _purchase_json_from_edit_html(get_resp.text)
 
         _json_backed_fields = [
             "isCharge", "chargeDate", "chargePayment", "chargeInvoiceDate",
@@ -3955,9 +3995,12 @@ def add_bonus_note_to_order(session, base_url, order_no, bonus_names, edit_id=No
                 val = purchase_json.get(key)
                 existing[key] = "" if val is None else str(val)
 
-        bonus_line = "獎金：" + "X".join(bonus_names)
-        old_notice = str(purchase_json.get("notice") or existing.get("notice", "") or "").strip()
-        new_notice = f"{old_notice}\n{bonus_line}" if old_notice else bonus_line
+        old_notice = _notice_from_edit_html(get_resp.text, purchase_json)
+        if old_notice is None:
+            return False, "無法讀取目前客服備註，未送出修改"
+        new_notice = _merge_bonus_notice(old_notice, bonus_names)
+        if new_notice == old_notice and existing.get("progress") == "1":
+            return True, new_notice
 
         existing["_token"] = csrf
         existing.pop("_method", None)
