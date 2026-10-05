@@ -30,8 +30,9 @@ def plan(when):
     last_day = when.day == calendar.monthrange(when.year, when.month)[1]
     if hm == '22:00' and last_day:
         add('scheduled_daily', target='month_end_cleanup')
-    if hm == '06:00':
+    if hm == '05:00':
         add('scheduled_field', target='field_all')
+    if hm == '05:30':
         add('scheduled_service', target='service_all')
     if hm in {'00:00', '08:00', '12:00', '18:00'}:
         add('performance_report')
