@@ -364,6 +364,11 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}",
                            "format": {"backgroundColor": {"red": .90, "green": .85, "blue": 1}}})
         for row in _balance_attention_rows(existing, plan["updates"], source_rows):
+            # Balance recovery can change only the highlight, with no calendar-field
+            # differences. Record the refresh just as we do for other row updates.
+            timestamp_range = f"{_column(columns[3])}{row}"
+            if not any(item["range"] == timestamp_range for item in updates):
+                updates.append({"range": timestamp_range, "values": [[updated_at]]})
             colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}",
                            "format": {"backgroundColor": {"red": 1, "green": .80, "blue": .80}}})
         if updates: target.batch_update(updates, value_input_option="USER_ENTERED")
