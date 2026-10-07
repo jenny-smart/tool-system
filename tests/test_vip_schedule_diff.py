@@ -423,6 +423,7 @@ def test_no_new_order_with_positive_vip_q_is_highlighted(q, marked):
     sync(Book([sheet]), [source])
     red = {'red': 1, 'green': .80, 'blue': .80}
     assert any(item['format']['backgroundColor'] == red for item in sheet.formats) == marked
+    assert any(item['range'] == 'AK2' for batch, _ in sheet.batches for item in batch) == marked
     assert sheet.data[1][:30] == before
 
 
@@ -446,3 +447,38 @@ def test_q_highlight_does_not_match_different_customer_or_missing_source():
     source = source_row(other)
     source[16] = '500'
     assert _balance_attention_rows([row], [], [source]) == []
+
+
+def test_balance_recovers_from_negative_updates_ak_without_calendar_changes():
+    row = old_row()
+    row[14] = '系統未產生新訂單編號'
+    previous_time = '2026-10-01 09:00:00'
+    physical = row[:30] + [''] * 3 + row[30:33] + [previous_time]
+    sheet = Sheet('台北202611', [physical])
+    sheet.col_count = 37
+    sheet.data[0] = [''] * 33 + ['日曆事件ID', '日曆異動', '日曆異動內容', '更新日期']
+    book = Book([sheet])
+    source = source_row(row)
+    source[16] = '-500'
+    sync(book, [source])
+    assert sheet.data[1][36] == previous_time
+    source[16] = '500'
+    sync(book, [source])
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', sheet.data[1][36])
+    assert sheet.data[1][36] != previous_time
+    assert sheet.data[1][:30] == row[:30]
+    assert any(item['range'] == 'AK2' for batch, _ in sheet.batches for item in batch)
+    assert any(item['format']['backgroundColor'] == {'red': 1, 'green': .80, 'blue': .80}
+               for item in sheet.formats)
+
+
+def test_balance_recovery_preview_does_not_write_timestamp_or_color():
+    row = old_row()
+    row[14] = '系統未產生新訂單編號'
+    sheet = Sheet('台北202611', [row])
+    source = source_row(row)
+    source[16] = '500'
+    before = deepcopy(sheet.data)
+    sync(Book([sheet]), [source], compare_only=True)
+    assert sheet.data == before
+    assert not sheet.batches and not sheet.formats
