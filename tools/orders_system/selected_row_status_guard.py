@@ -68,8 +68,8 @@ def _safe_load_candidates(batch_opt, sheet_name, allow_failed=False):
     return work
 
 
-def _auto_filter_rows(batch_opt, sheet_name, mode, region=None, allow_failed=False):
-    work = _safe_load_candidates(batch_opt, sheet_name, allow_failed=allow_failed)
+def _auto_filter_rows(batch_opt, sheet_name, mode, region=None, allow_failed=False, candidates=None):
+    work = candidates if candidates is not None else _safe_load_candidates(batch_opt, sheet_name, allow_failed=allow_failed)
     work = work[work["狀態"].map(normalize_status).eq("未安排") & work["訂單編號"].eq("")].copy()
     if region:
         work = work[work.apply(lambda row: batch_opt.get_region_by_address(batch_opt._text(row.get("地址")), __import__("accounts").ACCOUNTS) == region, axis=1)].copy()

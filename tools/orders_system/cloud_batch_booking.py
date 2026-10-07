@@ -23,15 +23,16 @@ def _bool_text(value) -> bool:
 
 def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = "", allow_auto_lemon=False, retry_failed=False):
     excluded = excluded or set()
+    candidates = _safe_load_candidates(batch_opt, sheet_name, allow_failed=retry_failed)
     allowed_rows = None
     if filter_mode != "all":
         allowed_rows = set()
         if filter_mode in ("no_schedule", "both"):
-            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None, allow_failed=retry_failed))
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None, allow_failed=retry_failed, candidates=candidates))
         if filter_mode in ("missing_order", "both"):
-            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None, allow_failed=retry_failed))
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None, allow_failed=retry_failed, candidates=candidates))
     result = []
-    for _, row in _safe_load_candidates(batch_opt, sheet_name, allow_failed=retry_failed).sort_values("__sheet_row__").iterrows():
+    for _, row in candidates.sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
         if row_no in excluded or (allowed_rows is not None and row_no not in allowed_rows):
             continue
@@ -79,6 +80,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
             else:
                 by_region[region].append(row_no)
         for region, rows in by_region.items():
+            group_snapshot = [0, 0, 0]
             account = ACCOUNTS.get(region) or {}
             try:
                 email = str(account.get("email") or "").strip()
@@ -90,6 +92,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                 print(f"START {region}: rows={','.join(map(str, rows))}", flush=True)
                 processed_base, success_base, fail_base = processed, success_total, fail_total
                 def report_group(done, ok, bad, current):
+                    group_snapshot[:] = [done, ok, bad]
                     progress.publish('成單中', processed_base + done, success_base + ok, fail_base + bad,
                                      max(candidate_total - processed_base - done, 0), target_total, str(current))
                 result = run_process_web_hybrid(
@@ -104,14 +107,20 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                 fail_total += fail
                 print(f"DONE {region}: success={success} fail={fail} recovered={int(result.get('recovered_count', 0) or 0)} blocked={int(result.get('blocked_count', 0) or 0)}", flush=True)
             except Exception as exc:
-                fail_total += len(rows)
+                # Only count rows whose results were actually reported; a sheet
+                # failure can occur AFTER the backend has created an order.
+                done, ok, bad = group_snapshot
+                progress.publish('中止，未回報列待核對', processed + done, success_total + ok, fail_total + bad,
+                                 max(candidate_total - processed - done, 0), target_total)
+                print(f"INTERRUPTED processed={processed + done} success={success_total + ok} fail={fail_total + bad} unconfirmed={len(rows) - done}", flush=True)
                 print(f"ERROR {region}: {exc}", flush=True)
+                return 2
             processed += len(rows)
             progress.publish('成單中', processed, success_total, fail_total,
                              max(candidate_total - processed, 0), target_total)
         elapsed = max(time.monotonic() - started, .001)
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
-        if pause_seconds and load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed):
+        if pause_seconds:
             time.sleep(pause_seconds)
     remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed))
     progress.publish('完成' if not fail_total else '部分失敗', processed, success_total, fail_total,

@@ -1,6 +1,7 @@
 """One private Sheets snapshot per GitHub run/attempt, without customer data."""
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 TITLE = '_雲端成單進度'
@@ -39,10 +40,14 @@ class Progress:
         self.key = f"{os.getenv('GITHUB_RUN_ID', '')}:{os.getenv('GITHUB_RUN_ATTEMPT', '1')}"
         self.sheet = None
         self.row = None
+        self.last_published = None
 
     def publish(self, phase, processed, success, failed, remaining, total, rows=''):
         if self.key.startswith(':'):
             return  # Local runs need no cloud progress table.
+        now = time.monotonic()
+        if phase == '成單中' and self.last_published is not None and now - self.last_published < 15:
+            return
         try:
             import orders
             import gspread
@@ -60,5 +65,6 @@ class Progress:
                 self.row = int(re.search(r'!A(\d+)', result['updates']['updatedRange']).group(1))
             else:
                 self.sheet.update(range_name=f'A{self.row}:J{self.row}', values=[values], value_input_option='RAW')
+            self.last_published = time.monotonic()
         except Exception:
             print('PROGRESS_UNAVAILABLE: 無法同步畫面進度；成單流程繼續，請查看日誌。', flush=True)
