@@ -140,15 +140,27 @@ def allowance_original(page, plan, before_submit):
                        before_save=before_submit)
 
 
-def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no=""):
+def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="",
+            retry_unissued=False):
     from .cetustek_invoice_paste import (
         _extract_invoice_no_for_order, _open_invoice_create, _paste_one, _wait_for_manual_save,
     )
     source = plan["source"]
     action = plan.get("original_action", "cancel")
+    stage = state.get("stage", "new")
     if action not in {"cancel", "allowance"}:
         raise ValueError("不支援的原發票處理方式")
-    if state.get("plan") and state["plan"] != plan:
+    saved_plan = state.get("plan") or {}
+    same_work = (
+        saved_plan.get("source") == source
+        and saved_plan.get("original_action", "cancel") == action
+    )
+    confirmed_retry = retry_unissued or (
+        bool(resume_allowance_no) and stage == "awaiting_save" and same_work
+    )
+    if saved_plan and saved_plan != plan and not (
+        confirmed_retry and stage == "awaiting_save" and same_work
+    ):
         raise RuntimeError("此原發票已有不同的處理記錄，請先核對既有進度")
     if state.get("invoice_no"):
         complete(ws, plan, state["invoice_no"])
@@ -156,8 +168,22 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
         print(f"已完成：{state['invoice_no']}；未重複作廢或開立", flush=True)
         return
     validate_source(ws, source)
-    stage = state.get("stage", "new")
-    if resume_allowance_no:
+    if confirmed_retry:
+        if stage != "awaiting_save" or not same_work:
+            raise RuntimeError("只有「已填入但尚未儲存」的同一筆發票可重新填入")
+        previous_order_id = str((saved_plan.get("payload") or {}).get("orderid") or "")
+        number = _extract_invoice_no_for_order(page, previous_order_id)
+        if number and number != source["old_invoice"]:
+            save({"plan": plan, "invoice_no": number, "stage": "issued"})
+            complete(ws, plan, number)
+            save({"stage": "completed"})
+            print(f"已找到新發票 {number}，只補回填，未重複開立", flush=True)
+            return
+        resume_stage = "allowed" if action == "allowance" and state.get("allowance_no") else "cancelled"
+        save({"plan": plan, "stage": resume_stage})
+        stage = resume_stage
+        print("已確認查無新發票；保留原票處理結果，重新填入三聯發票", flush=True)
+    if resume_allowance_no and not confirmed_retry:
         if action != "allowance" or stage not in {"new", "allowance_submitting", "allowed"}:
             raise RuntimeError("目前進度不能改為接續折讓，請保留既有新發票處理")
         if not re.fullmatch(r"[A-Z]{2}\d{8,}", resume_allowance_no):
@@ -220,6 +246,7 @@ def run(area: str, plan: dict, cdp_url: str) -> None:
 
     plan = dict(plan)
     resume_allowance_no = str(plan.pop("resume_allowance_no", "") or "").strip().upper()
+    retry_unissued = bool(plan.pop("retry_unissued", False))
     key = normalize_area(area)
     identity = hashlib.sha256(f"{key}:{plan['source']['old_invoice']}".encode()).hexdigest()
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -239,7 +266,7 @@ def run(area: str, plan: dict, cdp_url: str) -> None:
             _browser, context = connect_existing_chrome(playwright, cdp_url)
             page = _login(context, area, load_accounts(None))
             process(page, get_worksheet(area), plan, state, save, BackendClient(key), key,
-                    resume_allowance_no=resume_allowance_no)
+                    resume_allowance_no=resume_allowance_no, retry_unissued=retry_unissued)
 
 
 if __name__ == "__main__":

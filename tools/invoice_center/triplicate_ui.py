@@ -42,10 +42,23 @@ def render_triplicate() -> None:
             resume_no = st.text_input("已開立折讓單號（僅接續新發票時填）",
                                       key=f"triplicate_resume_{label}_{item['old_invoice']}").strip().upper()
             st.caption("折讓已成功但流程中斷時，填入單號後只回填折讓單號並接續新發票，不再開折讓。")
-        button_label = "回填折讓單號並接續新發票" if resume_no else "執行二聯改三聯"
+        retry_unissued = st.checkbox(
+            "上次已填入，但我沒有按儲存：確認無新發票後重新填入",
+            key=f"triplicate_retry_{label}_{item['old_invoice']}",
+        )
+        st.caption("程式會先查詢新發票；若已開立只補回填，若確定未開立才重填，不重複作廢／折讓原票。")
+        button_label = (
+            "確認未儲存並重新填入" if retry_unissued else
+            "回填折讓單號並接續新發票" if resume_no else
+            "執行二聯改三聯"
+        )
         if st.button(button_label, type="primary"):
             validate_source(ws, item)
-            dispatch_plan = {**plan, **({"resume_allowance_no": resume_no} if resume_no else {})}
+            dispatch_plan = {
+                **plan,
+                **({"resume_allowance_no": resume_no} if resume_no else {}),
+                **({"retry_unissued": True} if retry_unissued else {}),
+            }
             create_task("cetustek.triplicate", {"area": label, "plan": dispatch_plan},
                         created_by=st.session_state.get("username", "Tool System"))
             st.session_state.pop("triplicate_plan", None)
