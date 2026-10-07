@@ -170,9 +170,11 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
     confirmed_retry = retry_unissued or (
         bool(effective_allowance_no) and stage == "awaiting_save" and same_work
     )
-    if saved_plan and saved_plan != plan and not (
-        confirmed_retry and stage == "awaiting_save" and same_work
-    ):
+    safe_plan_refresh = same_work and (
+        stage in {"allowed", "cancelled"}
+        or (confirmed_retry and stage == "awaiting_save")
+    )
+    if saved_plan and saved_plan != plan and not safe_plan_refresh:
         raise RuntimeError("此原發票已有不同的處理記錄，請先核對既有進度")
     if state.get("invoice_no"):
         complete(ws, plan, state["invoice_no"])
@@ -180,6 +182,9 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
         print(f"已完成：{state['invoice_no']}；未重複作廢或開立", flush=True)
         return
     validate_source(ws, source)
+    if saved_plan and saved_plan != plan and stage in {"allowed", "cancelled"}:
+        save({"plan": plan})
+        saved_plan = plan
     if confirmed_retry:
         if stage != "awaiting_save" or not same_work:
             raise RuntimeError("只有「已填入但尚未儲存」的同一筆發票可重新填入")
@@ -222,8 +227,11 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
             save({"stage": "cancelled"})
             stage = "cancelled"
     if stage == "allowed":
-        record_allowance(ws, plan, state["allowance_no"])
-        print(f"全額折讓完成：{state['allowance_no']}；已回填 AB", flush=True)
+        if detected_allowance_no == state["allowance_no"]:
+            print(f"已偵測折讓單號：{state['allowance_no']}；直接接續開票", flush=True)
+        else:
+            record_allowance(ws, plan, state["allowance_no"])
+            print(f"全額折讓完成：{state['allowance_no']}；已回填 AB", flush=True)
     if stage == "awaiting_save":
         number = _extract_invoice_no_for_order(page, plan["payload"]["orderid"])
         if not number or number == source["old_invoice"]:

@@ -273,6 +273,21 @@ def test_resume_after_allowance_never_repeats_allowance(monkeypatch, source, bac
     assert events == ['open','awaiting_save','fill','issued','completed']
 
 
+def test_allowed_stage_accepts_corrected_invoice_payload(monkeypatch, source, backend):
+    plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
+    plan = prepare('taipei', source, backend, original_action='allowance')
+    old_plan = deepcopy(plan)
+    old_plan['payload']['hastax'] = '1'
+    state.update(plan=old_plan, stage='allowed', allowance_no='AL1234567890')
+    ws.get.side_effect = lambda address: [['AL1234567890']] if address.startswith('AB') else [row_for(source)]
+    monkeypatch.setattr(runner, 'allowance_original', lambda *a: pytest.fail('不得重複折讓'))
+
+    runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
+
+    assert state['plan']['payload']['hastax'] == '2'
+    assert events == ['allowed', 'open', 'awaiting_save', 'fill', 'issued', 'completed']
+
+
 def test_existing_allowance_is_detected_and_resumes_invoice(monkeypatch, source, backend):
     plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
     plan = prepare('taipei', source, backend, original_action='allowance')
