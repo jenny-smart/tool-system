@@ -100,6 +100,34 @@ def _run_summary(run_id):
     return None
 
 
+def _render_live_progress(run):
+    from cloud_booking_progress import read_progress
+    key = f"cloud_live_{run['id']}_{run.get('run_attempt', 1)}"
+    try:
+        snapshot = read_progress(run['id'], run.get('run_attempt', 1))
+        if snapshot:
+            st.session_state[key] = snapshot
+    except Exception:
+        snapshot = None
+    snapshot = snapshot or st.session_state.get(key)
+    if not snapshot:
+        st.caption("尚未取得成單進度；可能仍在準備環境，或尚未成功讀取工作表。")
+        return
+    st.caption(f"工作表：{snapshot['sheet']}｜最後更新：{snapshot['updated_at']}（台北時間）")
+    columns = st.columns(4)
+    for column, label, field in zip(columns, ['已處理', '成功', '失敗', '剩餘'],
+                                    ['processed', 'success', 'failed', 'remaining']):
+        column.metric(label, f"{snapshot[field]} 列")
+    total = snapshot['total']
+    if total:
+        st.progress(min(snapshot['processed'] / total, 1.0),
+                    text=f"本次處理 {snapshot['processed']}／{total} 列")
+    if run.get('status') != 'completed' and snapshot['rows']:
+        st.write(f"目前處理列號：{snapshot['rows']}")
+    if run.get('status') == 'completed' and run.get('conclusion') != 'success':
+        st.caption("以上為中止前最後回報的進度；未回報部分請核對工作表，勿視為零筆。")
+
+
 def _render_running_steps(run_id):
     jobs = _github_get(f"actions/runs/{run_id}/jobs").json().get("jobs", [])
     if not jobs:
@@ -122,7 +150,7 @@ def _render_running_steps(run_id):
         total = len(job.get("steps", []))
         if total:
             st.caption(f"工作流程步驟：已結束 {completed}／{total} 個；此數字不是成單筆數。")
-    st.caption("逐筆執行過程可點「查看日誌」；處理、成功、失敗及剩餘筆數於執行結束後顯示。")
+    st.caption("進度筆數在每組處理完成後更新；逐筆細節可點「查看日誌」。")
 
 
 @st.fragment(run_every="15s")
@@ -149,6 +177,7 @@ def _render_cloud_status():
             st.info("尚無雲端批次執行紀錄。")
             return
         st.markdown(f"[{_run_label(run)}・查看日誌]({run['html_url']})")
+        _render_live_progress(run)
         if run.get("status") != "completed":
             if run.get("status") == "in_progress":
                 st.info("雲端批次執行中；每 15 秒更新狀態。")
@@ -185,7 +214,7 @@ def _render_cloud_status():
         elif conclusion == "cancelled":
             st.warning("雲端批次已取消。")
         else:
-            st.error(f"這次雲端執行已失敗或中止（{conclusion}）。未取得 FINISH 摘要，無法確認處理筆數；請查看本次日誌與工作表。")
+            st.error(f"這次雲端執行已失敗或中止（{conclusion}）。未取得最終 FINISH 摘要；上方如有筆數，是最後回報的進度，完整結果請核對工作表。")
     except Exception:
         st.warning("暫時無法取得雲端狀態，請稍後更新或至 GitHub Actions 查看。")
 

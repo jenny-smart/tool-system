@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import time
+from cloud_booking_progress import Progress
 from collections import defaultdict
 from accounts import ACCOUNTS
 import batch_booking_optimized as batch_opt
@@ -47,11 +48,19 @@ def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selec
 def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False, retry_failed=False) -> int:
     attempted = set()
     success_total = fail_total = 0
+    progress = Progress(sheet_name)
+    processed = 0
+    target_total = None
+    candidate_total = 0
     started = time.monotonic()
     print(f"FILTER mode={filter_mode}; region={selected_region or 'auto'}; auto_lemon_shift={'ON' if allow_auto_lemon else 'OFF'}; retry_failed={'ON' if retry_failed else 'OFF'}", flush=True)
     print("STRATEGY multi-row-groups-first -> single-rows; Calendar only after order writeback", flush=True)
     while True:
         pending = load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed)
+        if target_total is None:
+            candidate_total = len(pending)
+            target_total = min(len(pending), max_rows) if max_rows else len(pending)
+            progress.publish('準備成單', 0, 0, 0, len(pending), target_total)
         if max_rows:
             left = max_rows - len(attempted)
             if left <= 0:
@@ -65,6 +74,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
             attempted.add(row_no)
             if error:
                 fail_total += 1
+                processed += 1
                 print(f"SKIP row={row_no}: {error}", flush=True)
             else:
                 by_region[region].append(row_no)
@@ -75,12 +85,18 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                 password = str(account.get("password") or "").strip()
                 if not email or not password:
                     raise RuntimeError(f"{region} 尚未設定後台帳號密碼")
+                progress.publish('成單中', processed, success_total, fail_total,
+                                 max(candidate_total - processed, 0), target_total, ','.join(map(str, rows)))
                 print(f"START {region}: rows={','.join(map(str, rows))}", flush=True)
+                processed_base, success_base, fail_base = processed, success_total, fail_total
+                def report_group(done, ok, bad, current):
+                    progress.publish('成單中', processed_base + done, success_base + ok, fail_base + bad,
+                                     max(candidate_total - processed_base - done, 0), target_total, str(current))
                 result = run_process_web_hybrid(
                     env_name="prod", region=region, backend_email=email, backend_password=password,
                     sheet_name=sheet_name, start_row=min(rows), end_row=max(rows), selected_actions=ACTIONS,
                     logger=lambda msg: print(str(msg), flush=True), allow_auto_lemon_shift=allow_auto_lemon,
-                    selected_rows=rows,
+                    selected_rows=rows, progress_callback=report_group,
                 ) or {}
                 success = int(result.get("success_count", 0) or 0)
                 fail = int(result.get("fail_count", 0) or 0)
@@ -90,11 +106,16 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
             except Exception as exc:
                 fail_total += len(rows)
                 print(f"ERROR {region}: {exc}", flush=True)
+            processed += len(rows)
+            progress.publish('成單中', processed, success_total, fail_total,
+                             max(candidate_total - processed, 0), target_total)
         elapsed = max(time.monotonic() - started, .001)
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
         if pause_seconds and load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed):
             time.sleep(pause_seconds)
     remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed))
+    progress.publish('完成' if not fail_total else '部分失敗', processed, success_total, fail_total,
+                     remaining, target_total or 0)
     print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining}", flush=True)
     return 0 if fail_total == 0 else 2
 

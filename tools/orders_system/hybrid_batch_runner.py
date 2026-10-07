@@ -252,7 +252,7 @@ def run_process_web_direct_single(
 def run_process_web_hybrid(
     *, env_name, region, backend_email, backend_password, sheet_name,
     start_row, end_row, selected_actions=None, logger=print,
-    allow_auto_lemon_shift=False, selected_rows=None,
+    allow_auto_lemon_shift=False, selected_rows=None, progress_callback=None,
 ):
     """優化/雲端：多筆同組先批次；單筆組直接逐筆。"""
     selected_actions = selected_actions or ["建單", "寄確認信", "改 Google 日曆"]
@@ -294,6 +294,14 @@ def run_process_web_hybrid(
     fail_count = len(blocked)
     processed = len(recovered) + len(blocked)
 
+    def report_progress(row_no=''):
+        if progress_callback:
+            try:
+                progress_callback(processed, success_count, fail_count, row_no)
+            except Exception:
+                logger('進度回報暫時無法更新；成單繼續。')
+
+
     if "改 Google 日曆" in selected_actions:
         for row_no, row in recovered_rows:
             order_no = str(row.get("訂單編號", "") or "").strip()
@@ -302,6 +310,7 @@ def run_process_web_hybrid(
                 result = _lazy_calendar_sync(row, result, region, gcal_state, logger)
                 _orders.update_sheet_rows(ws, {row_no: result})
 
+    report_progress()
     for row_no, row in existing_rows:
         try:
             result = _run_existing_direct(session, ws, row_no, row, region, selected_actions, gcal_state, logger)
@@ -315,6 +324,7 @@ def run_process_web_hybrid(
         success_count += ok
         fail_count += bad
         processed += 1
+        report_progress()
 
     grouped = defaultdict(list)
     for row_no, row in create_rows:
@@ -368,8 +378,10 @@ def run_process_web_hybrid(
             success_count += ok
             fail_count += bad
             processed += 1
+            report_progress()
 
     for index, (row_no, row) in enumerate(single_rows, 1):
+        report_progress(str(row_no))
         _safety._checkpoint(ws, [row_no], message="單筆已建立建單斷點；完成後立即回填")
         logger(f"▶ 優化單筆 {index}/{len(single_rows)}：第 {row_no} 列")
         try:
@@ -387,6 +399,7 @@ def run_process_web_hybrid(
         success_count += ok
         fail_count += bad
         processed += 1
+        report_progress()
 
     return {
         "success": fail_count == 0,
