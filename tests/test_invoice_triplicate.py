@@ -5,6 +5,7 @@ import pytest
 
 from tools.invoice_center.triplicate import candidates, complete, parse_requirements, prepare
 from tools.invoice_center import triplicate_runner as runner
+from tools.invoice_center.triplicate_ui import _active_triplicate_task
 from tools.lemon_backend.models import BackendOrder
 
 
@@ -31,6 +32,17 @@ def row_for(source):
                      10: source["note"], 23: source["old_invoice"], 24: "二聯"}.items():
         row[i] = value
     return row
+
+
+def test_active_triplicate_task_blocks_same_order_only():
+    task = {
+        "action": "cetustek.triplicate",
+        "status": "running",
+        "params_json": '{"area":"台北","plan":{"source":{"order_no":"LC001"}}}',
+    }
+    assert _active_triplicate_task([task], "台北", "LC001") is task
+    assert _active_triplicate_task([task], "台中", "LC001") is None
+    assert _active_triplicate_task([{**task, "status": "completed"}], "台北", "LC001") is None
 
 
 def test_candidate_filters_completed_and_other_work(source):
