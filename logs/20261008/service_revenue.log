@@ -1,0 +1,31 @@
+2026-10-07 21:31:53 [INFO] === 客服排程系統 run_id=9889831b step=3 台北時間=2026-10-08 05:31:53 ===
+2026-10-07 21:31:53 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-10-07 21:31:53 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-10-07 21:32:08 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-10-07 21:32:09 [INFO] 信件日期（台北時間）：2026-10-07
+2026-10-07 21:32:09 [WARNING] 開啟客服目標試算表 遇到 Sheets API 配額限制；15 秒後重試（1/4）：APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-10-07 21:32:24 [WARNING] 開啟客服目標試算表 遇到 Sheets API 配額限制；30 秒後重試（2/4）：APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-10-07 21:33:19 [INFO]   [mail] text/plain 為空，fallback 到 text/html（3651 字元）
+2026-10-07 21:33:35 [INFO]   近三日營業額-台北 → 選中 17:25:03（與17:25差3s）
+2026-10-07 21:33:35 [INFO]   [debug] 行65 repr='2026-10-05：212分'
+2026-10-07 21:33:35 [INFO]   [debug] 行66 repr='2026-10-06：40分'
+2026-10-07 21:33:35 [INFO]   [debug] 行67 repr='2026-10-07：45分'
+2026-10-07 21:33:35 [INFO]   [debug] 行68 repr='【家電清潔】日營業額'
+2026-10-07 21:33:35 [INFO]   [debug] 行69 repr='2026-10-05：0分'
+2026-10-07 21:33:35 [INFO]   [debug] 行70 repr='2026-10-06：0分'
+2026-10-07 21:33:35 [INFO]   [debug] 行71 repr='2026-10-07：0分'
+2026-10-07 21:33:35 [INFO]   [debug] 行72 repr='【儲值金】日營業額'
+2026-10-07 21:34:00 [INFO]   [mail] text/plain 為空，fallback 到 text/html（999 字元）
+2026-10-07 21:34:12 [INFO]   近三日營業額-台中 → 選中 17:25:06（與17:25差6s）
+2026-10-07 21:34:12 [INFO]   [debug] 行23 repr='2026-10-05：0分'
+2026-10-07 21:34:12 [INFO]   [debug] 行24 repr='2026-10-06：0分'
+2026-10-07 21:34:12 [INFO]   [debug] 行25 repr='2026-10-07：15分'
+2026-10-07 21:34:12 [INFO]   [debug] 行26 repr='【家電清潔】日營業額'
+2026-10-07 21:34:12 [INFO]   [debug] 行27 repr='2026-10-05：0分'
+2026-10-07 21:34:12 [INFO]   [debug] 行28 repr='2026-10-06：0分'
+2026-10-07 21:34:12 [INFO]   [debug] 行29 repr='2026-10-07：0分'
+2026-10-07 21:34:12 [INFO]   [debug] 行30 repr='【儲值金】日營業額'
+2026-10-07 21:34:12 [INFO]   台北：{'daily_value': 45, 'total_count': 630, 'total_amount': 1259450}
+2026-10-07 21:34:12 [INFO]   台中：{'daily_value': 15, 'total_count': 28, 'total_amount': 55600}
+2026-10-07 21:34:14 [INFO] Step 3 完成，row=2426（124.7s）
+2026-10-07 21:34:15 [INFO] === 全部完成 run_id=9889831b（126.1s）===
