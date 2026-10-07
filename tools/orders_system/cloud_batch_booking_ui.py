@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from service_pricing import load_config
 import requests
 import streamlit as st
@@ -79,6 +79,16 @@ def _latest_run():
     return runs[0] if runs else None
 
 
+def _run_label(run):
+    created = run.get("created_at", "")
+    try:
+        local = datetime.fromisoformat(created.replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=8)))
+        started = local.strftime("%Y-%m-%d %H:%M:%S") + "（台北時間）"
+    except (ValueError, TypeError):
+        started = "啟動時間未提供"
+    return f"第 {run['run_number']} 次執行・{started}・第 {run.get('run_attempt', 1)} 次嘗試"
+
+
 def _run_summary(run_id):
     jobs = _github_get(f"actions/runs/{run_id}/jobs").json().get("jobs", [])
     for job in jobs:
@@ -138,7 +148,7 @@ def _render_cloud_status():
         if not run:
             st.info("尚無雲端批次執行紀錄。")
             return
-        st.markdown(f"[第 {run['run_number']} 次執行・查看日誌]({run['html_url']})")
+        st.markdown(f"[{_run_label(run)}・查看日誌]({run['html_url']})")
         if run.get("status") != "completed":
             if run.get("status") == "in_progress":
                 st.info("雲端批次執行中；每 15 秒更新狀態。")
@@ -175,7 +185,7 @@ def _render_cloud_status():
         elif conclusion == "cancelled":
             st.warning("雲端批次已取消。")
         else:
-            st.error(f"雲端批次已結束（{conclusion}），請查看日誌確認原因。")
+            st.error(f"這次雲端執行已失敗或中止（{conclusion}）。未取得 FINISH 摘要，無法確認處理筆數；請查看本次日誌與工作表。")
     except Exception:
         st.warning("暫時無法取得雲端狀態，請稍後更新或至 GitHub Actions 查看。")
 
