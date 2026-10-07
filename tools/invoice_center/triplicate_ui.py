@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import json
+
+
+ACTIVE_TASK_STATUSES = {"pending", "queued", "running", "cancel_requested"}
+
+
+def _active_triplicate_task(tasks, area_label: str, order_no: str):
+    for task in tasks:
+        if task.get("action") != "cetustek.triplicate" or task.get("status") not in ACTIVE_TASK_STATUSES:
+            continue
+        try:
+            params = json.loads(task.get("params_json") or "{}")
+        except (TypeError, ValueError):
+            continue
+        source = ((params.get("plan") or {}).get("source") or {})
+        if str(params.get("area") or "") == area_label and str(source.get("order_no") or "") == order_no:
+            return task
+    return None
+
 
 def render_triplicate() -> None:
     import streamlit as st
     from tools.lemon_backend import BackendClient
     from tools.lemon_backend.stored_value_sheet import get_worksheet
-    from tools.local_agent_queue import create_task
+    from tools.local_agent_queue import create_task, list_tasks
     from .config import get_area_options
     from .triplicate import candidates, prepare, validate_source
 
@@ -32,6 +51,13 @@ def render_triplicate() -> None:
             return
         plan = saved[1]
         data = plan["payload"]
+        try:
+            active_task = _active_triplicate_task(list_tasks(limit=200), label, item["order_no"])
+        except Exception as exc:
+            active_task = None
+            st.warning(f"無法確認重複任務：{exc}")
+        if active_task:
+            st.warning(f"此訂單已有{active_task.get('status')}任務，完成或中止前不能再次執行。")
         st.write({"原發票": item["old_invoice"], "付款日期": plan["paid_date"], "原票處理": action_label,
                   **({"作廢原因": "開立錯誤"} if action == "cancel" else {"折讓範圍": "原票全額", "折讓金額": plan["total"]}),
                   "買方名稱": data["buyer_name"], "買方統編": data["buyer_identifier"],
@@ -57,8 +83,12 @@ def render_triplicate() -> None:
             "回填折讓單號並接續新發票" if resume_no else
             "執行二聯改三聯"
         )
-        if st.button(button_label, type="primary"):
+        if st.button(button_label, type="primary", disabled=bool(active_task)):
             validate_source(ws, item)
+            duplicate = _active_triplicate_task(list_tasks(limit=200), label, item["order_no"])
+            if duplicate:
+                st.warning("此訂單已有等待中或執行中的任務，未重複送出。")
+                return
             dispatch_plan = {
                 **plan,
                 **({"resume_allowance_no": resume_no} if resume_no else {}),
