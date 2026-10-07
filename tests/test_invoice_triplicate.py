@@ -406,8 +406,11 @@ def test_completion_appends_invoice_audit_note_only_once(source, backend):
     ws.get.return_value = [row]
     complete(ws, plan, 'AA12345678')
     note = next(x['values'][0][0] for x in ws.batch_update.call_args.args[0] if x['range']=='K303')
-    assert note.startswith(source['note'])
-    assert note.endswith('原發票號碼：DM51791909\n新發票號碼：AA12345678')
+    assert "\n" not in note
+    assert note == (
+        f"{source['note'].replace(chr(10), '，')}，"
+        "原發票號碼：DM51791909，新發票號碼：AA12345678"
+    )
     row[10], row[14], row[1] = note, 'AA12345678', '已處理發票'
     complete(ws, plan, 'AA12345678')
     assert not any(x['range']=='K303' for x in ws.batch_update.call_args.args[0])
