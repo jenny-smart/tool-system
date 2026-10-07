@@ -50,6 +50,12 @@ def validate_source(ws: Any, expected: dict[str, Any]) -> None:
         raise ValueError(f"清潔異動第 {n} 列已變更或已有新發票，請重新讀取")
 
 
+def _single_line_note(value: str) -> str:
+    """將既有 K 欄多行內容整理成以全形逗點分隔的單行。"""
+    parts = [part.strip().strip("，,") for part in re.split(r"[\r\n]+", str(value or ""))]
+    return "，".join(part for part in parts if part)
+
+
 def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: str = "cancel") -> dict[str, Any]:
     from .bridge import build_invoice_payload_from_backend_order
     from .invoice import build_add_invoice_payload
@@ -118,10 +124,10 @@ def complete(ws: Any, plan: dict[str, Any], invoice_no: str) -> None:
     # X/Y retain the original invoice audit trail; B records invoice completion.
     updates = [{"range": f"O{n}", "values": [[invoice_no]]},
                {"range": f"B{n}", "values": [["已處理發票"]]}]
-    note = str(row[10] or "").rstrip()
-    for line in (f"原發票號碼：{source['old_invoice']}", f"新發票號碼：{invoice_no}"):
-        if line not in note.splitlines():
-            note = f"{note}\n{line}" if note else line
+    note = _single_line_note(row[10])
+    for part in (f"原發票號碼：{source['old_invoice']}", f"新發票號碼：{invoice_no}"):
+        if part not in note:
+            note = f"{note}，{part}" if note else part
     if note != str(row[10] or ""):
         updates.append({"range": f"K{n}", "values": [[note]]})
     if not row[26]:
