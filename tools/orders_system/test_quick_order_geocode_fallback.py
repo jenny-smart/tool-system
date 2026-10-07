@@ -24,14 +24,16 @@ class BackendAddressTest(unittest.TestCase):
         self.assertFalse(info.get('area_id'))
         self.assertFalse(info.get('company_id'))
 
-    def test_backend_region_is_authoritative(self):
-        info, _, _ = self.resolve({'area': {'area_id': '25', 'company_id': '2'}})
-        self.assertEqual(info['area_id'], '25')
+    def test_address_lookup_reply_is_not_used(self):
+        info, _, reply = self.resolve({'area': {'area_id': '25', 'company_id': '2'}})
+        self.assertFalse(info.get('area_id'))
         self.assertEqual(info['country_id'], '23')
+        self.assertEqual(reply, {})
 
-    def test_backend_rejection_is_displayed(self):
-        with self.assertRaisesRegex(Exception, '後台地址查詢回覆：不在服務範圍'):
-            self.resolve({'return_code': '1001', 'description': '不在服務範圍'})
+    def test_address_lookup_rejection_cannot_block_order_flow(self):
+        info, _, reply = self.resolve({'return_code': '1001', 'description': '不在服務範圍'})
+        self.assertEqual(info['address'], ADDRESS)
+        self.assertEqual(reply, {})
 
     def test_existing_address_survives_empty_lookup(self):
         info, _, _ = self.resolve({}, [{'id': 7, 'address': ADDRESS, 'areaId': 88,

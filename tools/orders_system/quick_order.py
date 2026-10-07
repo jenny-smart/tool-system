@@ -635,8 +635,7 @@ def _get_booking_token_for_payway(session, base_url, payway):
 
 
 def _fetch_csrf_from_url(session, url):
-    """從指定頁面抓 CSRF token，不影響 orders.BOOKING_URL 等全域設定。
-    v8.5：用於儲值金訂單 check_contain 失敗時，向 /booking/single 借一個可靠的 token。"""
+    """從指定頁面抓 CSRF token，不影響 orders.BOOKING_URL 等全域設定。"""
     resp = session.get(url, headers=HEADERS, allow_redirects=True)
     if resp.status_code != 200:
         return ""
@@ -1374,32 +1373,21 @@ def get_unserved_paid_orders(session, phone, member_payload, known_addresses, to
 
 
 def resolve_backend_booking_address(session, member_payload, address, token, clean_type_id):
-    """新客、舊客、批次及查班表共用後台地址查詢；不自行判定服務區域。"""
-    member = (member_payload or {}).get("member", {}) or {}
+    """組出成單地址資料，不另外呼叫後台的地址查詢 AJAX。
+
+    成單流程直接沿用會員該筆既有地址保存的區域、座標與前次訂單資料；
+    沒有既有地址時只送使用者輸入的表單地址，交由後續原生計算／班表／送單
+    流程驗證。這裡刻意不呼叫 ``/ajax/check_contain``，避免地址查詢的
+    CSRF/session 狀態阻斷所有成單入口。
+    """
     best_addr = dict(pick_best_address_info(member_payload, address) or {})
     selected_address = str(address).strip()
     best_addr["address"] = selected_address
     address_parts = _split_booking_address(selected_address)
     # country_id 是後台縣市區下拉值，與服務區域 area_id 不同。
     best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
-    # 照成單欄位送後台；新地址座標留空，不等待或比對 Google Maps。
-    addr_check = check_contain(
-        session, member.get("member_id", ""), selected_address,
-        best_addr.get("lat", ""), best_addr.get("lng", ""), token, clean_type_id,
-    )
-    addr_check = addr_check if isinstance(addr_check, dict) else {}
-    code = addr_check.get("return_code")
-    if code not in (None, "", "0000"):
-        message = addr_check.get("description") or addr_check.get("message") or str(code)
-        raise Exception(f"後台地址查詢回覆：{message}")
-    area = addr_check.get("area")
-    if isinstance(area, dict):
-        for field in ("area_id", "company_id", "lat", "lng"):
-            if area.get(field) not in (None, "", 0, "0"):
-                best_addr[field] = area[field]
-    # 查詢未提供區域時保留會員既有值，未存的欄位留空交由後台驗證。
-    # 不指定預設區域，也不改寫客戶地址。
-    return best_addr, address_parts, addr_check
+    # 不指定預設區域、不改寫地址，也不發出額外的地址查詢請求。
+    return best_addr, address_parts, {}
 
 
 def quick_check_available_slots(env_name, payway, lookup_result, address, clean_type_id, date_s, hour, person="2", periods=None, period_hours=None):
@@ -1609,14 +1597,7 @@ def quick_create_order(
         session, base_url, payway, base_data, token, slot, allow_auto_lemon_shift,
     )
     cleaners = extract_cleaners_from_section_response(raw_section, slot)
-    # v2026.07.10：修正重大 bug——前面 check_contain 若失敗，可能借用過
-    # /booking/single 頁面的 token（見上面 v8.5 的備援邏輯），並把 token
-    # 變數永久換成借來的那個。如果送出建單時仍沿用這個借來的 token，會導致
-    # 送到 /booking/stored_value_routine 的請求帶著 /booking/single 頁面
-    # 發出的 token，後台可能因此誤判成一般訂單處理，出現付款方式空白、
-    # 訂單卡在待付款、儲值金沒有真的被扣除的情況。這裡在正式送出建單前，
-    # 一律重新跟「這筆訂單實際要用的建單網址」要一個乾淨的 token，不管前面
-    # check_contain 階段借用過哪個網址的 token。
+    # 正式送出前一律向這筆訂單實際使用的建單網址取得最新 token。
     booking_url = _booking_url_for_payway(base_url, payway)
     _fresh_token = _fetch_csrf_from_url(session, booking_url)
     if _fresh_token:
