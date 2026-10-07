@@ -273,6 +273,24 @@ TYPE_COMPLAINT_REFUND = "客訴退款"
 TYPE_DAMAGE_REFUND = "物損退款"
 
 
+def _is_vip_customer(customer_type: str) -> bool:
+    return str(customer_type or "").strip().upper() == "VIP"
+
+
+def _pending_status(customer_type: str, kind: str) -> str:
+    if kind == "charge":
+        return "待扣儲值金" if _is_vip_customer(customer_type) else STATUS_PENDING_CHARGE
+    if kind == "refund":
+        return "待返儲值金" if _is_vip_customer(customer_type) else STATUS_PENDING_REFUND
+    raise ValueError(f"不支援的異動類型：{kind}")
+
+
+def _change_payment(order: dict, customer_type: str) -> str:
+    return "儲值金" if _is_vip_customer(customer_type) else (
+        "信用卡" if order.get("payway") != "儲值金" else "儲值金"
+    )
+
+
 # ============================================================
 # 工具函式
 # ============================================================
@@ -646,12 +664,13 @@ def build_charge_row(order: dict, change_fee_info: dict, service_note: str,
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     j_value = _format_change_fee_j(order, change_fee_info)
     return {
-        "A": "清潔", "B": STATUS_PENDING_CHARGE, "C": TYPE_CHARGE,
+        "A": "清潔", "B": _pending_status(customer_type, "charge"), "C": TYPE_CHARGE,
         "E": _today_taipei_str(today),
         "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
         "M": "", "N": change_fee_info["change_fee"], "O": "",
+        "R": "儲值金" if _is_vip_customer(customer_type) else "",
         "_calc_amount": change_fee_info["change_fee"],
         "_calc_note": change_fee_info["calc_note"],
     }
@@ -665,13 +684,13 @@ def build_refund_row(order: dict, change_fee_info: dict, service_note: str,
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     j_value = _format_change_fee_j(order, change_fee_info)
     return {
-        "A": "清潔", "B": STATUS_PENDING_REFUND, "C": TYPE_REFUND,
+        "A": "清潔", "B": _pending_status(customer_type, "refund"), "C": TYPE_REFUND,
         "E": _today_taipei_str(today),
         "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value,
         "J": j_value,
         "K": service_note or "",
-        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
+        "R": _change_payment(order, customer_type),
         "S": refund_amount,
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -781,12 +800,13 @@ def build_addtime_row(order: dict, time_fee_info: dict, service_note: str,
     timing = _time_change_timing_label(service_date, today=today)
     j_value = _format_people_hours_fee_j(f"{timing}加時", "待收", time_fee_info)
     return {
-        "A": "清潔", "B": STATUS_PENDING_CHARGE, "C": TYPE_CHARGE,
+        "A": "清潔", "B": _pending_status(customer_type, "charge"), "C": TYPE_CHARGE,
         "E": _today_taipei_str(today),
         "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
         "M": "", "N": time_fee_info["amount"], "O": "",
+        "R": "儲值金" if _is_vip_customer(customer_type) else "",
         "_calc_amount": time_fee_info["amount"],
         "_calc_note": time_fee_info["calc_note"],
     }
@@ -800,13 +820,13 @@ def build_reducetime_row(order: dict, time_fee_info: dict, service_note: str,
     timing = _time_change_timing_label(service_date, today=today)
     j_value = _format_people_hours_fee_j(f"{timing}減時", "待退", time_fee_info)
     return {
-        "A": "清潔", "B": STATUS_PENDING_REFUND, "C": TYPE_REFUND,
+        "A": "清潔", "B": _pending_status(customer_type, "refund"), "C": TYPE_REFUND,
         "E": _today_taipei_str(today),
         "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value,
         "J": j_value,
         "K": service_note or "",
-        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
+        "R": _change_payment(order, customer_type),
         "S": time_fee_info["amount"],
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -822,12 +842,13 @@ def build_weekday_to_weekend_row(order: dict, time_fee_info: dict, service_note:
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     j_value = _format_people_hours_fee_j("異動平日轉週末", "待收", time_fee_info)
     return {
-        "A": "清潔", "B": STATUS_PENDING_CHARGE, "C": TYPE_CHARGE,
+        "A": "清潔", "B": _pending_status(customer_type, "charge"), "C": TYPE_CHARGE,
         "E": _today_taipei_str(today),
         "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
         "M": "", "N": time_fee_info["amount"], "O": "",
+        "R": "儲值金" if _is_vip_customer(customer_type) else "",
         "_calc_amount": time_fee_info["amount"],
         "_calc_note": time_fee_info["calc_note"],
     }
@@ -840,12 +861,12 @@ def build_weekend_to_weekday_row(order: dict, time_fee_info: dict, service_note:
     i_value = _format_service_datetime(service_date, order.get("period_text", ""))
     j_value = _format_people_hours_fee_j("異動週末轉平日", "待退", time_fee_info)
     return {
-        "A": "清潔", "B": STATUS_PENDING_REFUND, "C": TYPE_REFUND,
+        "A": "清潔", "B": _pending_status(customer_type, "refund"), "C": TYPE_REFUND,
         "E": _today_taipei_str(today),
         "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value, "J": j_value,
         "K": service_note or "",
-        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
+        "R": _change_payment(order, customer_type),
         "S": time_fee_info["amount"],
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -874,13 +895,13 @@ def build_manual_refund_row(order: dict, amount, refund_type_label: str, service
         f"{refund_type_label}，退費 ${amount}"
     )
     return {
-        "A": "清潔", "B": STATUS_PENDING_REFUND, "C": refund_type_label,
+        "A": "清潔", "B": _pending_status(customer_type, "refund"), "C": refund_type_label,
         "E": _today_taipei_str(today),
         "F": customer_type, "G": order["order_no"], "H": order["customer_name"],
         "I": i_value,
         "J": j_value,
         "K": service_note or "",
-        "R": "信用卡" if order.get("payway") != "儲值金" else "儲值金",
+        "R": _change_payment(order, customer_type),
         "S": amount,
         "X": order.get("invoice_no", ""),
         "Y": "三聯" if order.get("carrier_type") == "三聯式" else "二聯",
@@ -955,6 +976,7 @@ CHECK_REFUND_PARTIAL = [
 ]
 
 FIELD_CHARGE_DATE = ["chargeDate", "charge_date", "addChargeDate", "extraChargeDate"]
+FIELD_CHARGE_PAYMENT = ["chargePayment", "charge_payment", "addChargePayment", "extraChargePayment"]
 FIELD_CHARGE_AMOUNT = ["chargeAmount", "charge_amount", "addChargeAmount", "extraChargeAmount"]
 FIELD_CHARGE_INVOICE = ["chargeInvoice", "charge_invoice", "addChargeInvoice"]
 FIELD_CHARGE_NOTE = ["chargeNote", "charge_note", "addChargeNote", "extraChargeNote"]
@@ -1304,6 +1326,9 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
         _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
+        charge_payment = "儲值金" if status == "待扣儲值金" else _sheet_cell(raw, "R")
+        _set_field(form_data, controls, FIELD_CHARGE_PAYMENT, charge_payment,
+                   keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
                    keywords=["加收金額", "收款金額"], fallback_name="chargeAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_INVOICE, charge_invoice,
@@ -1324,7 +1349,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
                    keywords=["退款日期", "退款時間"], fallback_name="refundDate", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_REFUND_AMOUNT, _sheet_cell(raw, "S"),
                    keywords=["退款金額"], fallback_name="refundAmount", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_REFUND_FLOW, _sheet_cell(raw, "R"),
+        refund_flow = "儲值金" if status == "待返儲值金" else _sheet_cell(raw, "R")
+        _set_field(form_data, controls, FIELD_REFUND_FLOW, refund_flow,
                    keywords=["退款金流"], ui_logger=ui_logger)
         refund_note = _append_suffix_once(backend_note, f"，{refund_date}已退款" if refund_date else "")
         _set_field(form_data, controls, FIELD_REFUND_NOTE, refund_note,
@@ -1340,6 +1366,9 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
         _set_radio_value(form_data, controls, "isRefund", "0", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
+        charge_payment = "儲值金" if status == "已扣儲值金" else _sheet_cell(raw, "R")
+        _set_field(form_data, controls, FIELD_CHARGE_PAYMENT, charge_payment,
+                   keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
                    keywords=["加收金額", "收款金額"], fallback_name="chargeAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_INVOICE, charge_invoice,
@@ -1367,7 +1396,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
                    keywords=["退款金額"], fallback_name="refundAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_REFUND_NUMBER, _sheet_cell(raw, "AB"),
                    keywords=["折讓單號碼", "退款編號"], fallback_name="refundNumber", ui_logger=ui_logger)
-        _set_field(form_data, controls, FIELD_REFUND_FLOW, _sheet_cell(raw, "R"),
+        refund_flow = "儲值金" if status == "已返儲值金" else _sheet_cell(raw, "R")
+        _set_field(form_data, controls, FIELD_REFUND_FLOW, refund_flow,
                    keywords=["退款金流"], ui_logger=ui_logger)
         refund_note = _append_suffix_once(backend_note, f"，{refund_date}已退款" if refund_date else "")
         _set_field(form_data, controls, FIELD_REFUND_NOTE, refund_note,

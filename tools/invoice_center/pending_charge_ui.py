@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import time
+from decimal import Decimal
 from typing import Any
 
 import streamlit as st
@@ -11,6 +13,8 @@ from tools.local_agent_queue import create_task, list_tasks
 
 from .invoice_payload_queue import enqueue_payload
 from .pending_charge import DISPLAY_COLUMNS, get_pending_invoice_candidates
+from .invoice import build_detaildata
+from .models import InvoiceLineItem, round_money
 
 
 DELIVERY_OPTIONS = ["會員載具", "手機載具", "自然人憑證", "紙本", "捐贈"]
@@ -31,6 +35,37 @@ def _records(value: Any) -> list[dict[str, Any]]:
     if hasattr(value, "to_dict"):
         return value.to_dict("records")
     return [dict(row) for row in (value or [])]
+
+
+def _fare_amount(row: dict[str, Any]) -> int:
+    text = str(row.get("J 內容") or "")
+    match = re.search(r"車馬費\s*[$＄]?\s*([\d,]+)", text)
+    amount = int(match.group(1).replace(",", "")) if match else 0
+    if amount <= 0:
+        raise ValueError(f"第 {row.get('列號')} 列車馬費金額無法辨識")
+    return amount
+
+
+def _apply_fare_invoice_payload(payload: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    """車馬費發票沿用待收款開票流程，但金額只取 J 欄車馬費。"""
+    amount = _fare_amount(row)
+    quantity = amount // 100 if amount % 100 == 0 else 1
+    unit_price = 100 if amount % 100 == 0 else amount
+    item = InvoiceLineItem(
+        goodcode="TRAVEL", goodname="車馬費", unit="人" if amount % 100 == 0 else "式",
+        quantity=str(quantity), unitprice=str(unit_price), amount=str(amount),
+        fremark=str(row.get("J 內容") or "").strip(),
+    )
+    result = dict(payload)
+    result["detaildata"] = build_detaildata([item])
+    if str(result.get("buyer_identifier") or "").strip():
+        net = int(round_money(Decimal(amount) / Decimal("1.05")))
+        result.update({"saleamount": str(net), "taxamount": str(amount - net), "totalamount": str(amount)})
+    else:
+        result.update({"saleamount": str(amount), "taxamount": "0", "totalamount": str(amount)})
+    note = str(result.get("mainremark") or "").strip()
+    result["mainremark"] = f"{note}；車馬費發票" if note else "車馬費發票"
+    return result
 
 
 def _fresh_cached_value(entry: Any, now: float) -> dict[str, str] | None:
@@ -134,7 +169,8 @@ def install(ui) -> None:
         elif delivery == "捐贈":
             st.session_state["invoice_center_donate_code"] = carrier
 
-    def _build_payload(area_key: str, order_no: str, override: dict[str, Any] | None) -> dict[str, Any]:
+    def _build_payload(area_key: str, order_no: str, override: dict[str, Any] | None,
+                       source: dict[str, Any]) -> dict[str, Any]:
         suffix = str(st.session_state.get("invoice_center_order_suffix", "-1") or "-1")
         ui._load_backend_order(area_key, order_no, suffix)
         if override is not None:
@@ -142,7 +178,10 @@ def install(ui) -> None:
         rows = ui._normalize_line_items(st.session_state.get("invoice_center_line_items", []))
         totals = ui._calculate_totals(rows)
         payload = ui._build_payload(area_key, order_no, suffix, rows, totals)
-        return ui.create_invoice_from_payload(payload, dry_run=True).payload
+        result = ui.create_invoice_from_payload(payload, dry_run=True).payload
+        if source.get("_invoice_flow") == "fare":
+            result = _apply_fare_invoice_payload(result, source)
+        return result
 
     def _prepare(rows: list[dict[str, Any]], area_key: str) -> list[dict[str, Any]]:
         prepared: list[dict[str, Any]] = []
@@ -154,7 +193,7 @@ def install(ui) -> None:
             prepared.append({
                 "order_no": order_no,
                 "source_row": int(row.get("列號") or 0),
-                "payload": _build_payload(area_key, order_no, override),
+                "payload": _build_payload(area_key, order_no, override, row),
             })
         return prepared
 
