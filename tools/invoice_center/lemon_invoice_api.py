@@ -230,7 +230,7 @@ def create_invoice_by_soap(
 
     returned = _soap_call(
         "CreateInvoiceV3",
-        {"invoicexml": invoice_xml, "hastax": "1", "rentid": resolved_rent_id},
+        {"invoicexml": invoice_xml, "hastax": str(payload.hastax), "rentid": resolved_rent_id},
         timeout=timeout,
     )
     success = bool(INVOICE_NO_RE.fullmatch(returned))

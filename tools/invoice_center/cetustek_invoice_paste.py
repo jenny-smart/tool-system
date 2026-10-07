@@ -74,7 +74,7 @@ async (d) => {
   };
   const isTriplicate = Boolean(text(d.buyer_identifier));
   forceRadio("invoicetype07");
-  forceRadio(isTriplicate ? "hastax1" : (text(d.hastax) === "1" ? "hastax1" : "hastax2"));
+  forceRadio(isTriplicate ? "hastax2" : (text(d.hastax) === "2" ? "hastax2" : "hastax1"));
   const taxMap = {"1": "businesstax1", "2": "businesstax2", "3": "businesstax3", "4": "businesstax4"};
   forceRadio(taxMap[text(d.taxtype)] || "businesstax1");
   forceRadio(`roundnum${text(d.roundnum) || "4"}`);
@@ -131,7 +131,11 @@ async (d) => {
 
   const email = document.getElementById("buyer_emailaddress")?.value || "";
   if (email && !email.includes("@")) return {ok: false, message: `Email 欄位異常：${email}`};
-  return {ok: true, message: "已直接填入鯨躍原生表單"};
+  return {
+    ok: true,
+    message: "已直接填入鯨躍原生表單",
+    hastax: document.querySelector('input[name="hastax"]:checked')?.value || "",
+  };
 }
 """
 
@@ -371,6 +375,8 @@ def _paste_one(page: Any, payload_json: str) -> None:
     if not isinstance(result, dict) or not bool(result.get("ok")):
         message = result.get("message") if isinstance(result, dict) else ""
         raise RuntimeError(f"填入結果異常：{message or '沒有完成訊息'}")
+    if str(payload.get("buyer_identifier") or "").strip() and str(result.get("hastax") or "") != "2":
+        raise RuntimeError("發票表單驗證失敗：買方統編非空白時必須選擇單價含稅")
 
     if not _is_invoice_create_page(page):
         raise RuntimeError("填入後已離開發票開立頁")

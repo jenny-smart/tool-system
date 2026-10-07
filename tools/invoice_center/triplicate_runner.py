@@ -150,13 +150,25 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
     stage = state.get("stage", "new")
     if action not in {"cancel", "allowance"}:
         raise ValueError("不支援的原發票處理方式")
+    resume_allowance_no = str(resume_allowance_no or "").strip().upper()
+    detected_allowance_no = ""
+    if action == "allowance":
+        values = ws.get(f"AB{source['source_row']}")
+        detected_allowance_no = str(values[0][0]).strip().upper() if values and values[0] else ""
+        if detected_allowance_no and not re.fullmatch(r"[A-Z]{2}\d{8,}", detected_allowance_no):
+            raise ValueError("AB 欄折讓單號格式不符，請先核對")
+        if resume_allowance_no and detected_allowance_no and resume_allowance_no != detected_allowance_no:
+            raise ValueError("輸入的折讓單號與 AB 欄不符")
+    effective_allowance_no = resume_allowance_no or detected_allowance_no
+    if state.get("allowance_no") and effective_allowance_no and state["allowance_no"] != effective_allowance_no:
+        raise ValueError("與已記錄的折讓單號不符")
     saved_plan = state.get("plan") or {}
     same_work = (
         saved_plan.get("source") == source
         and saved_plan.get("original_action", "cancel") == action
     )
     confirmed_retry = retry_unissued or (
-        bool(resume_allowance_no) and stage == "awaiting_save" and same_work
+        bool(effective_allowance_no) and stage == "awaiting_save" and same_work
     )
     if saved_plan and saved_plan != plan and not (
         confirmed_retry and stage == "awaiting_save" and same_work
@@ -179,18 +191,20 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
             save({"stage": "completed"})
             print(f"已找到新發票 {number}，只補回填，未重複開立", flush=True)
             return
-        resume_stage = "allowed" if action == "allowance" and state.get("allowance_no") else "cancelled"
-        save({"plan": plan, "stage": resume_stage})
+        resume_stage = "allowed" if action == "allowance" and effective_allowance_no else "cancelled"
+        changes = {"plan": plan, "stage": resume_stage}
+        if effective_allowance_no:
+            changes["allowance_no"] = effective_allowance_no
+        save(changes)
         stage = resume_stage
         print("已確認查無新發票；保留原票處理結果，重新填入三聯發票", flush=True)
-    if resume_allowance_no and not confirmed_retry:
+    if effective_allowance_no and not confirmed_retry:
         if action != "allowance" or stage not in {"new", "allowance_submitting", "allowed"}:
             raise RuntimeError("目前進度不能改為接續折讓，請保留既有新發票處理")
-        if not re.fullmatch(r"[A-Z]{2}\d{8,}", resume_allowance_no):
+        if not re.fullmatch(r"[A-Z]{2}\d{8,}", effective_allowance_no):
             raise ValueError("已開立折讓單號格式不符")
-        if state.get("allowance_no") and state["allowance_no"] != resume_allowance_no:
-            raise ValueError("與已記錄的折讓單號不符")
-        save({"plan": plan, "stage": "allowed", "allowance_no": resume_allowance_no})
+        if stage != "allowed" or state.get("allowance_no") != effective_allowance_no:
+            save({"plan": plan, "stage": "allowed", "allowance_no": effective_allowance_no})
         stage = "allowed"
     if stage in {"cancel_submitting", "allowance_submitting"}:
         raise RuntimeError("上次原票處理結果尚未確認，請人工核對；禁止自動重試或開立")
@@ -200,9 +214,6 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
             raise RuntimeError("後台資料已變更，請回功能頁重新預覽")
         print(f"核對完成：{source['order_no']}／{source['old_invoice']}；原票處理：{action}", flush=True)
         if action == "allowance":
-            existing = ws.get(f"AB{source['source_row']}")
-            if existing and existing[0] and str(existing[0][0]).strip():
-                raise RuntimeError("AB 欄已有折讓單號，請核對既有結果，禁止重複折讓")
             number = allowance_original(page, plan, lambda: save({"plan": plan, "stage": "allowance_submitting"}))
             save({"stage": "allowed", "allowance_no": number})
             stage = "allowed"

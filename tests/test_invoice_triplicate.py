@@ -49,7 +49,7 @@ def test_payload_preserves_total_clears_carrier_and_address(source, backend):
     assert p["buyer_identifier"] == "93370180"
     assert p["buyer_name"] == "川岩國際有限公司"
     assert p["orderdate"] == ""
-    assert p["hastax"] == "1"
+    assert p["hastax"] == "2"
     assert p["buyer_address"] == ""
     assert p["buyer_emailaddress"] == "test@example.com"
     assert p["carriertype"] == p["carrierid1"] == p["carrierid2"] == ""
@@ -141,6 +141,7 @@ def test_awaiting_save_does_not_reissue(monkeypatch, source, backend):
 
 
 @pytest.mark.parametrize("retry_args", [
+    {},
     {"resume_allowance_no": "FP20261007163523"},
     {"retry_unissued": True},
 ])
@@ -272,13 +273,14 @@ def test_resume_after_allowance_never_repeats_allowance(monkeypatch, source, bac
     assert events == ['open','awaiting_save','fill','issued','completed']
 
 
-def test_existing_allowance_blocks_new_attempt(monkeypatch, source, backend):
+def test_existing_allowance_is_detected_and_resumes_invoice(monkeypatch, source, backend):
     plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
     plan = prepare('taipei', source, backend, original_action='allowance')
     ws.get.side_effect = lambda address: [['AL1234567890']] if address.startswith('AB') else [row_for(source)]
-    with pytest.raises(RuntimeError, match='禁止重複折讓'):
-        runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
-    assert events == []
+    monkeypatch.setattr(runner, 'allowance_original', lambda *a: pytest.fail('不得重複折讓'))
+    runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
+    assert events == ['allowed', 'open', 'awaiting_save', 'fill', 'issued', 'completed']
+    assert state['allowance_no'] == 'AL1234567890'
 
 
 def test_full_allowance_checks_amount_year_and_save_boundary(monkeypatch):

@@ -39,9 +39,14 @@ def render_triplicate() -> None:
         st.caption("K 欄其他需求請一併核對。新發票回填 O／AA，B 改為已處理發票，K 加註原票與新票號碼；X／Y 保留，折讓單號記錄於 AB。")
         resume_no = ""
         if action == "allowance":
-            resume_no = st.text_input("已開立折讓單號（僅接續新發票時填）",
-                                      key=f"triplicate_resume_{label}_{item['old_invoice']}").strip().upper()
-            st.caption("折讓已成功但流程中斷時，填入單號後只回填折讓單號並接續新發票，不再開折讓。")
+            values = ws.get(f"AB{item['source_row']}")
+            detected_no = str(values[0][0]).strip().upper() if values and values[0] else ""
+            if detected_no:
+                st.info(f"已偵測折讓單號：{detected_no}；將直接接續開立發票，不再折讓。")
+            else:
+                resume_no = st.text_input("已開立但尚未回填的折讓單號（選填）",
+                                          key=f"triplicate_resume_{label}_{item['old_invoice']}").strip().upper()
+                st.caption("若 AB 欄已有折讓單號會自動偵測；只有尚未回填時才需手動輸入。")
         retry_unissued = st.checkbox(
             "上次已填入，但我沒有按儲存：確認無新發票後重新填入",
             key=f"triplicate_retry_{label}_{item['old_invoice']}",
