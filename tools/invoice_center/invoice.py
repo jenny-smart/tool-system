@@ -96,6 +96,9 @@ def build_invoice_payload(
     **overrides: Any,
 ) -> InvoicePayload:
     line_items = list(items or [])
+    # 有買方統編就是三聯式發票；鯨躍表單的 hastax=1 代表單價含稅。
+    if str(buyer_identifier or "").strip():
+        overrides["hastax"] = "1"
     resolved_orderid = orderid or build_ei_order_id(order_no, suffix)
     resolved_orderdate = to_ei_roc_date(orderdate or date.today().isoformat())
     resolved_saleamount = (

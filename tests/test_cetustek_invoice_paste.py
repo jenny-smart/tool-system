@@ -51,6 +51,10 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
         self.assertIn('isTriplicate ? "hastax1"', script)
         self.assertNotIn('isTriplicate ? "hastax2"', script)
+        self.assertIn(
+            'if (valueText(d.orderdate)) setValue("orderdate", d.orderdate)',
+            script,
+        )
 
     def test_helper_button_alone_is_not_invoice_page(self) -> None:
         page = MagicMock()
@@ -92,6 +96,10 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         self.assertIn("setValue", page.evaluate.call_args.args[0])
         self.assertIn(
             'forceRadio(isTriplicate ? "hastax1"',
+            page.evaluate.call_args.args[0],
+        )
+        self.assertIn(
+            'if (text(d.orderdate)) setValue("orderdate", d.orderdate)',
             page.evaluate.call_args.args[0],
         )
         page.expect_event.assert_not_called()
