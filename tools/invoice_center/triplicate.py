@@ -83,6 +83,8 @@ def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: s
         raise ValueError("後台訂單金額必須大於零")
     # A stable, distinct order reference lets retries distinguish the replacement.
     payload = build_invoice_payload_from_backend_order(area, order, suffix=f"-R{old}")
+    # 二聯改三聯不帶原訂單／服務日期；鯨躍畫面保留預設的開立當日。
+    payload.orderdate = ""
     payload.buyer_identifier = requirements["buyer_identifier"]
     payload.buyer_name = requirements["buyer_name"]
     if requirements["remove_address"]:

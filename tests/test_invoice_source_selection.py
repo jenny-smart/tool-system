@@ -278,6 +278,7 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
         self.assertEqual(order.extra["invoice_settings_source_order"], "LC180")
         self.assertEqual(payload.buyer_identifier, "70450942")
         self.assertEqual(payload.buyer_name, "娜亞國際股份有限公司")
+        self.assertEqual(payload.hastax, "1")
 
     def test_stored_value_history_uses_backend_buy_and_paid_filters(self) -> None:
         response = SimpleNamespace(
@@ -316,6 +317,7 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
         client.search_paid_stored_value_orders_by_phone.assert_not_called()
         self.assertEqual(order.buyer_identifier, "")
         self.assertEqual(payload.carrierid1, "member@example.com")
+        self.assertEqual(payload.hastax, "2")
 
 
     def test_member_carrier_does_not_use_customer_email_as_carrier_number(self) -> None:

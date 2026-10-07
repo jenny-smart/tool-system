@@ -48,6 +48,8 @@ def test_payload_preserves_total_clears_carrier_and_address(source, backend):
     assert plan["paid_date"] == "2026-08-31"
     assert p["buyer_identifier"] == "93370180"
     assert p["buyer_name"] == "川岩國際有限公司"
+    assert p["orderdate"] == ""
+    assert p["hastax"] == "1"
     assert p["buyer_address"] == ""
     assert p["buyer_emailaddress"] == "test@example.com"
     assert p["carriertype"] == p["carrierid1"] == p["carrierid2"] == ""

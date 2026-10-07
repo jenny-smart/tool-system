@@ -82,7 +82,7 @@ async (d) => {
 
   clearCarrier();
   setValue("orderid", d.orderid);
-  setValue("orderdate", d.orderdate);
+  if (text(d.orderdate)) setValue("orderdate", d.orderdate);
   setValue("buyer_name", d.buyer_name);
   setValue("buyer_identifier", d.buyer_identifier);
   setValue("buyer_phone", d.buyer_phone);
