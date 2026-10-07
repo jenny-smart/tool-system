@@ -94,3 +94,37 @@ def test_service_daily_report_has_five_month_slots_per_city():
 
 def test_field_target_sheet_follows_file_year():
     assert schedule_stats.target_sheet_name("20270210") == "2027排班統計表"
+
+
+def test_field_annual_file_switch_finds_next_year_sibling():
+    cfg = {
+        "roster_default_year": 2026,
+        "spreadsheet_ids": {"roster": {"台北": "file-2026"}},
+    }
+    drive = MagicMock()
+    drive.files.return_value.get.return_value.execute.return_value = {
+        "id": "file-2026",
+        "name": "2026外場排程-台北",
+        "parents": ["folder"],
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+    }
+    drive.files.return_value.list.return_value.execute.return_value = {
+        "files": [{"id": "file-2027", "name": "2027外場排程-台北"}],
+    }
+    assert schedule_stats.get_yearly_roster_spreadsheet_id(
+        cfg, "台北", 2027, drive,
+    ) == "file-2027"
+
+
+def test_field_explicit_annual_file_id_takes_priority():
+    cfg = {
+        "spreadsheet_ids": {
+            "roster": {"台北": "legacy"},
+            "roster_by_year": {"2027": {"台北": "configured-2027"}},
+        },
+    }
+    drive = MagicMock()
+    assert schedule_stats.get_yearly_roster_spreadsheet_id(
+        cfg, "台北", 2027, drive,
+    ) == "configured-2027"
+    drive.files.assert_not_called()
