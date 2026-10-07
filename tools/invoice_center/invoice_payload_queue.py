@@ -198,6 +198,7 @@ def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: 
     values = ws.get(f"B{row_no}:AA{row_no}")
     row = list(values[0] if values else []) + [""] * 26
     current_status = str(row[0] or "").strip()
+    current_detail = str(row[1] or "").strip()
     current_order = str(row[5] or "").strip()
     payment_marker = str(row[11] or "").strip()
     current_invoice = str(row[13] or "").strip().upper()
@@ -218,7 +219,9 @@ def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: 
         updates.append({"range": f"O{row_no}", "values": [[normalized_invoice]]})
     if not current_time:
         updates.append({"range": f"AA{row_no}", "values": [[now_text()]]})
-    if payment_marker and current_status != "已收款":
+    if current_status == "待處理發票" and current_detail == "車馬費發票":
+        updates.append({"range": f"B{row_no}", "values": [["已處理發票"]]})
+    elif payment_marker and current_status != "已收款":
         updates.append({"range": f"B{row_no}", "values": [["已收款"]]})
     if updates:
         ws.batch_update(updates)

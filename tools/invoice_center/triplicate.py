@@ -28,9 +28,10 @@ def parse_requirements(note: str) -> dict[str, Any]:
 
 def candidate(row: list, row_no: int) -> dict[str, Any] | None:
     r = list(row) + [""] * 27
-    if str(r[1]).strip() != "待處理發票" or str(r[2]).strip() != "異動發票":
+    detail = str(r[2]).strip()
+    if str(r[1]).strip() != "待處理發票" or detail not in {"異動發票", "二聯轉三聯", "二聯改三聯"}:
         return None
-    if not re.search(r"改\s*三聯", str(r[10])) or not str(r[6]).strip() or str(r[14]).strip():
+    if not re.search(r"(?:改|轉)\s*三聯", f"{detail} {r[10]}") or not str(r[6]).strip() or str(r[14]).strip():
         return None
     return {"source_row": row_no, "order_no": str(r[6]).strip(), "customer": str(r[7]).strip(),
             "note": str(r[10]).strip(), "old_invoice": str(r[23]).strip().upper(),
