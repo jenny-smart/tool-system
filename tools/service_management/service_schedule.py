@@ -30,9 +30,9 @@ tools/service_management/service_schedule.py
   LOG_SPREADSHEET_ID            執行檔試算表（預設同 LEMON_TARGET_FILE_ID）
   NOTIFY_EMAIL / NOTIFY_PASSWORD / NOTIFY_TO
   SERVICE_SCHEDULE_DEEP_CLEAN_START
-                                 大掃除起始月份（YYYY-MM-DD，只看年月）。設定後，
-                                 該月起 Step1 一次下載/更新 5 個月，之後每月遞減 1，
-                                 最低回落到 2 個月（本月＋次月）並維持。未設定則一律 2 個月。
+                                 大掃除起始日（YYYY-MM-DD）。設定後，自該日起
+                                 Step1 下載/更新當月至隔年 2 月；季節結束後回到
+                                 本月＋次月。未設定則一律 2 個月。
 """
 
 from __future__ import annotations
@@ -57,6 +57,7 @@ import gspread
 from tools.common.google_auth import get_google_credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from tools.common.schedule_month_window import resolve_schedule_months
 
 # ──────────────────────────────────────────────────────────
 # 時區 & 基本設定
@@ -79,11 +80,8 @@ CONFIG: dict[str, Any] = {
     # 也保證清到這裡，避免新資料列數變少時舊資料殘留。
     "min_clear_rows": 120,
 
-    # 大掃除：從某個月份起，一次多下載/更新未來幾個月，之後逐月遞減，
-    # 最後回落到 default_month_window。由環境變數 SERVICE_SCHEDULE_DEEP_CLEAN_START
-    # （格式 YYYY-MM-DD，只看年月）控制起始月份，未設定則不啟用、維持 2 個月。
-    # 例：設定 2026-10-01 → 10月下載5個月、11月4個月、12月3個月、隔年1月2個月，之後維持2個月。
-    "deep_clean_start_months": 5,
+    # 大掃除：由環境變數 SERVICE_SCHEDULE_DEEP_CLEAN_START（YYYY-MM-DD）控制。
+    # 自指定日期起，處理當月至隔年 2 月；季節結束後回到預設 2 個月。
     "deep_clean_start_env": "SERVICE_SCHEDULE_DEEP_CLEAN_START",
 
     # 工作表名稱
@@ -118,6 +116,13 @@ CONFIG: dict[str, Any] = {
         {"taipei": "AZ3:BH", "taichung": "DW3:EE"},
         {"taipei": "BO3:BW", "taichung": "EL3:ET"},
     ],
+    "schedule_month_header_cells": [
+        {"taipei": "F1",  "taichung": "CC1"},
+        {"taipei": "U1",  "taichung": "CR1"},
+        {"taipei": "AJ1", "taichung": "DG1"},
+        {"taipei": "AY1", "taichung": "DV1"},
+        {"taipei": "BN1", "taichung": "EK1"},
+    ],
 
     # 每月 1 日清理前一個月的檔案。
     "monthly_cleanup_folders": {
@@ -128,11 +133,24 @@ CONFIG: dict[str, Any] = {
     },
 
     # 每日回報欄位對應
-    "report_mappings": [
-        {"source": "Q5:S5",   "target_col": 11},   # K:M
-        {"source": "AF5:AH5", "target_col": 15},   # O:Q
-        {"source": "CN5:CP5", "target_col": 101},  # CW:CY
-        {"source": "DC5:DE5", "target_col": 105},  # DA:DC
+    "report_month_slots": [
+        {"taipei_source": "Q5:S5",   "taipei_target_col": 11,
+         "taichung_source": "CN5:CP5", "taichung_target_col": 101},
+        {"taipei_source": "AF5:AH5", "taipei_target_col": 15,
+         "taichung_source": "DC5:DE5", "taichung_target_col": 105},
+        {"taipei_source": "AU5:AW5", "taipei_target_col": 19,
+         "taichung_source": "DR5:DT5", "taichung_target_col": 109},
+        {"taipei_source": "BJ5:BL5", "taipei_target_col": 23,
+         "taichung_source": "EG5:EI5", "taichung_target_col": 113},
+        {"taipei_source": "BY5:CA5", "taipei_target_col": 27,
+         "taichung_source": "EV5:EX5", "taichung_target_col": 117},
+    ],
+    "report_month_header_cells": [
+        {"taipei": "K2",  "taichung": "CW2"},
+        {"taipei": "O2",  "taichung": "DA2"},
+        {"taipei": "S2",  "taichung": "DE2"},
+        {"taipei": "W2",  "taichung": "DI2"},
+        {"taipei": "AA2", "taichung": "DM2"},
     ],
 
     # Gmail
@@ -478,33 +496,27 @@ def _month_offset(base: datetime, month: str) -> int:
 
 
 def _resolve_month_window(base: datetime) -> int:
-    """依 CONFIG['deep_clean_start_env'] 計算本次應處理的月份數（本月起算幾個月）。
-
-    未設定該環境變數，或執行月份早於起始月份：回傳 default_month_window（2）。
-    從起始月份當月開始：deep_clean_start_months（5），之後每過一個月遞減 1，
-    最低回落到 default_month_window，不會再往下降。
-    """
-    default_window = CONFIG["default_month_window"]
-    start_raw = os.environ.get(CONFIG["deep_clean_start_env"], "").strip()
-    if not start_raw:
-        return default_window
-
-    try:
-        start_dt = datetime.fromisoformat(start_raw)
-    except ValueError:
-        log.warning(
-            "%s 格式錯誤（應為 YYYY-MM-DD）：%s，改用預設 %d 個月",
-            CONFIG["deep_clean_start_env"], start_raw, default_window,
-        )
-        return default_window
-
+    """依指定起始日計算本月起至隔年 2 月所需的月份數。"""
     local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
-    months_since_start = (local_base.year - start_dt.year) * 12 + (local_base.month - start_dt.month)
-    if months_since_start < 0:
-        return default_window
+    months = resolve_schedule_months(
+        local_base,
+        os.environ.get(CONFIG["deep_clean_start_env"], ""),
+        default_window=CONFIG["default_month_window"],
+        warning=log.warning,
+    )
+    return len(months)
 
-    window = CONFIG["deep_clean_start_months"] - months_since_start
-    return max(default_window, window)
+
+def _active_month_keys(base: datetime) -> list[str]:
+    """本次應出現的月份鍵（YYYYMM），順序與目標表槽位一致。"""
+    local_base = base.astimezone(TZ_TAIPEI) if base.tzinfo else base.replace(tzinfo=TZ_TAIPEI)
+    months = resolve_schedule_months(
+        local_base,
+        os.environ.get(CONFIG["deep_clean_start_env"], ""),
+        default_window=CONFIG["default_month_window"],
+        warning=log.warning,
+    )
+    return [f"{year}{month:02d}" for year, month in months]
 
 
 def _add_months(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -682,6 +694,44 @@ def _process_city_slot(
     return file_info["name"]
 
 
+def _clear_unused_schedule_slots(
+    target_sh: gspread.Worksheet,
+    active_months: list[str],
+    found_months: set[str],
+) -> None:
+    """清掉本次不使用或缺檔的槽位，避免月份逐月減少後殘留舊資料。"""
+    slots = CONFIG["schedule_import_slots"]
+    clear_row_bound = max(target_sh.row_count, CONFIG["min_clear_rows"])
+    ranges: list[str] = []
+    for index, slot in enumerate(slots):
+        month = active_months[index] if index < len(active_months) else None
+        if month is not None and month in found_months:
+            continue
+        ranges.extend([
+            _bounded_clear_range(slot["taipei"], clear_row_bound),
+            _bounded_clear_range(slot["taichung"], clear_row_bound),
+        ])
+    if ranges:
+        target_sh.batch_clear(ranges)
+        log.info("已清除未使用／缺檔月份槽位：%s", ranges)
+
+
+def _month_label(month_key: str) -> str:
+    return f"{int(month_key[4:6])}月"
+
+
+def _update_schedule_month_headers(
+    target_sh: gspread.Worksheet,
+    active_months: list[str],
+) -> None:
+    updates = []
+    for index, cells in enumerate(CONFIG["schedule_month_header_cells"]):
+        label = _month_label(active_months[index]) if index < len(active_months) else ""
+        for cell in cells.values():
+            updates.append({"range": cell, "values": [[label]]})
+    target_sh.batch_update(updates, value_input_option="USER_ENTERED")
+
+
 def step1_update_schedule_stats(
     run_dt: datetime, gc: gspread.Client, drive, run_id: str
 ) -> dict:
@@ -697,6 +747,9 @@ def step1_update_schedule_stats(
 
         processed: dict[str, dict[str, str]] = {}
         slots = CONFIG["schedule_import_slots"]
+        active_months = _active_month_keys(run_dt)
+        _update_schedule_month_headers(target_sh, active_months)
+        _clear_unused_schedule_slots(target_sh, active_months, set(found))
         for month, pair in found.items():
             index = _month_offset(run_dt, month)
             if index >= len(slots):
@@ -771,16 +824,32 @@ def step2_write_daily_report(
                 f"找不到今天日期列：{fmt(run_dt, '%Y-%m-%d')}"
             )
 
-        for mp in CONFIG["report_mappings"]:
-            vals = stat_sh.get(mp["source"])
-            if not vals:
-                continue
-            tc = mp["target_col"]
-            report_sh.update(
-                values=vals,
-                range_name=gspread.utils.rowcol_to_a1(row, tc),
-                value_input_option="USER_ENTERED",
-            )
+        active_months = _active_month_keys(run_dt)
+        header_updates = []
+        value_updates = []
+        for index, slot in enumerate(CONFIG["report_month_slots"]):
+            active = index < len(active_months)
+            if index == 0:
+                header_label = "當月"
+            elif index == 1:
+                header_label = "次月"
+            else:
+                header_label = _month_label(active_months[index]) if active else ""
+
+            header_cells = CONFIG["report_month_header_cells"][index]
+            for city in ("taipei", "taichung"):
+                header_updates.append({
+                    "range": header_cells[city],
+                    "values": [[header_label if active else ""]],
+                })
+                values = stat_sh.get(slot[f"{city}_source"]) if active else [["", "", ""]]
+                if not values:
+                    values = [["", "", ""]]
+                start = gspread.utils.rowcol_to_a1(row, slot[f"{city}_target_col"])
+                value_updates.append({"range": start, "values": values})
+
+        report_sh.batch_update(header_updates, value_input_option="USER_ENTERED")
+        report_sh.batch_update(value_updates, value_input_option="USER_ENTERED")
 
         elapsed = (now_tp() - t0).total_seconds()
         checkin_both(gc, run_id, task, "DONE", "SUCCESS", f"row={row}", elapsed)
