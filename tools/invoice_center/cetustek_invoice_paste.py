@@ -73,8 +73,9 @@ async (d) => {
     fire(pay);
   };
   const isTriplicate = Boolean(text(d.buyer_identifier));
+  const hastaxId = isTriplicate ? "hastax2" : (text(d.hastax) === "2" ? "hastax2" : "hastax1");
   forceRadio("invoicetype07");
-  forceRadio(isTriplicate ? "hastax2" : (text(d.hastax) === "2" ? "hastax2" : "hastax1"));
+  forceRadio(hastaxId);
   const taxMap = {"1": "businesstax1", "2": "businesstax2", "3": "businesstax3", "4": "businesstax4"};
   forceRadio(taxMap[text(d.taxtype)] || "businesstax1");
   forceRadio(`roundnum${text(d.roundnum) || "4"}`);
@@ -128,6 +129,11 @@ async (d) => {
   setValue("saleamount", d.saleamount || "");
   setValue("taxamount", d.taxamount || "");
   setValue("totalamount", d.totalamount || "");
+
+  // 鯨躍會在統編、載具或明細異動後重設含稅選項，最後再強制確認。
+  forceRadio(hastaxId);
+  await sleep(100);
+  forceRadio(hastaxId);
 
   const email = document.getElementById("buyer_emailaddress")?.value || "";
   if (email && !email.includes("@")) return {ok: false, message: `Email 欄位異常：${email}`};

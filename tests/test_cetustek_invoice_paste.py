@@ -49,7 +49,8 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             / "tools/invoice_center/tampermonkey_ei_fill.js"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('isTriplicate ? "hastax2"', script)
+        self.assertIn('forceRadio(isTriplicate ? "hastax2"', script)
+        self.assertGreaterEqual(script.count("setTax(d);"), 3)
         self.assertNotIn('isTriplicate ? "hastax1"', script)
         self.assertIn(
             'if (valueText(d.orderdate)) setValue("orderdate", d.orderdate)',
@@ -95,9 +96,10 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         self.assertEqual(page.evaluate.call_args.args[1], payload)
         self.assertIn("setValue", page.evaluate.call_args.args[0])
         self.assertIn(
-            'forceRadio(isTriplicate ? "hastax2"',
+            'const hastaxId = isTriplicate ? "hastax2"',
             page.evaluate.call_args.args[0],
         )
+        self.assertGreaterEqual(page.evaluate.call_args.args[0].count("forceRadio(hastaxId)"), 3)
         self.assertIn(
             'if (text(d.orderdate)) setValue("orderdate", d.orderdate)',
             page.evaluate.call_args.args[0],

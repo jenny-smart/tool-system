@@ -7,7 +7,7 @@
 
 (() => {
   const TOOL_ID = "lemon-ei-fill-btn";
-  const TOOL_VERSION = "2026-09-05.1";
+  const TOOL_VERSION = "2026-10-07.1";
   if (window.__lemonEiToolVersion === TOOL_VERSION) return;
   window.__lemonEiToolVersion = TOOL_VERSION;
 
@@ -166,6 +166,9 @@
     await setCarrier(d);
     setValue("buyer_emailaddress", d.buyer_emailaddress);
     fillDetailHidden(d);
+    setTax(d);
+    await sleep(100);
+    setTax(d);
 
     const email = document.getElementById("buyer_emailaddress")?.value || "";
     if (email && !email.includes("@")) {
