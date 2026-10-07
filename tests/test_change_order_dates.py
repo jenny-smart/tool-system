@@ -44,6 +44,36 @@ class ChangeOrderDatesTest(unittest.TestCase):
                 ns['mark_sheet_row_done']('test', 2, items[0]['kind'])
                 self.assertEqual([c.args[0] for c in ws.update_acell.call_args_list], ['AD2'])
 
+    def test_processed_invoice_only_prepends_finance_note(self):
+        ns = load_functions()
+        raw = [''] * 31
+        raw[1] = '已處理發票'
+        raw[6] = 'LC001'
+        raw[10] = '原發票號碼：AA12345678\n新發票號碼：BB12345678'
+        raw[14] = 'BB12345678'
+        ws = Mock()
+        ws.get_all_values.return_value = [['header'], raw]
+        ns['get_worksheet'] = lambda region: ws
+
+        items = ns['get_pending_rows']('test')
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['kind'], 'invoice')
+        form = {'memoFinance': '原本財務備註', 'serviceNote': '原本客服備註'}
+        controls = {
+            'memoFinance': [{'type': 'textarea', 'context': '財務備註'}],
+            'serviceNote': [{'type': 'textarea', 'context': '客服備註'}],
+        }
+        original_keys = set(form)
+
+        ns['apply_sheet_row_to_form'](form, controls, items[0])
+
+        self.assertEqual(set(form), original_keys)
+        self.assertEqual(form['serviceNote'], '原本客服備註')
+        self.assertEqual(
+            form['memoFinance'],
+            '原發票號碼：AA12345678\n新發票號碼：BB12345678\n原本財務備註',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -257,6 +257,7 @@ STATUS_PENDING_CHARGE = "待收款"
 STATUS_PENDING_REFUND = "待退款"
 STATUS_DONE_CHARGE = "已收款"
 STATUS_DONE_REFUND = "已退款"
+STATUS_DONE_INVOICE = "已處理發票"
 STATUS_PENDING_CHARGE_ALIASES = {STATUS_PENDING_CHARGE, "待加收", "待扣儲值金"}
 STATUS_DONE_CHARGE_ALIASES = {STATUS_DONE_CHARGE, "已加收", "已扣儲值金"}
 STATUS_PENDING_REFUND_ALIASES = {STATUS_PENDING_REFUND, "待返儲值金"}
@@ -264,6 +265,7 @@ STATUS_DONE_REFUND_ALIASES = {STATUS_DONE_REFUND, "已返儲值金"}
 SYNC_STATUSES = {
     *STATUS_PENDING_CHARGE_ALIASES, *STATUS_DONE_CHARGE_ALIASES,
     *STATUS_PENDING_REFUND_ALIASES, *STATUS_DONE_REFUND_ALIASES,
+    STATUS_DONE_INVOICE,
 }
 
 TYPE_FARE = "車馬費發票"
@@ -1225,6 +1227,8 @@ def _row_kind(status: str) -> str:
         return "charge"
     if status in STATUS_PENDING_REFUND_ALIASES | STATUS_DONE_REFUND_ALIASES:
         return "refund"
+    if status == STATUS_DONE_INVOICE:
+        return "invoice"
     return ""
 
 
@@ -1289,11 +1293,13 @@ def get_pending_rows(region: str, row_spec: str = None, ui_logger=None):
         if status not in SYNC_STATUSES:
             continue
 
-        amount = _row_amount(row, status)
-        if not amount:
-            continue
-
         kind = _row_kind(status)
+        amount = _row_amount(row, status)
+        if kind == "invoice":
+            if not (_sheet_cell(row, "K").strip() or _sheet_cell(row, "O").strip()):
+                continue
+        elif not amount:
+            continue
         pending.append({
             "sheet_row": row_no,
             "kind": kind,
@@ -1320,6 +1326,12 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
     charge_date = _normalize_date_value(_sheet_cell(raw, "M"))
     charge_invoice = _sheet_cell(raw, "O").strip()
     refund_date = _normalize_date_value(_sheet_cell(raw, "AC"))
+
+    if status == STATUS_DONE_INVOICE:
+        invoice_note = backend_note or f"已處理發票：{charge_invoice}"
+        _prepend_field(form_data, controls, FIELD_FINANCE_NOTE, invoice_note,
+                       keywords=["財務備註"], ui_logger=ui_logger)
+        return
 
     if status in STATUS_PENDING_CHARGE_ALIASES:
         _set_radio_value(form_data, controls, "isCharge", "1", ui_logger=ui_logger)
