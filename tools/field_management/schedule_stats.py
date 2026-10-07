@@ -4,9 +4,11 @@ import argparse
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+from tools.common.schedule_month_window import resolve_schedule_months
 
 import yaml
 from tools.common.google_auth import get_google_credentials
@@ -30,6 +32,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
+TZ = timezone(timedelta(hours=8))
 
 
 def today_yyyymmdd() -> str:
@@ -302,7 +305,8 @@ PASTE_MAP = {
     12: "ET4",
 }
 
-TARGET_SHEET_NAME = "2026排班統計表"
+def target_sheet_name(date_key: str) -> str:
+    return f"{date_key[:4]}排班統計表"
 
 
 def filter_schedule_values(values: list[list[Any]]) -> list[list[Any]]:
@@ -334,9 +338,14 @@ def run_schedule_stats_for_area(
     source_folder_id = get_folder_id(cfg, "schedule_stats", area)
     target_spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)   # ★ 先取出備用
 
+    run_dt = datetime.strptime(date_key, "%Y%m%d").replace(tzinfo=TZ)
     target_keys = [
-        date_key,
-        add_month_same_day_yyyymmdd(date_key, 1),
+        f"{year}{month:02d}{run_dt.day:02d}"
+        for year, month in resolve_schedule_months(
+            run_dt,
+            os.getenv("SERVICE_SCHEDULE_DEEP_CLEAN_START", ""),
+            warning=log,
+        )
     ]
 
     for key in target_keys:
@@ -346,7 +355,7 @@ def run_schedule_stats_for_area(
         source_file_name = ""
         status = "失敗"
         message = ""
-        target_location = f"{TARGET_SHEET_NAME}!{paste_cell}"
+        target_location = f"{target_sheet_name(key)}!{paste_cell}"
 
         try:
             log(f"開始處理排班統計表：{file_base}")

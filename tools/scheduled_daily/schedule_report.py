@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from tools.common.schedule_month_window import resolve_schedule_months
 
 try:
     import streamlit as st
@@ -141,23 +142,18 @@ def login(email: str, password: str) -> requests.Session:
     return session
 
 
-def get_month_strings():
-    now = datetime.now(TZ)
-
-    this_month = now.strftime("%Y-%m")
-    today_stamp = now.strftime("%Y%m%d")
-
-    if now.month == 12:
-        next_year = now.year + 1
-        next_month_num = 1
-    else:
-        next_year = now.year
-        next_month_num = now.month + 1
-
-    next_month = f"{next_year}-{next_month_num:02d}"
-    next_month_stamp = f"{next_year}{next_month_num:02d}{now.day:02d}"
-
-    return this_month, next_month, today_stamp, next_month_stamp
+def get_schedule_months(now: datetime | None = None) -> list[tuple[str, str]]:
+    """回傳 [(查詢月份 YYYY-MM, 檔名日期 YYYYMMDD), ...]。"""
+    now = now or datetime.now(TZ)
+    targets = resolve_schedule_months(
+        now,
+        os.getenv("SERVICE_SCHEDULE_DEEP_CLEAN_START", ""),
+        warning=log,
+    )
+    return [
+        (f"{year}-{month:02d}", f"{year}{month:02d}{now.day:02d}")
+        for year, month in targets
+    ]
 
 
 def get_drive_service():
@@ -370,12 +366,8 @@ def main():
         "排班統計表",
     )
 
-    this_month, next_month, today_stamp, next_month_stamp = get_month_strings()
-
-    log(f"this_month = {this_month}")
-    log(f"next_month = {next_month}")
-    log(f"today_stamp = {today_stamp}")
-    log(f"next_month_stamp = {next_month_stamp}")
+    schedule_months = get_schedule_months()
+    log(f"schedule_months = {[month for month, _ in schedule_months]}")
     log(f"排班統計表 folder_id = {upload_folder_id}")
 
     regions = load_accounts()
@@ -388,11 +380,9 @@ def main():
         try:
             session = login(email, password)
 
-            current_filename = f"{today_stamp}排班統計表-{city}.xlsx"
-            next_filename = f"{next_month_stamp}排班統計表-{city}.xlsx"
-
-            export_schedule(session, this_month, current_filename, upload_folder_id)
-            export_schedule(session, next_month, next_filename, upload_folder_id)
+            for month, file_date in schedule_months:
+                filename = f"{file_date}排班統計表-{city}.xlsx"
+                export_schedule(session, month, filename, upload_folder_id)
 
             log(f"✅ {city} 全部完成")
 

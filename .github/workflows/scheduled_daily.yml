@@ -43,6 +43,7 @@ jobs:
     timeout-minutes: 60
 
     env:
+      SERVICE_SCHEDULE_DEEP_CLEAN_START: ${{ vars.SERVICE_SCHEDULE_DEEP_CLEAN_START }}
       DAILY_ROOT_FOLDER_ID: "11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc"
 
       # Jenny OAuth：Drive 建立、複製及清理檔案

@@ -24,6 +24,15 @@ Authorization 使用限定 tool-system 的 GitHub Actions read/write token，僅
 此時 GitHub 原生 schedule 的 job 會略過，手動執行仍保留。Router 在該變數未啟用時只接受 dry_run。
 回復：先停用五個外部 job，再將變數設為 false；原 cron 隨即恢復，但仍會有 GitHub 原生觸發延遲。
 
+客服／外場大掃除排班月份可設定 GitHub repository variable
+`SERVICE_SCHEDULE_DEEP_CLEAN_START=YYYY-MM-DD`。指定日之前維持本月＋次月；
+自指定日（含）起，日排程下載、客服匯入與外場排班統計會處理當月至隔年 2 月，
+並逐月縮短（例如 10–2 月、11–2 月、12–2 月）；最低仍保留本月＋次月，
+因此 2 月會處理 2 月與 3 月。季節結束後自動維持本月＋次月。
+月份資料逐月遞補到固定欄位：`台北台中排班統計表`的台北當月固定從 G 欄、
+台中當月固定從 CD 欄開始；`【空班】居家清潔(每日回報)`的台北當月固定從
+K 欄、台中當月固定從 CW 欄開始。
+
 Router 以 concurrency 序列化，使用 scheduled_slot 的執行標題確認是否已派送，避免重試時重複派送。
 既有失敗的工作不自動重跑，應檢查原因後使用 GitHub rerun。
 執行時間在原時段正負 30 分鐘內正常處理；同日延遲超過 30 分鐘仍派送並記錄 warning，不因超時漏跑。跨日期或超前超過 30 分鐘則回報失敗，需確認資料日期後補跑。外部時鐘前後兩分鐘偏差會正規化到最近的十分鐘時段；這與 runner 等待時間是不同的檢查。
