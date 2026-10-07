@@ -140,6 +140,35 @@ def test_awaiting_save_does_not_reissue(monkeypatch, source, backend):
     assert events == ["issued", "completed"]
 
 
+@pytest.mark.parametrize("retry_args", [
+    {"resume_allowance_no": "FP20261007163523"},
+    {"retry_unissued": True},
+])
+def test_confirmed_unsaved_retry_keeps_allowance_and_refills(
+    monkeypatch, source, backend, retry_args,
+):
+    from tools.invoice_center import cetustek_invoice_paste as paste
+    plan, ws, state, events, save = setup_process(monkeypatch, source, backend)
+    plan = prepare("taipei", source, backend, original_action="allowance")
+    old_plan = deepcopy(plan)
+    old_plan["payload"]["orderdate"] = "115/10/20"
+    state.update(plan=old_plan, stage="awaiting_save", allowance_no="FP20261007163523")
+    ws.get.side_effect = lambda address: (
+        [["FP20261007163523"]] if address.startswith("AB") else [row_for(source)]
+    )
+    monkeypatch.setattr(paste, "_extract_invoice_no_for_order", lambda *a: "")
+    monkeypatch.setattr(runner, "allowance_original", lambda *a: pytest.fail("不得重複折讓"))
+
+    runner.process(
+        MagicMock(), ws, plan, state, save, backend, "taipei",
+        **retry_args,
+    )
+
+    assert events == ["allowed", "open", "awaiting_save", "fill", "issued", "completed"]
+    assert state["allowance_no"] == "FP20261007163523"
+    assert state["plan"]["payload"]["orderdate"] == ""
+
+
 @pytest.mark.parametrize("result_ready", [False, True])
 @pytest.mark.parametrize("original_buyer_id", ["", "93370180"])
 def test_cancel_browser_fixture(source, backend, original_buyer_id, result_ready):
