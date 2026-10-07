@@ -278,7 +278,7 @@ class InvoiceSourceSelectionTest(unittest.TestCase):
         self.assertEqual(order.extra["invoice_settings_source_order"], "LC180")
         self.assertEqual(payload.buyer_identifier, "70450942")
         self.assertEqual(payload.buyer_name, "娜亞國際股份有限公司")
-        self.assertEqual(payload.hastax, "1")
+        self.assertEqual(payload.hastax, "2")
 
     def test_stored_value_history_uses_backend_buy_and_paid_filters(self) -> None:
         response = SimpleNamespace(

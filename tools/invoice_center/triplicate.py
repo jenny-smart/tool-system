@@ -91,7 +91,7 @@ def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: s
         payload.buyer_address = ""
     payload.carriertype = payload.carrierid1 = payload.carrierid2 = payload.donatevat = ""
     payload.donate = "0"
-    payload.hastax = "1"
+    payload.hastax = "2"
     payload.saleamount = round_money(total / Decimal("1.05"))
     payload.taxamount = total - payload.saleamount
     payload.totalamount = total

@@ -49,8 +49,8 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             / "tools/invoice_center/tampermonkey_ei_fill.js"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('isTriplicate ? "hastax1"', script)
-        self.assertNotIn('isTriplicate ? "hastax2"', script)
+        self.assertIn('isTriplicate ? "hastax2"', script)
+        self.assertNotIn('isTriplicate ? "hastax1"', script)
         self.assertIn(
             'if (valueText(d.orderdate)) setValue("orderdate", d.orderdate)',
             script,
@@ -95,7 +95,7 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         self.assertEqual(page.evaluate.call_args.args[1], payload)
         self.assertIn("setValue", page.evaluate.call_args.args[0])
         self.assertIn(
-            'forceRadio(isTriplicate ? "hastax1"',
+            'forceRadio(isTriplicate ? "hastax2"',
             page.evaluate.call_args.args[0],
         )
         self.assertIn(
@@ -103,6 +103,20 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             page.evaluate.call_args.args[0],
         )
         page.expect_event.assert_not_called()
+
+    def test_company_invoice_rejects_non_tax_inclusive_form_result(self) -> None:
+        page = _invoice_page("LC001")
+        page.evaluate.return_value = {
+            "ok": True,
+            "message": "已直接填入鯨躍原生表單",
+            "hastax": "1",
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "必須選擇單價含稅"):
+            paste._paste_one(page, json.dumps({
+                "orderid": "LC001",
+                "buyer_identifier": "93370180",
+            }))
 
     def test_paste_rejects_false_success_when_form_order_id_is_blank(self) -> None:
         page = _invoice_page("")
