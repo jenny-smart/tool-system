@@ -153,9 +153,21 @@ def _render_running_steps(run_id):
     st.caption("進度筆數在每組處理完成後更新；逐筆細節可點「查看日誌」。")
 
 
+def _sync_cloud_settings(settings):
+    previous = st.session_state.get('optimized_cloud_settings')
+    if previous != settings:
+        for key in ('optimized_cloud_current_run', 'optimized_cloud_dispatch', 'optimized_cloud_history'):
+            st.session_state.pop(key, None)
+        st.session_state['optimized_cloud_settings'] = settings
+
+
+def _is_current_run(run):
+    return st.session_state.get('optimized_cloud_current_run') == (run['id'], run.get('run_attempt', 1))
+
+
 @st.fragment(run_every="15s")
 def _render_cloud_status():
-    st.markdown("#### 最近一次雲端批次執行")
+    st.markdown("#### 雲端成單進度")
     st.markdown(f"[開啟雲端執行紀錄](https://github.com/{REPO}/actions/workflows/{WORKFLOW})")
     if not _token():
         st.warning("尚未設定 GitHub Token，頁面無法取得執行狀態；請開啟雲端執行紀錄查看。")
@@ -172,10 +184,18 @@ def _render_cloud_status():
             if not run or is_previous or is_older:
                 st.info("啟動要求已送出，等待雲端建立本次執行紀錄；每 15 秒更新。")
                 return
+            st.session_state['optimized_cloud_current_run'] = (run['id'], run.get('run_attempt', 1))
             del st.session_state['optimized_cloud_dispatch']
         if not run:
             st.info("尚無雲端批次執行紀錄。")
             return
+        if run.get('status') == 'completed' and not _is_current_run(run):
+            st.caption('目前設定尚未啟動雲端成單。')
+            if not st.checkbox('顯示上次執行結果（歷史紀錄）', key='optimized_cloud_history'):
+                return
+            st.caption('以下為上次執行結果，與目前設定無關。')
+        elif not _is_current_run(run):
+            st.caption('另有雲端工作仍在執行；以下為該工作的進度，與目前新設定無關。')
         st.markdown(f"[{_run_label(run)}・查看日誌]({run['html_url']})")
         _render_live_progress(run)
         if run.get("status") != "completed":
@@ -270,6 +290,7 @@ def render(env: str):
         modes.append("missing_order")
     filter_mode = "both" if len(modes) == 2 else (modes[0] if modes else "all")
     pending_key = (sheet, region, filter_mode, allow_auto_lemon, retry_failed)
+    _sync_cloud_settings(pending_key + (int(chunk), int(max_rows)))
     st.caption("雲端預設略過 N 欄結果為「失敗」的列；調整後勾選「重試失敗列」，不必清空結果。要補檸檬人時請同時勾選上方補檸檬人選項。同一次執行中，每列處理後不會在下一輪重複執行。")
 
     if st.button("檢查待成單筆數", disabled=not sheet, key="optimized_cloud_check"):
