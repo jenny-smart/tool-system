@@ -161,6 +161,60 @@ def get_spreadsheet_id(
     return str(value).strip()
 
 
+def get_yearly_roster_spreadsheet_id(
+    cfg: dict[str, Any],
+    area: str,
+    run_year: int,
+    drive,
+) -> str:
+    """依執行年份選外場排班檔；未明設 ID 時由目前檔名尋找年度同名檔。"""
+    spreadsheet_ids = cfg.get("spreadsheet_ids", {})
+    yearly = spreadsheet_ids.get("roster_by_year", {})
+    explicit = yearly.get(str(run_year), {}).get(area) if isinstance(yearly, dict) else None
+    if explicit:
+        return str(explicit).strip()
+
+    base_id = get_spreadsheet_id(cfg, "roster", area)
+    metadata = drive.files().get(
+        fileId=base_id,
+        fields="id,name,parents,mimeType",
+        supportsAllDrives=True,
+    ).execute()
+    base_name = str(metadata.get("name", ""))
+    year_match = re.search(r"(?<!\d)(20\d{2})(?!\d)", base_name)
+    base_year = int(year_match.group(1)) if year_match else int(cfg.get("roster_default_year", 0) or 0)
+    if run_year == base_year:
+        return base_id
+    if not year_match:
+        raise RuntimeError(
+            f"{area} 外場排班檔名「{base_name}」沒有年度，且未設定 "
+            f"spreadsheet_ids.roster_by_year.{run_year}.{area}"
+        )
+
+    target_name = base_name[:year_match.start()] + str(run_year) + base_name[year_match.end():]
+    parents = metadata.get("parents") or []
+    parent_query = f" and '{parents[0]}' in parents" if parents else ""
+    escaped_name = target_name.replace("'", "\\'")
+    result = drive.files().list(
+        q=(
+            f"name='{escaped_name}' and trashed=false{parent_query} and "
+            "mimeType='application/vnd.google-apps.spreadsheet'"
+        ),
+        fields="files(id,name)",
+        pageSize=10,
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    matches = result.get("files", [])
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"找不到唯一的 {area} {run_year} 年外場排班檔「{target_name}」；"
+            f"請設定 spreadsheet_ids.roster_by_year.{run_year}.{area}"
+        )
+    log(f"年度切換：{area} → {target_name}")
+    return str(matches[0]["id"])
+
+
 def area_list_from_config(cfg: dict[str, Any]) -> list[str]:
     if cfg.get("areas"):
         return list(cfg["areas"])
@@ -336,9 +390,11 @@ def run_schedule_stats_for_area(
     sheets = get_sheets_service()
 
     source_folder_id = get_folder_id(cfg, "schedule_stats", area)
-    target_spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)   # ★ 先取出備用
-
     run_dt = datetime.strptime(date_key, "%Y%m%d").replace(tzinfo=TZ)
+    target_spreadsheet_id = get_yearly_roster_spreadsheet_id(
+        cfg, area, run_dt.year, drive,
+    )
+    target_sheet = target_sheet_name(date_key)
     target_keys = [
         f"{year}{month:02d}{run_dt.day:02d}"
         for year, month in resolve_schedule_months(
@@ -355,7 +411,7 @@ def run_schedule_stats_for_area(
         source_file_name = ""
         status = "失敗"
         message = ""
-        target_location = f"{target_sheet_name(key)}!{paste_cell}"
+        target_location = f"{target_sheet}!{paste_cell}"
 
         try:
             log(f"開始處理排班統計表：{file_base}")
