@@ -3244,6 +3244,39 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
     return "已寫入「現金缺口試算」工作表：\n" + "\n".join(lines)
 
 
+def _run_new_year_generate(year, rows, *, dry_run, fresh=False, on_progress=None):
+    from config.vip_config import MASTER_SPREADSHEET_ID
+    from services.google_auth import get_drive_service, get_sheets_service
+    from tools.annual_rollover.new_year_generate import Rollover
+
+    year_text = str(year or "").strip()
+    if not re.fullmatch(r"20\d{2}", year_text):
+        raise ValueError("請輸入 4 位數新年度，例如 2027")
+    rows_text = str(rows or "").strip()
+    if not rows_text:
+        raise ValueError("請輸入要處理的列，例如 2、2-8 或 all")
+    log = (lambda msg: on_progress(msg, "info")) if on_progress else print
+    rollover = Rollover(
+        get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
+        int(year_text), dry_run=dry_run, fresh=fresh, log=log,
+    )
+    records = rollover.run(rows_text)
+    missing = [r["old_name"] for r in records if r["new_name"] == "找不到來源"]
+    head = "（預覽，未建立任何檔案）" if dry_run else "已生成並回寫「生成新年度」I欄／「新年度ID」"
+    lines = [f"{r['kind']} {r['old_name']} → {r['new_name']}：{r['new_id']}" for r in records]
+    if missing:
+        lines.append("⚠ 找不到來源：" + "、".join(missing))
+    return f"{year_text} 生成新年度{head}\n" + "\n".join(lines)
+
+
+def run_new_year_generate_preview(*, month="", rollover_rows="", rollover_fresh=False, on_progress=None, **_):
+    return _run_new_year_generate(month, rollover_rows, dry_run=True, fresh=rollover_fresh, on_progress=on_progress)
+
+
+def run_new_year_generate_apply(*, month="", rollover_rows="", rollover_fresh=False, on_progress=None, **_):
+    return _run_new_year_generate(month, rollover_rows, dry_run=False, fresh=rollover_fresh, on_progress=on_progress)
+
+
 def run_cash_gap_and_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     """一次完成兩件事：先試算並寫入「現金缺口試算」表頭 12 列，再查「預收款金額」
     寫進同一張表下方的 5 列。兩者本來就共用同一份「現金缺口試算」分頁、同一組
@@ -3492,6 +3525,8 @@ FINANCE_TASKS = [
     {"name": "【財報】年度review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
     {"name": "【財報】年度review｜分組隱藏當月起實際欄位", "handler": run_review_group_hide_actual, "enabled": True},
     {"name": "【財報】年度review｜分組隱藏當月後預估欄位", "handler": run_review_group_hide_future_forecast, "enabled": True},
+    {"name": "【換年度】生成新年度｜預覽", "handler": run_new_year_generate_preview, "enabled": True},
+    {"name": "【換年度】生成新年度｜執行", "handler": run_new_year_generate_apply, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
@@ -3925,6 +3960,8 @@ end_date_value = None
 monthly_date_mode = "期別"
 resume_target_sheet = ""
 cetustek_serial_qyear = ""
+rollover_rows = ""
+rollover_fresh = False
 cetustek_serial_qmonth = ""
 deep_clean_phase1_start = None
 deep_clean_phase1_end = None
@@ -4336,6 +4373,32 @@ with date_col:
                 "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來；"
                 "「分組隱藏當月後預估欄位」則相反，把該期別之後的「預估」欄位分組收合，"
                 "該期別及之前的預估欄位會維持顯示（若之前被誤收合會自動解開）。"
+            )
+        elif selected_function in ("【換年度】生成新年度｜預覽", "【換年度】生成新年度｜執行"):
+            st.markdown('<div class="field-label">📆 新年度</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "新年度",
+                value=str(today_date.year + 1),
+                placeholder="例如：2027",
+                label_visibility="collapsed",
+                key="finance_rollover_year",
+            )
+            st.markdown('<div class="field-label">📋 「生成新年度」列號</div>', unsafe_allow_html=True)
+            rollover_rows = st.text_input(
+                "列號",
+                value="2",
+                placeholder="例如：2、2-8、2,4、all",
+                label_visibility="collapsed",
+                key="finance_rollover_rows",
+            )
+            rollover_fresh = st.checkbox(
+                "重新生成（已存在的新年度同名資料夾／檔案改名為「_舊版時間」，不刪除）",
+                key="finance_rollover_fresh",
+            )
+            st.caption(
+                "依主控表「生成新年度」分頁，一列一列把前一年度資料夾與檔案複製成新年度，"
+                "結果寫回該列 I 欄，新檔 ID 寫入「新年度ID」C／D 欄。"
+                "先跑「預覽」確認沒問題，再跑「執行」。"
             )
         elif selected_function == "【儲值金】複製期別檔案":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
@@ -5405,6 +5468,10 @@ if run_clicked:
             ):
                 finance_kwargs["qyear"] = cetustek_serial_qyear
                 finance_kwargs["qmonth"] = cetustek_serial_qmonth
+            if selected_function in ("【換年度】生成新年度｜預覽", "【換年度】生成新年度｜執行"):
+                finance_kwargs["rollover_rows"] = rollover_rows
+                finance_kwargs["rollover_fresh"] = rollover_fresh
+                finance_kwargs["on_progress"] = lambda msg, level="info": add_log(msg, level)
             if selected_function == "【富邦銀行】異動 ATM 退款":
                 finance_kwargs["selected_rows"] = fubon_refund_selected_rows
             if selected_function == "【富邦銀行】請款記錄":
