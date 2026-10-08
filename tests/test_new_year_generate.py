@@ -54,6 +54,7 @@ class FakeSheets:
         self.writes = {}
         self.cleared = []
         self.requests = []
+        self.titles = None
 
     def spreadsheets(self):
         return self
@@ -63,8 +64,8 @@ class FakeSheets:
 
     def get(self, spreadsheetId, range=None, fields=None):
         if fields:
-            titles = ["富邦更新", "請款記錄", "零用金", "科目對照表", "股東損益表_財務", "台北財報",
-                      "2026目標", "信用卡", "ATM", "清潔異動"]
+            titles = self.titles or ["富邦更新", "請款記錄", "零用金", "科目對照表", "股東損益表_財務", "台北財報",
+                                     "2026目標", "信用卡", "ATM", "清潔異動"]
             return _Req(lambda: {"sheets": [{"properties": {"title": t, "sheetId": i}}
                                             for i, t in enumerate(titles)]})
         sheet = range.split("!")[0].strip("'")
@@ -210,3 +211,41 @@ def test_filter_by_area():
     assert filter_spec_by_area(office, "台北") is None
     sub = parse_row(4, ["服務分潤表", "ABCDEFGHIJKLMNOPQRSTU", "", "01.台北專員/06.電器專員"], 2026)
     assert filter_spec_by_area(sub, "電器").sub_folder_names == ["06.電器專員"]
+
+
+def test_staff_post_process():
+    drive = FakeDrive([
+        {"id": "y", "name": "2026", "mimeType": FOLDER_MIME, "parent": "STAFFFOLDERID_0123456789"},
+        {"id": "roster26", "name": "2026專員名冊與時數-台北", "mimeType": SHEET_MIME, "parent": "y"},
+        {"id": "salary26", "name": "2026專員薪資相關-台北", "mimeType": SHEET_MIME, "parent": "y"},
+    ])
+    header = [""] * 17 + ["地區"] + [""] * 11 + ["地區"]
+    sheets = FakeSheets({
+        "生成新年度": [[], ["專員名冊/薪資檔", "https://drive.google.com/drive/folders/STAFFFOLDERID_0123456789",
+                         "", "2026", "2026專員名冊與時數-台北，2026專員薪資相關-台北", "台北"]],
+        "新年度ID": [],
+        "2026排班統計表": [header],
+        "工具包押金": [[""], ["2026/02/12不退"], [""], ["已匯款"]],  # G2:G → 第 3、5 列有值
+    })
+    sheets.titles = ["2026排班統計表", "面試紀錄", "202512專員名冊", "202610專員名冊",
+                     "場次和時數", "工具包押金", "202609調薪資料", "202608調薪資料", "202603調薪資料-old"]
+    Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
+    ids = {i["name"]: i["id"] for i in drive.items.values()}
+    roster, salary = ids["2027專員名冊與時數-台北"], ids["2027專員薪資相關-台北"]
+
+    assert (roster, "'2026排班統計表'!R5:Z") in sheets.cleared
+    assert (roster, "'2026排班統計表'!AD5:AL") in sheets.cleared
+    assert (roster, "'面試紀錄'!A2:K") in sheets.cleared
+    r_reqs = [r for fid, r in sheets.requests if fid == roster]
+    assert {"updateSheetProperties": {"properties": {"sheetId": 0, "title": "2027排班統計表"},
+                                      "fields": "title"}} in r_reqs
+    assert [r["deleteSheet"]["sheetId"] for r in r_reqs if "deleteSheet" in r] == [2]  # 202512 刪、202610 留
+
+    assert (salary, "'場次和時數'!E2:AN") in sheets.cleared
+    assert sheets.writes[(salary, "'場次和時數'!A2")] == [[2027]]
+    s_reqs = [r for fid, r in sheets.requests if fid == salary]
+    deleted_rows = [r["deleteDimension"]["range"]["startIndex"] for r in s_reqs if "deleteDimension" in r]
+    assert deleted_rows == [4, 2]  # 第 5、3 列（0-based 4、2），由下往上
+    assert [r["deleteSheet"]["sheetId"] for r in s_reqs if "deleteSheet" in r] == [7]  # 202608 刪
+    assert {"findReplace": {"find": "roster26", "replacement": roster,
+                            "allSheets": True, "includeFormulas": True}} in s_reqs

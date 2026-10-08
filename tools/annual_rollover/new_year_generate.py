@@ -69,6 +69,21 @@ OFFICE_KEEP_SHEETS = [
 ]
 OFFICE_KEEP_CONTAINS = ["儲值金不足"]  # 分頁名稱含這些字也保留（例：202611儲值金不足）
 OFFICE_ATM_CELL = "'ATM'!A2"
+
+# 「專員名冊/薪資檔」：新建立的專員名冊與時數、專員薪資相關整理（取代 H 欄的通用清除）
+STAFF_ROW_NAMES = {"專員名冊/薪資檔"}
+ROSTER_KEYWORD = "專員名冊與時數"
+SALARY_KEYWORD = "專員薪資相關"
+ROSTER_SCHEDULE_SHEET = "{year}排班統計表"   # 改名為新年度；每月「地區」～「備註」清除第 5 列以下
+ROSTER_SCHEDULE_LAST_COL = "GB"
+ROSTER_CLEAR_RANGES = ["'應徵履歷統計'!A2:K", "'104應徵履歷'!A2:G", "'面試紀錄'!A2:K"]
+ROSTER_MONTHLY_SHEET = re.compile(r"^(\d{6})專員名冊$")      # 只留最近一個月
+SALARY_CLEAR_RANGES = ["'場次和時數'!E2:AN", "'教育訓練簽到名單'!A2:AE", "'工具包押金退款'!A2:I",
+                       "'新人實境'!A2:K", "'新人實習'!A2:K", "'外場現金出入記錄'!A2:J"]
+SALARY_YEAR_CELLS = ["'場次和時數'!A2", "'外場現金出入記錄'!A1"]
+SALARY_DEPOSIT_SHEET = "工具包押金"   # G 欄非空白（已全數提領）的列刪除
+SALARY_DEPOSIT_COL = "G"
+SALARY_MONTHLY_SHEET = re.compile(r"^(\d{6})調薪資料$")      # 只留最近一個月
 OFFICE_ATM_FORMULA = (
     '=filter({{filter(importrange("{fid}","富邦更新!$A2:$H"),'
     'importrange("{fid}","富邦更新!$A2:A"))}},{{0,1,1,1,1,1,0,1}})'
@@ -112,6 +127,21 @@ def col_index(letters: str) -> int:
     for ch in letters:
         n = n * 26 + ord(ch) - 64
     return n - 1
+
+
+def col_letters(index: int) -> str:
+    """0-based 欄號 → 欄名（0→A、17→R）。"""
+    letters = ""
+    index += 1
+    while index:
+        index, rem = divmod(index - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
+def month_block_starts(header: List[str]) -> List[int]:
+    """排班統計表第 4 列中每個月「地區」標題的欄號（0-based）。"""
+    return [i for i, v in enumerate(header) if str(v).strip() == "地區"]
 
 
 def a1_to_grid(sheet_id: int, a1: str) -> Dict[str, int]:
@@ -395,7 +425,7 @@ class Rollover:
             new_name = replace_year(file_name, self.prev_year, self.new_year)
             copied, created = self.ensure_copy(source, target_parent["id"], new_name)
             if (created and copied.get("mimeType") == SHEET_MIME
-                    and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES):
+                    and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES | STAFF_ROW_NAMES):
                 self.cleanup_sheets(copied["id"], spec.cleanup_sheets, spec.cleanup_start)
             records.append({"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                             "new_name": copied["name"], "new_id": copied["id"], "created": created})
@@ -403,7 +433,93 @@ class Rollover:
             self.finance_post_process(records)
         if spec.name in OFFICE_ROW_NAMES:
             self.office_post_process(spec, records)
+        if spec.name in STAFF_ROW_NAMES:
+            self.staff_post_process(records)
         return records
+
+    # ---------- 專員名冊／薪資檔專用整理 ----------
+    def _sheet_map(self, file_id: str) -> Dict[str, int]:
+        meta = self.sheets.spreadsheets().get(
+            spreadsheetId=file_id, fields="sheets.properties(sheetId,title)",
+        ).execute()
+        return {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta.get("sheets", [])}
+
+    @staticmethod
+    def _keep_latest_month(sheet_ids: Dict[str, int], pattern: re.Pattern) -> List[str]:
+        monthly = sorted((m.group(1), t) for t in sheet_ids if (m := pattern.match(t)))
+        return [t for _, t in monthly[:-1]]
+
+    def _apply(self, file_id: str, clear: List[str], values: List[Dict[str, Any]],
+               requests: List[Dict[str, Any]]) -> None:
+        if clear:
+            self.sheets.spreadsheets().values().batchClear(
+                spreadsheetId=file_id, body={"ranges": clear}).execute()
+        if values:
+            self._values_batch(file_id, values)
+        if requests:
+            self.sheets.spreadsheets().batchUpdate(
+                spreadsheetId=file_id, body={"requests": requests}).execute()
+
+    def staff_post_process(self, records: List[Dict[str, str]]) -> None:
+        files = [r for r in records if r["kind"] == "檔案" and r.get("new_id")]
+        roster = next((r for r in files if ROSTER_KEYWORD in r["new_name"]), None)
+        salary = next((r for r in files if SALARY_KEYWORD in r["new_name"]), None)
+
+        if roster and roster.get("created"):
+            old_sched = ROSTER_SCHEDULE_SHEET.format(year=self.prev_year)
+            new_sched = ROSTER_SCHEDULE_SHEET.format(year=self.new_year)
+            self.log(f"  {roster['new_name']}：{old_sched}→{new_sched}（各月地區～備註第 5 列以下清除，"
+                     f"未勾班名單保留）；清除 {'、'.join(ROSTER_CLEAR_RANGES)}；只留最近一個月專員名冊")
+            if not self.dry_run:
+                ids = self._sheet_map(roster["new_id"])
+                requests: List[Dict[str, Any]] = []
+                clear = [r for r in ROSTER_CLEAR_RANGES if r.split("!")[0].strip("'") in ids]
+                if old_sched in ids:
+                    requests.append({"updateSheetProperties": {
+                        "properties": {"sheetId": ids[old_sched], "title": new_sched}, "fields": "title"}})
+                    header = self.sheets.spreadsheets().values().get(
+                        spreadsheetId=roster["new_id"],
+                        range=f"'{old_sched}'!A4:{ROSTER_SCHEDULE_LAST_COL}4").execute().get("values", [[]])
+                    for start in month_block_starts(header[0] if header else []):
+                        clear.append(f"'{old_sched}'!{col_letters(start)}5:{col_letters(start + 8)}")
+                stale = self._keep_latest_month(ids, ROSTER_MONTHLY_SHEET)
+                requests += [{"deleteSheet": {"sheetId": ids[t]}} for t in stale]
+                if stale:
+                    self.log(f"  刪除分頁：{'、'.join(stale)}")
+                self._apply(roster["new_id"], clear, [], requests)
+
+        if salary and salary.get("created"):
+            self.log(f"  {salary['new_name']}：清除 {'、'.join(SALARY_CLEAR_RANGES)}；"
+                     f"{'、'.join(SALARY_YEAR_CELLS)} → {self.new_year}；工具包押金 G 欄有值的列刪除；"
+                     f"只留最近一個月調薪資料"
+                     + (f"；公式中專員名冊 ID {roster['old_id']} → {roster['new_id']}" if roster else ""))
+            if not self.dry_run:
+                ids = self._sheet_map(salary["new_id"])
+                clear = [r for r in SALARY_CLEAR_RANGES if r.split("!")[0].strip("'") in ids]
+                values = [{"range": c, "values": [[self.new_year]]}
+                          for c in SALARY_YEAR_CELLS if c.split("!")[0].strip("'") in ids]
+                requests = []
+                if SALARY_DEPOSIT_SHEET in ids:
+                    col = self.sheets.spreadsheets().values().get(
+                        spreadsheetId=salary["new_id"],
+                        range=f"'{SALARY_DEPOSIT_SHEET}'!{SALARY_DEPOSIT_COL}2:{SALARY_DEPOSIT_COL}",
+                    ).execute().get("values", [])
+                    rows = [i + 1 for i, v in enumerate(col, start=1) if v and str(v[0]).strip()]
+                    for row in sorted(rows, reverse=True):  # 由下往上刪，列號才不會位移
+                        requests.append({"deleteDimension": {"range": {
+                            "sheetId": ids[SALARY_DEPOSIT_SHEET], "dimension": "ROWS",
+                            "startIndex": row - 1, "endIndex": row}}})
+                    if rows:
+                        self.log(f"  工具包押金刪除 {len(rows)} 列")
+                stale = self._keep_latest_month(ids, SALARY_MONTHLY_SHEET)
+                requests += [{"deleteSheet": {"sheetId": ids[t]}} for t in stale]
+                if stale:
+                    self.log(f"  刪除分頁：{'、'.join(stale)}")
+                if roster and roster.get("old_id") and roster["old_id"] != roster["new_id"]:
+                    requests.append({"findReplace": {
+                        "find": roster["old_id"], "replacement": roster["new_id"],
+                        "allSheets": True, "includeFormulas": True}})
+                self._apply(salary["new_id"], clear, values, requests)
 
     # ---------- 內勤表單專用整理 ----------
     def find_finance_file(self, area: str) -> Optional[Dict[str, Any]]:
