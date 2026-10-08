@@ -52,6 +52,22 @@ TZ = ZoneInfo("Asia/Taipei")
 _SPLIT_LIST = re.compile(r"[，,、]")
 _SPLIT_SLASH = re.compile(r"[/／]")
 _FOLDER_ID = re.compile(r"/folders/([A-Za-z0-9_-]+)")
+# 「生成新年度」A 欄為這些名稱時，套用財務報表專用整理（取代 H 欄的通用清除）
+FINANCE_ROW_NAMES = {"財務報表"}
+FINANCE_AREAS = ["台北", "台中", "桃園", "新竹", "高雄", "電器"]
+FINANCE_REVIEW_KEYWORD = "目標及review"
+FINANCE_PL_SHEET = "股東損益表_財務"
+FINANCE_PL_CELL = "A241"
+FINANCE_CLEAR_RANGES = {
+    "台北/台中": ["'請款記錄'!A2:J", "'富邦更新'!A2:H", "'元大更新'!A2:I", "'零用金'!A3:F"],
+    "其他": ["'富邦更新'!A2:H", "'元大更新'!A2:I"],
+}
+
+
+def finance_area(name: str) -> str:
+    return next((area for area in FINANCE_AREAS if str(name).startswith(area)), "")
+
+
 _CLEANUP = re.compile(r"移除(.+?)的([A-Z]+\d+):?([A-Z]*\d*)")
 
 
@@ -305,11 +321,78 @@ class Rollover:
                 continue
             new_name = replace_year(file_name, self.prev_year, self.new_year)
             copied, created = self.ensure_copy(source, target_parent["id"], new_name)
-            if created and copied.get("mimeType") == SHEET_MIME:
+            if created and copied.get("mimeType") == SHEET_MIME and spec.name not in FINANCE_ROW_NAMES:
                 self.cleanup_sheets(copied["id"], spec.cleanup_sheets, spec.cleanup_start)
             records.append({"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
-                            "new_name": copied["name"], "new_id": copied["id"]})
+                            "new_name": copied["name"], "new_id": copied["id"], "created": created})
+        if spec.name in FINANCE_ROW_NAMES:
+            self.finance_post_process(records)
         return records
+
+    # ---------- 財務報表專用整理 ----------
+    def _values_batch(self, file_id: str, data: List[Dict[str, Any]]) -> None:
+        self.sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=file_id,
+            body={"valueInputOption": "USER_ENTERED", "data": data},
+        ).execute()
+
+    def _sheet_titles(self, file_id: str) -> set:
+        meta = self.sheets.spreadsheets().get(
+            spreadsheetId=file_id, fields="sheets.properties.title",
+        ).execute()
+        return {s["properties"]["title"] for s in meta.get("sheets", [])}
+
+    def finance_post_process(self, records: List[Dict[str, str]]) -> None:
+        """只處理這次新建立的檔案，避免重跑時清掉新年度已輸入的資料。
+        1. 各區財報清除指定範圍（FINANCE_CLEAR_RANGES）
+        2. 各區財報「股東損益表_財務」A241 改 IMPORTRANGE 前一年度同區財報
+        3. 新年度 review 的各區財報分頁 A1 改 IMPORTRANGE 新年度同區財報
+        """
+        area_files: Dict[str, Dict[str, str]] = {}
+        review: Optional[Dict[str, str]] = None
+        for r in records:
+            if r["kind"] != "檔案" or not r.get("new_id"):
+                continue
+            if FINANCE_REVIEW_KEYWORD in r["new_name"]:
+                review = r
+                continue
+            area = finance_area(r["new_name"])
+            if area:
+                area_files[area] = r
+
+        for area, r in area_files.items():
+            if not r.get("created"):
+                continue
+            clear = FINANCE_CLEAR_RANGES["台北/台中" if area in ("台北", "台中") else "其他"]
+            formula = (f'=IMPORTRANGE("{r["old_id"]}","{FINANCE_PL_SHEET}!$a$1:$aa200")')
+            self.log(f"  {r['new_name']}：清除 {'、'.join(clear)}；"
+                     f"{FINANCE_PL_SHEET}!{FINANCE_PL_CELL} → 前一年度 {r['old_id']}")
+            if self.dry_run:
+                continue
+            titles = self._sheet_titles(r["new_id"])
+            ranges = [rng for rng in clear if rng.split("!")[0].strip("'") in titles]
+            if ranges:
+                self.sheets.spreadsheets().values().batchClear(
+                    spreadsheetId=r["new_id"], body={"ranges": ranges},
+                ).execute()
+            if FINANCE_PL_SHEET in titles:
+                self._values_batch(r["new_id"], [
+                    {"range": f"'{FINANCE_PL_SHEET}'!{FINANCE_PL_CELL}", "values": [[formula]]},
+                ])
+            else:
+                self.log(f"  ⚠ {r['new_name']} 沒有「{FINANCE_PL_SHEET}」分頁")
+
+        if review and review.get("created"):
+            data = []
+            for area, r in area_files.items():
+                formula = f'=IMPORTRANGE("{r["new_id"]}","{FINANCE_PL_SHEET}!$A$1:$z$500")'
+                data.append({"range": f"'{area}財報'!A1", "values": [[formula]]})
+                self.log(f"  {review['new_name']}：{area}財報!A1 → {r['new_name']}")
+            if data and not self.dry_run:
+                titles = self._sheet_titles(review["new_id"])
+                data = [d for d in data if d["range"].split("!")[0].strip("'") in titles]
+                if data:
+                    self._values_batch(review["new_id"], data)
 
     def record_results(self, spec: RowSpec, records: List[Dict[str, str]]) -> None:
         now = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
