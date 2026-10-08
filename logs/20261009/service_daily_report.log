@@ -1,0 +1,6 @@
+2026-10-08 21:33:04 [INFO] === 客服排程系統 run_id=6991bfa3 step=2 台北時間=2026-10-09 05:33:04 ===
+2026-10-08 21:33:04 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-10-08 21:33:04 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-10-08 21:33:21 [INFO] --- Step2_更新每日回報 ---
+2026-10-08 21:33:32 [INFO] Step 2 完成，row=2428（9.3s）
+2026-10-08 21:33:33 [INFO] === 全部完成 run_id=6991bfa3（10.9s）===
