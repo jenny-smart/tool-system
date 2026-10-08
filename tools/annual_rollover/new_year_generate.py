@@ -65,8 +65,9 @@ OFFICE_KEEP_SHEETS = [
     "總覽", "專員班表查詢本月_1009", "專員班表查詢次月_1009", "刷卡連結", "評價預約",
     "信用卡", "ATM", "清潔異動", "專員收現", "專員回報", "專員請款", "清潔客訴",
     "客訴統計表", "專員個人資料", "偏遠區域個案服務規範與流程", "報價單", "工具組內容",
-    "專員跨區表", "裝細評估", "搬家打包評估", "系數參數", "外場排程系統執行Log",
+    "專員跨區表", "裝細評估", "搬家打包評估", "系數參數", "外場排程系統執行Log", "週末提醒",
 ]
+OFFICE_KEEP_CONTAINS = ["儲值金不足"]  # 分頁名稱含這些字也保留（例：202611儲值金不足）
 OFFICE_ATM_CELL = "'ATM'!A2"
 OFFICE_ATM_FORMULA = (
     '=filter({{filter(importrange("{fid}","富邦更新!$A2:$H"),'
@@ -424,12 +425,13 @@ class Rollover:
             requests: List[Dict[str, Any]] = []
             old_goal = f"{self.prev_year}目標"
             keep = set(OFFICE_KEEP_SHEETS) | {old_goal}
-            removed = [t for t in sheet_ids if t not in keep]
+            removed = [t for t in sheet_ids
+                       if t not in keep and not any(k in t for k in OFFICE_KEEP_CONTAINS)]
             if len(removed) < len(sheet_ids):  # 至少留一張才刪
                 requests += [{"deleteSheet": {"sheetId": sheet_ids[t]}} for t in removed]
                 if removed:
                     self.log(f"  刪除分頁：{'、'.join(removed)}")
-                sheet_ids = {t: i for t, i in sheet_ids.items() if t in keep}
+                sheet_ids = {t: i for t, i in sheet_ids.items() if t not in removed}
             if old_goal in sheet_ids:
                 requests.append({"updateSheetProperties": {
                     "properties": {"sheetId": sheet_ids[old_goal], "title": f"{self.new_year}目標"},
