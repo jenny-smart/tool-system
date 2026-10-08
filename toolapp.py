@@ -216,6 +216,11 @@ DEFAULT_CONFIG = {
             "type": "staff_payroll",
             "enabled": True,
         },
+        {
+            "name": "生成新年度",
+            "type": "new_year_rollover",
+            "enabled": True,
+        },
     ]
 }
 
@@ -1286,6 +1291,7 @@ def get_system_type_label(system_type: str) -> str:
         "finance_management": "財務管理",
         "orders_memo_system": "訂單系統",
         "staff_payroll": "內勤薪資管理",
+        "new_year_rollover": "生成新年度",
     }
     return mapping.get(system_type, system_type or "未設定")
 
@@ -3244,6 +3250,41 @@ def run_cash_gap_worksheet(*, month="", start_date=None, end_date=None, area="�
     return "已寫入「現金缺口試算」工作表：\n" + "\n".join(lines)
 
 
+# 「生成新年度」系統：功能名稱 → 主控表「生成新年度」分頁 A 欄名稱
+NEW_YEAR_FUNCTION_ROWS = {
+    "財務報表": ["財務報表"],
+    "內勤表單": ["內勤表單"],
+    "專員表單": ["專員名冊/薪資檔"],
+    "服務分潤表": ["服務分潤表"],
+    "內勤薪資": ["內勤薪資"],
+}
+
+
+def run_new_year_generate(year, function_name, *, dry_run, fresh=False, on_progress=None):
+    from config.vip_config import MASTER_SPREADSHEET_ID
+    from services.google_auth import get_drive_service, get_sheets_service
+    from tools.annual_rollover.new_year_generate import Rollover
+
+    year_text = str(year or "").strip()
+    if not re.fullmatch(r"20\d{2}", year_text):
+        raise ValueError("請輸入 4 位數新年度，例如 2027")
+    names = NEW_YEAR_FUNCTION_ROWS.get(function_name)
+    if not names:
+        raise ValueError(f"未知功能：{function_name}")
+    log = (lambda msg: on_progress(msg, "info")) if on_progress else print
+    rollover = Rollover(
+        get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
+        int(year_text), dry_run=dry_run, fresh=fresh, log=log,
+    )
+    records = rollover.run("all", names=names)
+    missing = [r["old_name"] for r in records if r["new_name"] == "找不到來源"]
+    head = "（預覽，未建立任何檔案）" if dry_run else "完成，已回寫「生成新年度」I欄／「新年度ID」"
+    lines = [f"{r['kind']} {r['old_name']} → {r['new_name']}：{r['new_id']}" for r in records]
+    if missing:
+        lines.append("⚠ 找不到來源：" + "、".join(missing))
+    return f"{year_text} {function_name}{head}\n" + "\n".join(lines)
+
+
 def run_cash_gap_and_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     """一次完成兩件事：先試算並寫入「現金缺口試算」表頭 12 列，再查「預收款金額」
     寫進同一張表下方的 5 列。兩者本來就共用同一份「現金缺口試算」分頁、同一組
@@ -3577,6 +3618,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "內勤薪資單通知信",
         "內勤元大帳戶",
     ],
+    "new_year_rollover": list(NEW_YEAR_FUNCTION_ROWS),
 }
 
 DAILY_SCRIPT_MAP = {
@@ -4667,6 +4709,27 @@ with date_col:
             st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
             st.info("功能開發中，尚未接上實際執行邏輯。", icon="🚧")
 
+    elif system_type == "new_year_rollover":
+        st.markdown('<div class="field-label">📆 新年度</div>', unsafe_allow_html=True)
+        period = st.text_input(
+            "新年度",
+            value=str(datetime.now(TW_TZ).year + 1),
+            placeholder="例如：2027",
+            label_visibility="collapsed",
+            key="new_year_rollover_year",
+        )
+        new_year_mode = st.radio(
+            "模式", ["預覽", "執行"], horizontal=True, key="new_year_rollover_mode",
+        )
+        new_year_fresh = st.checkbox(
+            "重新生成（已存在的新年度同名資料夾／檔案改名為「_舊版時間」，不刪除）",
+            key="new_year_rollover_fresh",
+        )
+        st.caption(
+            "依主控表「生成新年度」分頁，把前一年度資料夾與檔案複製成新年度，"
+            "結果寫回該列 I 欄，新檔 ID 寫入「新年度ID」C／D 欄。先「預覽」確認，再「執行」。"
+        )
+
     elif system_type == "staff_payroll":
         st.markdown('<div class="field-label">📆 年月（YYYYMM）</div>', unsafe_allow_html=True)
         period = st.text_input(
@@ -5108,7 +5171,7 @@ if can_access_page("settings"):
         system_type_options = [
             "vip", "daily_scheduler", "monthly_scheduler",
             "field_daily_schedule", "service_schedule", "gmail_401",
-            "finance_management",
+            "finance_management", "new_year_rollover",
         ]
 
         if st.session_state.adding_system:
@@ -5496,6 +5559,23 @@ if run_clicked:
                 add_log(f"執行失敗：{e}", "error")
                 add_log(traceback.format_exc(), "error")
 
+        st.rerun()
+
+    if system_type == "new_year_rollover":
+        dry_run = st.session_state.get("new_year_rollover_mode", "預覽") == "預覽"
+        fresh = bool(st.session_state.get("new_year_rollover_fresh", False))
+        add_log(f"開始執行：{system_name} / {selected_function} / {period} / {'預覽' if dry_run else '執行'}"
+                f"{' / 重新生成' if fresh else ''}")
+        with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
+            try:
+                result = run_new_year_generate(
+                    period, selected_function, dry_run=dry_run, fresh=fresh,
+                    on_progress=lambda msg, level="info": add_log(msg, level),
+                )
+                add_log(result, "warning" if "找不到來源" in result else "success")
+            except Exception as e:
+                add_log(f"執行失敗：{e}", "error")
+                add_log(traceback.format_exc(), "error")
         st.rerun()
 
     if system_type == "staff_payroll":

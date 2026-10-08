@@ -1,0 +1,58 @@
+name: New Year Generate
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "新年度（例：2027）"
+        required: true
+        type: string
+      rows:
+        description: "「生成新年度」要處理的列（例：2、2-8、2,4、all）"
+        required: true
+        type: string
+        default: "2"
+      dry_run:
+        description: "只預覽，不建立檔案、不回寫"
+        required: false
+        type: boolean
+        default: true
+      fresh:
+        description: "已存在的新年度同名資料夾／檔案改名為舊版後重新生成（不刪除）"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 生成新年度資料夾與檔案
+        run: |
+          args="--year ${{ inputs.year }} --rows ${{ inputs.rows }}"
+          if [ "${{ inputs.dry_run }}" = "true" ]; then args="$args --dry-run"; fi
+          if [ "${{ inputs.fresh }}" = "true" ]; then args="$args --fresh"; fi
+          python -u -m tools.annual_rollover.new_year_generate $args
