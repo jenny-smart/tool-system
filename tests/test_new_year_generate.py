@@ -1,3 +1,5 @@
+import re
+
 from tools.annual_rollover.new_year_generate import (
     FOLDER_MIME, SHEET_MIME, Rollover, parse_row, parse_rows_arg, strip_year,
 )
@@ -20,6 +22,9 @@ class FakeDrive:
         return self
 
     def list(self, q, **_):
+        if q.startswith("name = "):
+            name = q.split("'")[1]
+            return _Req(lambda: {"files": [i for i in self.items.values() if i["name"] == name]})
         parent = q.split("'")[1]
         return _Req(lambda: {"files": [i for i in self.items.values() if i["parent"] == parent]})
 
@@ -48,6 +53,7 @@ class FakeSheets:
         self.tables = tables
         self.writes = {}
         self.cleared = []
+        self.requests = []
 
     def spreadsheets(self):
         return self
@@ -57,8 +63,10 @@ class FakeSheets:
 
     def get(self, spreadsheetId, range=None, fields=None):
         if fields:
-            titles = ["富邦更新", "請款記錄", "零用金", "科目對照表", "股東損益表_財務", "台北財報"]
-            return _Req(lambda: {"sheets": [{"properties": {"title": t}} for t in titles]})
+            titles = ["富邦更新", "請款記錄", "零用金", "科目對照表", "股東損益表_財務", "台北財報",
+                      "2026目標", "信用卡", "ATM", "清潔異動"]
+            return _Req(lambda: {"sheets": [{"properties": {"title": t, "sheetId": i}}
+                                            for i, t in enumerate(titles)]})
         sheet = range.split("!")[0].strip("'")
         return _Req(lambda: {"values": self.tables.get(sheet, [])})
 
@@ -70,6 +78,9 @@ class FakeSheets:
 
     def batchUpdate(self, spreadsheetId, body):
         def run():
+            if "requests" in body:
+                self.requests.extend((spreadsheetId, r) for r in body["requests"])
+                return
             for d in body["data"]:
                 self.writes[(spreadsheetId, d["range"])] = d["values"]
         return _Req(run)
@@ -110,7 +121,9 @@ def test_generate_copies_records_and_is_idempotent():
     assert names["2027年"]["parent"] == "ROOTFOLDERID_0123456789"
     assert names["台北2027財報"]["parent"] == names["2027年"]["id"]
     assert names["2027目標及review"]["parent"] == names["2027年"]["id"]
-    assert sheets.writes["'新年度ID'!C1:D1"] == [[names["台北2027財報"]["id"], "台北2027財報"]]
+    new_id_row = sheets.writes["'新年度ID'!C1:E1"][0]
+    assert new_id_row[:2] == [names["台北2027財報"]["id"], "台北2027財報"]
+    assert re.fullmatch(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}", new_id_row[2])
     tp = names["台北2027財報"]["id"]
     rv = names["2027目標及review"]["id"]
     assert (tp, "'富邦更新'!A2:H") in sheets.cleared
@@ -155,3 +168,31 @@ def test_run_filters_by_name():
         assert False
     except RuntimeError:
         pass
+
+
+def test_office_form_post_process():
+    drive = FakeDrive([
+        {"id": "f", "name": "2026專員回報表單", "mimeType": FOLDER_MIME, "parent": "OFFICEFOLDERID_0123456789"},
+        {"id": "of", "name": "2026台北內勤工作表單", "mimeType": SHEET_MIME, "parent": "OFFICEFOLDERID_0123456789"},
+        {"id": "fin27", "name": "台北2027財報", "mimeType": SHEET_MIME, "parent": "x"},
+    ])
+    sheets = FakeSheets({
+        "生成新年度": [
+            [],
+            ["內勤表單", "https://drive.google.com/drive/folders/OFFICEFOLDERID_0123456789", "",
+             "2026專員回報表單", "2026台北內勤工作表單", "台北"],
+        ],
+        "新年度ID": [],
+    })
+    Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
+    new_id = next(i["id"] for i in drive.items.values() if i["name"] == "2027台北內勤工作表單")
+    assert (new_id, "'信用卡'!A2:J") in sheets.cleared
+    reqs = [r for fid, r in sheets.requests if fid == new_id]
+    assert {"updateSheetProperties": {"properties": {"sheetId": 6, "title": "2027目標"}, "fields": "title"}} in reqs
+    deleted = {r["deleteSheet"]["sheetId"] for r in reqs if "deleteSheet" in r}
+    assert deleted == {0, 1, 2, 3, 4, 5}  # 富邦更新…台北財報 不在保留清單
+    fill = next(r["repeatCell"] for r in reqs if "repeatCell" in r)
+    assert fill["range"] == {"sheetId": 9, "startRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 31}
+    atm = sheets.writes[(new_id, "'ATM'!A2")][0][0]
+    assert atm.startswith('=filter({filter(importrange("fin27","富邦更新!$A2:$H")')
+    assert atm.endswith('},{0,1,1,1,1,1,0,1})')
