@@ -58,8 +58,9 @@ FINANCE_AREAS = ["台北", "台中", "桃園", "新竹", "高雄", "電器"]
 FINANCE_REVIEW_KEYWORD = "目標及review"
 FINANCE_PL_SHEET = "股東損益表_財務"
 FINANCE_PL_CELL = "A241"
+FINANCE_YEAR_CELLS = ["'科目對照表'!E1"]  # 新年度檔案中改成新年度年份
 FINANCE_CLEAR_RANGES = {
-    "台北/台中": ["'請款記錄'!A2:J", "'富邦更新'!A2:H", "'元大更新'!A2:I", "'零用金'!A3:F"],
+    "台北/台中": ["'請款記錄'!A2:J", "'富邦更新'!A2:H", "'元大更新'!A2:I", "'零用金'!A3:H"],
     "其他": ["'富邦更新'!A2:H", "'元大更新'!A2:I"],
 }
 
@@ -102,9 +103,18 @@ def replace_year(name: str, prev_year: int, new_year: int) -> str:
     return re.sub(rf"(?<!\d){prev_year}(?!\d)", str(new_year), name)
 
 
+# 「新年度ID」B 欄與實際檔名的同義寫法
+NAME_ALIASES = {"家電": "電器"}
+
+
 def strip_year(name: str) -> str:
-    """去掉年份與空白，用來比對「2026台北財報」與「台北2026財報」這類寫法。"""
-    return re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", str(name or "")))
+    """去掉年份、空白與結尾「檔」字並統一同義字，用來比對「2026台北財報」與
+    「台北2026財報」、「2026家電財報」與「電器2026財報」、「2026目標及review檔」
+    與「2026目標及review」這類寫法。"""
+    text = re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", str(name or "")))
+    for alias, canonical in NAME_ALIASES.items():
+        text = text.replace(alias, canonical)
+    return re.sub(r"檔$", "", text)
 
 
 def parse_cleanup(text: str) -> Tuple[List[str], str]:
@@ -366,7 +376,8 @@ class Rollover:
             clear = FINANCE_CLEAR_RANGES["台北/台中" if area in ("台北", "台中") else "其他"]
             formula = (f'=IMPORTRANGE("{r["old_id"]}","{FINANCE_PL_SHEET}!$a$1:$aa200")')
             self.log(f"  {r['new_name']}：清除 {'、'.join(clear)}；"
-                     f"{FINANCE_PL_SHEET}!{FINANCE_PL_CELL} → 前一年度 {r['old_id']}")
+                     f"{FINANCE_PL_SHEET}!{FINANCE_PL_CELL} → 前一年度 {r['old_id']}；"
+                     f"{'、'.join(FINANCE_YEAR_CELLS)} → {self.new_year}")
             if self.dry_run:
                 continue
             titles = self._sheet_titles(r["new_id"])
@@ -375,12 +386,14 @@ class Rollover:
                 self.sheets.spreadsheets().values().batchClear(
                     spreadsheetId=r["new_id"], body={"ranges": ranges},
                 ).execute()
+            data = [{"range": cell, "values": [[self.new_year]]}
+                    for cell in FINANCE_YEAR_CELLS if cell.split("!")[0].strip("'") in titles]
             if FINANCE_PL_SHEET in titles:
-                self._values_batch(r["new_id"], [
-                    {"range": f"'{FINANCE_PL_SHEET}'!{FINANCE_PL_CELL}", "values": [[formula]]},
-                ])
+                data.append({"range": f"'{FINANCE_PL_SHEET}'!{FINANCE_PL_CELL}", "values": [[formula]]})
             else:
                 self.log(f"  ⚠ {r['new_name']} 沒有「{FINANCE_PL_SHEET}」分頁")
+            if data:
+                self._values_batch(r["new_id"], data)
 
         if review and review.get("created"):
             data = []

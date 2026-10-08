@@ -57,7 +57,7 @@ class FakeSheets:
 
     def get(self, spreadsheetId, range=None, fields=None):
         if fields:
-            titles = ["富邦更新", "請款記錄", "股東損益表_財務", "台北財報"]
+            titles = ["富邦更新", "請款記錄", "零用金", "科目對照表", "股東損益表_財務", "台北財報"]
             return _Req(lambda: {"sheets": [{"properties": {"title": t}} for t in titles]})
         sheet = range.split("!")[0].strip("'")
         return _Req(lambda: {"values": self.tables.get(sheet, [])})
@@ -99,6 +99,8 @@ def test_parse_helpers():
     assert spec.sub_folder_names == ["台北", "桃園"]
     assert parse_rows_arg("2-4,7", 10) == [2, 3, 4, 7]
     assert strip_year("2026台北財報") == "台北財報" == strip_year("台北2026財報")
+    assert strip_year("2026家電財報") == strip_year("電器2026財報")
+    assert strip_year("2026目標及review檔") == strip_year("2026目標及review")
 
 
 def test_generate_copies_records_and_is_idempotent():
@@ -114,6 +116,8 @@ def test_generate_copies_records_and_is_idempotent():
     assert (tp, "'富邦更新'!A2:H") in sheets.cleared
     assert (tp, "'請款記錄'!A2:J") in sheets.cleared
     assert (tp, "'元大更新'!A2:I") not in sheets.cleared  # 沒有這個分頁就略過
+    assert (tp, "'零用金'!A3:H") in sheets.cleared
+    assert sheets.writes[(tp, "'科目對照表'!E1")] == [[2027]]
     assert sheets.writes[(tp, "'股東損益表_財務'!A241")] == [
         ['=IMPORTRANGE("tp","股東損益表_財務!$a$1:$aa200")']]
     assert sheets.writes[(rv, "'台北財報'!A1")] == [
