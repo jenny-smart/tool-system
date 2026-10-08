@@ -1,3 +1,5 @@
+import re
+
 from tools.annual_rollover.new_year_generate import (
     FOLDER_MIME, SHEET_MIME, Rollover, parse_row, parse_rows_arg, strip_year,
 )
@@ -119,7 +121,9 @@ def test_generate_copies_records_and_is_idempotent():
     assert names["2027年"]["parent"] == "ROOTFOLDERID_0123456789"
     assert names["台北2027財報"]["parent"] == names["2027年"]["id"]
     assert names["2027目標及review"]["parent"] == names["2027年"]["id"]
-    assert sheets.writes["'新年度ID'!C1:D1"] == [[names["台北2027財報"]["id"], "台北2027財報"]]
+    new_id_row = sheets.writes["'新年度ID'!C1:E1"][0]
+    assert new_id_row[:2] == [names["台北2027財報"]["id"], "台北2027財報"]
+    assert re.fullmatch(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}", new_id_row[2])
     tp = names["台北2027財報"]["id"]
     rv = names["2027目標及review"]["id"]
     assert (tp, "'富邦更新'!A2:H") in sheets.cleared

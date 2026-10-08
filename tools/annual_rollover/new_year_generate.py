@@ -19,7 +19,7 @@ tools/annual_rollover/new_year_generate.py
   I 生成結果：程式回寫（時間、新資料夾與檔案 ID）
 
 「新年度ID」：A 地區、B 前一年度檔名。程式會在 B 名稱（去掉年份後）與
-複製來源相符的列，回寫 C 新年度 ID、D 新年度檔名。
+複製來源相符的列，回寫 C 新年度 ID、D 新年度檔名、E 生成時間。
 
 用法：
   python -m tools.annual_rollover.new_year_generate --year 2027 --rows 2 --dry-run
@@ -537,13 +537,15 @@ class Rollover:
         if not files:
             return 0
         rows = self.read(f"'{NEW_ID_SHEET}'!A1:D")
+        stamp = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
         updated = 0
         for index, row in enumerate(rows, start=1):
             old_label = (row[1] if len(row) > 1 else "").split("／")[0]
             record = files.get(strip_year(old_label))
             if not record:
                 continue
-            self.write(f"'{NEW_ID_SHEET}'!C{index}:D{index}", [[record["new_id"], record["new_name"]]])
+            self.write(f"'{NEW_ID_SHEET}'!C{index}:E{index}",
+                       [[record["new_id"], record["new_name"], stamp]])
             updated += 1
         return updated
 
