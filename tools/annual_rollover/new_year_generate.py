@@ -58,8 +58,9 @@ FINANCE_AREAS = ["台北", "台中", "桃園", "新竹", "高雄", "電器"]
 FINANCE_REVIEW_KEYWORD = "目標及review"
 FINANCE_PL_SHEET = "股東損益表_財務"
 FINANCE_PL_CELL = "A241"
+FINANCE_YEAR_CELLS = ["'科目對照表'!E1"]  # 新年度檔案中改成新年度年份
 FINANCE_CLEAR_RANGES = {
-    "台北/台中": ["'請款記錄'!A2:J", "'富邦更新'!A2:H", "'元大更新'!A2:I", "'零用金'!A3:F"],
+    "台北/台中": ["'請款記錄'!A2:J", "'富邦更新'!A2:H", "'元大更新'!A2:I", "'零用金'!A3:H"],
     "其他": ["'富邦更新'!A2:H", "'元大更新'!A2:I"],
 }
 
@@ -366,7 +367,8 @@ class Rollover:
             clear = FINANCE_CLEAR_RANGES["台北/台中" if area in ("台北", "台中") else "其他"]
             formula = (f'=IMPORTRANGE("{r["old_id"]}","{FINANCE_PL_SHEET}!$a$1:$aa200")')
             self.log(f"  {r['new_name']}：清除 {'、'.join(clear)}；"
-                     f"{FINANCE_PL_SHEET}!{FINANCE_PL_CELL} → 前一年度 {r['old_id']}")
+                     f"{FINANCE_PL_SHEET}!{FINANCE_PL_CELL} → 前一年度 {r['old_id']}；"
+                     f"{'、'.join(FINANCE_YEAR_CELLS)} → {self.new_year}")
             if self.dry_run:
                 continue
             titles = self._sheet_titles(r["new_id"])
@@ -375,12 +377,14 @@ class Rollover:
                 self.sheets.spreadsheets().values().batchClear(
                     spreadsheetId=r["new_id"], body={"ranges": ranges},
                 ).execute()
+            data = [{"range": cell, "values": [[self.new_year]]}
+                    for cell in FINANCE_YEAR_CELLS if cell.split("!")[0].strip("'") in titles]
             if FINANCE_PL_SHEET in titles:
-                self._values_batch(r["new_id"], [
-                    {"range": f"'{FINANCE_PL_SHEET}'!{FINANCE_PL_CELL}", "values": [[formula]]},
-                ])
+                data.append({"range": f"'{FINANCE_PL_SHEET}'!{FINANCE_PL_CELL}", "values": [[formula]]})
             else:
                 self.log(f"  ⚠ {r['new_name']} 沒有「{FINANCE_PL_SHEET}」分頁")
+            if data:
+                self._values_batch(r["new_id"], data)
 
         if review and review.get("created"):
             data = []
