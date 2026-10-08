@@ -54,6 +54,24 @@ _SPLIT_SLASH = re.compile(r"[/／]")
 _FOLDER_ID = re.compile(r"/folders/([A-Za-z0-9_-]+)")
 # 「生成新年度」A 欄為這些名稱時，套用財務報表專用整理（取代 H 欄的通用清除）
 FINANCE_ROW_NAMES = {"財務報表"}
+# 「內勤表單」：新建立的內勤工作表單整理（取代 H 欄的通用清除）
+OFFICE_ROW_NAMES = {"內勤表單"}
+OFFICE_CLEAR_RANGES = ["'信用卡'!A2:J", "'專員收現'!A2:P", "'專員回報'!A2:P",
+                       "'專員請款'!A2:AS", "'清潔客訴'!A3:AN"]
+OFFICE_CLEAR_WITH_FILL = [("清潔異動", "A2:AE")]  # 清除內容＋底色
+# 新內勤工作表單只保留這些分頁（加上「{前一年度}目標」改名後的「{新年度}目標」），其餘刪除；
+# 原檔沒有的分頁略過
+OFFICE_KEEP_SHEETS = [
+    "總覽", "專員班表查詢本月_1009", "專員班表查詢次月_1009", "刷卡連結", "評價預約",
+    "信用卡", "ATM", "清潔異動", "專員收現", "專員回報", "專員請款", "清潔客訴",
+    "客訴統計表", "專員個人資料", "偏遠區域個案服務規範與流程", "報價單", "工具組內容",
+    "專員跨區表", "裝細評估", "搬家打包評估", "系數參數", "外場排程系統執行Log",
+]
+OFFICE_ATM_CELL = "'ATM'!A2"
+OFFICE_ATM_FORMULA = (
+    '=filter({{filter(importrange("{fid}","富邦更新!$A2:$H"),'
+    'importrange("{fid}","富邦更新!$A2:A"))}},{{0,1,1,1,1,1,0,1}})'
+)
 FINANCE_AREAS = ["台北", "台中", "桃園", "新竹", "高雄", "電器"]
 FINANCE_REVIEW_KEYWORD = "目標及review"
 FINANCE_PL_SHEET = "股東損益表_財務"
@@ -85,6 +103,26 @@ class RowSpec:
     file_names: List[str] = field(default_factory=list)
     cleanup_sheets: List[str] = field(default_factory=list)
     cleanup_start: str = "A2"
+    area: str = ""  # F 欄（台北/台中…），單一地區時用來找該區財報
+
+
+def col_index(letters: str) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+
+def a1_to_grid(sheet_id: int, a1: str) -> Dict[str, int]:
+    """「A2:AE」→ GridRange（0-based、結束不含；沒寫結束列＝到底）。"""
+    start, end = a1.split(":")
+    s_col, s_row = re.match(r"([A-Z]+)(\d+)", start).groups()
+    e_col, e_row = re.match(r"([A-Z]+)(\d*)", end).groups()
+    grid = {"sheetId": sheet_id, "startRowIndex": int(s_row) - 1,
+            "startColumnIndex": col_index(s_col), "endColumnIndex": col_index(e_col) + 1}
+    if e_row:
+        grid["endRowIndex"] = int(e_row)
+    return grid
 
 
 def split_list(text: str, pattern: re.Pattern = _SPLIT_LIST) -> List[str]:
@@ -143,6 +181,7 @@ def parse_row(row_number: int, row: List[str], prev_year: int) -> Optional[RowSp
         file_names=split_list(cells[4]),
         cleanup_sheets=cleanup_sheets,
         cleanup_start=cleanup_start,
+        area=cells[5] if "/" not in cells[5] and "／" not in cells[5] else "",
     )
 
 
@@ -331,13 +370,91 @@ class Rollover:
                 continue
             new_name = replace_year(file_name, self.prev_year, self.new_year)
             copied, created = self.ensure_copy(source, target_parent["id"], new_name)
-            if created and copied.get("mimeType") == SHEET_MIME and spec.name not in FINANCE_ROW_NAMES:
+            if (created and copied.get("mimeType") == SHEET_MIME
+                    and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES):
                 self.cleanup_sheets(copied["id"], spec.cleanup_sheets, spec.cleanup_start)
             records.append({"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                             "new_name": copied["name"], "new_id": copied["id"], "created": created})
         if spec.name in FINANCE_ROW_NAMES:
             self.finance_post_process(records)
+        if spec.name in OFFICE_ROW_NAMES:
+            self.office_post_process(spec, records)
         return records
+
+    # ---------- 內勤表單專用整理 ----------
+    def find_finance_file(self, area: str) -> Optional[Dict[str, Any]]:
+        """找新年度該區財報（例：台北2027財報），需先跑過「財務報表」。"""
+        names = [f"{area}{self.new_year}財報"] + [
+            f"{alias}{self.new_year}財報" for alias, canon in NAME_ALIASES.items() if canon == area]
+        for name in names:
+            res = self.drive.files().list(
+                q=f"name = '{name}' and mimeType = '{SHEET_MIME}' and trashed = false",
+                fields="files(id,name)", pageSize=5,
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
+            ).execute()
+            files = res.get("files", [])
+            if files:
+                return files[0]
+        return None
+
+    def office_post_process(self, spec: RowSpec, records: List[Dict[str, str]]) -> None:
+        """只處理這次新建立的內勤工作表單：
+        0. 只保留 OFFICE_KEEP_SHEETS（＋目標分頁），其餘分頁刪除
+        1. 「{前一年度}目標」分頁改名為「{新年度}目標」
+        2. 清除 OFFICE_CLEAR_RANGES；清潔異動 A2:AE 清內容與底色
+        3. ATM!A2 改成 FILTER(IMPORTRANGE(新年度該區財報 富邦更新))
+        """
+        targets = [r for r in records if r["kind"] == "檔案" and r.get("created") and r.get("new_id")]
+        if not targets:
+            return
+        finance = self.find_finance_file(spec.area) if spec.area else None
+        if spec.area and not finance:
+            self.log(f"  ⚠ 找不到 {spec.area}{self.new_year}財報，ATM!A2 不更新（請先跑「財務報表」）")
+        for r in targets:
+            self.log(f"  {r['new_name']}：{self.prev_year}目標→{self.new_year}目標；清除 "
+                     f"{'、'.join(OFFICE_CLEAR_RANGES)}、清潔異動 A2:AE（含底色）"
+                     + (f"；ATM!A2 → {finance['name']}" if finance else ""))
+            if self.dry_run:
+                continue
+            meta = self.sheets.spreadsheets().get(
+                spreadsheetId=r["new_id"], fields="sheets.properties(sheetId,title)",
+            ).execute()
+            sheet_ids = {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta.get("sheets", [])}
+
+            requests: List[Dict[str, Any]] = []
+            old_goal = f"{self.prev_year}目標"
+            keep = set(OFFICE_KEEP_SHEETS) | {old_goal}
+            removed = [t for t in sheet_ids if t not in keep]
+            if len(removed) < len(sheet_ids):  # 至少留一張才刪
+                requests += [{"deleteSheet": {"sheetId": sheet_ids[t]}} for t in removed]
+                if removed:
+                    self.log(f"  刪除分頁：{'、'.join(removed)}")
+                sheet_ids = {t: i for t, i in sheet_ids.items() if t in keep}
+            if old_goal in sheet_ids:
+                requests.append({"updateSheetProperties": {
+                    "properties": {"sheetId": sheet_ids[old_goal], "title": f"{self.new_year}目標"},
+                    "fields": "title"}})
+            for title, a1 in OFFICE_CLEAR_WITH_FILL:
+                if title in sheet_ids:
+                    requests.append({"repeatCell": {
+                        "range": a1_to_grid(sheet_ids[title], a1),
+                        "cell": {"userEnteredFormat": {}},
+                        "fields": "userEnteredValue,userEnteredFormat.backgroundColor"}})
+            if requests:
+                self.sheets.spreadsheets().batchUpdate(
+                    spreadsheetId=r["new_id"], body={"requests": requests},
+                ).execute()
+
+            ranges = [rng for rng in OFFICE_CLEAR_RANGES if rng.split("!")[0].strip("'") in sheet_ids]
+            if ranges:
+                self.sheets.spreadsheets().values().batchClear(
+                    spreadsheetId=r["new_id"], body={"ranges": ranges},
+                ).execute()
+            if finance and "ATM" in sheet_ids:
+                self._values_batch(r["new_id"], [{
+                    "range": OFFICE_ATM_CELL,
+                    "values": [[OFFICE_ATM_FORMULA.format(fid=finance["id"])]],
+                }])
 
     # ---------- 財務報表專用整理 ----------
     def _values_batch(self, file_id: str, data: List[Dict[str, Any]]) -> None:
