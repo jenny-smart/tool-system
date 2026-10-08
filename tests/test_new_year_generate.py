@@ -57,7 +57,8 @@ class FakeSheets:
 
     def get(self, spreadsheetId, range=None, fields=None):
         if fields:
-            return _Req(lambda: {"sheets": [{"properties": {"title": "富邦更新"}}]})
+            titles = ["富邦更新", "請款記錄", "股東損益表_財務", "台北財報"]
+            return _Req(lambda: {"sheets": [{"properties": {"title": t}} for t in titles]})
         sheet = range.split("!")[0].strip("'")
         return _Req(lambda: {"values": self.tables.get(sheet, [])})
 
@@ -65,7 +66,13 @@ class FakeSheets:
         return _Req(lambda: self.writes.__setitem__(range, body["values"]))
 
     def batchClear(self, spreadsheetId, body):
-        return _Req(lambda: self.cleared.extend(body["ranges"]))
+        return _Req(lambda: self.cleared.extend((spreadsheetId, r) for r in body["ranges"]))
+
+    def batchUpdate(self, spreadsheetId, body):
+        def run():
+            for d in body["data"]:
+                self.writes[(spreadsheetId, d["range"])] = d["values"]
+        return _Req(run)
 
 
 def _setup():
@@ -102,12 +109,21 @@ def test_generate_copies_records_and_is_idempotent():
     assert names["台北2027財報"]["parent"] == names["2027年"]["id"]
     assert names["2027目標及review"]["parent"] == names["2027年"]["id"]
     assert sheets.writes["'新年度ID'!C1:D1"] == [[names["台北2027財報"]["id"], "台北2027財報"]]
-    assert "'富邦更新'!A2:ZZZ" in sheets.cleared
+    tp = names["台北2027財報"]["id"]
+    rv = names["2027目標及review"]["id"]
+    assert (tp, "'富邦更新'!A2:H") in sheets.cleared
+    assert (tp, "'請款記錄'!A2:J") in sheets.cleared
+    assert (tp, "'元大更新'!A2:I") not in sheets.cleared  # 沒有這個分頁就略過
+    assert sheets.writes[(tp, "'股東損益表_財務'!A241")] == [
+        ['=IMPORTRANGE("tp","股東損益表_財務!$a$1:$aa200")']]
+    assert sheets.writes[(rv, "'台北財報'!A1")] == [
+        [f'=IMPORTRANGE("{tp}","股東損益表_財務!$A$1:$z$500")']]
     assert len(records) == 3
 
-    before = len(drive.items)
+    before, cleared = len(drive.items), len(sheets.cleared)
     Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
     assert len(drive.items) == before
+    assert len(sheets.cleared) == cleared  # 沿用的檔案不再清除
 
 
 def test_fresh_renames_existing_instead_of_deleting():
