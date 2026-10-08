@@ -9,6 +9,7 @@ roles:
       - finance_management
       - orders_memo_system
       - staff_payroll
+      - new_year_rollover
     pages:
       - report
       - log
