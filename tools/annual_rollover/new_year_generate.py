@@ -103,9 +103,18 @@ def replace_year(name: str, prev_year: int, new_year: int) -> str:
     return re.sub(rf"(?<!\d){prev_year}(?!\d)", str(new_year), name)
 
 
+# 「新年度ID」B 欄與實際檔名的同義寫法
+NAME_ALIASES = {"家電": "電器"}
+
+
 def strip_year(name: str) -> str:
-    """去掉年份與空白，用來比對「2026台北財報」與「台北2026財報」這類寫法。"""
-    return re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", str(name or "")))
+    """去掉年份、空白與結尾「檔」字並統一同義字，用來比對「2026台北財報」與
+    「台北2026財報」、「2026家電財報」與「電器2026財報」、「2026目標及review檔」
+    與「2026目標及review」這類寫法。"""
+    text = re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", str(name or "")))
+    for alias, canonical in NAME_ALIASES.items():
+        text = text.replace(alias, canonical)
+    return re.sub(r"檔$", "", text)
 
 
 def parse_cleanup(text: str) -> Tuple[List[str], str]:

@@ -99,6 +99,8 @@ def test_parse_helpers():
     assert spec.sub_folder_names == ["台北", "桃園"]
     assert parse_rows_arg("2-4,7", 10) == [2, 3, 4, 7]
     assert strip_year("2026台北財報") == "台北財報" == strip_year("台北2026財報")
+    assert strip_year("2026家電財報") == strip_year("電器2026財報")
+    assert strip_year("2026目標及review檔") == strip_year("2026目標及review")
 
 
 def test_generate_copies_records_and_is_idempotent():
