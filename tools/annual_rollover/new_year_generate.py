@@ -332,10 +332,18 @@ class Rollover:
             updated += 1
         return updated
 
-    def run(self, rows_arg: str) -> List[Dict[str, str]]:
+    def run(self, rows_arg: str = "all", names: Optional[List[str]] = None) -> List[Dict[str, str]]:
+        """rows_arg 指定列號；names 指定 A 欄名稱（例：["內勤表單"]），兩者都給時取交集。"""
         values = self.read(f"'{GENERATE_SHEET}'!A1:H")
+        row_numbers = parse_rows_arg(rows_arg, len(values))
+        if names:
+            wanted = set(names)
+            row_numbers = [r for r in row_numbers
+                           if r <= len(values) and values[r - 1] and str(values[r - 1][0]).strip() in wanted]
+            if not row_numbers:
+                raise RuntimeError(f"「{GENERATE_SHEET}」A 欄找不到：{'、'.join(names)}")
         all_records: List[Dict[str, str]] = []
-        for row_number in parse_rows_arg(rows_arg, len(values)):
+        for row_number in row_numbers:
             row = values[row_number - 1] if row_number <= len(values) else []
             spec = parse_row(row_number, row, self.prev_year)
             if not spec:
@@ -360,6 +368,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="依「生成新年度」複製新年度資料夾與檔案")
     parser.add_argument("--year", type=int, default=datetime.now(TZ).year + 1, help="新年度（預設明年）")
     parser.add_argument("--rows", default="all", help="要處理的列，例：2、2-8、2,4,6、all")
+    parser.add_argument("--names", default="", help="只處理 A 欄為這些名稱的列，以逗號分隔，例：財務報表,內勤表單")
     parser.add_argument("--dry-run", action="store_true", help="只列出會做的事，不建立、不回寫")
     parser.add_argument("--fresh", action="store_true", help="已存在的新年度同名項目改名為舊版後重新生成")
     parser.add_argument("--spreadsheet-id", default=MASTER_SPREADSHEET_ID)
@@ -369,7 +378,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     rollover = Rollover(get_drive_service(), get_sheets_service(), args.spreadsheet_id,
                         args.year, dry_run=args.dry_run, fresh=args.fresh)
-    records = rollover.run(args.rows)
+    records = rollover.run(args.rows, names=split_list(args.names) or None)
     print(f"共 {len(records)} 筆生成紀錄")
     return 1 if any(r["new_name"] == "找不到來源" for r in records) else 0
 

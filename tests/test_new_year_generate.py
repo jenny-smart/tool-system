@@ -124,3 +124,14 @@ def test_dry_run_writes_nothing():
     before = len(drive.items)
     Rollover(drive, sheets, "master", 2027, dry_run=True, log=lambda *_: None).run("2")
     assert len(drive.items) == before and not sheets.writes
+
+
+def test_run_filters_by_name():
+    drive, sheets = _setup()
+    roll = Rollover(drive, sheets, "master", 2027, dry_run=True, log=lambda *_: None)
+    assert len(roll.run(names=["財務報表"])) == 3
+    try:
+        roll.run(names=["不存在"])
+        assert False
+    except RuntimeError:
+        pass
