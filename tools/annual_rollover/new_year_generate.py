@@ -84,6 +84,7 @@ SALARY_YEAR_CELLS = ["'場次和時數'!A2", "'外場現金出入記錄'!A1"]
 SALARY_DEPOSIT_SHEET = "工具包押金"   # G 欄非空白（已全數提領）的列刪除
 SALARY_DEPOSIT_COL = "G"
 SALARY_MONTHLY_SHEET = re.compile(r"^(\d{6})調薪資料$")      # 只留最近一個月
+SALARY_MONTHLY_EXTRA = "調薪"   # 名稱含這個字的其他分頁（-old、副本、藏函數用…）一併刪除
 OFFICE_ATM_FORMULA = (
     '=filter({{filter(importrange("{fid}","富邦更新!$A2:$H"),'
     'importrange("{fid}","富邦更新!$A2:A"))}},{{0,1,1,1,1,1,0,1}})'
@@ -512,6 +513,8 @@ class Rollover:
                     if rows:
                         self.log(f"  工具包押金刪除 {len(rows)} 列")
                 stale = self._keep_latest_month(ids, SALARY_MONTHLY_SHEET)
+                monthly = {t for t in ids if SALARY_MONTHLY_SHEET.match(t)}
+                stale += [t for t in ids if SALARY_MONTHLY_EXTRA in t and t not in monthly]
                 requests += [{"deleteSheet": {"sheetId": ids[t]}} for t in stale]
                 if stale:
                     self.log(f"  刪除分頁：{'、'.join(stale)}")

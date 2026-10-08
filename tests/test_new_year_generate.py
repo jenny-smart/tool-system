@@ -246,6 +246,6 @@ def test_staff_post_process():
     s_reqs = [r for fid, r in sheets.requests if fid == salary]
     deleted_rows = [r["deleteDimension"]["range"]["startIndex"] for r in s_reqs if "deleteDimension" in r]
     assert deleted_rows == [4, 2]  # 第 5、3 列（0-based 4、2），由下往上
-    assert [r["deleteSheet"]["sheetId"] for r in s_reqs if "deleteSheet" in r] == [7]  # 202608 刪
+    assert [r["deleteSheet"]["sheetId"] for r in s_reqs if "deleteSheet" in r] == [7, 8]  # 202608、-old 刪
     assert {"findReplace": {"find": "roster26", "replacement": roster,
                             "allSheets": True, "includeFormulas": True}} in s_reqs
