@@ -3258,9 +3258,17 @@ NEW_YEAR_FUNCTION_ROWS = {
     "服務分潤表": ["服務分潤表"],
     "內勤薪資": ["內勤薪資"],
 }
+# 各功能的執行區域（依「生成新年度」F 欄地區、或檔名／子資料夾裡的地區）
+NEW_YEAR_FUNCTION_AREAS = {
+    "財務報表": ["全區", "台北", "台中", "桃園", "新竹", "高雄", "電器", "目標及review"],
+    "內勤表單": ["全區", "台北", "台中"],
+    "專員表單": ["全區", "台北", "台中"],
+    "服務分潤表": ["全區", "台北", "台中", "桃園", "新竹", "高雄", "電器"],
+    "內勤薪資": ["全區", "台北", "桃園"],
+}
 
 
-def run_new_year_generate(year, function_name, *, dry_run, fresh=False, on_progress=None):
+def run_new_year_generate(year, function_name, *, dry_run, fresh=False, area="全區", on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
     from services.google_auth import get_drive_service, get_sheets_service
     from tools.annual_rollover.new_year_generate import Rollover
@@ -3276,13 +3284,15 @@ def run_new_year_generate(year, function_name, *, dry_run, fresh=False, on_progr
         get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
         int(year_text), dry_run=dry_run, fresh=fresh, log=log,
     )
-    records = rollover.run("all", names=names)
+    records = rollover.run("all", names=names, area=area or "全區")
     missing = [r["old_name"] for r in records if r["new_name"] == "找不到來源"]
     head = "（預覽，未建立任何檔案）" if dry_run else "完成，已回寫「生成新年度」I欄／「新年度ID」"
     lines = [f"{r['kind']} {r['old_name']} → {r['new_name']}：{r['new_id']}" for r in records]
     if missing:
         lines.append("⚠ 找不到來源：" + "、".join(missing))
-    return f"{year_text} {function_name}{head}\n" + "\n".join(lines)
+    if not records:
+        return f"{year_text} {function_name}（{area}）沒有符合的項目"
+    return f"{year_text} {function_name}（{area}）{head}\n" + "\n".join(lines)
 
 
 def run_cash_gap_and_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
@@ -4755,6 +4765,9 @@ with area_col:
 
     area_options = available_areas_for_system(selected_system)
 
+    if system_type == "new_year_rollover":
+        area_options = NEW_YEAR_FUNCTION_AREAS.get(selected_function, ["全區"])
+
     if system_type == "monthly_scheduler" and (not area_options or area_options == ["全區"]):
         area_options = ["台北", "新北", "台中", "桃園", "新竹", "高雄"]
 
@@ -5564,12 +5577,12 @@ if run_clicked:
     if system_type == "new_year_rollover":
         dry_run = st.session_state.get("new_year_rollover_mode", "預覽") == "預覽"
         fresh = bool(st.session_state.get("new_year_rollover_fresh", False))
-        add_log(f"開始執行：{system_name} / {selected_function} / {period} / {'預覽' if dry_run else '執行'}"
+        add_log(f"開始執行：{system_name} / {selected_function} / {period} / {selected_area_value} / {'預覽' if dry_run else '執行'}"
                 f"{' / 重新生成' if fresh else ''}")
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
                 result = run_new_year_generate(
-                    period, selected_function, dry_run=dry_run, fresh=fresh,
+                    period, selected_function, dry_run=dry_run, fresh=fresh, area=selected_area_value,
                     on_progress=lambda msg, level="info": add_log(msg, level),
                 )
                 add_log(result, "warning" if "找不到來源" in result else "success")

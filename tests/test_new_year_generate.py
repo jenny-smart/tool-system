@@ -1,7 +1,7 @@
 import re
 
 from tools.annual_rollover.new_year_generate import (
-    FOLDER_MIME, SHEET_MIME, Rollover, parse_row, parse_rows_arg, strip_year,
+    filter_spec_by_area, FOLDER_MIME, SHEET_MIME, Rollover, parse_row, parse_rows_arg, strip_year,
 )
 
 
@@ -196,3 +196,17 @@ def test_office_form_post_process():
     atm = sheets.writes[(new_id, "'ATM'!A2")][0][0]
     assert atm.startswith('=filter({filter(importrange("fin27","富邦更新!$A2:$H")')
     assert atm.endswith('},{0,1,1,1,1,1,0,1})')
+
+
+def test_filter_by_area():
+    spec = parse_row(2, ["財務報表", "https://drive.google.com/drive/folders/ABCDEFGHIJKLMNOPQRSTU", "", "",
+                         "台北2026財報，電器2026財報，2026目標及review"], 2026)
+    assert filter_spec_by_area(spec, "全區").file_names == ["台北2026財報", "電器2026財報", "2026目標及review"]
+    assert filter_spec_by_area(parse_row(2, ["x", "ABCDEFGHIJKLMNOPQRSTU", "", "", "台北2026財報，電器2026財報"], 2026),
+                               "電器").file_names == ["電器2026財報"]
+    assert filter_spec_by_area(parse_row(2, ["x", "ABCDEFGHIJKLMNOPQRSTU", "", "", "2026目標及review"], 2026),
+                               "目標及review").file_names == ["2026目標及review"]
+    office = parse_row(3, ["內勤表單", "ABCDEFGHIJKLMNOPQRSTU", "", "", "2026台中內勤工作表單", "台中"], 2026)
+    assert filter_spec_by_area(office, "台北") is None
+    sub = parse_row(4, ["服務分潤表", "ABCDEFGHIJKLMNOPQRSTU", "", "01.台北專員/06.電器專員"], 2026)
+    assert filter_spec_by_area(sub, "電器").sub_folder_names == ["06.電器專員"]

@@ -126,6 +126,29 @@ def a1_to_grid(sheet_id: int, a1: str) -> Dict[str, int]:
     return grid
 
 
+ALL_AREA = "全區"
+
+
+def mentions_area(text: str, area: str) -> bool:
+    names = [area] + [alias for alias, canon in NAME_ALIASES.items() if canon == area]
+    return any(n in text for n in names)
+
+
+def filter_spec_by_area(spec: "RowSpec", area: str) -> Optional["RowSpec"]:
+    """依執行區域篩選：列有 F 欄單一地區時整列比對；否則只留檔名／子資料夾含該地區的項目
+    （例：選「台北」只複製「台北2026財報」，選「目標及review」只複製 review）。"""
+    if not area or area == ALL_AREA:
+        return spec
+    if spec.area:
+        return spec if spec.area == area else None
+    files = [f for f in spec.file_names if mentions_area(f, area)]
+    subs = [d for d in spec.sub_folder_names if mentions_area(d, area)]
+    if not files and not subs:
+        return None
+    spec.file_names, spec.sub_folder_names = files, subs
+    return spec
+
+
 def split_list(text: str, pattern: re.Pattern = _SPLIT_LIST) -> List[str]:
     return [part.strip() for part in pattern.split(str(text or "")) if part.strip()]
 
@@ -515,6 +538,12 @@ class Rollover:
                 self._values_batch(r["new_id"], data)
 
         if review and review.get("created"):
+            # 只跑 review（或部分地區）時，其餘地區的新年度財報從 Drive 找
+            for area in FINANCE_AREAS:
+                if area not in area_files:
+                    found = self.find_finance_file(area)
+                    if found:
+                        area_files[area] = {"new_id": found["id"], "new_name": found["name"]}
             data = []
             for area, r in area_files.items():
                 formula = f'=IMPORTRANGE("{r["new_id"]}","{FINANCE_PL_SHEET}!$A$1:$z$500")'
@@ -549,8 +578,10 @@ class Rollover:
             updated += 1
         return updated
 
-    def run(self, rows_arg: str = "all", names: Optional[List[str]] = None) -> List[Dict[str, str]]:
-        """rows_arg 指定列號；names 指定 A 欄名稱（例：["內勤表單"]），兩者都給時取交集。"""
+    def run(self, rows_arg: str = "all", names: Optional[List[str]] = None,
+            area: str = ALL_AREA) -> List[Dict[str, str]]:
+        """rows_arg 指定列號；names 指定 A 欄名稱（例：["內勤表單"]），兩者都給時取交集；
+        area 指定執行區域（全區＝不篩選）。"""
         values = self.read(f"'{GENERATE_SHEET}'!A1:H")
         row_numbers = parse_rows_arg(rows_arg, len(values))
         if names:
@@ -566,7 +597,10 @@ class Rollover:
             if not spec:
                 self.log(f"第 {row_number} 列：沒有資料夾網址，略過")
                 continue
-            self.log(f"第 {row_number} 列：{spec.name}")
+            spec = filter_spec_by_area(spec, area)
+            if not spec:
+                continue
+            self.log(f"第 {row_number} 列：{spec.name}" + (f"（{area}）" if area != ALL_AREA else ""))
             try:
                 records = self.process_row(spec)
             except Exception as exc:  # 一列失敗不影響下一列
