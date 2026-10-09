@@ -2,7 +2,7 @@
 tools/annual_rollover/new_year_generate.py
 
 換年度：依主控表「生成新年度」工作表，一列一列複製前一年度的資料夾與檔案，
-產生新年度版本，並把新檔 ID 記到「新年度ID」工作表，供 12 月底置換程式設定。
+產生新年度版本；每個新檔記到「生成新年度Log」，「年度工作檔ID_GID總表」M～P 欄由 Log 自動帶入新年度 ID。
 
 「生成新年度」欄位（第 1 列為標題）：
   A 名稱
@@ -18,8 +18,7 @@ tools/annual_rollover/new_year_generate.py
   H 工作表整理：例「移除富邦更新/元大更新的A2:」→ 新檔中這些工作表清掉 A2 以下資料
   I 生成結果：程式回寫（時間、新資料夾與檔案 ID）
 
-「新年度ID」：A 地區、B 前一年度檔名。程式會在 B 名稱（去掉年份後）與
-複製來源相符的列，回寫 C 新年度 ID、D 新年度檔名、E 生成時間。
+新年度 ID 不另外回寫工作表：「年度工作檔ID_GID總表」以舊 ID（或舊檔名）比對 Log 取最新一筆。
 
 用法：
   python -m tools.annual_rollover.new_year_generate --year 2027 --rows 2 --dry-run
@@ -43,8 +42,13 @@ from zoneinfo import ZoneInfo
 from config.vip_config import MASTER_SPREADSHEET_ID
 
 GENERATE_SHEET = "生成新年度"
-NEW_ID_SHEET = "新年度ID"
 RUN_LOG_SHEET = "生成新年度Log"
+# 各系統自己的「年度工作檔ID_GID總表」從本檔的「生成新年度Log」帶入新年度 ID，
+# Log 同步追加到這些試算表（固定檔，不隨年度）
+SYSTEM_LOG_SPREADSHEETS = {
+    "salary-system（LemonSalarySystem）": "1GdW3FSZ0s3TGeYiNx3JtYvED_RRfJjiFYwLFeYHZ1hA",
+    "orders-system": "1nnbpR1s-VYeClpmIbYjKfi3IiDWtBUBXuXUjQhhgYT0",
+}
 RUN_LOG_HEADERS = ["執行時間", "新年度", "功能", "區域", "模式", "重新生成", "類型",
                    "前一年度名稱", "前一年度ID", "新年度名稱", "新年度ID", "狀態", "訊息"]
 RESULT_COL = "I"
@@ -109,10 +113,13 @@ SERVICE_FILE_RULES = [
      "sources": [r"{y}專員名冊薪資-{a}", r"{y}{a}專員薪資\(外場\)", r"{y}桃園專員薪資\(外場\)"],
      "ops": {**_STAFF_MONTHLY_OPS,
              "replace_year_in": ["{Y}薪資"],
-             "values": {"'場次和時數'!A2": "{Y}"},
              "clear": ["'專員請款'!A3:J", "'新人實境'!A2:K"],
              "clear_months": {r"^\d{6}調薪資料$": "B3:M", r"^\d{6}專員名冊$": "B2:I"},
-             "clear_constants": ["'{Y}排班統計表'!Y6:ET"]}},
+             "clear_constants": ["'{Y}排班統計表'!Y6:ET"],
+             # 富邦ATM 引用新年度同區支出明細（需先跑「服務分潤表」）
+             "lookup": {"exp": "{Y}支出明細-{a}"},
+             "values": {"'場次和時數'!A2": "{Y}",
+                        "'富邦ATM'!A1": '=importrange("{exp}","富邦ATM!A1:P")'}}},
     {"func": "專員表單", "areas": ["高雄"], "target": "{Y}專員名冊與時數-高雄",
      "sources": [r"{y}專員名冊與時數-高雄"], "post": "staff"},
     {"func": "專員表單", "areas": ["高雄"], "target": "{Y}專員薪資相關-高雄",
@@ -282,7 +289,7 @@ def replace_year(name: str, prev_year: int, new_year: int) -> str:
     return re.sub(rf"(?<!\d){prev_year}(?!\d)", str(new_year), name)
 
 
-# 「新年度ID」B 欄與實際檔名的同義寫法
+# 檔名比對時的同義寫法
 NAME_ALIASES = {"家電": "電器"}
 
 
@@ -452,6 +459,14 @@ class Rollover:
                 valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
         except Exception as exc:  # Log 失敗不影響主流程
             self.log(f"  ⚠ 寫入「{RUN_LOG_SHEET}」失敗：{exc}")
+            return
+        for label, sid in SYSTEM_LOG_SPREADSHEETS.items():
+            try:
+                self.sheets.spreadsheets().values().append(
+                    spreadsheetId=sid, range=f"'{RUN_LOG_SHEET}'!A1", valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
+            except Exception as exc:
+                self.log(f"  ⚠ 寫入 {label}「{RUN_LOG_SHEET}」失敗：{exc}")
 
     # ---------- Sheets ----------
     def read(self, a1: str) -> List[List[str]]:
@@ -710,7 +725,7 @@ class Rollover:
                         old_fin = (self.find_finance_file(area, self.prev_year)
                                    if "replace_finance_id_in" in ops else None)
                         self.apply_ops(record, ops, fin_id=fin["id"] if fin else "",
-                                       old_fin_id=old_fin["id"] if old_fin else "")
+                                       old_fin_id=old_fin["id"] if old_fin else "", area=area)
                     if rule.get("post") == "staff":
                         staff_records.append(record)
             except Exception as exc:  # 單一檔案失敗（例如沒有原始檔權限）不影響其他檔案
@@ -725,11 +740,22 @@ class Rollover:
 
     # ---------- 分頁整理（規則表） ----------
     def _fmt(self, text: str, **extra: str) -> str:
-        return str(text).replace("{y}", str(self.prev_year)).replace("{Y}", str(self.new_year)) \
-            .replace("{fin}", extra.get("fin", ""))
+        text = str(text).replace("{y}", str(self.prev_year)).replace("{Y}", str(self.new_year))
+        for key, value in extra.items():
+            text = text.replace("{" + key + "}", value)
+        return text
+
+    def find_file_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        res = self.drive.files().list(
+            q=f"name = '{name}' and mimeType = '{SHEET_MIME}' and trashed = false",
+            fields="files(id,name)", pageSize=5,
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        files = res.get("files", [])
+        return files[0] if files else None
 
     def apply_ops(self, record: Dict[str, str], ops: Dict[str, Any], fin_id: str = "",
-                  old_fin_id: str = "") -> None:
+                  old_fin_id: str = "", area: str = "") -> None:
         """依規則整理新建立檔案的分頁（只在新建立時呼叫）：
         year_columns   財報總表：前一年度 12 個月欄位右邊插入新年度欄位（複製公式、表頭改新年度），
                        前一年度欄位貼上為值
@@ -739,7 +765,8 @@ class Rollover:
         replace_year_in 分頁內容（含公式）中的前一年度改成新年度
         clear／clear_months  清除範圍（分頁名稱以 * 結尾＝開頭相符）
         clear_constants 範圍內是值的清空、是公式的保留
-        values         填入值或公式（{Y}＝新年度、{fin}＝新年度該區財報 ID）
+        values         填入值或公式（{Y}＝新年度、{fin}＝新年度該區財報 ID、lookup 定義的名稱＝該檔 ID）
+        lookup         {名稱: 檔名樣板}，用檔名找檔案 ID 給 values 使用（找不到則該公式不寫入）
         replace_finance_id_in 分頁公式中前一年度該區財報 ID 換成新年度該區財報 ID
         """
         name, file_id = record["new_name"], record["new_id"]
@@ -860,8 +887,17 @@ class Rollover:
         if clear:
             self.sheets.spreadsheets().values().batchClear(
                 spreadsheetId=file_id, body={"ranges": clear}).execute()
-        values = constants + [{"range": r, "values": [[self._fmt(v, fin=fin_id)]]}
-                              for c, v in ops.get("values", {}).items() if (r := resolve(c))]
+        lookups: Dict[str, str] = {}
+        for key, tpl in ops.get("lookup", {}).items():
+            name = self._fmt(tpl).replace("{a}", area)
+            found = self.find_file_by_name(name)
+            lookups[key] = found["id"] if found else ""
+            if not found:
+                self.log(f"  ⚠ 找不到「{name}」，引用它的公式未寫入（請先跑對應功能）")
+        values = constants + [
+            {"range": r, "values": [[self._fmt(v, fin=fin_id, **lookups)]]}
+            for c, v in ops.get("values", {}).items()
+            if (r := resolve(c)) and not any(f"{{{k}}}" in v and not lookups[k] for k in lookups)]
         if "{fin}" in str(ops.get("values", {})) and not fin_id:
             values = [v for v in values if "importrange" not in str(v["values"])]
             self.log(f"  ⚠ 找不到新年度財報 ID，公式未更新（請先跑「財務報表」）")
@@ -1108,23 +1144,6 @@ class Rollover:
         lines += [f"{r['kind']} {r['new_name']}：{r['new_id']}" for r in records]
         self.write(f"'{GENERATE_SHEET}'!{RESULT_COL}{spec.row_number}", [["\n".join(lines)]])
 
-    def record_new_ids(self, records: List[Dict[str, str]]) -> int:
-        files = {strip_year(r["old_name"]): r for r in records if r["kind"] == "檔案" and r["new_id"]}
-        if not files:
-            return 0
-        rows = self.read(f"'{NEW_ID_SHEET}'!A1:D")
-        stamp = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
-        updated = 0
-        for index, row in enumerate(rows, start=1):
-            old_label = (row[1] if len(row) > 1 else "").split("／")[0]
-            record = files.get(strip_year(old_label))
-            if not record:
-                continue
-            self.write(f"'{NEW_ID_SHEET}'!C{index}:E{index}",
-                       [[record["new_id"], record["new_name"], stamp]])
-            updated += 1
-        return updated
-
     def run(self, rows_arg: str = "all", names: Optional[List[str]] = None,
             area: str = ALL_AREA) -> List[Dict[str, str]]:
         records = self._run_rows(rows_arg, names, area)
@@ -1146,9 +1165,6 @@ class Rollover:
                     extra += self.clone_year_folder(job)
                 except Exception as exc:
                     self.log(f"  ✗ {job['label']} 失敗：{exc}")
-        if extra:
-            count = self.record_new_ids(extra)
-            self.log(f"  新年度ID 回寫 {count} 列")
         return records + extra
 
     def _run_rows(self, rows_arg: str, names: Optional[List[str]], area: str) -> List[Dict[str, str]]:
@@ -1181,8 +1197,7 @@ class Rollover:
                            [[f"{datetime.now(TZ):%Y/%m/%d %H:%M:%S} 失敗：{exc}"]])
                 continue
             self.record_results(spec, records)
-            count = self.record_new_ids(records)
-            self.log(f"  完成，新年度ID 回寫 {count} 列")
+            self.log("  完成")
             all_records.extend(records)
         return all_records
 

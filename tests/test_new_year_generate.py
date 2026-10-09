@@ -85,7 +85,9 @@ class FakeSheets:
         return _Req(lambda: self.writes.__setitem__(range, body["values"]))
 
     def append(self, spreadsheetId, range, valueInputOption, insertDataOption, body):
-        return _Req(lambda: self.appended.extend(body["values"]))
+        self.appended_to = getattr(self, "appended_to", [])
+        self.appended_to.append(spreadsheetId)
+        return _Req(lambda: self.appended.extend(body["values"]) if spreadsheetId == "master" else None)
 
     def batchClear(self, spreadsheetId, body):
         return _Req(lambda: self.cleared.extend((spreadsheetId, r) for r in body["ranges"]))
@@ -135,9 +137,7 @@ def test_generate_copies_records_and_is_idempotent():
     assert names["2027年"]["parent"] == "ROOTFOLDERID_0123456789"
     assert names["台北2027財報"]["parent"] == names["2027年"]["id"]
     assert names["2027目標及review"]["parent"] == names["2027年"]["id"]
-    new_id_row = sheets.writes["'新年度ID'!C1:E1"][0]
-    assert new_id_row[:2] == [names["台北2027財報"]["id"], "台北2027財報"]
-    assert re.fullmatch(r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}", new_id_row[2])
+    assert not [k for k in sheets.writes if "'新年度ID'" in str(k)]  # 不再寫「新年度ID」
     tp = names["台北2027財報"]["id"]
     rv = names["2027目標及review"]["id"]
     assert (tp, "'富邦更新'!A2:H") in sheets.cleared
@@ -316,9 +316,10 @@ def test_service_files_copy_originals_and_cross_area():
 
 
 def test_staff_function_generates_payroll_in_service_folder():
-    drive, sheets = _service_drive(), _service_sheets()
+    drive = _service_drive([{"id": "exp27", "name": "2027支出明細-新竹", "mimeType": SHEET_MIME, "parent": "z"}])
+    sheets = _service_sheets()
     sheets.titles = ["場次和時數", "專員請款", "2026薪資", "202609調薪資料", "202610調薪資料",
-                     "202610專員名冊", "2026排班統計表"]
+                     "202610專員名冊", "2026排班統計表", "富邦ATM"]
     sheets.tables["2026排班統計表"] = [["=A1", "5", ""], ["x", "=B2"]]
     Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run(names=["專員名冊/薪資檔"], area="新竹")
     items = list(drive.items.values())
@@ -334,6 +335,7 @@ def test_staff_function_generates_payroll_in_service_folder():
     assert (new["id"], "'專員請款'!A3:J") in sheets.cleared
     assert (new["id"], "'202610調薪資料'!B3:M") in sheets.cleared
     assert sheets.writes[(new["id"], "'場次和時數'!A2")] == [["2027"]]
+    assert sheets.writes[(new["id"], "'富邦ATM'!A1")] == [['=importrange("exp27","富邦ATM!A1:P")']]
     assert sheets.writes[(new["id"], "'2027排班統計表'!Y6:ET")] == [["=A1", "", ""], ["", "=B2"]]
 
 
@@ -409,3 +411,6 @@ def test_run_log():
     assert sheets.appended[0][11] == "成功"
     assert len(sheets.appended) == 1 + len(records)
     assert {row[11] for row in sheets.appended[1:]} <= {"新建", "沿用", ""}
+    # 同一批 Log 也追加到 salary-system／orders-system 的「生成新年度Log」
+    from tools.annual_rollover.new_year_generate import SYSTEM_LOG_SPREADSHEETS
+    assert sheets.appended_to[-2:] == list(SYSTEM_LOG_SPREADSHEETS.values())
