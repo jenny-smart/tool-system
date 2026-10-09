@@ -324,11 +324,11 @@ def test_staff_function_generates_payroll_in_service_folder():
     assert not [i for i in items if i["name"] == "2027專員名冊薪資-桃園"]  # 只跑新竹
     reqs = [r for fid, r in sheets.requests if fid == new["id"]]
     titles = {r["updateSheetProperties"]["properties"]["title"] for r in reqs if "updateSheetProperties" in r}
-    assert titles == {"2027薪資", "202710調薪資料", "202710專員名冊", "2027排班統計表"}
+    assert titles == {"2027薪資", "2027排班統計表"}
     assert {r["deleteSheet"]["sheetId"] for r in reqs if "deleteSheet" in r} == {3}
     assert any("findReplace" in r and r["findReplace"]["sheetId"] == 2 for r in reqs)
     assert (new["id"], "'專員請款'!A3:J") in sheets.cleared
-    assert (new["id"], "'202710調薪資料'!B3:M") in sheets.cleared
+    assert (new["id"], "'202610調薪資料'!B3:M") in sheets.cleared
     assert sheets.writes[(new["id"], "'場次和時數'!A2")] == [["2027"]]
     assert sheets.writes[(new["id"], "'2027排班統計表'!Y6:ET")] == [["=A1", "", ""], ["", "=B2"]]
 

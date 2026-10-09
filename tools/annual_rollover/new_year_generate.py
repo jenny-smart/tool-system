@@ -83,7 +83,7 @@ SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 _ALL = ["台北", "台中", "桃園", "新竹", "高雄"]
 _STAFF_MONTHLY_OPS = {
     "keep_latest": [r"^\d{6}調薪資料$", r"^\d{6}專員名冊$"],
-    "rename_year": [r"^\d{6}調薪資料$", r"^\d{6}專員名冊$", r"^{y}薪資$", r"^{y}排班統計表$"],
+    "rename_year": [r"^{y}薪資$", r"^{y}排班統計表$"],   # 調薪資料／專員名冊保留原月份名稱
 }
 SERVICE_FILE_RULES = [
     {"func": "服務分潤表", "areas": _ALL, "target": "{Y}承攬服務費mail-{a}",
