@@ -43,6 +43,12 @@ from config.vip_config import MASTER_SPREADSHEET_ID
 
 GENERATE_SHEET = "生成新年度"
 RUN_LOG_SHEET = "生成新年度Log"
+# 各系統自己的「年度工作檔ID_GID總表」從本檔的「生成新年度Log」帶入新年度 ID，
+# Log 同步追加到這些試算表（固定檔，不隨年度）
+SYSTEM_LOG_SPREADSHEETS = {
+    "salary-system（LemonSalarySystem）": "1GdW3FSZ0s3TGeYiNx3JtYvED_RRfJjiFYwLFeYHZ1hA",
+    "orders-system": "1nnbpR1s-VYeClpmIbYjKfi3IiDWtBUBXuXUjQhhgYT0",
+}
 RUN_LOG_HEADERS = ["執行時間", "新年度", "功能", "區域", "模式", "重新生成", "類型",
                    "前一年度名稱", "前一年度ID", "新年度名稱", "新年度ID", "狀態", "訊息"]
 RESULT_COL = "I"
@@ -453,6 +459,14 @@ class Rollover:
                 valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
         except Exception as exc:  # Log 失敗不影響主流程
             self.log(f"  ⚠ 寫入「{RUN_LOG_SHEET}」失敗：{exc}")
+            return
+        for label, sid in SYSTEM_LOG_SPREADSHEETS.items():
+            try:
+                self.sheets.spreadsheets().values().append(
+                    spreadsheetId=sid, range=f"'{RUN_LOG_SHEET}'!A1", valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
+            except Exception as exc:
+                self.log(f"  ⚠ 寫入 {label}「{RUN_LOG_SHEET}」失敗：{exc}")
 
     # ---------- Sheets ----------
     def read(self, a1: str) -> List[List[str]]:

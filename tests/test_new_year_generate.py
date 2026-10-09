@@ -85,7 +85,9 @@ class FakeSheets:
         return _Req(lambda: self.writes.__setitem__(range, body["values"]))
 
     def append(self, spreadsheetId, range, valueInputOption, insertDataOption, body):
-        return _Req(lambda: self.appended.extend(body["values"]))
+        self.appended_to = getattr(self, "appended_to", [])
+        self.appended_to.append(spreadsheetId)
+        return _Req(lambda: self.appended.extend(body["values"]) if spreadsheetId == "master" else None)
 
     def batchClear(self, spreadsheetId, body):
         return _Req(lambda: self.cleared.extend((spreadsheetId, r) for r in body["ranges"]))
@@ -409,3 +411,6 @@ def test_run_log():
     assert sheets.appended[0][11] == "成功"
     assert len(sheets.appended) == 1 + len(records)
     assert {row[11] for row in sheets.appended[1:]} <= {"新建", "沿用", ""}
+    # 同一批 Log 也追加到 salary-system／orders-system 的「生成新年度Log」
+    from tools.annual_rollover.new_year_generate import SYSTEM_LOG_SPREADSHEETS
+    assert sheets.appended_to[-2:] == list(SYSTEM_LOG_SPREADSHEETS.values())
