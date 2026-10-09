@@ -370,7 +370,7 @@ def _find_or_create_annual_spreadsheet(drive: Any, parent_id: str, year: str, ar
         if year in name and area in name and "紙本" in name and "中獎" in name:
             return item["id"]
     created = drive.files().create(
-        body={"name": f"{year}紙本／中獎發票-{area}", "mimeType": SHEET_MIME, "parents": [parent_id]},
+        body={"name": f"{year}紙本／中獎發票_{area}", "mimeType": SHEET_MIME, "parents": [parent_id]},
         fields="id,name", supportsAllDrives=True,
     ).execute()
     return created["id"]
