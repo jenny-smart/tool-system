@@ -1,0 +1,6 @@
+2026-10-09 21:32:02 [INFO] === 客服排程系統 run_id=bcf736af step=2 台北時間=2026-10-10 05:32:02 ===
+2026-10-09 21:32:02 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-10-09 21:32:02 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-10-09 21:32:14 [INFO] --- Step2_更新每日回報 ---
+2026-10-09 21:32:17 [INFO] Step 2 完成，row=2429（2.5s）
+2026-10-09 21:32:18 [INFO] === 全部完成 run_id=bcf736af（3.3s）===
