@@ -298,3 +298,16 @@ def test_service_files_copy_originals_and_cross_area():
     # 新竹有自己的支出明細 → 用新竹的
     assert one("2027支出明細_新竹")["parent"] == new_hc["id"]
     assert not [i for i in items if i["name"] == "2027支出明細_桃園"]  # 桃園沒有來源 → 不生成
+
+
+def test_service_rule_names():
+    import re as _re
+    from tools.annual_rollover.new_year_generate import SERVICE_FILE_RULES
+    def target_for(old, area):
+        for rule in SERVICE_FILE_RULES:
+            if area in rule["areas"] and any(
+                    _re.fullmatch(p.format(y=2026, a=area), old) for p in rule["sources"]):
+                return rule["target"].format(Y=2027, a=area)
+    assert target_for("2026高雄內勤工作表單", "高雄") == "2027內勤工作表單_高雄"
+    assert target_for("2027內勤工作表單_高雄".replace("2027", "2026"), "高雄") == "2027內勤工作表單_高雄"
+    assert target_for("2026紙本 / 中獎發票-新竹", "新竹") == "2027紙本／中獎發票_新竹"
