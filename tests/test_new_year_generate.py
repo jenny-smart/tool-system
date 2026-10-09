@@ -316,9 +316,10 @@ def test_service_files_copy_originals_and_cross_area():
 
 
 def test_staff_function_generates_payroll_in_service_folder():
-    drive, sheets = _service_drive(), _service_sheets()
+    drive = _service_drive([{"id": "exp27", "name": "2027支出明細-新竹", "mimeType": SHEET_MIME, "parent": "z"}])
+    sheets = _service_sheets()
     sheets.titles = ["場次和時數", "專員請款", "2026薪資", "202609調薪資料", "202610調薪資料",
-                     "202610專員名冊", "2026排班統計表"]
+                     "202610專員名冊", "2026排班統計表", "富邦ATM"]
     sheets.tables["2026排班統計表"] = [["=A1", "5", ""], ["x", "=B2"]]
     Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run(names=["專員名冊/薪資檔"], area="新竹")
     items = list(drive.items.values())
@@ -334,6 +335,7 @@ def test_staff_function_generates_payroll_in_service_folder():
     assert (new["id"], "'專員請款'!A3:J") in sheets.cleared
     assert (new["id"], "'202610調薪資料'!B3:M") in sheets.cleared
     assert sheets.writes[(new["id"], "'場次和時數'!A2")] == [["2027"]]
+    assert sheets.writes[(new["id"], "'富邦ATM'!A1")] == [['=importrange("exp27","富邦ATM!A1:P")']]
     assert sheets.writes[(new["id"], "'2027排班統計表'!Y6:ET")] == [["=A1", "", ""], ["", "=B2"]]
 
 

@@ -109,10 +109,13 @@ SERVICE_FILE_RULES = [
      "sources": [r"{y}專員名冊薪資-{a}", r"{y}{a}專員薪資\(外場\)", r"{y}桃園專員薪資\(外場\)"],
      "ops": {**_STAFF_MONTHLY_OPS,
              "replace_year_in": ["{Y}薪資"],
-             "values": {"'場次和時數'!A2": "{Y}"},
              "clear": ["'專員請款'!A3:J", "'新人實境'!A2:K"],
              "clear_months": {r"^\d{6}調薪資料$": "B3:M", r"^\d{6}專員名冊$": "B2:I"},
-             "clear_constants": ["'{Y}排班統計表'!Y6:ET"]}},
+             "clear_constants": ["'{Y}排班統計表'!Y6:ET"],
+             # 富邦ATM 引用新年度同區支出明細（需先跑「服務分潤表」）
+             "lookup": {"exp": "{Y}支出明細-{a}"},
+             "values": {"'場次和時數'!A2": "{Y}",
+                        "'富邦ATM'!A1": '=importrange("{exp}","富邦ATM!A1:P")'}}},
     {"func": "專員表單", "areas": ["高雄"], "target": "{Y}專員名冊與時數-高雄",
      "sources": [r"{y}專員名冊與時數-高雄"], "post": "staff"},
     {"func": "專員表單", "areas": ["高雄"], "target": "{Y}專員薪資相關-高雄",
@@ -710,7 +713,7 @@ class Rollover:
                         old_fin = (self.find_finance_file(area, self.prev_year)
                                    if "replace_finance_id_in" in ops else None)
                         self.apply_ops(record, ops, fin_id=fin["id"] if fin else "",
-                                       old_fin_id=old_fin["id"] if old_fin else "")
+                                       old_fin_id=old_fin["id"] if old_fin else "", area=area)
                     if rule.get("post") == "staff":
                         staff_records.append(record)
             except Exception as exc:  # 單一檔案失敗（例如沒有原始檔權限）不影響其他檔案
@@ -725,11 +728,22 @@ class Rollover:
 
     # ---------- 分頁整理（規則表） ----------
     def _fmt(self, text: str, **extra: str) -> str:
-        return str(text).replace("{y}", str(self.prev_year)).replace("{Y}", str(self.new_year)) \
-            .replace("{fin}", extra.get("fin", ""))
+        text = str(text).replace("{y}", str(self.prev_year)).replace("{Y}", str(self.new_year))
+        for key, value in extra.items():
+            text = text.replace("{" + key + "}", value)
+        return text
+
+    def find_file_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        res = self.drive.files().list(
+            q=f"name = '{name}' and mimeType = '{SHEET_MIME}' and trashed = false",
+            fields="files(id,name)", pageSize=5,
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        files = res.get("files", [])
+        return files[0] if files else None
 
     def apply_ops(self, record: Dict[str, str], ops: Dict[str, Any], fin_id: str = "",
-                  old_fin_id: str = "") -> None:
+                  old_fin_id: str = "", area: str = "") -> None:
         """依規則整理新建立檔案的分頁（只在新建立時呼叫）：
         year_columns   財報總表：前一年度 12 個月欄位右邊插入新年度欄位（複製公式、表頭改新年度），
                        前一年度欄位貼上為值
@@ -739,7 +753,8 @@ class Rollover:
         replace_year_in 分頁內容（含公式）中的前一年度改成新年度
         clear／clear_months  清除範圍（分頁名稱以 * 結尾＝開頭相符）
         clear_constants 範圍內是值的清空、是公式的保留
-        values         填入值或公式（{Y}＝新年度、{fin}＝新年度該區財報 ID）
+        values         填入值或公式（{Y}＝新年度、{fin}＝新年度該區財報 ID、lookup 定義的名稱＝該檔 ID）
+        lookup         {名稱: 檔名樣板}，用檔名找檔案 ID 給 values 使用（找不到則該公式不寫入）
         replace_finance_id_in 分頁公式中前一年度該區財報 ID 換成新年度該區財報 ID
         """
         name, file_id = record["new_name"], record["new_id"]
@@ -860,8 +875,17 @@ class Rollover:
         if clear:
             self.sheets.spreadsheets().values().batchClear(
                 spreadsheetId=file_id, body={"ranges": clear}).execute()
-        values = constants + [{"range": r, "values": [[self._fmt(v, fin=fin_id)]]}
-                              for c, v in ops.get("values", {}).items() if (r := resolve(c))]
+        lookups: Dict[str, str] = {}
+        for key, tpl in ops.get("lookup", {}).items():
+            name = self._fmt(tpl).replace("{a}", area)
+            found = self.find_file_by_name(name)
+            lookups[key] = found["id"] if found else ""
+            if not found:
+                self.log(f"  ⚠ 找不到「{name}」，引用它的公式未寫入（請先跑對應功能）")
+        values = constants + [
+            {"range": r, "values": [[self._fmt(v, fin=fin_id, **lookups)]]}
+            for c, v in ops.get("values", {}).items()
+            if (r := resolve(c)) and not any(f"{{{k}}}" in v and not lookups[k] for k in lookups)]
         if "{fin}" in str(ops.get("values", {})) and not fin_id:
             values = [v for v in values if "importrange" not in str(v["values"])]
             self.log(f"  ⚠ 找不到新年度財報 ID，公式未更新（請先跑「財務報表」）")
