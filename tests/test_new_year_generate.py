@@ -71,7 +71,7 @@ class FakeSheets:
     def values(self):
         return self
 
-    def get(self, spreadsheetId, range=None, fields=None):
+    def get(self, spreadsheetId, range=None, fields=None, **_):
         if fields:
             titles = self.titles or ["富邦更新", "請款記錄", "零用金", "科目對照表", "股東損益表_財務", "台北財報",
                                      "2026目標", "信用卡", "ATM", "清潔異動"]
@@ -173,11 +173,7 @@ def test_run_filters_by_name():
     drive, sheets = _setup()
     roll = Rollover(drive, sheets, "master", 2027, dry_run=True, log=lambda *_: None)
     assert len(roll.run(names=["財務報表"])) == 3
-    try:
-        roll.run(names=["不存在"])
-        assert False
-    except RuntimeError:
-        pass
+    assert roll.run(names=["不存在"]) == []
 
 
 def test_office_form_post_process():
@@ -240,7 +236,7 @@ def test_staff_post_process():
                      "場次和時數", "工具包押金", "202609調薪資料", "202608調薪資料", "202603調薪資料-old"]
     Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
     ids = {i["name"]: i["id"] for i in drive.items.values()}
-    roster, salary = ids["2027專員名冊與時數_台北"], ids["2027專員薪資相關_台北"]
+    roster, salary = ids["2027專員名冊與時數-台北"], ids["2027專員薪資相關-台北"]
 
     assert (roster, "'2026排班統計表'!R5:Z") in sheets.cleared
     assert (roster, "'2026排班統計表'!AD5:AL") in sheets.cleared
@@ -260,9 +256,9 @@ def test_staff_post_process():
                             "allSheets": True, "includeFormulas": True}} in s_reqs
 
 
-def test_service_files_copy_originals_and_cross_area():
+def _service_drive(extra=()):
     S = "application/vnd.google-apps.shortcut"
-    drive = FakeDrive([
+    return FakeDrive([
         {"id": "y", "name": "2026專員承攬服務費", "mimeType": FOLDER_MIME, "parent": "SERVICEFOLDERID_0123456789"},
         {"id": "ty", "name": "03.桃園專員", "mimeType": FOLDER_MIME, "parent": "y"},
         {"id": "hc", "name": "04.新竹專員", "mimeType": FOLDER_MIME, "parent": "y"},
@@ -273,52 +269,128 @@ def test_service_files_copy_originals_and_cross_area():
         {"id": "pay", "name": "2026桃園專員薪資(外場) ", "mimeType": SHEET_MIME, "parent": "ty"},
         {"id": "xlsx", "name": "2026桃園營業額總表", "mimeType": "application/vnd.ms-excel", "parent": "ty"},
         {"id": "hc_out", "name": "新竹2026支出明細", "mimeType": SHEET_MIME, "parent": "hc"},
+        *extra,
     ])
-    sheets = FakeSheets({
+
+
+def _service_sheets():
+    return FakeSheets({
         "生成新年度": [[], ["服務分潤表", "https://drive.google.com/drive/folders/SERVICEFOLDERID_0123456789",
-                         "", "03.桃園專員/04.新竹專員"]],
+                         "", "2026專員承攬服務費/03.桃園專員/04.新竹專員"]],
         "新年度ID": [],
     })
-    Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
+
+
+def test_service_files_copy_originals_and_cross_area():
+    S = "application/vnd.google-apps.shortcut"
+    drive, sheets = _service_drive(), _service_sheets()
+    sheets.titles = ["mail", "202609-1", "202609-2", "202608-2工具包押金", "富邦ATM", "桃園零用金", "其他"]
+    Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run(names=["服務分潤表"])
     items = list(drive.items.values())
+
     def one(name):
         found = [i for i in items if i["name"] == name]
         assert len(found) == 1, name
         return found[0]
     new_ty = next(i for i in items if i["name"] == "03.桃園專員" and i["id"] != "ty")
     new_hc = next(i for i in items if i["name"] == "04.新竹專員" and i["id"] != "hc")
-    assert one("2027承攬服務費mail_桃園")["parent"] == new_ty["id"]
+    mail = one("2027承攬服務費mail-桃園")
+    assert mail["parent"] == new_ty["id"]
+    # mail 只留 mail 與最後一期
+    deleted = {r["deleteSheet"]["sheetId"] for fid, r in sheets.requests if fid == mail["id"] and "deleteSheet" in r}
+    assert deleted == {1, 3, 4, 5, 6}
     # 捷徑 → 用原始檔複製，直接放在新年度地區資料夾，不建捷徑
-    assert one("2027營業額總表_桃園")["parent"] == new_ty["id"]
-    assert one("2027營業額總表_桃園")["mimeType"] == SHEET_MIME
+    assert one("2027營業額總表-桃園")["parent"] == new_ty["id"]
     assert not [i for i in items if i["mimeType"] == S and i["id"] != "rev_s"]
-    # 新竹沒有自己的專員薪資(外場) → 用桃園的生成
-    assert one("2027專員名冊薪資_桃園")["parent"] == new_ty["id"]
-    assert one("2027專員名冊薪資_新竹")["parent"] == new_hc["id"]
-    # 新竹有自己的支出明細 → 用新竹的
-    assert one("2027支出明細_新竹")["parent"] == new_hc["id"]
-    assert not [i for i in items if i["name"] == "2027支出明細_桃園"]  # 桃園沒有來源 → 不生成
+    # 專員名冊薪資改由「專員表單」生成
+    assert not [i for i in items if i["name"] == "2027專員名冊薪資-桃園"]
+    # 新竹有自己的支出明細 → 用新竹的；只留富邦ATM、零用金
+    out = one("2027支出明細-新竹")
+    assert out["parent"] == new_hc["id"]
+    deleted = {r["deleteSheet"]["sheetId"] for fid, r in sheets.requests if fid == out["id"] and "deleteSheet" in r}
+    assert deleted == {0, 1, 2, 3, 6}
+
+
+def test_staff_function_generates_payroll_in_service_folder():
+    drive, sheets = _service_drive(), _service_sheets()
+    sheets.titles = ["場次和時數", "專員請款", "2026薪資", "202609調薪資料", "202610調薪資料",
+                     "202610專員名冊", "2026排班統計表"]
+    sheets.tables["2026排班統計表"] = [["=A1", "5", ""], ["x", "=B2"]]
+    Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run(names=["專員名冊/薪資檔"], area="新竹")
+    items = list(drive.items.values())
+    new = next(i for i in items if i["name"] == "2027專員名冊薪資-新竹")
+    new_hc = next(i for i in items if i["name"] == "04.新竹專員" and i["id"] != "hc")
+    assert new["parent"] == new_hc["id"]
+    assert not [i for i in items if i["name"] == "2027專員名冊薪資-桃園"]  # 只跑新竹
+    reqs = [r for fid, r in sheets.requests if fid == new["id"]]
+    titles = {r["updateSheetProperties"]["properties"]["title"] for r in reqs if "updateSheetProperties" in r}
+    assert titles == {"2027薪資", "202710調薪資料", "202710專員名冊", "2027排班統計表"}
+    assert {r["deleteSheet"]["sheetId"] for r in reqs if "deleteSheet" in r} == {3}
+    assert any("findReplace" in r and r["findReplace"]["sheetId"] == 2 for r in reqs)
+    assert (new["id"], "'專員請款'!A3:J") in sheets.cleared
+    assert (new["id"], "'202710調薪資料'!B3:M") in sheets.cleared
+    assert sheets.writes[(new["id"], "'場次和時數'!A2")] == [["2027"]]
+    assert sheets.writes[(new["id"], "'2027排班統計表'!Y6:ET")] == [["=A1", "", ""], ["", "=B2"]]
 
 
 def test_service_rule_names():
-    import re as _re
-    from tools.annual_rollover.new_year_generate import SERVICE_FILE_RULES
+    from tools.annual_rollover.new_year_generate import SERVICE_FILE_RULES, dash_area
+
     def target_for(old, area):
         for rule in SERVICE_FILE_RULES:
             if area in rule["areas"] and any(
-                    _re.fullmatch(p.format(y=2026, a=area), old) for p in rule["sources"]):
+                    re.fullmatch(p.format(y=2026, a=area), dash_area(old)) for p in rule["sources"]):
                 return rule["target"].format(Y=2027, a=area)
-    assert target_for("2026高雄內勤工作表單", "高雄") == "2027內勤工作表單_高雄"
-    assert target_for("2027內勤工作表單_高雄".replace("2027", "2026"), "高雄") == "2027內勤工作表單_高雄"
-    assert target_for("2026紙本 / 中獎發票-新竹", "新竹") == "2027紙本／中獎發票_新竹"
+    assert target_for("2026高雄內勤工作表單", "高雄") == "2027內勤工作表單-高雄"
+    assert target_for("2026內勤工作表單_高雄", "高雄") == "2027內勤工作表單-高雄"
+    assert target_for("2026紙本 / 中獎發票-新竹", "新竹") == "2027紙本／中獎發票-新竹"
+    assert target_for("2026承攬服務費mail_台北", "台北") == "2027承攬服務費mail-台北"
 
 
-def test_underscore_area():
-    from tools.annual_rollover.new_year_generate import underscore_area
-    assert underscore_area("2027專員名冊與時數-台北") == "2027專員名冊與時數_台北"
-    assert underscore_area("2027承攬服務費mail-高雄") == "2027承攬服務費mail_高雄"
-    assert underscore_area("2027台北內勤工作表單") == "2027台北內勤工作表單"
+def test_dash_area():
+    from tools.annual_rollover.new_year_generate import dash_area
+    assert dash_area("2027專員名冊與時數_台北") == "2027專員名冊與時數-台北"
+    assert dash_area("2027承攬服務費mail-高雄") == "2027承攬服務費mail-高雄"
+    assert dash_area("2027台北內勤工作表單") == "2027台北內勤工作表單"
 
 
 def test_strip_year_treats_dash_and_underscore_alike():
     assert strip_year("2026專員名冊與時數_台北") == strip_year("2026專員名冊與時數-台北")
+
+
+def test_year_columns_and_invoice_folder_clone():
+    from tools.annual_rollover.new_year_generate import FINANCE_YEAR_FOLDERS
+    drive = FakeDrive([
+        {"id": "root", "name": "台北財務", "mimeType": FOLDER_MIME, "parent": "top"},
+        {"id": "f26", "name": "2026發票", "mimeType": FOLDER_MIME, "parent": "root"},
+        {"id": "p", "name": "01-02", "mimeType": FOLDER_MIME, "parent": "f26"},
+        {"id": "pf", "name": "202601紙本發票-台北.zip", "mimeType": "application/zip", "parent": "p"},
+        {"id": "inv", "name": "2026紙本／中獎發票-台北", "mimeType": SHEET_MIME, "parent": "f26"},
+        {"id": "dis", "name": "2026發票折讓單相關-台北", "mimeType": SHEET_MIME, "parent": "f26"},
+    ])
+    sheets = FakeSheets({"生成新年度": [], "新年度ID": [],
+                         "2026財報總表": [["2026", "", "2026.01", "2026.02"]]})
+    sheets.titles = ["2026", "中獎發票", "202601", "2026財報總表"]
+    roll = Rollover(drive, sheets, "master", 2027, log=lambda *_: None)
+    job = dict(FINANCE_YEAR_FOLDERS[0], folder_id="root")
+    records = roll.clone_year_folder(job)
+    names = {i["name"]: i for i in drive.items.values()}
+    new_folder = names["2027發票"]
+    assert new_folder["parent"] == "root"
+    parents = sorted(i["parent"] for i in drive.items.values() if i["name"] == "01-02")
+    assert parents == sorted(["f26", new_folder["id"]])
+    assert not [i for i in drive.items.values() if i["name"].endswith(".zip") and i["id"] != "pf"]
+    inv = names["2027紙本／中獎發票-台北"]
+    assert names["2027發票折讓單相關-台北"]["parent"] == new_folder["id"]
+    assert (inv["id"], "'2027'!A2:Y") in sheets.cleared and (inv["id"], "'中獎發票'!A2:L") in sheets.cleared
+    reqs = [r for fid, r in sheets.requests if fid == inv["id"]]
+    assert {r["deleteSheet"]["sheetId"] for r in reqs if "deleteSheet" in r} == {2}
+    assert len(records) == 3
+
+    # 營業額總表：前一年度 12 個月欄位右側插入新年度、前一年度貼上為值
+    record = {"new_name": "x", "new_id": "rev"}
+    roll.apply_ops(record, {"year_columns": "{y}財報總表"})
+    batch = [r for fid, r in sheets.requests if fid == "rev"]
+    assert batch[0]["insertDimension"]["range"]["startIndex"] == 4
+    assert batch[2]["copyPaste"]["pasteType"] == "PASTE_VALUES"
+    assert sheets.writes[("rev", "'2026財報總表'!E1:F1")] == [["2027.01", "2027.02"]]

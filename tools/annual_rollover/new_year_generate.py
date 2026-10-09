@@ -57,8 +57,9 @@ FINANCE_ROW_NAMES = {"財務報表"}
 # 「內勤表單」：新建立的內勤工作表單整理（取代 H 欄的通用清除）
 OFFICE_ROW_NAMES = {"內勤表單"}
 OFFICE_CLEAR_RANGES = ["'信用卡'!A2:J", "'專員收現'!A2:P", "'專員回報'!A2:P",
-                       "'專員請款'!A2:AS", "'清潔客訴'!A3:AN"]
-OFFICE_CLEAR_WITH_FILL = [("清潔異動", "A2:AE")]  # 清除內容＋底色
+                       "'專員請款'!A2:AS", "'清潔客訴'!A3:AN",
+                       "'清潔異動'!A2:J", "'清潔異動'!L2:AE"]   # 清潔異動 K 欄公式保留
+OFFICE_CLEAR_WITH_FILL = [("清潔異動", "A2:AE")]  # 底色清除
 # 新內勤工作表單只保留這些分頁（加上「{前一年度}目標」改名後的「{新年度}目標」），其餘刪除；
 # 原檔沒有的分頁略過
 OFFICE_KEEP_SHEETS = [
@@ -70,34 +71,78 @@ OFFICE_KEEP_SHEETS = [
 OFFICE_KEEP_CONTAINS = ["儲值金不足"]  # 分頁名稱含這些字也保留（例：202611儲值金不足）
 OFFICE_ATM_CELL = "'ATM'!A2"
 
-# 「服務分潤表」：年度資料夾（例：2026專員承攬服務費）下各區資料夾要複製的檔案。
-# sources 依序比對前一年度檔名（{y}＝前一年度、{a}＝地區，正規表示式、忽略前後空白），
-# target 是新年度檔名（{Y}＝新年度）。之後年度會先比對到第一個（新命名）來源。
-# 來源是捷徑時：用捷徑指向的原始檔複製，新年度檔直接放在新年度地區資料夾。
-# 先找本區資料夾，找不到再找其他地區資料夾（例：新竹 2027 由 2026桃園專員薪資(外場) 生成）。
+# 「服務分潤表」年度資料夾（例：2026專員承攬服務費）下各區資料夾的檔案。
+# func：哪個功能執行時生成（服務分潤表／專員表單／內勤表單／財務報表），新檔一律放在
+#       服務分潤表新年度的地區資料夾（不存在就先建立）。
+# sources 依序比對前一年度檔名（{y}＝前一年度、{a}＝地區，正規表示式；比對前檔名的
+#       「_地區」會先統一成「-地區」），target 是新年度檔名（{Y}＝新年度）。
+# 來源是捷徑時用捷徑指向的原始檔複製。先找本區資料夾，找不到再找其他地區資料夾。
+# ops：新建立的檔案要做的分頁整理，見 Rollover.apply_ops。
 SERVICE_ROW_NAMES = {"服務分潤表"}
 SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 _ALL = ["台北", "台中", "桃園", "新竹", "高雄"]
+_STAFF_MONTHLY_OPS = {
+    "keep_latest": [r"^\d{6}調薪資料$", r"^\d{6}專員名冊$"],
+    "rename_year": [r"^\d{6}調薪資料$", r"^\d{6}專員名冊$", r"^{y}薪資$", r"^{y}排班統計表$"],
+}
 SERVICE_FILE_RULES = [
-    {"areas": _ALL, "target": "{Y}承攬服務費mail_{a}",
-     "sources": [r"{y}承攬服務費mail[_\-]{a}"]},
-    {"areas": _ALL, "target": "{Y}營業額總表_{a}",
-     "sources": [r"{y}營業額總表_{a}", r"{y}{a}營業額總表"]},
-    {"areas": ["台北", "台中"], "target": "{Y}專員薪資申報_{a}",
-     "sources": [r"{y}專員薪資申報_{a}"]},
-    {"areas": ["桃園", "新竹"], "target": "{Y}專員名冊薪資_{a}",
-     "sources": [r"{y}_?專員名冊薪資_{a}", r"{y}{a}專員薪資\(外場\)", r"{y}桃園專員薪資\(外場\)"]},
-    {"areas": ["桃園", "新竹"], "target": "{Y}服務異動_{a}",
-     "sources": [r"{y}_?服務異動_{a}", r"{y}{a}退款及儲值金異動", r"{y}桃園退款及儲值金異動"]},
-    {"areas": ["桃園", "新竹"], "target": "{Y}紙本／中獎發票_{a}",
-     "sources": [r"{y}紙本\s*[／/]\s*中獎發票\s*[_\-]{a}"]},
-    {"areas": ["桃園", "新竹"], "target": "{Y}支出明細_{a}",
-     "sources": [r"{y}支出明細_{a}", r"{a}{y}支出明細", r"桃園{y}支出明細"]},
-    {"areas": ["高雄"], "target": "{Y}內勤工作表單_高雄",
-     "sources": [r"{y}內勤工作表單_高雄", r"{y}高雄內勤工作表單"]},
-    {"areas": ["高雄"], "target": "{Y}專員名冊與時數_高雄", "sources": [r"{y}專員名冊與時數[_\-]高雄"]},
-    {"areas": ["高雄"], "target": "{Y}專員薪資相關_高雄", "sources": [r"{y}專員薪資相關[_\-]高雄"]},
+    {"func": "服務分潤表", "areas": _ALL, "target": "{Y}承攬服務費mail-{a}",
+     "sources": [r"{y}承攬服務費mail-{a}"],
+     "ops": {"keep_only": ["mail"], "keep_latest": [r"^\d{6}-\d$"]}},
+    {"func": "服務分潤表", "areas": _ALL, "target": "{Y}營業額總表-{a}",
+     "sources": [r"{y}營業額總表-{a}", r"{y}{a}營業額總表"],
+     "ops": {"year_columns": "{y}財報總表",
+             "rename_year": [r"^{y}財報總表$", r"^{y}各服務收入金流總表$"],
+             "replace_year_in": ["{Y}各服務收入金流總表"],
+             "keep_only": ["{y}財報總表", "{y}各服務收入金流總表"], "keep_latest": [r"^\d{6}$"]}},
+    {"func": "服務分潤表", "areas": ["台北", "台中"], "target": "{Y}專員薪資申報-{a}",
+     "sources": [r"{y}專員薪資申報-{a}"],
+     "ops": {"rename_year": [r"^{y}公司補充保費$"], "values": {"'{Y}公司補充保費'!A2": "{Y}"}}},
+    {"func": "服務分潤表", "areas": ["桃園", "新竹"], "target": "{Y}支出明細-{a}",
+     "sources": [r"{y}支出明細-{a}", r"{a}{y}支出明細", r"桃園{y}支出明細"],
+     "ops": {"keep_only": ["富邦ATM"], "keep_contains": ["零用金"],
+             "replace_finance_id_in": ["富邦ATM"]}},  # 公式中前一年度該區財報 ID → 新年度
+    {"func": "專員表單", "areas": ["桃園", "新竹"], "target": "{Y}專員名冊薪資-{a}",
+     "sources": [r"{y}專員名冊薪資-{a}", r"{y}{a}專員薪資\(外場\)", r"{y}桃園專員薪資\(外場\)"],
+     "ops": {**_STAFF_MONTHLY_OPS,
+             "replace_year_in": ["{Y}薪資"],
+             "values": {"'場次和時數'!A2": "{Y}"},
+             "clear": ["'專員請款'!A3:J", "'新人實境'!A2:K"],
+             "clear_months": {r"^\d{6}調薪資料$": "B3:M", r"^\d{6}專員名冊$": "B2:I"},
+             "clear_constants": ["'{Y}排班統計表'!Y6:ET"]}},
+    {"func": "專員表單", "areas": ["高雄"], "target": "{Y}專員名冊與時數-高雄",
+     "sources": [r"{y}專員名冊與時數-高雄"], "post": "staff"},
+    {"func": "專員表單", "areas": ["高雄"], "target": "{Y}專員薪資相關-高雄",
+     "sources": [r"{y}專員薪資相關-高雄"], "post": "staff"},
+    {"func": "內勤表單", "areas": ["桃園", "新竹"], "target": "{Y}服務異動-{a}",
+     "sources": [r"{y}服務異動-{a}", r"{y}{a}退款及儲值金異動", r"{y}桃園退款及儲值金異動"],
+     "ops": {"clear": ["'{y}訂單金流*'!A2:J", "'{y}訂單金流*'!M2:AE"]}},
+    {"func": "內勤表單", "areas": ["高雄"], "target": "{Y}內勤工作表單-高雄",
+     "sources": [r"{y}內勤工作表單-高雄", r"{y}高雄內勤工作表單"],
+     "ops": {"clear": ["'專員收現'!A2:N", "'專員請款'!A2:AI", "'清潔異動'!A2:AE", "'ATM'!A2:G"],
+             "values": {"'ATM'!A2": (
+                 '=filter({filter(importrange("{fin}","元大更新!$A3:$i"),'
+                 'importrange("{fin}","元大更新!$A3:A"))},{0,1,1,0,1,1,1,1,1})')}}},
+    {"func": "財務報表", "areas": ["桃園", "新竹"], "target": "{Y}紙本／中獎發票-{a}",
+     "sources": [r"{y}紙本\s*[／/]\s*中獎發票-{a}"], "ops": "invoice"},
 ]
+# 紙本／中獎發票年度檔
+INVOICE_OPS = {"rename_year": [r"^{y}$"], "clear": ["'{Y}'!A2:Y", "'中獎發票'!A2:L"],
+               "delete_regex": [r"^\d{6}$"]}
+# 「財務報表」功能另外處理的年度資料夾：在資料夾（或其下名稱含前一年度的子資料夾）旁
+# 建立新年度資料夾，子資料夾結構照建但不複製子資料夾內的檔案；最上層名稱含前一年度的
+# 試算表複製成新年度檔，依 files 套用整理。
+FINANCE_YEAR_FOLDERS = [
+    {"label": "台北發票", "area": "台北", "folder_id": "17EQNG8VM9N4YgxXGb23CNZxYT3HsDkQ2",
+     "files": {r"紙本\s*[／/]\s*中獎發票": INVOICE_OPS}},
+    {"label": "台中發票", "area": "台中", "folder_id": "12XktB_jDnd3ufkIZX2hweHdV3nv14tAH",
+     "files": {r"紙本\s*[／/]\s*中獎發票": INVOICE_OPS}},
+    {"label": "台北進項發票", "area": "台北", "folder_id": "1XBWWOoDjZ74HsnAGsGUr7jlf34AHJajG", "files": {}},
+    {"label": "儲值金", "area": "", "folder_id": "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv", "files": {}},
+]
+# 「生成新年度」A 欄名稱 → 功能名稱
+ROW_FUNCTIONS = {"財務報表": "財務報表", "內勤表單": "內勤表單", "專員名冊/薪資檔": "專員表單",
+                 "服務分潤表": "服務分潤表", "內勤薪資": "內勤薪資"}
 
 # 「專員名冊/薪資檔」：新建立的專員名冊與時數、專員薪資相關整理（取代 H 欄的通用清除）
 STAFF_ROW_NAMES = {"專員名冊/薪資檔"}
@@ -221,13 +266,13 @@ def folder_id_from_url(value: str) -> str:
     return value if re.fullmatch(r"[A-Za-z0-9_-]{20,}", value) else ""
 
 
-_AREA_SUFFIX = re.compile(r"\s*-\s*(台北|台中|桃園|新竹|高雄|電器|家電|新北)$")
+_AREA_SUFFIX = re.compile(r"\s*[_\-]\s*(台北|台中|桃園|新竹|高雄|電器|家電|新北)$")
 
 
-def underscore_area(name: str) -> str:
-    """新年度檔名地區前一律用底線：「2027專員名冊與時數-台北」→「2027專員名冊與時數_台北」。
+def dash_area(name: str) -> str:
+    """新年度檔名地區前一律用連字號：「2027專員名冊與時數_台北」→「2027專員名冊與時數-台北」。
     也用來比對前一年度檔名（-地區 與 _地區 視為相同）。"""
-    return _AREA_SUFFIX.sub(r"_\1", str(name or "").strip())
+    return _AREA_SUFFIX.sub(r"-\1", str(name or "").strip())
 
 
 def replace_year(name: str, prev_year: int, new_year: int) -> str:
@@ -242,7 +287,7 @@ def strip_year(name: str) -> str:
     """去掉年份、空白與結尾「檔」字並統一同義字，用來比對「2026台北財報」與
     「台北2026財報」、「2026家電財報」與「電器2026財報」、「2026目標及review檔」
     與「2026目標及review」這類寫法。"""
-    text = re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", underscore_area(name)))
+    text = re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", dash_area(name)))
     for alias, canonical in NAME_ALIASES.items():
         text = text.replace(alias, canonical)
     return re.sub(r"檔$", "", text)
@@ -448,7 +493,7 @@ class Rollover:
         if spec.name in SERVICE_ROW_NAMES:
             old_subs_all = [old for old, _ in sub_pairs]
             for old_sub, new_sub in sub_pairs:
-                records += self.copy_service_files(old_sub, new_sub, old_subs_all)
+                records += self.copy_service_files(old_sub, new_sub, old_subs_all, func="服務分潤表")
 
         # 檔案：先找年度資料夾、再找子資料夾、最後找上層資料夾
         search_pairs = year_pairs + sub_pairs + [({"id": spec.folder_id}, {"id": spec.folder_id})]
@@ -458,7 +503,7 @@ class Rollover:
             for old_parent, new_parent in search_pairs:
                 files = listing_cache.setdefault(old_parent["id"], self.children(old_parent["id"]))
                 match = next((f for f in files if f["mimeType"] != FOLDER_MIME
-                              and underscore_area(f["name"]) == underscore_area(file_name)), None)
+                              and dash_area(f["name"]) == dash_area(file_name)), None)
                 if match:
                     source, target_parent = match, new_parent
                     break
@@ -467,7 +512,7 @@ class Rollover:
                 records.append({"kind": "檔案", "old_name": file_name, "old_id": "",
                                 "new_name": "找不到來源", "new_id": ""})
                 continue
-            new_name = underscore_area(replace_year(file_name, self.prev_year, self.new_year))
+            new_name = dash_area(replace_year(file_name, self.prev_year, self.new_year))
             copied, created = self.ensure_copy(source, target_parent["id"], new_name)
             if (created and copied.get("mimeType") == SHEET_MIME
                     and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES | STAFF_ROW_NAMES
@@ -576,7 +621,8 @@ class Rollover:
         ).execute()
 
     def copy_service_files(self, old_sub: Dict[str, Any], new_sub: Dict[str, Any],
-                           all_old_subs: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, str]]:
+                           all_old_subs: Optional[List[Dict[str, Any]]] = None,
+                           func: str = "服務分潤表") -> List[Dict[str, str]]:
         area = next((a for a in _ALL if mentions_area(old_sub["name"], a)), "")
         if not area:
             return []
@@ -593,14 +639,15 @@ class Rollover:
         files = listing(old_sub) + [f for o in (all_old_subs or []) if o["id"] != old_sub["id"]
                                     for f in listing(o)]
         records: List[Dict[str, str]] = []
+        staff_records: List[Dict[str, str]] = []
         for rule in SERVICE_FILE_RULES:
-            if area not in rule["areas"]:
+            if rule["func"] != func or area not in rule["areas"]:
                 continue
             target_name = rule["target"].format(Y=self.new_year, a=area)
             source = None
             for pattern in rule["sources"]:
                 regex = re.compile(pattern.format(y=self.prev_year, a=area))
-                source = next((f for f in files if regex.fullmatch(f["name"].strip())), None)
+                source = next((f for f in files if regex.fullmatch(dash_area(f["name"]))), None)
                 if source:
                     break
             if not source:
@@ -612,20 +659,263 @@ class Rollover:
                 old = (self.get_meta(source["shortcutDetails"]["targetId"])
                        if source["mimeType"] == SHORTCUT_MIME else source)
                 copied, created = self.ensure_copy(old, new_sub["id"], target_name)
+                record = {"kind": "檔案", "old_name": old["name"], "old_id": old["id"],
+                          "new_name": copied["name"], "new_id": copied["id"], "created": created}
+                if created:
+                    ops = INVOICE_OPS if rule.get("ops") == "invoice" else rule.get("ops")
+                    if ops:
+                        need_fin = "{fin}" in str(ops) or "replace_finance_id_in" in ops
+                        fin = self.find_finance_file(area) if need_fin else None
+                        old_fin = (self.find_finance_file(area, self.prev_year)
+                                   if "replace_finance_id_in" in ops else None)
+                        self.apply_ops(record, ops, fin_id=fin["id"] if fin else "",
+                                       old_fin_id=old_fin["id"] if old_fin else "")
+                    if rule.get("post") == "staff":
+                        staff_records.append(record)
             except Exception as exc:  # 單一檔案失敗（例如沒有原始檔權限）不影響其他檔案
-                self.log(f"  ✗ {source['name']} 複製失敗：{exc}")
+                self.log(f"  ✗ {source['name']} 失敗：{exc}")
                 records.append({"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                                 "new_name": "找不到來源", "new_id": ""})
                 continue
-            records.append({"kind": "檔案", "old_name": old["name"], "old_id": old["id"],
-                            "new_name": copied["name"], "new_id": copied["id"], "created": created})
+            records.append(record)
+        if staff_records:  # 名冊與薪資檔一起整理，薪資檔公式中的名冊 ID 才能替換
+            self.staff_post_process(staff_records)
+        return records
+
+    # ---------- 分頁整理（規則表） ----------
+    def _fmt(self, text: str, **extra: str) -> str:
+        return str(text).replace("{y}", str(self.prev_year)).replace("{Y}", str(self.new_year)) \
+            .replace("{fin}", extra.get("fin", ""))
+
+    def apply_ops(self, record: Dict[str, str], ops: Dict[str, Any], fin_id: str = "",
+                  old_fin_id: str = "") -> None:
+        """依規則整理新建立檔案的分頁（只在新建立時呼叫）：
+        year_columns   財報總表：前一年度 12 個月欄位右邊插入新年度欄位（複製公式、表頭改新年度），
+                       前一年度欄位貼上為值
+        keep_only／keep_contains／keep_latest  只保留這些分頁（keep_latest 符合者只留最新一張）
+        delete_regex   刪除符合的分頁
+        rename_year    分頁名稱中的前一年度改成新年度
+        replace_year_in 分頁內容（含公式）中的前一年度改成新年度
+        clear／clear_months  清除範圍（分頁名稱以 * 結尾＝開頭相符）
+        clear_constants 範圍內是值的清空、是公式的保留
+        values         填入值或公式（{Y}＝新年度、{fin}＝新年度該區財報 ID）
+        replace_finance_id_in 分頁公式中前一年度該區財報 ID 換成新年度該區財報 ID
+        """
+        name, file_id = record["new_name"], record["new_id"]
+        self.log(f"  整理 {name}：{', '.join(ops)}")
+        if self.dry_run:
+            return
+        y, Y = str(self.prev_year), str(self.new_year)
+        ids = self._sheet_map(file_id)
+
+        # 1. 財報總表年度欄位（要在刪除其他分頁前，先把前一年度貼成值）
+        if ops.get("year_columns"):
+            title = self._fmt(ops["year_columns"])
+            if title in ids:
+                header = self.sheets.spreadsheets().values().get(
+                    spreadsheetId=file_id, range=f"'{title}'!1:1").execute().get("values", [[]])
+                header = header[0] if header else []
+                months = [i for i, v in enumerate(header) if re.fullmatch(rf"{y}\.\d{{2}}", str(v).strip())]
+                if months:
+                    start, end = months[0], months[-1] + 1
+                    width = end - start
+                    src = {"sheetId": ids[title], "startColumnIndex": start, "endColumnIndex": end}
+                    dst = {"sheetId": ids[title], "startColumnIndex": end, "endColumnIndex": end + width}
+                    self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
+                        {"insertDimension": {"range": {"sheetId": ids[title], "dimension": "COLUMNS",
+                                                       "startIndex": end, "endIndex": end + width},
+                                             "inheritFromBefore": True}},
+                        {"copyPaste": {"source": src, "destination": dst, "pasteType": "PASTE_NORMAL"}},
+                        {"copyPaste": {"source": src, "destination": src, "pasteType": "PASTE_VALUES"}},
+                    ]}).execute()
+                    new_header = [str(header[i]).replace(y, Y) for i in months]
+                    self._values_batch(file_id, [{
+                        "range": f"'{title}'!{col_letters(end)}1:{col_letters(end + width - 1)}1",
+                        "values": [new_header]}])
+                    self.log(f"  {title}：{col_letters(start)}:{col_letters(end - 1)} 貼上為值，"
+                             f"右側插入 {Y} 欄位")
+
+        # 2. 決定刪除的分頁
+        delete: set = set()
+        keep_only = [self._fmt(t) for t in ops.get("keep_only", [])]
+        keep_contains = ops.get("keep_contains", [])
+        latest_patterns = [re.compile(self._fmt(p)) for p in ops.get("keep_latest", [])]
+        if keep_only or keep_contains:
+            for t in ids:
+                if t in keep_only or any(k in t for k in keep_contains) \
+                        or any(p.search(t) for p in latest_patterns):
+                    continue
+                delete.add(t)
+        for pattern in latest_patterns:
+            matched = sorted(t for t in ids if pattern.search(t))
+            delete.update(matched[:-1])
+        for pattern in ops.get("delete_regex", []):
+            delete.update(t for t in ids if re.search(self._fmt(pattern), t))
+        if len(delete) >= len(ids):
+            delete = set()
+        if delete:
+            self.log(f"  刪除分頁：{'、'.join(sorted(delete))}")
+
+        # 3. 改名、內容年份替換、底色等結構性請求
+        requests: List[Dict[str, Any]] = [{"deleteSheet": {"sheetId": ids[t]}} for t in sorted(delete)]
+        final: Dict[str, int] = {t: i for t, i in ids.items() if t not in delete}
+        for pattern in ops.get("rename_year", []):
+            regex = re.compile(self._fmt(pattern))
+            for t in list(final):
+                if regex.search(t) and y in t:
+                    new_title = t.replace(y, Y, 1)
+                    requests.append({"updateSheetProperties": {
+                        "properties": {"sheetId": final[t], "title": new_title}, "fields": "title"}})
+                    final[new_title] = final.pop(t)
+        for t in ops.get("replace_year_in", []):
+            title = self._fmt(t)
+            if title in final:
+                requests.append({"findReplace": {"find": y, "replacement": Y, "sheetId": final[title],
+                                                 "includeFormulas": True}})
+
+        for t in ops.get("replace_finance_id_in", []):
+            title = self._fmt(t)
+            if title not in final:
+                continue
+            if fin_id and old_fin_id:
+                requests.append({"findReplace": {"find": old_fin_id, "replacement": fin_id,
+                                                 "sheetId": final[title], "includeFormulas": True}})
+            else:
+                self.log(f"  ⚠ 找不到前一年度或新年度財報 ID，{title} 公式未更新（請先跑「財務報表」）")
+
+        def resolve(rng: str) -> Optional[str]:
+            sheet, a1 = self._fmt(rng).rsplit("!", 1)
+            sheet = sheet.strip("'")
+            if sheet.endswith("*"):
+                sheet = next((t for t in final if t.startswith(sheet[:-1])), "")
+            return f"'{sheet}'!{a1}" if sheet in final else None
+
+        # clear_constants：先讀公式，之後把公式寫回、值清空
+        constants: List[Dict[str, Any]] = []
+        for rng in ops.get("clear_constants", []):
+            target = resolve(rng)
+            if not target:
+                continue
+            original = target
+            for old_title, sid in ids.items():  # 改名前的名稱讀取
+                for new_title, nsid in final.items():
+                    if nsid == sid and target.startswith(f"'{new_title}'!"):
+                        original = target.replace(f"'{new_title}'!", f"'{old_title}'!", 1)
+            rows = self.sheets.spreadsheets().values().get(
+                spreadsheetId=file_id, range=original, valueRenderOption="FORMULA",
+            ).execute().get("values", [])
+            kept = [[v if isinstance(v, str) and v.startswith("=") else "" for v in row] for row in rows]
+            if rows:
+                constants.append({"range": target, "values": kept})
+
+        if requests:
+            self.sheets.spreadsheets().batchUpdate(
+                spreadsheetId=file_id, body={"requests": requests}).execute()
+
+        # 4. 清除與填值（用改名後的名稱）
+        clear = [r for r in (resolve(c) for c in ops.get("clear", [])) if r]
+        for pattern, a1 in ops.get("clear_months", {}).items():
+            clear += [f"'{t}'!{a1}" for t in final if re.search(self._fmt(pattern), t)]
+        if clear:
+            self.sheets.spreadsheets().values().batchClear(
+                spreadsheetId=file_id, body={"ranges": clear}).execute()
+        values = constants + [{"range": r, "values": [[self._fmt(v, fin=fin_id)]]}
+                              for c, v in ops.get("values", {}).items() if (r := resolve(c))]
+        if "{fin}" in str(ops.get("values", {})) and not fin_id:
+            values = [v for v in values if "importrange" not in str(v["values"])]
+            self.log(f"  ⚠ 找不到新年度財報 ID，公式未更新（請先跑「財務報表」）")
+        if values:
+            self._values_batch(file_id, values)
+
+    # ---------- 服務分潤表年度資料夾（其他功能共用） ----------
+    def service_area_folders(self, areas: List[str]) -> Tuple[List[Tuple[Dict[str, Any], Dict[str, Any]]],
+                                                               List[Dict[str, Any]]]:
+        """回傳 ([(前一年度地區資料夾, 新年度地區資料夾)], 前一年度所有地區資料夾)；
+        新年度年度／地區資料夾不存在就建立（只建 areas 的地區）。"""
+        values = self.read(f"'{GENERATE_SHEET}'!A1:H")
+        row_number = next((i for i, row in enumerate(values, start=1)
+                           if row and str(row[0]).strip() in SERVICE_ROW_NAMES), 0)
+        if not row_number:
+            raise RuntimeError(f"「{GENERATE_SHEET}」找不到服務分潤表列")
+        spec = parse_row(row_number, values[row_number - 1], self.prev_year)
+        pairs, all_old = [], []
+        for old_year in self.find_year_folders(spec):
+            new_year = self.ensure_folder(spec.folder_id, replace_year(old_year["name"], self.prev_year, self.new_year))
+            old_subs = [f for f in self.children(old_year["id"]) if f["mimeType"] == FOLDER_MIME]
+            all_old += old_subs
+            for old_sub in old_subs:
+                if not any(mentions_area(old_sub["name"], a) for a in areas):
+                    continue
+                if new_year["id"].startswith("(dry-run"):
+                    new_sub = {"id": f"(dry-run:{old_sub['name']})", "name": old_sub["name"]}
+                else:
+                    new_sub = self.ensure_folder(new_year["id"], old_sub["name"])
+                pairs.append((old_sub, new_sub))
+        return pairs, all_old
+
+    def run_service_rules(self, func: str, area: str) -> List[Dict[str, str]]:
+        areas = sorted({a for r in SERVICE_FILE_RULES if r["func"] == func for a in r["areas"]})
+        if area != ALL_AREA:
+            areas = [a for a in areas if a == area]
+        if not areas:
+            return []
+        self.log(f"{func}：服務分潤表資料夾內 {'、'.join(areas)} 的檔案")
+        pairs, all_old = self.service_area_folders(areas)
+        records: List[Dict[str, str]] = []
+        for old_sub, new_sub in pairs:
+            records += self.copy_service_files(old_sub, new_sub, all_old, func=func)
+        return records
+
+    # ---------- 財務報表：其他年度資料夾 ----------
+    def clone_year_folder(self, job: Dict[str, Any]) -> List[Dict[str, str]]:
+        meta = self.get_meta(job["folder_id"])
+        if str(self.prev_year) in meta["name"]:
+            old_year, parent = meta, (meta.get("parents") or [""])[0]
+        else:
+            folders = [f for f in self.children(job["folder_id"]) if f["mimeType"] == FOLDER_MIME
+                       and re.search(rf"(?<!\d){self.prev_year}", f["name"])]
+            folders.sort(key=lambda f: (f["name"] != str(self.prev_year), f["name"]))
+            if not folders:
+                raise RuntimeError(f"{job['label']} 找不到 {self.prev_year} 年度資料夾")
+            old_year, parent = folders[0], job["folder_id"]
+        new_year = self.ensure_folder(parent, replace_year(old_year["name"], self.prev_year, self.new_year))
+        records = [{"kind": "資料夾", "old_name": old_year["name"], "old_id": old_year["id"],
+                    "new_name": new_year["name"], "new_id": new_year["id"]}]
+
+        def year_name(n: str) -> str:
+            return dash_area(re.sub(rf"(?<!\d){self.prev_year}", str(self.new_year), n))
+
+        def copy_tree(old_id: str, new_id: str) -> None:  # 子資料夾照建、不複製檔案
+            for f in self.children(old_id):
+                if f["mimeType"] == FOLDER_MIME:
+                    if new_id.startswith("(dry-run"):
+                        self.log(f"  建立資料夾：{year_name(f['name'])}")
+                        continue
+                    copy_tree(f["id"], self.ensure_folder(new_id, year_name(f["name"]))["id"])
+
+        for f in self.children(old_year["id"]):
+            if f["mimeType"] == FOLDER_MIME:
+                if new_year["id"].startswith("(dry-run"):
+                    self.log(f"  建立資料夾：{year_name(f['name'])}")
+                else:
+                    copy_tree(f["id"], self.ensure_folder(new_year["id"], year_name(f["name"]))["id"])
+            elif f["mimeType"] in (SHEET_MIME, SHORTCUT_MIME) and str(self.prev_year) in f["name"]:
+                old = self.get_meta(f["shortcutDetails"]["targetId"]) if f["mimeType"] == SHORTCUT_MIME else f
+                copied, created = self.ensure_copy(old, new_year["id"], year_name(f["name"]))
+                record = {"kind": "檔案", "old_name": old["name"], "old_id": old["id"],
+                          "new_name": copied["name"], "new_id": copied["id"], "created": created}
+                ops = next((o for pat, o in job["files"].items() if re.search(pat, f["name"])), None)
+                if created and ops:
+                    self.apply_ops(record, ops)
+                records.append(record)
         return records
 
     # ---------- 內勤表單專用整理 ----------
-    def find_finance_file(self, area: str) -> Optional[Dict[str, Any]]:
-        """找新年度該區財報（例：台北2027財報），需先跑過「財務報表」。"""
-        names = [f"{area}{self.new_year}財報"] + [
-            f"{alias}{self.new_year}財報" for alias, canon in NAME_ALIASES.items() if canon == area]
+    def find_finance_file(self, area: str, year: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """找該區財報（預設新年度，例：台北2027財報），新年度需先跑過「財務報表」。"""
+        year = year or self.new_year
+        names = [f"{area}{year}財報"] + [
+            f"{alias}{year}財報" for alias, canon in NAME_ALIASES.items() if canon == area]
         for name in names:
             res = self.drive.files().list(
                 q=f"name = '{name}' and mimeType = '{SHEET_MIME}' and trashed = false",
@@ -652,7 +942,7 @@ class Rollover:
             self.log(f"  ⚠ 找不到 {spec.area}{self.new_year}財報，ATM!A2 不更新（請先跑「財務報表」）")
         for r in targets:
             self.log(f"  {r['new_name']}：{self.prev_year}目標→{self.new_year}目標；清除 "
-                     f"{'、'.join(OFFICE_CLEAR_RANGES)}、清潔異動 A2:AE（含底色）"
+                     f"{'、'.join(OFFICE_CLEAR_RANGES)}、清潔異動 A2:AE 底色（K 欄公式保留）"
                      + (f"；ATM!A2 → {finance['name']}" if finance else ""))
             if self.dry_run:
                 continue
@@ -680,7 +970,7 @@ class Rollover:
                     requests.append({"repeatCell": {
                         "range": a1_to_grid(sheet_ids[title], a1),
                         "cell": {"userEnteredFormat": {}},
-                        "fields": "userEnteredValue,userEnteredFormat.backgroundColor"}})
+                        "fields": "userEnteredFormat.backgroundColor"}})
             if requests:
                 self.sheets.spreadsheets().batchUpdate(
                     spreadsheetId=r["new_id"], body={"requests": requests},
@@ -796,6 +1086,31 @@ class Rollover:
 
     def run(self, rows_arg: str = "all", names: Optional[List[str]] = None,
             area: str = ALL_AREA) -> List[Dict[str, str]]:
+        records = self._run_rows(rows_arg, names, area)
+        funcs = {ROW_FUNCTIONS.get(n, n) for n in (names or [])}
+        extra: List[Dict[str, str]] = []
+        for func in ("專員表單", "內勤表單", "財務報表"):
+            if func not in funcs:
+                continue
+            try:
+                extra += self.run_service_rules(func, area)
+            except Exception as exc:
+                self.log(f"  ✗ {func} 服務分潤表檔案失敗：{exc}")
+        if "財務報表" in funcs:
+            for job in FINANCE_YEAR_FOLDERS:
+                if area != ALL_AREA and job["area"] != area:
+                    continue
+                self.log(f"財務報表：{job['label']}")
+                try:
+                    extra += self.clone_year_folder(job)
+                except Exception as exc:
+                    self.log(f"  ✗ {job['label']} 失敗：{exc}")
+        if extra:
+            count = self.record_new_ids(extra)
+            self.log(f"  新年度ID 回寫 {count} 列")
+        return records + extra
+
+    def _run_rows(self, rows_arg: str, names: Optional[List[str]], area: str) -> List[Dict[str, str]]:
         """rows_arg 指定列號；names 指定 A 欄名稱（例：["內勤表單"]），兩者都給時取交集；
         area 指定執行區域（全區＝不篩選）。"""
         values = self.read(f"'{GENERATE_SHEET}'!A1:H")
@@ -805,7 +1120,7 @@ class Rollover:
             row_numbers = [r for r in row_numbers
                            if r <= len(values) and values[r - 1] and str(values[r - 1][0]).strip() in wanted]
             if not row_numbers:
-                raise RuntimeError(f"「{GENERATE_SHEET}」A 欄找不到：{'、'.join(names)}")
+                self.log(f"「{GENERATE_SHEET}」A 欄沒有：{'、'.join(names)}")
         all_records: List[Dict[str, str]] = []
         for row_number in row_numbers:
             row = values[row_number - 1] if row_number <= len(values) else []
