@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.common.schedule_month_window import resolve_schedule_months
+from tools.common.year_files import file_for_year
 
 import yaml
 from tools.common.google_auth import get_google_credentials
@@ -191,28 +192,14 @@ def get_yearly_roster_spreadsheet_id(
             f"spreadsheet_ids.roster_by_year.{run_year}.{area}"
         )
 
-    target_name = base_name[:year_match.start()] + str(run_year) + base_name[year_match.end():]
-    parents = metadata.get("parents") or []
-    parent_query = f" and '{parents[0]}' in parents" if parents else ""
-    escaped_name = target_name.replace("'", "\\'")
-    result = drive.files().list(
-        q=(
-            f"name='{escaped_name}' and trashed=false{parent_query} and "
-            "mimeType='application/vnd.google-apps.spreadsheet'"
-        ),
-        fields="files(id,name)",
-        pageSize=10,
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True,
-    ).execute()
-    matches = result.get("files", [])
-    if len(matches) != 1:
+    try:
+        target_id = file_for_year(drive, base_id, run_year)
+    except FileNotFoundError as exc:
         raise RuntimeError(
-            f"找不到唯一的 {area} {run_year} 年外場排班檔「{target_name}」；"
-            f"請設定 spreadsheet_ids.roster_by_year.{run_year}.{area}"
-        )
-    log(f"年度切換：{area} → {target_name}")
-    return str(matches[0]["id"])
+            f"{area} {exc}；或設定 spreadsheet_ids.roster_by_year.{run_year}.{area}"
+        ) from exc
+    log(f"年度切換：{area} → {run_year} 年外場排班檔")
+    return target_id
 
 
 def area_list_from_config(cfg: dict[str, Any]) -> list[str]:
