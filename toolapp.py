@@ -3284,7 +3284,12 @@ def run_new_year_generate(year, function_name, *, dry_run, fresh=False, area="�
         get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
         int(year_text), dry_run=dry_run, fresh=fresh, log=log,
     )
-    records = rollover.run("all", names=names, area=area or "全區")
+    try:
+        records = rollover.run("all", names=names, area=area or "全區")
+    except Exception as exc:
+        rollover.append_run_log(function_name, area or "全區", [], error=str(exc))
+        raise
+    rollover.append_run_log(function_name, area or "全區", records)
     missing = [r["old_name"] for r in records if r["new_name"] == "找不到來源"]
     head = "（預覽，未建立任何檔案）" if dry_run else "完成，已回寫「生成新年度」I欄／「新年度ID」"
     lines = [f"{r['kind']} {r['old_name']} → {r['new_name']}：{r['new_id']}" for r in records]

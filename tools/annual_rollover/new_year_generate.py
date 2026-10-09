@@ -44,6 +44,9 @@ from config.vip_config import MASTER_SPREADSHEET_ID
 
 GENERATE_SHEET = "生成新年度"
 NEW_ID_SHEET = "新年度ID"
+RUN_LOG_SHEET = "生成新年度Log"
+RUN_LOG_HEADERS = ["執行時間", "新年度", "功能", "區域", "模式", "重新生成", "類型",
+                   "前一年度名稱", "前一年度ID", "新年度名稱", "新年度ID", "狀態", "訊息"]
 RESULT_COL = "I"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
@@ -411,6 +414,44 @@ class Rollover:
             fields="id,name,mimeType", supportsAllDrives=True,
         ).execute()
         return copied, True
+
+    # ---------- 執行 Log ----------
+    def append_run_log(self, func: str, area: str, records: List[Dict[str, str]],
+                       error: str = "") -> None:
+        """在主控表「生成新年度Log」追加：一列摘要＋每個資料夾／檔案一列（分頁不存在就建立）。"""
+        try:
+            meta = self.sheets.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id, fields="sheets.properties.title").execute()
+            titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+            if RUN_LOG_SHEET not in titles:
+                self.sheets.spreadsheets().batchUpdate(spreadsheetId=self.spreadsheet_id, body={
+                    "requests": [{"addSheet": {"properties": {"title": RUN_LOG_SHEET}}}]}).execute()
+                self.sheets.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id, range=f"'{RUN_LOG_SHEET}'!A1",
+                    valueInputOption="RAW", body={"values": [RUN_LOG_HEADERS]}).execute()
+            now = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
+            mode = "預覽" if self.dry_run else "執行"
+            fresh = "是" if self.fresh else ""
+            missing = [r for r in records if r.get("new_name") == "找不到來源"]
+            if error:
+                status, message = "失敗", error
+            elif missing:
+                status, message = "部分失敗", f"找不到或失敗 {len(missing)} 項"
+            else:
+                status, message = "成功", f"共 {len(records)} 項"
+            rows = [[now, self.new_year, func, area, mode, fresh, "摘要", "", "", "", "", status, message]]
+            for r in records:
+                failed = r.get("new_name") == "找不到來源"
+                state = "失敗" if failed else ("新建" if r.get("created") else
+                                             ("沿用" if r["kind"] == "檔案" else ""))
+                rows.append([now, self.new_year, func, area, mode, fresh, r["kind"],
+                             r.get("old_name", ""), r.get("old_id", ""),
+                             "" if failed else r.get("new_name", ""), r.get("new_id", ""), state, ""])
+            self.sheets.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id, range=f"'{RUN_LOG_SHEET}'!A1",
+                valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
+        except Exception as exc:  # Log 失敗不影響主流程
+            self.log(f"  ⚠ 寫入「{RUN_LOG_SHEET}」失敗：{exc}")
 
     # ---------- Sheets ----------
     def read(self, a1: str) -> List[List[str]]:
@@ -1160,7 +1201,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     rollover = Rollover(get_drive_service(), get_sheets_service(), args.spreadsheet_id,
                         args.year, dry_run=args.dry_run, fresh=args.fresh)
-    records = rollover.run(args.rows, names=split_list(args.names) or None)
+    names = split_list(args.names) or None
+    try:
+        records = rollover.run(args.rows, names=names)
+    except Exception as exc:
+        rollover.append_run_log("、".join(names or [f"列 {args.rows}"]), ALL_AREA, [], error=str(exc))
+        raise
+    rollover.append_run_log("、".join(names or [f"列 {args.rows}"]), ALL_AREA, records)
     print(f"共 {len(records)} 筆生成紀錄")
     return 1 if any(r["new_name"] == "找不到來源" for r in records) else 0
 
