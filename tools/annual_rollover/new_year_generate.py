@@ -70,6 +70,33 @@ OFFICE_KEEP_SHEETS = [
 OFFICE_KEEP_CONTAINS = ["儲值金不足"]  # 分頁名稱含這些字也保留（例：202611儲值金不足）
 OFFICE_ATM_CELL = "'ATM'!A2"
 
+# 「服務分潤表」：年度資料夾（例：2026專員承攬服務費）下各區資料夾要複製的檔案。
+# sources 依序比對前一年度檔名（{y}＝前一年度、{a}＝地區，正規表示式、忽略前後空白），
+# target 是新年度檔名（{Y}＝新年度）。之後年度會先比對到第一個（新命名）來源。
+# 來源是捷徑時：在原始檔所在資料夾複製新年度檔，再於新年度地區資料夾建捷徑。
+SERVICE_ROW_NAMES = {"服務分潤表"}
+SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
+_ALL = ["台北", "台中", "桃園", "新竹", "高雄"]
+SERVICE_FILE_RULES = [
+    {"areas": _ALL, "target": "{Y}承攬服務費mail_{a}",
+     "sources": [r"{y}承攬服務費mail[_\-]{a}"]},
+    {"areas": _ALL, "target": "{Y}營業額總表_{a}",
+     "sources": [r"{y}營業額總表_{a}", r"{y}{a}營業額總表"]},
+    {"areas": ["台北", "台中"], "target": "{Y}專員薪資申報_{a}",
+     "sources": [r"{y}專員薪資申報_{a}"]},
+    {"areas": ["桃園", "新竹"], "target": "{Y}_專員名冊薪資_{a}",
+     "sources": [r"{y}_專員名冊薪資_{a}", r"{y}{a}專員薪資\(外場\)"]},
+    {"areas": ["桃園", "新竹"], "target": "{Y}_服務異動_{a}",
+     "sources": [r"{y}_服務異動_{a}", r"{y}{a}退款及儲值金異動"]},
+    {"areas": ["桃園", "新竹"], "target": "{Y}紙本／中獎發票-{a}",
+     "sources": [r"{y}紙本[／/]中獎發票-{a}"]},
+    {"areas": ["桃園", "新竹"], "target": "{a}{Y}支出明細",
+     "sources": [r"{a}{y}支出明細"]},
+    {"areas": ["高雄"], "target": "{Y}高雄內勤工作表單", "sources": [r"{y}高雄內勤工作表單"]},
+    {"areas": ["高雄"], "target": "{Y}專員名冊與時數-高雄", "sources": [r"{y}專員名冊與時數-高雄"]},
+    {"areas": ["高雄"], "target": "{Y}專員薪資相關-高雄", "sources": [r"{y}專員薪資相關-高雄"]},
+]
+
 # 「專員名冊/薪資檔」：新建立的專員名冊與時數、專員薪資相關整理（取代 H 欄的通用清除）
 STAFF_ROW_NAMES = {"專員名冊/薪資檔"}
 ROSTER_KEYWORD = "專員名冊與時數"
@@ -277,7 +304,7 @@ class Rollover:
         while True:
             res = self.drive.files().list(
                 q=f"'{folder_id}' in parents and trashed = false",
-                fields="nextPageToken, files(id,name,mimeType)",
+                fields="nextPageToken, files(id,name,mimeType,shortcutDetails)",
                 pageToken=token, pageSize=1000,
                 supportsAllDrives=True, includeItemsFromAllDrives=True,
             ).execute()
@@ -407,6 +434,10 @@ class Rollover:
                 if sub_name in old_subs:
                     sub_pairs.append((old_subs[sub_name], new_sub))
 
+        if spec.name in SERVICE_ROW_NAMES:
+            for old_sub, new_sub in sub_pairs:
+                records += self.copy_service_files(old_sub, new_sub)
+
         # 檔案：先找年度資料夾、再找子資料夾、最後找上層資料夾
         search_pairs = year_pairs + sub_pairs + [({"id": spec.folder_id}, {"id": spec.folder_id})]
         listing_cache: Dict[str, List[Dict[str, Any]]] = {}
@@ -426,7 +457,8 @@ class Rollover:
             new_name = replace_year(file_name, self.prev_year, self.new_year)
             copied, created = self.ensure_copy(source, target_parent["id"], new_name)
             if (created and copied.get("mimeType") == SHEET_MIME
-                    and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES | STAFF_ROW_NAMES):
+                    and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES | STAFF_ROW_NAMES
+                    | SERVICE_ROW_NAMES):
                 self.cleanup_sheets(copied["id"], spec.cleanup_sheets, spec.cleanup_start)
             records.append({"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                             "new_name": copied["name"], "new_id": copied["id"], "created": created})
@@ -523,6 +555,71 @@ class Rollover:
                         "find": roster["old_id"], "replacement": roster["new_id"],
                         "allSheets": True, "includeFormulas": True}})
                 self._apply(salary["new_id"], clear, values, requests)
+
+    # ---------- 服務分潤表 ----------
+    def get_meta(self, file_id: str) -> Dict[str, Any]:
+        return self.drive.files().get(
+            fileId=file_id, fields="id,name,mimeType,parents", supportsAllDrives=True,
+        ).execute()
+
+    def ensure_shortcut(self, parent_id: str, name: str, target_id: str) -> None:
+        if parent_id.startswith("(dry-run"):
+            self.log(f"  建立捷徑：{name}")
+            return
+        existing = [f for f in self.children(parent_id)
+                    if f["mimeType"] == SHORTCUT_MIME and f["name"] == name]
+        if existing and not self.fresh:
+            return
+        for item in existing:
+            self._retire(item)
+        self.log(f"  建立捷徑：{name}")
+        if not self.dry_run:
+            self.drive.files().create(
+                body={"name": name, "mimeType": SHORTCUT_MIME, "parents": [parent_id],
+                      "shortcutDetails": {"targetId": target_id}},
+                fields="id", supportsAllDrives=True,
+            ).execute()
+
+    def copy_service_files(self, old_sub: Dict[str, Any], new_sub: Dict[str, Any]) -> List[Dict[str, str]]:
+        area = next((a for a in _ALL if mentions_area(old_sub["name"], a)), "")
+        if not area:
+            return []
+        files = [f for f in self.children(old_sub["id"])
+                 if f["mimeType"] in (SHEET_MIME, SHORTCUT_MIME)]
+        records: List[Dict[str, str]] = []
+        for rule in SERVICE_FILE_RULES:
+            if area not in rule["areas"]:
+                continue
+            target_name = rule["target"].format(Y=self.new_year, a=area)
+            source = None
+            for pattern in rule["sources"]:
+                regex = re.compile(pattern.format(y=self.prev_year, a=area))
+                source = next((f for f in files if regex.fullmatch(f["name"].strip())), None)
+                if source:
+                    break
+            if not source:
+                self.log(f"  ⚠ {old_sub['name']} 找不到：{target_name.replace(str(self.new_year), str(self.prev_year))}")
+                records.append({"kind": "檔案", "old_name": f"{old_sub['name']}/{target_name}",
+                                "old_id": "", "new_name": "找不到來源", "new_id": ""})
+                continue
+            try:
+                if source["mimeType"] == SHORTCUT_MIME:
+                    target = self.get_meta(source["shortcutDetails"]["targetId"])
+                    parent = (target.get("parents") or [new_sub["id"]])[0]
+                    copied, created = self.ensure_copy(target, parent, target_name)
+                    self.ensure_shortcut(new_sub["id"], target_name, copied["id"])
+                    old = target
+                else:
+                    copied, created = self.ensure_copy(source, new_sub["id"], target_name)
+                    old = source
+            except Exception as exc:  # 單一檔案失敗（例如沒有原始檔權限）不影響其他檔案
+                self.log(f"  ✗ {source['name']} 複製失敗：{exc}")
+                records.append({"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
+                                "new_name": "找不到來源", "new_id": ""})
+                continue
+            records.append({"kind": "檔案", "old_name": old["name"], "old_id": old["id"],
+                            "new_name": copied["name"], "new_id": copied["id"], "created": created})
+        return records
 
     # ---------- 內勤表單專用整理 ----------
     def find_finance_file(self, area: str) -> Optional[Dict[str, Any]]:
