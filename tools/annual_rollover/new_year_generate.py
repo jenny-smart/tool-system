@@ -95,8 +95,8 @@ SERVICE_FILE_RULES = [
      "sources": [r"{y}支出明細_{a}", r"{a}{y}支出明細", r"桃園{y}支出明細"]},
     {"areas": ["高雄"], "target": "{Y}內勤工作表單_高雄",
      "sources": [r"{y}內勤工作表單_高雄", r"{y}高雄內勤工作表單"]},
-    {"areas": ["高雄"], "target": "{Y}專員名冊與時數-高雄", "sources": [r"{y}專員名冊與時數-高雄"]},
-    {"areas": ["高雄"], "target": "{Y}專員薪資相關-高雄", "sources": [r"{y}專員薪資相關-高雄"]},
+    {"areas": ["高雄"], "target": "{Y}專員名冊與時數_高雄", "sources": [r"{y}專員名冊與時數[_\-]高雄"]},
+    {"areas": ["高雄"], "target": "{Y}專員薪資相關_高雄", "sources": [r"{y}專員薪資相關[_\-]高雄"]},
 ]
 
 # 「專員名冊/薪資檔」：新建立的專員名冊與時數、專員薪資相關整理（取代 H 欄的通用清除）
@@ -219,6 +219,15 @@ def folder_id_from_url(value: str) -> str:
     if match:
         return match.group(1)
     return value if re.fullmatch(r"[A-Za-z0-9_-]{20,}", value) else ""
+
+
+_AREA_SUFFIX = re.compile(r"\s*-\s*(台北|台中|桃園|新竹|高雄|電器|家電|新北)$")
+
+
+def underscore_area(name: str) -> str:
+    """新年度檔名地區前一律用底線：「2027專員名冊與時數-台北」→「2027專員名冊與時數_台北」。
+    也用來比對前一年度檔名（-地區 與 _地區 視為相同）。"""
+    return _AREA_SUFFIX.sub(r"_\1", str(name or "").strip())
 
 
 def replace_year(name: str, prev_year: int, new_year: int) -> str:
@@ -448,7 +457,8 @@ class Rollover:
             source, target_parent = None, None
             for old_parent, new_parent in search_pairs:
                 files = listing_cache.setdefault(old_parent["id"], self.children(old_parent["id"]))
-                match = next((f for f in files if f["mimeType"] != FOLDER_MIME and f["name"] == file_name), None)
+                match = next((f for f in files if f["mimeType"] != FOLDER_MIME
+                              and underscore_area(f["name"]) == underscore_area(file_name)), None)
                 if match:
                     source, target_parent = match, new_parent
                     break
@@ -457,7 +467,7 @@ class Rollover:
                 records.append({"kind": "檔案", "old_name": file_name, "old_id": "",
                                 "new_name": "找不到來源", "new_id": ""})
                 continue
-            new_name = replace_year(file_name, self.prev_year, self.new_year)
+            new_name = underscore_area(replace_year(file_name, self.prev_year, self.new_year))
             copied, created = self.ensure_copy(source, target_parent["id"], new_name)
             if (created and copied.get("mimeType") == SHEET_MIME
                     and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES | STAFF_ROW_NAMES

@@ -240,7 +240,7 @@ def test_staff_post_process():
                      "場次和時數", "工具包押金", "202609調薪資料", "202608調薪資料", "202603調薪資料-old"]
     Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
     ids = {i["name"]: i["id"] for i in drive.items.values()}
-    roster, salary = ids["2027專員名冊與時數-台北"], ids["2027專員薪資相關-台北"]
+    roster, salary = ids["2027專員名冊與時數_台北"], ids["2027專員薪資相關_台北"]
 
     assert (roster, "'2026排班統計表'!R5:Z") in sheets.cleared
     assert (roster, "'2026排班統計表'!AD5:AL") in sheets.cleared
@@ -311,3 +311,10 @@ def test_service_rule_names():
     assert target_for("2026高雄內勤工作表單", "高雄") == "2027內勤工作表單_高雄"
     assert target_for("2027內勤工作表單_高雄".replace("2027", "2026"), "高雄") == "2027內勤工作表單_高雄"
     assert target_for("2026紙本 / 中獎發票-新竹", "新竹") == "2027紙本／中獎發票_新竹"
+
+
+def test_underscore_area():
+    from tools.annual_rollover.new_year_generate import underscore_area
+    assert underscore_area("2027專員名冊與時數-台北") == "2027專員名冊與時數_台北"
+    assert underscore_area("2027承攬服務費mail-高雄") == "2027承攬服務費mail_高雄"
+    assert underscore_area("2027台北內勤工作表單") == "2027台北內勤工作表單"
