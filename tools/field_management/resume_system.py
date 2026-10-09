@@ -40,6 +40,7 @@ try:
         find_sheet_props,
         get_sheet_props_list,
         get_values,
+        year_file_id,
     )
 except ImportError:
     from roster_raise import (
@@ -47,6 +48,7 @@ except ImportError:
         find_sheet_props,
         get_sheet_props_list,
         get_values,
+        year_file_id,
     )
 
 try:
@@ -301,7 +303,8 @@ def _format_phone_for_sheet(digits: str) -> str:
 
 def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_type: str = "手動") -> dict[str, Any]:
     cfg = load_system_config(SYSTEM_NAME)
-    spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)
+    # 寫入結束日所屬年度的「YYYY專員名冊與時數」
+    spreadsheet_id = year_file_id(get_spreadsheet_id(cfg, "roster", area), end_dt.strftime("%Y%m"))
 
     status = "失敗"
     message = ""
@@ -399,7 +402,8 @@ def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_typ
 
 def fetch_lemon_home_replies(area: str, run_type: str = "手動") -> dict[str, Any]:
     cfg = load_system_config(SYSTEM_NAME)
-    spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)
+    # 今天所屬年度的「YYYY專員名冊與時數」
+    spreadsheet_id = year_file_id(get_spreadsheet_id(cfg, "roster", area), datetime.now().strftime("%Y%m"))
 
     status = "失敗"
     message = ""
@@ -498,7 +502,8 @@ def extract_latest_resumes(area: str, target_sheet_name: str, run_type: str = "�
     「XXX專員名冊」或既有的履歷追蹤表）。
     """
     cfg = load_system_config(SYSTEM_NAME)
-    spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)
+    # 今天所屬年度的「YYYY專員名冊與時數」
+    spreadsheet_id = year_file_id(get_spreadsheet_id(cfg, "roster", area), datetime.now().strftime("%Y%m"))
 
     status = "失敗"
     message = ""

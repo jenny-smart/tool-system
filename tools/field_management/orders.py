@@ -25,6 +25,11 @@ except ImportError:
 # ★ 新增
 from tools.common.log_to_sheet import write_target_log
 
+try:
+    from .roster_raise import year_file_id
+except ImportError:
+    from roster_raise import year_file_id
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
@@ -331,7 +336,8 @@ def run_orders_for_area(
     sheets = get_sheets_service()
 
     source_folder_id = get_folder_id(cfg, "order", area)
-    target_spreadsheet_id = get_spreadsheet_id(cfg, "salary", area)  # ★ 先取出
+    # 執行日所屬年度的「YYYY專員薪資相關」
+    target_spreadsheet_id = year_file_id(get_spreadsheet_id(cfg, "salary", area), date_key[:6])
 
     file_base = f"{date_key}訂單-{area}"
     source_file_name = ""                                             # ★
