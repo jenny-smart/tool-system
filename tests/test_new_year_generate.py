@@ -64,6 +64,7 @@ class FakeSheets:
         self.cleared = []
         self.requests = []
         self.titles = None
+        self.appended = []
 
     def spreadsheets(self):
         return self
@@ -82,6 +83,9 @@ class FakeSheets:
 
     def update(self, spreadsheetId, range, valueInputOption, body):
         return _Req(lambda: self.writes.__setitem__(range, body["values"]))
+
+    def append(self, spreadsheetId, range, valueInputOption, insertDataOption, body):
+        return _Req(lambda: self.appended.extend(body["values"]))
 
     def batchClear(self, spreadsheetId, body):
         return _Req(lambda: self.cleared.extend((spreadsheetId, r) for r in body["ranges"]))
@@ -394,3 +398,14 @@ def test_year_columns_and_invoice_folder_clone():
     assert batch[0]["insertDimension"]["range"]["startIndex"] == 4
     assert batch[2]["copyPaste"]["pasteType"] == "PASTE_VALUES"
     assert sheets.writes[("rev", "'2026財報總表'!E1:F1")] == [["2027.01", "2027.02"]]
+
+
+def test_run_log():
+    drive, sheets = _setup()
+    roll = Rollover(drive, sheets, "master", 2027, log=lambda *_: None)
+    records = roll.run(names=["財務報表"])
+    roll.append_run_log("財務報表", "全區", records)
+    assert sheets.appended[0][2:7] == ["財務報表", "全區", "執行", "", "摘要"]
+    assert sheets.appended[0][11] == "成功"
+    assert len(sheets.appended) == 1 + len(records)
+    assert {row[11] for row in sheets.appended[1:]} <= {"新建", "沿用", ""}
