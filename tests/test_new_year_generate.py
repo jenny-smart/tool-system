@@ -260,34 +260,41 @@ def test_staff_post_process():
                             "allSheets": True, "includeFormulas": True}} in s_reqs
 
 
-def test_service_files_with_shortcuts_and_renames():
+def test_service_files_copy_originals_and_cross_area():
     S = "application/vnd.google-apps.shortcut"
     drive = FakeDrive([
         {"id": "y", "name": "2026專員承攬服務費", "mimeType": FOLDER_MIME, "parent": "SERVICEFOLDERID_0123456789"},
         {"id": "ty", "name": "03.桃園專員", "mimeType": FOLDER_MIME, "parent": "y"},
+        {"id": "hc", "name": "04.新竹專員", "mimeType": FOLDER_MIME, "parent": "y"},
         {"id": "mail", "name": "2026承攬服務費mail_桃園", "mimeType": SHEET_MIME, "parent": "ty"},
         {"id": "rev", "name": "2026桃園營業額總表", "mimeType": SHEET_MIME, "parent": "fin"},
         {"id": "rev_s", "name": "2026桃園營業額總表", "mimeType": S, "parent": "ty",
          "shortcutDetails": {"targetId": "rev"}},
         {"id": "pay", "name": "2026桃園專員薪資(外場) ", "mimeType": SHEET_MIME, "parent": "ty"},
         {"id": "xlsx", "name": "2026桃園營業額總表", "mimeType": "application/vnd.ms-excel", "parent": "ty"},
+        {"id": "hc_out", "name": "新竹2026支出明細", "mimeType": SHEET_MIME, "parent": "hc"},
     ])
     sheets = FakeSheets({
         "生成新年度": [[], ["服務分潤表", "https://drive.google.com/drive/folders/SERVICEFOLDERID_0123456789",
-                         "", "03.桃園專員"]],
+                         "", "03.桃園專員/04.新竹專員"]],
         "新年度ID": [],
     })
-    records = Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
-    by_name = {}
-    for i in drive.items.values():
-        by_name.setdefault(i["name"], []).append(i)
-    new_sub = next(i for i in drive.items.values() if i["name"] == "03.桃園專員" and i["id"] != "ty")
-    assert by_name["2027承攬服務費mail_桃園"][0]["parent"] == new_sub["id"]
-    # 捷徑：原始檔資料夾複製實體檔，新年度地區資料夾放捷徑
-    real = next(i for i in by_name["2027營業額總表_桃園"] if i["mimeType"] == SHEET_MIME)
-    short = next(i for i in by_name["2027營業額總表_桃園"] if i["mimeType"] == S)
-    assert real["parent"] == "fin" and short["parent"] == new_sub["id"]
-    assert short["shortcutDetails"]["targetId"] == real["id"]
-    assert by_name["2027_專員名冊薪資_桃園"][0]["parent"] == new_sub["id"]
-    missing = [r for r in records if r["new_name"] == "找不到來源"]
-    assert len(missing) == 3  # 服務異動、紙本／中獎發票、支出明細 不在測試資料中
+    Rollover(drive, sheets, "master", 2027, log=lambda *_: None).run("2")
+    items = list(drive.items.values())
+    def one(name):
+        found = [i for i in items if i["name"] == name]
+        assert len(found) == 1, name
+        return found[0]
+    new_ty = next(i for i in items if i["name"] == "03.桃園專員" and i["id"] != "ty")
+    new_hc = next(i for i in items if i["name"] == "04.新竹專員" and i["id"] != "hc")
+    assert one("2027承攬服務費mail_桃園")["parent"] == new_ty["id"]
+    # 捷徑 → 用原始檔複製，直接放在新年度地區資料夾，不建捷徑
+    assert one("2027營業額總表_桃園")["parent"] == new_ty["id"]
+    assert one("2027營業額總表_桃園")["mimeType"] == SHEET_MIME
+    assert not [i for i in items if i["mimeType"] == S and i["id"] != "rev_s"]
+    # 新竹沒有自己的專員薪資(外場) → 用桃園的生成
+    assert one("2027專員名冊薪資_桃園")["parent"] == new_ty["id"]
+    assert one("2027專員名冊薪資_新竹")["parent"] == new_hc["id"]
+    # 新竹有自己的支出明細 → 用新竹的
+    assert one("2027支出明細_新竹")["parent"] == new_hc["id"]
+    assert not [i for i in items if i["name"] == "2027支出明細_桃園"]  # 桃園沒有來源 → 不生成

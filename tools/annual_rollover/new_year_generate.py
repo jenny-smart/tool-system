@@ -73,7 +73,8 @@ OFFICE_ATM_CELL = "'ATM'!A2"
 # 「服務分潤表」：年度資料夾（例：2026專員承攬服務費）下各區資料夾要複製的檔案。
 # sources 依序比對前一年度檔名（{y}＝前一年度、{a}＝地區，正規表示式、忽略前後空白），
 # target 是新年度檔名（{Y}＝新年度）。之後年度會先比對到第一個（新命名）來源。
-# 來源是捷徑時：在原始檔所在資料夾複製新年度檔，再於新年度地區資料夾建捷徑。
+# 來源是捷徑時：用捷徑指向的原始檔複製，新年度檔直接放在新年度地區資料夾。
+# 先找本區資料夾，找不到再找其他地區資料夾（例：新竹 2027 由 2026桃園專員薪資(外場) 生成）。
 SERVICE_ROW_NAMES = {"服務分潤表"}
 SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 _ALL = ["台北", "台中", "桃園", "新竹", "高雄"]
@@ -84,14 +85,14 @@ SERVICE_FILE_RULES = [
      "sources": [r"{y}營業額總表_{a}", r"{y}{a}營業額總表"]},
     {"areas": ["台北", "台中"], "target": "{Y}專員薪資申報_{a}",
      "sources": [r"{y}專員薪資申報_{a}"]},
-    {"areas": ["桃園", "新竹"], "target": "{Y}_專員名冊薪資_{a}",
-     "sources": [r"{y}_專員名冊薪資_{a}", r"{y}{a}專員薪資\(外場\)"]},
-    {"areas": ["桃園", "新竹"], "target": "{Y}_服務異動_{a}",
-     "sources": [r"{y}_服務異動_{a}", r"{y}{a}退款及儲值金異動"]},
-    {"areas": ["桃園", "新竹"], "target": "{Y}紙本／中獎發票-{a}",
-     "sources": [r"{y}紙本[／/]中獎發票-{a}"]},
-    {"areas": ["桃園", "新竹"], "target": "{a}{Y}支出明細",
-     "sources": [r"{a}{y}支出明細"]},
+    {"areas": ["桃園", "新竹"], "target": "{Y}專員名冊薪資_{a}",
+     "sources": [r"{y}_?專員名冊薪資_{a}", r"{y}{a}專員薪資\(外場\)", r"{y}桃園專員薪資\(外場\)"]},
+    {"areas": ["桃園", "新竹"], "target": "{Y}服務異動_{a}",
+     "sources": [r"{y}_?服務異動_{a}", r"{y}{a}退款及儲值金異動", r"{y}桃園退款及儲值金異動"]},
+    {"areas": ["桃園", "新竹"], "target": "{Y}紙本／中獎發票_{a}",
+     "sources": [r"{y}紙本[／/]中獎發票[_\-]{a}"]},
+    {"areas": ["桃園", "新竹"], "target": "{Y}支出明細_{a}",
+     "sources": [r"{y}支出明細_{a}", r"{a}{y}支出明細", r"桃園{y}支出明細"]},
     {"areas": ["高雄"], "target": "{Y}高雄內勤工作表單", "sources": [r"{y}高雄內勤工作表單"]},
     {"areas": ["高雄"], "target": "{Y}專員名冊與時數-高雄", "sources": [r"{y}專員名冊與時數-高雄"]},
     {"areas": ["高雄"], "target": "{Y}專員薪資相關-高雄", "sources": [r"{y}專員薪資相關-高雄"]},
@@ -435,8 +436,9 @@ class Rollover:
                     sub_pairs.append((old_subs[sub_name], new_sub))
 
         if spec.name in SERVICE_ROW_NAMES:
+            old_subs_all = [old for old, _ in sub_pairs]
             for old_sub, new_sub in sub_pairs:
-                records += self.copy_service_files(old_sub, new_sub)
+                records += self.copy_service_files(old_sub, new_sub, old_subs_all)
 
         # 檔案：先找年度資料夾、再找子資料夾、最後找上層資料夾
         search_pairs = year_pairs + sub_pairs + [({"id": spec.folder_id}, {"id": spec.folder_id})]
@@ -562,30 +564,23 @@ class Rollover:
             fileId=file_id, fields="id,name,mimeType,parents", supportsAllDrives=True,
         ).execute()
 
-    def ensure_shortcut(self, parent_id: str, name: str, target_id: str) -> None:
-        if parent_id.startswith("(dry-run"):
-            self.log(f"  建立捷徑：{name}")
-            return
-        existing = [f for f in self.children(parent_id)
-                    if f["mimeType"] == SHORTCUT_MIME and f["name"] == name]
-        if existing and not self.fresh:
-            return
-        for item in existing:
-            self._retire(item)
-        self.log(f"  建立捷徑：{name}")
-        if not self.dry_run:
-            self.drive.files().create(
-                body={"name": name, "mimeType": SHORTCUT_MIME, "parents": [parent_id],
-                      "shortcutDetails": {"targetId": target_id}},
-                fields="id", supportsAllDrives=True,
-            ).execute()
-
-    def copy_service_files(self, old_sub: Dict[str, Any], new_sub: Dict[str, Any]) -> List[Dict[str, str]]:
+    def copy_service_files(self, old_sub: Dict[str, Any], new_sub: Dict[str, Any],
+                           all_old_subs: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, str]]:
         area = next((a for a in _ALL if mentions_area(old_sub["name"], a)), "")
         if not area:
             return []
-        files = [f for f in self.children(old_sub["id"])
-                 if f["mimeType"] in (SHEET_MIME, SHORTCUT_MIME)]
+        if not hasattr(self, "_service_cache"):
+            self._service_cache: Dict[str, List[Dict[str, Any]]] = {}
+
+        def listing(folder: Dict[str, Any]) -> List[Dict[str, Any]]:
+            if folder["id"] not in self._service_cache:
+                self._service_cache[folder["id"]] = [
+                    f for f in self.children(folder["id"]) if f["mimeType"] in (SHEET_MIME, SHORTCUT_MIME)]
+            return self._service_cache[folder["id"]]
+
+        # 本區優先，其次其他地區資料夾
+        files = listing(old_sub) + [f for o in (all_old_subs or []) if o["id"] != old_sub["id"]
+                                    for f in listing(o)]
         records: List[Dict[str, str]] = []
         for rule in SERVICE_FILE_RULES:
             if area not in rule["areas"]:
@@ -603,15 +598,9 @@ class Rollover:
                                 "old_id": "", "new_name": "找不到來源", "new_id": ""})
                 continue
             try:
-                if source["mimeType"] == SHORTCUT_MIME:
-                    target = self.get_meta(source["shortcutDetails"]["targetId"])
-                    parent = (target.get("parents") or [new_sub["id"]])[0]
-                    copied, created = self.ensure_copy(target, parent, target_name)
-                    self.ensure_shortcut(new_sub["id"], target_name, copied["id"])
-                    old = target
-                else:
-                    copied, created = self.ensure_copy(source, new_sub["id"], target_name)
-                    old = source
+                old = (self.get_meta(source["shortcutDetails"]["targetId"])
+                       if source["mimeType"] == SHORTCUT_MIME else source)
+                copied, created = self.ensure_copy(old, new_sub["id"], target_name)
             except Exception as exc:  # 單一檔案失敗（例如沒有原始檔權限）不影響其他檔案
                 self.log(f"  ✗ {source['name']} 複製失敗：{exc}")
                 records.append({"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
