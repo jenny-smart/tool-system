@@ -2,7 +2,7 @@
 tools/annual_rollover/new_year_generate.py
 
 換年度：依主控表「生成新年度」工作表，一列一列複製前一年度的資料夾與檔案，
-產生新年度版本，並把新檔 ID 記到「新年度ID」工作表，供 12 月底置換程式設定。
+產生新年度版本；每個新檔記到「生成新年度Log」，「年度工作檔ID_GID總表」M～P 欄由 Log 自動帶入新年度 ID。
 
 「生成新年度」欄位（第 1 列為標題）：
   A 名稱
@@ -18,8 +18,7 @@ tools/annual_rollover/new_year_generate.py
   H 工作表整理：例「移除富邦更新/元大更新的A2:」→ 新檔中這些工作表清掉 A2 以下資料
   I 生成結果：程式回寫（時間、新資料夾與檔案 ID）
 
-「新年度ID」：A 地區、B 前一年度檔名。程式會在 B 名稱（去掉年份後）與
-複製來源相符的列，回寫 C 新年度 ID、D 新年度檔名、E 生成時間。
+新年度 ID 不另外回寫工作表：「年度工作檔ID_GID總表」以舊 ID（或舊檔名）比對 Log 取最新一筆。
 
 用法：
   python -m tools.annual_rollover.new_year_generate --year 2027 --rows 2 --dry-run
@@ -43,7 +42,6 @@ from zoneinfo import ZoneInfo
 from config.vip_config import MASTER_SPREADSHEET_ID
 
 GENERATE_SHEET = "生成新年度"
-NEW_ID_SHEET = "新年度ID"
 RUN_LOG_SHEET = "生成新年度Log"
 RUN_LOG_HEADERS = ["執行時間", "新年度", "功能", "區域", "模式", "重新生成", "類型",
                    "前一年度名稱", "前一年度ID", "新年度名稱", "新年度ID", "狀態", "訊息"]
@@ -285,7 +283,7 @@ def replace_year(name: str, prev_year: int, new_year: int) -> str:
     return re.sub(rf"(?<!\d){prev_year}(?!\d)", str(new_year), name)
 
 
-# 「新年度ID」B 欄與實際檔名的同義寫法
+# 檔名比對時的同義寫法
 NAME_ALIASES = {"家電": "電器"}
 
 
@@ -1132,23 +1130,6 @@ class Rollover:
         lines += [f"{r['kind']} {r['new_name']}：{r['new_id']}" for r in records]
         self.write(f"'{GENERATE_SHEET}'!{RESULT_COL}{spec.row_number}", [["\n".join(lines)]])
 
-    def record_new_ids(self, records: List[Dict[str, str]]) -> int:
-        files = {strip_year(r["old_name"]): r for r in records if r["kind"] == "檔案" and r["new_id"]}
-        if not files:
-            return 0
-        rows = self.read(f"'{NEW_ID_SHEET}'!A1:D")
-        stamp = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
-        updated = 0
-        for index, row in enumerate(rows, start=1):
-            old_label = (row[1] if len(row) > 1 else "").split("／")[0]
-            record = files.get(strip_year(old_label))
-            if not record:
-                continue
-            self.write(f"'{NEW_ID_SHEET}'!C{index}:E{index}",
-                       [[record["new_id"], record["new_name"], stamp]])
-            updated += 1
-        return updated
-
     def run(self, rows_arg: str = "all", names: Optional[List[str]] = None,
             area: str = ALL_AREA) -> List[Dict[str, str]]:
         records = self._run_rows(rows_arg, names, area)
@@ -1170,9 +1151,6 @@ class Rollover:
                     extra += self.clone_year_folder(job)
                 except Exception as exc:
                     self.log(f"  ✗ {job['label']} 失敗：{exc}")
-        if extra:
-            count = self.record_new_ids(extra)
-            self.log(f"  新年度ID 回寫 {count} 列")
         return records + extra
 
     def _run_rows(self, rows_arg: str, names: Optional[List[str]], area: str) -> List[Dict[str, str]]:
@@ -1205,8 +1183,7 @@ class Rollover:
                            [[f"{datetime.now(TZ):%Y/%m/%d %H:%M:%S} 失敗：{exc}"]])
                 continue
             self.record_results(spec, records)
-            count = self.record_new_ids(records)
-            self.log(f"  完成，新年度ID 回寫 {count} 列")
+            self.log("  完成")
             all_records.extend(records)
         return all_records
 

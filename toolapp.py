@@ -3291,7 +3291,7 @@ def run_new_year_generate(year, function_name, *, dry_run, fresh=False, area="�
         raise
     rollover.append_run_log(function_name, area or "全區", records)
     missing = [r["old_name"] for r in records if r["new_name"] == "找不到來源"]
-    head = "（預覽，未建立任何檔案）" if dry_run else "完成，已回寫「生成新年度」I欄／「新年度ID」"
+    head = "（預覽，未建立任何檔案）" if dry_run else "完成，已回寫「生成新年度」I欄與「生成新年度Log」"
     lines = [f"{r['kind']} {r['old_name']} → {r['new_name']}：{r['new_id']}" for r in records]
     if missing:
         lines.append("⚠ 找不到來源：" + "、".join(missing))
@@ -4742,7 +4742,7 @@ with date_col:
         )
         st.caption(
             "依主控表「生成新年度」分頁，把前一年度資料夾與檔案複製成新年度，"
-            "結果寫回該列 I 欄，新檔 ID、檔名、生成時間寫入「新年度ID」C／D／E 欄。先「預覽」確認，再「執行」。"
+            "結果寫回該列 I 欄，新檔 ID、檔名、生成時間寫入「生成新年度Log」，並自動帶入「年度工作檔ID_GID總表」。先「預覽」確認，再「執行」。"
         )
 
     elif system_type == "staff_payroll":
