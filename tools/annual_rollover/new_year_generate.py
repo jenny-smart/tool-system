@@ -242,7 +242,7 @@ def strip_year(name: str) -> str:
     """去掉年份、空白與結尾「檔」字並統一同義字，用來比對「2026台北財報」與
     「台北2026財報」、「2026家電財報」與「電器2026財報」、「2026目標及review檔」
     與「2026目標及review」這類寫法。"""
-    text = re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", str(name or "")))
+    text = re.sub(r"(?<!\d)20\d{2}(?!\d)", "", re.sub(r"\s+", "", underscore_area(name)))
     for alias, canonical in NAME_ALIASES.items():
         text = text.replace(alias, canonical)
     return re.sub(r"檔$", "", text)

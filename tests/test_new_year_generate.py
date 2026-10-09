@@ -318,3 +318,7 @@ def test_underscore_area():
     assert underscore_area("2027專員名冊與時數-台北") == "2027專員名冊與時數_台北"
     assert underscore_area("2027承攬服務費mail-高雄") == "2027承攬服務費mail_高雄"
     assert underscore_area("2027台北內勤工作表單") == "2027台北內勤工作表單"
+
+
+def test_strip_year_treats_dash_and_underscore_alike():
+    assert strip_year("2026專員名冊與時數_台北") == strip_year("2026專員名冊與時數-台北")
