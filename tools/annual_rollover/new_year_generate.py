@@ -49,6 +49,10 @@ SYSTEM_LOG_SPREADSHEETS = {
     "salary-system（LemonSalarySystem）": "1GdW3FSZ0s3TGeYiNx3JtYvED_RRfJjiFYwLFeYHZ1hA",
     "orders-system": "1nnbpR1s-VYeClpmIbYjKfi3IiDWtBUBXuXUjQhhgYT0",
 }
+# 各系統「年度工作檔ID_GID總表」：N 欄起依年度排列（每年 4 欄），K1 為參照年度（使用者手動切換）
+ID_TABLE_SHEET = "年度工作檔ID_GID總表"
+ID_TABLE_HEADER_ROW = 3
+YEAR_BLOCK_FIELDS = ("檔名（自動）", "ID（自動）", "GID（自動）", "生成時間（自動）")
 RUN_LOG_HEADERS = ["執行時間", "新年度", "功能", "區域", "模式", "重新生成", "類型",
                    "前一年度名稱", "前一年度ID", "新年度名稱", "新年度ID", "狀態", "訊息"]
 RESULT_COL = "I"
@@ -467,6 +471,68 @@ class Rollover:
                     insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
             except Exception as exc:
                 self.log(f"  ⚠ 寫入 {label}「{RUN_LOG_SHEET}」失敗：{exc}")
+        if not self.dry_run and not error:
+            for sid in [self.spreadsheet_id, *SYSTEM_LOG_SPREADSHEETS.values()]:
+                try:
+                    self.ensure_year_columns(sid)
+                except Exception as exc:
+                    self.log(f"  ⚠ 新增「{ID_TABLE_SHEET}」{self.new_year} 年度欄位失敗：{exc}")
+
+    def ensure_year_columns(self, spreadsheet_id: str) -> None:
+        """在「年度工作檔ID_GID總表」最右側加上新年度 4 欄（已存在就略過）。
+
+        新欄位以公式從本檔「生成新年度Log」帶入：用前一年度 ID（或檔名）比對 Log 的前一年度 ID，
+        取該年度最近一次執行的新年度名稱／ID 與生成時間；GID 沿用前一年度（複製檔案 GID 不變）。
+        只加欄位，不改 K1 參照年度，生效 ID／GID 由使用者切換參照年度才啟用。
+        """
+        meta = self.sheets.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets.properties").execute()
+        props = next((s["properties"] for s in meta.get("sheets", [])
+                      if s["properties"].get("title") == ID_TABLE_SHEET), None)
+        if not props:
+            return
+        row = ID_TABLE_HEADER_ROW
+        header = (self.sheets.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id, range=f"'{ID_TABLE_SHEET}'!{row}:{row}"
+        ).execute().get("values") or [[]])[0]
+
+        def find(prefix: str) -> Optional[int]:
+            return next((i for i, h in enumerate(header) if str(h).startswith(prefix)), None)
+
+        if find(f"{self.new_year} ID") is not None:
+            return
+        prev_name, prev_id, prev_gid = (find(f"{self.prev_year} 檔"), find(f"{self.prev_year} ID"),
+                                        find(f"{self.prev_year} GID"))
+        if None in (prev_name, prev_id, prev_gid):
+            self.log(f"  ⚠ {ID_TABLE_SHEET} 找不到 {self.prev_year} 年度欄位，未新增 {self.new_year} 欄位")
+            return
+        start = len(header)
+        grid_cols = props.get("gridProperties", {}).get("columnCount", 0)
+        if grid_cols < start + len(YEAR_BLOCK_FIELDS):
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [
+                {"appendDimension": {"sheetId": props["sheetId"], "dimension": "COLUMNS",
+                                     "length": start + len(YEAR_BLOCK_FIELDS) - grid_cols}}]}).execute()
+
+        first = row + 1
+        pid, pnm, pg = (f"{col_letters(c)}{first}:{col_letters(c)}" for c in (prev_id, prev_name, prev_gid))
+        new_id_col = f"{col_letters(start + 1)}{first}:{col_letters(start + 1)}"
+        log = f"'{RUN_LOG_SHEET}'"
+
+        def pick(log_col: str) -> str:
+            return (f"=MAP({pid}, {pnm}, LAMBDA(id, nm, IF(AND(id=\"\", nm=\"\"), \"\", IFERROR(CHOOSEROWS("
+                    f"FILTER({log}!${log_col}$2:${log_col}, IF(id<>\"\", {log}!$I$2:$I=id, {log}!$H$2:$H=nm), "
+                    f"{log}!$B$2:$B={self.new_year}, {log}!$E$2:$E=\"執行\", {log}!$K$2:$K<>\"\"), -1), \"\"))))")
+
+        values = [
+            [f"{self.new_year} {f}" for f in YEAR_BLOCK_FIELDS],
+            [pick("J"), pick("K"), f"=MAP({pg}, {new_id_col}, LAMBDA(g, n, IF(n=\"\", \"\", g)))", pick("A")],
+        ]
+        rng = f"'{ID_TABLE_SHEET}'!{col_letters(start)}{row}:{col_letters(start + 3)}{first}"
+        self.sheets.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id, range=rng, valueInputOption="USER_ENTERED",
+            body={"values": values}).execute()
+        self.log(f"  {ID_TABLE_SHEET} 新增 {self.new_year} 年度欄位（{rng}）；"
+                 f"確認後改 K1 參照年度為 {self.new_year} 才會啟用")
 
     # ---------- Sheets ----------
     def read(self, a1: str) -> List[List[str]]:
