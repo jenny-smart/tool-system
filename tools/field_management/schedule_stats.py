@@ -37,7 +37,7 @@ TZ = timezone(timedelta(hours=8))
 
 
 def today_yyyymmdd() -> str:
-    return datetime.now().strftime("%Y%m%d")
+    return datetime.now(TZ).strftime("%Y%m%d")
 
 
 def add_month_same_day_yyyymmdd(date_key: str, months: int = 1) -> str:

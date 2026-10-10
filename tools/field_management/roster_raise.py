@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 try:
@@ -69,8 +69,11 @@ _RAISE_FORMULA_ARG_PATTERN = re.compile(r",\s*(\d+)\s*,\s*false\s*\)", re.IGNORE
 # 共用工具
 # ────────────────────────────────────────────────────────────
 
+TZ = timezone(timedelta(hours=8))
+
+
 def today_ym() -> str:
-    return datetime.now().strftime("%Y%m")
+    return datetime.now(TZ).strftime("%Y%m")
 
 
 def get_previous_ym(ym: str) -> str:
