@@ -40,6 +40,7 @@ try:
         find_sheet_props,
         get_sheet_props_list,
         get_values,
+        year_file_id,
     )
 except ImportError:
     from roster_raise import (
@@ -47,6 +48,7 @@ except ImportError:
         find_sheet_props,
         get_sheet_props_list,
         get_values,
+        year_file_id,
     )
 
 try:
@@ -301,7 +303,9 @@ def _format_phone_for_sheet(digits: str) -> str:
 
 def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_type: str = "手動") -> dict[str, Any]:
     cfg = load_system_config(SYSTEM_NAME)
-    spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)
+    # 寫入結束日所屬年度的「YYYY專員名冊與時數」
+    configured_id = get_spreadsheet_id(cfg, "roster", area)
+    spreadsheet_id = year_file_id(configured_id, end_dt.strftime("%Y%m"))
 
     status = "失敗"
     message = ""
@@ -309,7 +313,6 @@ def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_typ
 
     try:
         sheets = get_sheets_service()
-        _ensure_sheet_exists(sheets, spreadsheet_id, RESUME_SHEET_NAME)
 
         imap, mailbox_user = _imap_connect()
         try:
@@ -358,11 +361,18 @@ def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_typ
                 pass
 
         entries.sort(key=lambda item: item[0])
-        rows = [row for _, row in entries]
+        # 區間跨年度時依每封信的年份分別寫入該年度檔（12 月的信不寫進新年度檔）
+        by_year: dict[str, list[list[Any]]] = {}
+        for msg_dt, row in entries:
+            by_year.setdefault(msg_dt.strftime("%Y"), []).append(row)
+        if not by_year:
+            _ensure_sheet_exists(sheets, spreadsheet_id, RESUME_SHEET_NAME)
+        for year, rows in sorted(by_year.items()):
+            target_id = year_file_id(configured_id, f"{year}01")
+            _ensure_sheet_exists(sheets, target_id, RESUME_SHEET_NAME)
+            append_values(sheets, target_id, f"'{RESUME_SHEET_NAME}'!A1", rows)
 
-        append_values(sheets, spreadsheet_id, f"'{RESUME_SHEET_NAME}'!A1", rows)
-
-        count = len(rows)
+        count = len(entries)
         status = "成功"
         message = (
             f"信箱={mailbox_user}｜區間={start_dt.strftime('%Y/%m/%d %H:%M:%S')} ~ {end_dt.strftime('%Y/%m/%d %H:%M:%S')}"
@@ -399,7 +409,8 @@ def fetch_resumes_range(area: str, start_dt: datetime, end_dt: datetime, run_typ
 
 def fetch_lemon_home_replies(area: str, run_type: str = "手動") -> dict[str, Any]:
     cfg = load_system_config(SYSTEM_NAME)
-    spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)
+    # 今天所屬年度的「YYYY專員名冊與時數」
+    spreadsheet_id = year_file_id(get_spreadsheet_id(cfg, "roster", area), datetime.now(TZ).strftime("%Y%m"))
 
     status = "失敗"
     message = ""
@@ -498,7 +509,8 @@ def extract_latest_resumes(area: str, target_sheet_name: str, run_type: str = "�
     「XXX專員名冊」或既有的履歷追蹤表）。
     """
     cfg = load_system_config(SYSTEM_NAME)
-    spreadsheet_id = get_spreadsheet_id(cfg, "roster", area)
+    # 今天所屬年度的「YYYY專員名冊與時數」
+    spreadsheet_id = year_file_id(get_spreadsheet_id(cfg, "roster", area), datetime.now(TZ).strftime("%Y%m"))
 
     status = "失敗"
     message = ""
