@@ -109,6 +109,17 @@ def test_service_daily_report_uses_full_three_column_range_on_date_row():
     assert service_schedule._report_target_range(row, 117) == "DM2430:DO2430"
 
 
+def test_service_daily_report_numbers_use_thousands_separator_and_right_alignment():
+    formats = service_schedule._report_number_formats(["S2430:U2430"])
+    assert formats == [{
+        "range": "S2430:U2430",
+        "format": {
+            "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
+            "horizontalAlignment": "RIGHT",
+        },
+    }]
+
+
 def test_field_target_sheet_follows_file_year():
     assert schedule_stats.target_sheet_name("20270210") == "2027排班統計表"
 

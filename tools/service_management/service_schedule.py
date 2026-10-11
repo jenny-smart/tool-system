@@ -812,6 +812,19 @@ def _report_target_range(row: int, start_col: int) -> str:
     return f"{start}:{end}"
 
 
+def _report_number_formats(ranges: list[str]) -> list[dict[str, object]]:
+    return [
+        {
+            "range": target_range,
+            "format": {
+                "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
+                "horizontalAlignment": "RIGHT",
+            },
+        }
+        for target_range in ranges
+    ]
+
+
 def step2_write_daily_report(
     run_dt: datetime, gc: gspread.Client, run_id: str
 ) -> dict:
@@ -862,6 +875,9 @@ def step2_write_daily_report(
 
         report_sh.batch_update(header_updates, value_input_option="USER_ENTERED")
         report_sh.batch_update(value_updates, value_input_option="USER_ENTERED")
+        report_sh.batch_format(
+            _report_number_formats([item["range"] for item in value_updates])
+        )
 
         elapsed = (now_tp() - t0).total_seconds()
         checkin_both(gc, run_id, task, "DONE", "SUCCESS", f"row={row}", elapsed)
