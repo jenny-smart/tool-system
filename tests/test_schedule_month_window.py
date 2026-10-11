@@ -92,8 +92,32 @@ def test_service_daily_report_has_five_month_slots_per_city():
     ]
 
 
+def test_service_refreshes_summary_formulas_for_all_five_months():
+    sheet = MagicMock()
+    service_schedule._refresh_schedule_summary_formulas(sheet, 5)
+    calls = [(call.args[0], call.args[1]) for call in sheet.copy_range.call_args_list]
+    assert calls == [
+        ("Q5:S5", "AF5:AH5"),
+        ("Q5:S5", "AU5:AW5"),
+        ("Q5:S5", "BJ5:BL5"),
+        ("Q5:S5", "BY5:CA5"),
+        ("CN5:CP5", "DC5:DE5"),
+        ("CN5:CP5", "DR5:DT5"),
+        ("CN5:CP5", "EG5:EI5"),
+        ("CN5:CP5", "EV5:EX5"),
+    ]
+
+
 def test_field_target_sheet_follows_file_year():
     assert schedule_stats.target_sheet_name("20270210") == "2027排班統計表"
+
+
+def test_field_cross_year_months_continue_after_december_until_new_year_run():
+    assert schedule_stats.paste_cell_for_target(2026, "20261211") == "ET4"
+    assert schedule_stats.paste_cell_for_target(2026, "20270111") == "FF4"
+    assert schedule_stats.paste_cell_for_target(2026, "20270211") == "FR4"
+    assert schedule_stats.paste_cell_for_target(2027, "20270111") == "R4"
+    assert schedule_stats.paste_cell_for_target(2027, "20270211") == "AD4"
 
 
 def test_field_annual_file_switch_finds_next_year_sibling():

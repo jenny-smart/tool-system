@@ -359,6 +359,24 @@ PASTE_MAP = {
     12: "ET4",
 }
 
+# 年度檔最右側保留給隔年 1、2 月；到隔年 1 月執行時才切換新年度檔，
+# 屆時仍使用新年度表前方的 R、AD。
+NEXT_YEAR_PASTE_MAP = {
+    1: "FF4",
+    2: "FR4",
+}
+
+
+def paste_cell_for_target(run_year: int, target_key: str) -> str:
+    target_year = int(target_key[:4])
+    month = int(target_key[4:6])
+    if target_year == run_year:
+        return PASTE_MAP[month]
+    if target_year == run_year + 1 and month in NEXT_YEAR_PASTE_MAP:
+        return NEXT_YEAR_PASTE_MAP[month]
+    raise ValueError(f"不支援的跨年度排班月份：{target_key}")
+
+
 def target_sheet_name(date_key: str) -> str:
     return f"{date_key[:4]}排班統計表"
 
@@ -405,8 +423,7 @@ def run_schedule_stats_for_area(
     ]
 
     for key in target_keys:
-        month = int(key[4:6])
-        paste_cell = PASTE_MAP[month]
+        paste_cell = paste_cell_for_target(run_dt.year, key)
         file_base = f"{key}排班統計表-{area}"
         source_file_name = ""
         status = "失敗"

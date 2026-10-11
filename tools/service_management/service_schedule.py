@@ -732,6 +732,22 @@ def _update_schedule_month_headers(
     target_sh.batch_update(updates, value_input_option="USER_ENTERED")
 
 
+def _refresh_schedule_summary_formulas(
+    target_sh: gspread.Worksheet,
+    active_month_count: int,
+) -> None:
+    """將首月彙總公式複製到後續月份，並讓 Sheets 自動平移引用欄位。"""
+    slots = CONFIG["report_month_slots"]
+    for city in ("taipei", "taichung"):
+        source = slots[0][f"{city}_source"]
+        for slot in slots[1:active_month_count]:
+            target_sh.copy_range(
+                source,
+                slot[f"{city}_source"],
+                paste_type=gspread.utils.PasteType.normal,
+            )
+
+
 def step1_update_schedule_stats(
     run_dt: datetime, gc: gspread.Client, drive, run_id: str
 ) -> dict:
@@ -825,6 +841,7 @@ def step2_write_daily_report(
             )
 
         active_months = _active_month_keys(run_dt)
+        _refresh_schedule_summary_formulas(stat_sh, len(active_months))
         header_updates = []
         value_updates = []
         for index, slot in enumerate(CONFIG["report_month_slots"]):
