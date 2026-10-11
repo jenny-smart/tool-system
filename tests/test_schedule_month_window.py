@@ -99,6 +99,16 @@ def test_service_daily_report_has_five_month_slots_per_city():
     ]
 
 
+def test_service_daily_report_uses_full_three_column_range_on_date_row():
+    row = 2430
+    assert service_schedule._report_target_range(row, 19) == "S2430:U2430"
+    assert service_schedule._report_target_range(row, 23) == "W2430:Y2430"
+    assert service_schedule._report_target_range(row, 27) == "AA2430:AC2430"
+    assert service_schedule._report_target_range(row, 109) == "DE2430:DG2430"
+    assert service_schedule._report_target_range(row, 113) == "DI2430:DK2430"
+    assert service_schedule._report_target_range(row, 117) == "DM2430:DO2430"
+
+
 def test_field_target_sheet_follows_file_year():
     assert schedule_stats.target_sheet_name("20270210") == "2027排班統計表"
 

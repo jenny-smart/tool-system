@@ -806,6 +806,12 @@ def _find_date_row(sheet: gspread.Worksheet, target_dt: datetime) -> int:
     return -1
 
 
+def _report_target_range(row: int, start_col: int) -> str:
+    start = gspread.utils.rowcol_to_a1(row, start_col)
+    end = gspread.utils.rowcol_to_a1(row, start_col + 2)
+    return f"{start}:{end}"
+
+
 def step2_write_daily_report(
     run_dt: datetime, gc: gspread.Client, run_id: str
 ) -> dict:
@@ -845,8 +851,14 @@ def step2_write_daily_report(
                 values = stat_sh.get(slot[f"{city}_source"]) if active else [["", "", ""]]
                 if not values:
                     values = [["", "", ""]]
-                start = gspread.utils.rowcol_to_a1(row, slot[f"{city}_target_col"])
-                value_updates.append({"range": start, "values": values})
+                target_range = _report_target_range(row, slot[f"{city}_target_col"])
+                value_updates.append({"range": target_range, "values": values})
+                log.info(
+                    "每日回報：%s → %s!%s",
+                    slot[f"{city}_source"],
+                    CONFIG["report_sheet_name"],
+                    target_range,
+                )
 
         report_sh.batch_update(header_updates, value_input_option="USER_ENTERED")
         report_sh.batch_update(value_updates, value_input_option="USER_ENTERED")
