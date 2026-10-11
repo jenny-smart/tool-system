@@ -22,6 +22,13 @@ def test_from_start_date_runs_through_following_february():
     ]
 
 
+def test_missing_external_scheduler_variable_uses_approved_start_date():
+    base = datetime(2026, 10, 11, tzinfo=TZ_TAIPEI)
+    assert resolve_schedule_months(base, "") == [
+        (2026, 10), (2026, 11), (2026, 12), (2027, 1), (2027, 2),
+    ]
+
+
 def test_active_window_shrinks_one_month_at_a_time_with_two_month_floor():
     assert resolve_schedule_months(
         datetime(2026, 11, 1, tzinfo=TZ_TAIPEI), "2026-10-10"
@@ -85,26 +92,10 @@ def test_service_daily_report_has_five_month_slots_per_city():
     assert slots[0]["taipei_target_col"] == 11  # K 欄永遠是台北當月
     assert slots[0]["taichung_target_col"] == 101  # CW 欄永遠是台中當月
     assert [slot["taipei_source"] for slot in slots] == [
-        "Q5:S5", "AF5:AH5", "AU5:AW5", "BJ5:BL5", "BY5:CA5",
+        "Q5:S5", "AF5:AH5", "AU3:AW3", "BJ3:BL3", "BY3:CA3",
     ]
     assert [slot["taichung_source"] for slot in slots] == [
-        "CN5:CP5", "DC5:DE5", "DR5:DT5", "EG5:EI5", "EV5:EX5",
-    ]
-
-
-def test_service_refreshes_summary_formulas_for_all_five_months():
-    sheet = MagicMock()
-    service_schedule._refresh_schedule_summary_formulas(sheet, 5)
-    calls = [(call.args[0], call.args[1]) for call in sheet.copy_range.call_args_list]
-    assert calls == [
-        ("Q5:S5", "AF5:AH5"),
-        ("Q5:S5", "AU5:AW5"),
-        ("Q5:S5", "BJ5:BL5"),
-        ("Q5:S5", "BY5:CA5"),
-        ("CN5:CP5", "DC5:DE5"),
-        ("CN5:CP5", "DR5:DT5"),
-        ("CN5:CP5", "EG5:EI5"),
-        ("CN5:CP5", "EV5:EX5"),
+        "CN5:CP5", "DC5:DE5", "DR3:DT3", "EG3:EI3", "EV3:EX3",
     ]
 
 

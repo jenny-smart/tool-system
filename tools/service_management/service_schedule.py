@@ -138,12 +138,12 @@ CONFIG: dict[str, Any] = {
          "taichung_source": "CN5:CP5", "taichung_target_col": 101},
         {"taipei_source": "AF5:AH5", "taipei_target_col": 15,
          "taichung_source": "DC5:DE5", "taichung_target_col": 105},
-        {"taipei_source": "AU5:AW5", "taipei_target_col": 19,
-         "taichung_source": "DR5:DT5", "taichung_target_col": 109},
-        {"taipei_source": "BJ5:BL5", "taipei_target_col": 23,
-         "taichung_source": "EG5:EI5", "taichung_target_col": 113},
-        {"taipei_source": "BY5:CA5", "taipei_target_col": 27,
-         "taichung_source": "EV5:EX5", "taichung_target_col": 117},
+        {"taipei_source": "AU3:AW3", "taipei_target_col": 19,
+         "taichung_source": "DR3:DT3", "taichung_target_col": 109},
+        {"taipei_source": "BJ3:BL3", "taipei_target_col": 23,
+         "taichung_source": "EG3:EI3", "taichung_target_col": 113},
+        {"taipei_source": "BY3:CA3", "taipei_target_col": 27,
+         "taichung_source": "EV3:EX3", "taichung_target_col": 117},
     ],
     "report_month_header_cells": [
         {"taipei": "K2",  "taichung": "CW2"},
@@ -732,22 +732,6 @@ def _update_schedule_month_headers(
     target_sh.batch_update(updates, value_input_option="USER_ENTERED")
 
 
-def _refresh_schedule_summary_formulas(
-    target_sh: gspread.Worksheet,
-    active_month_count: int,
-) -> None:
-    """將首月彙總公式複製到後續月份，並讓 Sheets 自動平移引用欄位。"""
-    slots = CONFIG["report_month_slots"]
-    for city in ("taipei", "taichung"):
-        source = slots[0][f"{city}_source"]
-        for slot in slots[1:active_month_count]:
-            target_sh.copy_range(
-                source,
-                slot[f"{city}_source"],
-                paste_type=gspread.utils.PasteType.normal,
-            )
-
-
 def step1_update_schedule_stats(
     run_dt: datetime, gc: gspread.Client, drive, run_id: str
 ) -> dict:
@@ -841,7 +825,6 @@ def step2_write_daily_report(
             )
 
         active_months = _active_month_keys(run_dt)
-        _refresh_schedule_summary_formulas(stat_sh, len(active_months))
         header_updates = []
         value_updates = []
         for index, slot in enumerate(CONFIG["report_month_slots"]):

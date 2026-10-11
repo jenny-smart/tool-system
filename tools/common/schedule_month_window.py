@@ -7,6 +7,7 @@ from typing import Callable
 
 
 DEFAULT_START_ENV = "SERVICE_SCHEDULE_DEEP_CLEAN_START"
+DEFAULT_START_DATE = "2026-10-09"
 
 
 def add_months(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -33,9 +34,9 @@ def resolve_schedule_months(
     def default_months() -> list[tuple[int, int]]:
         return [add_months(base.year, base.month, offset) for offset in range(default_window)]
 
-    value = (start_raw or "").strip()
-    if not value:
-        return default_months()
+    # 外部排程主機不會自動取得 GitHub Actions variable；未設定時仍須套用
+    # 已核定的啟用日，避免靜默退回只有本月＋次月。
+    value = (start_raw or DEFAULT_START_DATE).strip()
 
     try:
         start_date = date.fromisoformat(value)
