@@ -846,6 +846,7 @@ def step2_write_daily_report(
         active_months = _active_month_keys(run_dt)
         header_updates = []
         value_updates = []
+        target_ranges = []
         for index, slot in enumerate(CONFIG["report_month_slots"]):
             active = index < len(active_months)
             if index == 0:
@@ -866,6 +867,7 @@ def step2_write_daily_report(
                     values = [["", "", ""]]
                 target_range = _report_target_range(row, slot[f"{city}_target_col"])
                 value_updates.append({"range": target_range, "values": values})
+                target_ranges.append(target_range)
                 log.info(
                     "每日回報：%s → %s!%s",
                     slot[f"{city}_source"],
@@ -875,9 +877,9 @@ def step2_write_daily_report(
 
         report_sh.batch_update(header_updates, value_input_option="USER_ENTERED")
         report_sh.batch_update(value_updates, value_input_option="USER_ENTERED")
-        report_sh.batch_format(
-            _report_number_formats([item["range"] for item in value_updates])
-        )
+        # gspread.batch_update 會把 value_updates 內的 range 原地改成含工作表名稱；
+        # batch_format 不接受該形式，因此使用寫入前另存的純 A1 範圍。
+        report_sh.batch_format(_report_number_formats(target_ranges))
 
         elapsed = (now_tp() - t0).total_seconds()
         checkin_both(gc, run_id, task, "DONE", "SUCCESS", f"row={row}", elapsed)
