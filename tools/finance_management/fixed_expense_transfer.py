@@ -85,19 +85,19 @@ def _build_plan(
     if total <= 0 or (require_ready and not transfer_mark):
         return None
 
-    source_items: list[tuple[str, int]] = []
+    source_items: list[tuple[int, str, int]] = []
     for row_number in range(41, 72):
         row = values[row_number - 1] if row_number <= len(values) else []
         source = str(_cell(row, 2) or "").strip()
         amount = _amount(_cell(row, col))
         if source and amount > 0:
-            source_items.append((source, amount))
+            source_items.append((row_number, source, amount))
     if not source_items:
         raise RuntimeError(f"{period[:4]}.{period[4:]}／{area} 第72列有金額但找不到固定費用明細")
 
     period_label = f"{period[:4]}.{period[4:]}"
     taipei_rows, area_rows = [], []
-    for source, amount in source_items:
+    for _row_number, source, amount in source_items:
         label = f"{period_label}-{_label_subject(source)}{area}"
         for is_taipei, target in ((True, taipei_rows), (False, area_rows)):
             e_value, f_value = _posting(source, amount, taipei=is_taipei)
@@ -110,7 +110,7 @@ def _build_plan(
             f"{period_label}／{area} 固定費用明細 {signed_total:,} 與第72列 {total:,} 不符，未寫入"
         )
 
-    descriptions = [source for source, _ in source_items if source != "2%"]
+    descriptions = [source for _, source, _ in source_items if source != "2%"]
     memo = f"{period[:4]}/{period[4:]}" + "＋".join(descriptions)
     return {
         "area": area,
@@ -119,10 +119,45 @@ def _build_plan(
         "transfer_mark": transfer_mark,
         "eligible": bool(transfer_mark),
         "memo": memo,
-        "items": [{"subject": source, "amount": amount} for source, amount in source_items],
+        "items": [
+            {"row_number": row_number, "subject": source, "amount": amount}
+            for row_number, source, amount in source_items
+        ],
         "taipei_rows": taipei_rows,
         "area_rows": area_rows,
     }
+
+
+def select_plan_rows(
+    plan: dict[str, object], row_numbers: set[int] | list[int] | tuple[int, ...]
+) -> dict[str, object]:
+    """只保留使用者勾選的來源列，並以分錄正負號重算實際匯款金額。"""
+    selected = {int(row) for row in row_numbers}
+    indexes = [
+        index
+        for index, item in enumerate(plan["items"])
+        if int(item["row_number"]) in selected
+    ]
+    if not indexes:
+        raise ValueError("請至少勾選一個固定費用科目")
+
+    result = dict(plan)
+    result["items"] = [plan["items"][index] for index in indexes]
+    result["taipei_rows"] = [plan["taipei_rows"][index] for index in indexes]
+    result["area_rows"] = [plan["area_rows"][index] for index in indexes]
+    selected_total = sum(
+        int(row[5] or 0) - int(row[4] or 0) for row in result["taipei_rows"]
+    )
+    if selected_total <= 0:
+        raise ValueError("勾選科目計算後的匯款金額必須大於 0")
+    result["total"] = selected_total
+    descriptions = [
+        str(item["subject"])
+        for item in result["items"]
+        if item["subject"] != "2%"
+    ]
+    result["memo"] = f"{str(plan['memo'])[:7]}" + "＋".join(descriptions)
+    return result
 
 
 def _read_values(spreadsheet_id: str, title: str, range_a1: str) -> list[list[object]]:
@@ -176,6 +211,22 @@ def _missing_statement_rows(existing: list[list[object]], planned: list[list[obj
     return [] if present == need else planned
 
 
+def assert_plan_not_posted(plan: dict[str, object]) -> None:
+    """銀行匯款前確認同批固定費用分錄尚未寫入，避免重複匯款。"""
+    target = str(plan["area"])
+    report_area = str(plan["report_area"])
+    locations = [
+        ("台北", plan["taipei_rows"]),
+        (report_area, plan["area_rows"]),
+    ]
+    for area, planned_rows in locations:
+        spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
+        existing = _read_values(spreadsheet_id, title, "A:L")
+        if _fingerprints(existing) & _fingerprints(planned_rows):
+            label = f"{target}（{report_area}財報）" if report_area != target else target
+            raise ValueError(f"{label} 已有相同固定費用分錄，未進行銀行匯款")
+
+
 def _append_statement_rows(spreadsheet_id: str, title: str, existing: list[list[object]], rows: list[list[object]]) -> int:
     if not rows:
         return 0
@@ -225,7 +276,15 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
     }
 
 
-def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Callable | None = None) -> dict[str, object]:
+def transfer_fixed_expenses(
+    period: str,
+    area: str = "全區",
+    on_progress: Callable | None = None,
+    *,
+    allow_unmarked: bool = False,
+    payment_date: str = "",
+    selected_rows: dict[str, list[int]] | list[int] | set[int] | None = None,
+) -> dict[str, object]:
     period = (period or "").strip()
     if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
@@ -237,7 +296,28 @@ def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Call
     try:
         marketing_id, marketing_title = _marketing_source_location()
         values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
-        plans = [plan for target in targets if (plan := _build_plan(values, period, target))]
+        plans = [
+            plan
+            for target in targets
+            if (
+                plan := _build_plan(
+                    values,
+                    period,
+                    target,
+                    require_ready=not allow_unmarked,
+                )
+            )
+        ]
+        if selected_rows is not None:
+            plans = [
+                select_plan_rows(
+                    plan,
+                    selected_rows.get(str(plan["area"]), [])
+                    if isinstance(selected_rows, dict)
+                    else selected_rows,
+                )
+                for plan in plans
+            ]
         written_rows = request_rows = 0
         summaries = []
         for plan in plans:
@@ -253,19 +333,37 @@ def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Call
             written_rows += _append_statement_rows(ar_id, ar_title, ar_existing, ar_rows)
 
             req_id, req_title = resolve_report_location(PAYMENT_REQUEST_TYPE, report_area)
-            existing_memos = {str(_cell(row, 5)).strip() for row in _read_values(req_id, req_title, "A:I")}
-            if str(plan["memo"]) not in existing_memos:
+            existing_request_rows = _read_values(req_id, req_title, "A:I")
+            memo = str(plan["memo"])
+            matching_request_row = next(
+                (
+                    row_number
+                    for row_number, row in enumerate(existing_request_rows, start=1)
+                    if str(_cell(row, 5)).strip() == memo
+                    and _amount(_cell(row, 6)) == int(plan["total"])
+                ),
+                None,
+            )
+            if matching_request_row is None:
                 now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
+                request_status = "已付款" if payment_date else "待付款"
                 get_sheets_service().spreadsheets().values().append(
                     spreadsheetId=req_id,
                     range=f"'{req_title}'!A:I",
                     valueInputOption="USER_ENTERED",
                     insertDataOption="INSERT_ROWS",
-                    body={"values": [["待付款", "", now, "台北代墊款", plan["memo"], plan["total"], "", "", ""]]},
+                    body={"values": [[request_status, payment_date, now, "台北代墊款", memo, plan["total"], "", "", ""]]},
                 ).execute()
                 request_rows += 1
+            elif payment_date:
+                get_sheets_service().spreadsheets().values().update(
+                    spreadsheetId=req_id,
+                    range=f"'{req_title}'!A{matching_request_row}:B{matching_request_row}",
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [["已付款", payment_date]]},
+                ).execute()
             destination = f"（{report_area}財報）" if report_area != target else ""
-            summary = f"{target}{destination}：第72列 {int(plan['total']):,}，財報新增 {len(tp_rows) + len(ar_rows)} 列，請款新增 {1 if str(plan['memo']) not in existing_memos else 0} 列"
+            summary = f"{target}{destination}：匯款 {int(plan['total']):,}，財報新增 {len(tp_rows) + len(ar_rows)} 列，請款新增 {1 if matching_request_row is None else 0} 列"
             summaries.append(summary)
             if on_progress:
                 on_progress(summary, "success")

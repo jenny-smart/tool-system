@@ -3101,10 +3101,48 @@ def run_taipei_fixed_expense_billing(*, month="", start_date=None, end_date=None
     return summary
 
 
-def run_fixed_expense_transfer(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+def run_fixed_expense_transfer(
+    *,
+    month="",
+    start_date=None,
+    end_date=None,
+    area="全區",
+    selected_rows=None,
+    on_progress=None,
+    execute_fubon_transfer=False,
+):
+    period = (month or "").strip()
+    if execute_fubon_transfer:
+        if area == "全區":
+            raise ValueError("執行富邦銀行匯款時，請選擇單一地區")
+        selected_for_area = (
+            selected_rows.get(area, []) if isinstance(selected_rows, dict) else selected_rows
+        )
+        if selected_for_area is not None and not selected_for_area:
+            raise ValueError("請至少勾選一個固定費用科目")
+        task = create_local_agent_task(
+            "fubon.fixed_expense_transfer",
+            {
+                "area": area,
+                "month": period,
+                "selected_rows": selected_for_area,
+                "cdp_url": "http://127.0.0.1:9222",
+            },
+            created_by=st.session_state.get("username", "Tool System"),
+        )
+        return (
+            f"富邦匯款任務已建立：{task['task_id']}（等待本機 Agent）。"
+            "請在銀行畫面核對後人工確認；成功後系統會依序同步富邦明細及原訂分錄。"
+        )
+
     from tools.finance_management.fixed_expense_transfer import transfer_fixed_expenses
 
-    result = transfer_fixed_expenses((month or "").strip(), area=area, on_progress=on_progress)
+    result = transfer_fixed_expenses(
+        period,
+        area=area,
+        on_progress=on_progress,
+        selected_rows=selected_rows,
+    )
     lines = result["summaries"] or ["沒有符合「第72列 > 0 且第74列非空白」的地區"]
     if result["skipped_areas"]:
         lines.append("略過：" + "、".join(result["skipped_areas"]))
@@ -3996,6 +4034,8 @@ monthly_order_functions = ["上半月訂單", "下半月訂單"]
 
 period = ""
 start_date_value = None
+fixed_expense_execute_fubon = False
+fixed_expense_selected_rows = None
 end_date_value = None
 monthly_date_mode = "期別"
 resume_target_sheet = ""
@@ -4351,7 +4391,19 @@ with date_col:
                 label_visibility="collapsed",
                 key="finance_fixed_expense_transfer_period",
             )
-            st.caption("格式：YYYYMM；篩選第72列 > 0 且第74列非空白，新增台北／各區富邦更新分錄及各區請款記錄")
+            fixed_expense_execute_fubon = st.checkbox(
+                "執行富邦銀行匯款給台北",
+                value=False,
+                key="finance_fixed_expense_execute_fubon",
+                help="銀行端仍需人工核對並按確認；成功後才會同步明細與原訂分錄。",
+            )
+            if fixed_expense_execute_fubon:
+                st.caption(
+                    "第72列 > 0 即可執行（第74列可空白）；請選單一地區。"
+                    "順序：富邦匯款 → 該區富邦更新 → 原訂分錄及請款記錄。"
+                )
+            else:
+                st.caption("格式：YYYYMM；篩選第72列 > 0 且第74列非空白，新增台北／各區富邦更新分錄及各區請款記錄")
         elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
             st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -4905,6 +4957,7 @@ if system_type == "finance_management" and selected_function == "【財報】各
             )
             _preview_plans = _fixed_expense_preview["plans"]
             if _preview_plans:
+                fixed_expense_selected_rows = {}
                 st.markdown("**📋 該月相關科目及金額**")
                 for _plan in _preview_plans:
                     _destination = (
@@ -4917,20 +4970,58 @@ if system_type == "finance_management" and selected_function == "【財報】各
                         f"{int(_plan['total']):,}"
                     )
                     if not _plan["eligible"]:
-                        st.warning("第74列空白：目前僅供預覽，尚不符合執行條件。")
-                    st.dataframe(
+                        if fixed_expense_execute_fubon:
+                            st.info("第74列空白，但已勾選富邦匯款，仍可執行。")
+                        else:
+                            st.warning("第74列空白：目前僅供預覽，尚不符合執行條件。")
+                    _subject_editor = st.data_editor(
                         pd.DataFrame([
-                            {"科目": item["subject"], "金額": int(item["amount"])}
+                            {
+                                "執行": True,
+                                "來源列": int(item["row_number"]),
+                                "科目": item["subject"],
+                                "金額": int(item["amount"]),
+                            }
                             for item in _plan["items"]
                         ]),
                         hide_index=True,
                         use_container_width=True,
+                        disabled=["來源列", "科目", "金額"],
                         column_config={
+                            "執行": st.column_config.CheckboxColumn(
+                                "執行", default=True, required=True
+                            ),
+                            "來源列": None,
                             "金額": st.column_config.NumberColumn("金額", format="%,d"),
                         },
+                        key=(
+                            f"fixed_expense_subjects_{period.strip()}_"
+                            f"{selected_area_value}_{_plan['area']}"
+                        ),
                     )
+                    fixed_expense_selected_rows[str(_plan["area"])] = [
+                        int(row)
+                        for row in _subject_editor.loc[
+                            _subject_editor["執行"], "來源列"
+                        ].tolist()
+                    ]
+                    _selected_items = [
+                        item
+                        for item in _plan["items"]
+                        if int(item["row_number"])
+                        in fixed_expense_selected_rows[str(_plan["area"])]
+                    ]
+                    _selected_amount = sum(
+                        (-1 if item["subject"] == "稅捐" else 1)
+                        * int(item["amount"])
+                        for item in _selected_items
+                    )
+                    if _selected_items:
+                        st.caption(f"已勾選匯款金額：{_selected_amount:,}")
+                    else:
+                        st.warning("請至少勾選一個科目。")
             else:
-                st.info("該期別沒有符合「第72列 > 0 且第74列非空白」的資料。")
+                st.info("該期別沒有第72列 > 0 的固定費用資料。")
             if _fixed_expense_preview["skipped_areas"] and selected_area_value == "全區":
                 st.caption("未符合條件：" + "、".join(_fixed_expense_preview["skipped_areas"]))
         except Exception as exc:
@@ -5563,6 +5654,9 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             if selected_function == "【富邦銀行】清潔用品採購":
                 finance_kwargs["selected_rows"] = fubon_supply_purchase_selected_rows
+            if selected_function == "【財報】各區固定費用匯款":
+                finance_kwargs["execute_fubon_transfer"] = fixed_expense_execute_fubon
+                finance_kwargs["selected_rows"] = fixed_expense_selected_rows
             if selected_function in (
                 "【儲值金】轉檔",
                 "【儲值金】搬運",

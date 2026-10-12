@@ -30,12 +30,12 @@ class FixedExpenseTransferTest(unittest.TestCase):
 
         self.assertEqual(plan["total"], 36112)
         self.assertEqual(plan["items"], [
-            {"subject": "google行銷費", "amount": 11179},
-            {"subject": "google服務費", "amount": 1118},
-            {"subject": "2%", "amount": 4401},
-            {"subject": "內勤薪資", "amount": 10000},
-            {"subject": "內勤薪資", "amount": 10000},
-            {"subject": "稅捐", "amount": 586},
+            {"row_number": 41, "subject": "google行銷費", "amount": 11179},
+            {"row_number": 42, "subject": "google服務費", "amount": 1118},
+            {"row_number": 46, "subject": "2%", "amount": 4401},
+            {"row_number": 47, "subject": "內勤薪資", "amount": 10000},
+            {"row_number": 48, "subject": "內勤薪資", "amount": 10000},
+            {"row_number": 71, "subject": "稅捐", "amount": 586},
         ])
         self.assertEqual(plan["memo"], "2026/08google行銷費＋google服務費＋內勤薪資＋內勤薪資＋稅捐")
         self.assertEqual([(row[4], row[5], row[8]) for row in plan["taipei_rows"]], [
@@ -82,6 +82,37 @@ class FixedExpenseTransferTest(unittest.TestCase):
 
     def test_appliance_routes_to_taoyuan_report(self):
         self.assertEqual(transfer.REPORT_AREA_NAMES["家電"], "桃園")
+
+    def test_selected_subject_rows_recalculate_transfer_and_memo(self):
+        plan = transfer._build_plan(_values(), "202608", "台中")
+        selected = transfer.select_plan_rows(plan, {41, 47, 71})
+
+        self.assertEqual(selected["total"], 11179 + 10000 - 586)
+        self.assertEqual(
+            [item["row_number"] for item in selected["items"]],
+            [41, 47, 71],
+        )
+        self.assertEqual(selected["memo"], "2026/08google行銷費＋內勤薪資＋稅捐")
+
+    def test_selected_subject_rows_require_at_least_one(self):
+        plan = transfer._build_plan(_values(), "202608", "台中")
+        with self.assertRaisesRegex(ValueError, "至少勾選"):
+            transfer.select_plan_rows(plan, set())
+
+    def test_bank_preflight_blocks_existing_statement_rows(self):
+        plan = transfer._build_plan(_values(), "202608", "台中")
+        with patch.object(
+            transfer,
+            "resolve_statement_location",
+            side_effect=[("tp", "富邦更新"), ("tc", "富邦更新")],
+        ):
+            with patch.object(
+                transfer,
+                "_read_values",
+                side_effect=[plan["taipei_rows"], []],
+            ):
+                with self.assertRaisesRegex(ValueError, "已有相同固定費用分錄"):
+                    transfer.assert_plan_not_posted(plan)
 
     def test_invalid_registry_gid_falls_back_to_2026_total_sheet(self):
         with patch.object(

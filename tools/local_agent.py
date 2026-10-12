@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -543,6 +544,33 @@ def build_fubon_supply_purchase(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    month = str(params.get("month") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    if area not in ("台中", "桃園", "新竹", "高雄", "家電"):
+        raise ValueError("固定費用富邦匯款請選擇單一地區")
+    if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", month):
+        raise ValueError("固定費用富邦匯款缺少正確期別（YYYYMM）")
+    command = [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_fixed_expense_transfer",
+        "--area",
+        area,
+        "--month",
+        month,
+        "--cdp-url",
+        cdp_url,
+    ]
+    selected_rows = params.get("selected_rows")
+    if selected_rows is not None:
+        if not selected_rows:
+            raise ValueError("請至少勾選一個固定費用科目")
+        command.extend(["--rows", ",".join(str(int(row)) for row in selected_rows)])
+    return command
+
+
 def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     resume = str(params.get("resume") or "login").strip()
@@ -665,6 +693,7 @@ register_action("fubon.atm_refund", build_fubon_atm_refund)
 register_action("fubon.payment_request", build_fubon_payment_request)
 register_action("fubon.deposit_refund", build_fubon_deposit_refund)
 register_action("fubon.supply_purchase", build_fubon_supply_purchase)
+register_action("fubon.fixed_expense_transfer", build_fubon_fixed_expense_transfer)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
