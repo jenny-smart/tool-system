@@ -140,7 +140,12 @@ class FixedExpenseTransferTest(unittest.TestCase):
         self.assertEqual(plan["area"], "桃園")
         self.assertEqual(plan["source_areas"], ["桃園", "家電"])
         self.assertEqual(plan["total"], 1500)
-        self.assertEqual(plan["items"][0]["amount"], 1500)
+        self.assertEqual(
+            [(item["source_area"], item["amount"]) for item in plan["items"]],
+            [("桃園", 500), ("家電", 1000)],
+        )
+        self.assertTrue(plan["taipei_rows"][0][11].endswith("桃園"))
+        self.assertTrue(plan["taipei_rows"][1][11].endswith("家電"))
 
     def test_selected_subject_rows_recalculate_transfer_and_memo(self):
         plan = transfer._build_plan(_values(), "202608", "台中")

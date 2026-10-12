@@ -107,7 +107,7 @@ def _make_plan(
     memo = f"{period[:4]}/{period[4:]}" + "＋".join(descriptions)
     return {
         "area": area,
-        "report_area": area,
+        "report_area": REPORT_AREA_NAMES.get(area, area),
         "source_areas": source_areas,
         "total": total,
         "transfer_mark": transfer_mark,
@@ -156,24 +156,25 @@ def _build_target_plan(values: list[list[object]], period: str, area: str) -> di
     ]
     if not parts:
         return None
-    grouped: dict[tuple[int, str], int] = {}
-    for plan in parts:
-        for item in plan["items"]:
-            key = (int(item["row_number"]), str(item["subject"]))
-            grouped[key] = grouped.get(key, 0) + int(item["amount"])
     marks = [
         f"{plan['area']}:{plan['transfer_mark']}"
         for plan in parts
         if str(plan.get("transfer_mark") or "").strip()
     ]
-    return _make_plan(
-        period,
-        "桃園",
-        sum(int(plan["total"]) for plan in parts),
-        "；".join(marks),
-        [(row, subject, amount) for (row, subject), amount in grouped.items()],
-        list(TAOYUAN_SOURCE_AREAS),
-    )
+    items = [dict(item, source_area=plan["area"]) for plan in parts for item in plan["items"]]
+    descriptions = [str(item["subject"]) for item in items if item["subject"] != "2%"]
+    return {
+        "area": "桃園",
+        "report_area": "桃園",
+        "source_areas": list(TAOYUAN_SOURCE_AREAS),
+        "total": sum(int(plan["total"]) for plan in parts),
+        "transfer_mark": "；".join(marks),
+        "eligible": bool(marks),
+        "memo": f"{period[:4]}/{period[4:]}" + "＋".join(descriptions),
+        "items": items,
+        "taipei_rows": [row for plan in parts for row in plan["taipei_rows"]],
+        "area_rows": [row for plan in parts for row in plan["area_rows"]],
+    }
 
 
 def select_plan_rows(

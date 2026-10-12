@@ -56,11 +56,11 @@ def test_fubon_report_formats_only_written_amount_cells():
     worksheet = MagicMock()
     worksheet.get.return_value = [['header'], ['', '2026/09/13']]
     gspread = MagicMock()
-    gspread.authorize().open_by_key().worksheet.return_value = worksheet
+    gspread.authorize().open_by_key().get_worksheet_by_id.return_value = worksheet
+    target = MagicMock()
     rows = [['2026/09/14', '2026/09/14 10:00:00', '轉帳', 1234, '', 56789, 'note']]
-    ns = dict(resolve_statement_location=lambda *_: ('sid', '富邦更新'), Credentials=MagicMock(),
+    ns = dict(load_sheet_target=lambda *_: target, Credentials=MagicMock(),
         load_google_credentials=MagicMock(), SCOPES=[], gspread=gspread,
-        _statement_worksheet=lambda client, area, bank: client.open_by_key('sid').worksheet('富邦更新'),
         _normalize_text=lambda v: v, build_fubon_financial_report_rows=lambda _: rows)
     sync = load_function('sheet_filter.py', 'sync_financial_report', ns)
     table = MagicMock(rows=rows)

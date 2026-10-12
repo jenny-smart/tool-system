@@ -4996,6 +4996,7 @@ if system_type == "finance_management" and selected_function == "【財報】各
                         pd.DataFrame([
                             {
                                 "執行": True,
+                                "來源": item.get("source_area", _plan["area"]),
                                 "來源列": int(item["row_number"]),
                                 "科目": item["subject"],
                                 "金額": int(item["amount"]),
