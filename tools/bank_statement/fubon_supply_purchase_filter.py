@@ -23,8 +23,9 @@ def _parse_bank_code(value: str) -> str:
 def pending_supply_purchases(values: list[list[str]], month: str) -> list[dict[str, object]]:
     """Return 清潔用品採購 rows for the given 採購月份 (B 欄), grouped by 匯款銀行＋帳號（N／O 欄）.
 
-    篩選 B 欄符合指定月份、且 N／O 欄皆非空白的列；N／O 欄相同的列會合併成
-    一筆轉帳，金額為這些列 K 欄（進貨總金額）加總。
+    篩選 B 欄符合指定月份、Q 欄（匯款日期）空白、且 N／O 欄皆非空白的列；
+    N／O 欄相同的未匯款列會合併成一筆轉帳，金額為這些列 K 欄（進貨總金額）
+    加總。Q 欄已有值的列一律不再放入匯款名單。
     """
     target_month = _normalize_month(month)
     if not target_month:
@@ -36,6 +37,8 @@ def pending_supply_purchases(values: list[list[str]], month: str) -> list[dict[s
     for sheet_row, row in enumerate(values[1:], start=2):
         row_month = _normalize_month(_cell(row, 1))
         if row_month != target_month:
+            continue
+        if _cell(row, 16):
             continue
         bank_text = _cell(row, 13)
         account_text = _cell(row, 14)
