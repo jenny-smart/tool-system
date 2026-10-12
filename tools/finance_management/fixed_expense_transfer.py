@@ -21,7 +21,7 @@ from tools.finance_management.statement_registry import (
 
 TOOL_NAME = "各區固定費用匯款"
 AREAS = ("台中", "桃園", "新竹", "高雄", "家電")
-REPORT_AREA_NAMES = {"家電": "電器/家電"}
+REPORT_AREA_NAMES = {"家電": "桃園"}
 TW_TZ = ZoneInfo("Asia/Taipei")
 
 
