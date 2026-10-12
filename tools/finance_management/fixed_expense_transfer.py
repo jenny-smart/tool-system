@@ -22,6 +22,8 @@ from tools.finance_management.statement_registry import (
 TOOL_NAME = "各區固定費用匯款"
 AREAS = ("台中", "桃園", "新竹", "高雄", "家電")
 REPORT_AREA_NAMES = {"家電": "桃園"}
+FALLBACK_MARKETING_SPREADSHEET_ID = "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4"
+FALLBACK_MARKETING_SHEET_TITLE = "2026總表"
 TW_TZ = ZoneInfo("Asia/Taipei")
 
 
@@ -130,6 +132,14 @@ def _read_values(spreadsheet_id: str, title: str, range_a1: str) -> list[list[ob
     return result.get("values", [])
 
 
+def _marketing_source_location() -> tuple[str, str]:
+    """優先讀財報設定；GID 無效或分頁不存在時，回退到指定的 2026 總表。"""
+    try:
+        return resolve_marketing_expense_location("台北")
+    except RuntimeError:
+        return FALLBACK_MARKETING_SPREADSHEET_ID, FALLBACK_MARKETING_SHEET_TITLE
+
+
 def _sheet_id(service, spreadsheet_id: str, title: str) -> int:
     metadata = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id, fields="sheets.properties"
@@ -196,7 +206,7 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
     if any(target not in AREAS for target in targets):
         raise ValueError("請選擇台中／桃園／新竹／高雄／家電／全區")
 
-    marketing_id, marketing_title = resolve_marketing_expense_location("台北")
+    marketing_id, marketing_title = _marketing_source_location()
     values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
     plans = [plan for target in targets if (plan := _build_plan(values, period, target))]
     processed = {str(plan["area"]) for plan in plans}

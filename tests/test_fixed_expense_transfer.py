@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from tools.finance_management import fixed_expense_transfer as transfer
 
@@ -75,6 +76,20 @@ class FixedExpenseTransferTest(unittest.TestCase):
 
     def test_appliance_routes_to_taoyuan_report(self):
         self.assertEqual(transfer.REPORT_AREA_NAMES["家電"], "桃園")
+
+    def test_invalid_registry_gid_falls_back_to_2026_total_sheet(self):
+        with patch.object(
+            transfer,
+            "resolve_marketing_expense_location",
+            side_effect=RuntimeError("找不到 GID=無此工作表"),
+        ):
+            self.assertEqual(
+                transfer._marketing_source_location(),
+                (
+                    "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4",
+                    "2026總表",
+                ),
+            )
 
 
 if __name__ == "__main__":
