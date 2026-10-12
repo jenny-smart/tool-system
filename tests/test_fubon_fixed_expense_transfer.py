@@ -49,19 +49,15 @@ class FubonFixedExpenseTransferTest(unittest.TestCase):
         self.assertEqual(selected["total"], 100)
         self.assertFalse(selected["eligible"])
 
-    def test_bank_transfer_requires_nonblank_row_74(self):
-        with self.assertRaisesRegex(ValueError, "第74列空白"):
-            transfer.require_fubon_transfer_mark(
-                {"transfer_mark": ""}, "202608", "台中"
-            )
-
-        transfer.require_fubon_transfer_mark(
-            {"transfer_mark": "待匯款"}, "202608", "台中"
+    def test_bank_transfer_requires_blank_row_74(self):
+        transfer.require_fubon_not_transferred(
+            {"transfer_mark": ""}, "202608", "台中"
         )
-        with self.assertRaisesRegex(ValueError, "避免重複匯款"):
-            transfer.require_fubon_transfer_mark(
-                {"transfer_mark": "2026/10/13"}, "202608", "台中"
-            )
+        for value in ("已匯款", "2026/10/13"):
+            with self.assertRaisesRegex(ValueError, "避免重複匯款"):
+                transfer.require_fubon_not_transferred(
+                    {"transfer_mark": value}, "202608", "台中"
+                )
 
 
 if __name__ == "__main__":

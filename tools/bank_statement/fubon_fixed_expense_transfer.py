@@ -22,7 +22,7 @@ from tools.finance_management.fixed_expense_transfer import (
     REPORT_AREA_NAMES,
     assert_plan_not_posted,
     preview_fixed_expenses,
-    require_fubon_transfer_mark,
+    require_fubon_not_transferred,
     select_plan_rows,
     transfer_fixed_expenses,
     write_transfer_date,
@@ -84,7 +84,7 @@ def run(
 ) -> int:
     plan = load_transfer_plan(period, area, selected_rows)
     amount = int(plan["total"])
-    require_fubon_transfer_mark(plan, period, area)
+    require_fubon_not_transferred(plan, period, area)
     assert_plan_not_posted(plan)
     bank_area = REPORT_AREA_NAMES.get(area, area)
     account = load_account("fubon", bank_area, accounts_file.expanduser())

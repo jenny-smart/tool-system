@@ -3117,14 +3117,14 @@ def run_fixed_expense_transfer(
             raise ValueError("執行富邦銀行匯款時，請選擇單一地區")
         from tools.finance_management.fixed_expense_transfer import (
             preview_fixed_expenses,
-            require_fubon_transfer_mark,
+            require_fubon_not_transferred,
         )
 
         preview = preview_fixed_expenses(period, area)
         plans = preview.get("plans") or []
         if not plans:
             raise ValueError(f"{period}／{area} 第72列沒有可匯款金額")
-        require_fubon_transfer_mark(plans[0], period, area)
+        require_fubon_not_transferred(plans[0], period, area)
         selected_for_area = (
             selected_rows.get(area, []) if isinstance(selected_rows, dict) else selected_rows
         )
@@ -4409,7 +4409,7 @@ with date_col:
             )
             if fixed_expense_execute_fubon:
                 st.caption(
-                    "富邦匯款須第72列 > 0 且第74列非空白；請選單一地區。"
+                    "富邦匯款須第72列 > 0 且第74列空白（代表尚未匯款）；請選單一地區。"
                     "順序：富邦匯款 → 該區富邦更新 → 原訂分錄及請款記錄。"
                 )
             else:
@@ -4980,15 +4980,18 @@ if system_type == "finance_management" and selected_function == "【財報】各
                         f"{int(_plan['total']):,}"
                     )
                     if _plan["transfer_mark"]:
-                        if re.search(
+                        if fixed_expense_execute_fubon:
+                            st.warning(
+                                f"第74列已有匯款記錄 {_plan['transfer_mark']}，"
+                                "不能再次執行富邦匯款。"
+                            )
+                        elif re.search(
                             r"\d{3,4}[./-]\d{1,2}[./-]\d{1,2}",
                             str(_plan["transfer_mark"]),
                         ):
                             st.success(f"第74列匯款日期：{_plan['transfer_mark']}")
                         else:
-                            st.caption(f"第74列匯款前記錄：{_plan['transfer_mark']}")
-                    elif fixed_expense_execute_fubon:
-                        st.warning("第74列空白，不能執行富邦匯款。")
+                            st.caption(f"第74列匯款記錄：{_plan['transfer_mark']}")
                     _subject_editor = st.data_editor(
                         pd.DataFrame([
                             {
