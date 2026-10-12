@@ -11,6 +11,54 @@ import pytest
 SOURCE = Path(__file__).resolve().parents[1] / 'tools/bank_statement/fubon_supply_purchase.py'
 
 
+class SavedAccountNotFound(RuntimeError):
+    pass
+
+
+def load_destination_helper():
+    tree = ast.parse(SOURCE.read_text())
+    future = next(n for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == '__future__')
+    helper = next(
+        n for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == '_choose_supply_purchase_destination'
+    )
+    ns = dict(
+        Page=object,
+        SavedAccountNotFound=SavedAccountNotFound,
+        choose_saved_destination=MagicMock(),
+        choose_manual_destination=MagicMock(),
+        fill_manual_destination=MagicMock(),
+    )
+    exec(compile(ast.Module(body=[future, helper], type_ignores=[]), str(SOURCE), 'exec'), ns)
+    return ns
+
+
+def test_supply_purchase_prefers_saved_account_with_same_supplier_name():
+    ns = load_destination_helper()
+    page = MagicMock()
+    item = dict(supplier='LINE酵素', bank_code='807', account_number='11601800014602')
+
+    ns['_choose_supply_purchase_destination'](page, item)
+
+    ns['choose_saved_destination'].assert_called_once_with(page, 'LINE酵素')
+    ns['choose_manual_destination'].assert_not_called()
+    ns['fill_manual_destination'].assert_not_called()
+
+
+def test_supply_purchase_falls_back_to_report_account_when_same_name_is_missing():
+    ns = load_destination_helper()
+    page = MagicMock()
+    item = dict(supplier='新廠商', bank_code='013', account_number='214502127659')
+    ns['choose_saved_destination'].side_effect = SavedAccountNotFound('missing')
+
+    ns['_choose_supply_purchase_destination'](page, item)
+
+    ns['choose_saved_destination'].assert_called_once_with(page, '新廠商')
+    ns['choose_manual_destination'].assert_called_once_with(page)
+    page.wait_for_timeout.assert_called_once_with(800)
+    ns['fill_manual_destination'].assert_called_once_with(page, '013', '214502127659')
+
+
 def run_purchase(*, completion_error=False, write_error=False):
     tree = ast.parse(SOURCE.read_text())
     run = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'run')
