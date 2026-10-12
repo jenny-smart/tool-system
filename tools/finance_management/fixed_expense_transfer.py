@@ -22,10 +22,9 @@ from tools.finance_management.statement_registry import (
 )
 
 TOOL_NAME = "各區固定費用匯款"
-AREAS = ("台中", "桃園", "新竹", "高雄", "家電")
+AREAS = ("台中", "桃園", "新竹", "高雄")
+TAOYUAN_SOURCE_AREAS = ("桃園", "家電")
 REPORT_AREA_NAMES = {"家電": "桃園"}
-FALLBACK_MARKETING_SPREADSHEET_ID = "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4"
-FALLBACK_MARKETING_SHEET_TITLE = "2026總表"
 TW_TZ = ZoneInfo("Asia/Taipei")
 
 
@@ -78,23 +77,14 @@ def _posting(source: str, amount: int, *, taipei: bool) -> tuple[int, int]:
     return (-amount, 0) if taipei else (amount, 0)
 
 
-def _build_plan(
-    values: list[list[object]], period: str, area: str, *, require_ready: bool = True
-) -> dict[str, object] | None:
-    col = _find_source_column(values, period, area)
-    total = _amount(_cell(values[71], col)) if len(values) >= 72 else 0
-    transfer_mark = str(_cell(values[73], col) or "").strip() if len(values) >= 74 else ""
-    # 第 74 列改為實際匯款日期的輸出欄位，不再作為執行篩選條件。
-    if total <= 0:
-        return None
-
-    source_items: list[tuple[int, str, int]] = []
-    for row_number in range(41, 72):
-        row = values[row_number - 1] if row_number <= len(values) else []
-        source = str(_cell(row, 2) or "").strip()
-        amount = _amount(_cell(row, col))
-        if source and amount > 0:
-            source_items.append((row_number, source, amount))
+def _make_plan(
+    period: str,
+    area: str,
+    total: int,
+    transfer_mark: str,
+    source_items: list[tuple[int, str, int]],
+    source_areas: list[str],
+) -> dict[str, object]:
     if not source_items:
         raise RuntimeError(f"{period[:4]}.{period[4:]}／{area} 第72列有金額但找不到固定費用明細")
 
@@ -117,7 +107,8 @@ def _build_plan(
     memo = f"{period[:4]}/{period[4:]}" + "＋".join(descriptions)
     return {
         "area": area,
-        "report_area": REPORT_AREA_NAMES.get(area, area),
+        "report_area": area,
+        "source_areas": source_areas,
         "total": total,
         "transfer_mark": transfer_mark,
         "eligible": bool(transfer_mark),
@@ -129,6 +120,60 @@ def _build_plan(
         "taipei_rows": taipei_rows,
         "area_rows": area_rows,
     }
+
+
+def _build_plan(
+    values: list[list[object]], period: str, area: str, *, require_ready: bool = True
+) -> dict[str, object] | None:
+    col = _find_source_column(values, period, area)
+    total = _amount(_cell(values[71], col)) if len(values) >= 72 else 0
+    transfer_mark = str(_cell(values[73], col) or "").strip() if len(values) >= 74 else ""
+    if total <= 0:
+        return None
+
+    source_items: list[tuple[int, str, int]] = []
+    for row_number in range(41, 72):
+        row = values[row_number - 1] if row_number <= len(values) else []
+        source = str(_cell(row, 2) or "").strip()
+        amount = _amount(_cell(row, col))
+        if source and amount > 0:
+            source_items.append((row_number, source, amount))
+    if not source_items:
+        raise RuntimeError(f"{period[:4]}.{period[4:]}／{area} 第72列有金額但找不到固定費用明細")
+    return _make_plan(period, area, total, transfer_mark, source_items, [area])
+
+
+def _build_target_plan(values: list[list[object]], period: str, area: str) -> dict[str, object] | None:
+    """桃園固定費用合併桃園與家電欄位，其餘地區維持單一來源。"""
+    area = "桃園" if area == "家電" else area
+    if area != "桃園":
+        return _build_plan(values, period, area, require_ready=False)
+
+    parts = [
+        plan
+        for source_area in TAOYUAN_SOURCE_AREAS
+        if (plan := _build_plan(values, period, source_area, require_ready=False))
+    ]
+    if not parts:
+        return None
+    grouped: dict[tuple[int, str], int] = {}
+    for plan in parts:
+        for item in plan["items"]:
+            key = (int(item["row_number"]), str(item["subject"]))
+            grouped[key] = grouped.get(key, 0) + int(item["amount"])
+    marks = [
+        f"{plan['area']}:{plan['transfer_mark']}"
+        for plan in parts
+        if str(plan.get("transfer_mark") or "").strip()
+    ]
+    return _make_plan(
+        period,
+        "桃園",
+        sum(int(plan["total"]) for plan in parts),
+        "；".join(marks),
+        [(row, subject, amount) for (row, subject), amount in grouped.items()],
+        list(TAOYUAN_SOURCE_AREAS),
+    )
 
 
 def select_plan_rows(
@@ -186,11 +231,8 @@ def _read_values(spreadsheet_id: str, title: str, range_a1: str) -> list[list[ob
 
 
 def _marketing_source_location() -> tuple[str, str]:
-    """優先讀財報設定；GID 無效或分頁不存在時，回退到指定的 2026 總表。"""
-    try:
-        return resolve_marketing_expense_location("台北")
-    except RuntimeError:
-        return FALLBACK_MARKETING_SPREADSHEET_ID, FALLBACK_MARKETING_SHEET_TITLE
+    """固定由 Jenny's Lemonhometools「財報設定」取得來源檔案及分頁。"""
+    return resolve_marketing_expense_location("台北")
 
 
 def _column_letter(column: int) -> str:
@@ -205,15 +247,19 @@ def write_transfer_date(period: str, area: str, payment_date: str) -> str:
     """把富邦實際匯款日期寫回來源總表該月／該地區的第 74 列。"""
     spreadsheet_id, title = _marketing_source_location()
     values = _read_values(spreadsheet_id, title, "A1:ZZ74")
-    column = _find_source_column(values, period, area)
-    cell = f"{_column_letter(column)}74"
+    source_areas = TAOYUAN_SOURCE_AREAS if area in ("桃園", "家電") else (area,)
+    cells = [
+        f"{_column_letter(_find_source_column(values, period, source_area))}74"
+        for source_area in source_areas
+    ]
     def update(service) -> None:
-        service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{title}'!{cell}",
-            valueInputOption="USER_ENTERED",
-            body={"values": [[payment_date]]},
-        ).execute()
+        for cell in cells:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{title}'!{cell}",
+                valueInputOption="USER_ENTERED",
+                body={"values": [[payment_date]]},
+            ).execute()
 
     try:
         update(get_sheets_service())
@@ -224,7 +270,7 @@ def write_transfer_date(period: str, area: str, payment_date: str) -> str:
         from services.google_auth import get_sheets_service as get_oauth_sheets_service
 
         update(get_oauth_sheets_service())
-    return cell
+    return "、".join(cells)
 
 
 def _sheet_properties(service, spreadsheet_id: str, title: str) -> dict[str, object]:
@@ -331,16 +377,17 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
     period = (period or "").strip()
     if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
+    area = "桃園" if area == "家電" else area
     targets = list(AREAS) if area == "全區" else [area]
     if any(target not in AREAS for target in targets):
-        raise ValueError("請選擇台中／桃園／新竹／高雄／家電／全區")
+        raise ValueError("請選擇台中／桃園／新竹／高雄／全區")
 
     marketing_id, marketing_title = _marketing_source_location()
     values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
     plans = [
         plan
         for target in targets
-        if (plan := _build_plan(values, period, target, require_ready=False))
+        if (plan := _build_target_plan(values, period, target))
     ]
     processed = {str(plan["area"]) for plan in plans}
     return {
@@ -362,9 +409,10 @@ def transfer_fixed_expenses(
     period = (period or "").strip()
     if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
+    area = "桃園" if area == "家電" else area
     targets = list(AREAS) if area == "全區" else [area]
     if any(target not in AREAS for target in targets):
-        raise ValueError("請選擇台中／桃園／新竹／高雄／家電／全區")
+        raise ValueError("請選擇台中／桃園／新竹／高雄／全區")
 
     log_execution(TOOL_NAME, area, "開始", f"期別：{period}")
     try:
@@ -374,12 +422,7 @@ def transfer_fixed_expenses(
             plan
             for target in targets
             if (
-                plan := _build_plan(
-                    values,
-                    period,
-                    target,
-                    require_ready=not allow_unmarked,
-                )
+                plan := _build_target_plan(values, period, target)
             )
         ]
         if selected_rows is not None:

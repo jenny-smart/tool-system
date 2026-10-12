@@ -10,8 +10,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from tools.bank_statement.capture import CapturedTable
-from tools.bank_statement.google_config import load_google_credentials, load_sheet_target
+from tools.bank_statement.google_config import load_google_credentials
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+from tools.finance_management.statement_registry import resolve_statement_location
 
 
 SCOPES = (
@@ -19,6 +20,14 @@ SCOPES = (
     "https://www.googleapis.com/auth/drive",
 )
 BANK_AREAS = ("台北", "台中", "桃園", "新竹", "高雄")
+
+
+def _statement_worksheet(client, area: str, bank: str):
+    report = {"fubon": "富邦更新", "yuanta": "元大更新"}.get(bank)
+    if report is None:
+        raise ValueError(f"不支援的銀行：{bank}")
+    spreadsheet_id, title = resolve_statement_location(area, report)
+    return client.open_by_key(spreadsheet_id).worksheet(title)
 
 
 def _note_first_line(value: str) -> str:
@@ -183,10 +192,9 @@ def filter_yuanta_report_rows(
 
 
 def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable:
-    target = load_sheet_target(area, bank)
     credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
     client = gspread.authorize(credentials)
-    worksheet = client.open_by_key(target.spreadsheet_id).get_worksheet_by_id(target.worksheet_gid)
+    worksheet = _statement_worksheet(client, area, bank)
     if bank == "yuanta":
         # 財報 B 欄（交易日期時間）的日期對應「元大銀行-區域」A 欄。
         return filter_yuanta_report_rows(table, worksheet.get("B2:B"))
@@ -252,13 +260,8 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
     """將已確認未登記的明細同步追加至對應區域財報。"""
     if not table.rows:
         return 0
-    target = load_sheet_target(area, bank)
     credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
-    worksheet = (
-        gspread.authorize(credentials)
-        .open_by_key(target.spreadsheet_id)
-        .get_worksheet_by_id(target.worksheet_gid)
-    )
+    worksheet = _statement_worksheet(gspread.authorize(credentials), area, bank)
     existing = worksheet.get("A:I")
     headers = existing[0] if existing else []
     normalized_headers = [_normalize_text(value).replace("\n", "") for value in headers]

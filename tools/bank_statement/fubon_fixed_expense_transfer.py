@@ -32,14 +32,14 @@ from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_ch
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 DESTINATION_NAME = "台北"
-SUPPORTED_AREAS = ("台中", "桃園", "新竹", "高雄", "家電")
+SUPPORTED_AREAS = ("台中", "桃園", "新竹", "高雄")
 
 
 def load_transfer_plan(
     period: str, area: str, selected_rows: set[int] | None = None
 ) -> dict[str, object]:
     if area not in SUPPORTED_AREAS:
-        raise ValueError("固定費用富邦匯款請選擇台中／桃園／新竹／高雄／家電")
+        raise ValueError("固定費用富邦匯款請選擇台中／桃園／新竹／高雄")
     preview = preview_fixed_expenses(period, area)
     plans = preview.get("plans") or []
     if not plans:

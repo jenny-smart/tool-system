@@ -126,8 +126,21 @@ class FixedExpenseTransferTest(unittest.TestCase):
             transfer._missing_statement_rows(rows[:2], rows, "台中"), rows[2:]
         )
 
-    def test_appliance_routes_to_taoyuan_report(self):
-        self.assertEqual(transfer.REPORT_AREA_NAMES["家電"], "桃園")
+    def test_taoyuan_combines_appliance_subjects_and_amounts(self):
+        values = _values()
+        for row in values:
+            row.append("")
+        values[1][8] = "家電"
+        values[40][3] = 500
+        values[71][3] = 500
+        values[40][8] = 1000
+        values[71][8] = 1000
+        plan = transfer._build_target_plan(values, "202608", "桃園")
+
+        self.assertEqual(plan["area"], "桃園")
+        self.assertEqual(plan["source_areas"], ["桃園", "家電"])
+        self.assertEqual(plan["total"], 1500)
+        self.assertEqual(plan["items"][0]["amount"], 1500)
 
     def test_selected_subject_rows_recalculate_transfer_and_memo(self):
         plan = transfer._build_plan(_values(), "202608", "台中")
@@ -160,19 +173,14 @@ class FixedExpenseTransferTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "已有相同固定費用分錄"):
                     transfer.assert_plan_not_posted(plan)
 
-    def test_invalid_registry_gid_falls_back_to_2026_total_sheet(self):
+    def test_invalid_registry_gid_does_not_use_hardcoded_fallback(self):
         with patch.object(
             transfer,
             "resolve_marketing_expense_location",
             side_effect=RuntimeError("找不到 GID=無此工作表"),
         ):
-            self.assertEqual(
-                transfer._marketing_source_location(),
-                (
-                    "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4",
-                    "2026總表",
-                ),
-            )
+            with self.assertRaisesRegex(RuntimeError, "找不到 GID"):
+                transfer._marketing_source_location()
 
 
 if __name__ == "__main__":

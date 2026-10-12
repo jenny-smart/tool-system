@@ -4913,7 +4913,7 @@ with area_col:
         # 台北固定費用請款只會寫進請款記錄／台北，區域固定台北，不用選。
         area_select_options = ["台北"]
     if selected_function == "【財報】各區固定費用匯款":
-        area_select_options = ["全區", "台中", "桃園", "新竹", "高雄", "家電"]
+        area_select_options = ["全區", "台中", "桃園", "新竹", "高雄"]
     if selected_function in (
         "【儲值金】轉檔",
         "【儲值金】搬運",
