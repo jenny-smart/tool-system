@@ -102,8 +102,6 @@ def run(
         )
         paid_on = _payment_date(completed_at)
         try:
-            source_cell = write_transfer_date(period, area, paid_on)
-            print(f"富邦匯款已完成；已回填來源總表 {source_cell}：{paid_on}。")
             print(f"開始同步 {bank_area} 富邦明細。")
             today = datetime.now(TW_TZ).date()
             run_download(context, page, account, today, today)
@@ -120,6 +118,14 @@ def run(
                 "富邦匯款已完成，但後續明細或財報同步失敗；請勿重複匯款，"
                 f"請依日誌續處理：{exc}"
             ) from exc
+
+        try:
+            source_cell = write_transfer_date(period, area, paid_on)
+            print(f"已回填來源總表 {source_cell}：{paid_on}。")
+        except Exception as exc:
+            # 匯款、明細及財報已完成時，不可因來源表權限問題讓使用者誤以為
+            # 整批失敗而再次匯款；既有財報分錄仍會在下次銀行預檢時擋重複。
+            print(f"警告：匯款及後續分錄已完成，但第74列日期回填失敗：{exc}")
 
     for summary in result.get("summaries") or []:
         print(summary)

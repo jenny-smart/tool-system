@@ -1,6 +1,6 @@
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tools import local_agent
 from tools.bank_statement import fubon_fixed_expense_transfer as fubon_transfer
@@ -58,6 +58,44 @@ class FubonFixedExpenseTransferTest(unittest.TestCase):
                 transfer.require_fubon_not_transferred(
                     {"transfer_mark": value}, "202608", "台中"
                 )
+
+    def test_post_payment_runs_download_and_posting_before_row_74_marker(self):
+        events = []
+        plan = {"total": 36112}
+        page = MagicMock()
+        context = MagicMock()
+        browser = MagicMock()
+        playwright = MagicMock()
+        playwright.__enter__.return_value = MagicMock()
+        with patch.object(fubon_transfer, "load_transfer_plan", return_value=plan), patch.object(
+            fubon_transfer, "require_fubon_not_transferred"
+        ), patch.object(fubon_transfer, "assert_plan_not_posted"), patch.object(
+            fubon_transfer, "load_account", return_value=MagicMock(bank_account="123")
+        ), patch.object(fubon_transfer, "sync_playwright", return_value=playwright), patch.object(
+            fubon_transfer, "connect_existing_chrome", return_value=(browser, context)
+        ), patch.object(fubon_transfer, "ensure_login", return_value=page), patch.object(
+            fubon_transfer, "fill_fixed_expense_transfer"
+        ), patch.object(
+            fubon_transfer,
+            "wait_user_completed_transfer",
+            return_value="2026-10-13 05:43:35",
+        ), patch.object(
+            fubon_transfer,
+            "run_download",
+            side_effect=lambda *args: events.append("download"),
+        ), patch.object(
+            fubon_transfer,
+            "transfer_fixed_expenses",
+            side_effect=lambda *args, **kwargs: events.append("posting") or {"summaries": []},
+        ), patch.object(
+            fubon_transfer,
+            "write_transfer_date",
+            side_effect=lambda *args: events.append("marker") or "F74",
+        ):
+            result = fubon_transfer.run("台中", "202608", MagicMock(), "cdp")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(events, ["download", "posting", "marker"])
 
 
 if __name__ == "__main__":

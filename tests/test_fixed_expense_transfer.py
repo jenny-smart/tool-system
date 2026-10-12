@@ -1,6 +1,9 @@
 import unittest
 from unittest.mock import patch
 
+from googleapiclient.errors import HttpError
+from httplib2 import Response
+
 from tools.finance_management import fixed_expense_transfer as transfer
 
 
@@ -87,6 +90,25 @@ class FixedExpenseTransferTest(unittest.TestCase):
             valueInputOption="USER_ENTERED",
             body={"values": [["2026/10/13"]]},
         )
+
+    def test_row_74_write_falls_back_to_user_oauth_on_403(self):
+        service = unittest.mock.MagicMock()
+        oauth_service = unittest.mock.MagicMock()
+        forbidden = HttpError(Response({"status": "403"}), b"forbidden")
+        service.spreadsheets().values().update().execute.side_effect = forbidden
+        with patch.object(
+            transfer,
+            "_marketing_source_location",
+            return_value=("sheet-id", "2026總表"),
+        ), patch.object(transfer, "_read_values", return_value=_values()), patch.object(
+            transfer, "get_sheets_service", return_value=service
+        ), patch(
+            "services.google_auth.get_sheets_service", return_value=oauth_service
+        ):
+            cell = transfer.write_transfer_date("202608", "台中", "2026/10/13")
+
+        self.assertEqual(cell, "F74")
+        oauth_service.spreadsheets().values().update.assert_called_once()
 
     def test_mismatch_stops_before_writing(self):
         values = _values()

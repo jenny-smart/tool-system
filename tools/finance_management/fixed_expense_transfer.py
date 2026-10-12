@@ -8,6 +8,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from googleapiclient.errors import HttpError
+
 from tools.bank_statement.internal_payment_registry import (
     PAYMENT_REQUEST_TYPE,
     resolve_report_location,
@@ -205,12 +207,23 @@ def write_transfer_date(period: str, area: str, payment_date: str) -> str:
     values = _read_values(spreadsheet_id, title, "A1:ZZ74")
     column = _find_source_column(values, period, area)
     cell = f"{_column_letter(column)}74"
-    get_sheets_service().spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{title}'!{cell}",
-        valueInputOption="USER_ENTERED",
-        body={"values": [[payment_date]]},
-    ).execute()
+    def update(service) -> None:
+        service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=f"'{title}'!{cell}",
+            valueInputOption="USER_ENTERED",
+            body={"values": [[payment_date]]},
+        ).execute()
+
+    try:
+        update(get_sheets_service())
+    except HttpError as exc:
+        if getattr(exc.resp, "status", None) != 403:
+            raise
+        # 行銷費用總表可能只授權 Jenny、未分享給服務帳號；改用既有 OAuth。
+        from services.google_auth import get_sheets_service as get_oauth_sheets_service
+
+        update(get_oauth_sheets_service())
     return cell
 
 
