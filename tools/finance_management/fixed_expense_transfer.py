@@ -161,6 +161,19 @@ def select_plan_rows(
     return result
 
 
+def require_fubon_transfer_mark(
+    plan: dict[str, object], period: str, area: str
+) -> None:
+    """富邦任務建立前確認第 74 列已核准，且不是已完成匯款的日期。"""
+    transfer_mark = str(plan.get("transfer_mark") or "").strip()
+    if not transfer_mark:
+        raise ValueError(f"{period}／{area} 第74列空白，不能執行富邦匯款")
+    if re.search(r"\d{3,4}[./-]\d{1,2}[./-]\d{1,2}", transfer_mark):
+        raise ValueError(
+            f"{period}／{area} 第74列已有匯款日期 {transfer_mark}，為避免重複匯款已停止"
+        )
+
+
 def _read_values(spreadsheet_id: str, title: str, range_a1: str) -> list[list[object]]:
     service = get_sheets_service()
     result = service.spreadsheets().values().get(

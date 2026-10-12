@@ -3115,6 +3115,16 @@ def run_fixed_expense_transfer(
     if execute_fubon_transfer:
         if area == "全區":
             raise ValueError("執行富邦銀行匯款時，請選擇單一地區")
+        from tools.finance_management.fixed_expense_transfer import (
+            preview_fixed_expenses,
+            require_fubon_transfer_mark,
+        )
+
+        preview = preview_fixed_expenses(period, area)
+        plans = preview.get("plans") or []
+        if not plans:
+            raise ValueError(f"{period}／{area} 第72列沒有可匯款金額")
+        require_fubon_transfer_mark(plans[0], period, area)
         selected_for_area = (
             selected_rows.get(area, []) if isinstance(selected_rows, dict) else selected_rows
         )
