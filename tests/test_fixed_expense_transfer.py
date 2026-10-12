@@ -60,9 +60,15 @@ class FixedExpenseTransferTest(unittest.TestCase):
         values = _values()
         values[73][5] = ""
         self.assertIsNone(transfer._build_plan(values, "202608", "台中"))
+        preview = transfer._build_plan(values, "202608", "台中", require_ready=False)
+        self.assertEqual(preview["total"], 36112)
+        self.assertFalse(preview["eligible"])
         values[73][5] = "已匯"
         values[71][5] = 0
         self.assertIsNone(transfer._build_plan(values, "202608", "台中"))
+        self.assertIsNone(
+            transfer._build_plan(values, "202608", "台中", require_ready=False)
+        )
 
     def test_mismatch_stops_before_writing(self):
         values = _values()

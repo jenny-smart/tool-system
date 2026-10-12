@@ -76,11 +76,13 @@ def _posting(source: str, amount: int, *, taipei: bool) -> tuple[int, int]:
     return (-amount, 0) if taipei else (amount, 0)
 
 
-def _build_plan(values: list[list[object]], period: str, area: str) -> dict[str, object] | None:
+def _build_plan(
+    values: list[list[object]], period: str, area: str, *, require_ready: bool = True
+) -> dict[str, object] | None:
     col = _find_source_column(values, period, area)
     total = _amount(_cell(values[71], col)) if len(values) >= 72 else 0
     transfer_mark = str(_cell(values[73], col) or "").strip() if len(values) >= 74 else ""
-    if total <= 0 or not transfer_mark:
+    if total <= 0 or (require_ready and not transfer_mark):
         return None
 
     source_items: list[tuple[str, int]] = []
@@ -114,6 +116,8 @@ def _build_plan(values: list[list[object]], period: str, area: str) -> dict[str,
         "area": area,
         "report_area": REPORT_AREA_NAMES.get(area, area),
         "total": total,
+        "transfer_mark": transfer_mark,
+        "eligible": bool(transfer_mark),
         "memo": memo,
         "items": [{"subject": source, "amount": amount} for source, amount in source_items],
         "taipei_rows": taipei_rows,
@@ -208,7 +212,11 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
 
     marketing_id, marketing_title = _marketing_source_location()
     values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
-    plans = [plan for target in targets if (plan := _build_plan(values, period, target))]
+    plans = [
+        plan
+        for target in targets
+        if (plan := _build_plan(values, period, target, require_ready=False))
+    ]
     processed = {str(plan["area"]) for plan in plans}
     return {
         "period": period,
@@ -227,8 +235,9 @@ def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Call
 
     log_execution(TOOL_NAME, area, "開始", f"期別：{period}")
     try:
-        preview = preview_fixed_expenses(period, area)
-        plans = preview["plans"]
+        marketing_id, marketing_title = _marketing_source_location()
+        values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
+        plans = [plan for target in targets if (plan := _build_plan(values, period, target))]
         written_rows = request_rows = 0
         summaries = []
         for plan in plans:
@@ -260,7 +269,7 @@ def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Call
             summaries.append(summary)
             if on_progress:
                 on_progress(summary, "success")
-        skipped = preview["skipped_areas"]
+        skipped = [target for target in targets if target not in {str(plan["area"]) for plan in plans}]
         result = {"period": period, "processed_areas": len(plans), "statement_rows": written_rows, "request_rows": request_rows, "skipped_areas": skipped, "summaries": summaries}
         log_execution(TOOL_NAME, area, "完成", f"財報新增 {written_rows} 列；請款新增 {request_rows} 列；略過：{'、'.join(skipped) or '無'}")
         return result

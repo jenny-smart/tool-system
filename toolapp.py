@@ -4916,6 +4916,8 @@ if system_type == "finance_management" and selected_function == "【財報】各
                         f"{_plan['area']}{_destination}｜第72列匯款金額："
                         f"{int(_plan['total']):,}"
                     )
+                    if not _plan["eligible"]:
+                        st.warning("第74列空白：目前僅供預覽，尚不符合執行條件。")
                     st.dataframe(
                         pd.DataFrame([
                             {"科目": item["subject"], "金額": int(item["amount"])}
