@@ -286,13 +286,21 @@ def assert_plan_not_posted(plan: dict[str, object]) -> None:
 def _append_statement_rows(spreadsheet_id: str, title: str, existing: list[list[object]], rows: list[list[object]]) -> int:
     if not rows:
         return 0
-    last_a = max((idx for idx, row in enumerate(existing, start=1) if str(_cell(row, 1)).strip()), default=1)
-    start_row, end_row = last_a + 1, last_a + len(rows)
+    # A 欄整欄可能預先放了核取方塊，不能拿來判斷真正的資料尾端。
+    last_data = max(
+        (
+            idx
+            for idx, row in enumerate(existing, start=1)
+            if any(str(_cell(row, col)).strip() for col in range(2, 13))
+        ),
+        default=1,
+    )
+    start_row, end_row = last_data + 1, last_data + len(rows)
     service = get_sheets_service()
     properties = _sheet_properties(service, spreadsheet_id, title)
     sheet_id = int(properties["sheetId"])
     row_count = int((properties.get("gridProperties") or {}).get("rowCount", 0))
-    source = {"sheetId": sheet_id, "startRowIndex": last_a - 1, "endRowIndex": last_a, "startColumnIndex": 0, "endColumnIndex": 12}
+    source = {"sheetId": sheet_id, "startRowIndex": last_data - 1, "endRowIndex": last_data, "startColumnIndex": 0, "endColumnIndex": 12}
     destination = {"sheetId": sheet_id, "startRowIndex": start_row - 1, "endRowIndex": end_row, "startColumnIndex": 0, "endColumnIndex": 12}
     requests = []
     if end_row > row_count:
