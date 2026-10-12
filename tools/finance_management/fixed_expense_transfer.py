@@ -1,19 +1,13 @@
-"""各區固定費用匯款：由行銷費用總表產生台北／分店分錄與請款記錄。"""
+"""各區固定費用匯款：由行銷費用總表產生台北／分店富邦分錄。"""
 from __future__ import annotations
 
 import re
 from collections import Counter
-from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Callable
-from zoneinfo import ZoneInfo
 
 from googleapiclient.errors import HttpError
 
-from tools.bank_statement.internal_payment_registry import (
-    PAYMENT_REQUEST_TYPE,
-    resolve_report_location,
-)
 from tools.common.config_loader import get_sheets_service
 from tools.finance_management.execution_log import log_execution
 from tools.finance_management.statement_registry import (
@@ -25,7 +19,6 @@ TOOL_NAME = "各區固定費用匯款"
 AREAS = ("台中", "桃園", "新竹", "高雄")
 TAOYUAN_SOURCE_AREAS = ("桃園", "家電")
 REPORT_AREA_NAMES = {"家電": "桃園"}
-TW_TZ = ZoneInfo("Asia/Taipei")
 
 
 def _cell(row: list[object], col: int) -> object:
@@ -436,7 +429,7 @@ def transfer_fixed_expenses(
                 )
                 for plan in plans
             ]
-        written_rows = request_rows = 0
+        written_rows = 0
         summaries = []
         for plan in plans:
             target = str(plan["area"])
@@ -450,44 +443,14 @@ def transfer_fixed_expenses(
             written_rows += _append_statement_rows(tp_id, tp_title, tp_existing, tp_rows)
             written_rows += _append_statement_rows(ar_id, ar_title, ar_existing, ar_rows)
 
-            req_id, req_title = resolve_report_location(PAYMENT_REQUEST_TYPE, report_area)
-            existing_request_rows = _read_values(req_id, req_title, "A:I")
-            memo = str(plan["memo"])
-            matching_request_row = next(
-                (
-                    row_number
-                    for row_number, row in enumerate(existing_request_rows, start=1)
-                    if str(_cell(row, 5)).strip() == memo
-                    and _amount(_cell(row, 6)) == int(plan["total"])
-                ),
-                None,
-            )
-            if matching_request_row is None:
-                now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
-                request_status = "已付款" if payment_date else "待付款"
-                get_sheets_service().spreadsheets().values().append(
-                    spreadsheetId=req_id,
-                    range=f"'{req_title}'!A:I",
-                    valueInputOption="USER_ENTERED",
-                    insertDataOption="INSERT_ROWS",
-                    body={"values": [[request_status, payment_date, now, "台北代墊款", memo, plan["total"], "", "", ""]]},
-                ).execute()
-                request_rows += 1
-            elif payment_date:
-                get_sheets_service().spreadsheets().values().update(
-                    spreadsheetId=req_id,
-                    range=f"'{req_title}'!A{matching_request_row}:B{matching_request_row}",
-                    valueInputOption="USER_ENTERED",
-                    body={"values": [["已付款", payment_date]]},
-                ).execute()
             destination = f"（{report_area}財報）" if report_area != target else ""
-            summary = f"{target}{destination}：匯款 {int(plan['total']):,}，財報新增 {len(tp_rows) + len(ar_rows)} 列，請款新增 {1 if matching_request_row is None else 0} 列"
+            summary = f"{target}{destination}：匯款 {int(plan['total']):,}，富邦分錄新增 {len(tp_rows) + len(ar_rows)} 列"
             summaries.append(summary)
             if on_progress:
                 on_progress(summary, "success")
         skipped = [target for target in targets if target not in {str(plan["area"]) for plan in plans}]
-        result = {"period": period, "processed_areas": len(plans), "statement_rows": written_rows, "request_rows": request_rows, "skipped_areas": skipped, "summaries": summaries}
-        log_execution(TOOL_NAME, area, "完成", f"財報新增 {written_rows} 列；請款新增 {request_rows} 列；略過：{'、'.join(skipped) or '無'}")
+        result = {"period": period, "processed_areas": len(plans), "statement_rows": written_rows, "request_rows": 0, "skipped_areas": skipped, "summaries": summaries}
+        log_execution(TOOL_NAME, area, "完成", f"富邦分錄新增 {written_rows} 列；略過：{'、'.join(skipped) or '無'}")
         return result
     except Exception as exc:
         log_execution(TOOL_NAME, area, "失敗", str(exc))
