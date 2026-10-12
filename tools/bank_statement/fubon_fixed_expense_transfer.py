@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,6 +25,7 @@ from tools.finance_management.fixed_expense_transfer import (
     preview_fixed_expenses,
     select_plan_rows,
     transfer_fixed_expenses,
+    write_transfer_date,
 )
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
@@ -44,6 +46,18 @@ def load_transfer_plan(
         raise ValueError(f"{period}／{area} 第72列沒有可匯款金額")
     plan = plans[0]
     return select_plan_rows(plan, selected_rows) if selected_rows is not None else plan
+
+
+def require_transfer_mark(plan: dict[str, object], period: str, area: str) -> None:
+    transfer_mark = str(plan.get("transfer_mark") or "").strip()
+    if not transfer_mark:
+        raise ValueError(
+            f"{period}／{area} 第74列空白，不能執行富邦匯款"
+        )
+    if re.search(r"\d{3,4}[./-]\d{1,2}[./-]\d{1,2}", transfer_mark):
+        raise ValueError(
+            f"{period}／{area} 第74列已有匯款日期 {transfer_mark}，為避免重複匯款已停止"
+        )
 
 
 def fill_fixed_expense_transfer(
@@ -82,6 +96,7 @@ def run(
 ) -> int:
     plan = load_transfer_plan(period, area, selected_rows)
     amount = int(plan["total"])
+    require_transfer_mark(plan, period, area)
     assert_plan_not_posted(plan)
     bank_area = REPORT_AREA_NAMES.get(area, area)
     account = load_account("fubon", bank_area, accounts_file.expanduser())
@@ -98,9 +113,11 @@ def run(
             expected_amount=str(amount),
         )
         paid_on = _payment_date(completed_at)
-        print(f"富邦匯款已完成（付款日 {paid_on}），開始同步 {bank_area} 富邦明細。")
-        today = datetime.now(TW_TZ).date()
         try:
+            source_cell = write_transfer_date(period, area, paid_on)
+            print(f"富邦匯款已完成；已回填來源總表 {source_cell}：{paid_on}。")
+            print(f"開始同步 {bank_area} 富邦明細。")
+            today = datetime.now(TW_TZ).date()
             run_download(context, page, account, today, today)
             print(f"{bank_area} 富邦更新同步完成，開始寫入原訂固定費用分錄。")
             result = transfer_fixed_expenses(

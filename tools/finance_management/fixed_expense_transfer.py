@@ -82,7 +82,8 @@ def _build_plan(
     col = _find_source_column(values, period, area)
     total = _amount(_cell(values[71], col)) if len(values) >= 72 else 0
     transfer_mark = str(_cell(values[73], col) or "").strip() if len(values) >= 74 else ""
-    if total <= 0 or (require_ready and not transfer_mark):
+    # 第 74 列改為實際匯款日期的輸出欄位，不再作為執行篩選條件。
+    if total <= 0:
         return None
 
     source_items: list[tuple[int, str, int]] = []
@@ -177,6 +178,29 @@ def _marketing_source_location() -> tuple[str, str]:
         return resolve_marketing_expense_location("台北")
     except RuntimeError:
         return FALLBACK_MARKETING_SPREADSHEET_ID, FALLBACK_MARKETING_SHEET_TITLE
+
+
+def _column_letter(column: int) -> str:
+    letters = ""
+    while column:
+        column, remainder = divmod(column - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def write_transfer_date(period: str, area: str, payment_date: str) -> str:
+    """把富邦實際匯款日期寫回來源總表該月／該地區的第 74 列。"""
+    spreadsheet_id, title = _marketing_source_location()
+    values = _read_values(spreadsheet_id, title, "A1:ZZ74")
+    column = _find_source_column(values, period, area)
+    cell = f"{_column_letter(column)}74"
+    get_sheets_service().spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!{cell}",
+        valueInputOption="USER_ENTERED",
+        body={"values": [[payment_date]]},
+    ).execute()
+    return cell
 
 
 def _sheet_id(service, spreadsheet_id: str, title: str) -> int:

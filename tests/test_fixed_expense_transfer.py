@@ -56,11 +56,10 @@ class FixedExpenseTransferTest(unittest.TestCase):
         ])
         self.assertTrue(all(row[11].endswith("台中") for row in plan["taipei_rows"]))
 
-    def test_requires_positive_row_72_and_nonblank_row_74(self):
+    def test_requires_positive_row_72_but_not_row_74(self):
         values = _values()
         values[73][5] = ""
-        self.assertIsNone(transfer._build_plan(values, "202608", "台中"))
-        preview = transfer._build_plan(values, "202608", "台中", require_ready=False)
+        preview = transfer._build_plan(values, "202608", "台中")
         self.assertEqual(preview["total"], 36112)
         self.assertFalse(preview["eligible"])
         values[73][5] = "已匯"
@@ -68,6 +67,25 @@ class FixedExpenseTransferTest(unittest.TestCase):
         self.assertIsNone(transfer._build_plan(values, "202608", "台中"))
         self.assertIsNone(
             transfer._build_plan(values, "202608", "台中", require_ready=False)
+        )
+
+    def test_writes_bank_payment_date_to_source_row_74(self):
+        service = unittest.mock.MagicMock()
+        with patch.object(
+            transfer,
+            "_marketing_source_location",
+            return_value=("sheet-id", "2026總表"),
+        ), patch.object(transfer, "_read_values", return_value=_values()), patch.object(
+            transfer, "get_sheets_service", return_value=service
+        ):
+            cell = transfer.write_transfer_date("202608", "台中", "2026/10/13")
+
+        self.assertEqual(cell, "F74")
+        service.spreadsheets().values().update.assert_called_once_with(
+            spreadsheetId="sheet-id",
+            range="'2026總表'!F74",
+            valueInputOption="USER_ENTERED",
+            body={"values": [["2026/10/13"]]},
         )
 
     def test_mismatch_stops_before_writing(self):

@@ -3143,14 +3143,14 @@ def run_fixed_expense_transfer(
         on_progress=on_progress,
         selected_rows=selected_rows,
     )
-    lines = result["summaries"] or ["沒有符合「第72列 > 0 且第74列非空白」的地區"]
+    lines = result["summaries"] or ["沒有第72列 > 0 的地區"]
     if result["skipped_areas"]:
         lines.append("略過：" + "、".join(result["skipped_areas"]))
     return "\n".join(lines)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def get_fixed_expense_transfer_preview(period: str, area: str):
+def get_fixed_expense_transfer_preview(period: str, area: str, schema_version: int = 2):
     from tools.finance_management.fixed_expense_transfer import preview_fixed_expenses
 
     return preview_fixed_expenses(period, area)
@@ -4399,11 +4399,11 @@ with date_col:
             )
             if fixed_expense_execute_fubon:
                 st.caption(
-                    "第72列 > 0 即可執行（第74列可空白）；請選單一地區。"
+                    "富邦匯款須第72列 > 0 且第74列非空白；請選單一地區。"
                     "順序：富邦匯款 → 該區富邦更新 → 原訂分錄及請款記錄。"
                 )
             else:
-                st.caption("格式：YYYYMM；篩選第72列 > 0 且第74列非空白，新增台北／各區富邦更新分錄及各區請款記錄")
+                st.caption("格式：YYYYMM；篩選第72列 > 0，新增台北／各區富邦更新分錄及各區請款記錄")
         elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
             st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -4953,7 +4953,7 @@ if system_type == "finance_management" and selected_function == "【財報】各
     if re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", (period or "").strip()):
         try:
             _fixed_expense_preview = get_fixed_expense_transfer_preview(
-                period.strip(), selected_area_value
+                period.strip(), selected_area_value, 2
             )
             _preview_plans = _fixed_expense_preview["plans"]
             if _preview_plans:
@@ -4969,11 +4969,16 @@ if system_type == "finance_management" and selected_function == "【財報】各
                         f"{_plan['area']}{_destination}｜第72列匯款金額："
                         f"{int(_plan['total']):,}"
                     )
-                    if not _plan["eligible"]:
-                        if fixed_expense_execute_fubon:
-                            st.info("第74列空白，但已勾選富邦匯款，仍可執行。")
+                    if _plan["transfer_mark"]:
+                        if re.search(
+                            r"\d{3,4}[./-]\d{1,2}[./-]\d{1,2}",
+                            str(_plan["transfer_mark"]),
+                        ):
+                            st.success(f"第74列匯款日期：{_plan['transfer_mark']}")
                         else:
-                            st.warning("第74列空白：目前僅供預覽，尚不符合執行條件。")
+                            st.caption(f"第74列匯款前記錄：{_plan['transfer_mark']}")
+                    elif fixed_expense_execute_fubon:
+                        st.warning("第74列空白，不能執行富邦匯款。")
                     _subject_editor = st.data_editor(
                         pd.DataFrame([
                             {
