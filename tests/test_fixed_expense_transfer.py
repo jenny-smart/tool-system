@@ -120,6 +120,12 @@ class FixedExpenseTransferTest(unittest.TestCase):
         rows = transfer._build_plan(_values(), "202608", "台中")["area_rows"]
         self.assertEqual(transfer._missing_statement_rows(rows, rows, "台中"), [])
 
+    def test_partial_existing_rows_only_returns_missing_rows(self):
+        rows = transfer._build_plan(_values(), "202608", "台中")["area_rows"]
+        self.assertEqual(
+            transfer._missing_statement_rows(rows[:2], rows, "台中"), rows[2:]
+        )
+
     def test_appliance_routes_to_taoyuan_report(self):
         self.assertEqual(transfer.REPORT_AREA_NAMES["家電"], "桃園")
 

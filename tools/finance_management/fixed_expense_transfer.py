@@ -252,11 +252,15 @@ def _fingerprints(rows: list[list[object]]) -> Counter:
 
 
 def _missing_statement_rows(existing: list[list[object]], planned: list[list[object]], location: str) -> list[list[object]]:
-    have, need = _fingerprints(existing), _fingerprints(planned)
-    present = Counter({key: min(have[key], count) for key, count in need.items()})
-    if present and present != need:
-        raise RuntimeError(f"{location} 已有部分固定費用分錄，為避免重複未寫入")
-    return [] if present == need else planned
+    have = _fingerprints(existing)
+    missing: list[list[object]] = []
+    for row in planned:
+        key = next(iter(_fingerprints([row])))
+        if have[key] > 0:
+            have[key] -= 1
+        else:
+            missing.append(row)
+    return missing
 
 
 def assert_plan_not_posted(plan: dict[str, object]) -> None:
