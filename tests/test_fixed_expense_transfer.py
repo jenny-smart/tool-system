@@ -136,6 +136,14 @@ class FixedExpenseTransferTest(unittest.TestCase):
             list(range(1, len(planned) + 1)),
         )
 
+    def test_matching_rows_ignore_amount_headers(self):
+        planned = transfer._build_plan(_values(), "202608", "台中")["area_rows"]
+        header = ["", "", "", "", "支出金額", "收入金額", "", "", "科目"]
+        self.assertEqual(
+            transfer._matching_statement_row_numbers([header, planned[0]], planned),
+            [2],
+        )
+
     def test_taoyuan_combines_appliance_subjects_and_amounts(self):
         values = self._taoyuan_and_appliance_values()
         plan = transfer._build_target_plan(values, "202608", "桃園")

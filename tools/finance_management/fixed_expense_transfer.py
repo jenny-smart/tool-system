@@ -282,25 +282,22 @@ def _sheet_id(service, spreadsheet_id: str, title: str) -> int:
     return int(_sheet_properties(service, spreadsheet_id, title)["sheetId"])
 
 
+def _fingerprint(row: list[object], *, tolerant: bool = False) -> tuple[str, str, int, int]:
+    try:
+        e_amount = _amount(_cell(row, 5))
+        f_amount = _amount(_cell(row, 6))
+    except RuntimeError:
+        if not tolerant:
+            raise
+        return ("__非分錄列__", str(_cell(row, 5)), 0, 0)
+    return (str(_cell(row, 9)).strip(), str(_cell(row, 12)).strip(), e_amount, f_amount)
+
+
 def _fingerprints(rows: list[list[object]]) -> Counter:
     return Counter(
-        (
-            str(_cell(row, 9)).strip(),
-            str(_cell(row, 12)).strip(),
-            _amount(_cell(row, 5)),
-            _amount(_cell(row, 6)),
-        )
+        _fingerprint(row, tolerant=True)
         for row in rows
         if str(_cell(row, 9)).strip() or str(_cell(row, 12)).strip()
-    )
-
-
-def _fingerprint(row: list[object]) -> tuple[str, str, int, int]:
-    return (
-        str(_cell(row, 9)).strip(),
-        str(_cell(row, 12)).strip(),
-        _amount(_cell(row, 5)),
-        _amount(_cell(row, 6)),
     )
 
 
@@ -323,7 +320,7 @@ def _matching_statement_row_numbers(
     needed = _fingerprints(planned)
     matches: list[int] = []
     for row_number, row in enumerate(existing, start=1):
-        key = _fingerprint(row)
+        key = _fingerprint(row, tolerant=True)
         if needed[key] > 0:
             matches.append(row_number)
             needed[key] -= 1
@@ -340,7 +337,7 @@ def _reorder_statement_rows(
     row_numbers = _matching_statement_row_numbers(existing, planned)
     if len(row_numbers) != len(planned):
         return
-    current = [_fingerprint(existing[row_number - 1]) for row_number in row_numbers]
+    current = [_fingerprint(existing[row_number - 1], tolerant=True) for row_number in row_numbers]
     expected = [_fingerprint(row) for row in planned]
     if current == expected:
         return
