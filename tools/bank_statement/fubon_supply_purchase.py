@@ -11,8 +11,10 @@ from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login, run_download
 from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
 from tools.bank_statement.fubon_transfer_common import (
+    SavedAccountNotFound,
     choose_immediate_date,
     choose_manual_destination,
+    choose_saved_destination,
     choose_source_account,
     fill_manual_destination,
     fill_row_inputs,
@@ -35,20 +37,34 @@ def _month_display(month: str) -> str:
     return digits[-2:] if len(digits) >= 2 else digits
 
 
+def _choose_supply_purchase_destination(page: Page, item: dict[str, object]) -> None:
+    """優先使用與廠商同名的常用轉入帳號，找不到才依報表自行輸入。"""
+    supplier = str(item.get("supplier") or "").strip()
+    if supplier:
+        try:
+            choose_saved_destination(page, supplier)
+            print(f"已找到同名常用轉入帳號：{supplier}")
+            return
+        except SavedAccountNotFound:
+            print(f"常用轉入帳號找不到同名廠商「{supplier}」，改用報表帳號自行輸入。")
+    else:
+        print("廠商名稱空白，改用報表帳號自行輸入。")
+
+    choose_manual_destination(page)
+    # 點「自行輸入」後，富邦會以 AJAX 建立銀行代碼下拉元件；稍候再填值，
+    # 避免剛從常用帳號彈窗退回時抓到尚未完成更新的舊元件。
+    page.wait_for_timeout(800)
+    fill_manual_destination(page, str(item["bank_code"]), str(item["account_number"]))
+    print(f"轉入帳號已填入：{item['bank_code']}／{item['account_number']}")
+
+
 def fill_supply_purchase(
     page: Page, area: str, source_account: str, month: str, item: dict[str, object]
 ) -> None:
     page = open_transfer_form(page)
     choose_source_account(page, area, source_account)
 
-    # N／O 欄（匯款銀行、帳號）本來就是這份報表的必填欄位，一律有值，
-    # 不需要也不要再去查常用轉入帳號清單：那套「點開彈出視窗、比對卡片
-    # 文字」的互動本身比較不穩定（多次實機測試出現彈出視窗沒關閉、銀行
-    # 代碼撞號誤點到不相干帳號等問題），既然報表已經明確指定銀行代碼與
-    # 帳號，直接自行輸入更可靠、也不會有選錯常用帳號的風險。
-    choose_manual_destination(page)
-    fill_manual_destination(page, str(item["bank_code"]), str(item["account_number"]))
-    print(f"轉入帳號已填入：{item['bank_code']}／{item['account_number']}")
+    _choose_supply_purchase_destination(page, item)
     page.wait_for_timeout(800)
 
     fill_row_inputs(page, "轉帳金額", [str(item["amount"])])
