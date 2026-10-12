@@ -3101,6 +3101,16 @@ def run_taipei_fixed_expense_billing(*, month="", start_date=None, end_date=None
     return summary
 
 
+def run_fixed_expense_transfer(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    from tools.finance_management.fixed_expense_transfer import transfer_fixed_expenses
+
+    result = transfer_fixed_expenses((month or "").strip(), area=area, on_progress=on_progress)
+    lines = result["summaries"] or ["沒有符合「第72列 > 0 且第74列非空白」的地區"]
+    if result["skipped_areas"]:
+        lines.append("略過：" + "、".join(result["skipped_areas"]))
+    return "\n".join(lines)
+
+
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.deposit_report import aggregate_month_to_uy
 
@@ -3537,6 +3547,7 @@ FINANCE_TASKS = [
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
     {"name": "【藍新金流】藍新信用卡待退款", "handler": queue_newebpay_refund_pending, "enabled": True},
     {"name": "【財報】台北固定費用請款", "handler": run_taipei_fixed_expense_billing, "enabled": True},
+    {"name": "【財報】各區固定費用匯款", "handler": run_fixed_expense_transfer, "enabled": True},
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
@@ -4324,6 +4335,16 @@ with date_col:
                 "格式：YYYYMM；新增 AWS／震旦行／眾點（查信）＋辦公室租金／管理費（固定金額）"
                 "共 5 筆請款記錄到「請款記錄／台北」"
             )
+        elif selected_function == "【財報】各區固定費用匯款":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202608",
+                label_visibility="collapsed",
+                key="finance_fixed_expense_transfer_period",
+            )
+            st.caption("格式：YYYYMM；篩選第72列 > 0 且第74列非空白，新增台北／各區富邦更新分錄及各區請款記錄")
         elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
             st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -4822,6 +4843,8 @@ with area_col:
     if selected_function == "【財報】台北固定費用請款":
         # 台北固定費用請款只會寫進請款記錄／台北，區域固定台北，不用選。
         area_select_options = ["台北"]
+    if selected_function == "【財報】各區固定費用匯款":
+        area_select_options = ["全區", "台中", "桃園", "新竹", "高雄", "家電"]
     if selected_function in (
         "【儲值金】轉檔",
         "【儲值金】搬運",
@@ -5502,6 +5525,7 @@ if run_clicked:
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
                 "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）",
+                "【財報】各區固定費用匯款",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
                 "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
                 "【財報】年度review｜預覽公式調整",
