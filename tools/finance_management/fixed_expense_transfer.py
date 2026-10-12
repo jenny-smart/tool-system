@@ -227,15 +227,19 @@ def write_transfer_date(period: str, area: str, payment_date: str) -> str:
     return cell
 
 
-def _sheet_id(service, spreadsheet_id: str, title: str) -> int:
+def _sheet_properties(service, spreadsheet_id: str, title: str) -> dict[str, object]:
     metadata = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id, fields="sheets.properties"
     ).execute()
     for sheet in metadata.get("sheets", []):
         props = sheet.get("properties", {})
         if props.get("title") == title:
-            return int(props["sheetId"])
+            return props
     raise RuntimeError(f"試算表 {spreadsheet_id} 找不到分頁「{title}」")
+
+
+def _sheet_id(service, spreadsheet_id: str, title: str) -> int:
+    return int(_sheet_properties(service, spreadsheet_id, title)["sheetId"])
 
 
 def _fingerprints(rows: list[list[object]]) -> Counter:
@@ -285,15 +289,25 @@ def _append_statement_rows(spreadsheet_id: str, title: str, existing: list[list[
     last_a = max((idx for idx, row in enumerate(existing, start=1) if str(_cell(row, 1)).strip()), default=1)
     start_row, end_row = last_a + 1, last_a + len(rows)
     service = get_sheets_service()
-    sheet_id = _sheet_id(service, spreadsheet_id, title)
+    properties = _sheet_properties(service, spreadsheet_id, title)
+    sheet_id = int(properties["sheetId"])
+    row_count = int((properties.get("gridProperties") or {}).get("rowCount", 0))
     source = {"sheetId": sheet_id, "startRowIndex": last_a - 1, "endRowIndex": last_a, "startColumnIndex": 0, "endColumnIndex": 12}
     destination = {"sheetId": sheet_id, "startRowIndex": start_row - 1, "endRowIndex": end_row, "startColumnIndex": 0, "endColumnIndex": 12}
+    requests = []
+    if end_row > row_count:
+        requests.append({"appendDimension": {
+            "sheetId": sheet_id,
+            "dimension": "ROWS",
+            "length": end_row - row_count,
+        }})
+    requests.extend([
+        {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_FORMAT", "pasteOrientation": "NORMAL"}},
+        {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_DATA_VALIDATION", "pasteOrientation": "NORMAL"}},
+    ])
     service.spreadsheets().batchUpdate(
         spreadsheetId=spreadsheet_id,
-        body={"requests": [
-            {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_FORMAT", "pasteOrientation": "NORMAL"}},
-            {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_DATA_VALIDATION", "pasteOrientation": "NORMAL"}},
-        ]},
+        body={"requests": requests},
     ).execute()
     service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
