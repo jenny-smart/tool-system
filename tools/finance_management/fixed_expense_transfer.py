@@ -286,12 +286,12 @@ def assert_plan_not_posted(plan: dict[str, object]) -> None:
 def _append_statement_rows(spreadsheet_id: str, title: str, existing: list[list[object]], rows: list[list[object]]) -> int:
     if not rows:
         return 0
-    # A 欄整欄可能預先放了核取方塊，不能拿來判斷真正的資料尾端。
+    # A 欄整欄可能預先放核取方塊；依需求以 B 欄最後非空白列為資料尾端。
     last_data = max(
         (
             idx
             for idx, row in enumerate(existing, start=1)
-            if any(str(_cell(row, col)).strip() for col in range(2, 13))
+            if str(_cell(row, 2)).strip()
         ),
         default=1,
     )
