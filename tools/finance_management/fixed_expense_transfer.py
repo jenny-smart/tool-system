@@ -295,6 +295,15 @@ def _fingerprints(rows: list[list[object]]) -> Counter:
     )
 
 
+def _fingerprint(row: list[object]) -> tuple[str, str, int, int]:
+    return (
+        str(_cell(row, 9)).strip(),
+        str(_cell(row, 12)).strip(),
+        _amount(_cell(row, 5)),
+        _amount(_cell(row, 6)),
+    )
+
+
 def _missing_statement_rows(existing: list[list[object]], planned: list[list[object]], location: str) -> list[list[object]]:
     have = _fingerprints(existing)
     missing: list[list[object]] = []
@@ -305,6 +314,46 @@ def _missing_statement_rows(existing: list[list[object]], planned: list[list[obj
         else:
             missing.append(row)
     return missing
+
+
+def _matching_statement_row_numbers(
+    existing: list[list[object]], planned: list[list[object]]
+) -> list[int]:
+    """找出屬於本批分錄的實際列號；重複科目依預計出現次數限制。"""
+    needed = _fingerprints(planned)
+    matches: list[int] = []
+    for row_number, row in enumerate(existing, start=1):
+        key = _fingerprint(row)
+        if needed[key] > 0:
+            matches.append(row_number)
+            needed[key] -= 1
+    return matches
+
+
+def _reorder_statement_rows(
+    spreadsheet_id: str,
+    title: str,
+    existing: list[list[object]],
+    planned: list[list[object]],
+) -> None:
+    """把同一批分錄依預覽順序排列；桃園完整列完後才列家電。"""
+    row_numbers = _matching_statement_row_numbers(existing, planned)
+    if len(row_numbers) != len(planned):
+        return
+    current = [_fingerprint(existing[row_number - 1]) for row_number in row_numbers]
+    expected = [_fingerprint(row) for row in planned]
+    if current == expected:
+        return
+    get_sheets_service().spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "valueInputOption": "USER_ENTERED",
+            "data": [
+                {"range": f"'{title}'!A{row_number}:L{row_number}", "values": [row]}
+                for row_number, row in zip(row_numbers, planned)
+            ],
+        },
+    ).execute()
 
 
 def assert_plan_not_posted(plan: dict[str, object]) -> None:
@@ -326,12 +375,13 @@ def assert_plan_not_posted(plan: dict[str, object]) -> None:
 def _append_statement_rows(spreadsheet_id: str, title: str, existing: list[list[object]], rows: list[list[object]]) -> int:
     if not rows:
         return 0
-    # A 欄整欄可能預先放核取方塊；依需求以 B 欄最後非空白列為資料尾端。
+    # A 欄整欄可能預先放核取方塊；B 是一般交易資料，固定費用分錄則會寫 E/F/I。
+    # 因此尾端不能只看 B，否則下一批會覆蓋上一批固定費用。
     last_data = max(
         (
             idx
             for idx, row in enumerate(existing, start=1)
-            if str(_cell(row, 2)).strip()
+            if any(str(_cell(row, col)).strip() for col in (2, 5, 6, 9))
         ),
         default=1,
     )
@@ -442,6 +492,10 @@ def transfer_fixed_expenses(
             ar_rows = _missing_statement_rows(ar_existing, plan["area_rows"], f"{report_area}／{ar_title}")
             written_rows += _append_statement_rows(tp_id, tp_title, tp_existing, tp_rows)
             written_rows += _append_statement_rows(ar_id, ar_title, ar_existing, ar_rows)
+            tp_after = _read_values(tp_id, tp_title, "A:L")
+            ar_after = _read_values(ar_id, ar_title, "A:L")
+            _reorder_statement_rows(tp_id, tp_title, tp_after, plan["taipei_rows"])
+            _reorder_statement_rows(ar_id, ar_title, ar_after, plan["area_rows"])
 
             destination = f"（{report_area}財報）" if report_area != target else ""
             summary = f"{target}{destination}：匯款 {int(plan['total']):,}，富邦分錄新增 {len(tp_rows) + len(ar_rows)} 列"

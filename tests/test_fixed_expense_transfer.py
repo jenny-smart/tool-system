@@ -126,15 +126,18 @@ class FixedExpenseTransferTest(unittest.TestCase):
             transfer._missing_statement_rows(rows[:2], rows, "台中"), rows[2:]
         )
 
+    def test_matching_rows_keep_physical_positions_for_reordering(self):
+        plan = transfer._build_target_plan(self._taoyuan_and_appliance_values(), "202608", "桃園")
+        planned = plan["area_rows"]
+        scrambled = list(reversed(planned))
+
+        self.assertEqual(
+            transfer._matching_statement_row_numbers(scrambled, planned),
+            list(range(1, len(planned) + 1)),
+        )
+
     def test_taoyuan_combines_appliance_subjects_and_amounts(self):
-        values = _values()
-        for row in values:
-            row.append("")
-        values[1][8] = "家電"
-        values[40][3] = 500
-        values[71][3] = 500
-        values[40][8] = 1000
-        values[71][8] = 1000
+        values = self._taoyuan_and_appliance_values()
         plan = transfer._build_target_plan(values, "202608", "桃園")
 
         self.assertEqual(plan["area"], "桃園")
@@ -146,6 +149,18 @@ class FixedExpenseTransferTest(unittest.TestCase):
         )
         self.assertTrue(plan["taipei_rows"][0][11].endswith("桃園"))
         self.assertTrue(plan["taipei_rows"][1][11].endswith("家電"))
+
+    @staticmethod
+    def _taoyuan_and_appliance_values():
+        values = _values()
+        for row in values:
+            row.append("")
+        values[1][8] = "家電"
+        values[40][3] = 500
+        values[71][3] = 500
+        values[40][8] = 1000
+        values[71][8] = 1000
+        return values
 
     def test_selected_subject_rows_recalculate_transfer_and_memo(self):
         plan = transfer._build_plan(_values(), "202608", "台中")
