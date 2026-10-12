@@ -28,6 +28,14 @@ class FixedExpenseTransferTest(unittest.TestCase):
         plan = transfer._build_plan(_values(), "202608", "台中")
 
         self.assertEqual(plan["total"], 36112)
+        self.assertEqual(plan["items"], [
+            {"subject": "google行銷費", "amount": 11179},
+            {"subject": "google服務費", "amount": 1118},
+            {"subject": "2%", "amount": 4401},
+            {"subject": "內勤薪資", "amount": 10000},
+            {"subject": "內勤薪資", "amount": 10000},
+            {"subject": "稅捐", "amount": 586},
+        ])
         self.assertEqual(plan["memo"], "2026/08google行銷費＋google服務費＋內勤薪資＋內勤薪資＋稅捐")
         self.assertEqual([(row[4], row[5], row[8]) for row in plan["taipei_rows"]], [
             (-11179, "", "google行銷費"),

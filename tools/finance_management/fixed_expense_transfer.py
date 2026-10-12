@@ -113,6 +113,7 @@ def _build_plan(values: list[list[object]], period: str, area: str) -> dict[str,
         "report_area": REPORT_AREA_NAMES.get(area, area),
         "total": total,
         "memo": memo,
+        "items": [{"subject": source, "amount": amount} for source, amount in source_items],
         "taipei_rows": taipei_rows,
         "area_rows": area_rows,
     }
@@ -186,6 +187,26 @@ def _append_statement_rows(spreadsheet_id: str, title: str, existing: list[list[
     return len(rows)
 
 
+def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, object]:
+    """唯讀預覽符合條件的地區、來源科目、金額與第 72 列匯款總額。"""
+    period = (period or "").strip()
+    if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
+    targets = list(AREAS) if area == "全區" else [area]
+    if any(target not in AREAS for target in targets):
+        raise ValueError("請選擇台中／桃園／新竹／高雄／家電／全區")
+
+    marketing_id, marketing_title = resolve_marketing_expense_location("台北")
+    values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
+    plans = [plan for target in targets if (plan := _build_plan(values, period, target))]
+    processed = {str(plan["area"]) for plan in plans}
+    return {
+        "period": period,
+        "plans": plans,
+        "skipped_areas": [target for target in targets if target not in processed],
+    }
+
+
 def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Callable | None = None) -> dict[str, object]:
     period = (period or "").strip()
     if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", period):
@@ -196,9 +217,8 @@ def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Call
 
     log_execution(TOOL_NAME, area, "開始", f"期別：{period}")
     try:
-        marketing_id, marketing_title = resolve_marketing_expense_location("台北")
-        values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
-        plans = [plan for target in targets if (plan := _build_plan(values, period, target))]
+        preview = preview_fixed_expenses(period, area)
+        plans = preview["plans"]
         written_rows = request_rows = 0
         summaries = []
         for plan in plans:
@@ -230,7 +250,7 @@ def transfer_fixed_expenses(period: str, area: str = "全區", on_progress: Call
             summaries.append(summary)
             if on_progress:
                 on_progress(summary, "success")
-        skipped = [target for target in targets if target not in {str(plan["area"]) for plan in plans}]
+        skipped = preview["skipped_areas"]
         result = {"period": period, "processed_areas": len(plans), "statement_rows": written_rows, "request_rows": request_rows, "skipped_areas": skipped, "summaries": summaries}
         log_execution(TOOL_NAME, area, "完成", f"財報新增 {written_rows} 列；請款新增 {request_rows} 列；略過：{'、'.join(skipped) or '無'}")
         return result

@@ -3111,6 +3111,13 @@ def run_fixed_expense_transfer(*, month="", start_date=None, end_date=None, area
     return "\n".join(lines)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def get_fixed_expense_transfer_preview(period: str, area: str):
+    from tools.finance_management.fixed_expense_transfer import preview_fixed_expenses
+
+    return preview_fixed_expenses(period, area)
+
+
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.deposit_report import aggregate_month_to_uy
 
@@ -4889,6 +4896,43 @@ with area_col:
         st.caption("將執行全部已啟用地區")
     else:
         st.caption(f"只執行：{selected_area_value}")
+
+if system_type == "finance_management" and selected_function == "【財報】各區固定費用匯款":
+    if re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", (period or "").strip()):
+        try:
+            _fixed_expense_preview = get_fixed_expense_transfer_preview(
+                period.strip(), selected_area_value
+            )
+            _preview_plans = _fixed_expense_preview["plans"]
+            if _preview_plans:
+                st.markdown("**📋 該月相關科目及金額**")
+                for _plan in _preview_plans:
+                    _destination = (
+                        f" → {_plan['report_area']}財報"
+                        if _plan["report_area"] != _plan["area"]
+                        else ""
+                    )
+                    st.caption(
+                        f"{_plan['area']}{_destination}｜第72列匯款金額："
+                        f"{int(_plan['total']):,}"
+                    )
+                    st.dataframe(
+                        pd.DataFrame([
+                            {"科目": item["subject"], "金額": int(item["amount"])}
+                            for item in _plan["items"]
+                        ]),
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "金額": st.column_config.NumberColumn("金額", format="%,d"),
+                        },
+                    )
+            else:
+                st.info("該期別沒有符合「第72列 > 0 且第74列非空白」的資料。")
+            if _fixed_expense_preview["skipped_areas"] and selected_area_value == "全區":
+                st.caption("未符合條件：" + "、".join(_fixed_expense_preview["skipped_areas"]))
+        except Exception as exc:
+            st.warning(f"無法載入固定費用預覽：{exc}")
 
 refund_selected_rows = []
 if system_type == "finance_management" and selected_function == "【藍新金流】藍新信用卡待退款":
