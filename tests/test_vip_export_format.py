@@ -121,7 +121,7 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
 
 
 
-def test_calendar_export_writes_empty_snapshots_for_each_selected_month():
+def test_calendar_export_writes_monthly_snapshots_and_combined_cross_month_sheet():
     from datetime import timedelta
     from unittest.mock import MagicMock
     functions = _load_functions("_month_keys", "step2_export_vip_calendar")
@@ -144,11 +144,26 @@ def test_calendar_export_writes_empty_snapshots_for_each_selected_month():
         datetime(2026, 11, 10, tzinfo=timezone.utc), datetime(2026, 12, 20, tzinfo=timezone.utc),
     )
     assert result["台北"]["count"] == 0
-    assert writer.call_count == 2
-    assert [call.args[2] for call in writer.call_args_list] == [[], []]
+    assert writer.call_count == 3
+    assert [call.args[2] for call in writer.call_args_list] == [[], [], []]
     assert writer.call_args_list[0].kwargs["end_dt"].strftime("%Y%m%d") == "20261130"
     assert writer.call_args_list[1].args[3].strftime("%Y%m%d") == "20261201"
+    assert writer.call_args_list[2].kwargs["sheet_name"] == "定期VIP_台北_202611-202612"
     functions["_load_stored_value_info"].assert_not_called()
+
+
+def test_cross_month_balance_uses_monthly_subtotal_and_cumulative_difference():
+    functions = _load_functions("normalize_text", "normalize_name_for_compare", "_enrich_with_stored_value")
+    rows = [
+        {"name": "王小明", "amount": 3000, "start_dt": datetime(2026, 12, 1)},
+        {"name": "王小明", "amount": 4000, "start_dt": datetime(2027, 1, 1)},
+        {"name": "王小明", "amount": 2000, "start_dt": datetime(2027, 2, 1)},
+    ]
+    result = functions["_enrich_with_stored_value"](
+        rows, {"王小明": {"totalBalance": 8000, "lineValue": "line"}}
+    )
+    assert [row["subtotal"] for row in result] == [3000, 4000, 2000]
+    assert [row["diff"] for row in result] == [5000, 1000, -1000]
 
 
 def test_same_customer_same_day_events_keep_distinct_ids_and_times():

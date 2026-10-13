@@ -744,17 +744,25 @@ def _process_events(events: list, area_name: str, calendar_id: str = "") -> list
 
 
 def _enrich_with_stored_value(rows: list[dict], stored_info: dict[str, dict]) -> list[dict]:
-    subtotal_map: dict[str, float] = {}
+    subtotal_map: dict[tuple[str, str], float] = {}
     for r in rows:
         key = normalize_name_for_compare(r["name"])
-        subtotal_map[key] = subtotal_map.get(key, 0.0) + r["amount"]
+        period = r["start_dt"].strftime("%Y%m")
+        subtotal_map[(key, period)] = subtotal_map.get((key, period), 0.0) + r["amount"]
+
+    cumulative_map: dict[tuple[str, str], float] = {}
+    running_by_name: dict[str, float] = {}
+    for key, period in sorted(subtotal_map, key=lambda item: (item[0], item[1])):
+        running_by_name[key] = running_by_name.get(key, 0.0) + subtotal_map[(key, period)]
+        cumulative_map[(key, period)] = running_by_name[key]
 
     for r in rows:
         key  = normalize_name_for_compare(r["name"])
+        period = r["start_dt"].strftime("%Y%m")
         info = stored_info.get(key, {})
-        r["subtotal"] = subtotal_map.get(key, 0.0)
+        r["subtotal"] = subtotal_map.get((key, period), 0.0)
         r["balance"]  = info.get("totalBalance", 0.0)
-        r["diff"]     = r["balance"] - r["subtotal"]
+        r["diff"]     = r["balance"] - cumulative_map.get((key, period), 0.0)
         r["line"]     = info.get("lineValue", "")
 
     return rows
@@ -767,13 +775,14 @@ def _write_vip_sheet(
     start_dt: datetime,
     area_target_id: str = "",
     end_dt=None,
+    sheet_name: str = "",
 ) -> str:
     target_id = area_target_id or _load_target_file_id()
     if not target_id:
         raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
 
     ss         = gc.open_by_key(target_id)
-    sheet_name = f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}"
+    sheet_name = sheet_name or f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}"
 
     try:
         sh = ss.worksheet(sheet_name)
@@ -788,7 +797,7 @@ def _write_vip_sheet(
         "服務人時", "備註", "姓名", "電話", "地址",
         "日期", "開始時間", "結束時間", "狀態", "",
         "星期", "單價", "人時", "金額",
-        "當月預約總金額", "儲值金餘額", "差額", "LINE@", "日曆事件ID",
+        "當月預約總金額", "儲值金餘額", "累計差額（截至當月）", "LINE@", "日曆事件ID",
     ]
 
     rows = sorted(
@@ -801,13 +810,14 @@ def _write_vip_sheet(
     )
 
     out = [headers]
-    shown_names: set[str] = set()
+    shown_customer_months: set[tuple[str, str]] = set()
 
     for r in rows:
         compare_name = normalize_name_for_compare(r["name"])
-        is_first     = compare_name not in shown_names
+        customer_month = (compare_name, r["start_dt"].strftime("%Y%m"))
+        is_first     = customer_month not in shown_customer_months
         if is_first:
-            shown_names.add(compare_name)
+            shown_customer_months.add(customer_month)
 
         out.append([
             r["service"], r["note"], r["name"], r["phone"], r["address"],
@@ -883,6 +893,15 @@ def step2_export_vip_calendar(
                 sheet_names.append(_write_vip_sheet(
                     gc, area_name, month_rows, max(start_dt, month_start), area_target_id=_area_target,
                     end_dt=min(end_dt, month_end),
+                ))
+            if len(_month_keys(start_dt, end_dt)) > 1:
+                combined_rows = _enrich_with_stored_value(rows, stored_info)
+                combined_name = (
+                    f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}-{end_dt.strftime('%Y%m')}"
+                )
+                sheet_names.insert(0, _write_vip_sheet(
+                    gc, area_name, combined_rows, start_dt, area_target_id=_area_target,
+                    end_dt=end_dt, sheet_name=combined_name,
                 ))
             results[area_name] = {"count": len(rows), "sheet": "、".join(sheet_names), "ok": True}
 
