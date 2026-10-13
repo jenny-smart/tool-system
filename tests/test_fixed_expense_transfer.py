@@ -34,16 +34,16 @@ class FixedExpenseTransferTest(unittest.TestCase):
         self.assertEqual(plan["total"], 36112)
         self.assertEqual(plan["items"], [
             {"row_number": 41, "subject": "google行銷費", "amount": 11179},
-            {"row_number": 42, "subject": "google服務費", "amount": 1118},
+            {"row_number": 42, "subject": "google代理商服務費", "amount": 1118},
             {"row_number": 46, "subject": "2%", "amount": 4401},
             {"row_number": 47, "subject": "內勤薪資", "amount": 10000},
             {"row_number": 48, "subject": "內勤薪資", "amount": 10000},
             {"row_number": 71, "subject": "稅捐", "amount": 586},
         ])
-        self.assertEqual(plan["memo"], "2026/08google行銷費＋google服務費＋內勤薪資＋內勤薪資＋稅捐")
+        self.assertEqual(plan["memo"], "2026/08google行銷費＋google代理商服務費＋內勤薪資＋內勤薪資＋稅捐")
         self.assertEqual([(row[4], row[5], row[8]) for row in plan["taipei_rows"]], [
             (-11179, "", "google行銷費"),
-            (-1118, "", "google服務費"),
+            (-1118, "", "google代理商服務費"),
             ("", 4401, "分店收入2%"),
             (-10000, "", "內勤薪資"),
             (-10000, "", "內勤薪資"),
@@ -51,15 +51,15 @@ class FixedExpenseTransferTest(unittest.TestCase):
         ])
         self.assertEqual([(row[4], row[5], row[8]) for row in plan["area_rows"]], [
             (11179, "", "google行銷費"),
-            (1118, "", "google服務費"),
+            (1118, "", "google代理商服務費"),
             (4401, "", "分店支出2%"),
             (10000, "", "內勤薪資"),
             (10000, "", "內勤薪資"),
             (-586, "", "稅捐"),
         ])
-        self.assertTrue(all(row[11].endswith("台中") for row in plan["taipei_rows"]))
-        self.assertEqual(plan["taipei_rows"][2][11], "2026.08-2%台中")
-        self.assertEqual(plan["taipei_rows"][-1][11], "2026.08-稅捐台中")
+        self.assertTrue(all(row[11].endswith("-台中") for row in plan["taipei_rows"]))
+        self.assertEqual(plan["taipei_rows"][2][11], "2026.08-2%-台中")
+        self.assertEqual(plan["taipei_rows"][-1][11], "2026.08-稅捐-台中")
 
     def test_legacy_wrong_labels_match_for_in_place_correction(self):
         plan = transfer._build_plan(_values(), "202608", "台中")

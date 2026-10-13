@@ -59,7 +59,7 @@ def _account(source: str, *, taipei: bool) -> str:
 
 
 def _label_subject(source: str) -> str:
-    return source
+    return "google代理商服務費" if source == "google服務費" else source
 
 
 def _posting(source: str, amount: int, *, taipei: bool) -> tuple[int, int]:
@@ -84,10 +84,14 @@ def _make_plan(
     period_label = f"{period[:4]}.{period[4:]}"
     taipei_rows, area_rows = [], []
     for _row_number, source, amount in source_items:
-        label = f"{period_label}-{_label_subject(source)}{area}"
+        output_subject = _label_subject(source)
+        label = f"{period_label}-{output_subject}-{area}"
         for is_taipei, target in ((True, taipei_rows), (False, area_rows)):
             e_value, f_value = _posting(source, amount, taipei=is_taipei)
-            target.append([False, "", "", "", e_value or "", f_value or "", "", "", _account(source, taipei=is_taipei), "", "", label])
+            account = _account(source, taipei=is_taipei)
+            if account == "google服務費":
+                account = "google代理商服務費"
+            target.append([False, "", "", "", e_value or "", f_value or "", "", "", account, "", "", label])
 
     signed_total = sum(int(row[5] or 0) - int(row[4] or 0) for row in taipei_rows)
     tolerance = max(2, len(taipei_rows))
@@ -96,7 +100,7 @@ def _make_plan(
             f"{period_label}／{area} 固定費用明細 {signed_total:,} 與第72列 {total:,} 不符，未寫入"
         )
 
-    descriptions = [source for _, source, _ in source_items if source != "2%"]
+    descriptions = [_label_subject(source) for _, source, _ in source_items if source != "2%"]
     memo = f"{period[:4]}/{period[4:]}" + "＋".join(descriptions)
     return {
         "area": area,
@@ -107,7 +111,7 @@ def _make_plan(
         "eligible": bool(transfer_mark),
         "memo": memo,
         "items": [
-            {"row_number": row_number, "subject": source, "amount": amount}
+            {"row_number": row_number, "subject": _label_subject(source), "amount": amount}
             for row_number, source, amount in source_items
         ],
         "taipei_rows": taipei_rows,
@@ -295,11 +299,19 @@ def _raw_fingerprint(row: list[object], *, tolerant: bool = False) -> tuple[str,
 
 def _fingerprint(row: list[object], *, tolerant: bool = False) -> tuple[str, str, int, int]:
     account, label, e_amount, f_amount = _raw_fingerprint(row, tolerant=tolerant)
+    if account == "google服務費":
+        account = "google代理商服務費"
     # 相容舊版錯把 2%／稅捐標成 google服務費的資料，讓重跑時原列就地修正。
     if account in ("分店收入2%", "分店支出2%"):
         label = label.replace("-google服務費", "-2%")
     elif account == "稅捐":
         label = label.replace("-google服務費", "-稅捐")
+    else:
+        label = label.replace("-google服務費", "-google代理商服務費")
+    for area in ("台北", "台中", "桃園", "家電", "新竹", "高雄"):
+        if label.endswith(area) and not label.endswith(f"-{area}"):
+            label = f"{label[:-len(area)]}-{area}"
+            break
     return account, label, e_amount, f_amount
 
 
