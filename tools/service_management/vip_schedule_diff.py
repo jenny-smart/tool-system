@@ -264,16 +264,17 @@ def _balance_attention_rows(existing, updates, sources):
     return sorted(highlighted)
 
 
-def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False, coverage=None):
+def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False,
+                  coverage=None, period_filter=None):
     """Update calendar A:J; preserve existing K:AG and never clear a schedule."""
-    period = target_name[-6:]
-    in_month = []
+    period = target_name[-6:] if period_filter is None else period_filter
+    filtered_rows = []
     for source_row in source_rows:
         if len(source_row) < 6 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", _canonical(source_row[5], 5)):
             raise RuntimeError("日曆匯出日期無法解析，未更新排程")
-        if _canonical(source_row[5], 5).replace("-", "")[:6] == period:
-            in_month.append(source_row)
-    source_rows = in_month
+        if not period or _canonical(source_row[5], 5).replace("-", "")[:6] == period:
+            filtered_rows.append(source_row)
+    source_rows = filtered_rows
     export_range = None
     if coverage and len(coverage[0]) >= 2:
         start, end = (_canonical(value, 5) for value in coverage[0][:2])
@@ -297,7 +298,7 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         columns = [33, 34, 35, 36]
         created = True
     # Detect moves to another month by stable event identity, avoiding duplicate orders.
-    area = target_name[:-6]
+    area = re.sub(r"\d{6}(?:-\d{6})?$", "", target_name)
     source_ids = {_text(row[18]) for row in source_rows if len(row) > 18 and _text(row[18])}
     foreign = defaultdict(list)
     if source_ids:
@@ -325,13 +326,14 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             target.update(values=[list(headers[:30])], range_name="A1:AD1", value_input_option="RAW")
         for column, name in zip(columns, META_HEADERS):
             target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
-        year, month = int(target_name[-6:-2]), int(target_name[-2:])
-        previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
-        lookup_sheet = f"{area}{previous}"
         updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
         updates, phones, colors = [], [], []
         for change in plan["updates"]:
             row, values, before = change["row"], change["values"], change["old"]
+            service_date = _canonical(values[5], 5)
+            year, month = (int(service_date[:4]), int(service_date[5:7])) if service_date else (int(period[:4]), int(period[4:]))
+            previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
+            lookup_sheet = f"{area}{previous}"
             if before is None:
                 values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
                 updates.append({"range": f"A{row}:AD{row}", "values": [values[:30]]})

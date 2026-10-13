@@ -51,7 +51,7 @@ def test_schedule_builder_passes_compare_only_to_safe_writer():
     assert writer.call_args.args[1] == "台北202611"
 
 
-def test_schedule_builder_falls_back_to_combined_cross_month_export():
+def test_schedule_builder_uses_combined_cross_month_source_and_target():
     from unittest.mock import patch
     functions = _load_functions("_build_vip_schedule_sheet")
     functions.update({
@@ -64,19 +64,16 @@ def test_schedule_builder_falls_back_to_combined_cross_month_export():
         get=lambda cell_range: [["2026-12-01", "2027-02-28"]] if cell_range == "T2:U2" else [["data"]],
     )
 
-    def worksheet(name):
-        if name == "定期VIP_台北_202701":
-            raise KeyError(name)
-        return source
-
-    book = SimpleNamespace(worksheet=worksheet, worksheets=lambda: [source])
+    book = SimpleNamespace(worksheet=lambda name: source, worksheets=lambda: [source])
     client = SimpleNamespace(open_by_key=lambda _key: book)
     result = {"sheet": "台北202701", "count": 1, "differences": {}, "report": "差異"}
     with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer:
         assert functions["_build_vip_schedule_sheet"](
-            client, {"name": "台北", "target_spreadsheet_id": "test"}, "202701"
+            client, {"name": "台北", "target_spreadsheet_id": "test"}, "202612", "202702"
         ) == result
+    assert writer.call_args.args[1] == "台北202612-202702"
     assert writer.call_args.args[2] == [["data"]]
+    assert writer.call_args.kwargs["period_filter"] == ""
 
 
 def test_schedule_customer_key_uses_name_phone_and_address():

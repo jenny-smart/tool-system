@@ -957,7 +957,8 @@ def _month_keys(start_dt: datetime, end_dt: datetime) -> list[str]:
 def _build_vip_schedule_sheet(
     gc: gspread.Client,
     area: dict,
-    period: str,
+    start_period: str,
+    end_period: str = "",
     compare_only: bool = False,
 ) -> dict:
     """安全比對本月日曆，已成單異動保留原列供人工核對。"""
@@ -967,26 +968,16 @@ def _build_vip_schedule_sheet(
     if not target_id:
         raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
     ss = gc.open_by_key(target_id)
-    monthly_name = f"定期VIP_{area_name}_{period}"
-    try:
-        source = ss.worksheet(monthly_name)
-    except gspread.WorksheetNotFound:
-        combined_pattern = re.compile(
-            rf"^定期VIP_{re.escape(area_name)}_(\d{{6}})-(\d{{6}})$"
-        )
-        candidates = []
-        for worksheet in ss.worksheets():
-            match = combined_pattern.fullmatch(worksheet.title)
-            if match and match.group(1) <= period <= match.group(2):
-                candidates.append(worksheet)
-        if not candidates:
-            raise gspread.WorksheetNotFound(monthly_name)
-        source = min(candidates, key=lambda worksheet: worksheet.title)
-        log.info("[%s] %s 改從跨月合併表「%s」建立", area_name, period, source.title)
+    end_period = end_period or start_period
+    is_cross_month = start_period != end_period
+    suffix = f"{start_period}-{end_period}" if is_cross_month else start_period
+    source = ss.worksheet(f"定期VIP_{area_name}_{suffix}")
+    target_name = f"{area_name}{suffix}"
     result = sync_schedule(
-        ss, f"{area_name}{period}", source.get("A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
+        ss, target_name, source.get("A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
         VIP_SCHEDULE_FALLBACK_HEADERS, gspread.WorksheetNotFound, compare_only=compare_only,
         coverage=source.get("T2:U2") if getattr(source, "col_count", 21) >= 21 else [],
+        period_filter="" if is_cross_month else start_period,
     )
     mode = "只比對" if compare_only else "安全更新"
     log.info("[%s] VIP排程%s完成：%s（%d 筆）；差異：%s；差異工作表：%s",
@@ -1005,14 +996,17 @@ def step3_build_vip_schedule_sheets(
     results = {}
     errors = []
     for area in areas:
-        for period in _month_keys(start_dt, end_dt):
-            key = f"{area['name']}{period}"
-            try:
-                results[key] = _build_vip_schedule_sheet(gc, area, period, compare_only=compare_only)
-            except Exception as exc:
-                log.error("[%s] VIP排程工作表建立失敗：%s", key, exc)
-                errors.append(f"{key}: {exc}")
-                results[key] = {"ok": False, "error": str(exc)}
+        periods = _month_keys(start_dt, end_dt)
+        suffix = f"{periods[0]}-{periods[-1]}" if len(periods) > 1 else periods[0]
+        key = f"{area['name']}{suffix}"
+        try:
+            results[key] = _build_vip_schedule_sheet(
+                gc, area, periods[0], periods[-1], compare_only=compare_only
+            )
+        except Exception as exc:
+            log.error("[%s] VIP排程工作表建立失敗：%s", key, exc)
+            errors.append(f"{key}: {exc}")
+            results[key] = {"ok": False, "error": str(exc)}
     if errors:
         raise RuntimeError("部分VIP排程工作表建立失敗：\n" + "\n".join(errors))
     return results
