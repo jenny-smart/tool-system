@@ -479,9 +479,13 @@ def step1_fetch_stored_value(
         log.info("=== [%s] 抓取儲值金 ===", area_name)
         try:
             email, password = get_area_credentials(area_name)
+            log.info("[%s] 登入後台中…", area_name)
             session = _login_backend_session(email, password, area_name)
+            log.info("[%s] 下載儲值金報表中…", area_name)
             content = _download_stored_value_export(session, area_name)
+            log.info("[%s] 報表轉檔中…", area_name)
             values = _convert_stored_value_export(gc, content, area_name)
+            log.info("[%s] 寫入儲值金工作表中…", area_name)
             worksheet = _write_stored_value_sheet(gc, area_name, values)
 
             results[area_name] = {
@@ -881,8 +885,10 @@ def step2_export_vip_calendar(
                 log.warning("[%s] 指定日期範圍內無符合行程，仍更新空白日曆快照", area_name)
             _area_target = area.get("target_spreadsheet_id", "")
             stored_info = _load_stored_value_info(gc, area_name, area_target_id=_area_target) if rows else {}
+            periods = _month_keys(start_dt, end_dt)
             sheet_names = []
-            for period in _month_keys(start_dt, end_dt):
+            if len(periods) == 1:
+                period = periods[0]
                 month_start = start_dt.replace(year=int(period[:4]), month=int(period[4:]), day=1,
                                                hour=0, minute=0, second=0, microsecond=0)
                 next_month = (month_start.replace(year=month_start.year + 1, month=1)
@@ -894,7 +900,7 @@ def step2_export_vip_calendar(
                     gc, area_name, month_rows, max(start_dt, month_start), area_target_id=_area_target,
                     end_dt=min(end_dt, month_end),
                 ))
-            if len(_month_keys(start_dt, end_dt)) > 1:
+            else:
                 combined_rows = _enrich_with_stored_value(rows, stored_info)
                 combined_name = (
                     f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}-{end_dt.strftime('%Y%m')}"
@@ -961,7 +967,22 @@ def _build_vip_schedule_sheet(
     if not target_id:
         raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
     ss = gc.open_by_key(target_id)
-    source = ss.worksheet(f"定期VIP_{area_name}_{period}")
+    monthly_name = f"定期VIP_{area_name}_{period}"
+    try:
+        source = ss.worksheet(monthly_name)
+    except gspread.WorksheetNotFound:
+        combined_pattern = re.compile(
+            rf"^定期VIP_{re.escape(area_name)}_(\d{{6}})-(\d{{6}})$"
+        )
+        candidates = []
+        for worksheet in ss.worksheets():
+            match = combined_pattern.fullmatch(worksheet.title)
+            if match and match.group(1) <= period <= match.group(2):
+                candidates.append(worksheet)
+        if not candidates:
+            raise gspread.WorksheetNotFound(monthly_name)
+        source = min(candidates, key=lambda worksheet: worksheet.title)
+        log.info("[%s] %s 改從跨月合併表「%s」建立", area_name, period, source.title)
     result = sync_schedule(
         ss, f"{area_name}{period}", source.get("A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
         VIP_SCHEDULE_FALLBACK_HEADERS, gspread.WorksheetNotFound, compare_only=compare_only,

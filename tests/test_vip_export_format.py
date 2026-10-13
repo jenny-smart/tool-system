@@ -51,6 +51,34 @@ def test_schedule_builder_passes_compare_only_to_safe_writer():
     assert writer.call_args.args[1] == "台北202611"
 
 
+def test_schedule_builder_falls_back_to_combined_cross_month_export():
+    from unittest.mock import patch
+    functions = _load_functions("_build_vip_schedule_sheet")
+    functions.update({
+        "VIP_SCHEDULE_FALLBACK_HEADERS": [""] * 30,
+        "json": __import__("json"),
+        "re": re,
+    })
+    source = SimpleNamespace(
+        title="定期VIP_台北_202612-202702", col_count=21,
+        get=lambda cell_range: [["2026-12-01", "2027-02-28"]] if cell_range == "T2:U2" else [["data"]],
+    )
+
+    def worksheet(name):
+        if name == "定期VIP_台北_202701":
+            raise KeyError(name)
+        return source
+
+    book = SimpleNamespace(worksheet=worksheet, worksheets=lambda: [source])
+    client = SimpleNamespace(open_by_key=lambda _key: book)
+    result = {"sheet": "台北202701", "count": 1, "differences": {}, "report": "差異"}
+    with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer:
+        assert functions["_build_vip_schedule_sheet"](
+            client, {"name": "台北", "target_spreadsheet_id": "test"}, "202701"
+        ) == result
+    assert writer.call_args.args[2] == [["data"]]
+
+
 def test_schedule_customer_key_uses_name_phone_and_address():
     functions = _load_functions(
         "normalize_text", "normalize_name_for_compare", "normalize_phone", "normalize_address",
@@ -121,7 +149,7 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
 
 
 
-def test_calendar_export_writes_monthly_snapshots_and_combined_cross_month_sheet():
+def test_calendar_export_writes_only_combined_cross_month_sheet():
     from datetime import timedelta
     from unittest.mock import MagicMock
     functions = _load_functions("_month_keys", "step2_export_vip_calendar")
@@ -144,11 +172,10 @@ def test_calendar_export_writes_monthly_snapshots_and_combined_cross_month_sheet
         datetime(2026, 11, 10, tzinfo=timezone.utc), datetime(2026, 12, 20, tzinfo=timezone.utc),
     )
     assert result["台北"]["count"] == 0
-    assert writer.call_count == 3
-    assert [call.args[2] for call in writer.call_args_list] == [[], [], []]
-    assert writer.call_args_list[0].kwargs["end_dt"].strftime("%Y%m%d") == "20261130"
-    assert writer.call_args_list[1].args[3].strftime("%Y%m%d") == "20261201"
-    assert writer.call_args_list[2].kwargs["sheet_name"] == "定期VIP_台北_202611-202612"
+    assert writer.call_count == 1
+    assert writer.call_args.args[2] == []
+    assert writer.call_args.kwargs["sheet_name"] == "定期VIP_台北_202611-202612"
+    assert writer.call_args.kwargs["end_dt"].strftime("%Y%m%d") == "20261220"
     functions["_load_stored_value_info"].assert_not_called()
 
 
