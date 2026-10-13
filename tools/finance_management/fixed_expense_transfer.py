@@ -59,7 +59,7 @@ def _account(source: str, *, taipei: bool) -> str:
 
 
 def _label_subject(source: str) -> str:
-    return "google服務費" if source in ("2%", "稅捐") else source
+    return source
 
 
 def _posting(source: str, amount: int, *, taipei: bool) -> tuple[int, int]:
@@ -282,7 +282,7 @@ def _sheet_id(service, spreadsheet_id: str, title: str) -> int:
     return int(_sheet_properties(service, spreadsheet_id, title)["sheetId"])
 
 
-def _fingerprint(row: list[object], *, tolerant: bool = False) -> tuple[str, str, int, int]:
+def _raw_fingerprint(row: list[object], *, tolerant: bool = False) -> tuple[str, str, int, int]:
     try:
         e_amount = _amount(_cell(row, 5))
         f_amount = _amount(_cell(row, 6))
@@ -291,6 +291,16 @@ def _fingerprint(row: list[object], *, tolerant: bool = False) -> tuple[str, str
             raise
         return ("__非分錄列__", str(_cell(row, 5)), 0, 0)
     return (str(_cell(row, 9)).strip(), str(_cell(row, 12)).strip(), e_amount, f_amount)
+
+
+def _fingerprint(row: list[object], *, tolerant: bool = False) -> tuple[str, str, int, int]:
+    account, label, e_amount, f_amount = _raw_fingerprint(row, tolerant=tolerant)
+    # 相容舊版錯把 2%／稅捐標成 google服務費的資料，讓重跑時原列就地修正。
+    if account in ("分店收入2%", "分店支出2%"):
+        label = label.replace("-google服務費", "-2%")
+    elif account == "稅捐":
+        label = label.replace("-google服務費", "-稅捐")
+    return account, label, e_amount, f_amount
 
 
 def _fingerprints(rows: list[list[object]]) -> Counter:
@@ -337,8 +347,8 @@ def _reorder_statement_rows(
     row_numbers = _matching_statement_row_numbers(existing, planned)
     if len(row_numbers) != len(planned):
         return
-    current = [_fingerprint(existing[row_number - 1], tolerant=True) for row_number in row_numbers]
-    expected = [_fingerprint(row) for row in planned]
+    current = [_raw_fingerprint(existing[row_number - 1], tolerant=True) for row_number in row_numbers]
+    expected = [_raw_fingerprint(row) for row in planned]
     if current == expected:
         return
     get_sheets_service().spreadsheets().values().batchUpdate(

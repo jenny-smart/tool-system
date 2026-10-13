@@ -58,6 +58,16 @@ class FixedExpenseTransferTest(unittest.TestCase):
             (-586, "", "稅捐"),
         ])
         self.assertTrue(all(row[11].endswith("台中") for row in plan["taipei_rows"]))
+        self.assertEqual(plan["taipei_rows"][2][11], "2026.08-2%台中")
+        self.assertEqual(plan["taipei_rows"][-1][11], "2026.08-稅捐台中")
+
+    def test_legacy_wrong_labels_match_for_in_place_correction(self):
+        plan = transfer._build_plan(_values(), "202608", "台中")
+        correct = plan["taipei_rows"][2]
+        legacy = list(correct)
+        legacy[11] = "2026.08-google服務費台中"
+        self.assertEqual(transfer._fingerprint(legacy), transfer._fingerprint(correct))
+        self.assertNotEqual(transfer._raw_fingerprint(legacy), transfer._raw_fingerprint(correct))
 
     def test_requires_positive_row_72_but_not_row_74(self):
         values = _values()
