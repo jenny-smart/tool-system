@@ -1333,13 +1333,17 @@ def stream_subprocess(
     多了「邊跑邊看」的即時性，同時避免自己手動輪流讀兩個管線可能造成
     的死結）。
     """
+    child_env = dict(os.environ if env is None else env)
+    # 雲端主機通常使用 UTC；子程序的 logging.Formatter 會依程序時區輸出時間。
+    child_env["TZ"] = "Asia/Taipei"
+
     process = subprocess.Popen(
         cmd,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd,
-        env=env,
+        env=child_env,
         bufsize=1,
     )
 
