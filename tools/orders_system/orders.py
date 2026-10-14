@@ -4227,6 +4227,19 @@ def _calchk_duplicate_groups(orders):
     return groups
 
 
+def format_calendar_consistency_issue(item):
+    """統一顯示後台／Google 日曆雙向比對異常的必要資料。"""
+    order_nos = item.get("order_nos") or []
+    order_no = item.get("order_no") or "、".join(str(value) for value in order_nos if value)
+    return (
+        f"訂單編號：{order_no or '查無對應後台訂單'}｜"
+        f"姓名：{item.get('name') or '未提供'}｜"
+        f"電話：{item.get('phone') or '未提供'}｜"
+        f"地址：{item.get('address') or '未提供'}\n"
+        f"異常：{item.get('issue') or '未知異常'}"
+    )
+
+
 def get_calendar_compare_allowed_region(backend_email):
     """指定稽核帳號只能讀取所屬區域的日曆。"""
     return {
@@ -4640,6 +4653,7 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
             same_person_orders = [order for order in same_time_orders if _event_person_match(order, event)]
             same_address_orders = [order for order in same_time_orders
                                    if _event_addr_core_match(order["address"], event)]
+            related_order = (same_person_orders or same_address_orders or [None])[0]
             if same_person_orders:
                 backend_address = same_person_orders[0]["address"]
                 calendar_label = _event_address_label(event) or "未標示地址"
@@ -4651,11 +4665,13 @@ def run_backend_calendar_consistency_check(env_name, backend_email, backend_pass
                 reason = "同地址、同日期時段，但日曆是其他客人。"
             else:
                 reason = "找不到同一人／地址／日期時段完全相符的後台訂單。"
+            calendar_address = event.get("location", "") or _event_address_label(event)
             result["calendar_missing_in_backend"].append({
+                "order_no": related_order.get("order_no", "") if related_order else "",
                 "event_summary": summary,
                 "name": event_name,
                 "phone": event_phone,
-                "address": event.get("location", "") or "",
+                "address": calendar_address,
                 "region": r,
                 "service_date": service_date,
                 "service_time": service_time,

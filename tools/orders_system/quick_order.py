@@ -1,9 +1,16 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.64
-# 最後更新：2026-09-10
+# 版本：v8.65
+# 最後更新：2026-10-14
 #
 # Change Log
+# v8.65
+# - 成單與訂單轉換增加「已被其他重疊訂單占用」人力保護：
+#   不再直接信任 schedule/edit 或 get_section 列出的候選人員，
+#   必須同時出現在班表灰底「未配班」名單，並通過同日重疊訂單核對。
+# - 訂單轉換、混合配班與共用建單核心在寫入前會再次查核；
+#   後台登入失效、占用查詢失敗或找不到目標訂單時一律停止，
+#   不送出建單／換班 POST。
 # v8.64
 # - 多筆合併訂單若有不同服務地址，改為在每筆服務時間下方顯示
 #   該筆地址，不再停止產生訊息，也不再只顯示第一筆地址。
@@ -777,6 +784,229 @@ def _fetch_purchase_block_for_order_no(session, order_no):
         if block.get("order_no") == target:
             return block
     raise Exception(f"查無訂單：{target}")
+
+
+def _staff_name_key(value):
+    """把後台班表上的人員顯示文字正規化成可比對的姓名。"""
+    text = re.sub(r"\s+", "", str(value or ""))
+    lemon = re.search(r"檸檬人\d+", text)
+    if lemon:
+        return lemon.group(0)
+    text = re.sub(r"\(\d+\).*$", "", text)
+    return text.strip()
+
+
+def _period_bounds_minutes(value):
+    match = re.search(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})", str(value or ""))
+    if not match:
+        return None
+    start = int(match.group(1)) * 60 + int(match.group(2))
+    end = int(match.group(3)) * 60 + int(match.group(4))
+    return (start, end) if end > start else None
+
+
+def _periods_overlap(left, right):
+    left_bounds = _period_bounds_minutes(left)
+    right_bounds = _period_bounds_minutes(right)
+    if not left_bounds or not right_bounds:
+        return False
+    return max(left_bounds[0], right_bounds[0]) < min(left_bounds[1], right_bounds[1])
+
+
+def _period_from_schedule_text(value):
+    compact = re.sub(r"\s+", "", str(value or ""))
+    for period in sorted(PERIOD_TO_SHIFT_CODE, key=len, reverse=True):
+        if period in compact:
+            return period
+    return ""
+
+
+def _unassigned_label_staff_name(value):
+    """解析班表灰底「未配班」區塊內的人員標籤。
+
+    實際文字會帶班別/時數前綴與評分後綴，例如
+    ``6檸檬人40`` -> ``檸檬人4``、``48汪才開3`` -> ``汪才開``。
+    """
+    text = re.sub(r"\s+", "", str(value or "")).strip()
+    lemon = re.match(r"^\d*檸檬人(?P<number>\d+|[甲乙丙丁戊己])(?P<rating>\d)$", text)
+    if lemon:
+        return f"檸檬人{lemon.group('number')}"
+    normal = re.match(
+        r"^\d+[×xX♀♂]*"
+        r"(?P<name>[\u3400-\u9fff·‧]{2,})"
+        r"\d*[VDNX]?$",
+        text,
+    )
+    return normal.group("name") if normal else ""
+
+
+def _parse_schedule_unassigned_staff(html_text, service_date, period_s):
+    """從 /schedule 取出指定日期、完整時段的灰底未配班名單。"""
+    soup = BeautifulSoup(html_text or "", "html.parser")
+    target_period = str(period_s or "").replace(" ", "")
+    target_mmdd = str(service_date or "")[5:]
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if not rows:
+            continue
+        headers = rows[0].find_all(["th", "td"], recursive=False)
+        periods = [_period_from_schedule_text(cell.get_text(" ", strip=True)) for cell in headers]
+        if target_period not in periods:
+            continue
+        for row in rows[1:]:
+            cells = row.find_all(["th", "td"], recursive=False)
+            if not cells:
+                continue
+            row_text = row.get_text(" ", strip=True)
+            if target_mmdd and target_mmdd not in row_text and str(service_date) not in row_text:
+                continue
+            for index, cell in enumerate(cells):
+                if index >= len(periods) or periods[index] != target_period:
+                    continue
+                grey_blocks = cell.select('p[style*="616161"], div[style*="616161"]')
+                for block in grey_blocks:
+                    block_text = block.get_text(" ", strip=True)
+                    count_match = re.search(r"未配班\s*(\d+)\s*人", block_text)
+                    if not count_match:
+                        continue
+                    expected_count = int(count_match.group(1))
+                    names = set()
+                    leaf_spans = [
+                        span for span in block.find_all("span")
+                        if not span.find("span") and not span.find_parent("a")
+                    ]
+                    for span in leaf_spans:
+                        name = _unassigned_label_staff_name(span.get_text(" ", strip=True))
+                        if name:
+                            names.add(_staff_name_key(name))
+                    return {"count": expected_count, "names": names, "raw_text": block_text}
+    return None
+
+
+def _get_unassigned_staff_for_period(session, base_url, service_date, period_s):
+    """即時讀取班表灰底未配班名單；不完整時失敗關閉。"""
+    resp = session.get(
+        f"{base_url}/schedule",
+        params={"date": str(service_date), "staffId": ""},
+        headers=HEADERS,
+        allow_redirects=True,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"未配班名單查詢失敗（HTTP {resp.status_code}）")
+    html = resp.text or ""
+    if "login" in str(getattr(resp, "url", "")).lower() or re.search(
+        r'type=["\']password["\']', html, re.I,
+    ):
+        raise RuntimeError("後台登入已失效，無法讀取未配班名單")
+    parsed = _parse_schedule_unassigned_staff(html, service_date, period_s)
+    if parsed is None:
+        raise RuntimeError(f"班表找不到 {service_date} {period_s} 的未配班區塊")
+    expected_count = int(parsed.get("count") or 0)
+    names = set(parsed.get("names") or set())
+    if len(names) != expected_count:
+        raise RuntimeError(
+            f"未配班名單不完整：畫面顯示 {expected_count} 人，但只解析到 {len(names)} 人"
+        )
+    return parsed
+
+
+def _get_occupied_staff_for_period(
+    session, base_url, service_date, period_s, exclude_purchase_id=None,
+):
+    """找出同日、服務時間重疊且已綁在其他訂單的人員。
+
+    /schedule/edit 會把別張訂單的 shiftId 列成候選，因此不能只相信
+    修改頁。查詢無法驗證時拋錯，由呼叫端停止任何寫入。
+    """
+    occupied = set()
+    exclude_purchase_id = str(exclude_purchase_id or "").strip()
+    saw_excluded_purchase = False
+    for page in range(1, 81):
+        params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
+        params.update({
+            "clean_date_s": str(service_date),
+            "clean_date_e": str(service_date),
+            "page": str(page),
+        })
+        resp = session.get(
+            f"{base_url}/purchase", params=params,
+            headers=HEADERS, allow_redirects=True,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"占用人力查詢失敗（HTTP {resp.status_code}）")
+        html = resp.text or ""
+        if "login" in str(getattr(resp, "url", "")).lower() or (
+            re.search(r'type=["\']password["\']', html, re.I)
+            and not re.search(r'/schedule/edit\?', html, re.I)
+        ):
+            raise RuntimeError("後台登入已失效，無法確認人力是否未安排")
+        soup = BeautifulSoup(html, "html.parser")
+        rows = []
+        order_row_count = 0
+        for tr in soup.find_all("tr"):
+            if re.search(r"\b(?:LC|TT)\d+\b", tr.get_text(" ", strip=True)):
+                order_row_count += 1
+            shift_links = tr.find_all("a", href=re.compile(r"/schedule/edit\?", re.I))
+            if shift_links:
+                rows.append((tr, shift_links))
+        for tr, shift_links in rows:
+            row_text = tr.get_text(" ", strip=True)
+            row_date, row_period = _parse_service_date_time_loose(row_text)
+            if row_date != str(service_date) or not _periods_overlap(row_period, period_s):
+                continue
+            purchase_ids = set()
+            for link in shift_links:
+                match = re.search(r"(?:[?&])purchase_id=(\d+)", str(link.get("href", "")))
+                if match:
+                    purchase_ids.add(match.group(1))
+            if exclude_purchase_id and exclude_purchase_id in purchase_ids:
+                saw_excluded_purchase = True
+                continue
+            for link in shift_links:
+                name = _staff_name_key(link.get_text(" ", strip=True))
+                if name:
+                    occupied.add(name)
+        if order_row_count < 20:
+            break
+    if exclude_purchase_id and not saw_excluded_purchase:
+        raise RuntimeError(
+            f"占用人力查詢中找不到目標訂單 ID {exclude_purchase_id}，無法安全換班"
+        )
+    return occupied
+
+
+def _assert_booking_staff_unassigned(
+    session, base_url, service_date, period_s, cleaners, needed_people=None,
+):
+    """成單前防線：只接受班表灰底「未配班」人力。"""
+    unassigned = _get_unassigned_staff_for_period(
+        session, base_url, service_date, period_s,
+    )
+    allowed = set(unassigned.get("names") or set())
+    needed = int(needed_people or len(cleaners or []) or 0)
+    if int(unassigned.get("count") or 0) < needed:
+        raise Exception(
+            f"已停止成立訂單：{service_date} {period_s} "
+            f"未配班只剩 {unassigned.get('count', 0)} 人，需要 {needed} 人。"
+        )
+    selected = {_staff_name_key(name) for name in (cleaners or []) if _staff_name_key(name)}
+    outside_allowlist = sorted(selected - allowed)
+    if outside_allowlist:
+        raise Exception(
+            "已停止成立訂單：後台班表 API 回傳的人員不在灰底「未配班」名單（"
+            + "、".join(outside_allowlist)
+            + "）。"
+        )
+
+    # 保留訂單列表重疊檢查作為第二道防線。
+    occupied = _get_occupied_staff_for_period(session, base_url, service_date, period_s)
+    conflicts = sorted(selected & occupied)
+    if conflicts:
+        raise Exception(
+            "已停止成立訂單：後台班表回傳的人力已被其他重疊訂單安排（"
+            + "、".join(conflicts)
+            + "）。系統不會動用其他訂單的人力，請改用未安排人力。"
+        )
 
 
 def _check_order_no_duplicate(session, order_no):
@@ -1597,6 +1827,11 @@ def quick_create_order(
         session, base_url, payway, base_data, token, slot, allow_auto_lemon_shift,
     )
     cleaners = extract_cleaners_from_section_response(raw_section, slot)
+    # 後台 get_section 偶爾會回傳已綁在其他訂單的人員。送單前
+    # 另查同日重疊訂單；有任何占用衝突就不 POST 建單。
+    _assert_booking_staff_unassigned(
+        session, base_url, date_s, period_s, cleaners, needed_people=person,
+    )
     # 正式送出前一律向這筆訂單實際使用的建單網址取得最新 token。
     booking_url = _booking_url_for_payway(base_url, payway)
     _fresh_token = _fetch_csrf_from_url(session, booking_url)
@@ -1604,6 +1839,10 @@ def quick_create_order(
         token = _fresh_token
     staff_display = format_staff_from_cleaners(cleaners, people=person)
     before_order_nos = list_order_numbers_for_phone(session, phone, name=member_name)
+    # 貼近真正 POST 再查一次，縮小第一次檢查後被別筆訂單先占用的競態窗口。
+    _assert_booking_staff_unassigned(
+        session, base_url, date_s, period_s, cleaners, needed_people=person,
+    )
     booking_resp = session.post(booking_url, data=_build_booking_submit_data(base_data, token, payway, slot), headers=HEADERS, allow_redirects=True)
     display_period = display_period_text(period_s.split("-")[0], period_s.split("-")[1])
     after_order_nos = set()
@@ -2330,13 +2569,27 @@ def assign_lemon_cleaners_to_order(session, base_url, order_no_a, service_date, 
         m = re.search(r"檸檬人\s*(\d+)", str(name or ""))
         return int(m.group(1)) if m else 9999
 
-    def _pick_lemon(slot_map, used):
+    def _pick_lemon(slot_map, used, occupied, unassigned):
         candidates = [
             (k.strip(), v) for k, v in slot_map.items()
-            if "檸檬人" in k and k.strip() not in used
+            if "檸檬人" in k
+            and _staff_name_key(k) not in used
+            and _staff_name_key(k) not in occupied
+            and _staff_name_key(k) in unassigned
         ]
         candidates.sort(key=lambda x: _lemon_name_no(x[0]))
         return candidates[0] if candidates else None
+
+    try:
+        unassigned_names = set(_get_unassigned_staff_for_period(
+            session, base_url, service_date, period_s,
+        ).get("names") or set())
+        occupied_names = _get_occupied_staff_for_period(
+            session, base_url, service_date, period_s,
+            exclude_purchase_id=purchase_id,
+        )
+    except Exception as exc:
+        return {"success": False, "message": f"無法確認未安排人力，已停止換班：{exc}"}
 
     csrf, origin_ids, slots = _get_schedule_edit_info(session, base_url, service_date, purchase_id)
     if not slots:
@@ -2353,11 +2606,11 @@ def assign_lemon_cleaners_to_order(session, base_url, order_no_a, service_date, 
     for i, slot_map in enumerate(slots):
         if i >= n:
             break
-        entry = _pick_lemon(slot_map, used_names)
+        entry = _pick_lemon(slot_map, used_names, occupied_names, unassigned_names)
         if entry:
             shift_choices.append(entry[1])
             assigned_names.append(entry[0])
-            used_names.add(entry[0])
+            used_names.add(_staff_name_key(entry[0]))
         else:
             # 這個槽位排班頁沒有檸檬人，需要先去勾班
             shift_choices.append(None)
@@ -2386,16 +2639,26 @@ def assign_lemon_cleaners_to_order(session, base_url, order_no_a, service_date, 
         csrf, origin_ids, slots = _get_schedule_edit_info(session, base_url, service_date, purchase_id)
         if not slots:
             return {"success": False, "message": "勾班後無法重取排班修改頁，請手動操作"}
+        try:
+            unassigned_names = set(_get_unassigned_staff_for_period(
+                session, base_url, service_date, period_s,
+            ).get("names") or set())
+            occupied_names = _get_occupied_staff_for_period(
+                session, base_url, service_date, period_s,
+                exclude_purchase_id=purchase_id,
+            )
+        except Exception as exc:
+            return {"success": False, "message": f"無法確認未安排人力，已停止換班：{exc}"}
         # 重新填入 None 的槽位
         for i, slot_map in enumerate(slots):
             if i >= n:
                 break
             if shift_choices[i] is None:
-                entry = _pick_lemon(slot_map, used_names)
+                entry = _pick_lemon(slot_map, used_names, occupied_names, unassigned_names)
                 if entry:
                     shift_choices[i] = entry[1]
                     assigned_names[i] = entry[0]
-                    used_names.add(entry[0])
+                    used_names.add(_staff_name_key(entry[0]))
                 else:
                     return {
                         "success": False,
@@ -2405,6 +2668,46 @@ def assign_lemon_cleaners_to_order(session, base_url, order_no_a, service_date, 
 
     # 過濾掉 None（避免 None 混入名單；同時不覆蓋 n=person_count）
     assigned_names = [name for name in assigned_names if name]
+
+    # 寫入前重查，防止挑選後被另一筆訂單先占用。
+    try:
+        unassigned_before_post = set(_get_unassigned_staff_for_period(
+            session, base_url, service_date, period_s,
+        ).get("names") or set())
+        occupied_before_post = _get_occupied_staff_for_period(
+            session, base_url, service_date, period_s,
+            exclude_purchase_id=purchase_id,
+        )
+    except Exception as exc:
+        return {"success": False, "message": f"無法確認未安排人力，已停止換班：{exc}"}
+    conflicts = sorted({
+        _staff_name_key(name) for name in assigned_names
+        if _staff_name_key(name) in occupied_before_post
+    })
+    if conflicts:
+        return {
+            "success": False,
+            "assigned": [],
+            "message": (
+                "已停止換班：候選人力已被其他重疊訂單占用（"
+                + "、".join(conflicts)
+                + "），未動用其他訂單人力。"
+            ),
+        }
+    no_longer_unassigned = sorted({
+        _staff_name_key(name) for name in assigned_names
+        if _staff_name_key(name) not in unassigned_before_post
+    })
+    if no_longer_unassigned:
+        return {
+            "success": False,
+            "assigned": [],
+            "message": (
+                "已停止換班：候選人力已不在灰底「未配班」名單（"
+                + "、".join(no_longer_unassigned)
+                + "）。"
+            ),
+        }
 
     fields = [("_token", csrf), ("_method", "PUT")]
     for oid in origin_ids[:n]:
@@ -2438,6 +2741,16 @@ def _assign_mixed_cleaners_to_order(session, base_url, order_no, service_date, p
     if not purchase_id:
         return {"success": False, "message": f"無法取得訂單 {order_no} 的後台 ID"}
     n = int(person_count)
+    try:
+        unassigned_names = set(_get_unassigned_staff_for_period(
+            session, base_url, service_date, period_s,
+        ).get("names") or set())
+        occupied_names = _get_occupied_staff_for_period(
+            session, base_url, service_date, period_s,
+            exclude_purchase_id=purchase_id,
+        )
+    except Exception as exc:
+        return {"success": False, "message": f"無法確認未安排人力，已停止配班：{exc}"}
     if allow_auto_lemon_shift:
         pre_shift_result = ensure_lemon_cleaner_shifts(session=session, base_url=base_url, service_date=service_date, period_s=period_s, person_count=person_count)
     else:
@@ -2446,6 +2759,17 @@ def _assign_mixed_cleaners_to_order(session, base_url, order_no, service_date, p
     csrf, origin_ids, slots = _get_schedule_edit_info(session, base_url, service_date, purchase_id)
     if not slots:
         return {"success": False, "message": "無法取得排班修改頁，請手動操作"}
+    if allow_auto_lemon_shift:
+        try:
+            unassigned_names = set(_get_unassigned_staff_for_period(
+                session, base_url, service_date, period_s,
+            ).get("names") or set())
+            occupied_names = _get_occupied_staff_for_period(
+                session, base_url, service_date, period_s,
+                exclude_purchase_id=purchase_id,
+            )
+        except Exception as exc:
+            return {"success": False, "message": f"無法確認未安排人力，已停止配班：{exc}"}
     shift_choices = []
     assigned_names = []
     assigned_types = []
@@ -2461,13 +2785,25 @@ def _assign_mixed_cleaners_to_order(session, base_url, order_no, service_date, p
         chosen = None
         chosen_type = None
         # 優先：一般專員
-        normal_candidates = [(name_key.strip(), sid) for name_key, sid in slot_map.items() if "檸檬人" not in name_key and name_key.strip() not in used_names]
+        normal_candidates = [
+            (name_key.strip(), sid) for name_key, sid in slot_map.items()
+            if "檸檬人" not in name_key
+            and _staff_name_key(name_key) not in used_names
+            and _staff_name_key(name_key) not in occupied_names
+            and _staff_name_key(name_key) in unassigned_names
+        ]
         if normal_candidates:
             chosen = normal_candidates[0]
             chosen_type = "一般"
         # 備用：檸檬人
         if not chosen:
-            lemon_candidates = [(name_key.strip(), sid) for name_key, sid in slot_map.items() if "檸檬人" in name_key and name_key.strip() not in used_names]
+            lemon_candidates = [
+                (name_key.strip(), sid) for name_key, sid in slot_map.items()
+                if "檸檬人" in name_key
+                and _staff_name_key(name_key) not in used_names
+                and _staff_name_key(name_key) not in occupied_names
+                and _staff_name_key(name_key) in unassigned_names
+            ]
             preferred = [c for c in lemon_candidates if c[0] in preferred_lemon_names]
             others = [c for c in lemon_candidates if c[0] not in preferred_lemon_names]
             preferred.sort(key=lambda x: _lemon_no(x[0]))
@@ -2480,9 +2816,49 @@ def _assign_mixed_cleaners_to_order(session, base_url, order_no, service_date, p
             shift_choices.append(chosen[1])
             assigned_names.append(chosen[0])
             assigned_types.append(chosen_type)
-            used_names.add(chosen[0])
+            used_names.add(_staff_name_key(chosen[0]))
         else:
             return {"success": False, "message": f"槽位 {i+1} 找不到可用人員（一般專員或檸檬人），請手動操作", "assigned": assigned_names, "assigned_types": assigned_types}
+    try:
+        unassigned_before_post = set(_get_unassigned_staff_for_period(
+            session, base_url, service_date, period_s,
+        ).get("names") or set())
+        occupied_before_post = _get_occupied_staff_for_period(
+            session, base_url, service_date, period_s,
+            exclude_purchase_id=purchase_id,
+        )
+    except Exception as exc:
+        return {"success": False, "message": f"無法確認未安排人力，已停止配班：{exc}"}
+    conflicts = sorted({
+        _staff_name_key(name) for name in assigned_names
+        if _staff_name_key(name) in occupied_before_post
+    })
+    if conflicts:
+        return {
+            "success": False,
+            "assigned": [],
+            "assigned_types": [],
+            "message": (
+                "已停止配班：候選人力已被其他重疊訂單占用（"
+                + "、".join(conflicts)
+                + "），未動用其他訂單人力。"
+            ),
+        }
+    no_longer_unassigned = sorted({
+        _staff_name_key(name) for name in assigned_names
+        if _staff_name_key(name) not in unassigned_before_post
+    })
+    if no_longer_unassigned:
+        return {
+            "success": False,
+            "assigned": [],
+            "assigned_types": [],
+            "message": (
+                "已停止配班：候選人力已不在灰底「未配班」名單（"
+                + "、".join(no_longer_unassigned)
+                + "）。"
+            ),
+        }
     fields = [("_token", csrf), ("_method", "PUT")]
     for oid in origin_ids:
         fields.append(("originShiftId[]", oid))

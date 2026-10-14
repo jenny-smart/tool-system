@@ -411,6 +411,7 @@ _REQUIRED_ORDERS_NAMES = [
     "get_region_by_address",
     "run_standalone_consistency_check",
     "run_backend_calendar_consistency_check",
+    "format_calendar_consistency_issue",
     "get_calendar_compare_allowed_region",
     "find_orders_without_line_link",
     "find_pending_stored_value_orders",
@@ -1360,15 +1361,15 @@ elif mode == "後台／Google 日曆雙向比對":
             if _backend_duplicates:
                 st.error(f"⚠️ 後台同人同址同日期時段重複：{len(_backend_duplicates)} 組")
                 for _p in _backend_duplicates:
-                    st.warning(_p.get("issue"))
+                    st.warning(format_calendar_consistency_issue(_p))
             if _backend_missing:
                 st.error(f"⚠️ 後台有、日曆沒有：{len(_backend_missing)} 筆")
                 for _p in _backend_missing:
-                    st.warning(_p.get("issue"))
+                    st.warning(format_calendar_consistency_issue(_p))
             if _calendar_missing:
                 st.error(f"⚠️ 日曆有、後台沒有：{len(_calendar_missing)} 筆")
                 for _p in _calendar_missing:
-                    st.warning(_p.get("issue"))
+                    st.warning(format_calendar_consistency_issue(_p))
                     if _p.get("event_link"):
                         st.link_button("開啟日曆事件", _p["event_link"], key=f"cc_event_{_p.get('event_link')}")
 

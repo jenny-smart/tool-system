@@ -77,6 +77,26 @@ class CalendarDuplicateConsistencyTest(unittest.TestCase):
         self.assertEqual(result['backend_duplicates'], [])
         self.assertEqual(len(result['backend_missing_in_calendar']), 1)
 
+    def test_error_display_always_contains_required_customer_fields(self):
+        cases = [
+            {
+                'order_no': 'LC001', 'name': '王小明', 'phone': '0912345678',
+                'address': '台北市大安區測試路1號', 'issue': '找不到日曆事件',
+            },
+            {
+                'order_nos': ['LC002', 'LC003'], 'name': '陳小華', 'phone': '0987654321',
+                'address': '台北市信義區測試路2號', 'issue': '重複訂單',
+            },
+            {'name': '林小美', 'phone': '0900000000', 'address': '', 'issue': '找不到後台訂單'},
+        ]
+        displays = [orders.format_calendar_consistency_issue(item) for item in cases]
+        for display in displays:
+            for label in ('訂單編號：', '姓名：', '電話：', '地址：', '異常：'):
+                self.assertIn(label, display)
+        self.assertIn('LC002、LC003', displays[1])
+        self.assertIn('訂單編號：查無對應後台訂單', displays[2])
+        self.assertIn('地址：未提供', displays[2])
+
 
 if __name__ == '__main__':
     unittest.main()
