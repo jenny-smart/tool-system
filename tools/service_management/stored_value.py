@@ -536,8 +536,55 @@ def normalize_name_for_compare(name: str) -> str:
 def get_weekday_text(dt: datetime) -> str:
     return ["一", "二", "三", "四", "五", "六", "日"][dt.weekday()]
 
-def get_price_by_date(dt: datetime) -> int:
-    return 700 if dt.weekday() >= 5 else 600
+def get_price_by_date(dt: datetime, deep_clean_setting: Any = None) -> float:
+    """Return the per-person-hour price, including VIP deep-clean surcharge."""
+    regular_price = 700 if dt.weekday() >= 5 else 600
+    if deep_clean_setting is None:
+        return regular_price
+
+    if deep_clean_setting.phase1_start <= dt <= deep_clean_setting.phase1_end:
+        surcharge = (
+            deep_clean_setting.phase1_weekend_rate
+            if dt.weekday() >= 5 else deep_clean_setting.phase1_weekday_rate
+        )
+    elif deep_clean_setting.phase2_start <= dt <= deep_clean_setting.phase2_end:
+        surcharge = (
+            deep_clean_setting.phase2_weekend_rate
+            if dt.weekday() >= 5 else deep_clean_setting.phase2_weekday_rate
+        )
+    else:
+        return regular_price
+
+    # 大掃除期間平日、週末的基準皆為每 2 人 1 小時 NT$1,200；
+    # 設定中的 VIP 加價也是每 2 人 1 小時，因此換算為每人時後相加。
+    return 600 + (float(surcharge) / 2)
+
+
+def _load_deep_clean_pricing_settings(start_dt: datetime, end_dt: datetime) -> list[Any]:
+    """Load every annual deep-clean setting that could overlap an export range."""
+    from tools.service_management.deep_clean_notice import (
+        DEFAULT_MASTER_SPREADSHEET_ID,
+        load_deep_clean_settings,
+        resolve_deep_clean_sheet_ids,
+    )
+
+    settings = []
+    candidate_years = range(start_dt.year - 1, end_dt.year + 1)
+    for season_year in candidate_years:
+        try:
+            settings_sheet_id, _ = resolve_deep_clean_sheet_ids(
+                season_year, DEFAULT_MASTER_SPREADSHEET_ID,
+            )
+        except ValueError:
+            continue
+        try:
+            setting = load_deep_clean_settings(season_year, settings_sheet_id)
+        except Exception as exc:
+            raise RuntimeError(
+                f"讀取 {season_year} 年度大掃除設定失敗；為避免儲值金扣抵錯誤，已停止匯出：{exc}"
+            ) from exc
+        settings.append(setting)
+    return settings
 
 def parse_service_people(service_text: str) -> int:
     m = re.search(r"(\d+)\s*人", str(service_text or ""))
@@ -680,7 +727,12 @@ def _fetch_calendar_events(
     return events
 
 
-def _process_events(events: list, area_name: str, calendar_id: str = "") -> list[dict]:
+def _process_events(
+    events: list,
+    area_name: str,
+    calendar_id: str = "",
+    deep_clean_settings: Any = (),
+) -> list[dict]:
     rows = []
     seen_keys: set[str] = set()
 
@@ -715,12 +767,30 @@ def _process_events(events: list, area_name: str, calendar_id: str = "") -> list
             continue
         seen_keys.add(unique_key)
 
-        weekday    = get_weekday_text(start_dt)
-        price      = get_price_by_date(start_dt)
+        weekday = get_weekday_text(start_dt)
+        pricing_setting = next(
+            (
+                setting for setting in deep_clean_settings
+                if setting.phase1_start <= start_dt <= setting.phase2_end
+            ),
+            None,
+        )
+        lunar_pause = next(
+            (
+                setting for setting in deep_clean_settings
+                if setting.lunar_new_year_start
+                and setting.lunar_new_year_end
+                and setting.lunar_new_year_start <= start_dt <= setting.lunar_new_year_end
+            ),
+            None,
+        )
+        if lunar_pause:
+            status = "暫停"
+        price      = get_price_by_date(start_dt, pricing_setting)
         people     = parse_service_people(parsed["service"])
         hours      = calc_hours(start_dt, end_dt)
         person_hrs = people * hours
-        amount     = price * person_hrs
+        amount     = 0 if lunar_pause else price * person_hrs
 
         rows.append({
             "event_id":   f"{calendar_id or area_name}:{e['id']}" if e.get("id") else "",
@@ -869,6 +939,7 @@ def step2_export_vip_calendar(
     checkin_both(gc, run_id, task, "START", "RUNNING")
 
     cal_service = _calendar_service()
+    deep_clean_settings = _load_deep_clean_pricing_settings(start_dt, end_dt)
     results     = {}
     errors      = []
 
@@ -879,7 +950,9 @@ def step2_export_vip_calendar(
 
         try:
             events = _fetch_calendar_events(cal_service, calendar_id, start_dt, end_dt, area_name)
-            rows   = _process_events(events, area_name, calendar_id)
+            rows   = _process_events(
+                events, area_name, calendar_id, deep_clean_settings,
+            )
 
             if not rows:
                 log.warning("[%s] 指定日期範圍內無符合行程，仍更新空白日曆快照", area_name)
@@ -933,6 +1006,15 @@ VIP_SCHEDULE_FALLBACK_HEADERS = [
     "餘額不足", "確認信", "日曆改色結果", "日曆改色內容", "日曆原色", "日曆新色",
     "每月確認", "服務人員", "服務狀態", "車馬費", "客服備註", "服務日期", "服務時區", "服務時數",
 ]
+
+
+def _schedule_customer_key(row: list[Any]) -> tuple[str, str, str]:
+    padded = list(row) + [""] * max(0, 5 - len(row))
+    return (
+        normalize_name_for_compare(padded[2]),
+        normalize_phone(padded[3]),
+        normalize_address(padded[4]),
+    )
 
 
 def _schedule_row_key(row: list[Any]) -> tuple[str, ...]:
