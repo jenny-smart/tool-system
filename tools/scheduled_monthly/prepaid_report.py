@@ -47,6 +47,8 @@ try:
 except ModuleNotFoundError:
     from southern_exports import export_south_sources
 
+from tools.scheduled_monthly.excel_preservation import save_preserved_excel
+
 try:
     from tools.common.config_loader import load_monthly_config
 except Exception:
@@ -577,7 +579,7 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
         with tempfile.TemporaryDirectory() as temp_dir:
             if city == "高雄":
                 _, source_paths, merged_path = export_south_sources(
-                    lambda region: read_excel_from_bytes(download_single_export(session, region, rng)),
+                    lambda region: download_single_export(session, region, rng),
                     temp_dir, tag, "預收",
                 )
                 for path in [*source_paths, merged_path]:
@@ -588,8 +590,7 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
                 filename = f"{tag}預收-{city}.xlsx"
                 local_path = os.path.join(temp_dir, filename)
                 content = download_single_export(session, keyword, rng)
-                with open(local_path, "wb") as f:
-                    f.write(content)
+                save_preserved_excel(content, local_path)
                 upload_to_gdrive(service, local_path, tag_folder_id)
                 final_filename = filename
 

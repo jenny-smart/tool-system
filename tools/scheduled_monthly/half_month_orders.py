@@ -37,6 +37,12 @@ try:
 except ModuleNotFoundError:
     from southern_exports import export_south_sources
 
+from tools.scheduled_monthly.excel_preservation import (
+    filter_workbook_rows,
+    merge_workbook_files,
+    save_preserved_excel,
+)
+
 from tools.common.config_loader import load_monthly_config
 
 try:
@@ -258,7 +264,7 @@ def read_excel(content: bytes) -> pd.DataFrame:
 
 def write_excel_content(content: bytes, path: str) -> pd.DataFrame:
     df = read_excel(content)
-    df.to_excel(path, index=False)
+    save_preserved_excel(content, path)
     return df
 
 
@@ -414,10 +420,13 @@ def export_stored_value(session: requests.Session, city: str, start: str, end: s
             if not order_no:
                 raise RuntimeError("儲值金訂單缺少訂單編號")
             selected.add(order_no)
-    df = read_excel(download_export(session, start, end, stored_value=True))
+    content = download_export(session, start, end, stored_value=True)
+    df = read_excel(content)
     if df.empty:
         if selected:
             raise RuntimeError("儲值金搜尋有資料但匯出為空，停止上傳")
+        df.attrs["source_content"] = content
+        df.attrs["selected_order_numbers"] = selected
         return df
     columns = [col for col in df.columns if _customer_key(col) in {"訂單編號", "訂單號碼"}]
     if len(columns) != 1:
@@ -426,6 +435,8 @@ def export_stored_value(session: requests.Session, city: str, start: str, end: s
     if selected - set(order_numbers):
         raise RuntimeError("儲值金搜尋與匯出訂單不一致，停止上傳")
     result = df.loc[order_numbers.isin(selected)].copy()
+    result.attrs["source_content"] = content
+    result.attrs["selected_order_numbers"] = selected
     log(f"✅ {city} 儲值金地址核對：候選 {len(records)} 筆 → 本區 {len(result)} 筆")
     return result
 
@@ -462,13 +473,17 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             south_paths = []
+            original_merged_path = ""
+            original_content = b""
             if city == "高雄":
-                original_df, south_paths, _ = export_south_sources(
-                    lambda region: read_excel(download_export(session, start, end, region)),
+                original_df, south_paths, original_merged_path = export_south_sources(
+                    lambda region: download_export(session, start, end, region),
                     temp_dir, tag, "訂單",
                 )
             else:
-                original_df = export_original(session, city, start, end)
+                keyword = "新竹" if city == "新竹" else ""
+                original_content = download_export(session, start, end, keyword)
+                original_df = read_excel(original_content)
 
             if city in STORED_VALUE_MERGE_CITIES:
                 stored_df = export_stored_value(session, city, start, end)
@@ -478,27 +493,33 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
                         source_files.append(os.path.basename(path))
                 else:
                     original_path = os.path.join(temp_dir, f"{tag}原訂單-{city}.xlsx")
-                    original_df.to_excel(original_path, index=False)
+                    save_preserved_excel(original_content, original_path)
                     persist_file(service, original_path, tag_folder_id, args, tag, city, start, end, "原訂單")
                     source_files.append(os.path.basename(original_path))
 
                 stored_path = os.path.join(temp_dir, f"{tag}儲值金-{city}.xlsx")
-                stored_df.to_excel(stored_path, index=False)
+                stored_source_path = os.path.join(temp_dir, f"{tag}儲值金來源-{city}.xlsx")
+                stored_content = stored_df.attrs.get("source_content")
+                selected_orders = set(stored_df.attrs.get("selected_order_numbers") or [])
+                if not isinstance(stored_content, bytes):
+                    raise RuntimeError("儲值金來源檔遺失，停止避免改寫公式或內容")
+                save_preserved_excel(stored_content, stored_source_path)
+                filter_workbook_rows(stored_source_path, stored_path, selected_orders)
                 persist_file(service, stored_path, tag_folder_id, args, tag, city, start, end, "儲值金")
                 source_files.append(os.path.basename(stored_path))
                 log(f"✅ {city} 儲值金抓到 {len(stored_df)} 筆（服務日期 {start} ~ {end} / 儲值金 / 已付款 / 客戶地址核對）")
 
-                frames = [df for df in (original_df, stored_df) if not df.empty]
-                merged_df = pd.concat(frames, ignore_index=True).drop_duplicates() if frames else pd.DataFrame(columns=original_df.columns)
                 final_path = os.path.join(temp_dir, f"{tag}-訂單-高雄.xlsx" if city == "高雄" else f"{tag}訂單-{city}.xlsx")
-                merged_df.to_excel(final_path, index=False)
-                log(f"✅ {city} 合併完成：原訂單 {len(original_df)} + 儲值金 {len(stored_df)} → 合併 {len(merged_df)} 筆")
+                original_source_path = original_merged_path if city == "高雄" else original_path
+                merge_workbook_files([original_source_path, stored_path], final_path)
+                merged_count = len(pd.read_excel(final_path, engine="openpyxl"))
+                log(f"✅ {city} 合併完成：原訂單 {len(original_df)} + 儲值金 {len(stored_df)} → 合併 {merged_count} 筆")
             else:
                 if original_df.empty:
                     status, message = "成功", "本期無資料，略過上傳"
                     return
                 final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
-                original_df.to_excel(final_path, index=False)
+                save_preserved_excel(original_content, final_path)
 
             persist_file(service, final_path, tag_folder_id, args, tag, city, start, end, "訂單")
             source_files.append(os.path.basename(final_path))

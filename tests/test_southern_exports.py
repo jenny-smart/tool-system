@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -11,6 +12,12 @@ import sys
 ROOT = Path(__file__).parents[1]
 sys.path.insert(0,str(ROOT))
 from tools.scheduled_monthly.southern_exports import export_south_sources
+
+
+def excel_bytes(frame):
+    buffer = BytesIO()
+    frame.to_excel(buffer, index=False)
+    return buffer.getvalue()
 
 
 def load_functions(filename, names):
@@ -30,7 +37,7 @@ class SouthernTests(unittest.TestCase):
                 calls.append(region)
                 if region=='高雄':
                     self.assertTrue((Path(temp_dir)/f'202609-2-{label}-原台南.xlsx').exists())
-                return pd.DataFrame({'訂單編號':['LC1','LC2'] if region=='高雄' else ['LC2','LC3'],'金額':[100,200] if region=='高雄' else [200,300]})
+                return excel_bytes(pd.DataFrame({'訂單編號':['LC1','LC2'] if region=='高雄' else ['LC2','LC3'],'金額':[100,200] if region=='高雄' else [200,300]}))
             with tempfile.TemporaryDirectory() as temp_dir:
                 result,paths,final=export_south_sources(download,temp_dir,'202609-2',label)
                 self.assertEqual(calls,['台南','高雄'])
@@ -41,7 +48,7 @@ class SouthernTests(unittest.TestCase):
 
     def test_empty_sources_keep_headers_and_failed_source_stops(self):
         with tempfile.TemporaryDirectory() as temp:
-            result,_,_=export_south_sources(lambda region:pd.DataFrame(columns=['訂單編號']),temp,'202609-1','訂單')
+            result,_,_=export_south_sources(lambda region:excel_bytes(pd.DataFrame(columns=['訂單編號'])),temp,'202609-1','訂單')
             self.assertEqual(result.columns.tolist(),['訂單編號'])
             with self.assertRaises(RuntimeError): export_south_sources(lambda region:None,temp,'202609-1','訂單')
             with self.assertRaises(ValueError): export_south_sources(Mock(side_effect=ValueError('download failed')),temp,'202609-1','訂單')
@@ -50,14 +57,13 @@ class SouthernTests(unittest.TestCase):
         ns=load_functions('refund_report.py',{'export_kaohsiung'})
         searches=[]
         ns['build_export_url']=lambda mode,start,end,region:(f'{mode}/{region}',mode)
-        ns['download']=lambda session,url: searches.append(url) or url
-        ns['read_excel_from_bytes']=lambda content:pd.DataFrame({'訂單編號':[content]})
+        ns['download']=lambda session,url: searches.append(url) or excel_bytes(pd.DataFrame({'訂單編號':[url]}))
         with tempfile.TemporaryDirectory() as temp:
             files=ns['export_kaohsiung'](object(),temp,'202609-2','start','end')
             self.assertEqual(searches,['charge/台南','charge/高雄','refund/台南','refund/高雄'])
             self.assertEqual(len(files),6)
-            self.assertEqual(pd.read_excel(files[2])['類型'].tolist(),['加收','加收'])
-            self.assertEqual(pd.read_excel(files[5])['類型'].tolist(),['退款','退款'])
+            self.assertEqual(pd.read_excel(files[2])['訂單編號'].tolist(),['charge/高雄','charge/台南'])
+            self.assertEqual(pd.read_excel(files[5])['訂單編號'].tolist(),['refund/高雄','refund/台南'])
 
     def test_prepaid_three_files_and_failed_download_not_uploaded(self):
         ns=load_functions('prepaid_report.py',{'process_city'})
@@ -65,8 +71,7 @@ class SouthernTests(unittest.TestCase):
         for key in ('login','resolve_area_folder','get_or_create_single_child_folder','write_monthly_log'):
             ns[key]=Mock()
         calls=[]
-        ns['download_single_export']=lambda session,region,rng:calls.append(region) or region
-        ns['read_excel_from_bytes']=lambda region:pd.DataFrame({'訂單編號':[region]})
+        ns['download_single_export']=lambda session,region,rng:calls.append(region) or excel_bytes(pd.DataFrame({'訂單編號':[region]}))
         uploaded=[]
         ns['upload_to_gdrive']=lambda service,path,folder:uploaded.append(Path(path).name)
         args=SimpleNamespace(folder_id='root')

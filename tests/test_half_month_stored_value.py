@@ -8,6 +8,7 @@ import tempfile
 import re
 import unicodedata
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -16,8 +17,15 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from tools.scheduled_monthly.southern_exports import export_south_sources
+from tools.scheduled_monthly.excel_preservation import filter_workbook_rows, merge_workbook_files, save_preserved_excel
 
 SOURCE = Path(__file__).parents[1] / 'tools/scheduled_monthly/half_month_orders.py'
+
+
+def excel_bytes(frame):
+    buffer = BytesIO()
+    frame.to_excel(buffer, index=False)
+    return buffer.getvalue()
 
 
 def functions():
@@ -27,7 +35,7 @@ def functions():
     nodes += [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     def request(method, url, params):
         return SimpleNamespace(prepare=lambda: SimpleNamespace(url=url + '?' + urlencode(params)))
-    ns = dict(export_south_sources=export_south_sources, download_export=lambda *a: b'file', read_excel=lambda *a: pd.DataFrame({'訂單編號':['LC1']}), re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, log=lambda *args: None)
+    ns = dict(export_south_sources=export_south_sources, filter_workbook_rows=filter_workbook_rows, merge_workbook_files=merge_workbook_files, save_preserved_excel=save_preserved_excel, download_export=lambda *a: excel_bytes(pd.DataFrame({'狀態':[''], '訂單編號':['LC1']})), read_excel=lambda *a: pd.DataFrame({'狀態':[''], '訂單編號':['LC1']}), re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, log=lambda *args: None)
     exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(SOURCE), 'exec'), ns)
     return ns
 
@@ -92,7 +100,10 @@ class StoredValueTests(unittest.TestCase):
             ns['resolve_area_folder'] = Mock(return_value='area-folder')
             ns['get_or_create_single_child_folder'] = Mock(return_value='period-folder')
             ns['export_original'] = Mock(return_value=pd.DataFrame({'訂單編號':['LC1']}))
-            ns['export_stored_value'] = Mock(return_value=pd.DataFrame({'訂單編號':['LC2']}))
+            stored = pd.DataFrame({'狀態':[''], '訂單編號':['LC2']})
+            stored.attrs['source_content'] = excel_bytes(stored)
+            stored.attrs['selected_order_numbers'] = {'LC2'}
+            ns['export_stored_value'] = Mock(return_value=stored)
             ns['write_monthly_log'] = Mock()
             saved = {}
             ns['persist_file'] = lambda service, path, *args: saved.update({Path(path).name: pd.read_excel(path)})
