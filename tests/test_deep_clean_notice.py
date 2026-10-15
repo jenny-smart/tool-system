@@ -216,8 +216,9 @@ def test_monthly_confirmation_hides_schedule_and_asks_for_date_by_deadline():
 
     row = output[0]
     notice = row[15]
-    assert "🕓 請於 2026/11/03 前告知欲安排的日期。" in notice
+    assert notice.count("🕓 請於 2026/11/03 前告知欲安排的日期。") == 3
     assert "服務地址：台北市測試路1號" in notice
+    assert "2人1小時共" not in notice
     assert "您原訂週期於年節期間" not in notice
     assert "年節加價服務日期" not in notice
     assert "PART 1 次數／年節加價金額" not in notice
