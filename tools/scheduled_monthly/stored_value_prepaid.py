@@ -42,6 +42,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
+from tools.scheduled_monthly.excel_preservation import save_preserved_excel
+
 try:
     from tools.common.log_to_sheet import log_to_sheet
 except Exception:
@@ -549,8 +551,7 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
             filename = f"{folder_period}儲值金預收-{city}.xlsx"
             path = os.path.join(temp_dir, filename)
             content = download_export(session, keyword, rng)
-            with open(path, "wb") as f:
-                f.write(content)
+            save_preserved_excel(content, path)
 
             upload_to_gdrive(service, path, tag_folder_id)
 

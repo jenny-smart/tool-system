@@ -47,6 +47,8 @@ try:
 except ModuleNotFoundError:
     from southern_exports import export_south_sources
 
+from tools.scheduled_monthly.excel_preservation import save_preserved_excel
+
 try:
     from tools.common.config_loader import load_monthly_config
 except Exception:
@@ -558,40 +560,17 @@ def export_one(session: requests.Session, temp_dir: str, tag: str, city: str, ke
     file_name = f"{tag}已退款{label}-{name}.xlsx"
     full_path = os.path.join(temp_dir, file_name)
 
-    try:
-        df = read_excel_from_bytes(content)
-        df = df.copy()
-        df["類型"] = "加收" if mode == "charge" else "退款"
-        df.to_excel(full_path, index=False)
-        log(f"✅ 可解析：{full_path}")
-        return df, full_path
-    except Exception:
-        with open(full_path, "wb") as f:
-            f.write(content)
-        log(f"⚠️ 原始下載：{full_path}")
-        return None, full_path
+    save_preserved_excel(content, full_path)
+    log(f"✅ 保留公式與格式：{full_path}")
+    return full_path
 
 
 def export_city(session: requests.Session, city: str, temp_dir: str, tag: str, start: str, end: str) -> list[str]:
     keyword = "新竹" if city == "新竹" else ""
-    dfs = []
-    raw_files = []
-
-    for mode in ["charge", "refund"]:
-        df, path = export_one(session, temp_dir, tag, city, keyword, mode, start, end)
-        raw_files.append(path)
-        if df is not None:
-            dfs.append(df)
-
-    if dfs:
-        merged = pd.concat(dfs, ignore_index=True).drop_duplicates()
-        merged_path = os.path.join(temp_dir, f"{tag}已退款-{city}.xlsx")
-        merged.to_excel(merged_path, index=False)
-        log(f"✅ 合併完成：{merged_path}")
-        return [merged_path]
-
-    log(f"⚠️ {city} 無法合併，改上傳原始檔")
-    return raw_files
+    return [
+        export_one(session, temp_dir, tag, city, keyword, mode, start, end)
+        for mode in ["charge", "refund"]
+    ]
 
 
 def export_kaohsiung(session: requests.Session, temp_dir: str, tag: str, start: str, end: str) -> list[str]:
@@ -599,9 +578,7 @@ def export_kaohsiung(session: requests.Session, temp_dir: str, tag: str, start: 
     for mode, label in (("charge", "已退款全部加收"), ("refund", "已退款全部退款")):
         def download_frame(region):
             url, _ = build_export_url(mode, start, end, region)
-            frame = read_excel_from_bytes(download(session, url)).copy()
-            frame["類型"] = "加收" if mode == "charge" else "退款"
-            return frame
+            return download(session, url)
 
         _, source_paths, merged_path = export_south_sources(download_frame, temp_dir, tag, label)
         files.extend([*source_paths, merged_path])
