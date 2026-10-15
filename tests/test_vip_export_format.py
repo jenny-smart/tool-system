@@ -156,6 +156,7 @@ def test_calendar_export_writes_only_combined_cross_month_sheet():
         "now_tp": lambda: datetime(2026, 10, 4, tzinfo=timezone.utc),
         "checkin_both": lambda *args: None,
         "_calendar_service": lambda: None,
+        "_load_deep_clean_pricing_settings": lambda *_: [],
         "_fetch_calendar_events": lambda *args: [],
         "_process_events": lambda *args: [],
         "_load_stored_value_info": MagicMock(),
@@ -199,7 +200,7 @@ def test_same_customer_same_day_events_keep_distinct_ids_and_times():
         "normalize_address": lambda value: value,
         "normalize_phone": lambda value: value,
         "get_weekday_text": lambda _: "二",
-        "get_price_by_date": lambda _: 600,
+        "get_price_by_date": lambda *_: 600,
         "parse_service_people": lambda _: 1,
         "calc_hours": lambda start, end: (end - start).total_seconds() / 3600,
     })
@@ -214,3 +215,54 @@ def test_same_customer_same_day_events_keep_distinct_ids_and_times():
     assert [row["event_id"] for row in rows] == ["calendar:morning", "calendar:afternoon"]
     assert [row["start_str"] for row in rows] == ["09:00", "14:00"]
     assert [row["status"] for row in rows] == ["未安排", "暫停"]
+
+
+def test_deep_clean_price_uses_vip_part_and_day_type_rates():
+    get_price_by_date = _load_functions("get_price_by_date")["get_price_by_date"]
+    setting = SimpleNamespace(
+        phase1_start=datetime(2026, 12, 15, tzinfo=timezone.utc),
+        phase1_end=datetime(2027, 1, 21, 23, 59, tzinfo=timezone.utc),
+        phase1_weekday_rate=150,
+        phase1_weekend_rate=225,
+        phase2_start=datetime(2027, 1, 22, tzinfo=timezone.utc),
+        phase2_end=datetime(2027, 2, 4, 23, 59, tzinfo=timezone.utc),
+        phase2_weekday_rate=225,
+        phase2_weekend_rate=300,
+    )
+
+    assert get_price_by_date(datetime(2026, 12, 14, tzinfo=timezone.utc), setting) == 600
+    assert get_price_by_date(datetime(2026, 12, 18, tzinfo=timezone.utc), setting) == 675
+    assert get_price_by_date(datetime(2026, 12, 19, tzinfo=timezone.utc), setting) == 712.5
+    assert get_price_by_date(datetime(2027, 1, 22, tzinfo=timezone.utc), setting) == 712.5
+    assert get_price_by_date(datetime(2027, 1, 23, tzinfo=timezone.utc), setting) == 750
+
+
+def test_lunar_holiday_event_is_paused_and_not_deducted():
+    functions = _load_functions("_process_events")
+    functions.update({
+        "TZ_TAIPEI": timezone.utc,
+        "parse_title": lambda _: {"name": "王小明", "phone": "0912345678", "service": "2人", "note": ""},
+        "get_status": lambda _: "已安排",
+        "normalize_address": lambda value: value,
+        "normalize_phone": lambda value: value,
+        "get_weekday_text": lambda _: "二",
+        "get_price_by_date": lambda *_: 750,
+        "parse_service_people": lambda _: 2,
+        "calc_hours": lambda start, end: (end - start).total_seconds() / 3600,
+    })
+    setting = SimpleNamespace(
+        phase1_start=datetime(2026, 12, 15, tzinfo=timezone.utc),
+        phase2_end=datetime(2027, 2, 4, 23, 59, tzinfo=timezone.utc),
+        lunar_new_year_start=datetime(2027, 2, 5, tzinfo=timezone.utc),
+        lunar_new_year_end=datetime(2027, 2, 10, 23, 59, tzinfo=timezone.utc),
+    )
+    events = [{
+        "id": "holiday", "summary": "王小明,0912345678", "location": "台北市", "colorId": "5",
+        "start": {"dateTime": "2027-02-09T14:00:00+00:00"},
+        "end": {"dateTime": "2027-02-09T17:00:00+00:00"},
+    }]
+
+    row = functions["_process_events"](events, "台北", "calendar", [setting])[0]
+
+    assert row["status"] == "暫停"
+    assert row["amount"] == 0
