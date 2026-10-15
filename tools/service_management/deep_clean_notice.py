@@ -451,10 +451,14 @@ def _extra_charge(row: dict[str, Any], weekday_rate: float, weekend_rate: float)
 
 
 def _price_text(start: datetime, end: datetime, weekday_rate: float, weekend_rate: float) -> str:
+    weekday_total = f"${int(round(BASE_WEEKDAY_RATE + weekday_rate)):,}"
+    weekend_total = f"${int(round(BASE_WEEKEND_RATE + weekend_rate)):,}"
     return (
         f"{_date_range(start, end)}\n"
-        f"平日（週一～週五）：每 2 人 1 小時酌收年節加價 {_money(weekday_rate)}（含稅）\n"
-        f"週末（週六～週日）：每 2 人 1 小時酌收年節加價 {_money(weekend_rate)}（含稅）"
+        f"平日（週一～週五）：每 2 人 1 小時酌收年節加價 {_money(weekday_rate)}（含稅），"
+        f"2人1小時共{weekday_total}\n"
+        f"週末（週六～週日）：每 2 人 1 小時酌收年節加價 {_money(weekend_rate)}（含稅），"
+        f"2人1小時共{weekend_total}"
     )
 
 

@@ -249,6 +249,23 @@ def test_nonroutine_notice_uses_open_window_and_correct_customer_label():
     assert "服務內容同居家清潔，以人時計價" in notice
 
 
+def test_notice_price_text_includes_two_person_one_hour_total():
+    notice = build_nonroutine_notice(
+        "測試客戶",
+        datetime(2026, 12, 15, tzinfo=TZ),
+        datetime(2027, 1, 21, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ),
+        datetime(2027, 2, 4, tzinfo=TZ),
+        150, 225, 225, 300,
+        datetime(2026, 11, 5, tzinfo=TZ),
+        datetime(2026, 11, 10, tzinfo=TZ),
+    )
+
+    assert "年節加價 NT$150（含稅），2人1小時共$1,350" in notice
+    assert "年節加價 NT$225（含稅），2人1小時共$1,425" in notice
+    assert "年節加價 NT$300（含稅），2人1小時共$1,500" in notice
+
+
 def test_price_comparison_uses_matching_part_customer_type_and_day_type():
     settings = DeepCleanSettings(
         2026,
