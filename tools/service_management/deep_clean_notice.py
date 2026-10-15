@@ -548,12 +548,12 @@ def _build_notice_text(
         holiday_rows, lunar_new_year_start, lunar_new_year_end,
     )
     if monthly_confirmation:
-        arrangement = (
-            f"服務地址：{address or '未提供'}\n"
-            f"🕓 請於 {deadline_date} 前告知欲安排的日期。\n\n"
+        date_prompt = (
+            f"🕓 請於 {deadline_date} 前告知欲安排的日期。"
             if deadline_date
-            else f"服務地址：{address or '未提供'}\n🕓 請儘早告知欲安排的日期。\n\n"
+            else "🕓 請儘早告知欲安排的日期。"
         )
+        arrangement = f"服務地址：{address or '未提供'}\n{date_prompt}\n{date_prompt}\n{date_prompt}\n\n"
         arrangement += holiday_block
         contact = "請透過官方 LINE@ 與我們聯繫。\n"
         estimate_note = ""
