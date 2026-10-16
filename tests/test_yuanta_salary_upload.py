@@ -1,10 +1,15 @@
 import io
+import inspect
 import json
 
 import pytest
 from openpyxl import Workbook
 
-from tools.bank_statement.yuanta_salary_upload import _normalized_text, xlsx_total
+from tools.bank_statement.yuanta_salary_upload import (
+    _normalized_text,
+    upload_salary_files,
+    xlsx_total,
+)
 from tools.local_agent import build_yuanta_salary_upload
 
 
@@ -25,6 +30,20 @@ def test_xlsx_total_reads_column_d_from_row_3():
 
 def test_yuanta_option_text_ignores_bank_spacing():
     assert _normalized_text("臺幣薪轉格式 Excel") == "臺幣薪轉格式Excel"
+
+
+def test_yuanta_upload_uses_bank_page_button_order():
+    source = inspect.getsource(upload_salary_files)
+    steps = [
+        '_click_text(page, "確定")',
+        '_select_option_containing(page, payment_account)',
+        '_select_option_containing(page, item.summary, "摘要")',
+        '_click_text(page, "確定匯入")',
+        '_click_text(page, "送審")',
+        '_click_text(page, "確認送審")',
+    ]
+    positions = [source.index(step) for step in steps]
+    assert positions == sorted(positions)
 
 
 def test_agent_command_preserves_preview_and_selected_steps():
