@@ -237,26 +237,46 @@ def find_id_owners(names: list[str]) -> dict[str, bool]:
     return result
 
 
-def _find_spreadsheet(name: str) -> str:
+def pick_spreadsheet(prefix: str, files: list[dict]) -> str:
+    """檔名以 prefix 開頭的試算表：完全相同優先，其次是其他未標「停用」的（例如「…-台北new」）。"""
+    candidates = [f for f in files if f["name"].startswith(prefix) and "停用" not in f["name"]]
+    candidates.sort(key=lambda f: f["name"] != prefix)
+    return candidates[0]["id"] if candidates else ""
+
+
+def _find_spreadsheet(prefix: str) -> str:
     """依檔名在雲端找試算表，找不到回傳空字串。"""
     from tools.common.google_auth import get_drive_service
 
     res = get_drive_service().files().list(
-        q=f"name = '{name}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
-        fields="files(id)",
+        q=f"name contains '{prefix}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
+        fields="files(id, name)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True,
     ).execute()
-    files = res.get("files", [])
-    return files[0]["id"] if files else ""
+    return pick_spreadsheet(prefix, res.get("files", []))
 
 
 def read_roster_values(service, area: str) -> list[list]:
-    name = ROSTER_NAME.format(year=datetime.now(TW_TZ).year, area=area)
-    roster_id = _find_spreadsheet(name)
-    if not roster_id:
-        raise RuntimeError(f"雲端找不到試算表「{name}」")
-    return _read(service, roster_id, ROSTER_SHEET, "A:G")
+    """今年度＋前一年度的「基本資料、協議規章」。
+
+    前一年度的列放前面、今年度放後面，同名以今年度（最後一筆）為準；
+    今年度名冊找不到的人就會用到前一年度的資料。
+    """
+    year = datetime.now(TW_TZ).year
+    current_name = ROSTER_NAME.format(year=year, area=area)
+    current_id = _find_spreadsheet(current_name)
+    if not current_id:
+        raise RuntimeError(f"雲端找不到試算表「{current_name}」")
+    current = _read(service, current_id, ROSTER_SHEET, "A:G")
+    previous: list[list] = []
+    previous_id = _find_spreadsheet(ROSTER_NAME.format(year=year - 1, area=area))
+    if previous_id:
+        try:
+            previous = _read(service, previous_id, ROSTER_SHEET, "A:G")[1:]
+        except Exception:  # 前一年度沒有該分頁就只用今年度
+            previous = []
+    return current[:1] + previous + current[1:]
 
 
 def field_names(sheets: list[list[list]]) -> set[str]:
