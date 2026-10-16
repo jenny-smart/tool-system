@@ -3052,6 +3052,27 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_yuanta_salary_upload(
+    *, month="", start_date=None, end_date=None, area="全區",
+    include_contract=True, include_internal=False, transfer_fubon=True,
+    expected_files=None,
+):
+    task = create_local_agent_task(
+        "yuanta.salary_upload",
+        {
+            "area": area,
+            "period": str(month or "").strip(),
+            "include_contract": bool(include_contract),
+            "include_internal": bool(include_internal),
+            "transfer_fubon": bool(transfer_fubon),
+            "expected_files": list(expected_files or []),
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent 找檔並上傳至待放行）"
+
+
 def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from tools.prepaid_amount.prepaid_amount import run as run_prepaid_amount
 
@@ -3586,6 +3607,7 @@ FINANCE_TASKS = [
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
+    {"name": "【元大銀行】薪資檔上傳待放行", "handler": queue_yuanta_salary_upload, "enabled": True},
     {"name": "【鯨躍發票】開立發票", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】二聯改三聯", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
@@ -4048,6 +4070,10 @@ monthly_order_functions = ["上半月訂單", "下半月訂單"]
 
 period = ""
 start_date_value = None
+yuanta_salary_include_contract = True
+yuanta_salary_include_internal = False
+yuanta_salary_transfer_fubon = True
+yuanta_salary_expected_files = []
 fixed_expense_execute_fubon = False
 fixed_expense_selected_rows = None
 end_date_value = None
@@ -4127,6 +4153,35 @@ with date_col:
                     horizontal=True,
                     key="fubon_verification_mode",
                 )
+        elif selected_function == "【元大銀行】薪資檔上傳待放行":
+            st.markdown('<div class="field-label">📆 薪資期別</div>', unsafe_allow_html=True)
+            _default_half = "1" if today_date.day <= 15 else "2"
+            period = st.text_input(
+                "薪資期別",
+                value=f"{today_date:%Y%m}-{_default_half}",
+                placeholder="例如：202610-1",
+                label_visibility="collapsed",
+                key="finance_yuanta_salary_period",
+            )
+            yuanta_salary_include_contract = st.checkbox(
+                "專員承攬費／工具包押金",
+                value=True,
+                key="finance_yuanta_salary_contract",
+            )
+            yuanta_salary_include_internal = st.checkbox(
+                "期別元大帳戶-地區.xlsx（內勤薪資）",
+                value=False,
+                key="finance_yuanta_salary_internal",
+            )
+            yuanta_salary_transfer_fubon = st.checkbox(
+                "先由富邦匯總金額到元大帳戶",
+                value=True,
+                key="finance_yuanta_salary_transfer_fubon",
+            )
+            st.caption(
+                "Agent 會先列出檔案與合計；富邦轉帳須人工確認，成功後自動更新富邦明細，"
+                "再到元大上傳並審核至待放行。"
+            )
         elif selected_function == "【元大銀行】檢查薪資付款狀態":
             st.markdown('<div class="field-label">📆 付款日期</div>', unsafe_allow_html=True)
             st.info("固定查詢最近一週", icon="📅")
@@ -4896,6 +4951,7 @@ with area_col:
         "【元大銀行】元大登入",
         "【元大銀行】元大明細下載",
         "【元大銀行】檢查薪資付款狀態",
+        "【元大銀行】薪資檔上傳待放行",
         "【財報】工具包押金｜統計月份彙整（U–X）",
         "【財報】工具包押金｜批次依備註打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
@@ -5319,8 +5375,72 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
     except Exception as exc:
         st.error(f"讀取清潔用品採購資料失敗：{exc}")
 
+yuanta_salary_preview_ready = True
+if system_type == "finance_management" and selected_function == "【元大銀行】薪資檔上傳待放行":
+    _yuanta_preview_key = (
+        str(period or "").strip(),
+        selected_area_value,
+        bool(yuanta_salary_include_contract),
+        bool(yuanta_salary_include_internal),
+        bool(yuanta_salary_transfer_fubon),
+    )
+    if st.button("🔎 檢查本次檔案與金額", use_container_width=True):
+        try:
+            from services.google_auth import get_drive_service
+            from tools.bank_statement.yuanta_salary_upload import find_salary_files
+
+            _yuanta_files = find_salary_files(
+                get_drive_service(),
+                str(period or "").strip(),
+                selected_area_value,
+                include_contract=yuanta_salary_include_contract,
+                include_internal=yuanta_salary_include_internal,
+            )
+            st.session_state["yuanta_salary_upload_preview"] = {
+                "key": _yuanta_preview_key,
+                "files": [
+                    {"kind": item.kind, "name": item.name, "amount": item.amount}
+                    for item in _yuanta_files
+                ],
+            }
+        except Exception as exc:
+            st.session_state.pop("yuanta_salary_upload_preview", None)
+            st.error(f"檢查檔案失敗：{exc}")
+
+    _saved_yuanta_preview = st.session_state.get("yuanta_salary_upload_preview", {})
+    yuanta_salary_preview_ready = _saved_yuanta_preview.get("key") == _yuanta_preview_key
+    if yuanta_salary_preview_ready:
+        _preview_rows = list(_saved_yuanta_preview.get("files") or [])
+        yuanta_salary_expected_files = [
+            {"name": row["name"], "amount": int(row["amount"])} for row in _preview_rows
+        ]
+        st.dataframe(
+            pd.DataFrame([
+                {"類型": row["kind"], "檔案": row["name"], "金額": int(row["amount"])}
+                for row in _preview_rows
+            ]),
+            hide_index=True,
+            use_container_width=True,
+        )
+        _yuanta_total = sum(int(row["amount"]) for row in _preview_rows)
+        st.markdown(f"**本次合計：NT$ {_yuanta_total:,}**")
+        if yuanta_salary_transfer_fubon:
+            st.info(f"執行時將先由富邦轉 NT$ {_yuanta_total:,} 至元大{selected_area_value}；銀行端須人工確認。")
+        else:
+            st.info("本次未勾選富邦轉元大，只執行元大薪資檔上傳待放行。")
+    else:
+        st.caption("請先檢查檔案與金額；確認完成後才可執行。")
+
 _run_button_label = "💾 儲存年度設定" if selected_function == SERVICE_DEEP_CLEAN_SETTINGS else "▶ 執行"
-run_clicked = st.button(_run_button_label, use_container_width=True)
+run_clicked = st.button(
+    _run_button_label,
+    use_container_width=True,
+    disabled=(
+        system_type == "finance_management"
+        and selected_function == "【元大銀行】薪資檔上傳待放行"
+        and not yuanta_salary_preview_ready
+    ),
+)
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -5677,6 +5797,11 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             if selected_function == "【富邦銀行】清潔用品採購":
                 finance_kwargs["selected_rows"] = fubon_supply_purchase_selected_rows
+            if selected_function == "【元大銀行】薪資檔上傳待放行":
+                finance_kwargs["include_contract"] = yuanta_salary_include_contract
+                finance_kwargs["include_internal"] = yuanta_salary_include_internal
+                finance_kwargs["transfer_fubon"] = yuanta_salary_transfer_fubon
+                finance_kwargs["expected_files"] = yuanta_salary_expected_files
             if selected_function == "【財報】各區固定費用匯款":
                 finance_kwargs["execute_fubon_transfer"] = fixed_expense_execute_fubon
                 finance_kwargs["selected_rows"] = fixed_expense_selected_rows
