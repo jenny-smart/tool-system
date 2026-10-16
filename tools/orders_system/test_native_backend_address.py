@@ -52,24 +52,34 @@ class NativeAddressTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, '尚未查班表'):
             _address_result(response)
 
-    def test_new_address_uses_form_fields_without_lookup_browser_or_maps(self):
+    def test_new_address_looks_up_service_area(self):
         address = '台北市大安區金華街233號2樓'
-        with patch('backend_address_form.query_native_address', side_effect=AssertionError('must not launch browser')) as native, \
-             patch.object(q, 'check_contain', side_effect=AssertionError('must not query address')) as direct, \
-             patch.object(q, 'geocode_address', side_effect=AssertionError('must not call Google')):
+        reply = {'return_code': '0000', 'area': {'area_id': 25, 'company_id': 1}}
+        with patch.object(q, 'check_contain', return_value=reply) as direct, \
+             patch.object(q, 'geocode_address', return_value=('25.1', '121.1')):
             info, _, _ = q.resolve_backend_booking_address('session', {'member': {'member_id': 1}}, address, 'token', '1')
-        direct.assert_not_called()
-        native.assert_not_called()
+        direct.assert_called_once()
         self.assertEqual(info['address'], address)
-        self.assertFalse(info.get('area_id'))
+        self.assertEqual(info['area_id'], 25)
+        self.assertEqual(info['lat'], '25.1')
 
     def test_existing_address_keeps_input_and_saved_form_coordinates(self):
         address = '臺北市大安區金華街233號2樓'
         stored = {'id': 7, 'address': address, 'lat': '25.1', 'lng': '121.1'}
+        with patch.object(q, 'check_contain', side_effect=RuntimeError('lookup down')), \
+             patch.object(q, 'geocode_address', return_value=(None, None)), \
+             patch('backend_address_form.query_native_address', side_effect=RuntimeError('no browser')):
+            info, _, _ = q.resolve_backend_booking_address('session', {'member': {'member_id': 1, 'memberAddressList': [stored]}}, address, 'token', '1')
+        self.assertEqual(info['address'], address)
+        self.assertEqual(info['lat'], '25.1')
+
+    def test_existing_address_with_area_skips_lookup(self):
+        address = '臺北市大安區金華街233號2樓'
+        stored = {'id': 7, 'address': address, 'areaId': 25, 'companyId': 1, 'lat': '25.1', 'lng': '121.1'}
         with patch.object(q, 'check_contain', side_effect=AssertionError('must not query address')) as direct:
             info, _, _ = q.resolve_backend_booking_address('session', {'member': {'member_id': 1, 'memberAddressList': [stored]}}, address, 'token', '1')
         direct.assert_not_called()
-        self.assertEqual(info['address'], address)
+        self.assertEqual(info['area_id'], 25)
 
 if __name__ == '__main__':
     unittest.main()

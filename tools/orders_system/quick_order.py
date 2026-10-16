@@ -1,9 +1,18 @@
 # ============================================================
 # 檔名：quick_order.py
-# 版本：v8.65
-# 最後更新：2026-10-14
+# 版本：v8.66
+# 最後更新：2026-10-16
 #
 # Change Log
+# v8.66
+# - 修正新客、建了會員但沒成單的客人、舊客新地址全部無法成單
+#   （後台班表回覆：[]）：v8.65 起地址流程完全不查服務區域，會員地址
+#   清單沒有該地址時 area_id／company_id／lat／lng 都是空的，後台
+#   get_section 因此回傳空班表。
+# - 改為比照後台手動成單：會員既有地址有服務區域就直接沿用；沒有時
+#   先用座標＋查詢地址（check_contain）補區域，查不到再用後台原生
+#   「查詢地址」按鈕補，送單時後台會以新地址建立。
+# - 仍查不到服務區域時直接停止並列出原因，不套用預設區域。
 # v8.65
 # - 成單與訂單轉換增加「已被其他重疊訂單占用」人力保護：
 #   不再直接信任 schedule/edit 或 get_section 列出的候選人員，
@@ -412,7 +421,7 @@
 # v7.3 - PERIOD_DISPLAY_INFO / _format_period_display
 # ============================================================
 # -*- coding: utf-8 -*-
-__version__ = "8.39"
+__version__ = "8.66"
 
 import time
 import re
@@ -1602,13 +1611,62 @@ def get_unserved_paid_orders(session, phone, member_payload, known_addresses, to
     return upcoming
 
 
-def resolve_backend_booking_address(session, member_payload, address, token, clean_type_id):
-    """組出成單地址資料，不另外呼叫後台的地址查詢 AJAX。
+def _area_from_check_reply(reply):
+    """從後台「查詢地址」回覆取出服務區域；缺 area_id/company_id 視為查無。"""
+    if not isinstance(reply, dict) or reply.get("return_code") not in (None, "", "0000"):
+        return {}
+    area = reply.get("area") if isinstance(reply.get("area"), dict) else {}
+    if not str(area.get("area_id") or "").strip() or not str(area.get("company_id") or "").strip():
+        return {}
+    return area
 
-    成單流程直接沿用會員該筆既有地址保存的區域、座標與前次訂單資料；
-    沒有既有地址時只送使用者輸入的表單地址，交由後續原生計算／班表／送單
-    流程驗證。這裡刻意不呼叫 ``/ajax/check_contain``，避免地址查詢的
-    CSRF/session 狀態阻斷所有成單入口。
+
+def _lookup_backend_service_area(session, member_payload, address, token, clean_type_id):
+    """模擬後台按「查詢地址」：取得服務區域與座標。
+
+    1. 先用 Google 座標 + /ajax/check_contain。
+    2. 查不到再用後台頁面原生「查詢地址」按鈕（由後台自己定位）。
+    回傳 (area_dict, reply, errors)。
+    """
+    member = (member_payload or {}).get("member", {}) or {}
+    member_id = str(member.get("member_id") or "")
+    errors = []
+    lat, lng = geocode_address(address)
+    try:
+        reply = check_contain(session, member_id, address, lat, lng, token, clean_type_id)
+        area = _area_from_check_reply(reply)
+        if area:
+            area = dict(area)
+            area.setdefault("lat", lat or "")
+            area.setdefault("lng", lng or "")
+            if not area.get("lat"):
+                area["lat"] = lat or ""
+            if not area.get("lng"):
+                area["lng"] = lng or ""
+            return area, reply, errors
+        errors.append("查詢地址未回傳服務區域" + ("" if lat else "（無座標）"))
+    except Exception as exc:
+        errors.append(f"查詢地址：{exc}")
+    try:
+        from backend_address_form import query_native_address
+        reply = query_native_address(session, orders.BASE_URL, member_id, address, clean_type_id)
+        area = _area_from_check_reply(reply)
+        if area:
+            return dict(area), reply, errors
+        errors.append("後台原生查詢地址未回傳服務區域")
+    except Exception as exc:
+        errors.append(f"後台原生查詢地址：{exc}")
+    return {}, {}, errors
+
+
+def resolve_backend_booking_address(session, member_payload, address, token, clean_type_id):
+    """組出成單地址資料（新客、舊客新地址、舊客既有地址共用）。
+
+    - 會員既有地址已存服務區域：直接沿用，不另外查詢。
+    - 新客／建了會員但沒成單／舊客新地址：沒有可用區域時，比照後台手動
+      成單按「查詢地址」，補上 area_id、company_id、lat、lng，送單時後台
+      會以新地址建立。
+    - 查不到服務區域就停止並說明原因，不會用預設區域亂成單。
     """
     best_addr = dict(pick_best_address_info(member_payload, address) or {})
     selected_address = str(address).strip()
@@ -1616,8 +1674,26 @@ def resolve_backend_booking_address(session, member_payload, address, token, cle
     address_parts = _split_booking_address(selected_address)
     # country_id 是後台縣市區下拉值，與服務區域 area_id 不同。
     best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
-    # 不指定預設區域、不改寫地址，也不發出額外的地址查詢請求。
-    return best_addr, address_parts, {}
+    has_area = all(str(best_addr.get(k) or "").strip() for k in ("area_id", "company_id", "lat", "lng"))
+    if has_area:
+        return best_addr, address_parts, {}
+    lookup_address = address_parts.get("full") or selected_address
+    area, reply, errors = _lookup_backend_service_area(
+        session, member_payload, lookup_address, token, clean_type_id,
+    )
+    if not area:
+        if str(best_addr.get("addressId") or "").strip():
+            # 會員既有地址查詢失敗時，沿用原本存好的資料交給後台判斷。
+            return best_addr, address_parts, {}
+        raise Exception(
+            f"地址查不到服務區域，尚未查班表：{selected_address}。"
+            + "；".join(errors)
+            + "。請確認地址是否在服務範圍，或到後台按「查詢地址」確認。"
+        )
+    for key in ("area_id", "company_id", "lat", "lng"):
+        if not str(best_addr.get(key) or "").strip() and str(area.get(key) or "").strip():
+            best_addr[key] = area.get(key)
+    return best_addr, address_parts, reply if isinstance(reply, dict) else {}
 
 
 def quick_check_available_slots(env_name, payway, lookup_result, address, clean_type_id, date_s, hour, person="2", periods=None, period_hours=None):
