@@ -78,6 +78,12 @@ class _Service:
     def spreadsheets(self):
         return self
 
+    def get(self, spreadsheetId, fields=None):
+        return _Request({"sheets": [
+            {"properties": {"sheetId": 0, "title": "ATM"}},
+            {"properties": {"sheetId": staff_claim.CLAIM_SHEET_GIDS["台北"], "title": "專員請款"}},
+        ]})
+
     def values(self):
         return self.values_api
 
@@ -170,6 +176,11 @@ class RunClaimBatchTests(unittest.TestCase):
         self.assertIn("AJ2", written)
         self.assertNotIn("AJ3", written)
         self.assertNotIn("AJ4", written)
+
+    def test_unknown_gid_raises(self):
+        service = _Service({"專員請款": [CLAIM_HEADER], "專員個人資料": STAFF_ROWS})
+        with self.assertRaises(RuntimeError):
+            staff_claim.run_claim_batch("台北", 2, 3, "202601-1", service=service, claim_gid=123)
 
     def test_period_is_required(self):
         with self.assertRaises(ValueError):

@@ -8,7 +8,8 @@ from __future__ import annotations
 # docs/field-claim-gas.md。
 #
 # 試算表：「財務帳務設定」登記表的「清潔異動設定／地區」那一列的試算表ID
-#（台北／台中內勤工作表單），分頁用標題找「專員請款」「專員個人資料」。
+#（台北／台中內勤工作表單）；請款分頁用 CLAIM_SHEET_GIDS 的「專員請款」GID，
+# 地址對照用同一份試算表的「專員個人資料」分頁。
 #
 # 與原 GAS 的差異：
 #   - 選定列範圍執行時，AJ 給付期別必填，範圍內每列有資料的列都寫入。
@@ -32,6 +33,9 @@ from tools.common.config_loader import get_sheets_service
 CLAIM_SHEET_TITLE = "專員請款"
 STAFF_SHEET_TITLE = "專員個人資料"
 SUPPORTED_AREAS = ("台北", "台中")
+
+# 「專員請款」分頁 GID（2026台北／台中內勤工作表單）
+CLAIM_SHEET_GIDS = {"台北": 279541195, "台中": 749987965}
 
 # 台北叫「跨區車馬費」，台中叫「車馬費」
 TRAVEL_CLAIM_TYPES = {"跨區車馬費", "車馬費"}
@@ -140,7 +144,9 @@ def build_map_link(trip_type: str, staff_addr: str, addr1: str, addr2: str) -> s
         return "❌ 地址不完整"
     if start == end:
         return "📍 起點終點相同"
-    return f"https://www.google.com/maps/dir/{quote(start, safe='')}/{quote(end, safe='')}"
+    # 與 GAS encodeURIComponent 相同：保留 -_.!~*'() 不編碼
+    safe = "-_.!~*'()"
+    return f"https://www.google.com/maps/dir/{quote(start, safe=safe)}/{quote(end, safe=safe)}"
 
 
 def build_claim_remark(service_date: Any, customer: str, claim_type: str,
@@ -221,6 +227,17 @@ def resolve_spreadsheet_id(area: str) -> str:
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{CLEANING_CHANGE_TYPE}／{area} 缺少試算表ID")
     return spreadsheet_id
+
+
+def resolve_claim_sheet_title(service, spreadsheet_id: str, area: str, gid: Optional[int] = None) -> str:
+    """依 GID 找請款分頁標題（gid 未指定時用 CLAIM_SHEET_GIDS）。"""
+    gid = CLAIM_SHEET_GIDS[area] if gid is None else int(gid)
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties").execute()
+    for sheet in meta.get("sheets", []):
+        props = sheet.get("properties", {})
+        if props.get("sheetId") == gid:
+            return str(props.get("title", ""))
+    raise RuntimeError(f"{area}試算表找不到 GID={gid} 的{CLAIM_SHEET_TITLE}分頁")
 
 
 def _read(service, spreadsheet_id: str, a1_range: str) -> list[list[Any]]:
@@ -306,7 +323,8 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
 
 
 def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
-                    service=None, on_progress: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
+                    service=None, on_progress: Optional[Callable[[str], None]] = None,
+                    claim_gid: Optional[int] = None) -> dict[str, Any]:
     """批次設定專員請款第 start_row～end_row 列的 AD/AE/AF/AG/AJ/AN 欄。"""
     log = on_progress or (lambda msg: None)
     period = _clean(period)
@@ -318,17 +336,18 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
 
     service = service or get_sheets_service()
     spreadsheet_id = resolve_spreadsheet_id(area)
+    claim_title = resolve_claim_sheet_title(service, spreadsheet_id, area, claim_gid)
 
-    claim_header_rows = _read(service, spreadsheet_id, f"'{CLAIM_SHEET_TITLE}'!1:1")
+    claim_header_rows = _read(service, spreadsheet_id, f"'{claim_title}'!1:1")
     if not claim_header_rows:
-        raise RuntimeError(f"「{CLAIM_SHEET_TITLE}」第 1 列沒有表頭")
+        raise RuntimeError(f"「{claim_title}」第 1 列沒有表頭")
     claim_header = claim_header_rows[0]
     last_col = column_letter(len(claim_header) - 1)
-    claim_rows = _read(service, spreadsheet_id, f"'{CLAIM_SHEET_TITLE}'!A{start_row}:{last_col}{end_row}")
+    claim_rows = _read(service, spreadsheet_id, f"'{claim_title}'!A{start_row}:{last_col}{end_row}")
     claim_rows += [[] for _ in range(end_row - start_row + 1 - len(claim_rows))]
 
     address_book = AddressBook(_read(service, spreadsheet_id, f"'{STAFF_SHEET_TITLE}'!A:Z"))
-    log(f"{area}｜{CLAIM_SHEET_TITLE} 第 {start_row}～{end_row} 列，地址對照 {address_book.count} 筆")
+    log(f"{area}｜{claim_title} 第 {start_row}～{end_row} 列，地址對照 {address_book.count} 筆")
 
     plan = plan_claim_updates(claim_header, claim_rows, start_row, period, address_book)
     updates = plan["updates"]
@@ -337,11 +356,11 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
             spreadsheetId=spreadsheet_id,
             body={
                 "valueInputOption": "RAW",
-                "data": [{"range": f"'{CLAIM_SHEET_TITLE}'!{a1}", "values": [[v]]} for a1, v in updates],
+                "data": [{"range": f"'{claim_title}'!{a1}", "values": [[v]]} for a1, v in updates],
             },
         ).execute()
 
-    plan.update(area=area, spreadsheet_id=spreadsheet_id, start_row=start_row, end_row=end_row, period=period)
+    plan.update(area=area, spreadsheet_id=spreadsheet_id, sheet_title=claim_title, start_row=start_row, end_row=end_row, period=period)
     return plan
 
 
@@ -360,7 +379,7 @@ def format_batch_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def check_address_book(area: str, service=None) -> str:
+def check_address_book(area: str, service=None, claim_gid: Optional[int] = None) -> str:
     """檢查「專員個人資料」的地址對照欄位與筆數（對應 GAS「檢查專員資料對照」）。"""
     service = service or get_sheets_service()
     spreadsheet_id = resolve_spreadsheet_id(area)
@@ -372,7 +391,8 @@ def check_address_book(area: str, service=None) -> str:
         for name in STAFF_HEADERS.values()
     ]
     book = AddressBook(rows)
-    claim_header = (_read(service, spreadsheet_id, f"'{CLAIM_SHEET_TITLE}'!1:1") or [[]])[0]
+    claim_title = resolve_claim_sheet_title(service, spreadsheet_id, area, claim_gid)
+    claim_header = (_read(service, spreadsheet_id, f"'{claim_title}'!1:1") or [[]])[0]
     claim_positions = [
         f"{column_letter(_header_index(claim_header, name, CLAIM_SHEET_TITLE))} {name}"
         for name in CLAIM_HEADERS.values()
