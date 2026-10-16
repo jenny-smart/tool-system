@@ -3700,14 +3700,13 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【日排程】一鍵執行外場日排程",
         "【月排程】新增專員名冊",
         "【月排程】新增專員調薪",
-        "【請款】批次設定請款欄位",
-        "【請款】檢查地址對照",
         "【新人排程】104履歷-All",
         "【新人排程】104履歷回覆信",
         "【新人排程】104履歷-雙北專員",
         "【新人排程】新人訓練",
         "【新人排程】新人入職",
-        "【新人排程】新訓退訓實境費用",
+        "【新訓退款】新訓退訓實境費用",
+        "【專員請款】請款資料審核",
     ],
     # ── ★ 新增：客服排程系統功能清單 ────────────────────────
     "service_schedule": [
@@ -3812,10 +3811,9 @@ FIELD_SCRIPT_MAP = {
 FIELD_ROSTER_RAISE_FUNCTIONS = ("【月排程】新增專員名冊", "【月排程】新增專員調薪")
 FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】104履歷回覆信", "【新人排程】104履歷-雙北專員")
 FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
-FIELD_CLAIM_BATCH = "【請款】批次設定請款欄位"
-FIELD_CLAIM_CHECK = "【請款】檢查地址對照"
-FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH, FIELD_CLAIM_CHECK)
-FIELD_TRAINEE_FEE_FUNCTIONS = ("【新人排程】新訓退訓實境費用",)
+FIELD_CLAIM_BATCH = "【專員請款】請款資料審核"
+FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH,)
+FIELD_TRAINEE_FEE_FUNCTIONS = ("【新訓退款】新訓退訓實境費用",)
 FIELD_EXTRA_FUNCTIONS = (
     FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS
     + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
@@ -4866,7 +4864,7 @@ with date_col:
                 icon="🧾",
             )
 
-        if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
+        elif selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
             st.markdown('<div class="field-label">📆 期別（YYYYMM）</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
@@ -4896,13 +4894,9 @@ with date_col:
             )
             st.caption(
                 "範圍內有資料的列：AJ 寫入期別；AD/AE 依「專員個人資料」服務日期＋客戶姓名＋聯絡電話帶入地址"
-                "（查不到保留原值並列出列號）；AF/AG 依 N 欄跨區類型重算；"
+                "（查不到保留原值並列出列號）；AF/AG 依 N 欄跨區類型重算；執行前會先檢查兩張表欄位，日誌列出欄位位置；"
                 "車馬費且 N＝案場到案場時，AN 改為「MM/DD顧客-第二位顧客請款項目-」。"
             )
-
-        elif selected_function == FIELD_CLAIM_CHECK:
-            st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
-            st.info("檢查「專員個人資料」地址對照欄位與「專員請款」欄位位置，不會寫入資料", icon="🔍")
 
         elif selected_function == "【新人排程】104履歷-All":
             st.markdown('<div class="field-label">📆 履歷日期區間</div>', unsafe_allow_html=True)
@@ -5929,9 +5923,6 @@ if run_clicked:
                         on_progress=lambda msg: add_log(msg),
                     )
                     add_log(staff_claim.format_batch_result(result), "success")
-
-                elif selected_function == FIELD_CLAIM_CHECK:
-                    add_log(staff_claim.check_address_book(selected_area_value), "success")
 
                 elif selected_function == "【新人排程】104履歷-All":
                     if not start_date_value or not end_date_value:
