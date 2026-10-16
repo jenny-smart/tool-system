@@ -3700,6 +3700,8 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【日排程】一鍵執行外場日排程",
         "【月排程】新增專員名冊",
         "【月排程】新增專員調薪",
+        "【請款】批次設定請款欄位",
+        "【請款】檢查地址對照",
         "【新人排程】104履歷-All",
         "【新人排程】104履歷回覆信",
         "【新人排程】104履歷-雙北專員",
@@ -3810,9 +3812,13 @@ FIELD_SCRIPT_MAP = {
 FIELD_ROSTER_RAISE_FUNCTIONS = ("【月排程】新增專員名冊", "【月排程】新增專員調薪")
 FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】104履歷回覆信", "【新人排程】104履歷-雙北專員")
 FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
+FIELD_CLAIM_BATCH = "【請款】批次設定請款欄位"
+FIELD_CLAIM_CHECK = "【請款】檢查地址對照"
+FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH, FIELD_CLAIM_CHECK)
 FIELD_TRAINEE_FEE_FUNCTIONS = ("【新人排程】新訓退訓實境費用",)
 FIELD_EXTRA_FUNCTIONS = (
-    FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_RESUME_FUNCTIONS + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
+    FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS
+    + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
 )
 
 # ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
@@ -4098,6 +4104,8 @@ fixed_expense_selected_rows = None
 end_date_value = None
 monthly_date_mode = "期別"
 resume_target_sheet = ""
+claim_start_row = 2
+claim_end_row = 2
 cetustek_serial_qyear = ""
 cetustek_serial_qmonth = ""
 deep_clean_phase1_start = None
@@ -4871,6 +4879,30 @@ with date_col:
                 st.caption("複製上期「YYYYMM專員名冊」為新期別，並把離職人員移到「離職名冊」")
             else:
                 st.caption("複製上期「YYYYMM調薪資料」為新期別，重建 B3 IMPORTRANGE、K 欄、N 欄公式")
+
+        elif selected_function == FIELD_CLAIM_BATCH:
+            st.markdown('<div class="field-label">📄 「專員請款」列數範圍</div>', unsafe_allow_html=True)
+            r1, r2 = st.columns(2)
+            with r1:
+                claim_start_row = st.number_input("起始列", min_value=2, value=2, step=1, key="field_claim_start_row")
+            with r2:
+                claim_end_row = st.number_input("結束列", min_value=2, value=2, step=1, key="field_claim_end_row")
+            st.markdown('<div class="field-label">📆 給付期別（AJ 欄）</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "給付期別",
+                placeholder="例如：202601-1",
+                label_visibility="collapsed",
+                key="field_claim_period",
+            )
+            st.caption(
+                "範圍內有資料的列：AJ 寫入期別；AD/AE 依「專員個人資料」服務日期＋客戶姓名＋聯絡電話帶入地址"
+                "（查不到保留原值並列出列號）；AF/AG 依 N 欄跨區類型重算；"
+                "車馬費且 N＝案場到案場時，AN 改為「MM/DD顧客-第二位顧客請款項目-」。"
+            )
+
+        elif selected_function == FIELD_CLAIM_CHECK:
+            st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
+            st.info("檢查「專員個人資料」地址對照欄位與「專員請款」欄位位置，不會寫入資料", icon="🔍")
 
         elif selected_function == "【新人排程】104履歷-All":
             st.markdown('<div class="field-label">📆 履歷日期區間</div>', unsafe_allow_html=True)
@@ -5868,7 +5900,7 @@ if run_clicked:
             add_log(f"「{selected_function}」尚未開發，敬請期待。", "warning")
             st.rerun()
 
-        from tools.field_management import resume_system, roster_raise
+        from tools.field_management import resume_system, roster_raise, staff_claim
 
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
@@ -5890,6 +5922,16 @@ if run_clicked:
                     else:
                         result = roster_raise.create_raise_sheet(selected_area_value, ym)
                         add_log(f"✅ 調薪資料完成｜{result['source']} → {result['new']}", "success")
+
+                elif selected_function == FIELD_CLAIM_BATCH:
+                    result = staff_claim.run_claim_batch(
+                        selected_area_value, claim_start_row, claim_end_row, period,
+                        on_progress=lambda msg: add_log(msg),
+                    )
+                    add_log(staff_claim.format_batch_result(result), "success")
+
+                elif selected_function == FIELD_CLAIM_CHECK:
+                    add_log(staff_claim.check_address_book(selected_area_value), "success")
 
                 elif selected_function == "【新人排程】104履歷-All":
                     if not start_date_value or not end_date_value:
