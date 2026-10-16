@@ -68,6 +68,23 @@ STAFF_HEADERS = {
 
 PERIOD_PATTERN = re.compile(r"^\d{6}-\d+$")
 
+# 地址需以「縣市＋鄉鎮市區」開頭，例如 台北市中正區、新北市三重區；
+# 「台北中正區」（少「市」）或「2026/05/04 王小明 0912…」（舊 GAS 查不到地址時的文字）都算少字。
+CITY_PATTERN = (
+    "(?:[台臺]北市|新北市|桃園市|[台臺]中市|[台臺]南市|高雄市|基隆市|新竹市|嘉義市|"
+    "新竹縣|苗栗縣|彰化縣|南投縣|雲林縣|嘉義縣|屏東縣|宜蘭縣|花蓮縣|[台臺]東縣|澎湖縣|金門縣|連江縣)"
+)
+ADDRESS_PATTERN = re.compile(rf"^{CITY_PATTERN}[\u4e00-\u9fff]{{1,4}}?[區鄉鎮市]")
+
+# 檢查出的問題：每種一個底色，原因寫在儲存格備註（以 ⚠️ 開頭）
+ISSUE_TYPES = {
+    "short_addr": ("#F4CCCC", "地址少字或格式不完整（應以縣市＋區開頭）"),
+    "no_addr": ("#D9D2E9", "查無地址，請手動補上"),
+    "map": ("#FCE5CD", "無法產生地圖連結"),
+    "same_customer": ("#FFF2CC", "第二位顧客與顧客相同，請確認"),
+}
+ISSUE_NOTE_PREFIX = "⚠️"
+
 
 # ---------------------------------------------------------------- 小工具
 
@@ -108,6 +125,15 @@ def _header_index(headers: list[str], name: str, sheet_title: str) -> int:
 
 
 # ---------------------------------------------------------------- 計算規則
+
+def address_is_complete(address: Any) -> bool:
+    return bool(ADDRESS_PATTERN.match(re.sub(r"\s+", "", _clean(address))))
+
+
+def _hex_to_rgb(color: str) -> dict[str, float]:
+    color = color.lstrip("#")
+    return {k: int(color[i:i + 2], 16) / 255 for k, i in (("red", 0), ("green", 2), ("blue", 4))}
+
 
 def trip_endpoints(trip_type: str, staff_addr: str, addr1: str, addr2: str) -> Optional[tuple[str, str]]:
     """依跨區類型決定起訖地址；未知類型回傳 None。"""
@@ -229,14 +255,14 @@ def resolve_spreadsheet_id(area: str) -> str:
     return spreadsheet_id
 
 
-def resolve_claim_sheet_title(service, spreadsheet_id: str, area: str, gid: Optional[int] = None) -> str:
-    """依 GID 找請款分頁標題（gid 未指定時用 CLAIM_SHEET_GIDS）。"""
+def resolve_claim_sheet(service, spreadsheet_id: str, area: str, gid: Optional[int] = None) -> tuple[str, int]:
+    """依 GID 找請款分頁，回傳 (標題, GID)（gid 未指定時用 CLAIM_SHEET_GIDS）。"""
     gid = CLAIM_SHEET_GIDS[area] if gid is None else int(gid)
     meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties").execute()
     for sheet in meta.get("sheets", []):
         props = sheet.get("properties", {})
         if props.get("sheetId") == gid:
-            return str(props.get("title", ""))
+            return str(props.get("title", "")), gid
     raise RuntimeError(f"{area}試算表找不到 GID={gid} 的{CLAIM_SHEET_TITLE}分頁")
 
 
@@ -259,6 +285,7 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
     missing_addr1: list[int] = []
     missing_addr2: list[int] = []
     counts = {"addr1": 0, "addr2": 0, "area_pair": 0, "map_link": 0, "period": 0, "remark": 0}
+    issues: list[dict[str, Any]] = []
 
     for offset, row in enumerate(claim_rows):
         row_no = start_row + offset
@@ -271,6 +298,15 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
             if value != get(key):
                 updates.append((f"{column_letter(idx[key])}{row_no}", value))
                 counts[key] += 1
+
+        def flag(key: str, issue_type: str, detail: str = "") -> None:
+            issues.append({"row": row_no, "col": idx[key], "key": key, "type": issue_type, "detail": detail})
+
+        def check_address(key: str, value: str, required: bool, label: str) -> None:
+            if value and not address_is_complete(value):
+                flag(key, "short_addr", f"{label}：{value}")
+            elif not value and required:
+                flag(key, "no_addr", label)
 
         # 空白列（沒有服務日期也沒有顧客）整列不動，避免範圍選太大時把期別寫進空列
         if not get("date") and not get("customer"):
@@ -301,10 +337,18 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
 
         # AF / AG：有跨區類型才處理
         trip_type = get("trip_type")
+        staff_addr = get("staff_addr")
         if trip_type:
-            staff_addr = get("staff_addr")
             put("area_pair", build_area_pair(trip_type, staff_addr, addr1, addr2))
-            put("map_link", build_map_link(trip_type, staff_addr, addr1, addr2))
+            map_link = build_map_link(trip_type, staff_addr, addr1, addr2)
+            put("map_link", map_link)
+            if not map_link.startswith("https://"):
+                flag("map_link", "map", map_link)
+
+        # 地址檢查：有跨區類型時，用得到的地址空白也算問題
+        check_address("staff_addr", staff_addr, trip_type in ("家到案場", "案場到家"), "專員地址")
+        check_address("addr1", addr1, bool(trip_type), "顧客地址1")
+        check_address("addr2", addr2, bool(get("customer2") or get("phone2")), "顧客地址2")
 
         # AN 請款備註：車馬費案場到案場一律重算（帶兩位顧客）；其他列只補空白
         is_site_to_site = get("claim_type") in TRAVEL_CLAIM_TYPES and trip_type == SITE_TO_SITE
@@ -312,11 +356,16 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
             put("remark", build_claim_remark(
                 get("date"), get("customer"), get("claim_type"), get("sub_item"), trip_type, get("customer2"),
             ))
+        if is_site_to_site and get("customer2") and get("customer2") == get("customer"):
+            flag("remark", "same_customer", get("customer2"))
 
     return {
         "updates": updates,
         "missing_addr1": missing_addr1,
         "missing_addr2": missing_addr2,
+        "issues": issues,
+        # 會標記問題的欄位（AC/AD/AE/AG/AN），清舊標記時只看這幾欄
+        "checked_cols": sorted(idx[k] for k in ("staff_addr", "addr1", "addr2", "map_link", "remark")),
         "counts": counts,
         "rows": len(claim_rows),
     }
@@ -336,7 +385,7 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
 
     service = service or get_sheets_service()
     spreadsheet_id = resolve_spreadsheet_id(area)
-    claim_title = resolve_claim_sheet_title(service, spreadsheet_id, area, claim_gid)
+    claim_title, sheet_gid = resolve_claim_sheet(service, spreadsheet_id, area, claim_gid)
 
     claim_header_rows = _read(service, spreadsheet_id, f"'{claim_title}'!1:1")
     if not claim_header_rows:
@@ -360,8 +409,60 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
             },
         ).execute()
 
+    apply_issue_marks(service, spreadsheet_id, claim_title, sheet_gid, start_row, end_row, plan["issues"], plan["checked_cols"])
+
     plan.update(area=area, spreadsheet_id=spreadsheet_id, sheet_title=claim_title, start_row=start_row, end_row=end_row, period=period)
     return plan
+
+
+def apply_issue_marks(service, spreadsheet_id: str, sheet_title: str, sheet_gid: int,
+                      start_row: int, end_row: int, issues: list[dict[str, Any]],
+                      checked_cols: list[int]) -> None:
+    """問題格依類型上底色＋備註；範圍內先前標過、這次已沒問題的格子清掉底色與備註。"""
+    issue_colors = {t: _hex_to_rgb(c) for t, (c, _) in ISSUE_TYPES.items()}
+    marked: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for issue in issues:
+        marked.setdefault((issue["row"], issue["col"]), []).append(issue)
+
+    requests: list[dict[str, Any]] = []
+
+    def cell_request(row: int, col: int, cell: dict[str, Any], fields: str) -> dict[str, Any]:
+        return {"repeatCell": {
+            "range": {"sheetId": sheet_gid, "startRowIndex": row - 1, "endRowIndex": row,
+                      "startColumnIndex": col, "endColumnIndex": col + 1},
+            "cell": cell, "fields": fields,
+        }}
+
+    # 清掉舊標記：只動備註以 ⚠️ 開頭（本功能標的）的格子，人工上的底色不碰
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        ranges=[f"'{sheet_title}'!A{start_row}:{column_letter(max(checked_cols))}{end_row}"],
+        fields="sheets.data.rowData.values.note",
+    ).execute()
+    row_data = ((meta.get("sheets") or [{}])[0].get("data") or [{}])[0].get("rowData", [])
+    for offset, row_info in enumerate(row_data):
+        row = start_row + offset
+        for col, cell in enumerate(row_info.get("values", [])):
+            if col not in checked_cols or (row, col) in marked:
+                continue
+            if str(cell.get("note", "")).startswith(ISSUE_NOTE_PREFIX):
+                requests.append(cell_request(
+                    row, col,
+                    {"userEnteredFormat": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}, "note": ""},
+                    "userEnteredFormat.backgroundColor,note",
+                ))
+
+    for (row, col), cell_issues in sorted(marked.items()):
+        lines = [f"{ISSUE_NOTE_PREFIX} {ISSUE_TYPES[i['type']][1]}" + (f"：{i['detail']}" if i["detail"] else "")
+                 for i in cell_issues]
+        requests.append(cell_request(
+            row, col,
+            {"userEnteredFormat": {"backgroundColor": issue_colors[cell_issues[0]["type"]]}, "note": "\n".join(lines)},
+            "userEnteredFormat.backgroundColor,note",
+        ))
+
+    if requests:
+        service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
 
 
 def format_batch_result(result: dict[str, Any]) -> str:
@@ -374,6 +475,12 @@ def format_batch_result(result: dict[str, Any]) -> str:
     ]
     if result["missing_addr1"]:
         lines.append(f"⚠️ AD 查無顧客地址（保留原值）：第 {'、'.join(map(str, result['missing_addr1']))} 列")
+    issue_counts: dict[str, int] = {}
+    for issue in result.get("issues", []):
+        issue_counts[issue["type"]] = issue_counts.get(issue["type"], 0) + 1
+    if issue_counts:
+        lines.append("🎨 已上底色並加備註：" + "｜".join(
+            f"{ISSUE_TYPES[t][1].split('（')[0]} {n} 格" for t, n in issue_counts.items()))
     if result["missing_addr2"]:
         lines.append(f"⚠️ AE 查無第二位顧客地址（保留原值）：第 {'、'.join(map(str, result['missing_addr2']))} 列")
     return "\n".join(lines)
@@ -391,7 +498,7 @@ def check_address_book(area: str, service=None, claim_gid: Optional[int] = None)
         for name in STAFF_HEADERS.values()
     ]
     book = AddressBook(rows)
-    claim_title = resolve_claim_sheet_title(service, spreadsheet_id, area, claim_gid)
+    claim_title, _ = resolve_claim_sheet(service, spreadsheet_id, area, claim_gid)
     claim_header = (_read(service, spreadsheet_id, f"'{claim_title}'!1:1") or [[]])[0]
     claim_positions = [
         f"{column_letter(_header_index(claim_header, name, CLAIM_SHEET_TITLE))} {name}"

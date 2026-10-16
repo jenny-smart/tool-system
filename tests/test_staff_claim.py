@@ -72,13 +72,27 @@ class _Values:
 
 
 class _Service:
-    def __init__(self, sheets):
+    def __init__(self, sheets, notes=None):
         self.values_api = _Values(sheets)
+        self.notes = notes or {}  # {(row, col): note}，模擬既有備註
+        self.format_requests = []
 
     def spreadsheets(self):
         return self
 
-    def get(self, spreadsheetId, fields=None):
+    def batchUpdate(self, spreadsheetId, body):
+        self.format_requests.extend(body["requests"])
+        return _Request({})
+
+    def get(self, spreadsheetId, fields=None, ranges=None):
+        if ranges:
+            start = int("".join(c for c in ranges[0].split("!")[1].split(":")[0] if c.isdigit()))
+            end = int("".join(c for c in ranges[0].split(":")[-1] if c.isdigit()))
+            row_data = [
+                {"values": [{"note": self.notes.get((r, c), "")} for c in range(len(CLAIM_HEADER))]}
+                for r in range(start, end + 1)
+            ]
+            return _Request({"sheets": [{"data": [{"rowData": row_data}]}]})
         return _Request({"sheets": [
             {"properties": {"sheetId": 0, "title": "ATM"}},
             {"properties": {"sheetId": staff_claim.CLAIM_SHEET_GIDS["台北"], "title": "專員請款"}},
@@ -132,9 +146,10 @@ class MapTests(unittest.TestCase):
 
 
 class RunClaimBatchTests(unittest.TestCase):
-    def _run(self, claim_rows, start_row=2, end_row=None):
+    def _run(self, claim_rows, start_row=2, end_row=None, notes=None):
         sheets = {"專員請款": [CLAIM_HEADER] + claim_rows, "專員個人資料": STAFF_ROWS}
-        service = _Service(sheets)
+        service = _Service(sheets, notes)
+        self.service = service
         end_row = end_row or start_row + len(claim_rows) - 1
         result = staff_claim.run_claim_batch("台北", start_row, end_row, "202601-1", service=service)
         written = {}
@@ -181,6 +196,59 @@ class RunClaimBatchTests(unittest.TestCase):
         service = _Service({"專員請款": [CLAIM_HEADER], "專員個人資料": STAFF_ROWS})
         with self.assertRaises(RuntimeError):
             staff_claim.run_claim_batch("台北", 2, 3, "202601-1", service=service, claim_gid=123)
+
+    def _marks(self):
+        marks = {}
+        for req in self.service.format_requests:
+            cell = req["repeatCell"]
+            rng = cell["range"]
+            marks[(rng["startRowIndex"] + 1, rng["startColumnIndex"])] = cell["cell"]
+        return marks
+
+    def test_short_address_is_coloured_with_reason(self):
+        row = claim_row(
+            服務日期="2026/01/09", 顧客姓名="查無", 顧客電話="900000000", 請款項目="跨區車馬費",
+            跨區類型="案場到家", 專員地址="新北市樹林區保安街", 顧客地址1="台北中正區羅斯福路四段68號",
+        )
+        self._run([row])
+        mark = self._marks()[(2, COL["顧客地址1"])]
+        self.assertIn("地址少字", mark["note"])
+        self.assertIn("台北中正區", mark["note"])
+        self.assertEqual(mark["userEnteredFormat"]["backgroundColor"], staff_claim._hex_to_rgb("#F4CCCC"))
+
+    def test_fallback_text_in_address_counts_as_short(self):
+        self.assertFalse(staff_claim.address_is_complete("2026/05/04 陳宜欣 918190960"))
+        self.assertTrue(staff_claim.address_is_complete("臺中市西屯區台灣大道三段99號"))
+
+    def test_missing_address_and_map_problem_use_different_colours(self):
+        row = claim_row(
+            服務日期="2026/01/09", 顧客姓名="查無", 顧客電話="900000000", 請款項目="跨區車馬費",
+            跨區類型="家到案場", 專員地址="新北市樹林區保安街",
+        )
+        self._run([row])
+        marks = self._marks()
+        self.assertIn("查無地址", marks[(2, COL["顧客地址1"])]["note"])
+        self.assertIn("地址不完整", marks[(2, COL["實際跨區2"])]["note"])
+        self.assertNotEqual(
+            marks[(2, COL["顧客地址1"])]["userEnteredFormat"]["backgroundColor"],
+            marks[(2, COL["實際跨區2"])]["userEnteredFormat"]["backgroundColor"],
+        )
+
+    def test_same_second_customer_is_flagged(self):
+        row = claim_row(
+            服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638", 請款項目="跨區車馬費",
+            跨區類型="案場到案場", 第二位顧客姓名="廖士捷", 第二位顧客電話="937064638",
+        )
+        self._run([row])
+        self.assertIn("第二位顧客與顧客相同", self._marks()[(2, COL["請款備註"])]["note"])
+
+    def test_resolved_mark_is_cleared_but_manual_note_kept(self):
+        row = claim_row(服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638", 請款項目="工具組運費")
+        notes = {(2, COL["顧客地址1"]): "⚠️ 地址少字", (2, COL["顧客地址2"]): "人工備註"}
+        self._run([row], notes=notes)
+        marks = self._marks()
+        self.assertEqual(marks[(2, COL["顧客地址1"])]["note"], "")
+        self.assertNotIn((2, COL["顧客地址2"]), marks)
 
     def test_period_is_required(self):
         with self.assertRaises(ValueError):
