@@ -3228,6 +3228,21 @@ def run_deposit_report_mark_from_notes(*, month="", start_date=None, end_date=No
     return message
 
 
+def run_trainee_field_fee_update(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from tools.finance_management.trainee_field_fee import update_refund_and_fee_sheet
+
+    if area not in ("台北", "台中"):
+        raise ValueError("請選擇台北或台中")
+    result = update_refund_and_fee_sheet(area)
+    message = (
+        f"完成：退款金額 H 欄更新 {result['h_updated']} 列；"
+        f"新訓退訓實境費用 {result['fee_rows']} 人，身分證已打勾 {result['id_checked']} 人"
+    )
+    if result["warnings"]:
+        message += "；注意：" + "；".join(result["warnings"])
+    return message
+
+
 def run_deposit_report_flag_discrepancies(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.deposit_report import flag_discrepancies
 
@@ -3692,6 +3707,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【新人排程】104履歷-雙北專員",
         "【新人排程】新人訓練",
         "【新人排程】新人入職",
+        "【新人排程】新訓退訓實境費用",
     ],
     # ── ★ 新增：客服排程系統功能清單 ────────────────────────
     "service_schedule": [
@@ -3799,8 +3815,10 @@ FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排�
 FIELD_CLAIM_BATCH = "【請款】批次設定請款欄位"
 FIELD_CLAIM_CHECK = "【請款】檢查地址對照"
 FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH, FIELD_CLAIM_CHECK)
+FIELD_TRAINEE_FEE_FUNCTIONS = ("【新人排程】新訓退訓實境費用",)
 FIELD_EXTRA_FUNCTIONS = (
-    FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS + FIELD_PLACEHOLDER_FUNCTIONS
+    FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS
+    + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
 )
 
 # ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
@@ -4841,6 +4859,13 @@ with date_col:
     elif system_type == "field_daily_schedule" and selected_function in FIELD_EXTRA_FUNCTIONS:
         today_date = datetime.now(TW_TZ).date()
 
+        if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+            st.info(
+                "工具包押金退款 H 欄（I 欄退款日期空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總（今年度找不到該人改找前一年度）＋工具包押金 B 欄；"
+                "再重建新訓退訓實境費用 A3 起（H>2000，B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
+                icon="🧾",
+            )
+
         if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
             st.markdown('<div class="field-label">📆 期別（YYYYMM）</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -5879,7 +5904,10 @@ if run_clicked:
 
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
-                if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
+                if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+                    add_log(f"✅ {run_trainee_field_fee_update(area=selected_area_value)}", "success")
+
+                elif selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
                     ym = (period or "").strip()
                     if not re.fullmatch(r"\d{6}", ym):
                         raise ValueError("請輸入正確期別，格式：YYYYMM")
