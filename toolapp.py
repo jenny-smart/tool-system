@@ -4853,7 +4853,7 @@ with date_col:
 
         if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
             st.info(
-                "工具包押金退款 H 欄（S 欄空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總＋工具包押金 B 欄；"
+                "工具包押金退款 H 欄（I 欄退款日期空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總＋工具包押金 B 欄；"
                 "再重建新訓退訓實境費用 A3 起（H>2000，B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
                 icon="🧾",
             )

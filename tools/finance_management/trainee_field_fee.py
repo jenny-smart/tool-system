@@ -1,13 +1,15 @@
 """工具包押金退款金額（H 欄）＋新訓退訓實境費用。
 
 步驟（同一份試算表，依登記表「工具包押金退款／地區」找到）：
-1. 工具包押金退款 H 欄（只處理 S 欄空白＝尚未匯款的列）：
+1. 工具包押金退款 H 欄（只處理 I 欄退款日期空白＝尚未匯款的列）：
    = 新人實境＋新人實習 中 C 欄＝本列 B 欄姓名、且 A 欄空白的列 J×K 加總
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
 2. 新訓退訓實境費用 A3 起：工具包押金退款 H > 2000 的 B 欄姓名，B 欄＝H − 2000；
-   D–F（身分證／生日／戶籍）沿用既有資料，沒有的話從工具包押金 L–N 帶入；
+   D 欄若 D3 是公式就把公式往下填滿；E–F（生日／戶籍）沿用既有資料，
+   沒有的話從工具包押金 M–N 帶入；
    E 欄生日優先取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄，
-   2026 年起建檔的是西元年，一律轉成民國年（例如 1997/2/4 → 86/02/04）。
+   該表 A 欄時間戳記 2026 年起建檔的生日是西元年，年份減 1911 轉成民國年
+   （例如 1997/2/4 → 86/02/04）；2026 年前建檔的已是民國年，原樣帶入。
 3. C 欄：雲端資料夾（根目錄或 YYYY新訓退訓 底下）有該人姓名的資料夾、
    且資料夾內有檔案（身分證）即打勾。
 """
@@ -67,12 +69,19 @@ def to_roc_date(text: str) -> str:
 
 
 def roster_birthdays(values: list[list]) -> dict[str, str]:
-    """基本資料、協議規章：C 欄姓名 → E 欄生日（民國年，同名取最後一筆）。"""
+    """基本資料、協議規章：C 欄姓名 → E 欄生日（同名取最後一筆）。
+
+    A 欄時間戳記 2026 年起建檔的生日是西元年，轉成民國年；之前的原樣帶入。
+    """
     result: dict[str, str] = {}
     for row in values[1:]:
         name, birthday = _cell(row, 2), _cell(row, 4)
-        if name and birthday:
-            result[name] = to_roc_date(birthday)
+        if not name or not birthday:
+            continue
+        year = re.match(r"^\s*(\d{4})", _cell(row, 0))
+        if year and int(year.group(1)) >= 2026:
+            birthday = to_roc_date(birthday)
+        result[name] = birthday
     return result
 
 
@@ -107,7 +116,7 @@ def compute_refund_updates(
     pending: dict[str, list[int]] = {}
     for sheet_row, row in enumerate(refund_values[1:], start=2):
         name = _cell(row, 1)
-        if name and not _cell(row, 18):
+        if name and not _cell(row, 8):  # I 欄退款日期空白＝尚未匯款
             pending.setdefault(name, []).append(sheet_row)
 
     updates: dict[int, Decimal] = {}
@@ -213,6 +222,22 @@ def read_roster_birthdays(service, area: str) -> dict[str, str]:
     return roster_birthdays(_read(service, files[0]["id"], ROSTER_SHEET, "A:E"))
 
 
+def _fill_down_d(service, spreadsheet_id: str, n: int) -> None:
+    """把新訓退訓實境費用 D3 的公式往下填到 D{2+n}。"""
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets.properties(sheetId,title)"
+    ).execute()
+    sheet_id = next(
+        s["properties"]["sheetId"] for s in meta["sheets"] if s["properties"]["title"] == FEE_SHEET
+    )
+    source = {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 3, "endColumnIndex": 4}
+    dest = dict(source, startRowIndex=3, endRowIndex=2 + n)
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={"requests": [{"copyPaste": {"source": source, "destination": dest, "pasteType": "PASTE_FORMULA"}}]},
+    ).execute()
+
+
 def _read(service, spreadsheet_id: str, title: str, cols: str = "A:Z") -> list[list]:
     res = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
@@ -257,10 +282,23 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
     birthdays = read_roster_birthdays(service, area)
     fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, birthdays)
 
-    last_row = max(len(fee_values), 2 + len(fee_rows))
+    d3 = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{FEE_SHEET}'!D3",
+        valueRenderOption="FORMULA",
+    ).execute().get("values", [[""]])
+    d_formula = str(d3[0][0] if d3 and d3[0] else "").startswith("=")
+    n = len(fee_rows)
+
+    last_row = max(len(fee_values), 2 + n)
     if last_row >= 3:
-        service.spreadsheets().values().clear(
-            spreadsheetId=spreadsheet_id, range=f"'{FEE_SHEET}'!A3:F{last_row}"
+        clear_ranges = [f"'{FEE_SHEET}'!A3:C{last_row}", f"'{FEE_SHEET}'!E3:F{last_row}"]
+        if not d_formula:
+            clear_ranges.append(f"'{FEE_SHEET}'!D3:D{last_row}")
+        elif last_row > 2 + max(n, 1):
+            clear_ranges.append(f"'{FEE_SHEET}'!D{3 + max(n, 1)}:D{last_row}")
+        service.spreadsheets().values().batchClear(
+            spreadsheetId=spreadsheet_id, body={"ranges": clear_ranges}
         ).execute()
         # 清空後 C 欄核取方塊會變空白，補回 FALSE 維持核取方塊顯示
         service.spreadsheets().values().update(
@@ -270,12 +308,19 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
             body={"values": [[False] for _ in range(last_row - 2)]},
         ).execute()
     if fee_rows:
-        service.spreadsheets().values().update(
+        if d_formula:
+            data = [
+                {"range": f"'{FEE_SHEET}'!A3:C{2 + n}", "values": [r[:3] for r in fee_rows]},
+                {"range": f"'{FEE_SHEET}'!E3:F{2 + n}", "values": [r[4:] for r in fee_rows]},
+            ]
+        else:
+            data = [{"range": f"'{FEE_SHEET}'!A3:F{2 + n}", "values": fee_rows}]
+        service.spreadsheets().values().batchUpdate(
             spreadsheetId=spreadsheet_id,
-            range=f"'{FEE_SHEET}'!A3:F{2 + len(fee_rows)}",
-            valueInputOption="RAW",
-            body={"values": fee_rows},
+            body={"valueInputOption": "RAW", "data": data},
         ).execute()
+        if d_formula and n > 1:
+            _fill_down_d(service, spreadsheet_id, n)
 
     return {
         "h_updated": len(changed),

@@ -25,7 +25,7 @@ def test_refund_updates_add_deposit_and_skip_done_or_duplicate_rows():
     refund = [
         ["h"] * 19,
         ["t", "王小明"] + [""] * 17,
-        ["t", "李大華"] + [""] * 16 + ["已匯款"],
+        ["t", "李大華", "", "", "", "", "", "", "2026/10/16"],
         ["t", "陳三"] + [""] * 17,
         ["t", "陳三"] + [""] * 17,
     ]
@@ -48,8 +48,12 @@ def test_birthday_converted_to_roc_and_overrides_existing():
     assert to_roc_date("1997/2/4") == "86/02/04"
     assert to_roc_date("2011-1-5") == "100/01/05"
     assert to_roc_date("77/04/29") == "77/04/29"
-    roster = roster_birthdays([["時間戳記"], ["2025/12/4", "", "林映竹", "", "86/02/04"], ["2026/3/9", "", "莊曉珍", "", "2002/4/9"]])
-    assert roster == {"林映竹": "86/02/04", "莊曉珍": "91/04/09"}
+    roster = roster_birthdays([
+        ["時間戳記"],
+        ["2025/12/4 上午 2:10", "", "林映竹", "", "1997/2/4"],
+        ["2026/3/9 下午 6:47", "", "莊曉珍", "", "2002/4/9"],
+    ])
+    assert roster == {"林映竹": "1997/2/4", "莊曉珍": "91/04/09"}
     refund = [["h"] * 8, ["t", "莊曉珍", "", "", "", "", "", "2800"]]
     existing = [["姓名"], [], ["莊曉珍", "800", True, "A2", "02/04/09", "新北市"]]
     rows = build_fee_rows(refund, {}, existing, {}, {}, roster)
