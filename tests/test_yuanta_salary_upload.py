@@ -4,7 +4,7 @@ import json
 import pytest
 from openpyxl import Workbook
 
-from tools.bank_statement.yuanta_salary_upload import xlsx_total
+from tools.bank_statement.yuanta_salary_upload import _normalized_text, xlsx_total
 from tools.local_agent import build_yuanta_salary_upload
 
 
@@ -21,6 +21,10 @@ def _workbook_bytes(*amounts):
 
 def test_xlsx_total_reads_column_d_from_row_3():
     assert xlsx_total(_workbook_bytes(100, 250, "1,200")) == 1550
+
+
+def test_yuanta_option_text_ignores_bank_spacing():
+    assert _normalized_text("臺幣薪轉格式 Excel") == "臺幣薪轉格式Excel"
 
 
 def test_agent_command_preserves_preview_and_selected_steps():
