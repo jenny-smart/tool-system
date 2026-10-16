@@ -3228,6 +3228,21 @@ def run_deposit_report_mark_from_notes(*, month="", start_date=None, end_date=No
     return message
 
 
+def run_trainee_field_fee_update(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    from tools.finance_management.trainee_field_fee import update_refund_and_fee_sheet
+
+    if area not in ("台北", "台中"):
+        raise ValueError("請選擇台北或台中")
+    result = update_refund_and_fee_sheet(area)
+    message = (
+        f"完成：退款金額 H 欄更新 {result['h_updated']} 列；"
+        f"新訓退訓實境費用 {result['fee_rows']} 人，身分證已打勾 {result['id_checked']} 人"
+    )
+    if result["warnings"]:
+        message += "；注意：" + "；".join(result["warnings"])
+    return message
+
+
 def run_deposit_report_flag_discrepancies(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.deposit_report import flag_discrepancies
 
@@ -3632,6 +3647,7 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
+    {"name": "【財報】工具包押金｜退款金額＋新訓退訓實境費用", "handler": run_trainee_field_fee_update, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
@@ -4493,6 +4509,12 @@ with date_col:
                 key="finance_deposit_note_range",
             )
             st.caption("同一欄位的儲存格範圍；只寫列號（例如 22-25）預設抓 U 欄。會先清空整張表的 J–M 欄，再依範圍內的備註文字重新打勾")
+        elif selected_function == "【財報】工具包押金｜退款金額＋新訓退訓實境費用":
+            st.info(
+                "工具包押金退款 H 欄（S 欄空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總＋工具包押金 B 欄；"
+                "再重建新訓退訓實境費用 A3 起（H>2000，B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
+                icon="🧾",
+            )
         elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
@@ -4955,6 +4977,7 @@ with area_col:
         "【財報】工具包押金｜統計月份彙整（U–X）",
         "【財報】工具包押金｜批次依備註打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
+        "【財報】工具包押金｜退款金額＋新訓退訓實境費用",
     ) or selected_function in FIELD_EXTRA_FUNCTIONS:
         area_select_options = [area for area in area_options if area != "全區"]
     if selected_function == "【檸檬後台】異動儲值金":
@@ -4967,6 +4990,7 @@ with area_col:
         "【財報】工具包押金｜統計月份彙整（U–X）",
         "【財報】工具包押金｜批次依備註打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
+        "【財報】工具包押金｜退款金額＋新訓退訓實境費用",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
     if selected_function == "【財報】台北固定費用請款":
