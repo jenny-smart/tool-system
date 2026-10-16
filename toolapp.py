@@ -3700,14 +3700,14 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【日排程】一鍵執行外場日排程",
         "【月排程】新增專員名冊",
         "【月排程】新增專員調薪",
-        "【請款】批次設定請款欄位",
-        "【請款】檢查地址對照",
         "【新人排程】104履歷-All",
         "【新人排程】104履歷回覆信",
         "【新人排程】104履歷-雙北專員",
         "【新人排程】新人訓練",
         "【新人排程】新人入職",
-        "【新人排程】新訓退訓實境費用",
+        "【新訓退款】新訓退訓實境費用",
+        "【專員請款】請款資料審核",
+        "【專員請款】檢查地址對照",
     ],
     # ── ★ 新增：客服排程系統功能清單 ────────────────────────
     "service_schedule": [
@@ -3812,10 +3812,10 @@ FIELD_SCRIPT_MAP = {
 FIELD_ROSTER_RAISE_FUNCTIONS = ("【月排程】新增專員名冊", "【月排程】新增專員調薪")
 FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】104履歷回覆信", "【新人排程】104履歷-雙北專員")
 FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
-FIELD_CLAIM_BATCH = "【請款】批次設定請款欄位"
-FIELD_CLAIM_CHECK = "【請款】檢查地址對照"
+FIELD_CLAIM_BATCH = "【專員請款】請款資料審核"
+FIELD_CLAIM_CHECK = "【專員請款】檢查地址對照"
 FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH, FIELD_CLAIM_CHECK)
-FIELD_TRAINEE_FEE_FUNCTIONS = ("【新人排程】新訓退訓實境費用",)
+FIELD_TRAINEE_FEE_FUNCTIONS = ("【新訓退款】新訓退訓實境費用",)
 FIELD_EXTRA_FUNCTIONS = (
     FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS
     + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
@@ -4866,7 +4866,7 @@ with date_col:
                 icon="🧾",
             )
 
-        if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
+        elif selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
             st.markdown('<div class="field-label">📆 期別（YYYYMM）</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
