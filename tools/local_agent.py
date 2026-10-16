@@ -646,6 +646,35 @@ def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_yuanta_salary_upload(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    period = str(params.get("period") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    include_contract = bool(params.get("include_contract", True))
+    include_internal = bool(params.get("include_internal", False))
+    transfer_fubon = bool(params.get("transfer_fubon", True))
+    if not area or area == "全區":
+        raise ValueError("元大薪資檔上傳請選擇單一區域")
+    if not re.fullmatch(r"\d{6}-[12]", period):
+        raise ValueError("元大薪資檔上傳期別須為 YYYYMM-1 或 YYYYMM-2")
+    if not include_contract and not include_internal:
+        raise ValueError("請至少選擇專員承攬或內勤薪資")
+    command = [
+        sys.executable, "-m", "tools.bank_statement.yuanta_salary_upload",
+        "--area", area, "--period", period, "--cdp-url", cdp_url,
+    ]
+    if not include_contract:
+        command.append("--no-contract")
+    if include_internal:
+        command.append("--internal")
+    if transfer_fubon:
+        command.append("--fubon-transfer")
+    expected_files = params.get("expected_files")
+    if isinstance(expected_files, list):
+        command.extend(["--expected-plan", json.dumps(expected_files, ensure_ascii=False)])
+    return command
+
+
 def build_git_pull(_params: dict[str, Any]) -> list[str]:
     """Update this checkout without rewriting local commits or modifications."""
     return ["git", "-C", str(PROJECT_ROOT), "pull", "--ff-only"]
@@ -699,6 +728,7 @@ register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
 register_action("yuanta.download", build_yuanta_download)
 register_action("yuanta.salary_status", build_yuanta_salary_status)
+register_action("yuanta.salary_upload", build_yuanta_salary_upload)
 register_action("system.git_pull", build_git_pull)
 register_action("system.agent_status", build_agent_status)
 register_action("system.agent_logs", build_agent_logs)
