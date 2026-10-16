@@ -295,12 +295,13 @@ def upload_salary_files(files: list[SalaryFile], area: str, cdp_url: str, accoun
                 _click_text(page, "薪資臺幣整批付款")
                 _select_option_containing(page, "臺幣薪轉格式Excel")
                 _set_file(page, path)
-                _click_text(page, "確定匯入")
+                _click_text(page, "確定")
                 # 帳號顯示名稱可能是「元大大同-綜合活期-...」等不同格式；
                 # 以各地區設定的帳號末五碼選取，避免依賴銀行頁面的標點文字。
                 payment_account = account.bank_account[-5:] if account.bank_account else "元大大同"
                 _select_option_containing(page, payment_account)
                 _select_option_containing(page, item.summary, "摘要")
+                _click_text(page, "確定匯入")
                 _click_text(page, "送審")
                 _click_text(page, "確認送審")
                 print(f"已送待放行：{item.name}", flush=True)
