@@ -26,6 +26,7 @@ from tools.bank_statement.fubon_transfer_common import (
     choose_source_account,
     fill_row_inputs,
     open_transfer_form,
+    transfer_page_stage,
     wait_user_completed_transfer,
 )
 from tools.bank_statement.native_yuanta import (
@@ -322,17 +323,21 @@ def transfer_total_from_fubon(
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
-        page = open_transfer_form(page)
-        choose_source_account(page, area, account.bank_account)
-        choose_saved_destination(page, destination)
-        page.wait_for_timeout(800)
-        fill_row_inputs(page, "轉帳金額", [str(amount)])
-        choose_immediate_date(page)
-        memo = f"{period}薪資"
-        fill_row_inputs(page, "給自己", [memo])
-        fill_row_inputs(page, "給對方", [memo])
-        print(f"富邦已填入：NT$ {amount:,}，轉入常用帳號「{destination}」。", flush=True)
-        print("請人工核對並完成富邦交易；確認成功頁後系統才會繼續。", flush=True)
+        stage = transfer_page_stage(page, str(amount))
+        if stage in {"confirmation", "completed"}:
+            print(f"偵測到富邦目前停在{stage}階段，從現有畫面接續。", flush=True)
+        else:
+            page = open_transfer_form(page)
+            choose_source_account(page, area, account.bank_account)
+            choose_saved_destination(page, destination)
+            page.wait_for_timeout(800)
+            fill_row_inputs(page, "轉帳金額", [str(amount)])
+            choose_immediate_date(page)
+            memo = f"{period}薪資"
+            fill_row_inputs(page, "給自己", [memo])
+            fill_row_inputs(page, "給對方", [memo])
+            print(f"富邦已填入：NT$ {amount:,}，轉入常用帳號「{destination}」。", flush=True)
+            print("請人工核對並完成富邦交易；確認成功頁後系統才會繼續。", flush=True)
         wait_user_completed_transfer(
             page,
             require_completed_at=True,

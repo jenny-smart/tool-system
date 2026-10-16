@@ -170,7 +170,11 @@ def open_transfer_form(page: Page) -> Page:
         if "轉出帳號" in body_text:
             in_transfer_section = True
             source_row_text = _row_text_in_context(context, "轉出帳號")
-            if source_row_text and "==請選擇==" in source_row_text:
+            if (
+                source_row_text
+                and "==請選擇==" in source_row_text
+                or _amount_field_still_editable(context)
+            ):
                 fresh_form_open = True
             break
 
@@ -211,6 +215,10 @@ class SavedAccountNotFound(RuntimeError):
     """帳號選擇彈出視窗裡找不到指定名稱的卡片（可能還沒被加入常用轉入帳號）。"""
 
 
+class AccountSelectionNotUpdated(RuntimeError):
+    """已點選帳號卡片，但富邦 AJAX 沒有把選擇帶回表單。"""
+
+
 def _has_duplicate_warning(page: Page) -> bool:
     for context in _contexts(page):
         try:
@@ -229,9 +237,20 @@ def _select_account_card(
     符合 target_text 的帳號卡片。"""
     label = success_label or target_text
     row = _row_for_label(page, row_label)
-    if target_text in row.inner_text() and "==請選擇==" not in row.inner_text():
-        print(f"{row_label}已選擇：{label}。")
-        return
+    row_text = row.inner_text()
+    if "==請選擇==" not in row_text:
+        selected_target_visible = target_text in row_text
+        if not selected_target_visible:
+            for context in _all_fubon_contexts(page):
+                try:
+                    if target_text in context.locator("body").inner_text(timeout=800):
+                        selected_target_visible = True
+                        break
+                except Exception:
+                    continue
+        if selected_target_visible:
+            print(f"{row_label}已選擇：{label}。")
+            return
 
     # 觸發元件有時要等頁面 JS 跑完才會出現，所以要輪詢，不能只查一次。
     trigger = None
@@ -271,7 +290,13 @@ def _select_account_card(
             pass
         page.wait_for_timeout(300)
         raise SavedAccountNotFound(f"{row_label}的帳號選擇視窗找不到「{target_text}」")
-    click_nearest_control(card)
+    # 富邦帳號卡片需要可信任的滑鼠事件才會觸發 AJAX；直接執行 DOM click
+    # 偶爾只會關閉清單，卻不會把選擇帶回表單。
+    try:
+        card.scroll_into_view_if_needed(timeout=2_000)
+        card.click(timeout=3_000)
+    except Exception:
+        click_nearest_control(card)
 
     # 選完帳號卡片後富邦會 AJAX 重建下一個欄位；尖峰時可能超過 20 秒。
     # 畫面偶爾會在選到的瞬間又蓋上「系統偵測到重覆交易」並把這欄重置，
@@ -306,7 +331,9 @@ def _select_account_card(
                 page.wait_for_timeout(1_500)
                 return
         page.wait_for_timeout(200)
-    raise RuntimeError(f"已點選{row_label}帳號卡片「{target_text}」，但畫面未更新")
+    raise AccountSelectionNotUpdated(
+        f"已點選{row_label}帳號卡片「{target_text}」，但畫面未更新"
+    )
 
 
 def select_account_card_with_retry(
@@ -331,6 +358,17 @@ def select_account_card_with_retry(
                 )
             print(f"富邦顯示「系統偵測到重覆交易」（{row_label}），依畫面指示重新執行（第 {attempt + 1} 次嘗試）。")
             page.wait_for_timeout(3_000)
+        except AccountSelectionNotUpdated:
+            if attempt == max_attempts:
+                raise RuntimeError(
+                    f"已嘗試選擇「{target_text}」{max_attempts} 次，富邦畫面仍未更新。"
+                )
+            print(f"{row_label}點選後未更新，重新開啟帳號清單（第 {attempt + 1} 次嘗試）。")
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            page.wait_for_timeout(1_000)
 
 
 def choose_source_account(
@@ -576,6 +614,27 @@ def _amount_field_still_editable(context: Context) -> bool:
             except Exception:
                 return False
     return False
+
+
+def transfer_page_stage(page: Page, expected_amount: str = "") -> str:
+    """辨識富邦轉帳頁目前階段，讓中斷後可從現有畫面接續。"""
+    amount_digits = re.sub(r"\D", "", expected_amount)
+    for context in _all_fubon_contexts(page):
+        try:
+            text = context.locator("body").inner_text(timeout=800)
+        except Exception:
+            continue
+        compact_digits = re.sub(r"\D", "", text)
+        expected_matches = not amount_digits or amount_digits in compact_digits
+        if expected_matches and any(marker in text for marker in TRANSFER_SUCCESS_MARKERS):
+            return "completed"
+        if _amount_field_still_editable(context):
+            return "input"
+        if expected_matches and (
+            "確認資料" in text or "交易密碼" in text or "STEP 2" in text
+        ):
+            return "confirmation"
+    return "other"
 
 
 TRANSFER_SUCCESS_MARKERS = ("交易成功", "轉帳成功", "交易已完成")
