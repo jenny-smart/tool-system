@@ -4,6 +4,7 @@
 1. 工具包押金退款 H 欄（只處理 I 欄退款日期空白＝尚未匯款的列）：
    = 新人實境＋新人實習 中 C 欄＝本列 B 欄姓名、且 A 欄空白的列 J×K 加總
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
+   （今年度新人實境、新人實習都找不到該人時，改找前一年度「{去年}專員薪資相關-{地區}」）
 2. 新訓退訓實境費用 A3 起：工具包押金退款 H > 2000 的 B 欄姓名，B 欄＝H − 2000；
    D 欄若 D3 是公式就把公式往下填滿（公式改成只回傳身分證，不再溢出到 E–F）；
    E–F 取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄生日、G 欄地址，
@@ -38,6 +39,7 @@ ID_ROOT_FOLDER_ID = os.getenv(
 _YEAR_FOLDER_RE = re.compile(r"^\d{4}新訓退訓$")
 FOLDER_MIME = "application/vnd.google-apps.folder"
 ROSTER_NAME = "{year}專員名冊與時數-{area}"
+SALARY_NAME = "{year}專員薪資相關-{area}"
 ROSTER_SHEET = "基本資料、協議規章"
 _ID_ONLY_RE = re.compile(r"\{\s*2\s*(?:,\s*\d+\s*)+\}")
 
@@ -222,10 +224,10 @@ def find_id_owners(names: list[str]) -> dict[str, bool]:
     return result
 
 
-def read_roster(service, area: str) -> dict[str, tuple[str, str]]:
+def _find_spreadsheet(name: str) -> str:
+    """依檔名在雲端找試算表，找不到回傳空字串。"""
     from tools.common.google_auth import get_drive_service
 
-    name = ROSTER_NAME.format(year=datetime.now(ZoneInfo("Asia/Taipei")).year, area=area)
     res = get_drive_service().files().list(
         q=f"name = '{name}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
         fields="files(id)",
@@ -233,9 +235,38 @@ def read_roster(service, area: str) -> dict[str, tuple[str, str]]:
         includeItemsFromAllDrives=True,
     ).execute()
     files = res.get("files", [])
-    if not files:
+    return files[0]["id"] if files else ""
+
+
+def read_roster(service, area: str) -> dict[str, tuple[str, str]]:
+    name = ROSTER_NAME.format(year=datetime.now(ZoneInfo("Asia/Taipei")).year, area=area)
+    roster_id = _find_spreadsheet(name)
+    if not roster_id:
         raise RuntimeError(f"雲端找不到試算表「{name}」")
-    return roster_info(_read(service, files[0]["id"], ROSTER_SHEET, "A:G"))
+    return roster_info(_read(service, roster_id, ROSTER_SHEET, "A:G"))
+
+
+def field_names(sheets: list[list[list]]) -> set[str]:
+    """新人實境／新人實習中出現過的姓名（不論 A 欄是否已填）。"""
+    return {_cell(row, 2) for values in sheets for row in values[1:] if _cell(row, 2)}
+
+
+def add_previous_year_fees(
+    fees: dict[str, Decimal],
+    names_this_year: set[str],
+    pending_names: set[str],
+    previous_sheets: list[list[list]],
+) -> tuple[dict[str, Decimal], list[str]]:
+    """今年度新人實境／新人實習都找不到的人，改用前一年度的 J×K 加總。"""
+    missing = pending_names - names_this_year
+    if not missing:
+        return fees, []
+    previous = field_fees(previous_sheets)
+    merged = dict(fees)
+    used = sorted(n for n in missing if n in previous)
+    for name in used:
+        merged[name] = previous[name]
+    return merged, used
 
 
 def _fill_down_d(service, spreadsheet_id: str, n: int) -> None:
@@ -269,9 +300,27 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
 
     refund_values = _read(service, spreadsheet_id, refund_title)
     deposits = deposit_lookup(_read(service, spreadsheet_id, DEPOSIT_SHEET))
-    fees = field_fees([_read(service, spreadsheet_id, t, "A:K") for t in FIELD_SHEETS])
+    field_sheets = [_read(service, spreadsheet_id, t, "A:K") for t in FIELD_SHEETS]
+    fees = field_fees(field_sheets)
+
+    # 今年度新人實境／新人實習找不到的人，往前一年度的「專員薪資相關」找
+    pending_names = {
+        _cell(row, 1) for row in refund_values[1:]
+        if _cell(row, 1) and not _cell(row, 8) and "略過" not in _cell(row, 6)
+    }
+    previous_year_names: list[str] = []
+    if pending_names - field_names(field_sheets):
+        prev_name = SALARY_NAME.format(year=datetime.now(ZoneInfo("Asia/Taipei")).year - 1, area=area)
+        prev_id = _find_spreadsheet(prev_name)
+        if prev_id:
+            prev_sheets = [_read(service, prev_id, t, "A:K") for t in FIELD_SHEETS]
+            fees, previous_year_names = add_previous_year_fees(
+                fees, field_names(field_sheets), pending_names, prev_sheets
+            )
 
     updates, warnings = compute_refund_updates(refund_values, fees, deposits)
+    if previous_year_names:
+        warnings.append(f"以下人員實境費用取自前一年度：{'、'.join(previous_year_names)}")
     changed = {
         r: v for r, v in updates.items()
         if _num(_cell(refund_values[r - 1], 7)) != v or not _cell(refund_values[r - 1], 7)

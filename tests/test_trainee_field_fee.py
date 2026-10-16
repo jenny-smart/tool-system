@@ -76,3 +76,12 @@ def test_birthday_formats_unified():
     assert to_roc_date("19961/10/08") == ""  # 打錯字留空給人工檢查
     assert to_roc_date("200405/27/") == ""
     assert to_roc_date("") == ""
+
+
+def test_previous_year_fees_only_for_names_missing_this_year():
+    from tools.finance_management.trainee_field_fee import add_previous_year_fees
+
+    previous = [FIELD_HEADER, _field_row("", "林映竹", "200", "2"), _field_row("", "王小明", "200", "2")]
+    fees, used = add_previous_year_fees({"王小明": Decimal(400)}, {"王小明"}, {"王小明", "林映竹"}, [previous])
+    assert fees == {"王小明": Decimal(400), "林映竹": Decimal(400)}
+    assert used == ["林映竹"]
