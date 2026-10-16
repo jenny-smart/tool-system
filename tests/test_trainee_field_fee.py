@@ -105,3 +105,16 @@ def test_field_fees_start_from_roster_year():
         "王小明": Decimal(0),
         "李大華": Decimal(400),
     }
+
+
+def test_pick_spreadsheet_prefers_exact_and_skips_disabled():
+    from tools.finance_management.trainee_field_fee import pick_spreadsheet
+
+    files = [
+        {"id": "old", "name": "2025專員名冊與時數-台北old(停用)"},
+        {"id": "new", "name": "2025專員名冊與時數-台北new"},
+    ]
+    assert pick_spreadsheet("2025專員名冊與時數-台北", files) == "new"
+    files.append({"id": "exact", "name": "2025專員名冊與時數-台北"})
+    assert pick_spreadsheet("2025專員名冊與時數-台北", files) == "exact"
+    assert pick_spreadsheet("2024專員名冊與時數-台北", files) == ""
