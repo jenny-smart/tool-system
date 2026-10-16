@@ -414,3 +414,25 @@ def test_run_log():
     # 同一批 Log 也追加到 salary-system／orders-system 的「生成新年度Log」
     from tools.annual_rollover.new_year_generate import SYSTEM_LOG_SPREADSHEETS
     assert sheets.appended_to[-2:] == list(SYSTEM_LOG_SPREADSHEETS.values())
+
+
+def test_ensure_year_columns():
+    drive, sheets = _setup()
+    sheets.titles = ["年度工作檔ID_GID總表"]
+    header = ["年度處理"] + [""] * 12 + ["2026 檔案／資料夾名稱", "2026 ID", "2026 GID", "2026 生成時間",
+                                       "2027 檔名（自動）", "2027 ID（自動）", "2027 GID（自動）", "2027 生成時間（自動）"]
+    sheets.tables["年度工作檔ID_GID總表"] = [header]
+    roll = Rollover(drive, sheets, "master", 2028, log=lambda *_: None)
+    roll.ensure_year_columns("master")
+    # 2028 欄位接在 2027 之後（V 欄起），以 2027 ID／檔名比對 Log
+    values = sheets.writes["'年度工作檔ID_GID總表'!V3:Y4"]
+    assert values[0] == ["2028 檔名（自動）", "2028 ID（自動）", "2028 GID（自動）", "2028 生成時間（自動）"]
+    assert "MAP(S4:S, R4:R" in values[1][0] and "$B$2:$B=2028" in values[1][0]
+    assert values[1][2].startswith("=MAP(T4:T, W4:W")
+    # 欄數不足時先擴充欄位
+    assert any("appendDimension" in r for _, r in sheets.requests)
+
+    # 已有該年度欄位：不重複新增
+    sheets.writes.clear()
+    Rollover(drive, sheets, "master", 2027, log=lambda *_: None).ensure_year_columns("master")
+    assert not sheets.writes
