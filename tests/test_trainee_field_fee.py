@@ -73,4 +73,6 @@ def test_birthday_formats_unified():
     assert to_roc_date("20031031") == "92/10/31"
     assert to_roc_date("71.08.07") == "71/08/07"
     assert to_roc_date("民國90年08月20日") == "90/08/20"
-    assert to_roc_date("19961/10/08") == "19961/10/08"  # 打錯字原樣保留
+    assert to_roc_date("19961/10/08") == ""  # 打錯字留空給人工檢查
+    assert to_roc_date("200405/27/") == ""
+    assert to_roc_date("") == ""

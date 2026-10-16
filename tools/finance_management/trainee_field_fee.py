@@ -61,10 +61,9 @@ def _fmt(value: Decimal) -> int | float:
 def to_roc_date(text: str) -> str:
     """生日統一成民國年 YY/MM/DD（例如 1997/2/4、860204、86.2.4、民國86年2月4日 → 86/02/04）。
 
-    無法辨識的寫法（打錯字等）原樣回傳。
+    無法辨識的寫法（打錯字等）回傳空白，讓人工檢查補填。
     """
-    raw = text.strip()
-    cleaned = unicodedata.normalize("NFKC", raw).replace("民國", "")
+    cleaned = unicodedata.normalize("NFKC", text.strip()).replace("民國", "")
     cleaned = re.sub(r"[年月]", "/", cleaned).replace("日", "").strip(" /")
     parts = [p for p in re.split(r"[/.\-, ]+", cleaned) if p]
     if len(parts) == 1 and parts[0].isdigit():
@@ -74,12 +73,12 @@ def to_roc_date(text: str) -> str:
         elif len(digits) in (6, 7):
             parts = [digits[:-4], digits[-4:-2], digits[-2:]]
     if len(parts) != 3 or not all(p.isdigit() for p in parts):
-        return raw
+        return ""
     year, month, day = (int(p) for p in parts)
     if year >= 1912:
         year -= 1911
     if not (1 <= year <= 150 and 1 <= month <= 12 and 1 <= day <= 31):
-        return raw
+        return ""
     return f"{year:02d}/{month:02d}/{day:02d}"
 
 
@@ -173,8 +172,8 @@ def build_fee_rows(
         else:
             info = [_cell(dep, 11), _cell(dep, 12), _cell(dep, 13)]
         birthday, address = (roster or {}).get(name, ("", ""))
-        if birthday:
-            info[1] = birthday
+        if name in (roster or {}):
+            info[1] = birthday  # 名冊生日寫法有誤會是空白，留給人工檢查
         info[1] = to_roc_date(info[1])
         if address:
             info[2] = address
