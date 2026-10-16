@@ -288,6 +288,7 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
     counts = {"addr1": 0, "addr2": 0, "area_pair": 0, "map_link": 0, "period": 0, "remark": 0}
     issues: list[dict[str, Any]] = []
     data_rows: list[int] = []
+    map_links: dict[int, str] = {}
 
     for offset, row in enumerate(claim_rows):
         row_no = start_row + offset
@@ -346,6 +347,8 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
             put("area_pair", build_area_pair(trip_type, staff_addr, addr1, addr2))
             map_link = build_map_link(trip_type, staff_addr, addr1, addr2)
             put("map_link", map_link)
+            if map_link.startswith("https://"):
+                map_links[row_no] = map_link
             if not map_link.startswith("https://"):
                 flag("map_link", "map", map_link)
 
@@ -369,6 +372,7 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
         "missing_addr2": missing_addr2,
         "issues": issues,
         "data_rows": data_rows,
+        "map_links": map_links,
         # 會標記問題的欄位（AC/AD/AE/AG/AN），清舊標記時只看這幾欄
         "checked_cols": sorted(idx[k] for k in ("staff_addr", "addr1", "addr2", "map_link", "remark")),
         "counts": counts,
@@ -430,6 +434,8 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
     checked_cols = sorted(set(plan["checked_cols"]) | {dup_col})
 
     apply_issue_marks(service, spreadsheet_id, claim_title, sheet_gid, start_row, end_row, plan["issues"], checked_cols)
+    link_map_cells(service, spreadsheet_id, sheet_gid, _header_index(claim_header, "實際跨區2", CLAIM_SHEET_TITLE),
+                   plan["map_links"])
 
     plan.update(area=area, spreadsheet_id=spreadsheet_id, sheet_title=claim_title, start_row=start_row, end_row=end_row, period=period)
     return plan
@@ -516,6 +522,18 @@ def find_duplicates(service, spreadsheet_id: str, sheet_title: str, claim_header
             if r in data_rows:
                 duplicates[r] = [m for m in members if m != r]
     return duplicates
+
+
+def link_map_cells(service, spreadsheet_id: str, sheet_gid: int, col: int, map_links: dict[int, str]) -> None:
+    """AG 地圖連結加上超連結格式，可以直接點開（儲存格文字仍是網址本身）。"""
+    requests = [{"repeatCell": {
+        "range": {"sheetId": sheet_gid, "startRowIndex": row - 1, "endRowIndex": row,
+                  "startColumnIndex": col, "endColumnIndex": col + 1},
+        "cell": {"userEnteredFormat": {"textFormat": {"link": {"uri": url}}}},
+        "fields": "userEnteredFormat.textFormat.link",
+    }} for row, url in sorted(map_links.items())]
+    if requests:
+        service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
 
 
 def apply_issue_marks(service, spreadsheet_id: str, sheet_title: str, sheet_gid: int,

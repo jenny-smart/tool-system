@@ -316,6 +316,19 @@ class RunClaimBatchTests(unittest.TestCase):
         self.assertIn("第 2 列", mark["note"])
         self.assertNotIn((4, ar), self._marks())
 
+    def test_map_link_becomes_clickable(self):
+        row = claim_row(
+            服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638", 請款項目="跨區車馬費",
+            跨區類型="家到案場", 專員地址="新北市五股區新五路二段303號7樓",
+        )
+        self._run([row])
+        links = [r["repeatCell"] for r in self.service.format_requests
+                 if "repeatCell" in r and "link" in r["repeatCell"]["fields"]]
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]["range"]["startColumnIndex"], COL["實際跨區2"])
+        uri = links[0]["cell"]["userEnteredFormat"]["textFormat"]["link"]["uri"]
+        self.assertTrue(uri.startswith("https://www.google.com/maps/dir/"))
+
     def test_period_is_required(self):
         with self.assertRaises(ValueError):
             staff_claim.run_claim_batch("台北", 2, 3, "", service=_Service({}))
