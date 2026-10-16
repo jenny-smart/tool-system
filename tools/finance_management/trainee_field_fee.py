@@ -5,7 +5,9 @@
    = 新人實境＋新人實習 中 C 欄＝本列 B 欄姓名、且 A 欄空白的列 J×K 加總
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
 2. 新訓退訓實境費用 A3 起：工具包押金退款 H > 2000 的 B 欄姓名，B 欄＝H − 2000；
-   D–F（身分證／生日／戶籍）沿用既有資料，沒有的話從工具包押金 L–N 帶入。
+   D–F（身分證／生日／戶籍）沿用既有資料，沒有的話從工具包押金 L–N 帶入；
+   E 欄生日優先取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄，
+   2026 年起建檔的是西元年，一律轉成民國年（例如 1997/2/4 → 86/02/04）。
 3. C 欄：雲端資料夾（根目錄或 YYYY新訓退訓 底下）有該人姓名的資料夾、
    且資料夾內有檔案（身分證）即打勾。
 """
@@ -14,7 +16,9 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from tools.bank_statement.internal_payment_registry import (
     DEPOSIT_REFUND_TYPE,
@@ -31,6 +35,9 @@ ID_ROOT_FOLDER_ID = os.getenv(
 )
 _YEAR_FOLDER_RE = re.compile(r"^\d{4}新訓退訓$")
 FOLDER_MIME = "application/vnd.google-apps.folder"
+ROSTER_NAME = "{year}專員名冊與時數-{area}"
+ROSTER_SHEET = "基本資料、協議規章"
+_WESTERN_DATE_RE = re.compile(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$")
 
 
 def _cell(row: list, idx: int) -> str:
@@ -47,6 +54,26 @@ def _num(text: str) -> Decimal:
 
 def _fmt(value: Decimal) -> int | float:
     return int(value) if value == value.to_integral() else float(value)
+
+
+def to_roc_date(text: str) -> str:
+    """西元年（1997/2/4）轉民國年（86/02/04）；已是民國年或其他格式則原樣回傳。"""
+    text = text.strip()
+    match = _WESTERN_DATE_RE.match(text)
+    if not match or int(match.group(1)) < 1912:
+        return text
+    year, month, day = (int(g) for g in match.groups())
+    return f"{year - 1911:02d}/{month:02d}/{day:02d}"
+
+
+def roster_birthdays(values: list[list]) -> dict[str, str]:
+    """基本資料、協議規章：C 欄姓名 → E 欄生日（民國年，同名取最後一筆）。"""
+    result: dict[str, str] = {}
+    for row in values[1:]:
+        name, birthday = _cell(row, 2), _cell(row, 4)
+        if name and birthday:
+            result[name] = to_roc_date(birthday)
+    return result
 
 
 def field_fees(sheets: list[list[list]]) -> dict[str, Decimal]:
@@ -102,6 +129,7 @@ def build_fee_rows(
     existing_fee_values: list[list],
     deposits: dict[str, list],
     has_id: dict[str, bool],
+    birthdays: dict[str, str] | None = None,
 ) -> list[list]:
     """新訓退訓實境費用 A3 起的 A–F 資料。"""
     existing: dict[str, list] = {}
@@ -122,6 +150,8 @@ def build_fee_rows(
             info = [_cell(old, 3), _cell(old, 4), _cell(old, 5)]
         else:
             info = [_cell(dep, 11), _cell(dep, 12), _cell(dep, 13)]
+        if birthdays and birthdays.get(name):
+            info[1] = birthdays[name]
         rows.append([name, _fmt(h - DEPOSIT_BASE), bool(has_id.get(name)), *info])
     return rows
 
@@ -167,6 +197,22 @@ def find_id_owners(names: list[str]) -> dict[str, bool]:
     return result
 
 
+def read_roster_birthdays(service, area: str) -> dict[str, str]:
+    from tools.common.google_auth import get_drive_service
+
+    name = ROSTER_NAME.format(year=datetime.now(ZoneInfo("Asia/Taipei")).year, area=area)
+    res = get_drive_service().files().list(
+        q=f"name = '{name}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false",
+        fields="files(id)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    files = res.get("files", [])
+    if not files:
+        raise RuntimeError(f"雲端找不到試算表「{name}」")
+    return roster_birthdays(_read(service, files[0]["id"], ROSTER_SHEET, "A:E"))
+
+
 def _read(service, spreadsheet_id: str, title: str, cols: str = "A:Z") -> list[list]:
     res = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
@@ -208,7 +254,8 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
         if _cell(row, 1) and updates.get(r, _num(_cell(row, 7))) > DEPOSIT_BASE
     })
     has_id = find_id_owners(names) if names else {}
-    fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id)
+    birthdays = read_roster_birthdays(service, area)
+    fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, birthdays)
 
     last_row = max(len(fee_values), 2 + len(fee_rows))
     if last_row >= 3:

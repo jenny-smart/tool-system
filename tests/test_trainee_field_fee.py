@@ -40,3 +40,17 @@ def test_fee_rows_filter_over_2000_and_keep_existing_info():
     existing = [["姓名"], [], ["王小明", "1200", True, "F1", "65/10/28", "台北市"]]
     rows = build_fee_rows(refund, {}, existing, {}, {"王小明": True})
     assert rows == [["王小明", 1200, True, "F1", "65/10/28", "台北市"]]
+
+
+def test_birthday_converted_to_roc_and_overrides_existing():
+    from tools.finance_management.trainee_field_fee import roster_birthdays, to_roc_date
+
+    assert to_roc_date("1997/2/4") == "86/02/04"
+    assert to_roc_date("2011-1-5") == "100/01/05"
+    assert to_roc_date("77/04/29") == "77/04/29"
+    roster = roster_birthdays([["時間戳記"], ["2025/12/4", "", "林映竹", "", "86/02/04"], ["2026/3/9", "", "莊曉珍", "", "2002/4/9"]])
+    assert roster == {"林映竹": "86/02/04", "莊曉珍": "91/04/09"}
+    refund = [["h"] * 8, ["t", "莊曉珍", "", "", "", "", "", "2800"]]
+    existing = [["姓名"], [], ["莊曉珍", "800", True, "A2", "02/04/09", "新北市"]]
+    rows = build_fee_rows(refund, {}, existing, {}, {}, roster)
+    assert rows == [["莊曉珍", 800, False, "A2", "91/04/09", "新北市"]]
