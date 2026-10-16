@@ -49,6 +49,20 @@ class _Request:
         return self.result
 
 
+def _parse_a1(a1):
+    """'AG2:AR10' → (起欄 index, 起列, 迄欄 index, 迄列或 None)。"""
+    def one(part):
+        letters = "".join(c for c in part if c.isalpha())
+        digits = "".join(c for c in part if c.isdigit())
+        col = 0
+        for ch in letters:
+            col = col * 26 + ord(ch) - 64
+        return col - 1, int(digits) if digits else None
+    a, b = a1.split(":")
+    (c1, r1), (c2, r2) = one(a), one(b)
+    return c1, r1, c2, r2
+
+
 class _Values:
     def __init__(self, sheets):
         self.sheets = sheets
@@ -61,20 +75,29 @@ class _Values:
             return _Request({"values": rows[:1]})
         if a1 == "A:Z":
             return _Request({"values": rows})
-        start, end = a1.split(":")
-        start_no = int("".join(c for c in start if c.isdigit()))
-        end_no = int("".join(c for c in end if c.isdigit()))
-        return _Request({"values": rows[start_no - 1:end_no]})
+        c1, r1, c2, r2 = _parse_a1(a1)
+        picked = rows[r1 - 1:r2] if r2 else rows[r1 - 1:]
+        return _Request({"values": [row[c1:c2 + 1] for row in picked]})
 
     def batchUpdate(self, spreadsheetId, body):
         self.batch_bodies.append(body)
+        # 寫回假資料，讓後續讀取看得到新值
+        for item in body["data"]:
+            title, a1 = item["range"].split("!")
+            c, r, _, _ = _parse_a1(a1 + ":" + a1)
+            rows = self.sheets[title.strip("'")]
+            while len(rows[r - 1]) <= c:
+                rows[r - 1].append("")
+            rows[r - 1][c] = item["values"][0][0]
         return _Request({})
 
 
 class _Service:
-    def __init__(self, sheets, notes=None):
+    def __init__(self, sheets, notes=None, formulas=None):
         self.values_api = _Values(sheets)
-        self.notes = notes or {}  # {(row, col): note}，模擬既有備註
+        self.sheets = sheets
+        self.notes = notes or {}        # {(row, col): note}，模擬既有備註
+        self.formulas = formulas or {}  # {(row, col): formula}，模擬既有公式
         self.format_requests = []
 
     def spreadsheets(self):
@@ -86,12 +109,19 @@ class _Service:
 
     def get(self, spreadsheetId, fields=None, ranges=None):
         if ranges:
-            start = int("".join(c for c in ranges[0].split("!")[1].split(":")[0] if c.isdigit()))
-            end = int("".join(c for c in ranges[0].split(":")[-1] if c.isdigit()))
-            row_data = [
-                {"values": [{"note": self.notes.get((r, c), "")} for c in range(len(CLAIM_HEADER))]}
-                for r in range(start, end + 1)
-            ]
+            c1, r1, c2, r2 = _parse_a1(ranges[0].split("!")[1])
+            rows = self.sheets["專員請款"]
+            row_data = []
+            for r in range(r1, r2 + 1):
+                values = []
+                for c in range(c1, c2 + 1):
+                    cell = {"note": self.notes.get((r, c), "")}
+                    if (r, c) in self.formulas:
+                        cell["userEnteredValue"] = {"formulaValue": self.formulas[(r, c)]}
+                    elif r - 1 < len(rows) and c < len(rows[r - 1]) and rows[r - 1][c]:
+                        cell["userEnteredValue"] = {"stringValue": rows[r - 1][c]}
+                    values.append(cell)
+                row_data.append({"values": values})
             return _Request({"sheets": [{"data": [{"rowData": row_data}]}]})
         return _Request({"sheets": [
             {"properties": {"sheetId": 0, "title": "ATM"}},
@@ -146,9 +176,9 @@ class MapTests(unittest.TestCase):
 
 
 class RunClaimBatchTests(unittest.TestCase):
-    def _run(self, claim_rows, start_row=2, end_row=None, notes=None):
+    def _run(self, claim_rows, start_row=2, end_row=None, notes=None, formulas=None):
         sheets = {"專員請款": [CLAIM_HEADER] + claim_rows, "專員個人資料": STAFF_ROWS}
-        service = _Service(sheets, notes)
+        service = _Service(sheets, notes, formulas)
         self.service = service
         end_row = end_row or start_row + len(claim_rows) - 1
         result = staff_claim.run_claim_batch("台北", start_row, end_row, "202601-1", service=service)
@@ -200,6 +230,8 @@ class RunClaimBatchTests(unittest.TestCase):
     def _marks(self):
         marks = {}
         for req in self.service.format_requests:
+            if "repeatCell" not in req:
+                continue
             cell = req["repeatCell"]
             rng = cell["range"]
             marks[(rng["startRowIndex"] + 1, rng["startColumnIndex"])] = cell["cell"]
@@ -266,6 +298,23 @@ class RunClaimBatchTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             staff_claim.run_claim_batch("台北", 2, 2, "202601-1", service=service)
         self.assertEqual(service.values_api.batch_bodies, [])
+
+    def test_formulas_filled_down_and_duplicates_marked(self):
+        base = dict(服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638", 請款項目="工具組運費",
+                    專員姓名_重複="王小美", 請款備註="01/02廖士捷工具組運費-")
+        rows = [claim_row(**base), claim_row(**base), claim_row(**dict(base, 專員姓名_重複="別人"))]
+        aq, ar = COL["審核備註"], COL["審核備註"] + 1
+        formulas = {(2, aq): "=AN2&AO2", (2, ar): "=countifs(AQ:AQ,AQ2,AK:AK,AK2)"}
+        result, _ = self._run(rows, start_row=3, end_row=4, formulas=formulas)
+        pastes = [r["copyPaste"] for r in self.service.format_requests if "copyPaste" in r]
+        filled = {(p["destination"]["startRowIndex"] + 1, p["destination"]["startColumnIndex"]) for p in pastes}
+        self.assertEqual(filled, {(3, aq), (3, ar), (4, aq), (4, ar)})
+        self.assertTrue(all(p["source"]["startRowIndex"] == 1 for p in pastes))
+        self.assertEqual(result["duplicates"], {3: [2]})
+        mark = self._marks()[(3, ar)]
+        self.assertIn("重複請款", mark["note"])
+        self.assertIn("第 2 列", mark["note"])
+        self.assertNotIn((4, ar), self._marks())
 
     def test_period_is_required(self):
         with self.assertRaises(ValueError):

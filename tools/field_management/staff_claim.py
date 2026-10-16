@@ -82,6 +82,7 @@ ISSUE_TYPES = {
     "no_addr": ("#D9D2E9", "查無地址，請手動補上"),
     "map": ("#FCE5CD", "無法產生地圖連結"),
     "same_customer": ("#FFF2CC", "第二位顧客與顧客相同，請確認"),
+    "duplicate": ("#E6B8AF", "重複請款（專員＋請款備註＋審核補貼相同）"),
 }
 ISSUE_NOTE_PREFIX = "⚠️"
 
@@ -286,6 +287,7 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
     missing_addr2: list[int] = []
     counts = {"addr1": 0, "addr2": 0, "area_pair": 0, "map_link": 0, "period": 0, "remark": 0}
     issues: list[dict[str, Any]] = []
+    data_rows: list[int] = []
 
     for offset, row in enumerate(claim_rows):
         row_no = start_row + offset
@@ -311,6 +313,8 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
         # 空白列（沒有服務日期也沒有顧客）整列不動，避免範圍選太大時把期別寫進空列
         if not get("date") and not get("customer"):
             continue
+
+        data_rows.append(row_no)
 
         # AJ 給付期別：範圍內每列都寫
         put("period", period)
@@ -364,6 +368,7 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
         "missing_addr1": missing_addr1,
         "missing_addr2": missing_addr2,
         "issues": issues,
+        "data_rows": data_rows,
         # 會標記問題的欄位（AC/AD/AE/AG/AN），清舊標記時只看這幾欄
         "checked_cols": sorted(idx[k] for k in ("staff_addr", "addr1", "addr2", "map_link", "remark")),
         "counts": counts,
@@ -411,10 +416,106 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
             },
         ).execute()
 
-    apply_issue_marks(service, spreadsheet_id, claim_title, sheet_gid, start_row, end_row, plan["issues"], plan["checked_cols"])
+    data_rows = plan["data_rows"]
+    fill = fill_formula_columns(service, spreadsheet_id, claim_title, sheet_gid, claim_header, start_row, end_row, data_rows)
+    if fill["filled"]:
+        log(f"⬇️ 下拉公式 {fill['filled']} 格（{'、'.join(fill['columns'])}，範本第 {fill['template_row']} 列）")
+    duplicates = find_duplicates(service, spreadsheet_id, claim_title, claim_header, data_rows)
+    dup_col = fill["dup_col"] if fill["dup_col"] is not None else _header_index(claim_header, "審核備註", CLAIM_SHEET_TITLE)
+    for row, others in duplicates.items():
+        plan["issues"].append({"row": row, "col": dup_col, "key": "duplicate", "type": "duplicate",
+                               "detail": "與第 " + "、".join(map(str, others)) + " 列"})
+    plan["duplicates"] = duplicates
+    plan["filled_formulas"] = fill["filled"]
+    checked_cols = sorted(set(plan["checked_cols"]) | {dup_col})
+
+    apply_issue_marks(service, spreadsheet_id, claim_title, sheet_gid, start_row, end_row, plan["issues"], checked_cols)
 
     plan.update(area=area, spreadsheet_id=spreadsheet_id, sheet_title=claim_title, start_row=start_row, end_row=end_row, period=period)
     return plan
+
+
+def fill_formula_columns(service, spreadsheet_id: str, sheet_title: str, sheet_gid: int,
+                         claim_header: list[Any], start_row: int, end_row: int,
+                         data_rows: list[int]) -> dict[str, Any]:
+    """AG～AR 有公式的欄位（例如 AQ =AN&AO、AR =COUNTIFS 檢查重複）往下拉到範圍內缺公式的列。
+
+    範本用起始列以上最近一列有公式的列（沒有就用範圍內第一列有公式的列），
+    只填空白格，不覆蓋已有的值或公式。
+    """
+    first = _header_index(claim_header, "實際跨區2", CLAIM_SHEET_TITLE)
+    last = _header_index(claim_header, "審核備註", CLAIM_SHEET_TITLE) + 1
+    result = {"filled": 0, "columns": [], "template_row": None, "dup_col": None}
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        ranges=[f"'{sheet_title}'!{column_letter(first)}2:{column_letter(last)}{end_row}"],
+        fields="sheets.data.rowData.values.userEnteredValue",
+    ).execute()
+    row_data = ((meta.get("sheets") or [{}])[0].get("data") or [{}])[0].get("rowData", [])
+
+    def cell(row: int, col: int) -> dict[str, Any]:
+        values = row_data[row - 2].get("values", []) if 0 <= row - 2 < len(row_data) else []
+        i = col - first
+        return (values[i].get("userEnteredValue") or {}) if 0 <= i < len(values) else {}
+
+    def formula_cols(row: int) -> list[int]:
+        return [c for c in range(first, last + 1) if "formulaValue" in cell(row, c)]
+
+    template = next((r for r in range(start_row - 1, 1, -1) if formula_cols(r)), None)
+    if template is None:
+        template = next((r for r in range(start_row, end_row + 1) if formula_cols(r)), None)
+    if template is None:
+        return result
+    result["template_row"] = template
+
+    requests = []
+    for col in formula_cols(template):
+        if str(cell(template, col)["formulaValue"]).lower().startswith("=countif"):
+            result["dup_col"] = col
+        targets = [r for r in data_rows if r != template and not cell(r, col)]
+        if not targets:
+            continue
+        result["columns"].append(column_letter(col))
+        for r in targets:
+            requests.append({"copyPaste": {
+                "source": {"sheetId": sheet_gid, "startRowIndex": template - 1, "endRowIndex": template,
+                           "startColumnIndex": col, "endColumnIndex": col + 1},
+                "destination": {"sheetId": sheet_gid, "startRowIndex": r - 1, "endRowIndex": r,
+                                "startColumnIndex": col, "endColumnIndex": col + 1},
+                "pasteType": "PASTE_FORMULA",
+            }})
+    if requests:
+        service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
+    result["filled"] = len(requests)
+    return result
+
+
+def find_duplicates(service, spreadsheet_id: str, sheet_title: str, claim_header: list[Any],
+                    data_rows: list[int]) -> dict[int, list[int]]:
+    """與 AR =COUNTIFS(AQ:AQ,AQ,AK:AK,AK) 同規則：專員姓名_重複＋（請款備註＆審核補貼）相同即重複。
+
+    回傳 {範圍內重複的列: [與它重複的其他列]}；比對整張表，不只範圍內。
+    """
+    ak = _header_index(claim_header, "專員姓名_重複", CLAIM_SHEET_TITLE)
+    an = _header_index(claim_header, "請款備註", CLAIM_SHEET_TITLE)
+    ao = _header_index(claim_header, "審核補貼", CLAIM_SHEET_TITLE)
+    lo, hi = min(ak, an, ao), max(ak, an, ao)
+    rows = _read(service, spreadsheet_id, f"'{sheet_title}'!{column_letter(lo)}2:{column_letter(hi)}")
+    groups: dict[tuple[str, str], list[int]] = {}
+    for offset, row in enumerate(rows):
+        def get(i: int) -> str:
+            return _clean(row[i - lo]) if i - lo < len(row) else ""
+        if not get(an):
+            continue
+        groups.setdefault((get(ak), get(an) + get(ao)), []).append(offset + 2)
+    duplicates = {}
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        for r in members:
+            if r in data_rows:
+                duplicates[r] = [m for m in members if m != r]
+    return duplicates
 
 
 def apply_issue_marks(service, spreadsheet_id: str, sheet_title: str, sheet_gid: int,
