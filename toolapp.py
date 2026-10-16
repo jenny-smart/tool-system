@@ -3647,7 +3647,6 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
-    {"name": "【財報】工具包押金｜退款金額＋新訓退訓實境費用", "handler": run_trainee_field_fee_update, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
@@ -3706,6 +3705,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【新人排程】104履歷-雙北專員",
         "【新人排程】新人訓練",
         "【新人排程】新人入職",
+        "【新人排程】新訓退訓實境費用",
     ],
     # ── ★ 新增：客服排程系統功能清單 ────────────────────────
     "service_schedule": [
@@ -3810,7 +3810,10 @@ FIELD_SCRIPT_MAP = {
 FIELD_ROSTER_RAISE_FUNCTIONS = ("【月排程】新增專員名冊", "【月排程】新增專員調薪")
 FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】104履歷回覆信", "【新人排程】104履歷-雙北專員")
 FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
-FIELD_EXTRA_FUNCTIONS = FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_RESUME_FUNCTIONS + FIELD_PLACEHOLDER_FUNCTIONS
+FIELD_TRAINEE_FEE_FUNCTIONS = ("【新人排程】新訓退訓實境費用",)
+FIELD_EXTRA_FUNCTIONS = (
+    FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_RESUME_FUNCTIONS + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
+)
 
 # ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
 SERVICE_STEP_MAP = {
@@ -4509,12 +4512,6 @@ with date_col:
                 key="finance_deposit_note_range",
             )
             st.caption("同一欄位的儲存格範圍；只寫列號（例如 22-25）預設抓 U 欄。會先清空整張表的 J–M 欄，再依範圍內的備註文字重新打勾")
-        elif selected_function == "【財報】工具包押金｜退款金額＋新訓退訓實境費用":
-            st.info(
-                "工具包押金退款 H 欄（S 欄空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總＋工具包押金 B 欄；"
-                "再重建新訓退訓實境費用 A3 起（H>2000，B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
-                icon="🧾",
-            )
         elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
@@ -4854,6 +4851,13 @@ with date_col:
     elif system_type == "field_daily_schedule" and selected_function in FIELD_EXTRA_FUNCTIONS:
         today_date = datetime.now(TW_TZ).date()
 
+        if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+            st.info(
+                "工具包押金退款 H 欄（S 欄空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總＋工具包押金 B 欄；"
+                "再重建新訓退訓實境費用 A3 起（H>2000，B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
+                icon="🧾",
+            )
+
         if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
             st.markdown('<div class="field-label">📆 期別（YYYYMM）</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -4977,7 +4981,6 @@ with area_col:
         "【財報】工具包押金｜統計月份彙整（U–X）",
         "【財報】工具包押金｜批次依備註打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
-        "【財報】工具包押金｜退款金額＋新訓退訓實境費用",
     ) or selected_function in FIELD_EXTRA_FUNCTIONS:
         area_select_options = [area for area in area_options if area != "全區"]
     if selected_function == "【檸檬後台】異動儲值金":
@@ -4990,7 +4993,6 @@ with area_col:
         "【財報】工具包押金｜統計月份彙整（U–X）",
         "【財報】工具包押金｜批次依備註打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
-        "【財報】工具包押金｜退款金額＋新訓退訓實境費用",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
     if selected_function == "【財報】台北固定費用請款":
@@ -5870,7 +5872,10 @@ if run_clicked:
 
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
-                if selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
+                if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+                    add_log(f"✅ {run_trainee_field_fee_update(area=selected_area_value)}", "success")
+
+                elif selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
                     ym = (period or "").strip()
                     if not re.fullmatch(r"\d{6}", ym):
                         raise ValueError("請輸入正確期別，格式：YYYYMM")
