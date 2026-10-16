@@ -16,7 +16,7 @@ def _field_row(paid, name, fee, hours):
 
 def test_field_fees_sum_both_sheets_and_skip_paid_rows():
     shijing = [FIELD_HEADER, _field_row("", "王小明", "200", "2.00"), _field_row("202610-1", "王小明", "200", "2")]
-    shixi = [FIELD_HEADER, _field_row("", "王小明", "200", "1.5"), _field_row("", "李大華", "200", "2")]
+    shixi = [FIELD_HEADER, _field_row("", "王小明", "200", "1.5"), _field_row("", "李大華", "200", "２")]
     fees = field_fees([shijing, shixi])
     assert fees == {"王小明": Decimal("700.0"), "李大華": Decimal(400)}
 
@@ -28,6 +28,7 @@ def test_refund_updates_add_deposit_and_skip_done_or_duplicate_rows():
         ["t", "李大華", "", "", "", "", "", "", "2026/10/16"],
         ["t", "陳三"] + [""] * 17,
         ["t", "陳三"] + [""] * 17,
+        ["t", "黃詠宸", "", "", "", "", "此筆略過(帳號錯誤)", "0"],
     ]
     deposits = deposit_lookup([["專員姓名"], ["王小明", "2000"], ["李大華", "2000"], ["陳三", "2000"]])
     updates, warnings = compute_refund_updates(refund, {"王小明": Decimal(800)}, deposits)
@@ -43,18 +44,23 @@ def test_fee_rows_filter_over_2000_and_keep_existing_info():
 
 
 def test_birthday_converted_to_roc_and_overrides_existing():
-    from tools.finance_management.trainee_field_fee import roster_birthdays, to_roc_date
+    from tools.finance_management.trainee_field_fee import roster_info, to_roc_date
 
     assert to_roc_date("1997/2/4") == "86/02/04"
     assert to_roc_date("2011-1-5") == "100/01/05"
     assert to_roc_date("77/04/29") == "77/04/29"
-    roster = roster_birthdays([
+    roster = roster_info([
         ["時間戳記"],
-        ["2025/12/4 上午 2:10", "", "林映竹", "", "1997/2/4"],
-        ["2026/3/9 下午 6:47", "", "莊曉珍", "", "2002/4/9"],
+        ["2025/12/4 上午 2:10", "", "林映竹", "", "1997/2/4", "", "台北市"],
+        ["2025/12/9 下午 10:08", "", "廖品婷", "", "881215", "", "新北市汐止區"],
+        ["2026/3/9 下午 6:47", "", "莊曉珍", "", "2002/4/9", "", "新北市中和區"],
     ])
-    assert roster == {"林映竹": "1997/2/4", "莊曉珍": "91/04/09"}
+    assert roster == {
+        "林映竹": ("86/02/04", "台北市"),
+        "廖品婷": ("881215", "新北市汐止區"),
+        "莊曉珍": ("91/04/09", "新北市中和區"),
+    }
     refund = [["h"] * 8, ["t", "莊曉珍", "", "", "", "", "", "2800"]]
     existing = [["姓名"], [], ["莊曉珍", "800", True, "A2", "02/04/09", "新北市"]]
     rows = build_fee_rows(refund, {}, existing, {}, {}, roster)
-    assert rows == [["莊曉珍", 800, False, "A2", "91/04/09", "新北市"]]
+    assert rows == [["莊曉珍", 800, False, "A2", "91/04/09", "新北市中和區"]]

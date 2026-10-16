@@ -5,11 +5,10 @@
    = 新人實境＋新人實習 中 C 欄＝本列 B 欄姓名、且 A 欄空白的列 J×K 加總
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
 2. 新訓退訓實境費用 A3 起：工具包押金退款 H > 2000 的 B 欄姓名，B 欄＝H − 2000；
-   D 欄若 D3 是公式就把公式往下填滿；E–F（生日／戶籍）沿用既有資料，
-   沒有的話從工具包押金 M–N 帶入；
-   E 欄生日優先取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄，
-   該表 A 欄時間戳記 2026 年起建檔的生日是西元年，年份減 1911 轉成民國年
-   （例如 1997/2/4 → 86/02/04）；2026 年前建檔的已是民國年，原樣帶入。
+   D 欄若 D3 是公式就把公式往下填滿（公式改成只回傳身分證，不再溢出到 E–F）；
+   E–F 取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄生日、G 欄地址，
+   找不到才沿用既有資料或工具包押金 M–N；生日是 4 位數西元年（2026 年起建檔都是）
+   一律減 1911 轉成民國年（例如 1997/2/4 → 86/02/04），已是民國年的原樣帶入。
 3. C 欄：雲端資料夾（根目錄或 YYYY新訓退訓 底下）有該人姓名的資料夾、
    且資料夾內有檔案（身分證）即打勾。
 """
@@ -18,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
@@ -39,6 +39,7 @@ _YEAR_FOLDER_RE = re.compile(r"^\d{4}新訓退訓$")
 FOLDER_MIME = "application/vnd.google-apps.folder"
 ROSTER_NAME = "{year}專員名冊與時數-{area}"
 ROSTER_SHEET = "基本資料、協議規章"
+_ID_ONLY_RE = re.compile(r"\{\s*2\s*(?:,\s*\d+\s*)+\}")
 _WESTERN_DATE_RE = re.compile(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$")
 
 
@@ -47,7 +48,7 @@ def _cell(row: list, idx: int) -> str:
 
 
 def _num(text: str) -> Decimal:
-    cleaned = re.sub(r"[^0-9.\-]", "", text)
+    cleaned = re.sub(r"[^0-9.\-]", "", unicodedata.normalize("NFKC", text))
     try:
         return Decimal(cleaned) if cleaned else Decimal(0)
     except InvalidOperation:
@@ -68,20 +69,17 @@ def to_roc_date(text: str) -> str:
     return f"{year - 1911:02d}/{month:02d}/{day:02d}"
 
 
-def roster_birthdays(values: list[list]) -> dict[str, str]:
-    """基本資料、協議規章：C 欄姓名 → E 欄生日（同名取最後一筆）。
+def roster_info(values: list[list]) -> dict[str, tuple[str, str]]:
+    """基本資料、協議規章：C 欄姓名 → (E 欄生日, G 欄地址)，同名取最後一筆。
 
-    A 欄時間戳記 2026 年起建檔的生日是西元年，轉成民國年；之前的原樣帶入。
+    2026 年起建檔的生日是西元年（2026 年前也偶有填西元年），
+    凡是 4 位數西元年一律轉成民國年；已是民國年的原樣帶入。
     """
-    result: dict[str, str] = {}
+    result: dict[str, tuple[str, str]] = {}
     for row in values[1:]:
-        name, birthday = _cell(row, 2), _cell(row, 4)
-        if not name or not birthday:
-            continue
-        year = re.match(r"^\s*(\d{4})", _cell(row, 0))
-        if year and int(year.group(1)) >= 2026:
-            birthday = to_roc_date(birthday)
-        result[name] = birthday
+        name = _cell(row, 2)
+        if name:
+            result[name] = (to_roc_date(_cell(row, 4)), _cell(row, 6))
     return result
 
 
@@ -116,7 +114,8 @@ def compute_refund_updates(
     pending: dict[str, list[int]] = {}
     for sheet_row, row in enumerate(refund_values[1:], start=2):
         name = _cell(row, 1)
-        if name and not _cell(row, 8):  # I 欄退款日期空白＝尚未匯款
+        # I 欄退款日期空白＝尚未匯款；G 欄註明「略過」的列（帳號錯誤、重複回報）不處理
+        if name and not _cell(row, 8) and "略過" not in _cell(row, 6):
             pending.setdefault(name, []).append(sheet_row)
 
     updates: dict[int, Decimal] = {}
@@ -138,7 +137,7 @@ def build_fee_rows(
     existing_fee_values: list[list],
     deposits: dict[str, list],
     has_id: dict[str, bool],
-    birthdays: dict[str, str] | None = None,
+    roster: dict[str, tuple[str, str]] | None = None,
 ) -> list[list]:
     """新訓退訓實境費用 A3 起的 A–F 資料。"""
     existing: dict[str, list] = {}
@@ -159,8 +158,11 @@ def build_fee_rows(
             info = [_cell(old, 3), _cell(old, 4), _cell(old, 5)]
         else:
             info = [_cell(dep, 11), _cell(dep, 12), _cell(dep, 13)]
-        if birthdays and birthdays.get(name):
-            info[1] = birthdays[name]
+        birthday, address = (roster or {}).get(name, ("", ""))
+        if birthday:
+            info[1] = birthday
+        if address:
+            info[2] = address
         rows.append([name, _fmt(h - DEPOSIT_BASE), bool(has_id.get(name)), *info])
     return rows
 
@@ -206,7 +208,7 @@ def find_id_owners(names: list[str]) -> dict[str, bool]:
     return result
 
 
-def read_roster_birthdays(service, area: str) -> dict[str, str]:
+def read_roster(service, area: str) -> dict[str, tuple[str, str]]:
     from tools.common.google_auth import get_drive_service
 
     name = ROSTER_NAME.format(year=datetime.now(ZoneInfo("Asia/Taipei")).year, area=area)
@@ -219,7 +221,7 @@ def read_roster_birthdays(service, area: str) -> dict[str, str]:
     files = res.get("files", [])
     if not files:
         raise RuntimeError(f"雲端找不到試算表「{name}」")
-    return roster_birthdays(_read(service, files[0]["id"], ROSTER_SHEET, "A:E"))
+    return roster_info(_read(service, files[0]["id"], ROSTER_SHEET, "A:G"))
 
 
 def _fill_down_d(service, spreadsheet_id: str, n: int) -> None:
@@ -279,24 +281,34 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
         if _cell(row, 1) and updates.get(r, _num(_cell(row, 7))) > DEPOSIT_BASE
     })
     has_id = find_id_owners(names) if names else {}
-    birthdays = read_roster_birthdays(service, area)
-    fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, birthdays)
+    roster = read_roster(service, area)
+    fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, roster)
 
     d3 = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range=f"'{FEE_SHEET}'!D3",
         valueRenderOption="FORMULA",
     ).execute().get("values", [[""]])
-    d_formula = str(d3[0][0] if d3 and d3[0] else "").startswith("=")
+    d3_text = str(d3[0][0] if d3 and d3[0] else "")
+    d_formula = d3_text.startswith("=")
     n = len(fee_rows)
+
+    if d_formula:
+        # 原公式 VLOOKUP(...,{2,3,5}) 會溢出到 E–F，改成只回傳身分證，E–F 由程式寫入
+        id_only = _ID_ONLY_RE.sub("2", d3_text)
+        if id_only != d3_text:
+            service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{FEE_SHEET}'!D3",
+                valueInputOption="USER_ENTERED",
+                body={"values": [[id_only]]},
+            ).execute()
 
     last_row = max(len(fee_values), 2 + n)
     if last_row >= 3:
         clear_ranges = [f"'{FEE_SHEET}'!A3:C{last_row}", f"'{FEE_SHEET}'!E3:F{last_row}"]
         if not d_formula:
             clear_ranges.append(f"'{FEE_SHEET}'!D3:D{last_row}")
-        elif last_row > 2 + max(n, 1):
-            clear_ranges.append(f"'{FEE_SHEET}'!D{3 + max(n, 1)}:D{last_row}")
         service.spreadsheets().values().batchClear(
             spreadsheetId=spreadsheet_id, body={"ranges": clear_ranges}
         ).execute()
