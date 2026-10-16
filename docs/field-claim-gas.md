@@ -122,12 +122,45 @@
 
 ## 4. 本次修改需求
 
-1. **AN 請款備註－案場到案場**：當 G＝跨區車馬費（台中：車馬費）且 N＝`案場到案場` 時，AN 要同時帶 E（顧客姓名）與 O（第二位顧客姓名），
-   例：`05/12王小明、陳小華跨區車馬費-`（其他情況維持 `05/12王小明跨區車馬費-`）。
-   Web App 寫入時套用；批次執行時也一併重算範圍內的 AN。
-2. **選定列範圍執行時一律寫入 AJ 期別**：批次執行必填期別，範圍內每一列都寫入 AJ（不再是可取消的選項）。
+1. **AN 請款備註－案場到案場**：當 G＝跨區車馬費（台中：車馬費）且 N＝`案場到案場` 時，AN 同時帶 E（顧客姓名）與 O（第二位顧客姓名），兩個姓名之間用 `-`：
+   `05/12王小明-陳小華跨區車馬費-`（其他情況維持 `05/12王小明跨區車馬費-`）。
+   - 外場排程系統批次執行時：範圍內車馬費＋案場到案場的列一律重算 AN；其他列只補空白的 AN。
+   - 專員送出表單時（GAS Web App）：見下方 GAS 修改。
+2. **選定列範圍執行時一律寫入 AJ 期別**：批次執行必填期別（格式 `YYYYMM-期數`），範圍內有資料的列都寫入 AJ；空白列不動。
 
----
+### GAS Web App 對應修改（Code.gs，台北／台中都要改）
+
+`Utilities.generateClaimRemark` 改成多收跨區類型與第二位顧客：
+
+```javascript
+generateClaimRemark(serviceDate, customerName, claimType, supervisorItem, zoneType, secondCustomerName) {
+  const parts = [];
+  if (serviceDate) {
+    const date = new Date(serviceDate.replace(/-/g, '/'));
+    if (!isNaN(date.getTime())) {
+      parts.push(`${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`);
+    }
+  }
+  const isSiteToSite = (claimType === '跨區車馬費' || claimType === '車馬費') && zoneType === '案場到案場' && secondCustomerName;
+  if (isSiteToSite) {
+    parts.push(customerName ? `${customerName}-${secondCustomerName}` : secondCustomerName);
+  } else if (customerName) {
+    parts.push(customerName);
+  }
+  const item = (claimType === '主管專用' && supervisorItem) ? supervisorItem : (claimType || '');
+  if (item) parts.push(item);
+  return parts.length ? parts.join('') + '-' : '';
+},
+```
+
+`mapClaimFields` 呼叫處加上兩個參數：
+
+```javascript
+const claimRemark = Utilities.generateClaimRemark(
+  formData.serviceDate, formData.customerName, claimType, formData.supervisorItem,
+  formData.zoneType, formData.secondCustomerName
+);
+```
 
 ## 5. 現有程式的問題（移植時一併修正）
 
@@ -146,12 +179,14 @@
 
 ---
 
-## 6. 整合規劃（待確認）
+## 6. 整合到外場排程系統（已完成）
 
-- 新增 `tools/field_management/staff_claim.py`：以 Sheets API 實作 §3 的批次功能 + §4 修改，`area` 參數區分台北／台中（車馬費項目名稱、補貼）。
-- `toolapp.py` 外場排程系統新增功能：
-  - 【請款】批次設定請款欄位（AD/AE/AF/AG/AN，AJ 必填）
-  - 【請款】只產生AG欄Google Map連結
-  - 【請款】檢查地址對照資料
-- `config/systems.yaml` 外場排程系統 `spreadsheet_ids` 新增 `staff_claim: {台北: ..., 台中: ...}`，地址對照來源也放這裡。
-- Google Maps API 金鑰選單目前沒有實際用途，先不移植。
+- 程式：`tools/field_management/staff_claim.py`，測試：`tests/test_staff_claim.py`。
+- 試算表位置：主控試算表「財務帳務設定」登記表中 `清潔異動設定／台北`、`清潔異動設定／台中` 的試算表ID
+  （即「2026台北內勤工作表單」「2026台中內勤工作表單」），分頁用標題找 `專員請款`、`專員個人資料`，不另外設 GID。
+- `toolapp.py` →「外場排程系統」新增兩個功能（地區：台北／台中）：
+  - **【請款】批次設定請款欄位**：輸入起始列、結束列、給付期別 → 寫 AD/AE/AF/AG/AJ/AN。
+    AD/AE 對照「專員個人資料」G 服務日期＋L 客戶姓名＋N 聯絡電話 → M 客戶地址（依表頭名稱定位）；
+    比對順序：日期＋姓名＋電話 → 日期＋姓名 → 日期＋電話，查不到保留原值並在日誌列出列號。電話比對會忽略開頭 0。
+  - **【請款】檢查地址對照**：只讀，顯示兩張表的欄位位置與有效地址筆數。
+- 不移植：Google Maps API 金鑰（沒有功能使用）、「只產生AG欄」（批次功能已包含）、「跨區專用AF/AG」（AF/AG 只在 N 欄有值時重算）。
