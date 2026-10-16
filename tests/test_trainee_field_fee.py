@@ -78,10 +78,30 @@ def test_birthday_formats_unified():
     assert to_roc_date("") == ""
 
 
-def test_previous_year_fees_only_for_names_missing_this_year():
-    from tools.finance_management.trainee_field_fee import add_previous_year_fees
+def test_field_fees_start_from_roster_year():
+    from tools.finance_management.trainee_field_fee import (
+        field_start_years,
+        roster_start_years,
+        sum_fees_by_year,
+    )
 
-    previous = [FIELD_HEADER, _field_row("", "林映竹", "200", "2"), _field_row("", "王小明", "200", "2")]
-    fees, used = add_previous_year_fees({"王小明": Decimal(400)}, {"王小明"}, {"王小明", "林映竹"}, [previous])
-    assert fees == {"王小明": Decimal(400), "林映竹": Decimal(400)}
-    assert used == ["林映竹"]
+    roster = [["時間戳記"], ["2025/8/6 上午 2:51", "", "林映竹"], ["2026/3/9 下午 6:47", "", "莊曉珍"]]
+    start = field_start_years(
+        {"林映竹", "莊曉珍", "王小明", "李大華"},
+        roster_start_years(roster),
+        {"王小明"},
+        2026,
+    )
+    # 名冊建檔年度為起點；名冊沒有的人今年找得到看今年，找不到看前一年
+    assert start == {"林映竹": 2025, "莊曉珍": 2026, "王小明": 2026, "李大華": 2025}
+
+    fees_by_year = {
+        2025: {"林映竹": Decimal(800), "李大華": Decimal(400), "莊曉珍": Decimal(999)},
+        2026: {"林映竹": Decimal(400), "莊曉珍": Decimal(800)},
+    }
+    assert sum_fees_by_year(start, fees_by_year, 2026) == {
+        "林映竹": Decimal(1200),
+        "莊曉珍": Decimal(800),
+        "王小明": Decimal(0),
+        "李大華": Decimal(400),
+    }

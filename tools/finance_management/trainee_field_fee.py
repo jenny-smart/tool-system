@@ -4,7 +4,8 @@
 1. 工具包押金退款 H 欄（只處理 I 欄退款日期空白＝尚未匯款的列）：
    = 新人實境＋新人實習 中 C 欄＝本列 B 欄姓名、且 A 欄空白的列 J×K 加總
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
-   （今年度新人實境、新人實習都找不到該人時，改找前一年度「{去年}專員薪資相關-{地區}」）
+   （新人實境、新人實習從該人在「基本資料、協議規章」的建檔年度開始找，
+   逐年讀「{年度}專員薪資相關-{地區}」加總到今年度；名冊沒有此人時，今年度找不到才找前一年度）
 2. 新訓退訓實境費用 A3 起：工具包押金退款 H > 2000 的 B 欄姓名，B 欄＝H − 2000；
    D 欄若 D3 是公式就把公式往下填滿（公式改成只回傳身分證，不再溢出到 E–F）；
    E–F 取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄生日、G 欄地址，
@@ -29,6 +30,7 @@ from tools.bank_statement.internal_payment_registry import (
 )
 from tools.common.config_loader import get_sheets_service
 
+TW_TZ = ZoneInfo("Asia/Taipei")
 DEPOSIT_SHEET = "工具包押金"
 FIELD_SHEETS = ("新人實境", "新人實習")
 FEE_SHEET = "新訓退訓實境費用"
@@ -95,6 +97,17 @@ def roster_info(values: list[list]) -> dict[str, tuple[str, str]]:
         name = _cell(row, 2)
         if name:
             result[name] = (to_roc_date(_cell(row, 4)), _cell(row, 6))
+    return result
+
+
+def roster_start_years(values: list[list]) -> dict[str, int]:
+    """基本資料、協議規章：C 欄姓名 → A 欄時間戳記的建檔年份（同名取最後一筆）。"""
+    result: dict[str, int] = {}
+    for row in values[1:]:
+        name = _cell(row, 2)
+        year = re.match(r"^\s*(\d{4})", _cell(row, 0))
+        if name and year:
+            result[name] = int(year.group(1))
     return result
 
 
@@ -238,12 +251,12 @@ def _find_spreadsheet(name: str) -> str:
     return files[0]["id"] if files else ""
 
 
-def read_roster(service, area: str) -> dict[str, tuple[str, str]]:
-    name = ROSTER_NAME.format(year=datetime.now(ZoneInfo("Asia/Taipei")).year, area=area)
+def read_roster_values(service, area: str) -> list[list]:
+    name = ROSTER_NAME.format(year=datetime.now(TW_TZ).year, area=area)
     roster_id = _find_spreadsheet(name)
     if not roster_id:
         raise RuntimeError(f"雲端找不到試算表「{name}」")
-    return roster_info(_read(service, roster_id, ROSTER_SHEET, "A:G"))
+    return _read(service, roster_id, ROSTER_SHEET, "A:G")
 
 
 def field_names(sheets: list[list[list]]) -> set[str]:
@@ -251,22 +264,41 @@ def field_names(sheets: list[list[list]]) -> set[str]:
     return {_cell(row, 2) for values in sheets for row in values[1:] if _cell(row, 2)}
 
 
-def add_previous_year_fees(
-    fees: dict[str, Decimal],
-    names_this_year: set[str],
+def field_start_years(
     pending_names: set[str],
-    previous_sheets: list[list[list]],
-) -> tuple[dict[str, Decimal], list[str]]:
-    """今年度新人實境／新人實習都找不到的人，改用前一年度的 J×K 加總。"""
-    missing = pending_names - names_this_year
-    if not missing:
-        return fees, []
-    previous = field_fees(previous_sheets)
-    merged = dict(fees)
-    used = sorted(n for n in missing if n in previous)
-    for name in used:
-        merged[name] = previous[name]
-    return merged, used
+    start_years: dict[str, int],
+    names_this_year: set[str],
+    current_year: int,
+) -> dict[str, int]:
+    """每位待退款人員的新人實境／實習要從哪一年度開始找。
+
+    基本資料、協議規章有建檔年份就從該年度開始；名冊沒有此人時，
+    今年度找得到就只看今年，找不到再往前一年度。
+    """
+    result: dict[str, int] = {}
+    for name in pending_names:
+        if name in start_years:
+            result[name] = min(start_years[name], current_year)
+        elif name in names_this_year:
+            result[name] = current_year
+        else:
+            result[name] = current_year - 1
+    return result
+
+
+def sum_fees_by_year(
+    start_from: dict[str, int],
+    fees_by_year: dict[int, dict[str, Decimal]],
+    current_year: int,
+) -> dict[str, Decimal]:
+    """從起始年度加總到今年度的 J×K（缺檔的年度略過）。"""
+    return {
+        name: sum(
+            (fees_by_year.get(year, {}).get(name, Decimal(0)) for year in range(start, current_year + 1)),
+            Decimal(0),
+        )
+        for name, start in start_from.items()
+    }
 
 
 def _fill_down_d(service, spreadsheet_id: str, n: int) -> None:
@@ -302,25 +334,32 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
     deposits = deposit_lookup(_read(service, spreadsheet_id, DEPOSIT_SHEET))
     field_sheets = [_read(service, spreadsheet_id, t, "A:K") for t in FIELD_SHEETS]
     fees = field_fees(field_sheets)
+    roster_values = read_roster_values(service, area)
 
-    # 今年度新人實境／新人實習找不到的人，往前一年度的「專員薪資相關」找
+    # 新人實境／實習從該人在基本資料、協議規章的建檔年度開始找，加總到今年度
+    current_year = datetime.now(TW_TZ).year
     pending_names = {
         _cell(row, 1) for row in refund_values[1:]
         if _cell(row, 1) and not _cell(row, 8) and "略過" not in _cell(row, 6)
     }
-    previous_year_names: list[str] = []
-    if pending_names - field_names(field_sheets):
-        prev_name = SALARY_NAME.format(year=datetime.now(ZoneInfo("Asia/Taipei")).year - 1, area=area)
-        prev_id = _find_spreadsheet(prev_name)
-        if prev_id:
-            prev_sheets = [_read(service, prev_id, t, "A:K") for t in FIELD_SHEETS]
-            fees, previous_year_names = add_previous_year_fees(
-                fees, field_names(field_sheets), pending_names, prev_sheets
-            )
+    start_from = field_start_years(
+        pending_names, roster_start_years(roster_values), field_names(field_sheets), current_year
+    )
+    fees_by_year: dict[int, dict[str, Decimal]] = {current_year: fees}
+    warnings: list[str] = []
+    for year in sorted({y for y in start_from.values() if y < current_year}):
+        year_id = _find_spreadsheet(SALARY_NAME.format(year=year, area=area))
+        if not year_id:
+            warnings.append(f"雲端找不到「{SALARY_NAME.format(year=year, area=area)}」，該年度實境費用未計入")
+            continue
+        fees_by_year[year] = field_fees([_read(service, year_id, t, "A:K") for t in FIELD_SHEETS])
+    fees = {**fees, **sum_fees_by_year(start_from, fees_by_year, current_year)}
+    earlier = sorted(f"{n}（{y}起）" for n, y in start_from.items() if y < current_year)
 
-    updates, warnings = compute_refund_updates(refund_values, fees, deposits)
-    if previous_year_names:
-        warnings.append(f"以下人員實境費用取自前一年度：{'、'.join(previous_year_names)}")
+    updates, update_warnings = compute_refund_updates(refund_values, fees, deposits)
+    warnings = update_warnings + warnings
+    if earlier:
+        warnings.append(f"以下人員實境費用含前年度：{'、'.join(earlier)}")
     changed = {
         r: v for r, v in updates.items()
         if _num(_cell(refund_values[r - 1], 7)) != v or not _cell(refund_values[r - 1], 7)
@@ -344,7 +383,7 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
         if _cell(row, 1) and updates.get(r, _num(_cell(row, 7))) > DEPOSIT_BASE
     })
     has_id = find_id_owners(names) if names else {}
-    roster = read_roster(service, area)
+    roster = roster_info(roster_values)
     fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, roster)
 
     d3 = service.spreadsheets().values().get(
