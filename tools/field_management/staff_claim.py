@@ -395,8 +395,10 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
     claim_rows = _read(service, spreadsheet_id, f"'{claim_title}'!A{start_row}:{last_col}{end_row}")
     claim_rows += [[] for _ in range(end_row - start_row + 1 - len(claim_rows))]
 
-    address_book = AddressBook(_read(service, spreadsheet_id, f"'{STAFF_SHEET_TITLE}'!A:Z"))
-    log(f"{area}｜{claim_title} 第 {start_row}～{end_row} 列，地址對照 {address_book.count} 筆")
+    staff_rows = _read(service, spreadsheet_id, f"'{STAFF_SHEET_TITLE}'!A:Z")
+    address_book = AddressBook(staff_rows)
+    log(f"{area}｜{claim_title} 第 {start_row}～{end_row} 列")
+    log(describe_columns(claim_header, staff_rows, address_book))
 
     plan = plan_claim_updates(claim_header, claim_rows, start_row, period, address_book)
     updates = plan["updates"]
@@ -486,25 +488,18 @@ def format_batch_result(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def check_address_book(area: str, service=None, claim_gid: Optional[int] = None) -> str:
-    """檢查「專員個人資料」的地址對照欄位與筆數（對應 GAS「檢查專員資料對照」）。"""
-    service = service or get_sheets_service()
-    spreadsheet_id = resolve_spreadsheet_id(area)
-    rows = _read(service, spreadsheet_id, f"'{STAFF_SHEET_TITLE}'!A:Z")
-    if not rows:
-        raise RuntimeError(f"「{STAFF_SHEET_TITLE}」沒有資料")
-    positions = [
-        f"{column_letter(_header_index(rows[0], name, STAFF_SHEET_TITLE))}欄 {name}"
+def describe_columns(claim_header: list[Any], staff_rows: list[list[Any]], address_book: AddressBook) -> str:
+    """執行前檢查：列出地址對照與專員請款用到的欄位位置（缺欄位時 _header_index 會直接報錯）。"""
+    staff_positions = [
+        f"{column_letter(_header_index(staff_rows[0], name, STAFF_SHEET_TITLE))} {name}"
         for name in STAFF_HEADERS.values()
     ]
-    book = AddressBook(rows)
-    claim_title, _ = resolve_claim_sheet(service, spreadsheet_id, area, claim_gid)
-    claim_header = (_read(service, spreadsheet_id, f"'{claim_title}'!1:1") or [[]])[0]
     claim_positions = [
         f"{column_letter(_header_index(claim_header, name, CLAIM_SHEET_TITLE))} {name}"
         for name in CLAIM_HEADERS.values()
     ]
     return (
-        f"✅ {area}地址對照：{'、'.join(positions)}｜有效 {book.count} 筆（共 {len(rows) - 1} 列）\n"
-        f"專員請款欄位：{'、'.join(claim_positions)}"
+        f"🔍 地址對照（{STAFF_SHEET_TITLE}）：{'、'.join(staff_positions)}｜"
+        f"有效 {address_book.count} 筆（共 {len(staff_rows) - 1} 列）\n"
+        f"🔍 {CLAIM_SHEET_TITLE}欄位：{'、'.join(claim_positions)}"
     )

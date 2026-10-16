@@ -250,6 +250,23 @@ class RunClaimBatchTests(unittest.TestCase):
         self.assertEqual(marks[(2, COL["顧客地址1"])]["note"], "")
         self.assertNotIn((2, COL["顧客地址2"]), marks)
 
+    def test_batch_logs_column_check(self):
+        row = claim_row(服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638", 請款項目="工具組運費")
+        logs = []
+        service = _Service({"專員請款": [CLAIM_HEADER, row], "專員個人資料": STAFF_ROWS})
+        staff_claim.run_claim_batch("台北", 2, 2, "202601-1", service=service, on_progress=logs.append)
+        joined = "\n".join(logs)
+        self.assertIn("M 客戶地址", joined)
+        self.assertIn("AN 請款備註", joined)
+        self.assertIn("有效 2 筆", joined)
+
+    def test_missing_staff_column_stops_before_writing(self):
+        staff = [[h if h != "客戶地址" else "地址" for h in STAFF_ROWS[0]]] + STAFF_ROWS[1:]
+        service = _Service({"專員請款": [CLAIM_HEADER, claim_row(服務日期="2026/01/02", 顧客姓名="A")], "專員個人資料": staff})
+        with self.assertRaises(RuntimeError):
+            staff_claim.run_claim_batch("台北", 2, 2, "202601-1", service=service)
+        self.assertEqual(service.values_api.batch_bodies, [])
+
     def test_period_is_required(self):
         with self.assertRaises(ValueError):
             staff_claim.run_claim_batch("台北", 2, 3, "", service=_Service({}))
