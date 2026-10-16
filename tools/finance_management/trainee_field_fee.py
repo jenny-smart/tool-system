@@ -40,7 +40,6 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 ROSTER_NAME = "{year}專員名冊與時數-{area}"
 ROSTER_SHEET = "基本資料、協議規章"
 _ID_ONLY_RE = re.compile(r"\{\s*2\s*(?:,\s*\d+\s*)+\}")
-_WESTERN_DATE_RE = re.compile(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$")
 
 
 def _cell(row: list, idx: int) -> str:
@@ -60,20 +59,35 @@ def _fmt(value: Decimal) -> int | float:
 
 
 def to_roc_date(text: str) -> str:
-    """西元年（1997/2/4）轉民國年（86/02/04）；已是民國年或其他格式則原樣回傳。"""
-    text = text.strip()
-    match = _WESTERN_DATE_RE.match(text)
-    if not match or int(match.group(1)) < 1912:
-        return text
-    year, month, day = (int(g) for g in match.groups())
-    return f"{year - 1911:02d}/{month:02d}/{day:02d}"
+    """生日統一成民國年 YY/MM/DD（例如 1997/2/4、860204、86.2.4、民國86年2月4日 → 86/02/04）。
+
+    無法辨識的寫法（打錯字等）原樣回傳。
+    """
+    raw = text.strip()
+    cleaned = unicodedata.normalize("NFKC", raw).replace("民國", "")
+    cleaned = re.sub(r"[年月]", "/", cleaned).replace("日", "").strip(" /")
+    parts = [p for p in re.split(r"[/.\-, ]+", cleaned) if p]
+    if len(parts) == 1 and parts[0].isdigit():
+        digits = parts[0]
+        if len(digits) == 8:
+            parts = [digits[:4], digits[4:6], digits[6:]]
+        elif len(digits) in (6, 7):
+            parts = [digits[:-4], digits[-4:-2], digits[-2:]]
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return raw
+    year, month, day = (int(p) for p in parts)
+    if year >= 1912:
+        year -= 1911
+    if not (1 <= year <= 150 and 1 <= month <= 12 and 1 <= day <= 31):
+        return raw
+    return f"{year:02d}/{month:02d}/{day:02d}"
 
 
 def roster_info(values: list[list]) -> dict[str, tuple[str, str]]:
     """基本資料、協議規章：C 欄姓名 → (E 欄生日, G 欄地址)，同名取最後一筆。
 
-    2026 年起建檔的生日是西元年（2026 年前也偶有填西元年），
-    凡是 4 位數西元年一律轉成民國年；已是民國年的原樣帶入。
+    生日寫法不一（2026 年起建檔是西元年，之前多為民國年但格式不一），
+    一律統一成民國年 YY/MM/DD。
     """
     result: dict[str, tuple[str, str]] = {}
     for row in values[1:]:
@@ -161,6 +175,7 @@ def build_fee_rows(
         birthday, address = (roster or {}).get(name, ("", ""))
         if birthday:
             info[1] = birthday
+        info[1] = to_roc_date(info[1])
         if address:
             info[2] = address
         rows.append([name, _fmt(h - DEPOSIT_BASE), bool(has_id.get(name)), *info])

@@ -57,10 +57,20 @@ def test_birthday_converted_to_roc_and_overrides_existing():
     ])
     assert roster == {
         "林映竹": ("86/02/04", "台北市"),
-        "廖品婷": ("881215", "新北市汐止區"),
+        "廖品婷": ("88/12/15", "新北市汐止區"),
         "莊曉珍": ("91/04/09", "新北市中和區"),
     }
     refund = [["h"] * 8, ["t", "莊曉珍", "", "", "", "", "", "2800"]]
     existing = [["姓名"], [], ["莊曉珍", "800", True, "A2", "02/04/09", "新北市"]]
     rows = build_fee_rows(refund, {}, existing, {}, {}, roster)
     assert rows == [["莊曉珍", 800, False, "A2", "91/04/09", "新北市中和區"]]
+
+
+def test_birthday_formats_unified():
+    from tools.finance_management.trainee_field_fee import to_roc_date
+
+    assert to_roc_date("0860912") == "86/09/12"
+    assert to_roc_date("20031031") == "92/10/31"
+    assert to_roc_date("71.08.07") == "71/08/07"
+    assert to_roc_date("民國90年08月20日") == "90/08/20"
+    assert to_roc_date("19961/10/08") == "19961/10/08"  # 打錯字原樣保留
