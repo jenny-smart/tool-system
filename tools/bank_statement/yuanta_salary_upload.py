@@ -185,7 +185,16 @@ def find_salary_files(
 
 
 def _all_frames(page: Any) -> list[Any]:
-    return [frame for candidate in page.context.pages if not candidate.is_closed() for frame in candidate.frames]
+    # Agent Chrome 可能同時開著富邦、Google 等分頁；元大操作只能掃描元大頁面，
+    # 否則可能在其他分頁的下拉選單上等待到逾時。
+    pages = [
+        candidate
+        for candidate in page.context.pages
+        if not candidate.is_closed() and YUANTA_HOST in candidate.url
+    ]
+    if not pages and not page.is_closed():
+        pages = [page]
+    return [frame for candidate in pages for frame in candidate.frames]
 
 
 def _visible(locator: Any) -> Any | None:
@@ -197,6 +206,11 @@ def _visible(locator: Any) -> Any | None:
     except Exception:
         return None
     return None
+
+
+def _normalized_text(value: object) -> str:
+    """Normalize bank labels whose spacing changes across browsers/OSes."""
+    return re.sub(r"\s+", "", str(value or ""))
 
 
 def _click_text(page: Any, text: str, timeout_seconds: int = 30) -> None:
@@ -212,24 +226,38 @@ def _click_text(page: Any, text: str, timeout_seconds: int = 30) -> None:
     raise RuntimeError(f"元大頁面找不到「{text}」")
 
 
-def _select_option_containing(page: Any, option_text: str, label_hint: str = "") -> None:
-    for frame in _all_frames(page):
-        selects = frame.locator("select")
-        for index in range(selects.count()):
-            select = selects.nth(index)
-            if not select.is_visible():
-                continue
-            options = select.locator("option")
-            for option_index in range(options.count()):
-                option = options.nth(option_index)
-                if option_text not in (option.inner_text() or "").strip():
-                    continue
-                if label_hint:
-                    surrounding = select.locator("xpath=ancestor::*[self::tr or self::div][1]")
-                    if surrounding.count() and label_hint not in surrounding.inner_text():
+def _select_option_containing(
+    page: Any, option_text: str, label_hint: str = "", timeout_seconds: int = 30
+) -> None:
+    expected = _normalized_text(option_text)
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        for frame in _all_frames(page):
+            selects = frame.locator("select")
+            for index in range(selects.count()):
+                select = selects.nth(index)
+                try:
+                    if not select.is_visible():
                         continue
-                select.select_option(value=option.get_attribute("value"))
-                return
+                    if label_hint:
+                        surrounding = select.locator("xpath=ancestor::*[self::tr or self::div][1]")
+                        if surrounding.count() and label_hint not in surrounding.inner_text(timeout=1_000):
+                            continue
+                    # 一次從 DOM 取得全部 option，避免逐項 inner_text 各自等待逾時。
+                    options = select.evaluate(
+                        "el => Array.from(el.options).map(o => ({text: o.textContent || '', value: o.value}))"
+                    )
+                except Exception:
+                    continue
+                for option in options:
+                    if expected not in _normalized_text(option.get("text")):
+                        continue
+                    try:
+                        select.select_option(value=str(option.get("value", "")), timeout=3_000)
+                        return
+                    except Exception:
+                        break
+        page.wait_for_timeout(250)
     raise RuntimeError(f"元大頁面找不到選項「{option_text}」")
 
 
@@ -267,11 +295,14 @@ def upload_salary_files(files: list[SalaryFile], area: str, cdp_url: str, accoun
                 _click_text(page, "薪資臺幣整批付款")
                 _select_option_containing(page, "臺幣薪轉格式Excel")
                 _set_file(page, path)
-                _click_text(page, "確定")
-                _select_option_containing(page, "元大大同綜合活期", "付款帳號")
+                _click_text(page, "確定匯入")
+                # 帳號顯示名稱可能是「元大大同-綜合活期-...」等不同格式；
+                # 以各地區設定的帳號末五碼選取，避免依賴銀行頁面的標點文字。
+                payment_account = account.bank_account[-5:] if account.bank_account else "元大大同"
+                _select_option_containing(page, payment_account)
                 _select_option_containing(page, item.summary, "摘要")
-                _click_text(page, "審核")
-                _click_text(page, "確認審核")
+                _click_text(page, "送審")
+                _click_text(page, "確認送審")
                 print(f"已送待放行：{item.name}", flush=True)
 
 
