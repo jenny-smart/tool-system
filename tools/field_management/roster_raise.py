@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import argparse
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 try:
     from .staff_profile import (
         clear_range,
+        get_drive_service,
         get_sheets_service,
         get_spreadsheet_id,
         load_system_config,
@@ -30,6 +31,7 @@ try:
 except ImportError:
     from staff_profile import (
         clear_range,
+        get_drive_service,
         get_sheets_service,
         get_spreadsheet_id,
         load_system_config,
@@ -47,6 +49,7 @@ except ImportError:
     from logger import log
 
 from tools.common.log_to_sheet import write_target_log
+from tools.common.year_files import file_for_year
 
 
 SYSTEM_NAME = "外場排程系統"
@@ -66,8 +69,11 @@ _RAISE_FORMULA_ARG_PATTERN = re.compile(r",\s*(\d+)\s*,\s*false\s*\)", re.IGNORE
 # 共用工具
 # ────────────────────────────────────────────────────────────
 
+TZ = timezone(timedelta(hours=8))
+
+
 def today_ym() -> str:
-    return datetime.now().strftime("%Y%m")
+    return datetime.now(TZ).strftime("%Y%m")
 
 
 def get_previous_ym(ym: str) -> str:
@@ -130,6 +136,70 @@ def duplicate_sheet(
         )
     )
     return int(res["replies"][0]["duplicateSheet"]["properties"]["sheetId"])
+
+
+# ────────────────────────────────────────────────────────────
+# 跨年度：上一期在上一年度的檔案
+# ────────────────────────────────────────────────────────────
+
+def year_file_id(configured_id: str, ym: str, drive=None) -> str:
+    """設定檔的試算表 ID 換成 ym 所屬年度的同一份檔案（同年度直接回傳）。"""
+    try:
+        return file_for_year(drive or get_drive_service(), configured_id, int(ym[:4]))
+    except FileNotFoundError:
+        raise
+    except Exception as exc:  # 讀不到檔案資訊（權限等）時維持原本行為
+        log(f"跨年度檔案判斷略過：{exc}")
+        return configured_id
+
+
+def resolve_year_files(configured_id: str, target_ym: str, prev_ym: str) -> tuple[str, str]:
+    """回傳 (本期檔案 ID, 上一期檔案 ID)。202701 的上一期 202612 在 2026 年度檔案。"""
+    drive = get_drive_service()
+    return year_file_id(configured_id, target_ym, drive), year_file_id(configured_id, prev_ym, drive)
+
+
+def ensure_source_sheet(
+    sheets,
+    source_spreadsheet_id: str,
+    target_spreadsheet_id: str,
+    sheet_name: str,
+    props_list: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """本期檔案沒有上一期工作表時，從上一年度檔案複製過來（內容轉為值，避免跨檔公式失效）。"""
+    if source_spreadsheet_id == target_spreadsheet_id or find_sheet_props(props_list, sheet_name):
+        return props_list
+    source_props = find_sheet_props(get_sheet_props_list(sheets, source_spreadsheet_id), sheet_name)
+    if not source_props:
+        raise RuntimeError(f"上一年度檔案找不到來源工作表：{sheet_name}")
+    copied = execute_with_retry(
+        sheets.spreadsheets().sheets().copyTo(
+            spreadsheetId=source_spreadsheet_id,
+            sheetId=source_props["sheetId"],
+            body={"destinationSpreadsheetId": target_spreadsheet_id},
+        )
+    )
+    execute_with_retry(
+        sheets.spreadsheets().batchUpdate(
+            spreadsheetId=target_spreadsheet_id,
+            body={"requests": [{"updateSheetProperties": {
+                "properties": {"sheetId": copied["sheetId"], "title": sheet_name, "index": 0},
+                "fields": "title,index",
+            }}]},
+        )
+    )
+    values = get_values(sheets, source_spreadsheet_id, f"'{sheet_name}'", value_render_option="UNFORMATTED_VALUE")
+    if values:
+        execute_with_retry(
+            sheets.spreadsheets().values().update(
+                spreadsheetId=target_spreadsheet_id,
+                range=f"'{sheet_name}'!A1",
+                valueInputOption="RAW",
+                body={"values": values},
+            )
+        )
+    log(f"跨年度：已從上一年度檔案複製 {sheet_name}")
+    return get_sheet_props_list(sheets, target_spreadsheet_id)
 
 
 def get_values(
@@ -239,8 +309,12 @@ def create_roster_sheet(area: str, target_ym: str, run_type: str = "手動") -> 
     message = ""
 
     try:
+        spreadsheet_id, source_spreadsheet_id = resolve_year_files(spreadsheet_id, target_ym, prev_ym)
         sheets = get_sheets_service()
         props_list = get_sheet_props_list(sheets, spreadsheet_id)
+        props_list = ensure_source_sheet(
+            sheets, source_spreadsheet_id, spreadsheet_id, source_name, props_list
+        )
 
         source_props = find_sheet_props(props_list, source_name)
         if not source_props:
@@ -391,8 +465,15 @@ def create_raise_sheet(area: str, target_ym: str, run_type: str = "手動") -> d
     message = ""
 
     try:
+        salary_spreadsheet_id, source_spreadsheet_id = resolve_year_files(
+            salary_spreadsheet_id, target_ym, prev_ym
+        )
+        roster_spreadsheet_id = year_file_id(roster_spreadsheet_id, target_ym)
         sheets = get_sheets_service()
         props_list = get_sheet_props_list(sheets, salary_spreadsheet_id)
+        props_list = ensure_source_sheet(
+            sheets, source_spreadsheet_id, salary_spreadsheet_id, source_name, props_list
+        )
 
         source_props = find_sheet_props(props_list, source_name)
         if not source_props:
@@ -448,6 +529,7 @@ def convert_raise_sheet_to_values(area: str, ym: str, run_type: str = "手動") 
     end_row = 0
 
     try:
+        salary_spreadsheet_id = year_file_id(salary_spreadsheet_id, ym)
         sheets = get_sheets_service()
         props_list = get_sheet_props_list(sheets, salary_spreadsheet_id)
         if not find_sheet_props(props_list, sheet_name):
