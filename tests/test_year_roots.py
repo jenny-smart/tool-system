@@ -292,12 +292,11 @@ def test_shortcut_follows_target_and_home_appliance_alias():
     assert [r["結果"] for r in rows if r["類別"] == "儲值金"] == ["依期別自動建立（不需檢查）"]
 
 
-def test_write_report_creates_sheet_and_overwrites():
-    from tools.common.year_roots import REPORT_SHEET, write_report
+def test_write_check_column_one_cell_per_row():
+    from tools.common.year_roots import CHECK_COLUMN, write_check_column
 
     class Sheets:
-        def __init__(self):
-            self.calls, self.tabs = [], {}
+        body = None
 
         def spreadsheets(self):
             return self
@@ -306,28 +305,22 @@ def test_write_report_creates_sheet_and_overwrites():
             return self
 
         def get(self, **_):
-            return _Req({"sheets": [{"properties": {"title": t, "sheetId": i}} for t, i in self.tabs.items()]})
+            return _Req({"sheets": [{"properties": {"title": "年度根目錄設定", "sheetId": 5,
+                                                    "gridProperties": {"columnCount": 12}}}]})
 
         def batchUpdate(self, spreadsheetId, body):
-            self.calls.append(("batch", body))
-            if "addSheet" in body["requests"][0]:
-                self.tabs[REPORT_SHEET] = 7
-                return _Req({"replies": [{"addSheet": {"properties": {"sheetId": 7}}}]})
+            if "requests" in body:
+                Sheets.appended = body["requests"][0]["appendDimension"]["length"]
+            else:
+                Sheets.body = body
             return _Req({})
 
-        def clear(self, **kw):
-            self.calls.append(("clear", kw["range"]))
-            return _Req({})
-
-        def update(self, **kw):
-            self.calls.append(("update", kw["body"]["values"]))
-            return _Req({})
-
-    sheets = Sheets()
-    rows = [{"列": "16", "結果": "找到"}, {"列": "31", "結果": "找不到：x"}]
-    assert write_report(sheets, "master", "檢查", rows) == REPORT_SHEET
-    values = next(v for k, v in sheets.calls if k == "update")
-    assert values[1] == ["列", "結果"] and values[3] == ["31", "找不到：x"] and "檢查" in values[0][0]
-    assert ("clear", f"'{REPORT_SHEET}'") in sheets.calls
-    write_report(sheets, "master", "再一次", rows)  # 已有分頁就不再新增
-    assert sum(1 for k, b in sheets.calls if k == "batch" and "addSheet" in b["requests"][0]) == 1
+    rows = [{"列": "16", "地區": "台北", "結果": "找到", "路徑": "2026專員回報專區/2026台北內勤工作表單"},
+            {"列": "31", "地區": "台北", "結果": "找到", "路徑": "2026薪資/台北/2026台北薪資單總表"},
+            {"列": "31", "地區": "桃園", "結果": "找不到：找不到「x」", "路徑": ""}]
+    write_check_column(Sheets(), "master", 2026, rows)
+    cells = {d["range"]: d["values"][0][0] for d in Sheets.body["data"]}
+    assert f"'年度根目錄設定'!{CHECK_COLUMN}3" in cells
+    row31 = cells[f"'年度根目錄設定'!{CHECK_COLUMN}31"].split("\n")
+    assert Sheets.appended == 1
+    assert row31[1:] == ["2026 台北 找到：2026薪資/台北/2026台北薪資單總表", "2026 桃園 找不到：找不到「x」"]
