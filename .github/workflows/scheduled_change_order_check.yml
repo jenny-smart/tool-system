@@ -1,0 +1,164 @@
+name: Scheduled Change Order Daily Check
+
+on:
+  schedule:
+    - cron: "0 2 * * *"  # 台北 10:00：清潔異動每日檢查
+
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run-change-order-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
+      MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
+
+      TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
+      TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
+      TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
+      TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
+      TAOYUAN_EMAIL: ${{ secrets.TAOYUAN_EMAIL }}
+      TAOYUAN_PASSWORD: ${{ secrets.TAOYUAN_PASSWORD }}
+      HSINCHU_EMAIL: ${{ secrets.HSINCHU_EMAIL }}
+      HSINCHU_PASSWORD: ${{ secrets.HSINCHU_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_secret() {
+            NAME="$1"
+            VALUE="$2"
+
+            if [ -z "$VALUE" ]; then
+              echo "❌ 缺少 GitHub Secret：$NAME"
+              exit 1
+            fi
+
+            echo "✅ 已設定：$NAME"
+          }
+
+          warn_secret() {
+            NAME="$1"
+            VALUE="$2"
+
+            if [ -z "$VALUE" ]; then
+              echo "⚠️ 未設定：$NAME（該地區會被略過，不會擋住其他地區執行）"
+            else
+              echo "✅ 已設定：$NAME"
+            fi
+          }
+
+          check_secret "GOOGLE_SERVICE_ACCOUNT" "$GOOGLE_SERVICE_ACCOUNT"
+          check_secret "TAIPEI_EMAIL" "$TAIPEI_EMAIL"
+          check_secret "TAIPEI_PASSWORD" "$TAIPEI_PASSWORD"
+          check_secret "TAICHUNG_EMAIL" "$TAICHUNG_EMAIL"
+          check_secret "TAICHUNG_PASSWORD" "$TAICHUNG_PASSWORD"
+          warn_secret "TAOYUAN_EMAIL" "$TAOYUAN_EMAIL"
+          warn_secret "TAOYUAN_PASSWORD" "$TAOYUAN_PASSWORD"
+          warn_secret "HSINCHU_EMAIL" "$HSINCHU_EMAIL"
+          warn_secret "HSINCHU_PASSWORD" "$HSINCHU_PASSWORD"
+          check_secret \
+            "TOOLS_APP_LOG_SPREADSHEET_ID 或 MASTER_SPREADSHEET_ID" \
+            "$TOOLS_APP_LOG_SPREADSHEET_ID"
+
+      - name: Run change order daily check
+        shell: bash
+        run: |
+          set +e
+
+          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+          LOG_DIR="logs/$TODAY"
+          NAME="change_order_daily_check"
+          mkdir -p "$LOG_DIR"
+
+          echo "========================================"
+          echo "台北時間：$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")"
+          echo "執行任務：清潔異動每日檢查（台北／台中／桃園／新竹）"
+          echo "========================================"
+
+          START_TS=$(date +%s)
+          START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          LOG_FILE="$LOG_DIR/$NAME.log"
+
+          python -u -m tools.orders_system.change_order_daily_check > "$LOG_FILE" 2>&1
+          EXIT_CODE=$?
+
+          END_TS=$(date +%s)
+          END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          DURATION=$((END_TS - START_TS))
+
+          echo "$EXIT_CODE" > "$LOG_DIR/$NAME.exit"
+          printf \
+            '{"job_name":"%s","status":"%s","exit_code":%s,"started_at":"%s","finished_at":"%s","duration_seconds":%s}\n' \
+            "$NAME" \
+            "$([ "$EXIT_CODE" -eq 0 ] && echo success || echo failed)" \
+            "$EXIT_CODE" "$START_TEXT" "$END_TEXT" "$DURATION" \
+            > "$LOG_DIR/$NAME.json"
+
+          cat "$LOG_FILE"
+
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "✅ 清潔異動每日檢查執行成功"
+          else
+            echo "❌ 清潔異動每日檢查執行失敗（exit $EXIT_CODE）"
+          fi
+
+          echo "結束時間：$END_TEXT"
+          echo "執行秒數：$DURATION"
+
+          exit "$EXIT_CODE"
+
+      - name: Commit logs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -d "logs" ]; then
+            echo "沒有 logs 目錄"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -f logs
+
+          if git diff --cached --quiet; then
+            echo "沒有新的 Log 需要提交"
+            exit 0
+          fi
+
+          git commit -m "Update change order daily check logs"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+          echo "✅ 清潔異動每日檢查 Log 已提交"
