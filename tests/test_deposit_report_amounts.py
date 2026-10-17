@@ -21,6 +21,10 @@ sys.modules.setdefault("tools.common.config_loader", config_stub)
 
 from tools.finance_management import deposit_report
 
+# 假的登記表模組只給上面的 import 用，避免留在 sys.modules 影響其他測試
+if sys.modules.get("tools.bank_statement.internal_payment_registry") is registry_stub:
+    del sys.modules["tools.bank_statement.internal_payment_registry"]
+
 
 class _Execute:
     def execute(self):

@@ -1,4 +1,5 @@
 """生成新年度：營業額總表捷徑、行銷費用總管理、清潔用品。"""
+import pytest
 from tests.test_new_year_generate import FakeDrive, _Req
 from tools.annual_rollover import new_year_generate as nyg
 from tools.annual_rollover.new_year_generate import SHEET_MIME, SHORTCUT_MIME, Rollover
@@ -208,8 +209,14 @@ def test_service_revenue_file_gets_finance_shortcut(monkeypatch):
     assert shortcut["shortcutDetails"]["targetId"] == rev["new_id"]
 
 
-def test_marketing_location_switches_to_current_year_sheet(monkeypatch):
-    from tools.finance_management import statement_registry as reg
+def test_statement_tabs_found_by_name(monkeypatch):
+    """財報設定改依分頁名稱找：行銷「{YYYY}總表」、review「{地區}財報」「{YYYY}review」。"""
+    import importlib
+    import sys
+
+    # 其他測試可能在 sys.modules 放了假的 statement_registry，這裡載入真正的模組
+    monkeypatch.delitem(sys.modules, "tools.finance_management.statement_registry", raising=False)
+    reg = importlib.import_module("tools.finance_management.statement_registry")
 
     class Svc:
         def __init__(self, titles):
@@ -221,16 +228,19 @@ def test_marketing_location_switches_to_current_year_sheet(monkeypatch):
         def get(self, **_):
             return _Req(lambda: {"sheets": [{"properties": {"title": t}} for t in self.titles]})
 
-    import datetime as dt
-
-    real = dt.datetime
-
-    class Now:
-        @staticmethod
-        def now(tz=None):
-            return real(2027, 1, 5, tzinfo=tz)
-
-    monkeypatch.setattr(dt, "datetime", Now)
-    assert reg._current_year_title(Svc(["2026總表", "2027總表"]), "f", "2026總表") == "2027總表"
-    assert reg._current_year_title(Svc(["2026總表"]), "f", "2026總表") == "2026總表"
-    assert reg._current_year_title(Svc(["2026總表"]), "f", "台北") == "台北"
+    rows = [["台北", "FIN", "", "", "", "", "MKT"], ["2027", "REVIEW"]]
+    svc = Svc(["2026總表", "2027總表", "富邦更新", "股東損益表_財務", "台北財報", "2027review"])
+    monkeypatch.setattr(reg, "_read_registry", lambda: rows)
+    monkeypatch.setattr(reg, "get_sheets_service", lambda: svc)
+    monkeypatch.setattr(reg, "taipei_year", lambda: 2027)
+    monkeypatch.setattr(reg, "choose_file_id", lambda cat, area, sid, **k: sid)
+    reg._TITLES_CACHE.clear()
+    assert reg.resolve_marketing_expense_location("台北") == ("MKT", "2027總表")
+    assert reg.resolve_statement_location("台北", "富邦更新") == ("FIN", "富邦更新")
+    assert reg.resolve_statement_location("台北", "財務") == ("FIN", "股東損益表_財務")
+    assert reg.resolve_review_location("台北") == ("REVIEW", "台北財報")
+    assert reg.resolve_master_review_location() == ("REVIEW", "2027review")
+    reg._TITLES_CACHE.clear()
+    monkeypatch.setattr(reg, "get_sheets_service", lambda: Svc(["2026總表"]))
+    with pytest.raises(RuntimeError):
+        reg.resolve_marketing_expense_location("台北")

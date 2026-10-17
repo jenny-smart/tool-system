@@ -16,6 +16,10 @@ sys.modules.setdefault("tools.common.config_loader", config_stub)
 
 from tools.field_management import staff_claim  # noqa: E402
 
+# 假的登記表模組只給上面的 import 用，避免留在 sys.modules 影響其他測試
+if sys.modules.get("tools.bank_statement.internal_payment_registry") is registry_stub:
+    del sys.modules["tools.bank_statement.internal_payment_registry"]
+
 
 CLAIM_HEADER = [
     "提交ID", "提交時間", "專員姓名", "服務日期", "顧客姓名", "顧客電話", "請款項目", "請款子項目",
@@ -125,7 +129,7 @@ class _Service:
             return _Request({"sheets": [{"data": [{"rowData": row_data}]}]})
         return _Request({"sheets": [
             {"properties": {"sheetId": 0, "title": "ATM"}},
-            {"properties": {"sheetId": staff_claim.CLAIM_SHEET_GIDS["台北"], "title": "專員請款"}},
+            {"properties": {"sheetId": 279541195, "title": "專員請款"}},
         ]})
 
     def values(self):
