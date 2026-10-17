@@ -437,3 +437,11 @@ def test_ensure_year_columns():
     sheets.writes.clear()
     Rollover(drive, sheets, "master", 2027, log=lambda *_: None).ensure_year_columns("master")
     assert not sheets.writes
+
+
+def test_new_year_finance_name_uses_home_appliance():
+    from tools.annual_rollover.new_year_generate import new_year_file_name
+
+    assert new_year_file_name("電器2027財報") == "家電2027財報"   # 只有 2026 叫電器
+    assert new_year_file_name("台北2027財報") == "台北2027財報"
+    assert new_year_file_name("電器2027財報備份") == "電器2027財報備份"
