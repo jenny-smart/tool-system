@@ -120,7 +120,7 @@ def read_sheet_records(sheet_name: str, spreadsheet_id: str = "") -> list[dict[s
 
 def is_enabled(value: Any) -> bool:
     text = str(value or "").strip().lower()
-    return text in ["true", "1", "yes", "y", "啟用", "✅", "✅ 啟用"]
+    return text in ["true", "1", "yes", "y", "是", "啟用", "✅", "✅ 啟用"]
 
 
 def get_system_config(system_name: str) -> dict[str, str]:

@@ -171,17 +171,30 @@ def test_payment_registry_routes_categories(monkeypatch):
     assert calls == [("內勤工作表單", "台北", "A", 0), ("服務異動", "桃園", "B", 0), ("名冊薪資", "台中", "C", 1)]
 
 
-def test_change_order_falls_back_to_builtin_ids(monkeypatch):
-    reg = _real(monkeypatch, "tools.bank_statement.internal_payment_registry")
+def test_change_order_switches_year_file_by_region(monkeypatch):
     change_order = _real(monkeypatch, "tools.memo_system.change_order")
+    from tools.common import year_roots
 
-    def boom(*_):
-        raise RuntimeError("no master")
+    monkeypatch.setattr(change_order, "load_region_config", lambda: {
+        "sheet_ids": {"台北": "TP", "桃園": "TY"}, "sheet_gids": {}})
+    calls = []
+    monkeypatch.setattr(year_roots, "choose_file_id",
+                        lambda cat, area, cid, **k: calls.append((cat, area, cid)) or cid + "!")
+    opened = []
 
-    monkeypatch.setattr(reg, "find_registry_row", boom)
-    assert change_order._read_sheet_location("台北") == (change_order.SHEET_IDS["台北"], 759897417)
-    monkeypatch.setattr(reg, "find_registry_row", lambda t, a: {"試算表ID": "NEW", "GID": "42"})
-    assert change_order._read_sheet_location("台中") == ("NEW", 42)
+    class Client:
+        def open_by_key(self, key):
+            opened.append(key)
+            raise RuntimeError("stop")
+
+    monkeypatch.setattr(change_order, "_get_gspread_client", lambda: Client())
+    for region in ("台北", "桃園"):
+        try:
+            change_order.get_worksheet(region)
+        except RuntimeError:
+            pass
+    assert calls == [("內勤工作表單", "台北", "TP"), ("服務異動", "桃園", "TY")]
+    assert opened == ["TP!", "TY!"]
 
 
 def test_l_column_keeps_one_line_per_area_and_row_status():

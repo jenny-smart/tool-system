@@ -43,7 +43,7 @@ import requests
 from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
-from tools.common.config_loader import get_service_account_info
+from tools.common.config_loader import get_service_account_info, read_sheet_records, is_enabled
 from tools.common import tw_holidays
 
 try:
@@ -125,18 +125,68 @@ def get_service_amount(order: dict) -> int:
 # Google Sheet 連線（比照 memo.py 用 service account）
 # ============================================================
 
-# 清潔異動工作表改由主控表「財務帳務設定」的「清潔異動設定」列決定，
-# 並依「年度根目錄設定」的模式切換年度檔；下面兩組只在讀不到設定表時備用。
-SHEET_IDS = {
+# 內建預設值（僅台北/台中）：主控試算表「清潔異動設定」分頁讀不到時的 fallback，
+# 確保既有功能不會因為讀不到設定分頁而整個掛掉。
+_DEFAULT_SHEET_IDS = {
     "台北": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
     "台中": "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM",
 }
 
 # 對應網址列上的 gid，用來精準定位分頁（比用分頁名稱比對更穩，不怕改名）
-SHEET_GIDS = {
+_DEFAULT_SHEET_GIDS = {
     "台北": 759897417,
     "台中": 759897417,
 }
+
+# 各地區清潔異動試算表的正式設定來源：主控試算表（Jenny's Lemonhometools）
+# 的「清潔異動設定」分頁，欄位為 地區 / 試算表ID / GID / 啟用。
+# 之後要增減地區只要改這個分頁，不用改程式碼。
+REGION_CONFIG_SHEET = "清潔異動設定"
+
+_region_config_cache = None
+
+
+def load_region_config(force_reload: bool = False) -> dict:
+    """讀取各地區清潔異動試算表設定（地區 → 試算表ID / GID），
+    優先讀主控試算表「清潔異動設定」分頁並依「啟用」欄過濾；
+    讀不到分頁（權限、網路、分頁不存在…等）時，安靜地退回內建的台北/台中設定。
+    """
+    global _region_config_cache
+    if _region_config_cache is not None and not force_reload:
+        return _region_config_cache
+
+    sheet_ids = dict(_DEFAULT_SHEET_IDS)
+    sheet_gids = dict(_DEFAULT_SHEET_GIDS)
+
+    try:
+        records = read_sheet_records(REGION_CONFIG_SHEET)
+        loaded_ids = {}
+        loaded_gids = {}
+        for record in records:
+            region = (record.get("地區") or "").strip()
+            sid = (record.get("試算表ID") or "").strip()
+            gid_text = (record.get("GID") or "").strip()
+            if not region or not sid or not is_enabled(record.get("啟用", "")):
+                continue
+            loaded_ids[region] = sid
+            if gid_text:
+                try:
+                    loaded_gids[region] = int(gid_text)
+                except ValueError:
+                    pass
+        if loaded_ids:
+            sheet_ids = loaded_ids
+            sheet_gids = loaded_gids
+    except Exception:
+        pass
+
+    _region_config_cache = {"sheet_ids": sheet_ids, "sheet_gids": sheet_gids}
+    return _region_config_cache
+
+
+def supported_regions() -> list:
+    """目前設定為啟用的地區清單（依「清潔異動設定」分頁；讀不到時只有台北/台中）。"""
+    return list(load_region_config()["sheet_ids"].keys())
 
 _SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -196,44 +246,24 @@ def _get_gspread_client():
     return _gspread_client
 
 
-_LOCATION_CACHE: dict = {}
-
-
-def _sheet_location(region: str):
-    """回傳 (試算表ID, GID)：優先讀財務帳務設定（含年度根目錄切換），讀不到才用上方備用值。"""
-    # 以「地區＋日期」快取：Streamlit 常駐時跨年後隔天就會重新讀設定
-    key = (region, datetime.now(ZoneInfo("Asia/Taipei")).date())
-    if key not in _LOCATION_CACHE:
-        _LOCATION_CACHE[key] = _read_sheet_location(region)
-    return _LOCATION_CACHE[key]
-
-
-def _read_sheet_location(region: str):
-    try:
-        from tools.bank_statement.internal_payment_registry import (
-            CLEANING_CHANGE_TYPE,
-            find_registry_row,
-        )
-
-        record = find_registry_row(CLEANING_CHANGE_TYPE, region)
-        sheet_id = record.get("試算表ID", "").strip()
-        gid_text = record.get("GID", "").strip()
-        if sheet_id:
-            return sheet_id, int(gid_text) if gid_text.isdigit() else None
-    except Exception:
-        pass
-    return SHEET_IDS.get(region, ""), SHEET_GIDS.get(region)
-
-
 def get_worksheet(region: str, tab_name: str = "清潔異動"):
     """
     依地區回傳對應的 gspread worksheet 物件。
     優先用 gid（SHEET_GIDS）精準定位分頁；若該地區沒有設定 gid，
     退而用 tab_name 嘗試找同名分頁，最後 fallback 用該試算表第一個分頁。
     """
-    sheet_id, gid = _sheet_location(region)
-    if not sheet_id:
-        raise ValueError(f"不支援的地區：{region}（目前支援：{list(SHEET_IDS.keys())}）")
+    config = load_region_config()
+    sheet_ids = config["sheet_ids"]
+    sheet_gids = config["sheet_gids"]
+
+    if region not in sheet_ids:
+        raise ValueError(f"不支援的地區：{region}（目前支援：{list(sheet_ids.keys())}）")
+
+    # 依「年度根目錄設定」的模式切換年度檔（原設定／比對時仍用清潔異動設定的 ID）
+    from tools.common.year_roots import choose_file_id
+
+    category = "服務異動" if region in ("桃園", "新竹") else "內勤工作表單"
+    sheet_id = choose_file_id(category, region, sheet_ids[region])
 
     client = _get_gspread_client()
     try:
@@ -243,6 +273,7 @@ def get_worksheet(region: str, tab_name: str = "清潔異動"):
             f"無法開啟「{region}」清潔異動試算表。請確認試算表已分享給目前的 Google 服務帳號（編輯者權限）。"
         ) from exc
 
+    gid = sheet_gids.get(region)
     if gid is not None:
         for ws in sh.worksheets():
             if ws.id == gid:
@@ -341,7 +372,7 @@ def _parse_period_hours(period_text: str) -> float:
 
 
 def _is_workday(d: date) -> bool:
-    # 依年份自動抓政府辦公日曆；抓不到時退回下方內建的 2026 年清單
+    # 依年份自動抓政府辦公日曆；抓不到時退回上方內建的 2026 年清單
     return tw_holidays.is_workday(d, TAIWAN_PUBLIC_HOLIDAYS)
 
 

@@ -159,7 +159,23 @@ def resolve_marketing_expense_location(area: str = "台北") -> tuple[str, str]:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少行銷ID或行銷gid")
     service = get_sheets_service()
     title = sheet_title_for_gid(service, spreadsheet_id, gid)
-    return spreadsheet_id, title
+    return spreadsheet_id, _current_year_title(service, spreadsheet_id, title)
+
+
+def _current_year_title(service, spreadsheet_id: str, title: str) -> str:
+    """登記的是「YYYY總表」這類年度工作表時，今年的工作表（例如 2027總表）存在就改用它。
+    生成新年度會在同一個行銷費用檔複製出新年度工作表，GID 不同，這樣就不必每年改 H 欄。"""
+    import re
+    from datetime import datetime, timedelta, timezone
+
+    match = re.fullmatch(r"(20\d{2})(.+)", title)
+    year = str(datetime.now(timezone(timedelta(hours=8))).year)
+    if not match or match.group(1) == year:
+        return title
+    candidate = year + match.group(2)
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties.title").execute()
+    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
+    return candidate if candidate in titles else title
 
 
 def review_spreadsheet_id() -> str:
