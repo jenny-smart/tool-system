@@ -172,11 +172,14 @@ def test_payment_registry_routes_categories(monkeypatch):
 
 
 def test_change_order_switches_year_file_by_region(monkeypatch):
+    """服務異動以 orders-system 版為準：沒有 secrets 時用 tool-system「清潔異動設定」，再依年度根目錄切換。"""
     change_order = _real(monkeypatch, "tools.memo_system.change_order")
-    from tools.common import year_roots
+    from tools.memo_system import host_config
+    import year_roots
 
-    monkeypatch.setattr(change_order, "load_region_config", lambda: {
-        "sheet_ids": {"台北": "TP", "桃園": "TY"}, "sheet_gids": {}})
+    monkeypatch.setattr(change_order, "_secret_value", lambda key, default="": default)
+    monkeypatch.setattr(host_config, "_change_cache", {
+        "台北": {"spreadsheet_id": "TP", "gid": None}, "桃園": {"spreadsheet_id": "TY", "gid": None}})
     calls = []
     monkeypatch.setattr(year_roots, "choose_file_id",
                         lambda cat, area, cid, **k: calls.append((cat, area, cid)) or cid + "!")
@@ -195,6 +198,7 @@ def test_change_order_switches_year_file_by_region(monkeypatch):
             pass
     assert calls == [("內勤工作表單", "台北", "TP"), ("服務異動", "桃園", "TY")]
     assert opened == ["TP!", "TY!"]
+    assert change_order.supported_regions() == ["台北", "桃園"]
 
 
 def test_l_column_keeps_one_line_per_area_and_row_status():

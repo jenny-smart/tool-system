@@ -1,28 +1,11 @@
-# env.py
+"""轉接：服務異動／ATM 以 orders-system 為準。
 
-ENV = "dev"
+實際程式自 orders-system 同步到 tools/orders_system/memo_system/env.py，
+這裡讓 tools.memo_system.env 與 memo_system.env 是同一個模組（排程、Tools App 共用一份）。
+"""
+import importlib
+import sys
 
-BASE_URL_DEV = "https://backend-dev.lemonclean.com.tw"
-BASE_URL_PROD = "https://backend.lemonclean.com.tw"
+import tools.orders_system  # noqa: F401  （把 tools/orders_system 加進 sys.path，並註冊 tool-system 備援設定）
 
-ORDER_PREFIX_DEV = "TT"
-ORDER_PREFIX_PROD = "LC"
-
-GOOGLE_SHEET_ID = "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE"
-
-GOOGLE_SERVICE_ACCOUNT_FILE = "service_account.json"
-SHEET_ID = "1de41gNvBZCGdfy0qNouRNEaQD7R019VAvz2cfq88ZrE"
-WORKSHEET_NAME = "memo"
-
-ENABLE_GCAL_COLOR_SYNC = True
-GOOGLE_SERVICE_ACCOUNT_FILE = "google_service_account.json"
-
-GOOGLE_CALENDAR_MAP = {
-    "台北": "lemonclean925@gmail.com",
-    "台中": "lemonclean.com.tw_8soa7prkegf34tjp5b3okl6rqs@group.calendar.google.com",
-}
-
-COLOR_PURPLE = "3"
-COLOR_YELLOW = "5"
-
-REQUEST_DELAY = 1
+sys.modules[__name__] = importlib.import_module("memo_system.env")

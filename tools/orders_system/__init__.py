@@ -20,3 +20,14 @@ import sys
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
+
+
+# 服務異動／ATM（memo_system，自 orders-system 同步）在沒有 Streamlit secrets 時
+# （例如 GitHub 排程），改用 tool-system 的「清潔異動設定」與服務帳號
+try:
+    from memo_system import host as _memo_host
+    from tools.memo_system.host_config import register as _register_memo_host
+
+    _register_memo_host(_memo_host)
+except Exception:  # memo_system 尚未同步時不影響其他功能
+    pass

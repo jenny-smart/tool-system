@@ -131,7 +131,7 @@ def _sync_ready_item(region: str, item: dict, session, ui_logger=None) -> tuple:
     ws = change_order.get_worksheet(region)
     ws.update_acell(f"B{item['sheet_row']}", done_status)
     try:
-        change_order.mark_sheet_row_done(region, item["sheet_row"], kind, ui_logger=ui_logger)
+        change_order.mark_sheet_row_done(region, item["sheet_row"], done_status, ui_logger=ui_logger)
     except Exception:
         pass
     return True, ""

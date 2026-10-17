@@ -1,1 +1,5 @@
-# 墊片套件，內容空白即可，只是讓 memo_system 被視為一個 Python 套件。
+# -*- coding: utf-8 -*-
+"""Memo system package.
+
+The unified function menu is defined directly in ordersapp.py.
+"""

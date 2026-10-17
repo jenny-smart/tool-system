@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 
 def load_functions():
-    source = Path(__file__).resolve().parents[1] / 'tools/memo_system/change_order.py'
+    source = Path(__file__).resolve().parents[1] / 'tools/orders_system/memo_system/change_order.py'
     nodes = [n for n in ast.parse(source.read_text()).body
              if isinstance(n, ast.FunctionDef) or
              (isinstance(n, ast.Assign) and all(isinstance(t, ast.Name) and
@@ -41,8 +41,9 @@ class ChangeOrderDatesTest(unittest.TestCase):
                 charge = status in statuses[:6]
                 self.assertEqual(form['chargeDate' if charge else 'refundDate'],
                                  '2026-09-20' if charge else '2026-09-25')
-                ns['mark_sheet_row_done']('test', 2, items[0]['kind'])
-                self.assertEqual([c.args[0] for c in ws.update_acell.call_args_list], ['AD2'])
+                ns['mark_sheet_row_done']('test', 2, status)
+                ranges = [u['range'] for c in ws.batch_update.call_args_list for u in c.args[0]]
+                self.assertIn('AD2', ranges)
 
     def test_processed_invoice_only_prepends_finance_note(self):
         ns = load_functions()
@@ -57,7 +58,7 @@ class ChangeOrderDatesTest(unittest.TestCase):
 
         items = ns['get_pending_rows']('test')
         self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]['kind'], 'invoice')
+        self.assertEqual(items[0]['kind'], 'finance_note')
         form = {'memoFinance': '原本財務備註', 'serviceNote': '原本客服備註'}
         controls = {
             'memoFinance': [{'type': 'textarea', 'context': '財務備註'}],
