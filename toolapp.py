@@ -3375,6 +3375,8 @@ NEW_YEAR_FUNCTION_AREAS = {
     "行銷費用總管理": ["全區"],
     "清潔用品": ["全區"],
 }
+# 可「只整理已存在檔案」的功能（整理只是清空數字與改年度，重跑結果相同）
+NEW_YEAR_TIDY_FUNCTIONS = {"行銷費用總管理", "清潔用品"}
 
 
 # 「年度根目錄設定」的檢查與模式切換（三個系統共用同一張設定表）
@@ -3429,7 +3431,7 @@ def run_year_root_check(action, year, on_progress=None):
     raise ValueError(f"未知動作：{action}")
 
 
-def run_new_year_generate(year, function_name, *, dry_run, fresh=False, area="全區", on_progress=None):
+def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=False, area="全區", on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
     import importlib
 
@@ -3448,7 +3450,7 @@ def run_new_year_generate(year, function_name, *, dry_run, fresh=False, area="�
     log = (lambda msg: on_progress(msg, "info")) if on_progress else print
     rollover = Rollover(
         get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
-        int(year_text), dry_run=dry_run, fresh=fresh, log=log,
+        int(year_text), dry_run=dry_run, fresh=fresh, tidy=tidy, log=log,
     )
     try:
         records = rollover.run("all", names=names, area=area or "全區")
@@ -5022,6 +5024,11 @@ with date_col:
             "重新生成（已存在的新年度同名資料夾／檔案改名為「_舊版時間」，不刪除）",
             key="new_year_rollover_fresh",
         )
+        if selected_function in NEW_YEAR_TIDY_FUNCTIONS:
+            st.checkbox(
+                "只整理已存在檔案（不重建、不改名，直接清空數字與改年度；已輸入的資料會被清掉）",
+                key="new_year_rollover_tidy",
+            )
         st.caption(
             "依主控表「生成新年度」分頁，把前一年度資料夾與檔案複製成新年度，"
             "結果寫回該列 I 欄，新檔 ID、檔名、生成時間寫入「生成新年度Log」，並自動帶入「年度工作檔ID_GID總表」。先「預覽」確認，再「執行」。"
@@ -6053,12 +6060,14 @@ if run_clicked:
     if system_type == "new_year_rollover":
         dry_run = st.session_state.get("new_year_rollover_mode", "預覽") == "預覽"
         fresh = bool(st.session_state.get("new_year_rollover_fresh", False))
+        tidy = (selected_function in NEW_YEAR_TIDY_FUNCTIONS
+                and bool(st.session_state.get("new_year_rollover_tidy", False)))
         add_log(f"開始執行：{system_name} / {selected_function} / {period} / {selected_area_value} / {'預覽' if dry_run else '執行'}"
-                f"{' / 重新生成' if fresh else ''}")
+                f"{' / 重新生成' if fresh else ''}{' / 只整理已存在檔案' if tidy else ''}")
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
                 result = run_new_year_generate(
-                    period, selected_function, dry_run=dry_run, fresh=fresh, area=selected_area_value,
+                    period, selected_function, dry_run=dry_run, fresh=fresh, tidy=tidy, area=selected_area_value,
                     on_progress=lambda msg, level="info": add_log(msg, level),
                 )
                 add_log(result, "warning" if "找不到來源" in result else "success")

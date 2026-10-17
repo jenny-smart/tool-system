@@ -151,6 +151,37 @@ def test_supply_copy_and_clear_every_stock_sheet():
     assert ("new2", "'進貨明細表-台北'!G3:K") in sheets.cleared
 
 
+def test_tidy_existing_marketing_and_supply_without_copy():
+    fid = nyg.MARKETING_FILE_ID
+    sheets = Sheets({fid: {"2026廣告": 1, "2026總表": 2, "2027廣告": 3, "2027總表": 4},
+                     "s27": {"進貨明細表-台北": 1, "庫存統計表-台中": 2}}, {
+        (fid, "'2027廣告'!A:E"): [["", "", "", "", "台北居家(SEM)"]],
+        (fid, "'2027廣告'!F1"): [[100]],
+        (fid, "'2027總表'!1:1"): [[2026]],
+        ("s27", "'庫存統計表-台中'!B:B"): [[""], ["期末庫存"], ["期初庫存"]],
+        ("s27", "'庫存統計表-台中'!C3:AY3"): [[5]],
+    })
+    drive = FakeDrive([
+        {"id": "s26", "name": "2026清潔用品訂購記錄-四店共用new", "mimeType": SHEET_MIME, "parent": nyg.SUPPLY_FOLDER_ID},
+        {"id": "s27", "name": "2027清潔用品訂購記錄-四店共用new", "mimeType": SHEET_MIME, "parent": nyg.SUPPLY_FOLDER_ID},
+    ])
+    roll = _roll(drive, sheets)
+    roll.tidy = True
+    records = roll.run_marketing() + roll.run_supply()
+    assert not any(r["created"] for r in records)                       # 不複製、不改名
+    assert not any("duplicateSheet" in r or "updateSheetProperties" in r for _, r in sheets.requests)
+    assert len(drive.items) == 2 and drive.items["s27"]["name"] == "2027清潔用品訂購記錄-四店共用new"
+    assert sheets.writes[(fid, "'2027廣告'!F1")] == [[""]]
+    assert sheets.writes[(fid, "'2027總表'!A1")] == [[2027]]
+    assert ("s27", "'進貨明細表-台北'!G3:K") in sheets.cleared
+    assert sheets.writes[("s27", "'庫存統計表-台中'!C3:AY3")] == [[""]]
+
+    # 沒勾只整理：已存在就沿用，不動
+    sheets.requests.clear(); sheets.writes.clear(); sheets.cleared.clear()
+    _roll(drive, sheets).run_marketing(); _roll(drive, sheets).run_supply()
+    assert not sheets.writes and not sheets.cleared
+
+
 def test_run_extra_functions_skip_sheet_rows(monkeypatch):
     roll = _roll(FakeDrive([]), Sheets({}))
     called = []
