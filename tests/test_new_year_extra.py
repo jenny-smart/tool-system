@@ -136,12 +136,18 @@ def test_supply_copy_and_clear_every_stock_sheet():
     labels = {k: v for k, v in w.items() if k.startswith(f"'{tc}'!A")}
     assert labels == {f"'{tc}'!A1": [["2027"]], f"'{tc}'!A2": [["2026.12"]], f"'{tc}'!A3": [["2027.01"]]}
 
-    # 重跑：已有 2027 檔就移到垃圾桶，重新生成並清空
-    sheets.tabs["new2"] = sheets.tabs["new1"]
-    sheets.cleared.clear()
+    # 重跑不勾重新生成：已存在就沿用、不清空
+    sheets.cleared.clear(); sheets.writes.clear()
     again = _roll(drive, sheets).run_supply()
-    assert again[0]["created"] and again[0]["new_id"] == "new2"
-    assert drive.items["new1"]["trashed"] is True
+    assert not again[0]["created"] and not sheets.cleared and not sheets.writes
+
+    # 勾重新生成：既有檔改名為舊版保留，重新複製並清空
+    sheets.tabs["new2"] = sheets.tabs["new1"]
+    roll = _roll(drive, sheets)
+    roll.fresh = True
+    fresh = roll.run_supply()
+    assert fresh[0]["created"] and fresh[0]["new_id"] == "new2"
+    assert "_舊版" in drive.items["new1"]["name"] and not drive.items["new1"].get("trashed")
     assert ("new2", "'進貨明細表-台北'!G3:K") in sheets.cleared
 
 
