@@ -25,3 +25,11 @@ def test_tool_host_config_registered(monkeypatch):
 def test_scheduled_jobs_import():
     importlib.import_module("tools.orders_system.change_order_daily_check")
     importlib.import_module("tools.orders_system.atm_reconcile")
+
+
+def test_year_roots_uses_oauth_drive_in_tool_system():
+    import tools.orders_system  # noqa: F401
+    import year_roots
+    from tools.common.google_auth import get_drive_service
+
+    assert year_roots.drive_factory is get_drive_service
