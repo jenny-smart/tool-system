@@ -162,7 +162,8 @@ FINANCE_YEAR_FOLDERS = [
 MARKETING_FILE_ID = "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4"
 MARKETING_AD_SHEET = "{y}廣告"
 MARKETING_TOTAL_SHEET = "{y}總表"
-# 「{Y}廣告」B 欄是這些項目的列，清空各月實際欄位
+# 「{Y}廣告」A～E 欄（項目名稱在 E 欄）是這些項目的列，清空各月實際欄位
+MARKETING_AD_ITEM_COLS = "A:E"
 MARKETING_AD_ITEMS = [
     "台北居家(SEM)", "台北品牌(SEM)", "台北大掃除(SEM)", "台北外廣(DGC)", "台北居家(YT)", "台北居家(RDA)",
     "台北裝潢(SEM)", "台北裝潢(RDA)", "台北裝潢(YT)", "台北電器(SEM)", "台北收納(SEM)",
@@ -191,6 +192,9 @@ SUPPLY_STOCK_COLS = ("C", "AY")
 SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列清空 C:AY
 SUPPLY_STOCK_CLOSING = "期末庫存"
 SUPPLY_STOCK_PREV_ROW = 81                # 前一年度 12 月期末庫存所在列
+SUPPLY_STOCK_PREFIX = "庫存統計表"          # A 欄年月標籤（2026、2025.12、2026.01…）改為新年度
+# 不含儲存格參照的公式（例如 =87369、=1200+300）視同手打數字，清空時一併清除
+_LITERAL_FORMULA = re.compile(r"=[\d\s.+\-*/(),%]*")
 EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品"}   # 不依「生成新年度」列的功能
 
 # 「生成新年度」A 欄名稱 → 功能名稱
@@ -878,9 +882,16 @@ class Rollover:
             if self.dry_run:
                 self.log(f"  複製工作表：{old_title} → {new_title}")
                 continue
-            if new_title in ids:
+            if new_title in ids and not self.fresh:
                 self.log(f"  工作表已存在，沿用：{new_title}")
                 continue
+            if new_title in ids:  # 重新生成：既有工作表改名為舊版
+                retired = f"{new_title}_舊版{self.stamp}"
+                self.log(f"  --fresh：既有「{new_title}」改名為「{retired}」")
+                self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
+                    {"updateSheetProperties": {"properties": {"sheetId": ids[new_title], "title": retired},
+                                               "fields": "title"}}]}).execute()
+                ids[retired] = ids.pop(new_title)
             if old_title not in ids:
                 raise RuntimeError(f"行銷費用總管理找不到「{old_title}」工作表")
             self.log(f"  複製工作表：{old_title} → {new_title}")
@@ -897,12 +908,13 @@ class Rollover:
                     for title in created for old, new in renames.items()]
         if requests:
             self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": requests}).execute()
+        self._update_year_header(file_id, sorted(created))
         ad = renames[self._fmt(MARKETING_AD_SHEET)]
         if ad in created:
-            col_b = self.sheets.spreadsheets().values().get(
-                spreadsheetId=file_id, range=f"'{ad}'!B:B").execute().get("values", [])
+            cols = self.sheets.spreadsheets().values().get(
+                spreadsheetId=file_id, range=f"'{ad}'!{MARKETING_AD_ITEM_COLS}").execute().get("values", [])
             items = set(MARKETING_AD_ITEMS)
-            rows = [i for i, r in enumerate(col_b, start=1) if r and str(r[0]).strip() in items]
+            rows = [i for i, r in enumerate(cols, start=1) if any(str(v).strip() in items for v in r)]
             ranges = [f"'{ad}'!{c}{r}" for r in rows for c in MARKETING_AD_COLUMNS]
             self.log(f"  {ad}：清空 {len(rows)} 個項目的各月實際欄位")
             self._clear_constants(file_id, ranges)
@@ -912,8 +924,27 @@ class Rollover:
             self._clear_constants(file_id, [f"'{total}'!{r}" for r in MARKETING_TOTAL_CLEAR])
         return records
 
+    def _update_year_header(self, file_id: str, titles: List[str]) -> None:
+        """新工作表第 1 列與 A 欄等於前一年度的儲存格（總表 A1／A40、廣告 E1 的 2026）改為新年度，
+        月份標題公式（=$A1&".01"）跟著變。"""
+        data = []
+        for title in titles:
+            get = lambda rng: self.sheets.spreadsheets().values().get(
+                spreadsheetId=file_id, range=f"'{title}'!{rng}", valueRenderOption="FORMULA",
+            ).execute().get("values", [])
+            row = get("1:1")
+            cells = {f"{col_letters(i)}1" for i, v in enumerate(row[0] if row else [])
+                     if str(v).strip() == str(self.prev_year)}
+            cells |= {f"A{i}" for i, r in enumerate(get("A:A"), start=1)
+                      if r and str(r[0]).strip() == str(self.prev_year)}
+            data += [{"range": f"'{title}'!{c}", "values": [[self.new_year]]}
+                     for c in sorted(cells, key=lambda c: (len(c), c))]
+        if data:
+            self.log(f"  年度標題 {self.prev_year} → {self.new_year}：{'、'.join(d['range'] for d in data)}")
+            self._values_batch(file_id, data)
+
     def _clear_constants(self, file_id: str, ranges: List[str]) -> None:
-        """清空範圍內的數值，公式保留。"""
+        """清空範圍內的數值（含 =87369 這類只有數字的公式），引用儲存格的公式保留。"""
         if not ranges:
             return
         res = self.sheets.spreadsheets().values().batchGet(
@@ -923,7 +954,8 @@ class Rollover:
             rows = vr.get("values", [])
             if not rows:
                 continue
-            kept = [[v if isinstance(v, str) and v.startswith("=") else "" for v in row] for row in rows]
+            kept = [[v if isinstance(v, str) and v.startswith("=") and not _LITERAL_FORMULA.fullmatch(v)
+                     else "" for v in row] for row in rows]
             if kept != rows:
                 data.append({"range": rng, "values": kept})
         if data:
@@ -931,7 +963,7 @@ class Rollover:
 
     # ---------- 清潔用品 ----------
     def run_supply(self) -> List[Dict[str, str]]:
-        """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（只在新建立時清空）。"""
+        """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（已有新年度檔就先移到垃圾桶）。"""
         old_name = self._fmt(SUPPLY_FILE_NAME)
         new_name = SUPPLY_FILE_NAME.replace("{y}", str(self.new_year))
         source = next((f for f in self.children(SUPPLY_FOLDER_ID)
@@ -939,6 +971,12 @@ class Rollover:
         if not source:
             self.log(f"  ⚠ 找不到檔案：{old_name}")
             return [{"kind": "檔案", "old_name": old_name, "old_id": "", "new_name": "找不到來源", "new_id": ""}]
+        for item in self.children(SUPPLY_FOLDER_ID):  # 已有新年度檔：一律移到垃圾桶後重新生成
+            if item["mimeType"] == SHEET_MIME and item["name"] == new_name:
+                self.log(f"  既有「{new_name}」移到垃圾桶，重新生成")
+                if not self.dry_run:
+                    self.drive.files().update(fileId=item["id"], body={"trashed": True},
+                                              supportsAllDrives=True).execute()
         copied, created = self.ensure_copy(source, SUPPLY_FOLDER_ID, new_name)
         record = {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                   "new_name": copied["name"], "new_id": copied["id"], "created": created}
@@ -979,6 +1017,9 @@ class Rollover:
                 data.append({"range": f"'{stock}'!{first}2:{last}2", "values": [prev]})
         else:
             self.log(f"  ⚠ 沒有「{stock}」工作表")
+        for title in props:
+            if title.startswith(SUPPLY_STOCK_PREFIX):
+                data += self._stock_year_labels(new_id, title)
         if clear:
             self.sheets.spreadsheets().values().batchClear(
                 spreadsheetId=new_id, body={"ranges": clear}).execute()
@@ -986,6 +1027,21 @@ class Rollover:
             self.sheets.spreadsheets().batchUpdate(spreadsheetId=new_id, body={"requests": requests}).execute()
         if data:
             self._values_batch(new_id, data)
+
+    def _stock_year_labels(self, file_id: str, title: str) -> List[Dict[str, Any]]:
+        """庫存統計表 A 欄年月標籤（2026、2025.12、2026.01…）各加一年；公式（=A$1&".01"）不動。
+        當月進貨／領貨的 SUMIF 用這些標籤對進貨明細表，不換就抓不到新年度資料。"""
+        col_a = self.sheets.spreadsheets().values().get(
+            spreadsheetId=file_id, range=f"'{title}'!A:A", valueRenderOption="FORMULA",
+        ).execute().get("values", [])
+        data = []
+        for i, r in enumerate(col_a, start=1):
+            m = re.fullmatch(r"(\d{4})(\.\d{2})?", str(r[0]).strip()) if r else None
+            if m and int(m.group(1)) in (self.prev_year, self.prev_year - 1):
+                data.append({"range": f"'{title}'!A{i}", "values": [[f"{int(m.group(1)) + 1}{m.group(2) or ''}"]]})
+        if data:
+            self.log(f"  {title}：A 欄 {len(data)} 個年月標籤改為新年度")
+        return data
 
     def _previous_closing_stock(self, old_id: str) -> Optional[List[Any]]:
         """前一年度「庫存統計表-台中」12 月期末庫存（預設第 81 列；B 欄不是期末庫存時改用最後一個期末庫存列）。"""
