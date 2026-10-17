@@ -182,3 +182,65 @@ def test_change_order_falls_back_to_builtin_ids(monkeypatch):
     assert change_order._read_sheet_location("台北") == (change_order.SHEET_IDS["台北"], 759897417)
     monkeypatch.setattr(reg, "find_registry_row", lambda t, a: {"試算表ID": "NEW", "GID": "42"})
     assert change_order._read_sheet_location("台中") == ("NEW", 42)
+
+
+def test_l_column_keeps_one_line_per_area_and_row_status():
+    from tools.common.year_roots import row_status
+
+    values = _values("比對")
+    values[5][1] = "台北／台中"  # 財報列（第 6 列）兩區
+    drive = _drive()
+    drive.items.append({"id": "f26", "name": "2026年", "mimeType": FOLDER, "parent": "FIN"})
+    written = {}
+    roots = YearRoots(values, lambda: drive, lambda row, text: written.__setitem__(row, text))
+    roots.choose("財報", "台中", 2027, "tc27")
+    roots.choose("財報", "台北", 2027, "x")
+    lines = written[6].splitlines()
+    assert len(lines) == 2 and any("台中 2027 一致" in l for l in lines) and any("台北 2027 找不到" in l for l in lines)
+    rule = [r for r in roots.rules if r.row == 6][0]
+    assert row_status(rule) == "有不一致"
+    # 重新讀設定表時，L 欄每行會被解析回來
+    values[5] += [""] * (12 - len(values[5]))
+    values[5][11] = written[6]
+    again = parse_rules(values)
+    assert set([r for r in again if r.row == 6][0].results) == {"台中 2027", "台北 2027"}
+
+
+def test_set_modes_only_switches_consistent_compare_rows():
+    from tools.common.year_roots import set_modes
+
+    values = _values("比對")
+    values[3] += [""] * (12 - len(values[3]))
+    values[3][11] = "2026/10/17 08:00 台北 2027 一致"
+    values[4] += [""] * (12 - len(values[4]))
+    values[4][11] = "2026/10/17 08:00 台北 2027 不一致：…"
+    roots = YearRoots(values, lambda: None)
+
+    class Sheets:
+        data = None
+
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def batchUpdate(self, spreadsheetId, body):
+            Sheets.data = body["data"]
+            return type("R", (), {"execute": lambda self: {}})()
+
+    assert set_modes(Sheets(), "m", roots, "根目錄", only_consistent=True) == [4]
+    assert Sheets.data == [{"range": "'年度根目錄設定'!K4", "values": [["根目錄"]]}]
+    assert set_modes(Sheets(), "m", roots, "原設定") == [4, 5, 6, 7, 8]
+
+
+def test_check_year_lists_each_file():
+    from tools.common.year_roots import check_year
+
+    roots, _, _ = _roots("比對")
+    rows = check_year(roots, 2027)
+    by = {(r["類別"], r["地區"], r["檔名規則"]): r for r in rows}
+    assert by[("內勤工作表單", "台北", "{YYYY}台北內勤工作表單")]["檔案ID"] == "tp27"
+    assert by[("名冊薪資", "台北", "{YYYY}專員薪資相關-台北")]["檔案ID"] == "sa27"
+    assert by[("財報", "台北", "{地區}{YYYY}財報")]["結果"].startswith("找不到")
+    assert by[("大掃除", "共用", "{YYYY}年終大掃除VIP")]["檔案ID"] == "dcv"

@@ -45,6 +45,7 @@ class Rule:
     file_names: List[str]
     since_year: int
     mode: str
+    results: Dict[str, str] = None  # L 欄：{「地區 年度」: 該行文字}，每個地區一行
 
 
 def taipei_year() -> int:
@@ -85,8 +86,32 @@ def parse_rules(values: List[List[str]]) -> List[Rule]:
             [n for n in (s.strip() for s in _clean(cell(6)).split("；")) if n],
             since_year=since,
             mode=cell(10) or MODE_ORIGINAL,
+            results=_parse_results(cell(11)),
         ))
     return rules
+
+
+def _parse_results(text: str) -> Dict[str, str]:
+    """L 欄每行格式：「YYYY/MM/DD HH:MM 地區 年度 結果…」，以「地區 年度」為鍵。"""
+    results: Dict[str, str] = {}
+    for line in str(text or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 4:
+            results[f"{parts[2]} {parts[3]}"] = line
+    return results
+
+
+def row_status(rule: Rule) -> str:
+    """整列比對狀態：全部一致／有不一致／尚未比對。"""
+    lines = list((rule.results or {}).values())
+    if not lines:
+        return "尚未比對"
+    bad = ("不一致", "找不到", "空白", "改用原設定")
+    if any(any(b in line for b in bad) for line in lines):
+        return "有不一致"
+    if all(line.endswith("一致") or "使用根目錄" in line for line in lines):
+        return "全部一致"
+    return "有不一致"
 
 
 def find_rule(rules: List[Rule], category: str, area: str) -> Optional[Rule]:
@@ -174,13 +199,18 @@ class YearRoots:
         return self._drive
 
     def _report(self, rule: Rule, text: str) -> None:
+        """text 以「地區 年度」開頭；同一列每個地區保留一行，寫回 L 欄。"""
         key = (rule.row, text)
         if self._writer is None or key in self._written:
             return
         self._written.add(key)
         stamp = datetime.now(TZ).strftime("%Y/%m/%d %H:%M")
+        parts = text.split()
+        if rule.results is None:
+            rule.results = {}
+        rule.results[" ".join(parts[:2])] = f"{stamp} {text}"
         try:
-            self._writer(rule.row, f"{stamp} {text}")
+            self._writer(rule.row, "\n".join(rule.results[k] for k in sorted(rule.results)))
         except Exception as exc:  # 寫不回去不影響主流程
             self._log(f"⚠ 年度根目錄設定 L{rule.row} 寫入失敗：{exc}")
 
@@ -263,3 +293,53 @@ def choose_file_id(category: str, area: str, configured_id: str,
     except Exception as exc:
         print(f"⚠ 年度根目錄比對失敗，沿用原設定：{exc}", flush=True)
         return str(configured_id or "").strip()
+
+
+# ---------- 檢查與切換（給 toolapp「年度根目錄檢查與切換」用） ----------
+def _rule_areas(rule: Rule) -> List[str]:
+    return [a for a in rule.areas if a not in _ALL_AREAS] or [""]
+
+
+def check_year(roots: YearRoots, year: int) -> List[Dict[str, str]]:
+    """依根目錄規則找 year 年度的每個檔（不改模式、不寫 L 欄）。"""
+    rows = []
+    for rule in roots.rules:
+        for area in _rule_areas(rule):
+            for index, name in enumerate(rule.file_names or ["（固定檔）"]):
+                item = {"列": str(rule.row), "類別": rule.category, "地區": area or "共用",
+                        "檔名規則": name, "模式": rule.mode}
+                if rule.since_year and year < rule.since_year:
+                    item.update(結果="適用起年前（用原設定）", 路徑="", 檔案ID="")
+                else:
+                    try:
+                        found, path = resolve(roots.drive, rule, year, area, index)
+                        item.update(結果="找到", 路徑=path, 檔案ID=found)
+                    except Exception as exc:
+                        item.update(結果=f"找不到：{exc}", 路徑="", 檔案ID="")
+                rows.append(item)
+    return rows
+
+
+def compare_summary(roots: YearRoots) -> List[Dict[str, str]]:
+    return [{"列": str(r.row), "類別": r.category, "地區": "／".join(r.areas), "模式": r.mode,
+             "比對狀態": row_status(r), "L 欄": "\n".join((r.results or {}).values())}
+            for r in roots.rules]
+
+
+def set_modes(sheets, spreadsheet_id: str, roots: YearRoots, mode: str,
+              only_consistent: bool = False) -> List[int]:
+    """把模式寫回 K 欄。only_consistent=True 時只改「比對」且全部一致的列。回傳改了哪些列。"""
+    changed = []
+    for rule in roots.rules:
+        if only_consistent and not (rule.mode == MODE_COMPARE and row_status(rule) == "全部一致"):
+            continue
+        if rule.mode == mode:
+            continue
+        changed.append(rule.row)
+    if changed:
+        sheets.spreadsheets().values().batchUpdate(spreadsheetId=spreadsheet_id, body={
+            "valueInputOption": "RAW",
+            "data": [{"range": f"'{ROOT_SHEET}'!K{row}", "values": [[mode]]} for row in changed]}).execute()
+        global _LOADED_AT
+        _LOADED_AT = 0.0  # 下次呼叫重讀設定
+    return changed

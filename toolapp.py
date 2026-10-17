@@ -3373,6 +3373,58 @@ NEW_YEAR_FUNCTION_AREAS = {
 }
 
 
+# 「年度根目錄設定」的檢查與模式切換（三個系統共用同一張設定表）
+YEAR_ROOT_CHECK_FUNCTION = "年度根目錄檢查與切換"
+YEAR_ROOT_ACTIONS = [
+    "查看比對結果",
+    "檢查根目錄找檔（指定年度）",
+    "比對全部一致的列改為「根目錄」",
+    "全部改回「原設定」",
+]
+
+
+def run_year_root_check(action, year, on_progress=None):
+    from tools.common import year_roots
+    from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+    from tools.common.google_auth import get_drive_service
+
+    log = (lambda msg: on_progress(msg, "info")) if on_progress else print
+    master_id = get_master_spreadsheet_id()
+    sheets = get_sheets_service()
+    values = sheets.spreadsheets().values().get(
+        spreadsheetId=master_id, range=f"'{year_roots.ROOT_SHEET}'!A1:L"
+    ).execute().get("values", [])
+    roots = year_roots.YearRoots(values, get_drive_service, writer=None, log=log)
+
+    if action == "查看比對結果":
+        rows = year_roots.compare_summary(roots)
+        counts = {}
+        for r in rows:
+            counts[r["比對狀態"]] = counts.get(r["比對狀態"], 0) + 1
+        summary = "、".join(f"{k} {v} 列" for k, v in counts.items())
+        return f"共 {len(rows)} 列：{summary}", rows
+
+    if action == "檢查根目錄找檔（指定年度）":
+        year_text = str(year or "").strip()
+        if not re.fullmatch(r"20\d{2}", year_text):
+            raise ValueError("請輸入 4 位數年度，例如 2027")
+        rows = year_roots.check_year(roots, int(year_text))
+        missing = [r for r in rows if r["結果"].startswith("找不到")]
+        return f"{year_text} 年共檢查 {len(rows)} 個檔，找不到 {len(missing)} 個", rows
+
+    if action == "比對全部一致的列改為「根目錄」":
+        changed = year_roots.set_modes(sheets, master_id, roots, year_roots.MODE_ROOT, only_consistent=True)
+        return (f"已改為根目錄：第 {'、'.join(map(str, changed))} 列" if changed
+                else "沒有可切換的列（需模式為「比對」且 L 欄每個地區都一致）"), []
+
+    if action == "全部改回「原設定」":
+        changed = year_roots.set_modes(sheets, master_id, roots, year_roots.MODE_ORIGINAL)
+        return (f"已改回原設定：第 {'、'.join(map(str, changed))} 列" if changed
+                else "全部已經是原設定"), []
+
+    raise ValueError(f"未知動作：{action}")
+
+
 def run_new_year_generate(year, function_name, *, dry_run, fresh=False, area="全區", on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
     from services.google_auth import get_drive_service, get_sheets_service
@@ -3742,7 +3794,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "內勤薪資單通知信",
         "內勤元大帳戶",
     ],
-    "new_year_rollover": list(NEW_YEAR_FUNCTION_ROWS),
+    "new_year_rollover": list(NEW_YEAR_FUNCTION_ROWS) + [YEAR_ROOT_CHECK_FUNCTION],
 }
 
 DAILY_SCRIPT_MAP = {
@@ -4925,6 +4977,26 @@ with date_col:
             st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
             st.info("功能開發中，尚未接上實際執行邏輯。", icon="🚧")
 
+    elif system_type == "new_year_rollover" and selected_function == YEAR_ROOT_CHECK_FUNCTION:
+        st.markdown('<div class="field-label">📆 檢查年度</div>', unsafe_allow_html=True)
+        period = st.text_input(
+            "檢查年度",
+            value=str(datetime.now(TW_TZ).year),
+            placeholder="例如：2027",
+            label_visibility="collapsed",
+            key="year_root_check_year",
+        )
+        st.radio("動作", YEAR_ROOT_ACTIONS, key="year_root_check_action")
+        st.caption(
+            "主控表「年度根目錄設定」：K 欄模式（原設定／比對／根目錄）、L 欄各地區比對結果。"
+            "先用「查看比對結果」確認，全部一致的列再改為根目錄；有問題可一鍵改回原設定。"
+            "「檢查年度」只用在「檢查根目錄找檔」。"
+        )
+        last_rows = st.session_state.get("year_root_check_rows")
+        if last_rows:
+            with st.expander(f"上次結果（{len(last_rows)} 筆）", expanded=True):
+                st.dataframe(last_rows, use_container_width=True, hide_index=True)
+
     elif system_type == "new_year_rollover":
         st.markdown('<div class="field-label">📆 新年度</div>', unsafe_allow_html=True)
         period = st.text_input(
@@ -5951,6 +6023,22 @@ if run_clicked:
                 add_log(f"執行失敗：{e}", "error")
                 add_log(traceback.format_exc(), "error")
 
+        st.rerun()
+
+    if system_type == "new_year_rollover" and selected_function == YEAR_ROOT_CHECK_FUNCTION:
+        action = st.session_state.get("year_root_check_action", YEAR_ROOT_ACTIONS[0])
+        add_log(f"開始執行：{system_name} / {selected_function} / {action}")
+        with st.spinner(f"⏳ 執行中：{action}，請稍候..."):
+            try:
+                message, rows = run_year_root_check(
+                    action, period, on_progress=lambda msg, level="info": add_log(msg, level),
+                )
+                add_log(message, "success")
+                if rows:
+                    st.session_state["year_root_check_rows"] = rows
+            except Exception as e:
+                add_log(f"執行失敗：{e}", "error")
+                add_log(traceback.format_exc(), "error")
         st.rerun()
 
     if system_type == "new_year_rollover":
