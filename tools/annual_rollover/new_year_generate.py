@@ -102,6 +102,10 @@ SERVICE_FILE_RULES = [
      "ops": {"keep_only": ["mail"], "keep_latest": [r"^\d{6}-\d$"]}},
     {"func": "服務分潤表", "areas": _ALL, "target": "{Y}營業額總表-{a}",
      "sources": [r"{y}營業額總表-{a}", r"{y}{a}營業額總表"],
+     # 台北／台中在財務的營業額總表資料夾另建捷徑「{Y}{a}營業額總表」指向新檔
+     "shortcut": {"folders": {"台北": "1Pjldya3PQu1Fhi_oHMfCWI5kYTCVIXXU",
+                              "台中": "1ou9JRoLYdmDZWmFM1kOPpAzpOSA9rBOw"},
+                  "name": "{Y}{a}營業額總表"},
      "ops": {"year_columns": "{y}財報總表",
              "rename_year": [r"^{y}財報總表$", r"^{y}各服務收入金流總表$"],
              "replace_year_in": ["{Y}各服務收入金流總表"],
@@ -154,6 +158,41 @@ FINANCE_YEAR_FOLDERS = [
     {"label": "台北進項發票", "area": "台北", "folder_id": "1XBWWOoDjZ74HsnAGsGUr7jlf34AHJajG", "files": {}},
     {"label": "儲值金", "area": "", "folder_id": "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv", "files": {}},
 ]
+# 「行銷費用總管理」：同一個檔，每年複製「{y}廣告」「{y}總表」成新年度工作表後清空實際數字
+MARKETING_FILE_ID = "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4"
+MARKETING_AD_SHEET = "{y}廣告"
+MARKETING_TOTAL_SHEET = "{y}總表"
+# 「{Y}廣告」B 欄是這些項目的列，清空各月實際欄位
+MARKETING_AD_ITEMS = [
+    "台北居家(SEM)", "台北品牌(SEM)", "台北大掃除(SEM)", "台北外廣(DGC)", "台北居家(YT)", "台北居家(RDA)",
+    "台北裝潢(SEM)", "台北裝潢(RDA)", "台北裝潢(YT)", "台北電器(SEM)", "台北收納(SEM)",
+    "桃園居家(SEM)", "桃園品牌(SEM)", "桃園大掃除(SEM)", "桃園外廣(DGC)", "桃園居家(YT)", "桃園居家(RDA)",
+    "桃園裝潢(SEM)", "桃園裝潢(RDA)", "桃園裝潢(YT)", "桃園電器(SEM)", "桃園收納(SEM)",
+    "新竹居家(SEM)", "新竹品牌(SEM)", "新竹大掃除(SEM)", "新竹居家(YT)", "新竹外廣(DGC)", "新竹居家(RDA)",
+    "新竹裝潢(SEM)", "新竹裝潢(RDA)", "新竹裝潢(YT)", "新竹收納(SEM)",
+    "台中居家(SEM)", "台中品牌(SEM)", "台中大掃除(SEM)", "台中居家(YT)", "台中外廣(DGC)", "台中居家(RDA)",
+    "台中裝潢(SEM)", "台中裝潢(RDA)", "台中裝潢(YT)", "台中電器(SEM)", "台中收納(SEM)",
+    "家電電器-台北(SEM)", "家電電器-台北(RDA)", "家電電器-台北(YT)", "家電外廣(DGC)",
+    "家電電器-桃園(SEM)", "家電電器-桃園(RDA)", "家電電器-桃園(YT)",
+    "家電電器-新竹(SEM)", "家電電器-新竹(RDA)", "家電電器-新竹(YT)",
+    "家電電器-台中(SEM)", "家電電器-台中(RDA)", "家電電器-台中(YT)",
+]
+MARKETING_AD_COLUMNS = ["F", "I", "L", "O", "R", "U", "X", "AA", "AD", "AG", "AJ", "AM"]  # 各月實際
+MARKETING_TOTAL_CLEAR = ["C24:CH29", "C47:CH64", "C74:CH85"]
+
+# 「清潔用品」：根目錄下「{y}清潔用品訂購記錄-四店共用new」複製成新年度後清空
+SUPPLY_FOLDER_ID = "1GGD6fjEgvepKM3QWMe4A5MYBmSNXB39v"
+SUPPLY_FILE_NAME = "{y}清潔用品訂購記錄-四店共用new"
+SUPPLY_PURCHASE_PREFIX = "進貨明細表-"
+SUPPLY_PURCHASE_CLEAR = ["A3:A", "C3:C", "E3:E", "F3:F", "G3:K", "M3:M", "O3:T"]
+SUPPLY_PURCHASE_FALSE_COL = "U"          # U3:U 設為 FALSE
+SUPPLY_STOCK_SHEET = "庫存統計表-台中"
+SUPPLY_STOCK_COLS = ("C", "AY")
+SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列清空 C:AY
+SUPPLY_STOCK_CLOSING = "期末庫存"
+SUPPLY_STOCK_PREV_ROW = 81                # 前一年度 12 月期末庫存所在列
+EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品"}   # 不依「生成新年度」列的功能
+
 # 「生成新年度」A 欄名稱 → 功能名稱
 ROW_FUNCTIONS = {"財務報表": "財務報表", "內勤表單": "內勤表單", "專員名冊/薪資檔": "專員表單",
                  "服務分潤表": "服務分潤表", "內勤薪資": "內勤薪資"}
@@ -783,6 +822,10 @@ class Rollover:
                 copied, created = self.ensure_copy(old, new_sub["id"], target_name)
                 record = {"kind": "檔案", "old_name": old["name"], "old_id": old["id"],
                           "new_name": copied["name"], "new_id": copied["id"], "created": created}
+                shortcut = rule.get("shortcut")
+                if shortcut and area in shortcut["folders"]:
+                    self.ensure_shortcut(shortcut["folders"][area],
+                                         shortcut["name"].format(Y=self.new_year, a=area), copied)
                 if created:
                     ops = INVOICE_OPS if rule.get("ops") == "invoice" else rule.get("ops")
                     if ops:
@@ -803,6 +846,165 @@ class Rollover:
         if staff_records:  # 名冊與薪資檔一起整理，薪資檔公式中的名冊 ID 才能替換
             self.staff_post_process(staff_records)
         return records
+
+    def ensure_shortcut(self, folder_id: str, name: str, target: Dict[str, Any]) -> None:
+        """在 folder_id 建立指向 target 的捷徑；同名項目已存在就略過。"""
+        existing = [f for f in self.children(folder_id) if f["name"] == name]
+        if existing:
+            self.log(f"  捷徑已存在，略過：{name}")
+            return
+        self.log(f"  建立捷徑：{name} → {target.get('name', target['id'])}")
+        if self.dry_run or str(target["id"]).startswith("(dry-run"):
+            return
+        self.drive.files().create(
+            body={"name": name, "mimeType": SHORTCUT_MIME, "parents": [folder_id],
+                  "shortcutDetails": {"targetId": target["id"]}},
+            fields="id", supportsAllDrives=True,
+        ).execute()
+
+    # ---------- 行銷費用總管理 ----------
+    def run_marketing(self) -> List[Dict[str, str]]:
+        """同一個檔：複製「{y}廣告」「{y}總表」為新年度工作表（已存在就略過），清空實際數字。"""
+        file_id = MARKETING_FILE_ID
+        ids = self._sheet_map(file_id) if not self.dry_run else {}
+        records: List[Dict[str, str]] = []
+        renames = {}
+        for tpl in (MARKETING_AD_SHEET, MARKETING_TOTAL_SHEET):
+            old_title, new_title = self._fmt(tpl), tpl.replace("{y}", str(self.new_year))
+            renames[old_title] = new_title
+            record = {"kind": "工作表", "old_name": old_title, "old_id": file_id,
+                      "new_name": new_title, "new_id": file_id, "created": False}
+            records.append(record)
+            if self.dry_run:
+                self.log(f"  複製工作表：{old_title} → {new_title}")
+                continue
+            if new_title in ids:
+                self.log(f"  工作表已存在，沿用：{new_title}")
+                continue
+            if old_title not in ids:
+                raise RuntimeError(f"行銷費用總管理找不到「{old_title}」工作表")
+            self.log(f"  複製工作表：{old_title} → {new_title}")
+            res = self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
+                {"duplicateSheet": {"sourceSheetId": ids[old_title], "newSheetName": new_title}}]}).execute()
+            ids[new_title] = res["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
+            record["created"] = True
+        if self.dry_run:
+            return records
+        created = {r["new_name"] for r in records if r["created"]}
+        # 新工作表公式中引用前一年度工作表名稱 → 新年度
+        requests = [{"findReplace": {"find": old, "replacement": new, "sheetId": ids[title],
+                                     "includeFormulas": True}}
+                    for title in created for old, new in renames.items()]
+        if requests:
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": requests}).execute()
+        ad = renames[self._fmt(MARKETING_AD_SHEET)]
+        if ad in created:
+            col_b = self.sheets.spreadsheets().values().get(
+                spreadsheetId=file_id, range=f"'{ad}'!B:B").execute().get("values", [])
+            items = set(MARKETING_AD_ITEMS)
+            rows = [i for i, r in enumerate(col_b, start=1) if r and str(r[0]).strip() in items]
+            ranges = [f"'{ad}'!{c}{r}" for r in rows for c in MARKETING_AD_COLUMNS]
+            self.log(f"  {ad}：清空 {len(rows)} 個項目的各月實際欄位")
+            self._clear_constants(file_id, ranges)
+        total = renames[self._fmt(MARKETING_TOTAL_SHEET)]
+        if total in created:
+            self.log(f"  {total}：清空 {'、'.join(MARKETING_TOTAL_CLEAR)}")
+            self._clear_constants(file_id, [f"'{total}'!{r}" for r in MARKETING_TOTAL_CLEAR])
+        return records
+
+    def _clear_constants(self, file_id: str, ranges: List[str]) -> None:
+        """清空範圍內的數值，公式保留。"""
+        if not ranges:
+            return
+        res = self.sheets.spreadsheets().values().batchGet(
+            spreadsheetId=file_id, ranges=ranges, valueRenderOption="FORMULA").execute()
+        data = []
+        for rng, vr in zip(ranges, res.get("valueRanges", [])):
+            rows = vr.get("values", [])
+            if not rows:
+                continue
+            kept = [[v if isinstance(v, str) and v.startswith("=") else "" for v in row] for row in rows]
+            if kept != rows:
+                data.append({"range": rng, "values": kept})
+        if data:
+            self._values_batch(file_id, data)
+
+    # ---------- 清潔用品 ----------
+    def run_supply(self) -> List[Dict[str, str]]:
+        """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（只在新建立時清空）。"""
+        old_name = self._fmt(SUPPLY_FILE_NAME)
+        new_name = SUPPLY_FILE_NAME.replace("{y}", str(self.new_year))
+        source = next((f for f in self.children(SUPPLY_FOLDER_ID)
+                       if f["mimeType"] == SHEET_MIME and dash_area(f["name"]) == dash_area(old_name)), None)
+        if not source:
+            self.log(f"  ⚠ 找不到檔案：{old_name}")
+            return [{"kind": "檔案", "old_name": old_name, "old_id": "", "new_name": "找不到來源", "new_id": ""}]
+        copied, created = self.ensure_copy(source, SUPPLY_FOLDER_ID, new_name)
+        record = {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
+                  "new_name": copied["name"], "new_id": copied["id"], "created": created}
+        if created and not self.dry_run:
+            self.supply_post_process(source["id"], copied["id"])
+        elif created:
+            self.log(f"  整理 {new_name}：清空進貨明細表、庫存統計表期初庫存，帶入前一年度期末庫存")
+        return [record]
+
+    def supply_post_process(self, old_id: str, new_id: str) -> None:
+        meta = self.sheets.spreadsheets().get(
+            spreadsheetId=new_id, fields="sheets.properties(sheetId,title,gridProperties)").execute()
+        props = {s["properties"]["title"]: s["properties"] for s in meta.get("sheets", [])}
+        first, last = SUPPLY_STOCK_COLS
+        clear, requests = [], []
+        for title, p in props.items():
+            if not title.startswith(SUPPLY_PURCHASE_PREFIX):
+                continue
+            clear += [f"'{title}'!{r}" for r in SUPPLY_PURCHASE_CLEAR]
+            col = col_index(SUPPLY_PURCHASE_FALSE_COL)
+            requests.append({"repeatCell": {
+                "range": {"sheetId": p["sheetId"], "startRowIndex": 2,
+                          "endRowIndex": p.get("gridProperties", {}).get("rowCount", 1000),
+                          "startColumnIndex": col, "endColumnIndex": col + 1},
+                "cell": {"userEnteredValue": {"boolValue": False}}, "fields": "userEnteredValue"}})
+            self.log(f"  {title}：清空 {'、'.join(SUPPLY_PURCHASE_CLEAR)}，{SUPPLY_PURCHASE_FALSE_COL}3:{SUPPLY_PURCHASE_FALSE_COL} 設為 FALSE")
+        stock = SUPPLY_STOCK_SHEET
+        data = []
+        if stock in props:
+            col_b = self.sheets.spreadsheets().values().get(
+                spreadsheetId=new_id, range=f"'{stock}'!B:B").execute().get("values", [])
+            rows = [i for i, r in enumerate(col_b, start=1) if r and str(r[0]).strip() == SUPPLY_STOCK_OPENING]
+            clear += [f"'{stock}'!{first}{r}:{last}{r}" for r in rows]
+            clear.append(f"'{stock}'!{first}2:{last}2")
+            self.log(f"  {stock}：清空 {len(rows)} 列期初庫存的 {first}:{last}")
+            prev = self._previous_closing_stock(old_id)
+            if prev is not None:
+                data.append({"range": f"'{stock}'!{first}2:{last}2", "values": [prev]})
+        else:
+            self.log(f"  ⚠ 沒有「{stock}」工作表")
+        if clear:
+            self.sheets.spreadsheets().values().batchClear(
+                spreadsheetId=new_id, body={"ranges": clear}).execute()
+        if requests:
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=new_id, body={"requests": requests}).execute()
+        if data:
+            self._values_batch(new_id, data)
+
+    def _previous_closing_stock(self, old_id: str) -> Optional[List[Any]]:
+        """前一年度「庫存統計表-台中」12 月期末庫存（預設第 81 列；B 欄不是期末庫存時改用最後一個期末庫存列）。"""
+        first, last = SUPPLY_STOCK_COLS
+        stock = SUPPLY_STOCK_SHEET
+        col_b = self.sheets.spreadsheets().values().get(
+            spreadsheetId=old_id, range=f"'{stock}'!B:B").execute().get("values", [])
+        closing = [i for i, r in enumerate(col_b, start=1) if r and str(r[0]).strip() == SUPPLY_STOCK_CLOSING]
+        row = SUPPLY_STOCK_PREV_ROW
+        if row not in closing:
+            if not closing:
+                self.log(f"  ⚠ 前一年度「{stock}」找不到期末庫存列，第 2 列未帶入")
+                return None
+            row = closing[-1]
+            self.log(f"  ⚠ 前一年度第 {SUPPLY_STOCK_PREV_ROW} 列不是期末庫存，改用第 {row} 列")
+        values = self.sheets.spreadsheets().values().get(
+            spreadsheetId=old_id, range=f"'{stock}'!{first}{row}:{last}{row}").execute().get("values", [[]])
+        self.log(f"  {stock}!{first}2:{last}2 ← 前一年度第 {row} 列期末庫存")
+        return values[0] if values else []
 
     # ---------- 分頁整理（規則表） ----------
     def _fmt(self, text: str, **extra: str) -> str:
@@ -1212,9 +1414,18 @@ class Rollover:
 
     def run(self, rows_arg: str = "all", names: Optional[List[str]] = None,
             area: str = ALL_AREA) -> List[Dict[str, str]]:
-        records = self._run_rows(rows_arg, names, area)
+        row_names = [n for n in (names or []) if n not in EXTRA_FUNCTIONS] or None
+        records = self._run_rows(rows_arg, row_names, area) if row_names or not names else []
         funcs = {ROW_FUNCTIONS.get(n, n) for n in (names or [])}
         extra: List[Dict[str, str]] = []
+        for func, job in (("行銷費用總管理", self.run_marketing), ("清潔用品", self.run_supply)):
+            if func not in funcs:
+                continue
+            self.log(func)
+            try:
+                extra += job()
+            except Exception as exc:
+                self.log(f"  ✗ {func} 失敗：{exc}")
         for func in ("專員表單", "內勤表單", "財務報表"):
             if func not in funcs:
                 continue
