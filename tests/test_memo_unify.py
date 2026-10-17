@@ -17,9 +17,12 @@ def test_tool_host_config_registered(monkeypatch):
 
     assert host.region_sheet is host_config.region_sheet
     assert host.service_account is host_config.service_account
-    monkeypatch.setattr(atm, "_secret_text", lambda key: "")
-    monkeypatch.setattr(atm, "_year_root_id", lambda kind, region, sid: sid)
-    assert atm._atm_sheet_config("台北")["spreadsheet_id"] == host_config._ATM_SHEETS["台北"]["spreadsheet_id"]
+    # ATM 只依年度根目錄找檔，不再用 secrets 或「清潔異動設定」的 ID
+    import year_roots
+    monkeypatch.setattr(atm, "_secret_text", lambda key: "SECRET")
+    monkeypatch.setattr(year_roots, "root_file_id", lambda cat, area, file_index=0: f"ROOT-{cat}-{area}-{file_index}")
+    assert atm._atm_sheet_config("台北")["spreadsheet_id"] == "ROOT-內勤工作表單-台北-0"
+    assert atm._atm_sheet_config("新竹")["spreadsheet_id"] == "ROOT-名冊薪資-新竹-1"
 
 
 def test_scheduled_jobs_import():
