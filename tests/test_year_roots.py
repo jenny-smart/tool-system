@@ -171,18 +171,18 @@ def test_payment_registry_routes_categories(monkeypatch):
     assert calls == [("內勤工作表單", "台北", "A", 0), ("服務異動", "桃園", "B", 0), ("名冊薪資", "台中", "C", 1)]
 
 
-def test_change_order_switches_year_file_by_region(monkeypatch):
-    """服務異動以 orders-system 版為準：沒有 secrets 時用 tool-system「清潔異動設定」，再依年度根目錄切換。"""
+def test_change_order_finds_year_file_by_root_only(monkeypatch):
+    """服務異動以 orders-system 版為準：只依年度根目錄找檔，不看 secrets 或「清潔異動設定」的 ID。"""
     change_order = _real(monkeypatch, "tools.memo_system.change_order")
     from tools.memo_system import host_config
     import year_roots
 
-    monkeypatch.setattr(change_order, "_secret_value", lambda key, default="": default)
+    monkeypatch.setattr(change_order, "_secret_value", lambda key, default="": "SECRET")
     monkeypatch.setattr(host_config, "_change_cache", {
-        "台北": {"spreadsheet_id": "TP", "gid": None}, "桃園": {"spreadsheet_id": "TY", "gid": None}})
+        "台北": {"spreadsheet_id": "TP", "gid": 1}, "桃園": {"spreadsheet_id": "TY", "gid": 2}})
     calls = []
-    monkeypatch.setattr(year_roots, "choose_file_id",
-                        lambda cat, area, cid, **k: calls.append((cat, area, cid)) or cid + "!")
+    monkeypatch.setattr(year_roots, "root_file_id",
+                        lambda cat, area, **k: calls.append((cat, area)) or f"ROOT-{area}")
     opened = []
 
     class Client:
@@ -196,8 +196,8 @@ def test_change_order_switches_year_file_by_region(monkeypatch):
             change_order.get_worksheet(region)
         except RuntimeError:
             pass
-    assert calls == [("內勤工作表單", "台北", "TP"), ("服務異動", "桃園", "TY")]
-    assert opened == ["TP!", "TY!"]
+    assert calls == [("內勤工作表單", "台北"), ("服務異動", "桃園")]
+    assert opened == ["ROOT-台北", "ROOT-桃園"]
     assert change_order.supported_regions() == ["台北", "桃園"]
 
 

@@ -53,8 +53,9 @@ def taipei_year() -> int:
 
 
 def _clean(text: str) -> str:
-    """去掉括號說明，例如「{YYYY}台北營業額總表（捷徑）」→「{YYYY}台北營業額總表」。"""
-    return re.sub(r"[（(].*?[）)]", "", str(text or "")).strip()
+    """去掉全形括號說明，例如「{YYYY}台北營業額總表（捷徑）」→「{YYYY}台北營業額總表」。
+    半形括號是檔名的一部分（例如「2026桃園專員薪資(外場)」），保留。"""
+    return re.sub(r"（.*?）", "", str(text or "")).strip()
 
 
 # 檔名的地區舊稱：找不到時再試（2026 年家電區的財報叫「電器2026財報」，其他年度用「家電」）
@@ -184,23 +185,21 @@ def resolve(drive, rule: Rule, year: int, area: str = "", file_index: int = 0) -
         name = _fill(template, year, area)
         node = _child(drive, node, name, folder=True)["id"]
         path.append(name)
-    template = rule.file_names[min(file_index, len(rule.file_names) - 1)]
-    name = _fill(template, year, area)
-    try:
-        found = _child(drive, node, name, folder=False)
-    except FileNotFoundError:
-        olds = _AREA_OLD_NAMES.get(area, ()) if "{地區}" in template else ()
-        for old in olds:
-            try:
-                found = _child(drive, node, _fill(template, year, old), folder=False)
-                name = _fill(template, year, old)
-                break
-            except FileNotFoundError:
-                continue
-        else:
-            raise
-    path.append(name)
-    return found["id"], "/".join(path)
+    entry = rule.file_names[min(file_index, len(rule.file_names) - 1)]
+    # 同一個檔可登記多種寫法，用「｜」分隔，依序找（例如 2027 起改名的新檔名｜2026 的舊檔名）
+    candidates = []
+    for template in (t.strip() for t in entry.split("｜") if t.strip()):
+        candidates.append(_fill(template, year, area))
+        if "{地區}" in template:
+            candidates += [_fill(template, year, old) for old in _AREA_OLD_NAMES.get(area, ())]
+    for name in candidates:
+        try:
+            found = _child(drive, node, name, folder=False)
+        except FileNotFoundError:
+            continue
+        path.append(name)
+        return found["id"], "/".join(path)
+    raise FileNotFoundError(f"找不到「{'」或「'.join(candidates)}」")
 
 
 class YearRoots:
