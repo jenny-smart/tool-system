@@ -960,7 +960,7 @@ class Rollover:
 
     # ---------- 清潔用品 ----------
     def run_supply(self) -> List[Dict[str, str]]:
-        """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（已有新年度檔就先移到垃圾桶）。"""
+        """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（只在新建立時清空；已存在要重做請勾重新生成）。"""
         old_name = self._fmt(SUPPLY_FILE_NAME)
         new_name = SUPPLY_FILE_NAME.replace("{y}", str(self.new_year))
         source = next((f for f in self.children(SUPPLY_FOLDER_ID)
@@ -968,12 +968,6 @@ class Rollover:
         if not source:
             self.log(f"  ⚠ 找不到檔案：{old_name}")
             return [{"kind": "檔案", "old_name": old_name, "old_id": "", "new_name": "找不到來源", "new_id": ""}]
-        for item in self.children(SUPPLY_FOLDER_ID):  # 已有新年度檔：一律移到垃圾桶後重新生成
-            if item["mimeType"] == SHEET_MIME and item["name"] == new_name:
-                self.log(f"  既有「{new_name}」移到垃圾桶，重新生成")
-                if not self.dry_run:
-                    self.drive.files().update(fileId=item["id"], body={"trashed": True},
-                                              supportsAllDrives=True).execute()
         copied, created = self.ensure_copy(source, SUPPLY_FOLDER_ID, new_name)
         record = {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                   "new_name": copied["name"], "new_id": copied["id"], "created": created}
