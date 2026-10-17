@@ -67,10 +67,13 @@ def test_shortcut_created_once():
 def test_marketing_copies_and_clears_numbers_only():
     fid = nyg.MARKETING_FILE_ID
     sheets = Sheets({fid: {"2026廣告": 1, "2026總表": 2}}, {
-        (fid, "'2027廣告'!B:B"): [["項目"], ["台北居家(SEM)"], ["其他"]],
+        (fid, "'2027廣告'!A:E"): [["", "Google", "", "", "2026"], ["台北", "Google", "居家", "(SEM)", "台北居家(SEM)"],
+                                  ["台北", "Google", "", "", "其他"]],
+        (fid, "'2027廣告'!1:1"): [["", "Google", "", "", "2026", "=$E1&\".01\""]],
+        (fid, "'2027總表'!1:1"): [[2026, "=$A1&\".01\""]],
         (fid, "'2027廣告'!F2"): [[100]],
         (fid, "'2027廣告'!I2"): [["=SUM(A1)"]],
-        (fid, "'2027總表'!C24:CH29"): [[5, "=A1"]],
+        (fid, "'2027總表'!C24:CH29"): [[5, "=A1", "=87369", "=1200+300"]],
     })
     records = _roll(FakeDrive([]), sheets).run_marketing()
     assert [r["new_name"] for r in records] == ["2027廣告", "2027總表"] and all(r["created"] for r in records)
@@ -81,13 +84,25 @@ def test_marketing_copies_and_clears_numbers_only():
     assert ("2026廣告", "2027廣告") in finds and ("2026總表", "2027總表") in finds
     assert sheets.writes[(fid, "'2027廣告'!F2")] == [[""]]          # 數字清空
     assert (fid, "'2027廣告'!I2") not in sheets.writes               # 公式保留
-    assert sheets.writes[(fid, "'2027總表'!C24:CH29")] == [["", "=A1"]]
+    assert sheets.writes[(fid, "'2027總表'!C24:CH29")] == [["", "=A1", "", ""]]   # 只有數字的公式也清
+    assert sheets.writes[(fid, "'2027廣告'!E1")] == [[2027]]           # 年度標題改新年度
+    assert sheets.writes[(fid, "'2027總表'!A1")] == [[2027]]
     assert (fid, "'2027廣告'!F3") not in sheets.writes               # 「其他」列不動
 
     # 重跑：已存在就沿用，不再複製或清空
     sheets.requests.clear(); sheets.writes.clear()
     again = _roll(FakeDrive([]), sheets).run_marketing()
     assert not any(r["created"] for r in again) and not sheets.requests and not sheets.writes
+
+    # 重新生成：既有工作表改名為舊版後重新複製、清空
+    roll = _roll(FakeDrive([]), sheets)
+    roll.fresh = True
+    fresh = roll.run_marketing()
+    assert all(r["created"] for r in fresh)
+    renamed = [r["updateSheetProperties"]["properties"]["title"] for _, r in sheets.requests
+               if "updateSheetProperties" in r]
+    assert len(renamed) == 2 and all("_舊版" in t for t in renamed)
+    assert sheets.writes[(fid, "'2027廣告'!F2")] == [[""]]
 
 
 def test_supply_copy_clear_and_carry_closing_stock():
@@ -98,6 +113,7 @@ def test_supply_copy_clear_and_carry_closing_stock():
         ("new1", f"'{stock}'!B:B"): [[""], ["期末庫存"], ["期初庫存"], ["當月進貨"], ["期初庫存"]],
         ("s26", f"'{stock}'!B:B"): [[""]] * 80 + [["期末庫存"]],
         ("s26", f"'{stock}'!C81:AY81"): [[3, 4, 5]],
+        ("new1", f"'{stock}'!A:A"): [["2026"], ["2025.12"], ["2026.01"], [""], ["=A$1&\".02\""], ["備註"]],
     })
     records = _roll(drive, sheets).run_supply()
     assert records[0]["new_name"] == "2027清潔用品訂購記錄-四店共用new" and records[0]["created"]
@@ -108,6 +124,8 @@ def test_supply_copy_clear_and_carry_closing_stock():
     false_cols = [r["repeatCell"] for _, r in sheets.requests if "repeatCell" in r]
     assert len(false_cols) == 2 and false_cols[0]["cell"]["userEnteredValue"] == {"boolValue": False}
     assert sheets.writes[("new1", f"'{stock}'!C2:AY2")] == [[3, 4, 5]]
+    labels = {k[1]: v for k, v in sheets.writes.items() if k[1].startswith(f"'{stock}'!A")}
+    assert labels == {f"'{stock}'!A1": [["2027"]], f"'{stock}'!A2": [["2026.12"]], f"'{stock}'!A3": [["2027.01"]]}
 
     # 重跑：檔案已存在就沿用、不清空
     sheets.cleared.clear()
