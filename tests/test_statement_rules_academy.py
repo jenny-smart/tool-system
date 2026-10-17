@@ -100,7 +100,8 @@ class AcademyStatementRulesTest(unittest.TestCase):
         row = [""] * 12
         row[10] = "2026/08/19"
 
-        self.assertEqual(rule.month_source, "K")
+        # 沒填月份來源＝自動判斷：J 欄沒有月份標記時改用 K 欄記帳日期，既有規則結果不變
+        self.assertEqual(rule.month_source, "")
         self.assertEqual(rule.l_value(row), "2026.06-內勤勞保費")
 
     def test_fixed_e_amount_accepts_formatted_number(self):
