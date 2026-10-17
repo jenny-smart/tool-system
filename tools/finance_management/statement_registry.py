@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+from tools.common.year_roots import choose_file_id, taipei_year
 
 REGISTRY_SHEET_NAME = "財報設定"
 
@@ -47,6 +48,14 @@ REPORT_GID_COLUMN = {
 ALL_REPORT_AREA = "2026-all"
 CASH_GAP_AREA = "2026-現金"
 REVIEW_SPREADSHEET_AREA = "2026"
+
+
+def _review_row() -> list[str]:
+    """年度review那一列：優先找地區＝今年（例如 2027）的列，沒有才用「2026」列。"""
+    try:
+        return _find_row(str(taipei_year()))
+    except RuntimeError:
+        return _find_row(REVIEW_SPREADSHEET_AREA)
 
 
 def _cell(row: list[str], col: int) -> str:
@@ -112,7 +121,9 @@ def resolve_statement_location(area: str, report: str) -> tuple[str, str]:
     if report not in REPORT_GID_COLUMN:
         raise ValueError(f"不支援的財報類型：{report}")
     row = _find_row(area)
-    spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
+    spreadsheet_id = choose_file_id(
+        "財報", area, _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
+    )
     gid = _cell(row, REPORT_GID_COLUMN[report])
     if not spreadsheet_id or not gid:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area}／{report} 缺少試算表ID或GID")
@@ -169,8 +180,10 @@ def _current_year_title(service, spreadsheet_id: str, title: str) -> str:
 
 def review_spreadsheet_id() -> str:
     """2026目標及review檔本身的試算表ID：地區＝「2026」那一列的B欄。"""
-    row = _find_row(REVIEW_SPREADSHEET_AREA)
-    spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
+    row = _review_row()
+    spreadsheet_id = choose_file_id(
+        "目標及review", "共用", _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
+    )
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{REVIEW_SPREADSHEET_AREA} 缺少試算表ID")
     return spreadsheet_id
@@ -180,7 +193,7 @@ def resolve_master_review_location() -> tuple[str, str]:
     """回傳 (試算表ID, 分頁標題)：「年度review工作表」這個跨地區彙整的固定分頁。
     GID 登記在地區＝「2026」那一列的 I欄（跟各地區列的「年度review gid」共用
     同一欄，只是這一列代表的不是某個地區自己的分頁，而是彙整分頁本身）。"""
-    row = _find_row(REVIEW_SPREADSHEET_AREA)
+    row = _review_row()
     gid = _cell(row, COL_REVIEW_GID)
     if not gid:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{REVIEW_SPREADSHEET_AREA} 缺少 年度review工作表 gid")

@@ -29,6 +29,7 @@ except ImportError:
 
 # ★ 新增
 from tools.common.log_to_sheet import write_target_log
+from tools.common.year_roots import choose_file_id
 
 
 SCOPES = [
@@ -294,7 +295,9 @@ def run_staff_profile_only(
     sheets = get_sheets_service()
 
     source_folder_id = get_folder_id(cfg, "staff_profile", area)
-    target_spreadsheet_id = get_spreadsheet_id(cfg, "office", area)
+    target_spreadsheet_id = choose_file_id(
+        "內勤工作表單", area, get_spreadsheet_id(cfg, "office", area), year=int(date_key[:4])
+    )
 
     file_base_new = f"{date_key}專員個資-{area}"
     file_base_old = f"{date_key}專員系統個資-{area}"
@@ -385,7 +388,9 @@ def run_order_columns_to_staff_profile(
     sheets = get_sheets_service()
 
     source_folder_id = get_folder_id(cfg, "order", area)
-    target_spreadsheet_id = get_spreadsheet_id(cfg, "office", area)
+    target_spreadsheet_id = choose_file_id(
+        "內勤工作表單", area, get_spreadsheet_id(cfg, "office", area), year=int(date_key[:4])
+    )
 
     file_base = f"{date_key}訂單-{area}"
     source_file_name = ""                                            # ★

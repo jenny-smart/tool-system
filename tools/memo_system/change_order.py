@@ -44,6 +44,7 @@ from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 from tools.common.config_loader import get_service_account_info, read_sheet_records, is_enabled
+from tools.common import tw_holidays
 
 try:
     import streamlit as st
@@ -258,9 +259,15 @@ def get_worksheet(region: str, tab_name: str = "清潔異動"):
     if region not in sheet_ids:
         raise ValueError(f"不支援的地區：{region}（目前支援：{list(sheet_ids.keys())}）")
 
+    # 依「年度根目錄設定」的模式切換年度檔（原設定／比對時仍用清潔異動設定的 ID）
+    from tools.common.year_roots import choose_file_id
+
+    category = "服務異動" if region in ("桃園", "新竹") else "內勤工作表單"
+    sheet_id = choose_file_id(category, region, sheet_ids[region])
+
     client = _get_gspread_client()
     try:
-        sh = client.open_by_key(sheet_ids[region])
+        sh = client.open_by_key(sheet_id)
     except gspread.exceptions.SpreadsheetNotFound as exc:
         raise RuntimeError(
             f"無法開啟「{region}」清潔異動試算表。請確認試算表已分享給目前的 Google 服務帳號（編輯者權限）。"
@@ -365,7 +372,8 @@ def _parse_period_hours(period_text: str) -> float:
 
 
 def _is_workday(d: date) -> bool:
-    return d.weekday() < 5 and d not in TAIWAN_PUBLIC_HOLIDAYS
+    # 依年份自動抓政府辦公日曆；抓不到時退回上方內建的 2026 年清單
+    return tw_holidays.is_workday(d, TAIWAN_PUBLIC_HOLIDAYS)
 
 
 def _is_weekend(d: date) -> bool:

@@ -23,6 +23,7 @@ except ImportError:
     from logger import log
 
 from tools.common.log_to_sheet import write_target_log
+from tools.common.year_roots import choose_file_id
 
 
 SCOPES = [
@@ -743,12 +744,15 @@ def run_staff_schedule_for_area(
         area,
     )
 
-    target_spreadsheet_id = (
+    target_spreadsheet_id = choose_file_id(
+        "內勤工作表單",
+        area,
         get_spreadsheet_id(
             cfg,
             "office",
             area,
-        )
+        ),
+        year=int(date_key[:4]),
     )
 
     current_sheet, next_sheet = (

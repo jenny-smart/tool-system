@@ -38,6 +38,11 @@ def load_sheet_target(
         raise ValueError(f"{area} 的 {gid_key} 必須是數字") from exc
     if bank == "yuanta" and area in YUANTA_TARGET_OVERRIDES:
         spreadsheet_id, worksheet_gid = YUANTA_TARGET_OVERRIDES[area]
+    if spreadsheet_id:
+        # 依「年度根目錄設定」的模式切換年度財報（原設定／比對時仍用上面的值）
+        from tools.common.year_roots import choose_file_id
+
+        spreadsheet_id = choose_file_id("財報", area, spreadsheet_id)
     if not spreadsheet_id or not worksheet_gid:
         raise ValueError(f"尚未設定 {area} 的 spreadsheet_id／{gid_key}")
     return SheetTarget(area, bank, spreadsheet_id, worksheet_gid)

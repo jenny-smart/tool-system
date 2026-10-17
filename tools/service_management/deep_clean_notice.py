@@ -1258,8 +1258,12 @@ def main() -> None:
             args.master_spreadsheet_id,
         )
     else:
-        master_settings_id = DEFAULT_SETTINGS_SPREADSHEET_ID
-        master_notice_id = DEFAULT_NOTICE_SPREADSHEET_ID
+        # 其他模式原本直接用寫死的預設檔；改依「年度根目錄設定」的模式切換
+        # （原設定／比對時仍用預設檔；注意預設通知檔是 2025 資料夾的舊檔）
+        from tools.common.year_roots import choose_file_id
+
+        master_settings_id = choose_file_id("大掃除", "共用", DEFAULT_SETTINGS_SPREADSHEET_ID, file_index=0)
+        master_notice_id = choose_file_id("大掃除", "共用", DEFAULT_NOTICE_SPREADSHEET_ID, file_index=1)
     settings_spreadsheet_id = args.settings_spreadsheet_id.strip() or master_settings_id
     notice_spreadsheet_id = args.notice_spreadsheet_id.strip() or master_notice_id
 
