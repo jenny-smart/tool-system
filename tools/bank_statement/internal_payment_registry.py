@@ -13,6 +13,7 @@ from tools.common.config_loader import (
     get_sheets_service,
     read_sheet_records,
 )
+from tools.common.year_roots import choose_file_id
 
 REGISTRY_SHEET_NAME = "財務帳務設定"
 
@@ -22,6 +23,17 @@ SUPPLY_PURCHASE_TYPE = "清潔用品採購"
 DEPOSIT_REPORT_TYPE = "工具包押金財報"
 NEWEBPAY_EXPRESS_TYPE = "藍新快速收款查帳"
 CLEANING_CHANGE_TYPE = "清潔異動設定"
+
+# 各類型對應「年度根目錄設定」的類別與檔名序號（同一列有多個檔名時用分號分隔）
+YEAR_ROOT_CATEGORY = {
+    PAYMENT_REQUEST_TYPE: ("財報", 0),
+    DEPOSIT_REPORT_TYPE: ("財報", 0),
+    DEPOSIT_REFUND_TYPE: ("名冊薪資", 1),
+    SUPPLY_PURCHASE_TYPE: ("清潔用品", 0),
+    NEWEBPAY_EXPRESS_TYPE: ("內勤工作表單", 0),
+    CLEANING_CHANGE_TYPE: ("內勤工作表單", 0),
+}
+SERVICE_CHANGE_AREAS = {"桃園", "新竹"}
 
 
 def _sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:
@@ -42,11 +54,23 @@ def find_registry_row(report_type: str, area: str) -> dict[str, str]:
             continue
         if record.get("地區", "").strip() != area:
             continue
-        return record
+        return _with_year_root(report_type, area, record)
     raise RuntimeError(
         f"「{REGISTRY_SHEET_NAME}」登記表找不到「{report_type}／{area}」，"
         f"請先在 Jenny's Lemonhometools 的「{REGISTRY_SHEET_NAME}」分頁新增一列"
     )
+
+
+def _with_year_root(report_type: str, area: str, record: dict[str, str]) -> dict[str, str]:
+    """依「年度根目錄設定」的模式決定試算表ID（原設定／比對時就是登記表上的 ID）。"""
+    category, index = YEAR_ROOT_CATEGORY.get(report_type, ("", 0))
+    if not category:
+        return record
+    if report_type == CLEANING_CHANGE_TYPE and area in SERVICE_CHANGE_AREAS:
+        category = "服務異動"
+    record = dict(record)
+    record["試算表ID"] = choose_file_id(category, area, record.get("試算表ID", ""), file_index=index)
+    return record
 
 
 def read_report_values(report_type: str, area: str) -> list[list[str]]:

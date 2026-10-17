@@ -44,6 +44,7 @@ from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 from tools.common.config_loader import get_service_account_info
+from tools.common import tw_holidays
 
 try:
     import streamlit as st
@@ -124,7 +125,8 @@ def get_service_amount(order: dict) -> int:
 # Google Sheet 連線（比照 memo.py 用 service account）
 # ============================================================
 
-# 兩個地區各自的清潔異動工作表（Sheet ID 取自您提供的網址）
+# 清潔異動工作表改由主控表「財務帳務設定」的「清潔異動設定」列決定，
+# 並依「年度根目錄設定」的模式切換年度檔；下面兩組只在讀不到設定表時備用。
 SHEET_IDS = {
     "台北": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
     "台中": "1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM",
@@ -194,24 +196,53 @@ def _get_gspread_client():
     return _gspread_client
 
 
+_LOCATION_CACHE: dict = {}
+
+
+def _sheet_location(region: str):
+    """回傳 (試算表ID, GID)：優先讀財務帳務設定（含年度根目錄切換），讀不到才用上方備用值。"""
+    # 以「地區＋日期」快取：Streamlit 常駐時跨年後隔天就會重新讀設定
+    key = (region, datetime.now(ZoneInfo("Asia/Taipei")).date())
+    if key not in _LOCATION_CACHE:
+        _LOCATION_CACHE[key] = _read_sheet_location(region)
+    return _LOCATION_CACHE[key]
+
+
+def _read_sheet_location(region: str):
+    try:
+        from tools.bank_statement.internal_payment_registry import (
+            CLEANING_CHANGE_TYPE,
+            find_registry_row,
+        )
+
+        record = find_registry_row(CLEANING_CHANGE_TYPE, region)
+        sheet_id = record.get("試算表ID", "").strip()
+        gid_text = record.get("GID", "").strip()
+        if sheet_id:
+            return sheet_id, int(gid_text) if gid_text.isdigit() else None
+    except Exception:
+        pass
+    return SHEET_IDS.get(region, ""), SHEET_GIDS.get(region)
+
+
 def get_worksheet(region: str, tab_name: str = "清潔異動"):
     """
     依地區回傳對應的 gspread worksheet 物件。
     優先用 gid（SHEET_GIDS）精準定位分頁；若該地區沒有設定 gid，
     退而用 tab_name 嘗試找同名分頁，最後 fallback 用該試算表第一個分頁。
     """
-    if region not in SHEET_IDS:
+    sheet_id, gid = _sheet_location(region)
+    if not sheet_id:
         raise ValueError(f"不支援的地區：{region}（目前支援：{list(SHEET_IDS.keys())}）")
 
     client = _get_gspread_client()
     try:
-        sh = client.open_by_key(SHEET_IDS[region])
+        sh = client.open_by_key(sheet_id)
     except gspread.exceptions.SpreadsheetNotFound as exc:
         raise RuntimeError(
             f"無法開啟「{region}」清潔異動試算表。請確認試算表已分享給目前的 Google 服務帳號（編輯者權限）。"
         ) from exc
 
-    gid = SHEET_GIDS.get(region)
     if gid is not None:
         for ws in sh.worksheets():
             if ws.id == gid:
@@ -310,7 +341,8 @@ def _parse_period_hours(period_text: str) -> float:
 
 
 def _is_workday(d: date) -> bool:
-    return d.weekday() < 5 and d not in TAIWAN_PUBLIC_HOLIDAYS
+    # 依年份自動抓政府辦公日曆；抓不到時退回下方內建的 2026 年清單
+    return tw_holidays.is_workday(d, TAIWAN_PUBLIC_HOLIDAYS)
 
 
 def _is_weekend(d: date) -> bool:

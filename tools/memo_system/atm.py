@@ -193,7 +193,10 @@ def get_atm_spreadsheet(sheet_id: str):
 def get_atm_worksheet(region: str):
     if region not in ATM_SHEET_IDS:
         raise ValueError(f"未知地區「{region}」，目前支援：{list(ATM_SHEET_IDS.keys())}")
-    sh = get_atm_spreadsheet(ATM_SHEET_IDS[region])
+    # 依「年度根目錄設定」的模式切換年度檔（原設定／比對時仍用 ATM_SHEET_IDS）
+    from tools.common.year_roots import choose_file_id
+
+    sh = get_atm_spreadsheet(choose_file_id("內勤工作表單", region, ATM_SHEET_IDS[region]))
     return sh.worksheet(ATM_WORKSHEET_TITLE)
 
 
