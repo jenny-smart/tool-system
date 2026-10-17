@@ -2,9 +2,12 @@
 
 規則（2026-10 與 Jenny 確認）：
   - 只處理登記日期（E 欄）2026/09/01 以後的列。
+  - 每列分三類：未備妥（missing，缺資料還不能處理，例如缺匯款帳號、客人尚未付款）、
+    可自動執行（actions）、需人工（manual，資料齊全但要到其他功能逐筆處理）。
+    未備妥的列不執行任何動作；每日檢查只提醒未備妥的列。
   - 待退款：① 開折讓單（有 X 原發票、Z 未稅金額，AB 空白）
             ② 退款（AC 空白）：R＝ATM → 富邦 ATM 退款（台北／台中）；R＝信用卡 → 藍新退款；其他付款方式 → 需人工
-  - 待收款：M 收款時間有值、O 發票空白 → 需到【鯨躍發票】開立發票逐筆確認；M 空白 → 客人尚未付款
+  - 待收款：M 收款時間空白 → 未備妥；M、N 有值、O 發票空白 → 需到【鯨躍發票】開立發票逐筆確認
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
   - 待處理發票（車馬費發票／異動發票／二聯改三聯）→ 需到鯨躍發票功能逐筆確認
   - 回寫系統：B 欄為 已退款／已收款／已扣儲值金／已返儲值金／已處理發票，
@@ -94,7 +97,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
     item = {
         "region": region, "row": row_no, "status": status, "detail": _cell(row, "C"),
         "order_no": order_no, "customer": _cell(row, "H"), "payway": _cell(row, "R"),
-        "amount": "", "progress": [], "actions": [], "manual": [], "note": _cell(row, "K"),
+        "amount": "", "progress": [], "actions": [], "missing": [], "manual": [], "note": _cell(row, "K"),
     }
     if status in DONE_STATUSES:
         if not needs_sync(row):
@@ -104,36 +107,46 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         return item
 
     if status == "待退款":
+        # missing＝缺資料還不能處理（未備妥）；manual＝資料齊全但要人工或到其他功能逐筆處理
         item["amount"] = _amount(_cell(row, "T") or _cell(row, "S"))
+        if not _amount(_cell(row, "S")):
+            item["missing"].append("缺退款金額（S）")
         if _cell(row, "AB"):
             item["progress"].append("折讓單 ✓")
         elif not _cell(row, "X"):
-            item["manual"].append("缺原發票號碼（X），無法開折讓單")
+            item["missing"].append("缺原發票號碼（X）")
         elif not _amount(_cell(row, "Z")):
-            item["manual"].append("缺未稅金額（Z），無法開折讓單")
+            item["missing"].append("缺未稅金額（Z）")
         else:
             item["actions"].append("allowance")
         if _cell(row, "AC"):
             item["progress"].append("退款 ✓")
         else:
             payway = item["payway"].upper()
-            if "ATM" in payway:
-                if region not in ATM_REFUND_REGIONS:
+            if not payway:
+                item["missing"].append("缺付款方式（R）")
+            elif "ATM" in payway:
+                if not re.sub(r"\D", "", _cell(row, "P")) or not re.sub(r"\D", "", _cell(row, "Q")):
+                    item["missing"].append("缺退款銀行代碼／帳號（P／Q）")
+                elif region not in ATM_REFUND_REGIONS:
                     item["manual"].append(f"{region} ATM 退款需人工")
-                elif not re.sub(r"\D", "", _cell(row, "P")) or not re.sub(r"\D", "", _cell(row, "Q")):
-                    item["manual"].append("缺退款銀行代碼／帳號（P／Q）")
-                else:
+                elif _amount(_cell(row, "S")):
                     item["actions"].append("atm_refund")
             elif item["payway"] == "信用卡":
-                item["actions"].append("credit_refund")
+                if _amount(_cell(row, "S")):
+                    item["actions"].append("credit_refund")
             else:
-                item["manual"].append(f"付款方式「{item['payway'] or '空白'}」退款需人工")
+                item["manual"].append(f"付款方式「{item['payway']}」退款需人工")
+        if item["missing"]:
+            item["actions"] = []  # 資料不齊的列先不執行，避免只做一半
         return item
 
     if status == "待收款":
         item["amount"] = _amount(_cell(row, "N"))
         if not _cell(row, "M"):
-            item["manual"].append("客人尚未付款（M 收款時間空白）")
+            item["missing"].append("客人尚未付款（M 收款時間空白）")
+        elif not item["amount"]:
+            item["missing"].append("缺收款金額（N）")
         elif not _cell(row, "O"):
             item["manual"].append("請到【鯨躍發票】開立發票逐筆開立")
         return item
@@ -144,7 +157,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         if item["amount"]:
             item["actions"].append("stored_value")
         else:
-            item["manual"].append(f"缺儲值金金額（{column}）")
+            item["missing"].append(f"缺儲值金金額（{column}）")
         return item
 
     if status == "待處理發票":

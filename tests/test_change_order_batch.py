@@ -33,24 +33,34 @@ def test_done_rows_need_sync_until_marker_matches():
 
 def test_pending_refund_atm_and_credit():
     item = plan(B="待退款", X="AB12345678", Z="952", S="1000", T="985", R="ATM", P="700", Q="123")
-    assert item["actions"] == ["allowance", "atm_refund"]
+    assert item["actions"] == ["allowance", "atm_refund"] and item["missing"] == []
     assert plan(B="待退款", X="AB1", Z="952", S="1000", R="信用卡")["actions"] == ["allowance", "credit_refund"]
     item = plan("桃園", B="待退款", X="AB1", Z="952", S="1000", R="ATM", P="700", Q="1")
     assert item["actions"] == ["allowance"] and "桃園 ATM 退款需人工" in item["manual"]
     item = plan(B="待退款", S="1000", R="現金", AB="X1", AC="2026/09/20")
     assert item["actions"] == [] and item["progress"] == ["折讓單 ✓", "退款 ✓"]
-    assert "缺原發票號碼（X），無法開折讓單" in plan(B="待退款", S="1000", R="現金")["manual"]
+    assert plan(B="待退款", X="AB1", Z="952", S="1000", R="現金")["manual"] == ["付款方式「現金」退款需人工"]
+
+
+def test_missing_data_is_not_ready_and_blocks_actions():
+    item = plan(B="待退款", X="AB1", Z="952", S="1000", R="ATM")
+    assert item["missing"] == ["缺退款銀行代碼／帳號（P／Q）"] and item["actions"] == []
+    assert plan(B="待退款", S="1000", R="信用卡")["missing"] == ["缺原發票號碼（X）"]
+    assert plan(B="待退款", X="AB1", R="信用卡")["missing"] == ["缺退款金額（S）", "缺未稅金額（Z）"]
+    assert plan(B="待退款", X="AB1", Z="952", S="1000")["missing"] == ["缺付款方式（R）"]
 
 
 def test_pending_charge_waits_for_payment_and_manual_invoice():
-    assert plan(B="待收款")["manual"] == ["客人尚未付款（M 收款時間空白）"]
-    assert plan(B="待收款", M="2026/09/20")["manual"] == ["請到【鯨躍發票】開立發票逐筆開立"]
-    assert plan(B="待收款", M="2026/09/20", O="AB1")["manual"] == []
+    assert plan(B="待收款")["missing"] == ["客人尚未付款（M 收款時間空白）"]
+    assert plan(B="待收款", M="2026/09/20")["missing"] == ["缺收款金額（N）"]
+    item = plan(B="待收款", M="2026/09/20", N="500")
+    assert item["missing"] == [] and item["manual"] == ["請到【鯨躍發票】開立發票逐筆開立"]
+    assert plan(B="待收款", M="2026/09/20", N="500", O="AB1")["manual"] == []
 
 
 def test_stored_value_and_invoice_rows():
     assert plan(B="待扣儲值金", N="500")["actions"] == ["stored_value"]
-    assert plan(B="待返儲值金", S="")["manual"] == ["缺儲值金金額（S）"]
+    assert plan(B="待返儲值金", S="")["missing"] == ["缺儲值金金額（S）"]
     assert "二聯改三聯" in plan(B="待處理發票", C="異動發票")["manual"][0]
     assert "開立發票" in plan(B="待處理發票", C="車馬費發票")["manual"][0]
 

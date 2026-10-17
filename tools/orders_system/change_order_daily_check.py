@@ -6,9 +6,9 @@
 
 只做兩件事，不回寫系統（回寫改由【清潔異動】已備妥整合執行處理）：
   1. 補 T（匯款金額）、Z（未稅金額）公式：待退款且 S 有值、T／Z 空白的格子。
-  2. 列出登記日期 2026/09/01 以後「未備妥」的列（還要開折讓單、退款、開發票、
-     異動儲值金或需人工的列），在 jenny@lemonclean.com.tw 行事曆建一筆 11:00 的提醒，
-     10:30 跳窗；沒有未備妥、非工作日就不建。
+  2. 列出登記日期 2026/09/01 以後「未備妥」的列（缺資料還不能處理，例如缺匯款帳號、
+     客人尚未付款），在 jenny@lemonclean.com.tw 行事曆建一筆 11:00 的提醒，10:30 跳窗；
+     沒有未備妥、非工作日就不建。資料齊全可執行或需人工的列不提醒。
 盤點規則與【清潔異動】已備妥整合執行共用 tools/finance_management/change_order_batch.py。
 """
 from __future__ import annotations
@@ -41,13 +41,12 @@ def next_remind_slot(now: datetime, is_workday=tw_holidays.is_workday):
 
 
 def todo_items(items: list) -> list:
-    """未備妥＝還沒完成的列（只差回寫系統的已完成列不算）。"""
-    return [item for item in items if item["actions"] != ["sync"]]
+    """未備妥＝缺資料還不能處理的列。"""
+    return [item for item in items if item["missing"]]
 
 
 def _todo_text(item: dict) -> str:
-    steps = [batch.ACTIONS[a][0] for a in item["actions"] if a != "sync"] + item["manual"]
-    return "；".join(steps)
+    return "、".join(item["missing"])
 
 
 def build_notify_text(todo: list, today: date) -> tuple:
@@ -55,9 +54,9 @@ def build_notify_text(todo: list, today: date) -> tuple:
     for item in todo:
         lines.append(
             f"・[{item['region']}] {item['status']} {item['order_no']}"
-            f"（{item.get('customer', '')}）待處理：{_todo_text(item)}（第{item['row']}列）"
+            f"（{item.get('customer', '')}）{_todo_text(item)}（第{item['row']}列）"
         )
-    lines += ["", "可到 Tools App【清潔異動】已備妥整合執行一次處理。"]
+    lines += ["", "補齊資料後，可到 Tools App【清潔異動】已備妥整合執行一次處理。"]
     return f"清潔異動未備妥：{len(todo)} 筆", "\n".join(lines)
 
 

@@ -26,7 +26,8 @@ def _rows(items: list[dict]) -> pd.DataFrame:
             "金額": item["amount"],
             "進度": "、".join(item["progress"]),
             "本次動作": "、".join(batch.ACTIONS[a][0] for a in item["actions"]),
-            "需人工／卡住原因": "；".join(item["manual"]),
+            "未備妥（缺資料）": "、".join(item["missing"]),
+            "需人工": "；".join(item["manual"]),
             "後台備註": item["note"],
         }
         for item in items
@@ -51,8 +52,10 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         return
 
     runnable = [item for item in items if item["actions"]]
-    manual = [item for item in items if not item["actions"]]
-    st.markdown(f"共 **{len(items)}** 列：可自動執行 **{len(runnable)}** 列，只能人工處理 **{len(manual)}** 列。")
+    missing = [item for item in items if item["missing"]]
+    manual = [item for item in items if not item["actions"] and not item["missing"]]
+    st.markdown(f"共 **{len(items)}** 列：可自動執行 **{len(runnable)}** 列、"
+                f"未備妥（缺資料）**{len(missing)}** 列、需人工 **{len(manual)}** 列。")
     edited = st.data_editor(
         _rows(items),
         hide_index=True,

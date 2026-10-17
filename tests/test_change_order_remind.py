@@ -7,7 +7,7 @@ from tools.orders_system import change_order_daily_check as chk
 
 TZ = chk.TW_TZ
 TODO = [{"region": "台北", "status": "待退款", "order_no": "LC1", "customer": "王", "row": 5,
-         "actions": ["allowance"], "manual": ["付款方式「現金」退款需人工"]}]
+         "actions": [], "missing": ["缺退款銀行代碼／帳號（P／Q）"], "manual": []}]
 
 
 def _at(h, m=0, d=19):
@@ -25,8 +25,11 @@ def test_no_slot_on_holiday():
     assert chk.next_remind_slot(_at(10), is_workday=lambda d: False) is None
 
 
-def test_todo_excludes_rows_only_waiting_for_sync():
-    rows = [dict(TODO[0]), {**TODO[0], "order_no": "LC2", "actions": ["sync"], "manual": []}]
+def test_todo_only_lists_rows_missing_data():
+    rows = [dict(TODO[0]),
+            {**TODO[0], "order_no": "LC2", "actions": ["sync"], "missing": []},
+            {**TODO[0], "order_no": "LC3", "actions": ["allowance"], "missing": []},
+            {**TODO[0], "order_no": "LC4", "missing": [], "manual": ["請到【鯨躍發票】開立發票逐筆開立"]}]
     assert [item["order_no"] for item in chk.todo_items(rows)] == ["LC1"]
 
 
@@ -38,7 +41,7 @@ def test_notify_creates_event_on_jenny_calendar(monkeypatch):
     kw = calls[0]
     assert kw["calendar_id"] == "jenny@lemonclean.com.tw" and kw["attendee"] == ""
     assert kw["start"] == _at(11) and kw["reminder_minutes"] == [30]
-    assert "LC1" in kw["description"] and "開立折讓單" in kw["description"] and "需人工" in kw["description"]
+    assert "LC1" in kw["description"] and "缺退款銀行代碼／帳號（P／Q）" in kw["description"]
 
 
 def test_notify_failure_does_not_use_shared_calendar(monkeypatch):
@@ -63,7 +66,7 @@ def test_run_never_syncs(monkeypatch):
     from tools.finance_management import change_order_batch as batch
 
     monkeypatch.setattr(batch, "scan_region", lambda region, fix_formulas, log: [
-        {**TODO[0], "region": region}, {**TODO[0], "region": region, "actions": ["sync"], "manual": []}])
+        {**TODO[0], "region": region}, {**TODO[0], "region": region, "actions": ["sync"], "missing": []}])
     monkeypatch.setattr(batch, "sync_region", lambda *a, **k: pytest.fail("每日檢查不應回寫"))
     monkeypatch.setattr(chk, "log_execution", lambda *a, **k: None)
     monkeypatch.setattr(chk, "_notify", lambda todo, log: None)
