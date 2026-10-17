@@ -396,7 +396,7 @@ def parse_rows_arg(text: str, last_row: int) -> List[int]:
 # ============================================================
 class Rollover:
     def __init__(self, drive, sheets, spreadsheet_id: str, new_year: int,
-                 dry_run: bool = False, fresh: bool = False, log=print):
+                 dry_run: bool = False, fresh: bool = False, tidy: bool = False, log=print):
         self.drive = drive
         self.sheets = sheets
         self.spreadsheet_id = spreadsheet_id
@@ -404,6 +404,7 @@ class Rollover:
         self.prev_year = new_year - 1
         self.dry_run = dry_run
         self.fresh = fresh
+        self.tidy = tidy  # 行銷費用總管理／清潔用品：已存在的新年度檔不重建，直接再整理一次
         self.log = log
         self.stamp = datetime.now(TZ).strftime("%Y%m%d%H%M")
 
@@ -879,6 +880,10 @@ class Rollover:
             if self.dry_run:
                 self.log(f"  複製工作表：{old_title} → {new_title}")
                 continue
+            if new_title in ids and not self.fresh and self.tidy:
+                self.log(f"  工作表已存在，只整理：{new_title}")
+                record["tidied"] = True
+                continue
             if new_title in ids and not self.fresh:
                 self.log(f"  工作表已存在，沿用：{new_title}")
                 continue
@@ -898,7 +903,7 @@ class Rollover:
             record["created"] = True
         if self.dry_run:
             return records
-        created = {r["new_name"] for r in records if r["created"]}
+        created = {r["new_name"] for r in records if r["created"] or r.get("tidied")}
         # 新工作表公式中引用前一年度工作表名稱 → 新年度
         requests = [{"findReplace": {"find": old, "replacement": new, "sheetId": ids[title],
                                      "includeFormulas": True}}
@@ -971,7 +976,11 @@ class Rollover:
         copied, created = self.ensure_copy(source, SUPPLY_FOLDER_ID, new_name)
         record = {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                   "new_name": copied["name"], "new_id": copied["id"], "created": created}
-        if created and not self.dry_run:
+        if not created and self.tidy:
+            self.log(f"  檔案已存在，只整理：{copied['name']}")
+            if not self.dry_run:
+                self.supply_post_process(copied["id"])
+        elif created and not self.dry_run:
             self.supply_post_process(copied["id"])
         elif created:
             self.log(f"  整理 {new_name}：清空進貨明細表、各地區庫存統計表第 2 列與期初庫存")
