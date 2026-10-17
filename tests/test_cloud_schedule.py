@@ -36,6 +36,11 @@ class ScheduleTests(unittest.TestCase):
     def test_weekly_and_401(self):
         self.assertIn(('scheduled_fubon_pending_check.yml',{}),self.jobs('2026-09-29T10:00'))
         self.assertNotIn(('scheduled_fubon_pending_check.yml',{}),self.jobs('2026-09-30T10:00'))
+
+    def test_change_order_check_at_10_and_14(self):
+        for hm in ['10:00','14:00']:
+            self.assertIn(('scheduled_change_order_check.yml',{}),self.jobs('2026-10-17T'+hm))
+        self.assertNotIn(('scheduled_change_order_check.yml',{}),self.jobs('2026-10-17T12:00'))
         self.assertIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-20T00:00'))
         self.assertNotIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-21T00:00'))
 

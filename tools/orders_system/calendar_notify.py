@@ -38,8 +38,9 @@ def _calendar_service():
 
 
 def create_notify_event(summary: str, description: str = "", start: datetime = None,
-                         calendar_id: str = None):
-    """建立一個通知用日曆事件：30 分鐘、提前 20 分與 10 分跳窗提醒，並邀請 Jenny。"""
+                         calendar_id: str = None, reminder_minutes=None, attendee: str = NOTIFY_ATTENDEE_EMAIL):
+    """建立一個通知用日曆事件：30 分鐘、預設提前 20 分與 10 分跳窗提醒，並邀請 Jenny。
+    attendee 傳空字串＝不邀請（事件直接建在本人的日曆上時）。"""
     service = _calendar_service()
     calendar_id = calendar_id or GOOGLE_CALENDAR_MAP.get(NOTIFY_CALENDAR_REGION)
     if not calendar_id:
@@ -53,13 +54,15 @@ def create_notify_event(summary: str, description: str = "", start: datetime = N
         "description": description,
         "start": {"dateTime": start.isoformat(), "timeZone": "Asia/Taipei"},
         "end": {"dateTime": end.isoformat(), "timeZone": "Asia/Taipei"},
-        "attendees": [{"email": NOTIFY_ATTENDEE_EMAIL}],
         "reminders": {
             "useDefault": False,
-            "overrides": [{"method": "popup", "minutes": m} for m in REMINDER_MINUTES],
+            "overrides": [{"method": "popup", "minutes": m}
+                          for m in (reminder_minutes or REMINDER_MINUTES)],
         },
     }
+    if attendee:
+        body["attendees"] = [{"email": attendee}]
 
     return service.events().insert(
-        calendarId=calendar_id, body=body, sendUpdates="all"
+        calendarId=calendar_id, body=body, sendUpdates="all" if attendee else "none"
     ).execute()

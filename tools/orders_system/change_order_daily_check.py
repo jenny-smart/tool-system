@@ -1,16 +1,17 @@
 # change_order_daily_check.py
 # -*- coding: utf-8 -*-
 """
-清潔異動每日檢查：台北／台中／桃園／新竹，每天台北時間 10:00 跑一次
-（.github/workflows/scheduled_change_order_check.yml）。
+清潔異動每日檢查：台北／台中／桃園／新竹，每天台北時間 10:00、14:00 各跑一次
+（.github/workflows/scheduled_change_order_check.yml，由 scripts/cloud_schedule.py 派送）。
 
 掃描各地區「清潔異動」工作表 B 欄狀態為「待收款」／「待退款」的列：
   - 待退款：AB（折讓單號碼）與 AC（退款時間）都有值 → 視為已備妥，
     自動回填後台，成功後才把 B 欄改成「已退款」。
   - 待收款：M（收款時間）與 O（收款發票號碼）都有值 → 視為已備妥，
     自動回填後台，成功後才把 B 欄改成「已收款」。
-  - 條件還沒補齊（或自動回填失敗）的列，列進待辦清單寫一筆行事曆提醒，
-    完全不動 Sheet 資料（已經有行事曆通知就不再另外寄信）。
+  - 條件還沒補齊（或自動回填失敗）的列，列進待辦清單，在工作日 11:00／15:00
+    （下一個時段）於 jenny@lemonclean.com.tw 行事曆建一筆提醒、提前 30 分鐘跳窗，
+    完全不動 Sheet 資料；沒有待辦、非工作日就不建。
 
 登入後台採「各區帳號密碼」（比照 tools/lemon_backend/config.py 的 AREA_ENV：
 台北→TAIPEI_EMAIL/TAIPEI_PASSWORD、台中→TAICHUNG_EMAIL/TAICHUNG_PASSWORD、
@@ -20,16 +21,22 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from tools.memo_system import memo, change_order
 from tools.lemon_backend.config import get_credentials
 from tools.finance_management.execution_log import log_execution
 from tools.orders_system import calendar_notify
+from tools.common import tw_holidays
 
 REGIONS = ["台北", "台中", "桃園", "新竹"]
 TW_TZ = ZoneInfo("Asia/Taipei")
+
+# 未備妥提醒：工作日 11:00、15:00 各一筆，建在 Jenny 的行事曆，提前 30 分鐘跳窗
+REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
+REMIND_SLOTS = (time(11, 0), time(15, 0))
+REMIND_BEFORE_MINUTES = 30
 
 
 def _login_session(region: str, ui_logger=None):
@@ -130,31 +137,56 @@ def _sync_ready_item(region: str, item: dict, session, ui_logger=None) -> tuple:
     return True, ""
 
 
-def _notify(all_todo: list, summary: dict):
-    today = datetime.now(TW_TZ).strftime("%Y/%m/%d")
+def next_remind_slot(now: datetime, is_workday=tw_holidays.is_workday):
+    """下一個提醒時段（今天 11:00 或 15:00）；非工作日或已過 15:00 回傳 None。"""
+    now = now.astimezone(TW_TZ)
+    if not is_workday(now.date()):
+        return None
+    for slot in REMIND_SLOTS:
+        start = datetime.combine(now.date(), slot, tzinfo=TW_TZ)
+        if start > now:
+            return start
+    return None
+
+
+def build_notify_text(all_todo: list, summary: dict, today: date) -> tuple:
     total_synced = sum(s["synced"] for s in summary.values())
     total_failed = sum(s["failed"] for s in summary.values())
-
-    lines = [f"{today} 清潔異動每日檢查",
-             f"已自動回填：{total_synced} 筆；失敗：{total_failed} 筆；待辦：{len(all_todo)} 筆", ""]
-    if all_todo:
-        lines.append("待辦事項：")
-        for item in all_todo:
-            lines.append(
-                f"・[{item['region']}] {item['kind']} {item['order_no']}"
-                f"（{item.get('customer_name', '')}）缺：{item['missing']}（第{item['sheet_row']}列）"
-            )
-    else:
-        lines.append("今天沒有待辦事項。")
-    plain_body = "\n".join(lines)
-
-    try:
-        calendar_notify.create_notify_event(
-            summary=f"清潔異動待辦：{len(all_todo)} 筆（回填{total_synced}／失敗{total_failed}）",
-            description=plain_body,
+    lines = [f"{today:%Y/%m/%d} 清潔異動未備妥，請補齊後下次檢查會自動回填系統",
+             f"已自動回填：{total_synced} 筆；失敗：{total_failed} 筆；待補齊：{len(all_todo)} 筆", ""]
+    for item in all_todo:
+        lines.append(
+            f"・[{item['region']}] {item['kind']} {item['order_no']}"
+            f"（{item.get('customer_name', '')}）缺：{item['missing']}（第{item['sheet_row']}列）"
         )
+    lines += ["", "待退款請補 AB 折讓單號碼、AC 退款時間；待收款請補 M 收款時間、O 發票號碼。"]
+    title = f"清潔異動未備妥：{len(all_todo)} 筆待補齊（回填{total_synced}／失敗{total_failed}）"
+    return title, "\n".join(lines)
+
+
+def _notify(all_todo: list, summary: dict, now: datetime = None, log=print):
+    """有未備妥的列才建提醒：工作日 11:00／15:00 中下一個時段，提前 30 分鐘跳窗。"""
+    now = now or datetime.now(TW_TZ)
+    if not all_todo:
+        log("沒有未備妥的列，不建提醒")
+        return None
+    start = next_remind_slot(now)
+    if start is None:
+        log("非工作日或已過 15:00，不建提醒")
+        return None
+    title, body = build_notify_text(all_todo, summary, now.date())
+    kwargs = dict(summary=title, description=body, start=start, reminder_minutes=[REMIND_BEFORE_MINUTES])
+    try:
+        event = calendar_notify.create_notify_event(calendar_id=REMIND_CALENDAR_ID, attendee="", **kwargs)
+        log(f"已建立 {start:%H:%M} 提醒（{REMIND_CALENDAR_ID}）")
+        return event
+    except Exception as exc:  # 服務帳號尚未取得 Jenny 行事曆權限時，改建在共用日曆並邀請她
+        log(f"⚠️ 無法寫入 {REMIND_CALENDAR_ID} 行事曆（{exc}），改用共用日曆邀請")
+    try:
+        return calendar_notify.create_notify_event(attendee=REMIND_CALENDAR_ID, **kwargs)
     except Exception as exc:
-        print(f"⚠️ 建立行事曆通知失敗：{exc}", flush=True)
+        log(f"⚠️ 建立行事曆通知失敗：{exc}")
+        return None
 
 
 def run(regions=None, ui_logger=None) -> dict:
@@ -211,7 +243,7 @@ def run(regions=None, ui_logger=None) -> dict:
     for region in skipped_regions:
         log(f"【{region}】清潔異動設定分頁未啟用或找不到，略過")
 
-    _notify(all_todo, summary)
+    _notify(all_todo, summary, log=log)
     return {"summary": summary, "todo": all_todo}
 
 
