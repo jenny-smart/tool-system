@@ -1,0 +1,16 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[登入] 已登入
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台北】已回填 0 筆，失敗 0 筆，待辦 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[登入] 已登入
+【台中】已回填 0 筆，失敗 0 筆，待辦 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[登入] 已登入
+【桃園】已回填 0 筆，失敗 0 筆，待辦 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[登入] 已登入
+【新竹】已回填 0 筆，失敗 0 筆，待辦 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠️ 建立行事曆通知失敗：<HttpError 403 when requesting https://www.googleapis.com/calendar/v3/calendars/lemonclean925%40gmail.com/events?sendUpdates=all&alt=json returned "Service accounts cannot invite attendees without Domain-Wide Delegation of Authority.". Details: "[{'domain': 'calendar', 'reason': 'forbiddenForServiceAccounts', 'message': 'Service accounts cannot invite attendees without Domain-Wide Delegation of Authority.'}]">
+{'summary': {'台北': {'synced': 0, 'failed': 0, 'todo': 1, 'errors': []}, '台中': {'synced': 0, 'failed': 0, 'todo': 0, 'errors': []}, '桃園': {'synced': 0, 'failed': 0, 'todo': 0, 'errors': []}, '新竹': {'synced': 0, 'failed': 0, 'todo': 0, 'errors': []}}, 'todo': [{'region': '台北', 'kind': '收款', 'sheet_row': 318, 'order_no': 'LC00217398', 'customer_name': '羅心伶', 'missing': '收款、發票'}]}
