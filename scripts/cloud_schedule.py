@@ -38,6 +38,8 @@ def plan(when):
         add('performance_report')
     if hm in {'08:00', '10:00', '12:00', '14:00', '16:00'}:
         add('scheduled_fubon_statement')
+    if hm in {'10:00', '14:00'}:
+        add('scheduled_change_order_check')
     if hm == '10:00' and when.weekday() in {1, 4}:
         add('scheduled_fubon_pending_check')
     if hm == '00:00' and when.day == 20:
