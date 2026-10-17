@@ -337,6 +337,11 @@ def replace_year(name: str, prev_year: int, new_year: int) -> str:
 NAME_ALIASES = {"家電": "電器"}
 
 
+def new_year_file_name(name: str) -> str:
+    """新年度檔名：家電區財報只有 2026 年叫「電器2026財報」，其他年度一律「家電YYYY財報」。"""
+    return re.sub(r"^電器(?=20\d{2}財報$)", "家電", name)
+
+
 def strip_year(name: str) -> str:
     """去掉年份、空白與結尾「檔」字並統一同義字，用來比對「2026台北財報」與
     「台北2026財報」、「2026家電財報」與「電器2026財報」、「2026目標及review檔」
@@ -675,7 +680,7 @@ class Rollover:
                 records.append({"kind": "檔案", "old_name": file_name, "old_id": "",
                                 "new_name": "找不到來源", "new_id": ""})
                 continue
-            new_name = dash_area(replace_year(file_name, self.prev_year, self.new_year))
+            new_name = new_year_file_name(dash_area(replace_year(file_name, self.prev_year, self.new_year)))
             copied, created = self.ensure_copy(source, target_parent["id"], new_name)
             if (created and copied.get("mimeType") == SHEET_MIME
                     and spec.name not in FINANCE_ROW_NAMES | OFFICE_ROW_NAMES | STAFF_ROW_NAMES

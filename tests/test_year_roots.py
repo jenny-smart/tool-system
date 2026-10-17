@@ -261,3 +261,73 @@ def test_check_year_lists_each_file():
     assert by[("名冊薪資", "台北", "{YYYY}專員薪資相關-台北")]["檔案ID"] == "sa27"
     assert by[("財報", "台北", "{地區}{YYYY}財報")]["結果"].startswith("找不到")
     assert by[("大掃除", "共用", "{YYYY}年終大掃除VIP")]["檔案ID"] == "dcv"
+
+
+def test_shortcut_follows_target_and_home_appliance_alias():
+    """捷徑跟到目標檔；家電區財報先找「家電YYYY財報」，2026 年找不到時用舊稱「電器2026財報」。"""
+    from tools.common.year_roots import check_year
+
+    shortcut = "application/vnd.google-apps.shortcut"
+    values = HEADER + [
+        ["財報", "家電", "FIN", "02", "{YYYY}年", "—", "{地區}{YYYY}財報", "2026", "", "", "比對"],
+        ["承攬費mail", "桃園", "SV", "承攬費", "{YYYY}專員承攬服務費", "03.桃園專員",
+         "{YYYY}承攬服務費mail-桃園", "2026", "", "", "比對"],
+        ["儲值金", "各地區", "SV2", "儲值金", "依期別自動建立", "—", "{YYYYMM}儲值金結算", "2026", "", "", "比對"],
+    ]
+    drive = FakeDrive([
+        {"id": "f26", "name": "2026年", "mimeType": FOLDER, "parent": "FIN"},
+        {"id": "el26", "name": "電器2026財報", "mimeType": SHEET, "parent": "f26"},
+        {"id": "f27", "name": "2027年", "mimeType": FOLDER, "parent": "FIN"},
+        {"id": "hm27", "name": "家電2027財報", "mimeType": SHEET, "parent": "f27"},
+        {"id": "s26", "name": "2026專員承攬服務費", "mimeType": FOLDER, "parent": "SV"},
+        {"id": "ty", "name": "03.桃園專員", "mimeType": FOLDER, "parent": "s26"},
+        {"id": "sc", "name": "2026承攬服務費mail_桃園", "mimeType": shortcut, "parent": "ty",
+         "shortcutDetails": {"targetId": "mail26", "targetMimeType": SHEET}},
+    ])
+    rules = parse_rules(values)
+    assert resolve(drive, find_rule(rules, "財報", "家電"), 2026, "家電") == ("el26", "2026年/電器2026財報")
+    assert resolve(drive, find_rule(rules, "財報", "家電"), 2027, "家電")[0] == "hm27"
+    assert resolve(drive, find_rule(rules, "承攬費mail", "桃園"), 2026, "桃園")[0] == "mail26"
+    rows = check_year(YearRoots(values, lambda: drive), 2026)
+    assert [r["結果"] for r in rows if r["類別"] == "儲值金"] == ["依期別自動建立（不需檢查）"]
+
+
+def test_write_report_creates_sheet_and_overwrites():
+    from tools.common.year_roots import REPORT_SHEET, write_report
+
+    class Sheets:
+        def __init__(self):
+            self.calls, self.tabs = [], {}
+
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def get(self, **_):
+            return _Req({"sheets": [{"properties": {"title": t, "sheetId": i}} for t, i in self.tabs.items()]})
+
+        def batchUpdate(self, spreadsheetId, body):
+            self.calls.append(("batch", body))
+            if "addSheet" in body["requests"][0]:
+                self.tabs[REPORT_SHEET] = 7
+                return _Req({"replies": [{"addSheet": {"properties": {"sheetId": 7}}}]})
+            return _Req({})
+
+        def clear(self, **kw):
+            self.calls.append(("clear", kw["range"]))
+            return _Req({})
+
+        def update(self, **kw):
+            self.calls.append(("update", kw["body"]["values"]))
+            return _Req({})
+
+    sheets = Sheets()
+    rows = [{"列": "16", "結果": "找到"}, {"列": "31", "結果": "找不到：x"}]
+    assert write_report(sheets, "master", "檢查", rows) == REPORT_SHEET
+    values = next(v for k, v in sheets.calls if k == "update")
+    assert values[1] == ["列", "結果"] and values[3] == ["31", "找不到：x"] and "檢查" in values[0][0]
+    assert ("clear", f"'{REPORT_SHEET}'") in sheets.calls
+    write_report(sheets, "master", "再一次", rows)  # 已有分頁就不再新增
+    assert sum(1 for k, b in sheets.calls if k == "batch" and "addSheet" in b["requests"][0]) == 1

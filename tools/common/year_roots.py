@@ -57,6 +57,10 @@ def _clean(text: str) -> str:
     return re.sub(r"[（(].*?[）)]", "", str(text or "")).strip()
 
 
+# 檔名的地區舊稱：找不到時再試（2026 年家電區的財報叫「電器2026財報」，其他年度用「家電」）
+_AREA_OLD_NAMES = {"家電": ("電器",)}
+
+
 def _fill(template: str, year: int, area: str = "") -> str:
     return _clean(template).replace("{YYYY}", str(year)).replace("{地區}", area)
 
@@ -149,9 +153,15 @@ def _child(drive, parent_id: str, name: str, folder: bool) -> Dict:
         if _norm(item.get("name")) != target:
             continue
         mime = item.get("mimeType", "")
-        if mime == SHORTCUT_MIME:
-            continue
+        if mime == SHORTCUT_MIME:  # 捷徑：改用它指向的檔案／資料夾
+            details = item.get("shortcutDetails") or {}
+            if not details.get("targetId"):
+                continue
+            mime = details.get("targetMimeType", "")
+            item = {**item, "id": details["targetId"], "mimeType": mime}
         if folder != (mime == FOLDER_MIME):
+            continue
+        if any(h["id"] == item["id"] for h in hits):  # 原檔與指向它的捷徑只算一個
             continue
         hits.append(item)
     if not hits:
@@ -174,9 +184,23 @@ def resolve(drive, rule: Rule, year: int, area: str = "", file_index: int = 0) -
         name = _fill(template, year, area)
         node = _child(drive, node, name, folder=True)["id"]
         path.append(name)
-    name = _fill(rule.file_names[min(file_index, len(rule.file_names) - 1)], year, area)
+    template = rule.file_names[min(file_index, len(rule.file_names) - 1)]
+    name = _fill(template, year, area)
+    try:
+        found = _child(drive, node, name, folder=False)
+    except FileNotFoundError:
+        olds = _AREA_OLD_NAMES.get(area, ()) if "{地區}" in template else ()
+        for old in olds:
+            try:
+                found = _child(drive, node, _fill(template, year, old), folder=False)
+                name = _fill(template, year, old)
+                break
+            except FileNotFoundError:
+                continue
+        else:
+            raise
     path.append(name)
-    return _child(drive, node, name, folder=False)["id"], "/".join(path)
+    return found["id"], "/".join(path)
 
 
 class YearRoots:
@@ -310,6 +334,8 @@ def check_year(roots: YearRoots, year: int) -> List[Dict[str, str]]:
                         "檔名規則": name, "模式": rule.mode}
                 if rule.since_year and year < rule.since_year:
                     item.update(結果="適用起年前（用原設定）", 路徑="", 檔案ID="")
+                elif "依期別" in rule.year_folder:
+                    item.update(結果="依期別自動建立（不需檢查）", 路徑="", 檔案ID="")
                 else:
                     try:
                         found, path = resolve(roots.drive, rule, year, area, index)
@@ -324,6 +350,33 @@ def compare_summary(roots: YearRoots) -> List[Dict[str, str]]:
     return [{"列": str(r.row), "類別": r.category, "地區": "／".join(r.areas), "模式": r.mode,
              "比對狀態": row_status(r), "L 欄": "\n".join((r.results or {}).values())}
             for r in roots.rules]
+
+
+REPORT_SHEET = "年度根目錄檢查結果"
+
+
+def write_report(sheets, spreadsheet_id: str, title: str, rows: List[Dict[str, str]]) -> str:
+    """把檢查／比對結果整份寫到主控表「年度根目錄檢查結果」分頁（每次覆蓋），回傳分頁名稱。"""
+    meta = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id,
+                                     fields="sheets.properties(sheetId,title)").execute()
+    ids = {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta.get("sheets", [])}
+    if REPORT_SHEET not in ids:
+        res = sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [
+            {"addSheet": {"properties": {"title": REPORT_SHEET, "gridProperties": {"frozenRowCount": 2}}}}]}).execute()
+        ids[REPORT_SHEET] = res["replies"][0]["addSheet"]["properties"]["sheetId"]
+    headers = list(rows[0].keys()) if rows else []
+    stamp = datetime.now(TZ).strftime("%Y/%m/%d %H:%M")
+    values = [[f"{stamp} {title}"], headers] + [[str(r.get(h, "")) for h in headers] for r in rows]
+    sheets.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range=f"'{REPORT_SHEET}'").execute()
+    sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id, range=f"'{REPORT_SHEET}'!A1",
+        valueInputOption="RAW", body={"values": values}).execute()
+    if headers:  # 表頭列加篩選，方便只看「找不到」
+        sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [
+            {"setBasicFilter": {"filter": {"range": {
+                "sheetId": ids[REPORT_SHEET], "startRowIndex": 1, "endRowIndex": len(values),
+                "startColumnIndex": 0, "endColumnIndex": len(headers)}}}}]}).execute()
+    return REPORT_SHEET
 
 
 def set_modes(sheets, spreadsheet_id: str, roots: YearRoots, mode: str,
