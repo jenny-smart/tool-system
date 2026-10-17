@@ -107,27 +107,34 @@ def test_marketing_copies_and_clears_numbers_only():
     assert sheets.writes[(fid, "'2027廣告'!F2")] == [[""]]
 
 
-def test_supply_copy_clear_and_carry_closing_stock():
+def test_supply_copy_and_clear_every_stock_sheet():
     drive = FakeDrive([{"id": "s26", "name": "2026清潔用品訂購記錄-四店共用new", "mimeType": SHEET_MIME,
                         "parent": nyg.SUPPLY_FOLDER_ID}])
-    stock = nyg.SUPPLY_STOCK_SHEET
-    sheets = Sheets({"new1": {"進貨明細表-台北": 1, "進貨明細表-台中": 2, stock: 3}}, {
-        ("new1", f"'{stock}'!B:B"): [[""], ["期末庫存"], ["期初庫存"], ["當月進貨"], ["期初庫存"]],
-        ("s26", f"'{stock}'!B:B"): [[""]] * 80 + [["期末庫存"]],
-        ("s26", f"'{stock}'!C81:AY81"): [[3, 4, 5]],
-        ("new1", f"'{stock}'!A:A"): [["2026"], ["2025.12"], ["2026.01"], [""], ["=A$1&\".02\""], ["備註"]],
+    tc, tp = "庫存統計表-台中", "庫存統計表-台北"
+    sheets = Sheets({"new1": {"進貨明細表-台北": 1, "進貨明細表-台中": 2, tc: 3, tp: 4, "收納庫存統計表-台北": 5}}, {
+        ("new1", f"'{tc}'!B:B"): [[""], ["期末庫存"], ["期初庫存"], ["當月進貨"], ["期初庫存"]],
+        ("new1", f"'{tp}'!B:B"): [[""], ["期末庫存"], ["期初庫存"]],
+        ("new1", f"'{tc}'!C2:AY2"): [[1, 2]],
+        ("new1", f"'{tc}'!C3:AY3"): [[1, "=C2"]],
+        ("new1", f"'{tc}'!C5:AY5"): [[7, "=8"]],
+        ("new1", f"'{tp}'!C3:AY3"): [[9]],
+        ("new1", f"'{tc}'!A:A"): [["2026"], ["2025.12"], ["2026.01"], [""], ["=A$1&\".02\""], ["備註"]],
     })
     records = _roll(drive, sheets).run_supply()
     assert records[0]["new_name"] == "2027清潔用品訂購記錄-四店共用new" and records[0]["created"]
     cleared = {r for _, r in sheets.cleared}
     assert "'進貨明細表-台北'!G3:K" in cleared and "'進貨明細表-台中'!O3:T" in cleared
-    assert f"'{stock}'!C3:AY3" in cleared and f"'{stock}'!C5:AY5" in cleared
-    assert f"'{stock}'!C4:AY4" not in cleared                         # 當月進貨不動
     false_cols = [r["repeatCell"] for _, r in sheets.requests if "repeatCell" in r]
     assert len(false_cols) == 2 and false_cols[0]["cell"]["userEnteredValue"] == {"boolValue": False}
-    assert sheets.writes[("new1", f"'{stock}'!C2:AY2")] == [[3, 4, 5]]
-    labels = {k[1]: v for k, v in sheets.writes.items() if k[1].startswith(f"'{stock}'!A")}
-    assert labels == {f"'{stock}'!A1": [["2027"]], f"'{stock}'!A2": [["2026.12"]], f"'{stock}'!A3": [["2027.01"]]}
+    w = {k[1]: v for k, v in sheets.writes.items()}
+    assert w[f"'{tc}'!C2:AY2"] == [["", ""]]                    # 第 2 列清空，不帶入前一年度
+    assert w[f"'{tc}'!C3:AY3"] == [["", "=C2"]]                 # 期初庫存數字清空，公式保留
+    assert w[f"'{tc}'!C5:AY5"] == [["", ""]]
+    assert w[f"'{tp}'!C3:AY3"] == [[""]]                        # 台北也清
+    assert f"'{tc}'!C4:AY4" not in w                            # 當月進貨不動
+    assert not any(k.startswith("'收納庫存統計表") for k in w)
+    labels = {k: v for k, v in w.items() if k.startswith(f"'{tc}'!A")}
+    assert labels == {f"'{tc}'!A1": [["2027"]], f"'{tc}'!A2": [["2026.12"]], f"'{tc}'!A3": [["2027.01"]]}
 
     # 重跑：已有 2027 檔就移到垃圾桶，重新生成並清空
     sheets.tabs["new2"] = sheets.tabs["new1"]

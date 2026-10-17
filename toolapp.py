@@ -3431,8 +3431,13 @@ def run_year_root_check(action, year, on_progress=None):
 
 def run_new_year_generate(year, function_name, *, dry_run, fresh=False, area="全區", on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
+    import importlib
+
     from services.google_auth import get_drive_service, get_sheets_service
-    from tools.annual_rollover.new_year_generate import Rollover
+    from tools.annual_rollover import new_year_generate
+
+    # 每次重新載入，合併新版後不必重開 App 就會用到最新程式
+    Rollover = importlib.reload(new_year_generate).Rollover
 
     year_text = str(year or "").strip()
     if not re.fullmatch(r"20\d{2}", year_text):

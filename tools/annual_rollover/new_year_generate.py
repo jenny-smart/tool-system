@@ -187,12 +187,9 @@ SUPPLY_FILE_NAME = "{y}清潔用品訂購記錄-四店共用new"
 SUPPLY_PURCHASE_PREFIX = "進貨明細表-"
 SUPPLY_PURCHASE_CLEAR = ["A3:A", "C3:C", "E3:E", "F3:F", "G3:K", "M3:M", "O3:T"]
 SUPPLY_PURCHASE_FALSE_COL = "U"          # U3:U 設為 FALSE
-SUPPLY_STOCK_SHEET = "庫存統計表-台中"
+SUPPLY_STOCK_PREFIX = "庫存統計表-"         # 各地區庫存統計表
 SUPPLY_STOCK_COLS = ("C", "AY")
-SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列清空 C:AY
-SUPPLY_STOCK_CLOSING = "期末庫存"
-SUPPLY_STOCK_PREV_ROW = 81                # 前一年度 12 月期末庫存所在列
-SUPPLY_STOCK_PREFIX = "庫存統計表"          # A 欄年月標籤（2026、2025.12、2026.01…）改為新年度
+SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列與第 2 列清空 C:AY；A 欄年月標籤改為新年度
 # 不含儲存格參照的公式（例如 =87369、=1200+300）視同手打數字，清空時一併清除
 _LITERAL_FORMULA = re.compile(r"=[\d\s.+\-*/(),%]*")
 EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品"}   # 不依「生成新年度」列的功能
@@ -981,12 +978,12 @@ class Rollover:
         record = {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                   "new_name": copied["name"], "new_id": copied["id"], "created": created}
         if created and not self.dry_run:
-            self.supply_post_process(source["id"], copied["id"])
+            self.supply_post_process(copied["id"])
         elif created:
-            self.log(f"  整理 {new_name}：清空進貨明細表、庫存統計表期初庫存，帶入前一年度期末庫存")
+            self.log(f"  整理 {new_name}：清空進貨明細表、各地區庫存統計表第 2 列與期初庫存")
         return [record]
 
-    def supply_post_process(self, old_id: str, new_id: str) -> None:
+    def supply_post_process(self, new_id: str) -> None:
         meta = self.sheets.spreadsheets().get(
             spreadsheetId=new_id, fields="sheets.properties(sheetId,title,gridProperties)").execute()
         props = {s["properties"]["title"]: s["properties"] for s in meta.get("sheets", [])}
@@ -1003,28 +1000,23 @@ class Rollover:
                           "startColumnIndex": col, "endColumnIndex": col + 1},
                 "cell": {"userEnteredValue": {"boolValue": False}}, "fields": "userEnteredValue"}})
             self.log(f"  {title}：清空 {'、'.join(SUPPLY_PURCHASE_CLEAR)}，{SUPPLY_PURCHASE_FALSE_COL}3:{SUPPLY_PURCHASE_FALSE_COL} 設為 FALSE")
-        stock = SUPPLY_STOCK_SHEET
-        data = []
-        if stock in props:
-            col_b = self.sheets.spreadsheets().values().get(
-                spreadsheetId=new_id, range=f"'{stock}'!B:B").execute().get("values", [])
-            rows = [i for i, r in enumerate(col_b, start=1) if r and str(r[0]).strip() == SUPPLY_STOCK_OPENING]
-            clear += [f"'{stock}'!{first}{r}:{last}{r}" for r in rows]
-            clear.append(f"'{stock}'!{first}2:{last}2")
-            self.log(f"  {stock}：清空 {len(rows)} 列期初庫存的 {first}:{last}")
-            prev = self._previous_closing_stock(old_id)
-            if prev is not None:
-                data.append({"range": f"'{stock}'!{first}2:{last}2", "values": [prev]})
-        else:
-            self.log(f"  ⚠ 沒有「{stock}」工作表")
+        data, stock_ranges = [], []
         for title in props:
-            if title.startswith(SUPPLY_STOCK_PREFIX):
-                data += self._stock_year_labels(new_id, title)
+            if not title.startswith(SUPPLY_STOCK_PREFIX):
+                continue
+            col_b = self.sheets.spreadsheets().values().get(
+                spreadsheetId=new_id, range=f"'{title}'!B:B").execute().get("values", [])
+            rows = [2] + [i for i, r in enumerate(col_b, start=1)
+                          if r and str(r[0]).strip() == SUPPLY_STOCK_OPENING]
+            stock_ranges += [f"'{title}'!{first}{r}:{last}{r}" for r in rows]
+            self.log(f"  {title}：清空第 2 列與 {len(rows) - 1} 列期初庫存的 {first}:{last}")
+            data += self._stock_year_labels(new_id, title)
         if clear:
             self.sheets.spreadsheets().values().batchClear(
                 spreadsheetId=new_id, body={"ranges": clear}).execute()
         if requests:
             self.sheets.spreadsheets().batchUpdate(spreadsheetId=new_id, body={"requests": requests}).execute()
+        self._clear_constants(new_id, stock_ranges)  # 數字清空，引用儲存格的公式保留
         if data:
             self._values_batch(new_id, data)
 
@@ -1042,25 +1034,6 @@ class Rollover:
         if data:
             self.log(f"  {title}：A 欄 {len(data)} 個年月標籤改為新年度")
         return data
-
-    def _previous_closing_stock(self, old_id: str) -> Optional[List[Any]]:
-        """前一年度「庫存統計表-台中」12 月期末庫存（預設第 81 列；B 欄不是期末庫存時改用最後一個期末庫存列）。"""
-        first, last = SUPPLY_STOCK_COLS
-        stock = SUPPLY_STOCK_SHEET
-        col_b = self.sheets.spreadsheets().values().get(
-            spreadsheetId=old_id, range=f"'{stock}'!B:B").execute().get("values", [])
-        closing = [i for i, r in enumerate(col_b, start=1) if r and str(r[0]).strip() == SUPPLY_STOCK_CLOSING]
-        row = SUPPLY_STOCK_PREV_ROW
-        if row not in closing:
-            if not closing:
-                self.log(f"  ⚠ 前一年度「{stock}」找不到期末庫存列，第 2 列未帶入")
-                return None
-            row = closing[-1]
-            self.log(f"  ⚠ 前一年度第 {SUPPLY_STOCK_PREV_ROW} 列不是期末庫存，改用第 {row} 列")
-        values = self.sheets.spreadsheets().values().get(
-            spreadsheetId=old_id, range=f"'{stock}'!{first}{row}:{last}{row}").execute().get("values", [[]])
-        self.log(f"  {stock}!{first}2:{last}2 ← 前一年度第 {row} 列期末庫存")
-        return values[0] if values else []
 
     # ---------- 分頁整理（規則表） ----------
     def _fmt(self, text: str, **extra: str) -> str:
