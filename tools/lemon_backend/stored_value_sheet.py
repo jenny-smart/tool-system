@@ -1,60 +1,29 @@
+"""清潔異動工作表：與 orders-system 服務異動同一套找法。
+
+檔案依年度根目錄找（桃園／新竹「服務異動」，其他地區「內勤工作表單」），
+分頁依名稱找「清潔異動」（桃園／新竹為唯一的「…訂單金流…異動表」），找不到就報錯；
+不再讀「財務帳務設定」清潔異動列的試算表ID／GID。
+"""
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Optional
 
-import gspread
-from google.oauth2.service_account import Credentials
-
-from tools.common.config_loader import get_service_account_info
-from tools.bank_statement.internal_payment_registry import (
-    CLEANING_CHANGE_TYPE,
-    REGISTRY_SHEET_NAME,
-    find_registry_row,
-)
-
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
 SUPPORTED_AREAS = ("台北", "台中", "桃園", "新竹", "高雄")
 
 
-@lru_cache(maxsize=1)
-def _client() -> gspread.Client:
-    credentials = Credentials.from_service_account_info(
-        get_service_account_info(), scopes=SCOPES
-    )
-    return gspread.authorize(credentials)
+def _change_order():
+    from tools.memo_system import change_order
+
+    return change_order
 
 
 def get_sheet_config(area: str) -> tuple[str, Optional[int]]:
     if area not in SUPPORTED_AREAS:
         raise ValueError(f"不支援的地區：{area}")
-    record = find_registry_row(CLEANING_CHANGE_TYPE, area)
-    spreadsheet_id = str(record.get("試算表ID", "")).strip()
-    gid_text = str(record.get("GID", "")).strip()
-    if not spreadsheet_id:
-        raise RuntimeError(f"{REGISTRY_SHEET_NAME} 找不到「{area}」清潔異動設定")
-    try:
-        return spreadsheet_id, int(gid_text) if gid_text else None
-    except ValueError as exc:
-        raise RuntimeError(f"{area} 的 GID 必須是數字") from exc
+    return _change_order()._sheet_config(area)["spreadsheet_id"], None
 
 
 def get_worksheet(area: str, tab_name: str = "清潔異動"):
-    spreadsheet_id, gid = get_sheet_config(area)
-    try:
-        spreadsheet = _client().open_by_key(spreadsheet_id)
-    except gspread.exceptions.SpreadsheetNotFound as exc:
-        raise RuntimeError(f"服務帳號無法開啟「{area}」清潔異動試算表") from exc
-    if gid is not None:
-        for worksheet in spreadsheet.worksheets():
-            if worksheet.id == gid:
-                return worksheet
-        raise RuntimeError(f"{area} 清潔異動試算表找不到 GID {gid}")
-    try:
-        return spreadsheet.worksheet(tab_name)
-    except gspread.exceptions.WorksheetNotFound as exc:
-        raise RuntimeError(f"{area} 試算表找不到「{tab_name}」分頁") from exc
+    if area not in SUPPORTED_AREAS:
+        raise ValueError(f"不支援的地區：{area}")
+    return _change_order().get_worksheet(area, tab_name)

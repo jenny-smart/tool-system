@@ -46,7 +46,6 @@ from tools.finance_management.execution_log import log_execution
 from tools.finance_management.statement_registry import (
     resolve_marketing_expense_location,
     resolve_statement_location,
-    sheet_title_for_gid,
 )
 
 CASH_GAP_SHEET_NAME = "現金缺口試算"
@@ -91,7 +90,7 @@ FINANCE_REVENUE_ROW = 3
 FINANCE_YEAR_END_BONUS_ROW = 97
 FINANCE_SPRING_PARTY_ROW = 135
 
-NEWEBPAY_INVOICE_GID = "327631316"
+NEWEBPAY_INVOICE_SHEET = "藍新發票總表"
 NEWEBPAY_INVOICE_AMOUNT_COL = 4  # D
 
 
@@ -285,7 +284,7 @@ def newebpay_invoice_amount(area: str, as_of: date) -> float:
     月份（YYYYMM）都符合的列，取 D欄（發票金額），若有多筆則加總。"""
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
-    title = sheet_title_for_gid(service, spreadsheet_id, NEWEBPAY_INVOICE_GID)
+    title = NEWEBPAY_INVOICE_SHEET
     res = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
         range=f"'{title}'!A:Z",

@@ -1,24 +1,14 @@
 """財報設定登記表查詢：讀主控試算表（Jenny's Lemonhometools）的「財報設定」分頁，
-取得各地區財報試算表、各分頁 GID，以及共用的行銷費用檔案ID。
+取得各地區財報試算表 ID 與共用的行銷費用檔案 ID。
 
-分頁欄位（A 起，依欄位順序讀取，不靠標題文字比對）：
-  A 地區　B 試算表ID　C 富邦更新gid　D 元大更新gid　E 財務gid　F 現金gid
-  G 行銷費用檔案ID（各地區列共用同一個值，指向「行銷費用總管理」試算表）
-  H 行銷費用 gid（行銷費用檔案裡的來源分頁）
-  I 年度review gid（該地區在「2026目標及review檔」裡對應的分頁）
+分頁一律依名稱找（換年 GID 會變，不再讀 C／D／E／F／H／I 欄的 GID）：
+  財報：富邦更新／元大更新／股東損益表_財務／股東損益表_現金
+  行銷費用總管理：{YYYY}總表（今年）
+  目標及review檔：各地區「{地區}財報」、跨地區彙整「{YYYY}review」
 
-地區列：台北／台中／桃園／新竹／高雄，每列的 B 欄是「該地區財報」這一份
-試算表，C–F 欄則是同一份試算表裡各分頁（富邦更新／元大更新／財務／現金）
-的 GID。I欄則是另一份共用試算表（「2026目標及review檔」，見下）裡，該
-地區自己的分頁 GID。
-
-另外兩列 2026-all／2026-現金，只有 B 欄（試算表ID），對應獨立的
-「All財報」／「All財報現金缺口」試算表本身。
-
-還有一列地區＝「2026」，B 欄是「2026目標及review檔」這份試算表本身的ID
-（各地區共用同一份試算表，只是分頁不同——各地區自己的分頁 GID 記在各地區
-列的 I欄，不是這一列）。這一列自己的 I欄，登記的是「年度review工作表」
-這個跨地區彙整分頁的 GID。
+分頁欄位（A 起，依欄位順序讀取）：A 地區　B 試算表ID　G 行銷費用檔案ID。
+另有地區＝「2026」（或今年）的列，B 欄是「目標及review檔」本身的 ID；
+2026-all／2026-現金 兩列的 B 欄是獨立的「All財報」／「All財報現金缺口」試算表。
 """
 
 from __future__ import annotations
@@ -30,19 +20,14 @@ REGISTRY_SHEET_NAME = "財報設定"
 
 COL_AREA = 1
 COL_SPREADSHEET_ID = 2
-COL_FUBON_GID = 3
-COL_YUANTA_GID = 4
-COL_FINANCE_GID = 5
-COL_CASH_GID = 6
 COL_MARKETING_ID = 7
-COL_MARKETING_GID = 8
-COL_REVIEW_GID = 9
 
-REPORT_GID_COLUMN = {
-    "富邦更新": COL_FUBON_GID,
-    "元大更新": COL_YUANTA_GID,
-    "財務": COL_FINANCE_GID,
-    "現金": COL_CASH_GID,
+# 財報類型 → 財報裡的分頁名稱
+REPORT_SHEET_TITLES = {
+    "富邦更新": "富邦更新",
+    "元大更新": "元大更新",
+    "財務": "股東損益表_財務",
+    "現金": "股東損益表_現金",
 }
 
 ALL_REPORT_AREA = "2026-all"
@@ -93,6 +78,24 @@ def _find_row(area: str) -> list[str]:
     raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」登記表找不到地區「{area}」")
 
 
+_TITLES_CACHE: dict[str, set[str]] = {}
+
+
+def require_sheet_title(service, spreadsheet_id: str, title: str) -> str:
+    """確認分頁存在（依名稱，不用 GID）；找不到就報錯。同一次執行內快取分頁清單，
+    避免短時間內對同一份試算表重複打 metadata API 觸發配額。"""
+    if spreadsheet_id not in _TITLES_CACHE:
+        meta = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets.properties.title"
+        ).execute()
+        _TITLES_CACHE[spreadsheet_id] = {
+            str(sheet.get("properties", {}).get("title", "")) for sheet in meta.get("sheets", [])
+        }
+    if title not in _TITLES_CACHE[spreadsheet_id]:
+        raise RuntimeError(f"試算表 {spreadsheet_id} 找不到「{title}」分頁")
+    return title
+
+
 _SHEET_TITLE_CACHE: dict[tuple[str, str], str] = {}
 
 
@@ -118,17 +121,15 @@ def sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:
 
 def resolve_statement_location(area: str, report: str) -> tuple[str, str]:
     """回傳 (試算表ID, 分頁標題)。report 為 富邦更新／元大更新／財務／現金。"""
-    if report not in REPORT_GID_COLUMN:
+    if report not in REPORT_SHEET_TITLES:
         raise ValueError(f"不支援的財報類型：{report}")
     row = _find_row(area)
     spreadsheet_id = choose_file_id(
         "財報", area, _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
     )
-    gid = _cell(row, REPORT_GID_COLUMN[report])
-    if not spreadsheet_id or not gid:
-        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area}／{report} 缺少試算表ID或GID")
-    service = get_sheets_service()
-    title = sheet_title_for_gid(service, spreadsheet_id, gid)
+    if not spreadsheet_id:
+        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少試算表ID")
+    title = require_sheet_title(get_sheets_service(), spreadsheet_id, REPORT_SHEET_TITLES[report])
     return spreadsheet_id, title
 
 
@@ -151,31 +152,14 @@ def marketing_expense_spreadsheet_id(area: str = "台北") -> str:
 
 
 def resolve_marketing_expense_location(area: str = "台北") -> tuple[str, str]:
-    """回傳行銷費用來源的 (試算表ID, 分頁標題)，位置登記在 G／H 欄。"""
+    """回傳行銷費用來源的 (試算表ID, 今年的「{YYYY}總表」分頁)；檔案ID 登記在 G 欄。
+    生成新年度會在同一個行銷費用檔複製出新年度工作表，依名稱找就不必每年改設定。"""
     row = _find_row(area)
     spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_MARKETING_ID))
-    gid = _cell(row, COL_MARKETING_GID)
-    if not spreadsheet_id or not gid:
-        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少行銷ID或行銷gid")
-    service = get_sheets_service()
-    title = sheet_title_for_gid(service, spreadsheet_id, gid)
-    return spreadsheet_id, _current_year_title(service, spreadsheet_id, title)
-
-
-def _current_year_title(service, spreadsheet_id: str, title: str) -> str:
-    """登記的是「YYYY總表」這類年度工作表時，今年的工作表（例如 2027總表）存在就改用它。
-    生成新年度會在同一個行銷費用檔複製出新年度工作表，GID 不同，這樣就不必每年改 H 欄。"""
-    import re
-    from datetime import datetime, timedelta, timezone
-
-    match = re.fullmatch(r"(20\d{2})(.+)", title)
-    year = str(datetime.now(timezone(timedelta(hours=8))).year)
-    if not match or match.group(1) == year:
-        return title
-    candidate = year + match.group(2)
-    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties.title").execute()
-    titles = {s["properties"]["title"] for s in meta.get("sheets", [])}
-    return candidate if candidate in titles else title
+    if not spreadsheet_id:
+        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少行銷ID")
+    title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{taipei_year()}總表")
+    return spreadsheet_id, title
 
 
 def review_spreadsheet_id() -> str:
@@ -190,26 +174,14 @@ def review_spreadsheet_id() -> str:
 
 
 def resolve_master_review_location() -> tuple[str, str]:
-    """回傳 (試算表ID, 分頁標題)：「年度review工作表」這個跨地區彙整的固定分頁。
-    GID 登記在地區＝「2026」那一列的 I欄（跟各地區列的「年度review gid」共用
-    同一欄，只是這一列代表的不是某個地區自己的分頁，而是彙整分頁本身）。"""
-    row = _review_row()
-    gid = _cell(row, COL_REVIEW_GID)
-    if not gid:
-        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{REVIEW_SPREADSHEET_AREA} 缺少 年度review工作表 gid")
+    """回傳 (試算表ID, 分頁標題)：跨地區彙整的「{YYYY}review」分頁（例如 2026review）。"""
     spreadsheet_id = review_spreadsheet_id()
-    service = get_sheets_service()
-    title = sheet_title_for_gid(service, spreadsheet_id, gid)
+    title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{taipei_year()}review")
     return spreadsheet_id, title
 
 
 def resolve_review_location(area: str) -> tuple[str, str]:
-    """回傳 (試算表ID, 分頁標題)：2026目標及review檔裡，該地區對應的分頁。"""
-    row = _find_row(area)
-    gid = _cell(row, COL_REVIEW_GID)
-    if not gid:
-        raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少 年度review gid")
+    """回傳 (試算表ID, 分頁標題)：目標及review檔裡，該地區的「{地區}財報」分頁。"""
     spreadsheet_id = review_spreadsheet_id()
-    service = get_sheets_service()
-    title = sheet_title_for_gid(service, spreadsheet_id, gid)
+    title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{area}財報")
     return spreadsheet_id, title

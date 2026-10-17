@@ -8,7 +8,7 @@ from __future__ import annotations
 # docs/field-claim-gas.md。
 #
 # 試算表：「財務帳務設定」登記表的「清潔異動設定／地區」那一列的試算表ID
-#（台北／台中內勤工作表單）；請款分頁用 CLAIM_SHEET_GIDS 的「專員請款」GID，
+#（台北／台中內勤工作表單）；請款分頁依名稱找「專員請款」（不用 GID），
 # 地址對照用同一份試算表的「專員個人資料」分頁。
 #
 # 與原 GAS 的差異：
@@ -33,9 +33,6 @@ from tools.common.config_loader import get_sheets_service
 CLAIM_SHEET_TITLE = "專員請款"
 STAFF_SHEET_TITLE = "專員個人資料"
 SUPPORTED_AREAS = ("台北", "台中")
-
-# 「專員請款」分頁 GID（2026台北／台中內勤工作表單）
-CLAIM_SHEET_GIDS = {"台北": 279541195, "台中": 749987965}
 
 # 台北叫「跨區車馬費」，台中叫「車馬費」
 TRAVEL_CLAIM_TYPES = {"跨區車馬費", "車馬費"}
@@ -257,14 +254,14 @@ def resolve_spreadsheet_id(area: str) -> str:
 
 
 def resolve_claim_sheet(service, spreadsheet_id: str, area: str, gid: Optional[int] = None) -> tuple[str, int]:
-    """依 GID 找請款分頁，回傳 (標題, GID)（gid 未指定時用 CLAIM_SHEET_GIDS）。"""
-    gid = CLAIM_SHEET_GIDS[area] if gid is None else int(gid)
+    """依名稱找「專員請款」分頁，回傳 (標題, GID)；指定 gid 時改找該 GID（換年 GID 會變，預設不用）。"""
     meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties").execute()
     for sheet in meta.get("sheets", []):
         props = sheet.get("properties", {})
-        if props.get("sheetId") == gid:
-            return str(props.get("title", "")), gid
-    raise RuntimeError(f"{area}試算表找不到 GID={gid} 的{CLAIM_SHEET_TITLE}分頁")
+        if (props.get("sheetId") == int(gid)) if gid is not None else (props.get("title") == CLAIM_SHEET_TITLE):
+            return str(props.get("title", "")), int(props.get("sheetId"))
+    target = f"GID={gid}" if gid is not None else f"「{CLAIM_SHEET_TITLE}」"
+    raise RuntimeError(f"{area}試算表找不到 {target} 的{CLAIM_SHEET_TITLE}分頁")
 
 
 def _read(service, spreadsheet_id: str, a1_range: str) -> list[list[Any]]:
