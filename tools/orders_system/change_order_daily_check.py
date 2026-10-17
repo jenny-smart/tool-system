@@ -180,12 +180,8 @@ def _notify(all_todo: list, summary: dict, now: datetime = None, log=print):
         event = calendar_notify.create_notify_event(calendar_id=REMIND_CALENDAR_ID, attendee="", **kwargs)
         log(f"已建立 {start:%H:%M} 提醒（{REMIND_CALENDAR_ID}）")
         return event
-    except Exception as exc:  # 服務帳號尚未取得 Jenny 行事曆權限時，改建在共用日曆並邀請她
-        log(f"⚠️ 無法寫入 {REMIND_CALENDAR_ID} 行事曆（{exc}），改用共用日曆邀請")
-    try:
-        return calendar_notify.create_notify_event(attendee=REMIND_CALENDAR_ID, **kwargs)
-    except Exception as exc:
-        log(f"⚠️ 建立行事曆通知失敗：{exc}")
+    except Exception as exc:  # 只建在 Jenny 的行事曆，不改建到共用日曆
+        log(f"⚠️ 建立 {REMIND_CALENDAR_ID} 行事曆提醒失敗：{exc}")
         return None
 
 

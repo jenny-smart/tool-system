@@ -36,19 +36,17 @@ def test_notify_creates_event_on_jenny_calendar(monkeypatch):
     assert "LC1" in kw["description"] and "缺：折讓單" in kw["description"]
 
 
-def test_notify_falls_back_to_shared_calendar(monkeypatch):
+def test_notify_failure_does_not_use_shared_calendar(monkeypatch):
     calls = []
 
     def fake(**kw):
         calls.append(kw)
-        if kw.get("calendar_id"):
-            raise PermissionError("403")
-        return {"id": "shared"}
+        raise PermissionError("403")
 
     monkeypatch.setattr(chk, "next_remind_slot", lambda now: _at(15))
     monkeypatch.setattr(chk.calendar_notify, "create_notify_event", fake)
-    assert chk._notify(TODO, SUMMARY, now=_at(14), log=lambda *_: None) == {"id": "shared"}
-    assert calls[1]["attendee"] == "jenny@lemonclean.com.tw" and "calendar_id" not in calls[1]
+    assert chk._notify(TODO, SUMMARY, now=_at(14), log=lambda *_: None) is None
+    assert len(calls) == 1 and calls[0]["calendar_id"] == "jenny@lemonclean.com.tw"
 
 
 def test_notify_skips_without_todo(monkeypatch):
