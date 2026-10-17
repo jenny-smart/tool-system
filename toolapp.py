@@ -3390,7 +3390,12 @@ YEAR_ROOT_ACTIONS = [
 
 
 def run_year_root_check(action, year, on_progress=None):
+    import importlib
+
     from tools.common import year_roots
+
+    # 每次重新載入，合併新版後不必重開 App（避免 toolapp 與快取的舊模組對不上）
+    year_roots = importlib.reload(year_roots)
     from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
     from tools.common.google_auth import get_drive_service
 
