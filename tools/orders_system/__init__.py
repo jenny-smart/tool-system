@@ -31,3 +31,13 @@ try:
     _register_memo_host(_memo_host)
 except Exception:  # memo_system 尚未同步時不影響其他功能
     pass
+
+# 年度根目錄找檔改用 Jenny OAuth（資料夾擁有者）；服務帳號看不到未分享的資料夾
+try:
+    import year_roots as _year_roots
+    from tools.common.google_auth import get_drive_service as _oauth_drive
+
+    if getattr(_year_roots, "drive_factory", "missing") is None:
+        _year_roots.drive_factory = _oauth_drive
+except Exception:  # 舊版 year_roots 或沒有 OAuth 設定時沿用服務帳號
+    pass

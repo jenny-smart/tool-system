@@ -3390,7 +3390,12 @@ YEAR_ROOT_ACTIONS = [
 
 
 def run_year_root_check(action, year, on_progress=None):
+    import importlib
+
     from tools.common import year_roots
+
+    # 每次重新載入，合併新版後不必重開 App（避免 toolapp 與快取的舊模組對不上）
+    year_roots = importlib.reload(year_roots)
     from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
     from tools.common.google_auth import get_drive_service
 
@@ -3408,9 +3413,7 @@ def run_year_root_check(action, year, on_progress=None):
         for r in rows:
             counts[r["比對狀態"]] = counts.get(r["比對狀態"], 0) + 1
         summary = "、".join(f"{k} {v} 列" for k, v in counts.items())
-        message = f"共 {len(rows)} 列：{summary}"
-        sheet = year_roots.write_report(sheets, master_id, f"比對結果：{message}", rows)
-        return f"{message}（完整結果已寫入主控表「{sheet}」分頁）", rows
+        return f"共 {len(rows)} 列：{summary}（各列結果在「年度根目錄設定」L 欄）", rows
 
     if action == "檢查根目錄找檔（指定年度）":
         year_text = str(year or "").strip()
@@ -3418,9 +3421,9 @@ def run_year_root_check(action, year, on_progress=None):
             raise ValueError("請輸入 4 位數年度，例如 2027")
         rows = year_roots.check_year(roots, int(year_text))
         missing = [r for r in rows if r["結果"].startswith("找不到")]
-        message = f"{year_text} 年共檢查 {len(rows)} 個檔，找不到 {len(missing)} 個"
-        sheet = year_roots.write_report(sheets, master_id, f"檢查根目錄找檔：{message}", rows)
-        return f"{message}（完整結果已寫入主控表「{sheet}」分頁）", rows
+        year_roots.write_check_column(sheets, master_id, int(year_text), rows)
+        return (f"{year_text} 年共檢查 {len(rows)} 個檔，找不到 {len(missing)} 個"
+                f"（各列結果已寫入「年度根目錄設定」{year_roots.CHECK_COLUMN} 欄）"), rows
 
     if action == "比對全部一致的列改為「根目錄」":
         changed = year_roots.set_modes(sheets, master_id, roots, year_roots.MODE_ROOT, only_consistent=True)
