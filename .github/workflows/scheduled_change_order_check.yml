@@ -4,8 +4,8 @@ run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot
 
 on:
   schedule:
-    # 台北 10:00、14:00：清潔異動檢查；未備妥的列在工作日 11:00／15:00 建行事曆提醒（提前 30 分鐘）
-    - cron: "0 2,6 * * *"
+    # 台北 10:00：清潔異動檢查（補 T／Z 公式，不回寫系統）；未備妥的列在工作日 11:00 建行事曆提醒（10:30 跳窗）
+    - cron: "0 2 * * *"
 
   workflow_dispatch:
     inputs:

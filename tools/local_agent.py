@@ -396,6 +396,17 @@ def build_newebpay_refund_pending(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_change_order_sync(params: dict[str, Any]) -> list[str]:
+    regions = [str(r).strip() for r in params.get("regions") or [] if str(r).strip()]
+    command = [sys.executable, "-m", "tools.finance_management.change_order_batch", "sync"]
+    if regions:
+        command.extend(["--regions", ",".join(regions)])
+    rows = params.get("rows")
+    if isinstance(rows, dict):
+        command.extend(["--rows", json.dumps(rows, ensure_ascii=False)])
+    return command
+
+
 def build_lemon_stored_value_adjustment(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     selected_rows = params.get("selected_rows") or []
@@ -716,6 +727,7 @@ register_action("newebpay.express_payment_check", build_newebpay_express_payment
 register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
 register_action("newebpay.refund_pending", build_newebpay_refund_pending)
 register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjustment)
+register_action("change_order.sync", build_change_order_sync)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
 register_action("fubon.atm_refund", build_fubon_atm_refund)
