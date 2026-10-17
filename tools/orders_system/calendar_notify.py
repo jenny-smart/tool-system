@@ -56,8 +56,9 @@ def create_notify_event(summary: str, description: str = "", start: datetime = N
         "end": {"dateTime": end.isoformat(), "timeZone": "Asia/Taipei"},
         "reminders": {
             "useDefault": False,
+            # reminder_minutes=[] 表示不跳提醒（例如只留紀錄的事件）
             "overrides": [{"method": "popup", "minutes": m}
-                          for m in (reminder_minutes or REMINDER_MINUTES)],
+                          for m in (REMINDER_MINUTES if reminder_minutes is None else reminder_minutes)],
         },
     }
     if attendee:

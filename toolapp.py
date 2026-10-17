@@ -3681,6 +3681,7 @@ def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全
 
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
+    {"name": "【清潔異動】已備妥整合執行", "handler": None, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
     {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
@@ -4124,6 +4125,16 @@ with func_col:
             label_visibility="collapsed",
             key="selected_function",
         )
+
+if system_type == "finance_management" and selected_function == "【清潔異動】已備妥整合執行":
+    st.markdown("</div>", unsafe_allow_html=True)
+    from tools.finance_management.change_order_batch_ui import render as render_change_order_batch
+
+    render_change_order_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("cetustek.", "fubon.", "newebpay.", "lemon.", "change_order."))
+    st.stop()
 
 if system_type == "finance_management" and selected_function == "【鯨躍發票】二聯改三聯":
     st.markdown("</div>", unsafe_allow_html=True)
