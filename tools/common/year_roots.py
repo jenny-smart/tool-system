@@ -352,6 +352,33 @@ def compare_summary(roots: YearRoots) -> List[Dict[str, str]]:
             for r in roots.rules]
 
 
+REPORT_SHEET = "年度根目錄檢查結果"
+
+
+def write_report(sheets, spreadsheet_id: str, title: str, rows: List[Dict[str, str]]) -> str:
+    """把檢查／比對結果整份寫到主控表「年度根目錄檢查結果」分頁（每次覆蓋），回傳分頁名稱。"""
+    meta = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id,
+                                     fields="sheets.properties(sheetId,title)").execute()
+    ids = {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta.get("sheets", [])}
+    if REPORT_SHEET not in ids:
+        res = sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [
+            {"addSheet": {"properties": {"title": REPORT_SHEET, "gridProperties": {"frozenRowCount": 2}}}}]}).execute()
+        ids[REPORT_SHEET] = res["replies"][0]["addSheet"]["properties"]["sheetId"]
+    headers = list(rows[0].keys()) if rows else []
+    stamp = datetime.now(TZ).strftime("%Y/%m/%d %H:%M")
+    values = [[f"{stamp} {title}"], headers] + [[str(r.get(h, "")) for h in headers] for r in rows]
+    sheets.spreadsheets().values().clear(spreadsheetId=spreadsheet_id, range=f"'{REPORT_SHEET}'").execute()
+    sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id, range=f"'{REPORT_SHEET}'!A1",
+        valueInputOption="RAW", body={"values": values}).execute()
+    if headers:  # 表頭列加篩選，方便只看「找不到」
+        sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": [
+            {"setBasicFilter": {"filter": {"range": {
+                "sheetId": ids[REPORT_SHEET], "startRowIndex": 1, "endRowIndex": len(values),
+                "startColumnIndex": 0, "endColumnIndex": len(headers)}}}}]}).execute()
+    return REPORT_SHEET
+
+
 def set_modes(sheets, spreadsheet_id: str, roots: YearRoots, mode: str,
               only_consistent: bool = False) -> List[int]:
     """把模式寫回 K 欄。only_consistent=True 時只改「比對」且全部一致的列。回傳改了哪些列。"""
