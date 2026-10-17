@@ -2,8 +2,8 @@ name: Scheduled ATM Reconcile
 
 on:
   schedule:
-    - cron: "0 3 * * *"  # 台北 11:00：ATM 對帳
-    - cron: "0 7 * * *"  # 台北 15:00：ATM 對帳
+    - cron: "0 23 * * *"  # 台北 07:00：ATM 對帳
+    - cron: "0 12 * * *"  # 台北 20:00：ATM 對帳
 
   workflow_dispatch: {}
 
