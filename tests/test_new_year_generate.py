@@ -26,7 +26,8 @@ class FakeDrive:
             name = q.split("'")[1]
             return _Req(lambda: {"files": [i for i in self.items.values() if i["name"] == name]})
         parent = q.split("'")[1]
-        return _Req(lambda: {"files": [i for i in self.items.values() if i["parent"] == parent]})
+        return _Req(lambda: {"files": [i for i in self.items.values()
+                                       if i["parent"] == parent and not i.get("trashed")]})
 
     def _new(self, name, mime, parent):
         self.counter += 1
@@ -52,7 +53,7 @@ class FakeDrive:
 
     def update(self, fileId, body, **_):
         def run():
-            self.items[fileId]["name"] = body["name"]
+            self.items[fileId].update(body)
             return self.items[fileId]
         return _Req(run)
 

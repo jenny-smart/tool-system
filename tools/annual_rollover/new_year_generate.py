@@ -925,15 +925,20 @@ class Rollover:
         return records
 
     def _update_year_header(self, file_id: str, titles: List[str]) -> None:
-        """新工作表第 1 列等於前一年度的儲存格（例如 A1／E1 的 2026）改為新年度，月份標題公式跟著變。"""
+        """新工作表第 1 列與 A 欄等於前一年度的儲存格（總表 A1／A40、廣告 E1 的 2026）改為新年度，
+        月份標題公式（=$A1&".01"）跟著變。"""
         data = []
         for title in titles:
-            row = self.sheets.spreadsheets().values().get(
-                spreadsheetId=file_id, range=f"'{title}'!1:1", valueRenderOption="FORMULA",
-            ).execute().get("values", [[]])
-            for i, v in enumerate(row[0] if row else []):
-                if str(v).strip() == str(self.prev_year):
-                    data.append({"range": f"'{title}'!{col_letters(i)}1", "values": [[self.new_year]]})
+            get = lambda rng: self.sheets.spreadsheets().values().get(
+                spreadsheetId=file_id, range=f"'{title}'!{rng}", valueRenderOption="FORMULA",
+            ).execute().get("values", [])
+            row = get("1:1")
+            cells = {f"{col_letters(i)}1" for i, v in enumerate(row[0] if row else [])
+                     if str(v).strip() == str(self.prev_year)}
+            cells |= {f"A{i}" for i, r in enumerate(get("A:A"), start=1)
+                      if r and str(r[0]).strip() == str(self.prev_year)}
+            data += [{"range": f"'{title}'!{c}", "values": [[self.new_year]]}
+                     for c in sorted(cells, key=lambda c: (len(c), c))]
         if data:
             self.log(f"  年度標題 {self.prev_year} → {self.new_year}：{'、'.join(d['range'] for d in data)}")
             self._values_batch(file_id, data)
@@ -958,7 +963,7 @@ class Rollover:
 
     # ---------- 清潔用品 ----------
     def run_supply(self) -> List[Dict[str, str]]:
-        """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（只在新建立時清空）。"""
+        """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（已有新年度檔就先移到垃圾桶）。"""
         old_name = self._fmt(SUPPLY_FILE_NAME)
         new_name = SUPPLY_FILE_NAME.replace("{y}", str(self.new_year))
         source = next((f for f in self.children(SUPPLY_FOLDER_ID)
@@ -966,6 +971,12 @@ class Rollover:
         if not source:
             self.log(f"  ⚠ 找不到檔案：{old_name}")
             return [{"kind": "檔案", "old_name": old_name, "old_id": "", "new_name": "找不到來源", "new_id": ""}]
+        for item in self.children(SUPPLY_FOLDER_ID):  # 已有新年度檔：一律移到垃圾桶後重新生成
+            if item["mimeType"] == SHEET_MIME and item["name"] == new_name:
+                self.log(f"  既有「{new_name}」移到垃圾桶，重新生成")
+                if not self.dry_run:
+                    self.drive.files().update(fileId=item["id"], body={"trashed": True},
+                                              supportsAllDrives=True).execute()
         copied, created = self.ensure_copy(source, SUPPLY_FOLDER_ID, new_name)
         record = {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                   "new_name": copied["name"], "new_id": copied["id"], "created": created}

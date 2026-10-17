@@ -71,6 +71,7 @@ def test_marketing_copies_and_clears_numbers_only():
                                   ["台北", "Google", "", "", "其他"]],
         (fid, "'2027廣告'!1:1"): [["", "Google", "", "", "2026", "=$E1&\".01\""]],
         (fid, "'2027總表'!1:1"): [[2026, "=$A1&\".01\""]],
+        (fid, "'2027總表'!A:A"): [[2026], ["費用別"]] + [[""]] * 37 + [[2026]],
         (fid, "'2027廣告'!F2"): [[100]],
         (fid, "'2027廣告'!I2"): [["=SUM(A1)"]],
         (fid, "'2027總表'!C24:CH29"): [[5, "=A1", "=87369", "=1200+300"]],
@@ -87,6 +88,7 @@ def test_marketing_copies_and_clears_numbers_only():
     assert sheets.writes[(fid, "'2027總表'!C24:CH29")] == [["", "=A1", "", ""]]   # 只有數字的公式也清
     assert sheets.writes[(fid, "'2027廣告'!E1")] == [[2027]]           # 年度標題改新年度
     assert sheets.writes[(fid, "'2027總表'!A1")] == [[2027]]
+    assert sheets.writes[(fid, "'2027總表'!A40")] == [[2027]]
     assert (fid, "'2027廣告'!F3") not in sheets.writes               # 「其他」列不動
 
     # 重跑：已存在就沿用，不再複製或清空
@@ -127,10 +129,13 @@ def test_supply_copy_clear_and_carry_closing_stock():
     labels = {k[1]: v for k, v in sheets.writes.items() if k[1].startswith(f"'{stock}'!A")}
     assert labels == {f"'{stock}'!A1": [["2027"]], f"'{stock}'!A2": [["2026.12"]], f"'{stock}'!A3": [["2027.01"]]}
 
-    # 重跑：檔案已存在就沿用、不清空
+    # 重跑：已有 2027 檔就移到垃圾桶，重新生成並清空
+    sheets.tabs["new2"] = sheets.tabs["new1"]
     sheets.cleared.clear()
     again = _roll(drive, sheets).run_supply()
-    assert not again[0]["created"] and not sheets.cleared
+    assert again[0]["created"] and again[0]["new_id"] == "new2"
+    assert drive.items["new1"]["trashed"] is True
+    assert ("new2", "'進貨明細表-台北'!G3:K") in sheets.cleared
 
 
 def test_run_extra_functions_skip_sheet_rows(monkeypatch):
