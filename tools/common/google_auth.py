@@ -17,17 +17,24 @@ def _oauth_value(name: str) -> str:
     value = os.getenv(name, "").strip()
     if value:
         return value
-    secrets_path = os.getenv("TOOLS_APP_SECRETS_FILE", "").strip()
-    if secrets_path and Path(secrets_path).expanduser().exists():
+    # 本機 Agent 沒有環境變數時，讀本機的 secrets.toml（與 Streamlit 雲端 secrets 同一份內容）
+    explicit = os.getenv("TOOLS_APP_SECRETS_FILE", "").strip()
+    candidates = [Path(explicit).expanduser()] if explicit else []
+    candidates += [
+        Path.home() / "lemon" / ".streamlit" / "secrets.toml",
+        Path.home() / ".streamlit" / "secrets.toml",
+    ]
+    for secrets_path in candidates:
+        if not secrets_path.exists():
+            continue
         try:
             import toml
 
-            raw = toml.loads(
-                Path(secrets_path).expanduser().read_text(encoding="utf-8")
-            ).get(name, "")
-            return str(raw or "").strip()
+            raw = toml.loads(secrets_path.read_text(encoding="utf-8")).get(name, "")
         except Exception:
-            return ""
+            continue
+        if str(raw or "").strip():
+            return str(raw).strip()
     return ""
 
 

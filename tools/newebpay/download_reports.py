@@ -26,23 +26,8 @@ PAYMENT_URL = f"{BASE_URL}/sale/Sell_center/search_transaction?count=1"
 REFUND_URL = f"{BASE_URL}/payment/Credit_finance/search_credit_close"
 LOGOUT_URL = f"{BASE_URL}/company/company_procedures/logout"
 DEFAULT_ACCOUNTS_FILE = Path.home() / "NewebPay account" / "newebpay_accounts.json"
-BASE_GOOGLE_DRIVE = (
-    Path.home()
-    / "Library"
-    / "CloudStorage"
-    / "GoogleDrive-jenny@lemonclean.com.tw"
-    / "我的雲端硬碟"
-)
-PATH_HR = BASE_GOOGLE_DRIVE / "lemon_人事" / "03 服務分潤表"
-AREA_OUTPUT_DIRS = {
-    "台北": "01.台北專員",
-    "台中": "02.台中專員",
-    "新北": "03.新北專員",
-    "桃園": "04.桃園專員",
-    "新竹": "05.新竹專員",
-    "高雄": "06.高雄專員",
-    "家電": "07.家電專員",
-}
+# 未指定 --output 時：先下載到暫存資料夾，再用 Drive API 上傳到
+# 「{YYYY}專員承攬服務費／{NN}.{地區}專員／{期別}」（不再依賴 Mac 的 Google Drive 同步資料夾）
 
 
 @dataclass(frozen=True)
@@ -127,13 +112,12 @@ def load_accounts(accounts_file: Path, selected_area: str | None) -> list[AreaAc
 
 
 def area_output_dir(area: str, period: str, override: Path | None = None) -> Path:
+    """指定 --output 時存本機該路徑；否則存暫存資料夾（下載完會上傳雲端）。"""
     if override:
-        return override.expanduser() / AREA_OUTPUT_DIRS.get(area, area) / period
-    area_dir = AREA_OUTPUT_DIRS.get(area)
-    if not area_dir:
-        raise ValueError(f"尚未設定 {area} 的人事輸出資料夾")
-    year = period[:4]
-    return PATH_HR / f"{year}專員承攬服務費" / area_dir / period
+        return override.expanduser() / area / period
+    import tempfile
+
+    return Path(tempfile.mkdtemp(prefix=f"newebpay_{period}_")) / area
 
 
 def first_visible(page: Page, selectors: Iterable[str]) -> Locator:
@@ -514,7 +498,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--half", choices=("1", "2", "full"), default="full", help="full=整月（預設）；1=1～15日；2=16～月底")
     parser.add_argument("--area", help="只下載指定區域，例如 台北")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE, help=f"各區帳密 JSON（預設：{DEFAULT_ACCOUNTS_FILE}）")
-    parser.add_argument("--output", type=Path, help="自訂輸出根目錄；未指定時存到 Google Drive 人事目錄")
+    parser.add_argument("--output", type=Path, help="自訂本機輸出根目錄；未指定時直接上傳到雲端承攬費期別資料夾")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     return parser.parse_args()
 
@@ -544,6 +528,10 @@ def main() -> int:
                     output = area_output_dir(account.area, period, args.output)
                     print(f"儲存位置：{output}")
                     files = run_account(context, account, start, end, period, output, page=shared_page)
+                    if not args.output:
+                        from tools.common.contractor_upload import upload_period_files
+
+                        upload_period_files(files, account.area, period)
                     for file_path in files:
                         print(f"RESULT_FILE: {file_path}")
                 except Exception as exc:

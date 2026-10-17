@@ -45,14 +45,6 @@ DEFAULT_ACCOUNT_PATHS = [
     Path(__file__).with_name("ei_accounts.json"),
 ]
 
-BASE_GOOGLE_DRIVE = (
-    Path.home()
-    / "Library"
-    / "CloudStorage"
-    / "GoogleDrive-jenny@lemonclean.com.tw"
-    / "我的雲端硬碟"
-)
-PATH_HR = BASE_GOOGLE_DRIVE / "lemon_人事" / "03 服務分潤表"
 
 AREA_OUTPUT_DIRS = {
     "taipei": "02.台北專員",
@@ -134,10 +126,11 @@ def configured_areas(accounts: dict[str, Any]) -> list[str]:
     return result
 
 
-def output_dir(area: str, accounts: dict[str, Any], yyyymm: str, override: Path | None) -> Path:
+def output_dir(area: str, accounts: dict[str, Any], yyyymm: str, override: Path) -> Path:
+    """只在指定 --output-root（本機）時使用。"""
     area_key = normalize_area(area)
     meta = AREA_ENV[area_key]
-    root = override.expanduser() if override else PATH_HR / f"{yyyymm[:4]}專員承攬服務費"
+    root = override.expanduser() / f"{yyyymm[:4]}專員承攬服務費"
     label_suffix = f".{meta['label']}專員"
     try:
         matches = [item for item in root.iterdir() if item.is_dir() and item.name.endswith(label_suffix)]
@@ -608,9 +601,11 @@ def main() -> int:
                         portal_page = context.new_page()
                         portal_page.goto(PORTAL_MEMBER_URL, wait_until="domcontentloaded")
                     login_second(ei_page, credentials)
+                    # 未指定 --output-root 時一律先存暫存資料夾：整月由歸檔流程上傳，
+                    # 區間下載則在下面直接上傳到雲端承攬費期別資料夾
                     area_dir = (
                         output_dir(area, accounts, yyyymm, args.output_root)
-                        if range_mode or args.output_root is not None
+                        if args.output_root is not None
                         else Path(temp_root) / credentials.label
                     )
                     full_download = export_invoices(
@@ -636,6 +631,10 @@ def main() -> int:
                         target=area_dir / f"{export_key}紙本發票-{credentials.label}{extension}",
                     )
                     prize_download = None
+                    if range_mode and args.output_root is None:
+                        from tools.common.contractor_upload import upload_period_files
+
+                        upload_period_files([full_download, paper_download], credentials.label, f"{yyyymm}-2")
                     if not range_mode:
                         full_archive = archive_as_zip(
                             full_download,

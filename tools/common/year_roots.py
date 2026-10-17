@@ -268,6 +268,24 @@ class YearRoots:
         return configured_id
 
 
+    def locate(self, category: str, area: str, year: int, file_index: int = 0) -> str:
+        """只依根目錄找檔（不看模式、不退回原設定）；找不到就丟出錯誤。"""
+        rule = find_rule(self.rules, category, area)
+        if rule is None:
+            raise FileNotFoundError(f"年度根目錄設定沒有「{category}／{area or '共用'}」這一列")
+        label = f"{area or '共用'} {year}"
+        key = (rule.row, year, area, file_index)
+        try:
+            if key not in self._resolved:
+                self._resolved[key] = resolve(self.drive, rule, year, area, file_index)
+        except Exception as exc:
+            self._report(rule, f"{label} 找不到：{exc}")
+            raise FileNotFoundError(f"年度根目錄找不到「{category}／{area or '共用'}」{year} 年度檔：{exc}") from exc
+        found, path = self._resolved[key]
+        self._report(rule, f"{label} 使用根目錄：{path}")
+        return found
+
+
 _INSTANCE: Optional[YearRoots] = None
 _LOADED_AT = 0.0
 RELOAD_SECONDS = 600  # 常駐程式每 10 分鐘重讀一次，改 K 欄模式不必重啟
@@ -319,6 +337,14 @@ def choose_file_id(category: str, area: str, configured_id: str,
 
 
 # ---------- 檢查與切換（給 toolapp「年度根目錄檢查與切換」用） ----------
+def root_file_id(category: str, area: str, year: Optional[int] = None, file_index: int = 0) -> str:
+    """只用年度根目錄找檔（不用各設定表的 ID）；設定讀不到或找不到檔都會報錯。"""
+    roots = get_year_roots()
+    if roots is None:
+        raise RuntimeError(f"讀不到主控表「{ROOT_SHEET}」，無法依根目錄找檔")
+    return roots.locate(category, area, year or taipei_year(), file_index)
+
+
 def _rule_areas(rule: Rule) -> List[str]:
     return [a for a in rule.areas if a not in _ALL_AREAS] or [""]
 
