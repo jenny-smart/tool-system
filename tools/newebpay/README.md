@@ -101,22 +101,16 @@ python3 tools/newebpay/download_reports.py 202606 --area 台北
 python3 tools/newebpay/download_reports.py 202606 --half full
 ```
 
-預設輸出到 Google Drive 人事目錄，例如台北 202606 下半月：
+預設直接用 Drive API（Jenny OAuth）上傳到雲端「02 服務分潤表」的承攬費期別資料夾，
+不再依賴 Mac 的 Google Drive 同步資料夾，例如台北 202606 下半月：
 
 ```text
-~/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_人事/03 服務分潤表/2026專員承攬服務費/01.台北專員/202606-2/
+02 服務分潤表/2026專員承攬服務費/01.台北專員/202606-2/
 ```
 
-各區資料夾：
-
-```text
-01.台北專員
-02.台中專員
-03.新北專員
-04.桃園專員
-05.新竹專員
-06.高雄專員
-```
+各區資料夾依名稱結尾「.{地區}專員」找（例如 03.桃園專員）；沒有時依
+01.台北／02.台中／03.桃園／04.新竹／05.高雄／06.家電 的編號建立。
+指定 `--output` 時改存本機該路徑，不上傳。
 
 藍新若改版導致欄位找不到，程式會把當時畫面及 HTML 存到輸出資料夾的 `debug/`。
 

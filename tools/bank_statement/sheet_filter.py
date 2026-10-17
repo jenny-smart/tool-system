@@ -186,7 +186,7 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     target = load_sheet_target(area, bank)
     credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
     client = gspread.authorize(credentials)
-    worksheet = client.open_by_key(target.spreadsheet_id).get_worksheet_by_id(target.worksheet_gid)
+    worksheet = client.open_by_key(target.spreadsheet_id).worksheet(target.worksheet_title)
     if bank == "yuanta":
         # 財報 B 欄（交易日期時間）的日期對應「元大銀行-區域」A 欄。
         return filter_yuanta_report_rows(table, worksheet.get("B2:B"))
@@ -257,7 +257,7 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
     worksheet = (
         gspread.authorize(credentials)
         .open_by_key(target.spreadsheet_id)
-        .get_worksheet_by_id(target.worksheet_gid)
+        .worksheet(target.worksheet_title)
     )
     existing = worksheet.get("A:I")
     headers = existing[0] if existing else []
