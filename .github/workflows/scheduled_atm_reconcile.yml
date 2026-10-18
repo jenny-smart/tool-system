@@ -1,10 +1,8 @@
 name: Scheduled ATM Reconcile
 
 on:
-  schedule:
-    - cron: "0 23 * * *"  # 台北 07:00：ATM 對帳
-    - cron: "0 12 * * *"  # 台北 20:00：ATM 對帳
-
+  # 2026-10-18 暫停定時排程：舊資料 T 欄空白被當成新增列，誤發大量確認信給客人。
+  # 確認處理範圍後再恢復；目前只能手動執行。
   workflow_dispatch: {}
 
 permissions:

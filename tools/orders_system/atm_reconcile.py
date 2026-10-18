@@ -4,7 +4,7 @@
 ATM 對帳排程：台北／台中，每天台北時間 11:00、15:00 各跑一次
 （.github/workflows/scheduled_atm_reconcile.yml）。
 
-只挑「J 欄有訂單編號、且 T 欄（對帳狀態）還空白」的列視為要處理的新增列，
+只挑「J 欄有訂單編號、P／T 欄還空白，且 B 欄入帳日期在最近 7 天內」的列視為新增列，
 交給 tools.memo_system.atm.process_atm_rows() 去執行系統更新（按已付款／
 開立發票／發確認信，並回寫 P～T 欄）。
 
@@ -20,7 +20,10 @@ row_spec 再呼叫 process_atm_rows()，已經對過帳的原始資料列完全�
 """
 from __future__ import annotations
 
+import re
 import sys
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from tools.memo_system import memo, atm
 from tools.lemon_backend.config import get_credentials
@@ -40,19 +43,38 @@ def _login_session(region: str, ui_logger=None):
     return memo.login(ui_logger=ui_logger)
 
 
-def find_new_rows(region: str) -> list:
-    """掃描 ATM Sheet，回傳「J 欄有訂單編號、且 T 欄尚為空白」的列號（新增列）。"""
+# 只處理銀行入帳日期（B 欄）在最近幾天內的列：舊資料多半沒有填 T 欄，
+# 不能只看 T 空白，否則會把整年舊訂單重跑一次並重發確認信（2026-10-17 發生過）。
+RECENT_DAYS = 7
+TW_TZ = ZoneInfo("Asia/Taipei")
+
+
+def _bank_date(text: str):
+    match = re.search(r"(\d{4})\D(\d{1,2})\D(\d{1,2})", str(text or ""))
+    if not match:
+        return None
+    try:
+        return date(*(int(part) for part in match.groups()))
+    except ValueError:
+        return None
+
+
+def is_new_row(row: list, today: date) -> bool:
+    """J 有訂單編號、P（系統對帳時間）與 T（對帳狀態）都空白，且 B 入帳日期在最近 RECENT_DAYS 天內。"""
+    if not memo.safe_cell(row, atm.COL_ORDER_NO):
+        return False
+    if memo.safe_cell(row, atm.COL_RECON_STATUS) or memo.safe_cell(row, atm.COL_RECONCILED_AT):
+        return False
+    bank_date = _bank_date(memo.safe_cell(row, atm.COL_BANK_TIME))
+    return bank_date is not None and today - timedelta(days=RECENT_DAYS) <= bank_date <= today
+
+
+def find_new_rows(region: str, today: date = None) -> list:
+    """掃描 ATM Sheet，回傳要處理的新增列號（條件見 is_new_row）。"""
+    today = today or datetime.now(TW_TZ).date()
     ws = atm.get_atm_worksheet(region)
     rows = memo.with_retry(ws.get_all_values)
-    new_rows = []
-    for row_no, row in enumerate(rows, start=1):
-        if row_no == 1:
-            continue
-        order_no = memo.safe_cell(row, atm.COL_ORDER_NO)
-        recon_status = memo.safe_cell(row, atm.COL_RECON_STATUS)
-        if order_no and not recon_status:
-            new_rows.append(row_no)
-    return new_rows
+    return [row_no for row_no, row in enumerate(rows, start=1) if row_no > 1 and is_new_row(row, today)]
 
 
 def _notify_calendar(summary: dict, total_success: int, total_failed: int, total_skipped: int):
