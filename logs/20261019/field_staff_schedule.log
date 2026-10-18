@@ -1,0 +1,33 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場專員班表 / running
+Command: /opt/hostedtoolcache/Python/3.11.17/x64/bin/python -u -m tools.field_management.staff_schedule --date 20261019 --system-name 外場排程系統 --run-type 排程
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠ 讀取「年度根目錄設定」失敗，沿用原設定：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+[2026-10-19 05:03:37] 開始處理專員班表：20261019專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：14s65wmrm8ZelzTe0k5wYLfKhwdhFBGmjFRx_yMZE9dg
+🗑️ 已刪除來源暫存 Google Sheet：14s65wmrm8ZelzTe0k5wYLfKhwdhFBGmjFRx_yMZE9dg
+[2026-10-19 05:03:44] 更新專員班表分頁名稱：專員班表查詢本月_1018 → 專員班表查詢本月_1019
+[2026-10-19 05:03:45] 專員班表分頁名稱更新完成：專員班表查詢本月_1019
+[2026-10-19 05:03:45] 完成：20261019專員班表-台北.xls → '專員班表查詢本月_1019'!A:G / rows=1552
+[2026-10-19 05:03:47] 開始處理專員班表：20261119專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1IPbr7qnuCFjGFFJO_BCCKv4yP7pqkq6UKB3akh4vVnc
+🗑️ 已刪除來源暫存 Google Sheet：1IPbr7qnuCFjGFFJO_BCCKv4yP7pqkq6UKB3akh4vVnc
+[2026-10-19 05:03:54] 更新專員班表分頁名稱：專員班表查詢次月_1018 → 專員班表查詢次月_1019
+[2026-10-19 05:03:55] 專員班表分頁名稱更新完成：專員班表查詢次月_1019
+[2026-10-19 05:03:55] 完成：20261119專員班表-台北.xls → '專員班表查詢次月_1019'!A:G / rows=1136
+[2026-10-19 05:03:56] 開始處理專員班表：20261019專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1NlBNTc4lbzTr_PT1pg9Qo_NFxXK7-A5yhmwpzFzPVa4
+🗑️ 已刪除來源暫存 Google Sheet：1NlBNTc4lbzTr_PT1pg9Qo_NFxXK7-A5yhmwpzFzPVa4
+[2026-10-19 05:04:05] 更新專員班表分頁名稱：專員班表查詢本月_1018 → 專員班表查詢本月_1019
+[2026-10-19 05:04:05] 專員班表分頁名稱更新完成：專員班表查詢本月_1019
+[2026-10-19 05:04:05] 完成：20261019專員班表-台中.xls → '專員班表查詢本月_1019'!A:G / rows=227
+[2026-10-19 05:04:12] 開始處理專員班表：20261119專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Tlsizl7m5ySmwmQyacJUDzfqdvOdgUDBtEuFN6mRpNM
+🗑️ 已刪除來源暫存 Google Sheet：1Tlsizl7m5ySmwmQyacJUDzfqdvOdgUDBtEuFN6mRpNM
+[2026-10-19 05:04:20] 更新專員班表分頁名稱：專員班表查詢次月_1018 → 專員班表查詢次月_1019
+[2026-10-19 05:04:20] 專員班表分頁名稱更新完成：專員班表查詢次月_1019
+[2026-10-19 05:04:21] 完成：20261119專員班表-台中.xls → '專員班表查詢次月_1019'!A:G / rows=191
+[2026-10-19 05:04:22] staff_schedule.py 全部完成
+
+📝 外場排程打卡：外場專員班表 / success
+field_management scheduler 全部完成
