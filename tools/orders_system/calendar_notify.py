@@ -6,8 +6,8 @@
 比照 tools/orders_system/orders.py 的 build_gcal_service()（Service Account +
 calendar scope，不需要另外的 OAuth 密鑰），但改用 tools.common.config_loader
 的共用服務帳號設定，避免載入 orders.py 整個大檔（含 accounts/env 等仰賴
-tools/orders_system 套件 sys.path 技巧的絕對匯入）。事件建立在既有的台北
-日曆上，並把 Jenny 加為與會者（sendUpdates="all"），讓她同時收到日曆通知信。
+tools/orders_system 套件 sys.path 技巧的絕對匯入）。事件一律建在 Jenny 的
+行事曆（jenny@lemonclean.com.tw），不用共用日曆（lemonclean925），也不另寄邀請信。
 """
 from __future__ import annotations
 
@@ -18,12 +18,11 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
 from tools.common.config_loader import get_service_account_info
-from tools.orders_system.env import GOOGLE_CALENDAR_MAP
 
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
-NOTIFY_ATTENDEE_EMAIL = "jenny@hers.com.tw"
-NOTIFY_CALENDAR_REGION = "台北"
+# 系統通知一律建在 Jenny 的行事曆，不用共用日曆（lemonclean925）
+NOTIFY_CALENDAR_ID = "jenny@lemonclean.com.tw"
 EVENT_DURATION_MINUTES = 30
 REMINDER_MINUTES = [10, 20]
 
@@ -38,13 +37,11 @@ def _calendar_service():
 
 
 def create_notify_event(summary: str, description: str = "", start: datetime = None,
-                         calendar_id: str = None, reminder_minutes=None, attendee: str = NOTIFY_ATTENDEE_EMAIL):
-    """建立一個通知用日曆事件：30 分鐘、預設提前 20 分與 10 分跳窗提醒，並邀請 Jenny。
-    attendee 傳空字串＝不邀請（事件直接建在本人的日曆上時）。"""
+                         calendar_id: str = None, reminder_minutes=None, attendee: str = ""):
+    """建立一個通知用日曆事件：30 分鐘、預設提前 20 分與 10 分跳窗提醒，
+    建在 Jenny 的行事曆；attendee 有給才另外邀請（會寄邀請信）。"""
     service = _calendar_service()
-    calendar_id = calendar_id or GOOGLE_CALENDAR_MAP.get(NOTIFY_CALENDAR_REGION)
-    if not calendar_id:
-        raise ValueError(f"{NOTIFY_CALENDAR_REGION} 尚未設定 Google Calendar ID")
+    calendar_id = calendar_id or NOTIFY_CALENDAR_ID
 
     start = start or datetime.now(TAIPEI_TZ)
     end = start + timedelta(minutes=EVENT_DURATION_MINUTES)
