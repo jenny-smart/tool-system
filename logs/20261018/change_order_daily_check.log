@@ -1,0 +1,13 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+【台北】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【桃園】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+非工作日或已過 11:00，不建提醒
+{'todo': [{'region': '台北', 'row': 318, 'status': '待收款', 'detail': '服務前加時', 'order_no': 'LC00217398', 'customer': '羅心伶', 'payway': '', 'amount': '1400', 'progress': [], 'actions': [], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/10/15 LC00217398 服務前加時--服務前加時2人1小時，待收服務費$1400'}, {'region': '高雄', 'row': 45, 'status': '待收款', 'detail': '其他', 'order_no': 'LC00217060', 'customer': '謝宛芸', 'payway': '', 'amount': '', 'progress': [], 'actions': [], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/10/10  LC00217060 其他--修改訂單狀態為已付款, 不需開立發票'}], 'failed': []}
