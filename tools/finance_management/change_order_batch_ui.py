@@ -36,7 +36,7 @@ def _rows(items: list[dict]) -> pd.DataFrame:
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption(
-        "只處理登記日期 2026/09/01 以後的列。盤點時會補 T（匯款金額）、Z（未稅金額）公式；"
+        "只處理登記日期 2026/10/16 以後的列。盤點時會補 T（匯款金額）、Z（未稅金額）公式；"
         "開立發票、二聯改三聯需逐筆確認，請到【鯨躍發票】對應功能處理。"
     )
     regions = st.multiselect("地區", batch.REGIONS, default=batch.REGIONS, key="change_order_batch_regions")
