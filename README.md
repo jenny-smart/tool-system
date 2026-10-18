@@ -37,13 +37,11 @@ HSINCHU_PASSWORD
 KAOHSIUNG_EMAIL
 KAOHSIUNG_PASSWORD
 
-新增：ATM 對帳 / 清潔異動每日檢查排程，登入後台一律各區用各區自己的帳密
+新增：清潔異動每日檢查排程（ATM 對帳排程已於 2026-10-18 刪除），登入後台一律各區用各區自己的帳密
 （TAIPEI_EMAIL/PASSWORD、TAICHUNG_EMAIL/PASSWORD、TAOYUAN_EMAIL/PASSWORD、
 HSINCHU_EMAIL/PASSWORD，同上表已列的既有 Secrets），不共用單一帳號登入。
 
-scheduled_atm_reconcile.yml -> .github/workflows/scheduled_atm_reconcile.yml
 scheduled_change_order_check.yml -> .github/workflows/scheduled_change_order_check.yml
-atm_reconcile.py -> tools/orders_system/atm_reconcile.py
 change_order_daily_check.py -> tools/orders_system/change_order_daily_check.py
 calendar_notify.py -> tools/orders_system/calendar_notify.py
 
