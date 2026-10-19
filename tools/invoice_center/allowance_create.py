@@ -184,6 +184,26 @@ def _query_row_inputs(page: Page, label: str) -> Locator:
     return row.locator("input[type='text'], input:not([type])")
 
 
+def _click_query_search(page: Page) -> None:
+    """按查詢頁的「搜尋」。鯨躍按鈕是 <a>搜尋<span class="icon">›</span></a>，
+    文字其實是「搜尋›」，比對時先去掉符號；只點看得到的那顆。"""
+    controls = page.locator("a, button, input[type='button'], input[type='submit'], [role='button']")
+    for index in range(controls.count()):
+        control = controls.nth(index)
+        if not control.is_visible():
+            continue
+        text = control.evaluate("el => el.tagName === 'INPUT' ? el.value : (el.textContent || '')")
+        if re.sub(r"[\W_]+", "", text or "") == "搜尋":
+            control.click()
+            return
+    texts = page.get_by_text("搜尋", exact=False)
+    for index in range(texts.count()):
+        if texts.nth(index).is_visible():
+            texts.nth(index).click()
+            return
+    raise RuntimeError(f"鯨躍折讓單查詢頁找不到「搜尋」按鈕，無法確認是否已開立折讓單；目前頁面：{page.url}")
+
+
 def find_existing_allowance(page: Page, invoice_no: str, days: int = 120, *, untaxed: str = "",
                             not_before: str = "") -> tuple[str, str] | None:
     """到鯨躍「折讓單查詢」用原發票號碼查近 days 天的折讓單；有就回傳（日期, 單號）。
@@ -208,11 +228,7 @@ def find_existing_allowance(page: Page, invoice_no: str, days: int = 120, *, unt
     if not keyword.count():
         raise RuntimeError("鯨躍折讓單查詢頁找不到「關鍵字」欄位，無法確認是否已開立折讓單")
     keyword.first.fill(invoice_no)
-    search = page.locator("a, button, input[type='button'], input[type='submit']").filter(has_text=re.compile(r"^\s*搜尋\s*$"))
-    if search.count():
-        search.first.click()
-    else:
-        page.locator("input[value='搜尋']").first.click()
+    _click_query_search(page)
     page.wait_for_load_state("networkidle", timeout=20_000)
     page.wait_for_timeout(800)
     rows = page.locator("tr").filter(has_text=invoice_no)
