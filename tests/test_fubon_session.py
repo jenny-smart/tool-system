@@ -74,3 +74,17 @@ def test_every_transfer_logs_out_when_done():
     for name in ("fubon_atm_refund", "fubon_payment_request", "fubon_deposit_refund",
                  "fubon_supply_purchase", "fubon_fixed_expense_transfer"):
         assert "cleanup.callback(logout_quietly, context, page)" in (root / f"{name}.py").read_text(encoding="utf-8"), name
+
+
+def test_verify_uses_account_row_finder(monkeypatch):
+    page = _page("")
+    monkeypatch.setattr(agent, "open_my_deposits", lambda c, p: p)
+    monkeypatch.setattr(agent, "find_account_row", lambda p, a, timeout_ms: object())
+    assert agent.verify_logged_in_account(MagicMock(), page, TAIPEI) == (True, page)
+    monkeypatch.setattr(agent, "find_account_row", lambda p, a, timeout_ms: None)
+    assert agent.verify_logged_in_account(MagicMock(), _page("82120000041950"), TAIPEI)[0] is False
+
+
+def test_visible_account_numbers_for_error_message():
+    assert agent.visible_account_numbers(_page("00709120003320 松高 82120000041950 4,385,453.00")) == [
+        "00709120003320", "82120000041950"]

@@ -13,6 +13,7 @@ from tools.bank_statement.capture import CapturedTable, copy_to_clipboard, find_
 from tools.bank_statement.open_login import (
     LOGIN_URLS,
     current_fubon_page,
+    find_account_row,
     fill_fubon,
     has_visible_text,
     is_fubon_logged_in,
@@ -50,9 +51,31 @@ def page_shows_account(page: Page, account: BankAccount) -> bool:
     return False
 
 
+def visible_account_numbers(page: Page) -> list[str]:
+    """頁面（含 frame）上看到的 12～16 碼帳號，供錯誤訊息判斷用。"""
+    found: list[str] = []
+    for frame in [page, *page.frames]:
+        try:
+            text = frame.locator("body").inner_text(timeout=3000)
+        except Exception:
+            continue
+        for number in re.findall(r"\d{12,16}", text):
+            if number not in found:
+                found.append(number)
+    return found
+
+
 def verify_logged_in_account(context: BrowserContext, page: Page, account: BankAccount) -> tuple[bool, Page]:
-    """到「我的存款」確認列表裡有這區的帳號；回傳（是否為這區、目前頁面）。"""
+    """到「我的存款」確認列表裡有這區的帳號；回傳（是否為這區、目前頁面）。
+
+    用明細下載同一個 find_account_row（帳號末 5 碼＋同列有「快速功能」，最多等 10 秒），
+    表格晚一點才載入也找得到；再以完整帳號比對當備援。
+    """
+    if not re.sub(r"\D", "", account.bank_account or ""):
+        raise RuntimeError(f"bank_accounts.json 的富邦／{account.area} 尚未設定 bank_account，無法確認登入的是哪一區")
     page = open_my_deposits(context, page)
+    if find_account_row(page, account, timeout_ms=10_000) is not None:
+        return True, page
     return page_shows_account(page, account), page
 
 
@@ -87,8 +110,10 @@ def ensure_login(context: BrowserContext, account: BankAccount) -> Page:
     page = wait_fubon_login(context, page)
     matched, page = verify_logged_in_account(context, page, account)
     if not matched:
+        seen = "、".join(visible_account_numbers(page)) or "沒有讀到任何帳號"
         raise RuntimeError(
-            f"登入後「我的存款」找不到{account.area}帳號（{account.bank_account[-5:]}），已停止，請確認帳密檔或登入的帳號"
+            f"登入後「我的存款」找不到{account.area}帳號（末碼 {account.bank_account[-5:]}），已停止；"
+            f"頁面上看到的帳號：{seen}；目前頁面：{page.url}"
         )
     print(f"已確認登入的是{account.area}帳號（{account.bank_account[-5:]}）。")
     return page
