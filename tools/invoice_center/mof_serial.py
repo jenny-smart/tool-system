@@ -110,6 +110,10 @@ def fill_if_present(page: Page, selector: str, value: str) -> bool:
     return False
 
 
+MOF_LOGOUT_PATH = "/act/login/api/logoutClient/logout"
+MOF_LOGOUT_URL = f"https://service-mc.einvoice.nat.gov.tw{MOF_LOGOUT_PATH}"
+
+
 def logged_in_account(page: Page) -> str:
     """已登入畫面左上角「帳號：42627791」的帳號；讀不到回傳空字串。"""
     try:
@@ -125,26 +129,20 @@ def is_expected_account(account: str, credentials: MOFCredentials) -> bool:
 
 
 def logout_mof(page: Page) -> None:
-    """登出財政部電子發票平台，確認回到登入頁；登不出去就報錯（避免用錯的帳號繼續下載）。"""
+    """按左下角「登出」（logoutClient/logout），再確認畫面已沒有登入帳號；登不出去就報錯（避免用錯的帳號繼續下載）。"""
     page.once("dialog", lambda dialog: dialog.accept())
     try:
-        page.get_by_text("登出", exact=False).first.click(timeout=10_000)
-    except Exception as exc:
-        raise RuntimeError(f"找不到「登出」按鈕，請手動登出財政部電子發票平台後再執行；目前頁面：{page.url}") from exc
-    try:
-        page.get_by_role("button", name=re.compile("確定|確認|是")).first.click(timeout=3000)
+        page.locator(f'a[href*="{MOF_LOGOUT_PATH}"], a[title="登出"]').first.click(timeout=10_000)
+        page.wait_for_load_state("domcontentloaded", timeout=15_000)
     except Exception:
-        pass
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if "/accounts/login" in page.url or "/logout" in page.url:
-            print("[財政部電子發票] 已登出")
-            return
-        page.wait_for_timeout(500)
+        # 找不到按鈕（例如不在後台頁）就直接開登出網址
+        page.goto(MOF_LOGOUT_URL, wait_until="domcontentloaded")
+    page.wait_for_timeout(2000)
     page.goto(MOF_LOGIN_URL, wait_until="domcontentloaded")
     page.wait_for_timeout(3000)
-    if "/accounts/login" not in page.url:
-        raise RuntimeError(f"登出後仍是登入狀態，請手動登出財政部電子發票平台後再執行；目前頁面：{page.url}")
+    account = logged_in_account(page)
+    if account:
+        raise RuntimeError(f"登出後仍是登入狀態（帳號：{account}），請手動登出財政部電子發票平台後再執行；目前頁面：{page.url}")
     print("[財政部電子發票] 已登出")
 
 

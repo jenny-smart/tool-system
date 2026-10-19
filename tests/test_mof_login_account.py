@@ -49,3 +49,64 @@ def test_wrong_account_stops_before_download():
 
     with pytest.raises(RuntimeError, match="不是 台中"):
         mof_serial.ensure_expected_login(_Page("帳號：42627791"), TAICHUNG)
+
+
+class _LogoutPage(_Page):
+    """按「登出」的假頁面：記錄去過的網址；logged_out 決定登出後畫面還有沒有帳號。"""
+
+    def __init__(self, logged_out=True, has_button=True):
+        super().__init__("帳號：42627791")
+        self.logged_out, self.has_button, self.visited, self.url = logged_out, has_button, [], ""
+
+    def once(self, event, handler):
+        pass
+
+    def locator(self, selector):
+        page = self
+
+        class L:
+            first = None
+
+            def click(self, timeout=None):
+                if not page.has_button:
+                    raise TimeoutError("no button")
+                page.visited.append("click:" + selector)
+                if page.logged_out:
+                    page.text = "登入"
+
+            def inner_text(self, timeout=None):
+                return page.text
+        loc = L()
+        loc.first = loc
+        return loc
+
+    def wait_for_load_state(self, *args, **kwargs):
+        pass
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def goto(self, url, wait_until=None):
+        self.visited.append(url)
+        self.url = url
+        if url == mof_serial.MOF_LOGOUT_URL and self.logged_out:
+            self.text = "登入"
+
+
+def test_logout_clicks_logout_link_and_checks_account_gone():
+    page = _LogoutPage()
+    mof_serial.logout_mof(page)
+    assert "logoutClient/logout" in page.visited[0]
+
+
+def test_logout_falls_back_to_logout_url_without_button():
+    page = _LogoutPage(has_button=False)
+    mof_serial.logout_mof(page)
+    assert mof_serial.MOF_LOGOUT_URL in page.visited
+
+
+def test_logout_raises_when_still_logged_in():
+    import pytest
+
+    with pytest.raises(RuntimeError, match="仍是登入狀態"):
+        mof_serial.logout_mof(_LogoutPage(logged_out=False))
