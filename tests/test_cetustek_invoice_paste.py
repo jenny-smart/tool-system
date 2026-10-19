@@ -224,6 +224,8 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
         with patch.object(paste, "list_pending_payloads", return_value=pending), patch.object(
             paste, "_extract_invoice_no_for_order", return_value=""
+        ), patch.object(paste, "_source_row_values", return_value=("2026/10/19", "1400")), patch.object(
+            paste, "find_existing_invoice", return_value=None
         ), patch.object(paste, "_open_invoice_create") as open_invoice, patch.object(
             paste, "_clear_dialog_handlers"
         ), patch.object(paste, "_paste_one") as paste_one, patch.object(
@@ -373,3 +375,37 @@ class CetustekInvoicePasteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExistingInvoiceCheckTest(unittest.TestCase):
+    ROWS = [
+        "1 115/10/05 AB11111111 LC002175641 杜冠勳 12,000 開立",   # 原訂單發票（登記日前）
+        "2 115/10/19 AB22222222 LC002175641 杜冠勳 1,400 作廢",    # 作廢
+        "3 115/10/19 AB33333333 LC002175641-1 杜冠勳 1,400 開立",  # 這一筆
+    ]
+
+    def test_finds_this_charge_invoice_only(self) -> None:
+        self.assertEqual(
+            paste.parse_invoice_rows(self.ROWS, "LC002175641", amount="1400", not_before="2026/10/19"),
+            "AB33333333",
+        )
+
+    def test_original_order_invoice_is_not_treated_as_issued(self) -> None:
+        self.assertIsNone(
+            paste.parse_invoice_rows(self.ROWS[:2], "LC002175641", amount="1400", not_before="2026/10/19")
+        )
+        self.assertIsNone(paste.parse_invoice_rows(self.ROWS, "LC00217564", amount="1400"))
+
+    def test_existing_invoice_is_backfilled_without_pasting(self) -> None:
+        pending = [{"_row": 7, "source_row": 320, "order_no": "LC002175641",
+                    "payload_json": "{}", "status": "pending"}]
+        with patch.object(paste, "list_pending_payloads", return_value=pending), patch.object(
+            paste, "_extract_invoice_no_for_order", return_value=""
+        ), patch.object(paste, "_source_row_values", return_value=("2026/10/19", "1400")), patch.object(
+            paste, "find_existing_invoice", return_value="AB33333333"
+        ), patch.object(paste, "_paste_one") as paste_one, patch.object(
+            paste, "write_invoice_result"
+        ) as write_result, patch.object(paste, "update_payload_status"):
+            self.assertEqual(paste.process_pending_invoice_payloads(MagicMock(), "台北"), 1)
+        paste_one.assert_not_called()
+        write_result.assert_called_once_with("台北", 320, "LC002175641", "AB33333333")

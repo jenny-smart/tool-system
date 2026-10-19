@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 """
 逐筆下載鯨躍紙本發票的「B2B預覽(A5)」PDF，並依「訂單編號_買方統編_買方名稱.pdf」
 歸檔到 Google Drive「銷項發票根目錄／{YYYY}發票折讓單相關-{地區}／雙月期別（如 07-08）／單月子資料夾（如 07）」。
@@ -276,13 +278,15 @@ def run(area: str, cdp_url: str, month: str, *, upload: bool = True) -> int:
     output_dir = PROJECT_ROOT / "outputs" / "paper_invoice_pdf" / area_label / yyyymm
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         # 鯨躍的 B2B預覽(A5) 頁面 onload 會自己叫 window.print()；
         # 用 context 層級的 init script 蓋掉，避免擋住 headless PDF 產生。
         context.add_init_script("window.print = () => {};")
         print(f"瀏覽器：已連接現有 Chrome（{cdp_url}）")
         page = _login(context, area_key, accounts)
+        from tools.invoice_center.ei_session import logout_quietly
+        cleanup.callback(logout_quietly, page, area_key)  # 做完一律登出
 
         _search_paper_invoices(page, start_roc, end_roc)
         all_rows = _list_all_rows(page)

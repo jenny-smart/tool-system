@@ -159,9 +159,16 @@ def main() -> int:
         if used_login_handler:
             active_page = _clean_ei_page(context, active_page, credentials.userid)
 
-        processed = process_pending_invoice_payloads(active_page, credentials.label)
+        from tools.invoice_center.ei_session import logout_quietly
+
+        try:
+            processed = process_pending_invoice_payloads(active_page, credentials.label)
+        except Exception:
+            logout_quietly(active_page, credentials.label)  # 開立發票中途失敗也登出
+            raise
         if processed:
             print(f"[{credentials.label}] 發票已儲存，號碼與開立時間已回填清潔異動表")
+            logout_quietly(active_page, credentials.label)  # 開完發票一律登出
         else:
             print(f"[{credentials.label}] 沒有待匯入 Payload；保留目前鯨躍頁面")
     return 0
