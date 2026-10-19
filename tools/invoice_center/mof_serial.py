@@ -269,6 +269,37 @@ def _open_serial_query(page: Page, year: int, label: str) -> None:
         page.wait_for_timeout(1500)
 
 
+# 找畫面上看得到、文字剛好是「是」的元素（不限 button 標籤），回傳候選數與看得到的數量
+_FIND_CONFIRM_JS = """() => {
+    const all = [...document.querySelectorAll('button, a, [role=button], .btn, span, div')]
+        .filter(el => (el.innerText || el.textContent || '').replace(/\\s/g, '') === '是');
+    const shown = all.filter(el => {
+        const r = el.getBoundingClientRect();
+        const st = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none';
+    });
+    // 只要最內層的那個（避免點到包住按鈕的外框）
+    const leaf = shown.filter(el => !shown.some(o => o !== el && el.contains(o)));
+    leaf.forEach((el, i) => el.setAttribute('data-mof-confirm', String(i)));
+    return [all.length, leaf.length];
+}"""
+
+
+def _click_visible_confirm(page: Page, timeout_seconds: float = 15) -> None:
+    """按下「下載」後的「注意事項」燈箱只有一個「是」；頁面上另有多份隱藏的同樣燈箱，只點看得到的。"""
+    deadline = time.monotonic() + timeout_seconds
+    total = shown = 0
+    while time.monotonic() < deadline:
+        total, shown = page.evaluate(_FIND_CONFIRM_JS)
+        if shown:
+            page.locator("[data-mof-confirm='0']").first.click(timeout=8000)
+            return
+        page.wait_for_timeout(300)
+    raise RuntimeError(
+        f"按下「下載」後沒有出現確認燈箱：頁面上文字為「是」的元素 {total} 個，看得到的 {shown} 個；目前頁面：{page.url}"
+    )
+
+
 def download_serial_csv(page: Page, year: int, label: str, destination: Path) -> Path:
     _open_serial_query(page, year, label)
 
@@ -330,12 +361,7 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
                 raise RuntimeError(f"找不到「下載」按鈕；目前頁面：{page.url}") from e
             # 按下下載後會跳一個「注意事項」燈箱（提醒下載檔案編碼為 UTF-8），確認按鈕只有文字「是」。
             # 頁面上藏著好幾份同樣的燈箱（實測 21 個隱藏的），只認看得到的那個「是」。
-            confirm = page.locator("button:visible").filter(has_text=re.compile(r"^\s*是\s*$"))
-            try:
-                confirm.first.wait_for(state="visible", timeout=10_000)
-            except Exception as e:
-                raise RuntimeError(f"按下「下載」後沒有出現確認燈箱（找不到看得到的「是」）；目前頁面：{page.url}") from e
-            confirm.first.click(timeout=8000)
+            _click_visible_confirm(page)
     except RuntimeError:
         raise
     except Exception as e:
