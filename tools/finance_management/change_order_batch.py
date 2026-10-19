@@ -1,7 +1,7 @@
 """清潔異動整合執行：盤點各區清潔異動 → 勾選 → 交給本機 Agent 依序執行 → 回寫系統。
 
 規則（2026-10 與 Jenny 確認）：
-  - 只處理登記日期（E 欄）2026/09/01 以後的列。
+  - 只處理登記日期（E 欄）2026/10/16 以後的列。
   - 每列分三類：未備妥（missing，缺資料還不能處理，例如缺匯款帳號、客人尚未付款）、
     可自動執行（actions）、需人工（manual，資料齊全但要到其他功能逐筆處理）。
     未備妥的列不執行任何動作；每日檢查只提醒未備妥的列。
@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 REGIONS = ["台北", "台中", "桃園", "新竹", "高雄"]
-CUTOFF = date(2026, 9, 1)
+CUTOFF = date(2026, 10, 16)
 RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
 
 DONE_STATUSES = ("已退款", "已收款", "已扣儲值金", "已返儲值金", "已處理發票")

@@ -8,7 +8,7 @@ LETTERS = "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB AC AD AE".s
 
 def row(**cells):
     values = [""] * len(LETTERS)
-    cells.setdefault("E", "2026/09/15")
+    cells.setdefault("E", "2026/10/16")
     cells.setdefault("G", "LC001")
     for key, value in cells.items():
         values[LETTERS.index(key)] = value
@@ -20,7 +20,7 @@ def plan(region="台北", **cells):
 
 
 def test_before_cutoff_and_synced_rows_are_skipped():
-    assert plan(B="待退款", E="2026/08/31") is None
+    assert plan(B="待退款", E="2026/10/15") is None
     assert plan(B="已退款", AE="更新系統（B欄：已退款）") is None
     assert plan(B="異動不處理") is None
 
@@ -67,7 +67,7 @@ def test_stored_value_and_invoice_rows():
 
 def test_formula_fixes_only_fill_blank_cells():
     values = [["header"], row(B="待退款", S="1000"), row(B="待退款", S="1000", T="985", Z="952"),
-              row(B="待退款", S="1000", E="2026/08/01"), row(B="待收款", S="1000")]
+              row(B="待退款", S="1000", E="2026/10/15"), row(B="待收款", S="1000")]
     updates = batch.formula_fixes(values)
     assert updates == [
         {"range": "T2", "values": [['=IF(R2="ATM",IF(P2="012",S2,S2-15),0)']]},
@@ -109,7 +109,7 @@ def test_record_text_lists_rows_by_region():
 
 def test_sync_region_only_touches_done_rows(monkeypatch):
     values = [["h"], row(B="已退款"), row(B="待退款"), row(B="已收款", AE="更新系統（B欄：已收款）"),
-              row(B="已扣儲值金", E="2026/08/01")]
+              row(B="已扣儲值金", E="2026/10/15")]
 
     class WS:
         def get_all_values(self):
