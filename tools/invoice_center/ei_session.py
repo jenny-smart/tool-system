@@ -5,12 +5,13 @@
   2. 第二層是別區帳號或已失效 → 只換／重登第二層
   3. 第二層不能用 → 從現有第一層分頁進第二層
   4. 都不行 → 登入第一層再進第二層
-所有鯨躍功能（下載、字軌匯入配號、紙本、中獎、折讓、開立發票）都應呼叫 open_ei_page()。
+所有鯨躍功能（下載、字軌匯入配號、紙本、中獎、折讓、開立發票）都應呼叫 open_ei_page()；
+做完（成功或失敗）都要呼叫 logout_quietly() 登出第二層（「鯨躍登入」保留畫面給人工操作，例外）。
 """
 from __future__ import annotations
 
 from tools.invoice_center.cetustek_login_only import ensure_expected_ei_login
-from tools.invoice_center.ei_export_all import EI_HOME_URL, login_portal, open_second_login
+from tools.invoice_center.ei_export_all import EI_HOME_URL, login_portal, logout_second, open_second_login
 
 
 def prepare_download_session(context, portal_page, ei_page, accounts, credentials):
@@ -55,3 +56,12 @@ def open_ei_page(context, area: str, accounts=None):
     portal_page, ei_page = find_invoice_pages(context)
     _portal, page, reused = prepare_download_session(context, portal_page, ei_page, accounts, credentials)
     return page, reused
+
+
+def logout_quietly(page, label: str) -> None:
+    """做完一律登出第二層；登出失敗只提醒，不蓋掉原本的結果或錯誤。"""
+    try:
+        if page is not None and not page.is_closed():
+            logout_second(page, label)
+    except Exception as exc:
+        print(f"[{label}] ⚠️ 鯨躍第二層自動登出失敗，下次執行前請手動登出：{exc}")

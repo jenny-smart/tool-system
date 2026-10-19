@@ -13,6 +13,8 @@
 # 「鯨躍字軌匯入配號Log」。
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 import sys
 import tempfile
@@ -332,10 +334,12 @@ def main() -> int:
     sheets = None
     spreadsheet_id = ""
     try:
-        with sync_playwright() as playwright:
+        with sync_playwright() as playwright, ExitStack() as cleanup:
             _browser, context = connect_existing_chrome(playwright, args.cdp_url)
             print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
             page = ensure_ei_login(context, args.area)
+            from tools.invoice_center.ei_session import logout_quietly
+            cleanup.callback(logout_quietly, page, args.area)  # 做完一律登出
 
             if args.action == "import":
                 failing_function = "電子發票字軌號碼匯入"

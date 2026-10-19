@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 import re
 import time
@@ -169,9 +171,11 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
         raise ValueError("沒有可執行的待退款折讓資料")
 
     accounts = load_accounts(None)
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = _login(context, area, accounts)
+        from tools.invoice_center.ei_session import logout_quietly
+        cleanup.callback(logout_quietly, page, area)  # 做完一律登出
         _open_allowance(page)
         for item in rows:
             sheet_row = int(item["sheet_row"])
