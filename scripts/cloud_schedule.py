@@ -36,8 +36,8 @@ def plan(when):
         add('scheduled_service', target='service_all')
     if hm in {'00:00', '08:00', '12:00', '18:00'}:
         add('performance_report')
-    if hm in {'08:00', '10:00', '12:00', '14:00', '16:00'}:
-        add('scheduled_fubon_statement')
+    if hm in {'08:00', '11:00', '16:30'}:
+        add('scheduled_fubon_statement')  # 11:00、16:30 例假日由 fubon_statement_queue 略過
     if hm == '10:00':
         add('scheduled_change_order_check')
     if hm == '10:00' and when.weekday() in {1, 4}:
