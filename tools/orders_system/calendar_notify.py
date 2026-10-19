@@ -3,10 +3,9 @@
 """
 共用：把排程結果寫成 Google Calendar 事件通知 Jenny。
 
-比照 tools/orders_system/orders.py 的 build_gcal_service()（Service Account +
-calendar scope，不需要另外的 OAuth 密鑰），但改用 tools.common.config_loader
-的共用服務帳號設定，避免載入 orders.py 整個大檔（含 accounts/env 等仰賴
-tools/orders_system 套件 sys.path 技巧的絕對匯入）。事件一律建在 Jenny 的
+優先用 Jenny 本人的 OAuth 授權（GOOGLE_CALENDAR_REFRESH_TOKEN，與 Drive 共用
+GOOGLE_OAUTH_CLIENT_ID／SECRET）；尚未設定時改用 tools.common.config_loader 的
+共用服務帳號（不載入 orders.py 整個大檔）。事件一律建在 Jenny 的
 行事曆（jenny@lemonclean.com.tw），不用共用日曆（lemonclean925），也不另寄邀請信。
 """
 from __future__ import annotations
@@ -29,8 +28,34 @@ REMINDER_MINUTES = [10, 20]
 _CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
+# Jenny 本人（jenny@lemonclean.com.tw）授權的行事曆 refresh token；
+# 由 tools/common/google_oauth_setup_lemonclean_calendar.py 產生
+CALENDAR_REFRESH_TOKEN_KEY = "GOOGLE_CALENDAR_REFRESH_TOKEN"
+
+
+def _oauth_credentials():
+    """有 Jenny 行事曆授權時回傳 OAuth 憑證，否則回傳 None。"""
+    from google.oauth2.credentials import Credentials as OAuthCredentials
+
+    from tools.common.google_auth import _oauth_value
+
+    refresh_token = _oauth_value(CALENDAR_REFRESH_TOKEN_KEY)
+    if not refresh_token:
+        return None
+    return OAuthCredentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=_oauth_value("GOOGLE_OAUTH_CLIENT_ID"),
+        client_secret=_oauth_value("GOOGLE_OAUTH_CLIENT_SECRET"),
+        scopes=["https://www.googleapis.com/auth/calendar.events"],
+    )
+
+
 def _calendar_service():
-    credentials = Credentials.from_service_account_info(
+    # 優先用 Jenny 本人授權（服務帳號沒有她行事曆的寫入權限，會回 404）；
+    # 尚未設定時沿用服務帳號
+    credentials = _oauth_credentials() or Credentials.from_service_account_info(
         get_service_account_info(), scopes=_CALENDAR_SCOPES
     )
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
