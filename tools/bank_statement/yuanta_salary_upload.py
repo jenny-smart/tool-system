@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 import io
 import json
@@ -20,6 +22,7 @@ from playwright.sync_api import sync_playwright
 from services.google_auth import get_drive_service
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login, run_download
+from tools.bank_statement.fubon_agent import logout_quietly as fubon_logout_quietly
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
     choose_saved_destination,
@@ -33,6 +36,7 @@ from tools.bank_statement.native_yuanta import (
     YUANTA_HOST,
     YUANTA_URL,
     bind_yuanta_page,
+    logout_yuanta_quietly,
     wait_for_yuanta_login,
 )
 from tools.invoice_center.chrome_cdp import connect_existing_chrome
@@ -289,23 +293,31 @@ def upload_salary_files(files: list[SalaryFile], area: str, cdp_url: str, accoun
                 page.goto(YUANTA_URL, wait_until="domcontentloaded", timeout=60_000)
             bind_yuanta_page(page)
             wait_for_yuanta_login(account, timeout=300)
-            for item, path in staged:
-                print(f"上傳中：{item.name}（NT$ {item.amount:,}）", flush=True)
-                _click_text(page, "收付款服務")
-                _click_text(page, "薪資付款")
-                _click_text(page, "薪資臺幣整批付款")
-                _select_option_containing(page, "臺幣薪轉格式Excel")
-                _set_file(page, path)
-                _click_text(page, "確定")
-                # 帳號顯示名稱可能是「元大大同-綜合活期-...」等不同格式；
-                # 以各地區設定的帳號末五碼選取，避免依賴銀行頁面的標點文字。
-                payment_account = account.bank_account[-5:] if account.bank_account else "元大大同"
-                _select_option_containing(page, payment_account)
-                _select_option_containing(page, item.summary, "摘要")
-                _click_text(page, "確定匯入")
-                _click_text(page, "送審")
-                _click_text(page, "確認送審")
-                print(f"已送待放行：{item.name}", flush=True)
+            try:
+                _upload_staged(page, account, staged)
+            finally:
+                logout_yuanta_quietly()  # 送審完（或失敗）一律登出
+
+
+def _upload_staged(page: Any, account: Any, staged: list) -> None:
+    """逐檔上傳、選付款帳號（末五碼）、送審。"""
+    for item, path in staged:
+        print(f"上傳中：{item.name}（NT$ {item.amount:,}）", flush=True)
+        _click_text(page, "收付款服務")
+        _click_text(page, "薪資付款")
+        _click_text(page, "薪資臺幣整批付款")
+        _select_option_containing(page, "臺幣薪轉格式Excel")
+        _set_file(page, path)
+        _click_text(page, "確定")
+        # 帳號顯示名稱可能是「元大大同-綜合活期-...」等不同格式；
+        # 以各地區設定的帳號末五碼選取，避免依賴銀行頁面的標點文字。
+        payment_account = account.bank_account[-5:] if account.bank_account else "元大大同"
+        _select_option_containing(page, payment_account)
+        _select_option_containing(page, item.summary, "摘要")
+        _click_text(page, "確定匯入")
+        _click_text(page, "送審")
+        _click_text(page, "確認送審")
+        print(f"已送待放行：{item.name}", flush=True)
 
 
 def transfer_total_from_fubon(
@@ -320,9 +332,10 @@ def transfer_total_from_fubon(
         raise ValueError("富邦匯往元大的總金額必須大於 0")
     account = load_account("fubon", area, accounts_file.expanduser())
     destination = f"元大{area}"
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
+        cleanup.callback(fubon_logout_quietly, context, page)  # 轉帳完（或失敗）一律登出富邦
         stage = transfer_page_stage(page, str(amount))
         if stage in {"confirmation", "completed"}:
             print(f"偵測到富邦目前停在{stage}階段，從現有畫面接續。", flush=True)

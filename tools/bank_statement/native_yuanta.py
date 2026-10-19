@@ -176,6 +176,52 @@ def fill_yuanta_login(account: object, timeout: float = 30.0) -> None:
     raise RuntimeError("找不到元大登入欄位，無法預填帳密")
 
 
+def _all_text() -> str:
+    return execute_yuanta_js(
+        r'''
+        (() => {
+          const docs=[];
+          const walk=d=>{docs.push(d);[...d.querySelectorAll('iframe,frame')].forEach(f=>{try{if(f.contentDocument)walk(f.contentDocument)}catch(_){}})};
+          walk(document);
+          return docs.map(d => d.body?.innerText || '').join('\n');
+        })()
+        '''
+    )
+
+
+def logged_in_company_ids() -> list[str]:
+    """儀表板中間「42627791 檸檬專業清潔有限公司」這類 8 碼統編（供核對與錯誤訊息）。"""
+    return list(dict.fromkeys(re.findall(r"(?<!\d)(\d{8})(?!\d)\s*\S*公司", _all_text())))
+
+
+def is_expected_company(account: object, timeout: float = 10.0) -> bool:
+    """登入中的統編是不是這區（帳密檔 login_id）；不在儀表板時先點「儀表板」再看。"""
+    expected = re.sub(r"\D", "", str(getattr(account, "login_id", "") or ""))
+    if not expected:
+        raise RuntimeError(f"bank_accounts.json 的元大／{getattr(account, 'area', '')} 尚未設定 login_id（統編），無法確認登入的是哪一區")
+    if expected in re.sub(r"\s", "", _all_text()):
+        return True
+    try:
+        _click_text("儀表板", timeout=5)
+    except Exception:
+        pass
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if expected in re.sub(r"\s", "", _all_text()):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _goto_login_page() -> None:
+    if _YUANTA_PAGE is not None and not _YUANTA_PAGE.is_closed():
+        _YUANTA_PAGE.goto(YUANTA_URL, wait_until="domcontentloaded", timeout=60_000)
+        time.sleep(1)
+
+
 def wait_for_yuanta_login(account: object, timeout: float = 30.0) -> dict[str, object]:
     try:
         state = page_state()
@@ -196,9 +242,15 @@ def wait_for_yuanta_login(account: object, timeout: float = 30.0) -> dict[str, o
         if not state:
             raise RuntimeError("Chrome 已開啟，但元大登入頁尚未載入，請再執行一次")
 
+    area = getattr(account, "area", "")
     if state.get("logged_in"):
-        print("元大目前已登入，沿用現有工作階段。")
-        return state
+        if is_expected_company(account):
+            print(f"元大目前已登入{area}（統編 {account.login_id}），沿用現有工作階段。")
+            return state
+        seen = "、".join(logged_in_company_ids()) or "讀不到"
+        print(f"元大目前登入的統編（{seen}）不是{area}（{account.login_id}），先登出再登入{area}。")
+        logout_yuanta()
+        _goto_login_page()
     fill_yuanta_login(account)
     print("等待你在 Chrome 輸入驗證碼並登入元大（最長 30 秒）……")
     deadline = time.monotonic() + timeout
@@ -221,6 +273,12 @@ def wait_for_yuanta_login(account: object, timeout: float = 30.0) -> dict[str, o
                 time.sleep(1)
                 continue
             if stable.get("logged_in") or not stable.get("prelogin"):
+                if not is_expected_company(account):
+                    seen = "、".join(logged_in_company_ids()) or "讀不到"
+                    raise RuntimeError(
+                        f"元大登入後的統編（{seen}）不是{area}（{account.login_id}），已停止，請確認帳密檔或登入的帳號"
+                    )
+                print(f"已確認登入的是元大{area}（統編 {account.login_id}）。")
                 return stable
         time.sleep(1)
     raise RuntimeError("等待元大登入逾時，請重新執行指令")
@@ -691,3 +749,11 @@ def logout_yuanta() -> None:
             print("元大已登出。")
             return
     raise RuntimeError("元大找不到登出按鈕")
+
+
+def logout_yuanta_quietly() -> None:
+    """做完一律登出元大；登出失敗只提醒，不蓋掉原本的結果或錯誤。"""
+    try:
+        logout_yuanta()
+    except Exception as exc:
+        print(f"⚠️ 元大自動登出失敗，下次執行前請手動登出：{exc}")
