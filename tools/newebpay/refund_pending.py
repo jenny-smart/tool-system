@@ -13,7 +13,7 @@ from playwright.sync_api import Locator, Page, sync_playwright
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
 from tools.lemon_backend.stored_value_sheet import get_worksheet
-from tools.finance_management.refund_guard import ready_for_refund
+from tools.finance_management.refund_guard import ready_for_refund, ready_items
 from tools.newebpay.refund_filter import pending_credit_card_refunds
 from tools.newebpay.download_reports import (
     DEFAULT_ACCOUNTS_FILE,
@@ -172,11 +172,16 @@ def _close_detail_by_backdrop(page: Page) -> None:
 
 def run(area: str, accounts_file: Path, cdp_url: str, selected_rows: set[int] | None = None) -> int:
     worksheet = get_worksheet(area)
-    pending = pending_credit_card_refunds(worksheet.get_all_values())
+    values = worksheet.get_all_values()
+    pending = pending_credit_card_refunds(values)
     if selected_rows is not None:
         pending = [item for item in pending if int(item["sheet_row"]) in selected_rows]
     print(f"{area}：待退款＋信用卡共 {len(pending)} 筆。")
+    total = len(pending)
+    pending = ready_items(values, pending)  # 登入藍新前先排除缺折讓單號的列
     if not pending:
+        if total:
+            print("沒有已完成折讓單的列，不登入藍新。")
         return 0
     account = load_accounts(accounts_file.expanduser(), area)[0]
     today = datetime.now(ZoneInfo("Asia/Taipei")).date()
@@ -209,7 +214,7 @@ def run(area: str, accounts_file: Path, cdp_url: str, selected_rows: set[int] | 
             finally:
                 if not page.is_closed():
                     page.close()
-    print(f"藍新信用卡退款完成：{completed}/{len(pending)} 筆。")
+    print(f"藍新信用卡退款完成：{completed}/{total} 筆。")
     return 0
 
 

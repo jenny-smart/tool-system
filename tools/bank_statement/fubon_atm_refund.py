@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.finance_management.refund_guard import ready_for_refund
+from tools.finance_management.refund_guard import ready_for_refund, ready_items
 from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
 from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
 from tools.bank_statement.fubon_transfer_common import (
@@ -65,7 +65,8 @@ def fill_refund(
 
 def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     worksheet = get_worksheet(area)
-    candidates = pending_atm_refunds(worksheet.get_all_values())
+    values = worksheet.get_all_values()
+    candidates = pending_atm_refunds(values)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
     if not selected:
         raise ValueError("勾選列中沒有符合 B=待退款、R=ATM 且 P/Q/T 完整的資料")
@@ -79,6 +80,10 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     selected = [item for item in selected if item["amount"] != "0"]
     if not selected:
         raise ValueError("勾選列的轉帳金額（T欄）皆為 0，請先確認金額後再執行")
+    selected = ready_items(values, selected)  # 登入富邦前先排除缺折讓單號的列
+    if not selected:
+        print("沒有已完成折讓單的列，不登入富邦。")
+        return 0
 
     account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright, ExitStack() as cleanup:

@@ -1,6 +1,7 @@
 """退款前確認：有開發票（X 欄原發票號碼）的列，必須已有折讓單號（AB 欄）才退款。
 
-藍新信用卡退款、富邦 ATM 退款共用。每一筆退款前重新讀一次該列，
+藍新信用卡退款、富邦 ATM 退款共用。登入網站前先用 ready_items 篩掉缺折讓單號的列
+（全部都缺就不登入）；每一筆退款前再重新讀一次該列，
 折讓單沒開成功（或沒回填）就跳過、不退款，避免只退款沒折讓。沒開發票（X 空白）的列不需要折讓單。
 """
 from __future__ import annotations
@@ -22,3 +23,15 @@ def ready_for_refund(worksheet, sheet_row: int, log: Callable[[str], None] = pri
         log(f"⚠️ 第 {sheet_row} 列有原發票但沒有折讓單號（AB），未退款；請先完成折讓單再退款")
         return False
     return True
+
+
+def ready_items(values: list[list[object]], items: list[dict], log: Callable[[str], None] = print) -> list[dict]:
+    """登入前先篩：缺折讓單號的列提示後剔除，回傳可退款的列。"""
+    ready = []
+    for item in items:
+        sheet_row = int(item["sheet_row"])
+        if missing_allowance(values, sheet_row):
+            log(f"⚠️ 第 {sheet_row} 列有原發票但沒有折讓單號（AB），未退款；請先完成折讓單再退款")
+        else:
+            ready.append(item)
+    return ready
