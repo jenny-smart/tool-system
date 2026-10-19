@@ -47,3 +47,28 @@ def test_reports_counts_when_no_visible_confirm():
         with pytest.raises(RuntimeError, match="看得到的 0 個"):
             mof_serial._click_visible_confirm(page, timeout_seconds=1)
         browser.close()
+
+
+PAGE = (
+    HIDDEN * 21
+    + '<div class="card"><table><tr><td><button title="下載" class="btn"><svg></svg></button></td></tr></table>'
+    '<div class="card-footer bg-light have_btn"><div class="btn_function"><ul><li>'
+    '<button title="下載" class="btn btn-sm btn-falcon" onclick="window.clicks=(window.clicks||0)+1;'
+    'if(window.clicks>=2){document.body.insertAdjacentHTML(\'beforeend\', ' + repr(SHOWN).replace('"', '&quot;') + ')}">'
+    '<svg></svg> 下載</button></li></ul></div></div></div>'
+)
+
+
+def test_clicks_footer_download_and_retries_until_dialog_appears():
+    with sync_api.sync_playwright() as p:
+        browser, page = _page(p, PAGE)
+        mof_serial._click_download_button(page)
+        found, _total, _shown = mof_serial._wait_visible_confirm(page, 1)
+        assert not found  # 第一次按沒有出燈箱（模擬沒按到）
+        mof_serial._click_download_button(page)
+        found, _total, _shown = mof_serial._wait_visible_confirm(page, 2)
+        assert found
+        page.locator("[data-mof-confirm='0']").first.click()
+        assert page.evaluate("window.clicks") == 2
+        assert page.evaluate("window.clicked") == "shown"
+        browser.close()
