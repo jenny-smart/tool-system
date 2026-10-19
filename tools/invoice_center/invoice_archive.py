@@ -18,16 +18,16 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 CONFIG_SHEET = "鯨躍發票根目錄設定"
-CONFIG_HEADERS = ["地區", "財務根目錄ID", "承攬費總根目錄ID", "啟用", "備註"]
+CONFIG_HEADERS = ["地區", "銷項發票根目錄ID", "承攬費總根目錄ID", "啟用", "備註"]
 UPDATE_LOG_SHEET = "鯨躍發票更新Log"
 UPDATE_LOG_HEADERS = ["執行時間", "功能", "地區", "期別", "狀態", "筆數", "訊息"]
 MONTHLY_ROOT_FOLDER_ID = "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
 DEFAULT_CONFIG = [
-    ["台北", "17EQNG8VM9N4YgxXGb23CNZxYT3HsDkQ2", MONTHLY_ROOT_FOLDER_ID, "TRUE", "紙本／中獎存財務路徑"],
-    ["台中", "12XktB_jDnd3ufkIZX2hweHdV3nv14tAH", MONTHLY_ROOT_FOLDER_ID, "TRUE", "紙本／中獎存財務路徑"],
-    ["桃園", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設財務根目錄時存承攬費路徑"],
-    ["新竹", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設財務根目錄時存承攬費路徑"],
-    ["高雄", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設財務根目錄時存承攬費路徑"],
+    ["台北", "17EQNG8VM9N4YgxXGb23CNZxYT3HsDkQ2", MONTHLY_ROOT_FOLDER_ID, "TRUE", "字軌、紙本、中獎、紙本PDF存銷項發票根目錄"],
+    ["台中", "12XktB_jDnd3ufkIZX2hweHdV3nv14tAH", MONTHLY_ROOT_FOLDER_ID, "TRUE", "字軌、紙本、中獎、紙本PDF存銷項發票根目錄"],
+    ["桃園", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設銷項發票根目錄時存承攬費路徑"],
+    ["新竹", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設銷項發票根目錄時存承攬費路徑"],
+    ["高雄", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設銷項發票根目錄時存承攬費路徑"],
 ]
 AREA_FOLDER_NAMES = {
     "台北": "01.台北專員",
@@ -277,7 +277,14 @@ def _child_folders_starting_with(drive: Any, parent_id: str, prefix: str) -> lis
     return [item for item in files if str(item.get("name") or "").startswith(prefix)]
 
 
+def finance_year_folder_name(year: str, area: str) -> str:
+    """銷項發票根目錄下的年度資料夾名稱，例如「2027發票折讓單相關-台北」。"""
+    return f"{year}發票折讓單相關-{area}"
+
+
 def get_or_create_finance_year_folder(drive: Any, parent_id: str, year: str, area: str) -> str:
+    """找名稱以年份開頭的年度資料夾（優先含地區、含「發票」）；換年還沒有時，
+    依「{YYYY}發票折讓單相關-{地區}」命名新建（不再建只叫「2027」的資料夾）。"""
     candidates = _child_folders_starting_with(drive, parent_id, year)
     if candidates:
         candidates.sort(
@@ -289,7 +296,7 @@ def get_or_create_finance_year_folder(drive: Any, parent_id: str, year: str, are
             reverse=True,
         )
         return candidates[0]["id"]
-    return get_or_create_folder(drive, parent_id, year)
+    return get_or_create_folder(drive, parent_id, finance_year_folder_name(year, area))
 
 
 def get_or_create_period_folder(drive: Any, parent_id: str, period4: str) -> str:
