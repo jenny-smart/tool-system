@@ -45,7 +45,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-21T00:00'))
 
     def test_five_cloud_expressions_cover_all_slots(self):
-        slots={(h,0) for h in [0,1,5,7,8,10,12,14,16,17,18,22]} | {(1,10),(1,20),(0,30),(1,30),(5,30),(0,40)}
+        slots={(h,0) for h in [0,1,5,7,8,10,11,12,17,18,22]} | {(1,10),(1,20),(0,30),(1,30),(5,30),(16,30),(0,40)}
         for day in range(1,32):
             for hour in range(24):
                 for minute in [0,10,20,30,40,50]:
@@ -62,7 +62,10 @@ class ScheduleTests(unittest.TestCase):
 
     def test_cloud_clock_skew(self):
         self.assertEqual(m.scheduled_time(1790755153).isoformat(), "2026-09-30T16:00:00+08:00")
-        self.assertIn(("scheduled_fubon_statement.yml", {}), m.plan(m.scheduled_time(1790755153)))
+        self.assertNotIn(("scheduled_fubon_statement.yml", {}), m.plan(m.scheduled_time(1790755153)))
+        for text in ["2026-09-30T08:00", "2026-09-30T11:00", "2026-09-30T16:30"]:
+            when=dt.datetime.fromisoformat(text).replace(tzinfo=m.TZ)
+            self.assertIn(("scheduled_fubon_statement.yml", {}), m.plan(when))
         for text in ["2026-10-01T00:00", "2026-10-01T01:10", "2026-10-01T01:20", "2026-10-01T00:30", "2026-10-01T00:40"]:
             target=dt.datetime.fromisoformat(text).replace(tzinfo=m.TZ)
             for offset in [-120,-47,0,45,120]:

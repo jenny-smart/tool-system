@@ -5,11 +5,10 @@ run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot
 on:
   schedule:
     # UTC 時間；台北時間需加 8 小時
+    # 例假日（週六日、國定假日）只跑 08:00；11:00、16:30 由程式判斷非工作日就不排任務
     - cron: "0 0 * * *"   # 台北 08:00
-    - cron: "0 2 * * *"   # 台北 10:00
-    - cron: "0 4 * * *"   # 台北 12:00
-    - cron: "0 6 * * *"   # 台北 14:00
-    - cron: "0 8 * * *"   # 台北 16:00
+    - cron: "0 3 * * *"   # 台北 11:00
+    - cron: "30 8 * * *"  # 台北 16:30
   workflow_dispatch:
     inputs:
       scheduled_slot:

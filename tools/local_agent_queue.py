@@ -397,6 +397,43 @@ def list_agent_status(
     return result
 
 
+DEDUP_ACTIONS = {"fubon.download"}
+
+
+def _download_key(task: dict[str, str]) -> tuple | None:
+    if task.get("action") not in DEDUP_ACTIONS:
+        return None
+    try:
+        params = json.loads(task.get("params_json") or "{}")
+    except (TypeError, ValueError):
+        return None
+    return (task.get("action"), str(params.get("area") or ""),
+            str(params.get("start_date") or ""), str(params.get("end_date") or ""))
+
+
+def _skip_superseded_downloads(pending: list[dict[str, str]], *, service: Any, spreadsheet_id: str) -> list[dict[str, str]]:
+    """同一地區、同一天的富邦明細下載只做最新一筆（Mac 沒開機時排程會累積重複任務）；
+    較舊的標成已略過，不執行。pending 依建立順序由舊到新。"""
+    newest: dict[tuple, int] = {}
+    for index, task in enumerate(pending):
+        key = _download_key(task)
+        if key:
+            newest[key] = index
+    kept = []
+    for index, task in enumerate(pending):
+        key = _download_key(task)
+        if key and newest[key] != index:
+            update_task(
+                int(task["_row"]),
+                {"status": "cancelled", "finished_at": now_text(), "message": "已略過（有較新的同日任務）"},
+                service=service,
+                spreadsheet_id=spreadsheet_id,
+            )
+            continue
+        kept.append(task)
+    return kept
+
+
 def claim_next_task(
     *,
     agent_id: str = "",
@@ -410,6 +447,7 @@ def claim_next_task(
         for task in reversed(list_tasks(limit=500, service=service, spreadsheet_id=spreadsheet_id))
         if task["status"] in {"pending", "queued"}
     ]
+    pending = _skip_superseded_downloads(pending, service=service, spreadsheet_id=spreadsheet_id)
     if not pending:
         return None
     # 驗證碼有時效，優先處理擷取及送出任務。
