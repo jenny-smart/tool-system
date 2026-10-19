@@ -13,25 +13,15 @@ def extract_csrf_token(html: str) -> str:
 
 
 def login(session: LemonBackendSession, credentials: BackendCredentials) -> bool:
-    login_page = session.get("/login")
-    login_page.raise_for_status()
+    """登入檸檬後台（共用 tools/common/lemon_backend_login；程式結束時自動登出）。"""
+    from tools.common.lemon_backend_login import login as backend_login
 
-    token = extract_csrf_token(login_page.text)
-    if not token:
-        raise RuntimeError("登入頁找不到 _token")
-
-    response = session.post(
-        "/login",
-        data={
-            "_token": token,
-            "email": credentials.email,
-            "password": credentials.password,
-        },
-    )
-    response.raise_for_status()
-
-    check = session.get("/purchase")
-    check.raise_for_status()
-    if session.looks_like_login_page(check):
-        raise RuntimeError("後台登入失敗，請確認帳密")
+    try:
+        backend_login(session.session, credentials.email, credentials.password,
+                      login_url=session.url("/login"), timeout=session.timeout,
+                      check_url=session.url("/purchase"))
+    except RuntimeError as exc:
+        raise RuntimeError(f"後台登入失敗，請確認帳密：{exc}") from exc
     return True
+
+

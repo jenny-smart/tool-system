@@ -31,37 +31,13 @@ def get_account(city: str):
 
 
 def login_backend(email: str, password: str) -> requests.Session:
+    """登入檸檬後台（共用 tools/common/lemon_backend_login；程式結束時自動登出）。"""
+    from tools.common.lemon_backend_login import login as backend_login
+
     session = requests.Session()
-
-    res = session.get(LOGIN_URL, headers=HEADERS, allow_redirects=True)
-    res.raise_for_status()
-
-    soup = BeautifulSoup(res.text, "html.parser")
-
-    token_input = soup.find("input", {"name": "_token"})
-
-    if not token_input:
-        raise RuntimeError("找不到 _token")
-
-    payload = {
-        "_token": token_input.get("value"),
-        "email": email,
-        "password": password,
-    }
-
-    login_res = session.post(
-        LOGIN_URL,
-        data=payload,
-        headers=HEADERS,
-        allow_redirects=True,
-    )
-
-    login_res.raise_for_status()
-
-    if "login" in login_res.url.lower():
-        raise RuntimeError("登入失敗")
-
+    backend_login(session, email, password, login_url=LOGIN_URL, headers=HEADERS)
     return session
+
 
 def load_accounts_dict():
     accounts = {}
