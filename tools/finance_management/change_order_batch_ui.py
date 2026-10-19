@@ -75,6 +75,17 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     st.caption("執行順序：鯨躍折讓單 → 富邦 ATM 退款（需手機核准）→ 藍新信用卡退款 → 檸檬後台儲值金 → 回寫系統。"
                "回寫完成會在 Jenny 行事曆留一筆紀錄。")
 
+    sync_only = [item for item in selected if "sync" in item["actions"]]
+    if st.button(f"📝 只回寫系統（勾選中可回寫的 {len(sync_only)} 筆，不執行其他動作）",
+                 key="change_order_batch_sync_only", disabled=not sync_only):
+        rows = batch.selected_rows_by_region(sync_only)
+        with st.spinner("回寫系統中…"):
+            results = batch.sync(list(rows), log=log, rows=rows)
+        done = sum(len(r["done"]) for r in results.values())
+        failed = sum(len(r["failed"]) for r in results.values())
+        (st.success if not failed else st.warning)(f"回寫完成 {done} 筆，失敗 {failed} 筆")
+        st.session_state.pop(STATE_KEY, None)
+
     if st.button("▶️ 執行勾選的動作", key="change_order_batch_run", disabled=not selected):
         agent_items = [item for item in selected if set(item["actions"]) - {"sync"}]
         if agent_items:
