@@ -574,10 +574,10 @@ def _build_notice_text(
         ) or "目前無排程"
         arrangement = (
             f"服務地址：{address or '未提供'}\n"
-            f"🕓 您原訂週期於（{_month_range(phase1_start, phase2_end)}）之服務安排如下：\n\n"
+            f"🕓 您原訂週期於（{_month_range(phase1_start, phase2_end)}）之服務安排如下：\n"
             f"{month_dates}\n"
             f"服務時段：{month_times}\n\n"
-            f"🕓 您原訂週期於年節期間（{_date_range(phase1_start, phase2_end)}）之服務安排如下：\n\n"
+            f"🕓 您原訂週期於年節期間（{_date_range(phase1_start, phase2_end)}）之服務安排如下：\n"
             f"年節加價服務日期：\n{service_dates}\n"
             f"服務時段：{service_times}\n\n"
             f"PART 1 次數／年節加價金額：{len(phase1_rows)} 次／{_money(phase1_total)}\n"
