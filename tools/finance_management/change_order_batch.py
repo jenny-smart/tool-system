@@ -134,7 +134,9 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
 
     if status == "待退款":
         # missing＝缺資料還不能處理（未備妥）；manual＝資料齊全但要人工或到其他功能逐筆處理
-        item["amount"] = _amount(_cell(row, "T") or _cell(row, "S"))
+        # 顯示實際會退的金額：ATM 是 T（扣手續費後的匯款金額），信用卡等其他方式是 S（退款金額）
+        is_atm = "ATM" in item["payway"].upper()
+        item["amount"] = _amount(_cell(row, "T")) if is_atm and _amount(_cell(row, "T")) else _amount(_cell(row, "S"))
         if not _amount(_cell(row, "S")):
             item["missing"].append("缺退款金額（S）")
         if _cell(row, "AB"):
