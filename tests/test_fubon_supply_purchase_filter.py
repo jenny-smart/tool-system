@@ -18,14 +18,16 @@ def _row(
     bank="807(永豐銀行)",
     account="11601800014602",
     payment_date="",
+    request_date="",
 ):
-    row = [""] * 17
+    row = [""] * 19
     row[1] = month
     row[5] = supplier
     row[10] = amount
     row[13] = bank
     row[14] = account
     row[16] = payment_date
+    row[18] = request_date
     return row
 
 
@@ -53,3 +55,10 @@ def test_group_only_contains_and_sums_rows_without_payment_date():
             "amount": "2000",
         }
     ]
+
+
+def test_request_date_in_s_means_paid_and_na_account_is_skipped():
+    values = [[""] * 19, _row(request_date="2026/02/10"), _row(bank="#N/A", account="#N/A"), _row(amount="500")]
+
+    result = pending_supply_purchases(values, "202610")
+    assert [item["rows"] for item in result] == [[4]]

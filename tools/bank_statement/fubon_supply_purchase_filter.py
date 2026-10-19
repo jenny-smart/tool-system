@@ -20,12 +20,22 @@ def _parse_bank_code(value: str) -> str:
     return match.group(1) if match else value.strip()
 
 
+def _is_blank(value: str) -> bool:
+    return not value or value.upper().startswith("#N/A")
+
+
+def is_paid(row: list[str]) -> bool:
+    """Q 欄（匯款日期）或 S 欄（請款日期）有值＝已付款。"""
+    return bool(_cell(row, 16) or _cell(row, 18))
+
+
 def pending_supply_purchases(values: list[list[str]], month: str) -> list[dict[str, object]]:
     """Return 清潔用品採購 rows for the given 採購月份 (B 欄), grouped by 匯款銀行＋帳號（N／O 欄）.
 
-    篩選 B 欄符合指定月份、Q 欄（匯款日期）空白、且 N／O 欄皆非空白的列；
-    N／O 欄相同的未匯款列會合併成一筆轉帳，金額為這些列 K 欄（進貨總金額）
-    加總。Q 欄已有值的列一律不再放入匯款名單。
+    篩選 B 欄符合指定月份、Q 欄（匯款日期）與 S 欄（請款日期）都空白、
+    且 N／O 欄皆有實際內容（不是空白或 #N/A）的列；N／O 欄相同的未匯款列
+    會合併成一筆轉帳，金額為這些列 K 欄（進貨總金額）加總。
+    Q 或 S 欄已有日期的列視為已付款，一律不再放入匯款名單。
     """
     target_month = _normalize_month(month)
     if not target_month:
@@ -38,11 +48,11 @@ def pending_supply_purchases(values: list[list[str]], month: str) -> list[dict[s
         row_month = _normalize_month(_cell(row, 1))
         if row_month != target_month:
             continue
-        if _cell(row, 16):
+        if is_paid(row):
             continue
         bank_text = _cell(row, 13)
         account_text = _cell(row, 14)
-        if not bank_text or not account_text:
+        if _is_blank(bank_text) or _is_blank(account_text):
             continue
         amount_text = re.sub(r"[^0-9.]", "", _cell(row, 10))
         if not amount_text:
