@@ -89,20 +89,13 @@ def find_ei_page(context) -> Page | None:
 
 
 def ensure_ei_login(context, area: str) -> Page:
-    """沿用「鯨躍登入」的完整流程，回傳已登入第二層的 EI 頁面。"""
+    """接續目前畫面：第二層已登入正確帳號就直接用；帳號不對只換第二層；第二層不能用才從第一層登入。"""
+    from tools.invoice_center.ei_session import prepare_download_session
+
     accounts = load_ei_accounts()
     credentials = ei_credentials_for(area, accounts)
     portal_page, ei_page = find_invoice_pages(context)
-
-    if portal_page is not None:
-        login_portal(portal_page, accounts)
-        ei_page = open_second_login(context, portal_page)
-    elif ei_page is None:
-        portal_page = context.new_page()
-        login_portal(portal_page, accounts)
-        ei_page = open_second_login(context, portal_page)
-
-    login_second(ei_page, credentials)
+    _portal, ei_page, _reused = prepare_download_session(context, portal_page, ei_page, accounts, credentials)
     return ei_page
 
 

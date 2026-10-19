@@ -21,31 +21,16 @@ from playwright.sync_api import sync_playwright
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
     from invoice_center import cetustek_serial, mof_serial
-    from invoice_center.ei_export_all import (
-        credentials_for as ei_credentials_for,
-        load_accounts as load_ei_accounts,
-        login_portal,
-        login_second,
-        open_second_login,
-    )
     from invoice_center.invoice_archive import get_google_services, _master_spreadsheet_id
     from invoice_center.mof_config import credentials_for, load_accounts
 else:
     from . import cetustek_serial, mof_serial
-    from .ei_export_all import (
-        credentials_for as ei_credentials_for,
-        load_accounts as load_ei_accounts,
-        login_portal,
-        login_second,
-        open_second_login,
-    )
     from .invoice_archive import get_google_services, _master_spreadsheet_id
     from .mof_config import credentials_for, load_accounts
 
 from tools.invoice_center.chrome_cdp import (
     DEFAULT_CDP_URL,
     connect_existing_chrome,
-    find_invoice_pages,
 )
 
 
@@ -92,21 +77,8 @@ def main() -> int:
         print("[1/3] 已歸檔到 Google Drive，並寫入鯨躍字軌匯入配號Log")
 
         # 2/3 鯨躍匯入
-        # Follow the same complete two-layer flow as 「鯨躍登入」.
-        ei_accounts = load_ei_accounts()
-        ei_credentials = ei_credentials_for(args.area, ei_accounts)
-        portal_page, ei_page = find_invoice_pages(context)
-        if portal_page is not None:
-            login_portal(portal_page, ei_accounts)
-            ei_page = open_second_login(context, portal_page)
-            login_second(ei_page, ei_credentials)
-        elif ei_page is not None:
-            login_second(ei_page, ei_credentials)
-        else:
-            portal_page = context.new_page()
-            login_portal(portal_page, ei_accounts)
-            ei_page = open_second_login(context, portal_page)
-            login_second(ei_page, ei_credentials)
+        # 接續目前畫面：第二層已是這區帳號就直接匯入，不重跑第一層登入
+        ei_page = cetustek_serial.ensure_ei_login(context, args.area)
         with tempfile.TemporaryDirectory(prefix="mof_serial_fetch_") as temp_dir:
             csv_path = cetustek_serial.fetch_mof_serial_csv(
                 args.area, year, label, Path(temp_dir) / filename
