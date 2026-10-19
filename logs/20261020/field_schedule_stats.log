@@ -1,153 +1,37 @@
 📋 log_spreadsheet_id 已從設定檔載入
 📝 外場排程打卡：外場排班統計表 / running
 Command: /opt/hostedtoolcache/Python/3.11.17/x64/bin/python -u -m tools.field_management.schedule_stats --date 20261020 --system-name 外場排程系統 --run-type 排程
-[2026-10-20 05:01:34] 開始處理排班統計表：20261020排班統計表-台北
-[2026-10-20 05:02:35] 失敗：20261020排班統計表-台北 / The read operation timed out
+[2026-10-20 07:14:00] 開始處理排班統計表：20261020排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261020排班統計表-台北 (14EbOnSC3SFRXputJPKcnPK-haC9sDZgD25lQGxxlDBk)
+[2026-10-20 07:14:05] 完成：20261020排班統計表-台北 → 2026排班統計表!DV4 / rows=85
+[2026-10-20 07:14:16] 開始處理排班統計表：20261120排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261120排班統計表-台北 (1z3whz_HpJEX2aQrT47eW9Hxn2kZh5w_QwOmeTCSQmZs)
+[2026-10-20 07:14:18] 完成：20261120排班統計表-台北 → 2026排班統計表!EH4 / rows=56
+[2026-10-20 07:14:20] 開始處理排班統計表：20261220排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261220排班統計表-台北 (1Bdh-U6NLKVs-5m7lmSbL2hV9zjnVPx_1zGOqbrAMv5E)
+[2026-10-20 07:14:22] 完成：20261220排班統計表-台北 → 2026排班統計表!ET4 / rows=45
+[2026-10-20 07:14:24] 開始處理排班統計表：20270120排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270120排班統計表-台北 (1_RVw6U7y6_C5Dc3lhHw0obZm6BBvcOXwvBctjW8qjWU)
+[2026-10-20 07:14:26] 完成：20270120排班統計表-台北 → 2026排班統計表!FF4 / rows=39
+[2026-10-20 07:14:27] 開始處理排班統計表：20270220排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270220排班統計表-台北 (1y7Sp5Ey9FSd6BMfmHQrsNoi3Cw93ulx2Jo0XdFpjruI)
+[2026-10-20 07:14:30] 完成：20270220排班統計表-台北 → 2026排班統計表!FR4 / rows=36
+[2026-10-20 07:14:32] 開始處理排班統計表：20261020排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261020排班統計表-台中 (1LHiG0q6y6KUedBbFxgf5wh7KHdBLxk_puoCydze0cic)
+[2026-10-20 07:14:34] 完成：20261020排班統計表-台中 → 2026排班統計表!DV4 / rows=13
+[2026-10-20 07:14:37] 開始處理排班統計表：20261120排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261120排班統計表-台中 (1mWOGlATWgn9Cx3FhES5q2B00eSWKPuWkuGJSaOdbx7w)
+[2026-10-20 07:14:39] 完成：20261120排班統計表-台中 → 2026排班統計表!EH4 / rows=8
+[2026-10-20 07:14:41] 開始處理排班統計表：20261220排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261220排班統計表-台中 (1VgJr3iCEfdlSCB4YT0BGwACmFy7kQq1VPOcoqB2ujm8)
+[2026-10-20 07:14:43] 完成：20261220排班統計表-台中 → 2026排班統計表!ET4 / rows=7
+[2026-10-20 07:14:44] 開始處理排班統計表：20270120排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270120排班統計表-台中 (1QRpYpXACOm8UXHocvU1R6nwT5NQojcaOYcZvffaDyf8)
+[2026-10-20 07:14:46] 完成：20270120排班統計表-台中 → 2026排班統計表!FF4 / rows=7
+[2026-10-20 07:14:47] 開始處理排班統計表：20270220排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270220排班統計表-台中 (1KD2vN-TKM43Y_yQZK5iabLhTIz8kPt4ckKuC5GMnGM0)
+[2026-10-20 07:14:49] 完成：20270220排班統計表-台中 → 2026排班統計表!FR4 / rows=7
+[2026-10-20 07:14:50] schedule_stats.py 全部完成
 
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 505, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 491, in main
-    run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 439, in run_schedule_stats_for_area
-    raw_values = read_file_values(drive, sheets, file)
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 292, in read_file_values
-    return read_drive_spreadsheet_values(drive, sheets, file)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 171, in read_drive_spreadsheet_values
-    temp_file_id = convert_excel_to_google_sheet(
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 79, in convert_excel_to_google_sheet
-    copied = execute_with_retry(
-             ^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 20, in execute_with_retry
-    return request.execute()
-           ^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
-    return wrapped(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 1003, in execute
-    resp, content = _retry_request(
-                    ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 222, in _retry_request
-    raise exception
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 191, in _retry_request
-    resp, content = http.request(uri, method, *args, **kwargs)
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google_auth_httplib2.py", line 214, in request
-    response, content = self.http.request(
-                        ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1755, in request
-    (response, content) = self._request(
-                          ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1475, in _request
-    (response, content) = self._conn_request(conn, request_uri, method, body, headers)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1427, in _conn_request
-    response = conn.getresponse()
-               ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/http/client.py", line 1443, in getresponse
-    response.begin()
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/http/client.py", line 337, in begin
-    version, status, reason = self._read_status()
-                              ^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/http/client.py", line 298, in _read_status
-    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/socket.py", line 718, in readinto
-    return self._sock.recv_into(b)
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/ssl.py", line 1327, in recv_into
-    return self.read(nbytes, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/ssl.py", line 1179, in read
-    return self._sslobj.read(len, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TimeoutError: The read operation timed out
-
-📝 外場排程打卡：外場排班統計表 / failed
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 179, in <module>
-    main(target=args.target, date_key=args.date, area=args.area or None, system_name=args.system_name)
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 158, in main
-    results.append(run_job(job_name, date_key, area, system_name))
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/scheduler.py", line 134, in run_job
-    raise RuntimeError(message)
-RuntimeError: 外場排班統計表 執行失敗，exit=1
-STDOUT:
-[2026-10-20 05:01:34] 開始處理排班統計表：20261020排班統計表-台北
-[2026-10-20 05:02:35] 失敗：20261020排班統計表-台北 / The read operation timed out
-
-STDERR:
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 505, in <module>
-    main(
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 491, in main
-    run_schedule_stats_for_area(cfg, current_area, date_key, run_type)  # ★
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 439, in run_schedule_stats_for_area
-    raw_values = read_file_values(drive, sheets, file)
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/schedule_stats.py", line 292, in read_file_values
-    return read_drive_spreadsheet_values(drive, sheets, file)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 171, in read_drive_spreadsheet_values
-    temp_file_id = convert_excel_to_google_sheet(
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 79, in convert_excel_to_google_sheet
-    copied = execute_with_retry(
-             ^^^^^^^^^^^^^^^^^^^
-  File "/home/runner/work/tool-system/tool-system/tools/field_management/google_sheet_reader.py", line 20, in execute_with_retry
-    return request.execute()
-           ^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/_helpers.py", line 130, in positional_wrapper
-    return wrapped(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 1003, in execute
-    resp, content = _retry_request(
-                    ^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 222, in _retry_request
-    raise exception
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/googleapiclient/http.py", line 191, in _retry_request
-    resp, content = http.request(uri, method, *args, **kwargs)
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google_auth_httplib2.py", line 214, in request
-    response, content = self.http.request(
-                        ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1755, in request
-    (response, content) = self._request(
-                          ^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1475, in _request
-    (response, content) = self._conn_request(conn, request_uri, method, body, headers)
-                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/httplib2/__init__.py", line 1427, in _conn_request
-    response = conn.getresponse()
-               ^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/http/client.py", line 1443, in getresponse
-    response.begin()
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/http/client.py", line 337, in begin
-    version, status, reason = self._read_status()
-                              ^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/http/client.py", line 298, in _read_status
-    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/socket.py", line 718, in readinto
-    return self._sock.recv_into(b)
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/ssl.py", line 1327, in recv_into
-    return self.read(nbytes, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/ssl.py", line 1179, in read
-    return self._sslobj.read(len, buffer)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TimeoutError: The read operation timed out
-
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成
