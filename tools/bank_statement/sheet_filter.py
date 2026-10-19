@@ -248,6 +248,72 @@ def build_fubon_financial_report_rows(table: CapturedTable) -> list[list[Any]]:
     ]
 
 
+AMOUNT_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}, "horizontalAlignment": "RIGHT"}
+# 日期寫成真正的日期後固定顯示格式，比對已同步明細時讀回的文字才會和原本一致
+DATE_FORMAT = {"numberFormat": {"type": "DATE", "pattern": "yyyy/mm/dd"}}
+DATETIME_FORMAT = {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy/mm/dd hh:mm:ss"}}
+FUBON_ATM_SHEET_ID = "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
+
+
+def _fubon_formulas(r: int) -> list[str]:
+    """富邦更新 K:P：帳務日、分類標籤、M-P＝E-H。"""
+    return [
+        f'=TEXT(LEFT(C{r},10),"yyyy/mm/dd")',
+        f'=if(E{r}<>0,text(K{r},"yyyy.mm")&"-"&left(I{r},10),'
+        f'vlookup(C{r},importrange("{FUBON_ATM_SHEET_ID}","ATM!B:G"),6,false))',
+        f"=E{r}", f"=F{r}", f"=G{r}", f"=H{r}",
+    ]
+
+
+def _yuanta_formulas(r: int) -> list[str]:
+    """元大更新 L:Q：帳務日、分類標籤、N-Q＝F-I。"""
+    return [
+        f'=TEXT(LEFT(C{r},10),"yyyy/mm/dd")',
+        f'=text(L{r},"YYYY.MM")&"-"&J{r}',
+        f"=F{r}", f"=G{r}", f"=H{r}", f"=I{r}",
+    ]
+
+
+def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]]):
+    """拆成 (RAW 資料, USER_ENTERED 資料, 格式設定)；格式只加在有值的格子。
+
+    富邦 rows＝B:H（交易日、帳務日、說明、支出、存入、餘額、備註）；
+    元大 rows＝A:I（序號、交易日、帳務日、說明、行庫、支出、存入、餘額、備註）。
+    """
+    end_row = start_row + len(rows) - 1
+    if bank == "fubon":
+        dates = [row[0:2] for row in rows]
+        raw = [{"range": f"D{start_row}:H{end_row}", "values": [row[2:7] for row in rows]}]
+        entered = [
+            {"range": f"B{start_row}:C{end_row}", "values": dates},
+            {"range": f"K{start_row}:P{end_row}", "values": [_fubon_formulas(start_row + i) for i in range(len(rows))]},
+        ]
+        amount_columns = {"E": 3, "F": 4, "G": 5}
+    else:
+        dates = [row[1:3] for row in rows]
+        raw = [
+            {"range": f"A{start_row}:A{end_row}", "values": [row[0:1] for row in rows]},
+            {"range": f"D{start_row}:I{end_row}", "values": [row[3:9] for row in rows]},
+        ]
+        entered = [
+            {"range": f"B{start_row}:C{end_row}", "values": dates},
+            {"range": f"L{start_row}:Q{end_row}", "values": [_yuanta_formulas(start_row + i) for i in range(len(rows))]},
+        ]
+        amount_columns = {"F": 5, "G": 6, "H": 7}
+    formats = [
+        {"range": f"{column}{start_row + i}", "format": AMOUNT_FORMAT}
+        for i, row in enumerate(rows)
+        for column, index in amount_columns.items()
+        if index < len(row) and str(row[index]).strip() != ""
+    ]
+    for i, pair in enumerate(dates):
+        for column, value in zip("BC", pair):
+            if str(value).strip():
+                fmt = DATETIME_FORMAT if ":" in str(value) else DATE_FORMAT
+                formats.append({"range": f"{column}{start_row + i}", "format": fmt})
+    return raw, entered, formats
+
+
 def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
     """將已確認未登記的明細同步追加至對應區域財報。"""
     if not table.rows:
@@ -282,19 +348,13 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
         )
         start_column, end_column = "A", "I"
     start_row = last_row + 1
-    worksheet.update(
-        range_name=f"{start_column}{start_row}:{end_column}{start_row + len(rows) - 1}",
-        values=rows,
-        value_input_option="RAW",
-    )
-    if bank == "fubon":
-        worksheet.format(
-            f"E{start_row}:G{start_row + len(rows) - 1}",
-            {
-                "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
-                "horizontalAlignment": "RIGHT",
-            },
-        )
+    raw_data, entered_data, formats = report_cell_updates(bank, start_row, rows)
+    worksheet.batch_update(raw_data, value_input_option="RAW")
+    # 交易日／帳務日用 USER_ENTERED 寫成日期（RAW 會變成前面帶 ' 的文字），公式欄同樣要解析
+    worksheet.batch_update(entered_data, value_input_option="USER_ENTERED")
+    if formats:
+        # 只對有值的格子加格式；空白的支出／存入格維持空白、不加格式
+        worksheet.batch_format(formats)
     return len(rows)
 
 
