@@ -189,3 +189,11 @@ def test_sync_region_sets_done_status_for_processed_pending_rows(monkeypatch):
     monkeypatch.setattr(batch, "_login_session", lambda region, ui_logger=None: "session")
     assert batch.sync_region("台北", log=lambda *_: None) == {"done": [2], "failed": []}
     assert synced == ["已收款"] and b_updates == [("B2", "已收款")] and marked == [(2, "已收款")]
+
+
+def test_refund_amount_shows_what_will_actually_be_refunded():
+    # 信用卡：T 欄公式為 0，畫面要顯示 S（退款金額），不是 0
+    assert plan(B="待退款", X="FP56436829", Z="1333.333", S="1400", T="0", R="信用卡")["amount"] == "1400"
+    # ATM：顯示 T（扣手續費後實際匯出金額）
+    assert plan(B="待退款", X="AB1", Z="952", S="1000", T="985", R="ATM", P="700", Q="1")["amount"] == "985"
+    assert plan(B="待退款", X="AB1", Z="952", S="1000", R="ATM", P="700", Q="1")["amount"] == "1000"
