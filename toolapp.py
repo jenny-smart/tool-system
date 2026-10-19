@@ -3690,6 +3690,7 @@ FINANCE_TASKS = [
     {"name": "【富邦銀行】請款記錄", "handler": queue_fubon_payment_request, "enabled": True},
     {"name": "【富邦銀行】工具包押金退款", "handler": queue_fubon_deposit_refund, "enabled": True},
     {"name": "【富邦銀行】清潔用品採購", "handler": queue_fubon_supply_purchase, "enabled": True},
+    {"name": "【富邦銀行】內部請款整合執行", "handler": None, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -4125,6 +4126,16 @@ with func_col:
             label_visibility="collapsed",
             key="selected_function",
         )
+
+if system_type == "finance_management" and selected_function == "【富邦銀行】內部請款整合執行":
+    st.markdown("</div>", unsafe_allow_html=True)
+    from tools.finance_management.internal_payment_batch_ui import render as render_internal_payment_batch
+
+    render_internal_payment_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("fubon.", "internal_payment."))
+    st.stop()
 
 if system_type == "finance_management" and selected_function == "【清潔異動】已備妥整合執行":
     st.markdown("</div>", unsafe_allow_html=True)
