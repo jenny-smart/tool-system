@@ -89,14 +89,10 @@ def find_ei_page(context) -> Page | None:
 
 
 def ensure_ei_login(context, area: str) -> Page:
-    """接續目前畫面：第二層已登入正確帳號就直接用；帳號不對只換第二層；第二層不能用才從第一層登入。"""
-    from tools.invoice_center.ei_session import prepare_download_session
+    """接續目前畫面登入這區鯨躍第二層（共用 ei_session.open_ei_page）。"""
+    from tools.invoice_center.ei_session import open_ei_page
 
-    accounts = load_ei_accounts()
-    credentials = ei_credentials_for(area, accounts)
-    portal_page, ei_page = find_invoice_pages(context)
-    _portal, ei_page, _reused = prepare_download_session(context, portal_page, ei_page, accounts, credentials)
-    return ei_page
+    return open_ei_page(context, area, load_ei_accounts())[0]
 
 
 def _download_from_drive_by_name(drive: Any, folder_id: str, name: str, destination: Path) -> Path:
