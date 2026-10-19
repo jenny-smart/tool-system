@@ -88,3 +88,13 @@ def test_verify_uses_account_row_finder(monkeypatch):
 def test_visible_account_numbers_for_error_message():
     assert agent.visible_account_numbers(_page("00709120003320 松高 82120000041950 4,385,453.00")) == [
         "00709120003320", "82120000041950"]
+
+
+def test_mid_transfer_page_of_this_area_is_kept(monkeypatch):
+    import tools.bank_statement.fubon_transfer_common as common
+    page = _page("STEP 2 確認資料 轉出帳號 0070912000****3320 03320 轉帳金額 9,485")
+    monkeypatch.setattr(common, "transfer_page_stage", lambda p, amount="": "confirmation")
+    assert agent.mid_transfer_of_account(page, TAIPEI)
+    assert not agent.mid_transfer_of_account(page, TAICHUNG)
+    monkeypatch.setattr(common, "transfer_page_stage", lambda p, amount="": "other")
+    assert not agent.mid_transfer_of_account(page, TAIPEI)

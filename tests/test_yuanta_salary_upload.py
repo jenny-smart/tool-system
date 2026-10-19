@@ -6,6 +6,7 @@ import pytest
 from openpyxl import Workbook
 
 from tools.bank_statement.yuanta_salary_upload import (
+    _upload_staged,
     _normalized_text,
     upload_salary_files,
     xlsx_total,
@@ -33,7 +34,7 @@ def test_yuanta_option_text_ignores_bank_spacing():
 
 
 def test_yuanta_upload_uses_bank_page_button_order():
-    source = inspect.getsource(upload_salary_files)
+    source = inspect.getsource(_upload_staged)  # 上傳步驟抽到 _upload_staged（外層負責登入與登出）
     steps = [
         '_click_text(page, "確定")',
         '_select_option_containing(page, payment_account)',

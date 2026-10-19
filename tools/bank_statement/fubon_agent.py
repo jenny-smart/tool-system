@@ -65,6 +65,28 @@ def visible_account_numbers(page: Page) -> list[str]:
     return found
 
 
+def mid_transfer_of_account(page: Page, account: BankAccount) -> bool:
+    """是否停在轉帳確認頁或完成頁，且頁面上的帳號末 5 碼是這區（避免核對帳號時離開頁面、中斷轉帳）。"""
+    from tools.bank_statement.fubon_transfer_common import transfer_page_stage
+
+    suffix = re.sub(r"\D", "", account.bank_account or "")[-5:]
+    if not suffix:
+        return False
+    try:
+        if transfer_page_stage(page) not in {"confirmation", "completed"}:
+            return False
+    except Exception:
+        return False
+    for frame in [page, *page.frames]:
+        try:
+            text = frame.locator("body").inner_text(timeout=2000)
+        except Exception:
+            continue
+        if suffix in re.sub(r"\D", "", text):
+            return True
+    return False
+
+
 def verify_logged_in_account(context: BrowserContext, page: Page, account: BankAccount) -> tuple[bool, Page]:
     """到「我的存款」確認列表裡有這區的帳號；回傳（是否為這區、目前頁面）。
 
@@ -83,6 +105,10 @@ def ensure_login(context: BrowserContext, account: BankAccount) -> Page:
     """接續目前畫面：已登入且是這區帳號就沿用；是別區帳號就先登出再登入這區。"""
     page = existing_page(context) or context.new_page()
     if is_fubon_logged_in(page):
+        if mid_transfer_of_account(page, account):
+            # 停在轉帳確認頁／完成頁且轉出帳號是這區：不離開頁面，讓轉帳流程從現有畫面接續
+            print(f"富邦停在{account.area}帳號（{account.bank_account[-5:]}）的轉帳確認／完成頁，從現有畫面接續。")
+            return page
         matched, page = verify_logged_in_account(context, page, account)
         if matched:
             print(f"偵測到富邦已登入，確認是{account.area}帳號（{account.bank_account[-5:]}），沿用目前工作階段。")
