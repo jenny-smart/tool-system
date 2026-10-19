@@ -23,6 +23,7 @@ def test_pending_allowances_includes_preview_details():
         "invoice_no": "FP12345678",
         "refund_amount": "1400",
         "untaxed_amount": "1333.333",
+        "registered_on": "",
     }]
 
 

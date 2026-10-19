@@ -13,6 +13,7 @@ from playwright.sync_api import Locator, Page, sync_playwright
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
 from tools.lemon_backend.stored_value_sheet import get_worksheet
+from tools.finance_management.refund_guard import ready_for_refund
 from tools.newebpay.refund_filter import pending_credit_card_refunds
 from tools.newebpay.download_reports import (
     DEFAULT_ACCOUNTS_FILE,
@@ -190,6 +191,8 @@ def run(area: str, accounts_file: Path, cdp_url: str, selected_rows: set[int] | 
         try:
             for item in pending:
                 order_no, amount, sheet_row = str(item["order_no"]), str(item["amount"]), int(item["sheet_row"])
+                if not ready_for_refund(worksheet, sheet_row):
+                    continue  # 有原發票但折讓單未開成功／未回填：不退款
                 print(f"處理第 {sheet_row} 列：{order_no}／NT$ {amount}")
                 _set_order_query(page, order_no, start, end)
                 _submit_refund(page, order_no, amount)

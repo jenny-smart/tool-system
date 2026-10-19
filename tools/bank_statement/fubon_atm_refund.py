@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
+from tools.finance_management.refund_guard import ready_for_refund
 from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
 from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
 from tools.bank_statement.fubon_transfer_common import (
@@ -86,6 +87,8 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
         cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
         try:
             for item in selected:
+                if not ready_for_refund(worksheet, int(item["sheet_row"])):
+                    continue  # 有原發票但折讓單未開成功／未回填：不退款
                 print(
                     f"準備第 {item['sheet_row']} 列：{item['customer']}／"
                     f"P={item['bank_code']}／Q={item['account_number']}／NT$ {item['amount']}"
