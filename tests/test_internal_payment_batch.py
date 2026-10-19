@@ -67,3 +67,37 @@ def test_weekly_reminder_skips_when_nothing_pending(monkeypatch):
     monkeypatch.setattr(notify.batch, "scan", lambda: [])
     monkeypatch.setattr(notify.calendar_notify, "create_notify_event", lambda **kw: (_ for _ in ()).throw(AssertionError))
     notify.main()
+
+
+def test_merge_by_payee_sums_same_payee_and_account():
+    from tools.bank_statement.fubon_payment_request_filter import merge_by_payee, pending_payment_requests
+
+    header = [""] * 9
+    row = lambda payee, account, amount: ["待付款", "", "", "", "說明", amount, "請款人", payee, account]  # noqa: E731
+    values = [header, row("王小明", "812-123", "100"), row("王小明", "812-123", "250"),
+              row("王小明", "812-999", "70"), row("陳大華", "700-1", "30")]
+    merged = merge_by_payee(pending_payment_requests(values))
+    assert [(m["name"], m["rows"], m["amount"]) for m in merged] == [
+        ("王小明", [2, 3], "350"), ("王小明", [4], "70"), ("陳大華", [5], "30"),
+    ]
+    assert "合併 2 筆" in merged[0]["memo"]
+
+
+def test_queue_passes_merge_only_for_payment_requests():
+    from tools.finance_management import internal_payment_batch as batch
+
+    created = []
+    items = [{"kind": "payment", "area": "台北", "row": 5}, {"kind": "deposit", "area": "台北", "row": 8}]
+    batch.queue_actions(items, lambda action, params, created_by="": created.append((action, params)) or {},
+                        log=lambda *_: None, merge_payments=True)
+    params = dict(created)
+    assert params["fubon.payment_request"]["merge"] is True
+    assert "merge" not in params["fubon.deposit_refund"]
+
+
+def test_agent_command_adds_merge_flag():
+    from tools.local_agent import build_fubon_payment_request
+
+    base = {"area": "台北", "selected_rows": [2, 3]}
+    assert "--merge" not in build_fubon_payment_request(base)
+    assert build_fubon_payment_request({**base, "merge": True})[-1] == "--merge"

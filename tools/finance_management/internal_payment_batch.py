@@ -92,8 +92,10 @@ def _key(item: dict) -> tuple:
 
 
 def queue_actions(items: list[dict], create_task: Callable, created_by: str = "內部請款整合執行",
-                  log: Callable[[str], None] = print) -> list[dict]:
-    """每區每種（清潔用品再依月份）排一筆本機 Agent 任務，最後排一筆「留紀錄」。"""
+                  log: Callable[[str], None] = print, merge_payments: bool = False) -> list[dict]:
+    """每區每種（清潔用品再依月份）排一筆本機 Agent 任務，最後排一筆「留紀錄」。
+
+    merge_payments：請款記錄同一收款對象合併成一筆轉帳。要合併與不合併的請分兩次執行。"""
     tasks = []
     groups: dict[tuple, list[int]] = {}
     for item in items:
@@ -106,6 +108,8 @@ def queue_actions(items: list[dict], create_task: Callable, created_by: str = "�
                 params = {"area": area, "selected_rows": sorted(rows), "cdp_url": "http://127.0.0.1:9222"}
                 if month:
                     params["month"] = month
+                if kind == "payment" and merge_payments:
+                    params["merge"] = True
                 task = create_task(KINDS[kind][1], params, created_by=created_by)
                 tasks.append(task)
                 log(f"已排入：{area} {KINDS[kind][0]}{f'（{month}）' if month else ''} {len(rows)} 筆 → {task.get('task_id', '')}")

@@ -60,6 +60,7 @@ def pending_payment_requests(values: list[list[str]]) -> list[dict[str, object]]
         result.append(
             {
                 "sheet_row": sheet_row,
+                "rows": [sheet_row],
                 "memo": memo,
                 "name": payee,
                 "requester": requester,
@@ -70,3 +71,29 @@ def pending_payment_requests(values: list[list[str]]) -> list[dict[str, object]]
             }
         )
     return result
+
+
+def merge_by_payee(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    """同一收款對象（H 欄收款對象＋I 欄收款帳號都相同）合併成一筆轉帳，金額加總。
+
+    合併後的 rows 列出所有原始列號，轉帳完成後每一列都要回填；只有一列的維持原樣。
+    """
+    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for item in items:
+        account = str(item.get("account_number") or "") or str(item.get("account_text") or "")
+        groups.setdefault((str(item["name"]), account), []).append(item)
+    merged: list[dict[str, object]] = []
+    for members in groups.values():
+        if len(members) == 1:
+            merged.append(members[0])
+            continue
+        rows = sorted(int(m["sheet_row"]) for m in members)
+        total = sum(Decimal(str(m["amount"])) for m in members)
+        merged.append({
+            **members[0],
+            "sheet_row": rows[0],
+            "rows": rows,
+            "amount": str(int(total)) if total == total.to_integral() else format(total, "f"),
+            "memo": f"合併 {len(rows)} 筆（第 {'、'.join(map(str, rows))} 列）",
+        })
+    return sorted(merged, key=lambda m: int(m["sheet_row"]))
