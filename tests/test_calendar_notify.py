@@ -54,3 +54,16 @@ def test_calendar_uses_jenny_oauth_when_refresh_token_set(monkeypatch):
 def test_calendar_falls_back_to_service_account_without_token(monkeypatch):
     monkeypatch.setattr("tools.common.google_auth._oauth_value", lambda name: "")
     assert calendar_notify._oauth_credentials() is None
+
+
+def test_calendar_client_override_matches_refresh_token_client(monkeypatch):
+    values = {
+        "GOOGLE_CALENDAR_REFRESH_TOKEN": "rt",
+        "GOOGLE_CALENDAR_CLIENT_ID": "cal-id",
+        "GOOGLE_CALENDAR_CLIENT_SECRET": "cal-secret",
+        "GOOGLE_OAUTH_CLIENT_ID": "drive-id",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "drive-secret",
+    }
+    monkeypatch.setattr("tools.common.google_auth._oauth_value", lambda name: values.get(name, ""))
+    creds = calendar_notify._oauth_credentials()
+    assert (creds.client_id, creds.client_secret) == ("cal-id", "cal-secret")

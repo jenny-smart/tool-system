@@ -11,7 +11,9 @@ REFRESH_TOKEN 存成 GOOGLE_CALENDAR_REFRESH_TOKEN，放在：
   - 本機 Agent 的 secrets.toml（~/lemon/.streamlit/secrets.toml 或 TOOLS_APP_SECRETS_FILE）
   - Streamlit 雲端 secrets
   - GitHub Secret（排程用）
-CLIENT_ID／CLIENT_SECRET 跟現有的 GOOGLE_OAUTH_CLIENT_ID／SECRET 是同一組，不用另外存。
+若 jenny_tool-oauth.json 的用戶端跟現有 GOOGLE_OAUTH_CLIENT_ID 不同，另把印出的
+CLIENT_ID／CLIENT_SECRET 存成 GOOGLE_CALENDAR_CLIENT_ID／GOOGLE_CALENDAR_CLIENT_SECRET
+（refresh token 只能配發出它的那組用戶端，配錯會出現 unauthorized_client）。
 """
 
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -29,5 +31,9 @@ print("即將開啟瀏覽器，請務必用 jenny@lemonclean.com.tw 登入並同
 creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
 
 print("\n=== Calendar OAuth 完成（jenny@lemonclean.com.tw）===")
-print("REFRESH_TOKEN（請存成 GOOGLE_CALENDAR_REFRESH_TOKEN）：")
+print("CLIENT_ID（存成 GOOGLE_CALENDAR_CLIENT_ID）：")
+print(creds.client_id)
+print("\nCLIENT_SECRET（存成 GOOGLE_CALENDAR_CLIENT_SECRET）：")
+print(creds.client_secret)
+print("\nREFRESH_TOKEN（請存成 GOOGLE_CALENDAR_REFRESH_TOKEN）：")
 print(creds.refresh_token)

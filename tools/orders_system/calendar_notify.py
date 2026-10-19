@@ -29,7 +29,8 @@ _CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
 # Jenny 本人（jenny@lemonclean.com.tw）授權的行事曆 refresh token；
-# 由 tools/common/google_oauth_setup_lemonclean_calendar.py 產生
+# 由 tools/common/google_oauth_setup_lemonclean_calendar.py 產生；
+# 該腳本用的 OAuth 用戶端與 GOOGLE_OAUTH_CLIENT_ID 不同時，另設 GOOGLE_CALENDAR_CLIENT_ID／SECRET
 CALENDAR_REFRESH_TOKEN_KEY = "GOOGLE_CALENDAR_REFRESH_TOKEN"
 
 
@@ -46,8 +47,10 @@ def _oauth_credentials():
         token=None,
         refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
-        client_id=_oauth_value("GOOGLE_OAUTH_CLIENT_ID"),
-        client_secret=_oauth_value("GOOGLE_OAUTH_CLIENT_SECRET"),
+        # 行事曆授權若用了不同的 OAuth 用戶端（jenny_tool-oauth.json），要配同一組 ID／SECRET，
+        # 否則 Google 回 unauthorized_client；未設定時沿用 Drive 那組
+        client_id=_oauth_value("GOOGLE_CALENDAR_CLIENT_ID") or _oauth_value("GOOGLE_OAUTH_CLIENT_ID"),
+        client_secret=_oauth_value("GOOGLE_CALENDAR_CLIENT_SECRET") or _oauth_value("GOOGLE_OAUTH_CLIENT_SECRET"),
         scopes=["https://www.googleapis.com/auth/calendar.events"],
     )
 
