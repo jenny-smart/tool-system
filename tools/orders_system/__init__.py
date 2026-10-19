@@ -41,3 +41,41 @@ try:
         _year_roots.drive_factory = _oauth_drive
 except Exception:  # 舊版 year_roots 或沒有 OAuth 設定時沿用服務帳號
     pass
+
+
+# 本機 Agent 子程式沒有 Streamlit secrets，orders.get_service_account_info 會找不到憑證，
+# 讀不到「年度根目錄設定」；找不到時改用 tool-system 的服務帳號來源（含本機 secrets.toml）
+def _with_host_service_account(original):
+    def get_service_account_info():
+        try:
+            return original()
+        except Exception:
+            from tools.common.config_loader import get_service_account_info as _host_info
+
+            return _host_info()
+
+    get_service_account_info._host_fallback = True
+    return get_service_account_info
+
+
+def _patch_orders_credentials() -> None:
+    import orders as _orders
+
+    current = _orders.get_service_account_info
+    if not getattr(current, "_host_fallback", False):
+        _orders.get_service_account_info = _with_host_service_account(current)
+
+
+try:
+    _plain_get_year_roots = _year_roots.get_year_roots
+
+    def _get_year_roots():
+        try:
+            _patch_orders_credentials()
+        except Exception:
+            pass
+        return _plain_get_year_roots()
+
+    _year_roots.get_year_roots = _get_year_roots
+except Exception:
+    pass
