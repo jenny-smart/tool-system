@@ -7,7 +7,8 @@
     未備妥的列不執行任何動作；每日檢查只提醒未備妥的列。
   - 待退款：① 開折讓單（有 X 原發票、Z 未稅金額，AB 空白）
             ② 退款（AC 空白）：R＝ATM → 富邦 ATM 退款（台北／台中）；R＝信用卡 → 藍新退款；其他付款方式 → 需人工
-  - 待收款：M 收款時間空白 → 未備妥；M、N 有值、O 發票空白 → 需到【鯨躍發票】開立發票逐筆確認
+  - 待收款：M 收款時間空白 → 未備妥；M、N 有值、O 發票空白 → 開立發票（同【鯨躍發票】開立發票：
+            沿用訂單發票設定、Agent 填表、人工按下一步及儲存，回填 O／AA）
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
   - 待處理發票（車馬費發票／異動發票／二聯改三聯）→ 需到鯨躍發票功能逐筆確認
   - 回寫系統：B 欄為 已退款／已收款／已扣儲值金／已返儲值金／已處理發票，
@@ -39,6 +40,7 @@ IGNORED_STATUSES = {"異動不處理", ""}
 
 # 動作 → (顯示名稱, 本機 Agent action)
 ACTIONS = {
+    "invoice": ("開立發票", "cetustek.login"),
     "allowance": ("開立折讓單", "cetustek.allowance"),
     "atm_refund": ("富邦 ATM 退款", "fubon.atm_refund"),
     "credit_refund": ("藍新信用卡退款", "newebpay.refund_pending"),
@@ -46,7 +48,7 @@ ACTIONS = {
     "sync": ("回寫系統", ""),
 }
 # 本機 Agent 依建立順序執行：同一個網站排在一起，只登入一次
-ACTION_ORDER = ("allowance", "atm_refund", "credit_refund", "stored_value")
+ACTION_ORDER = ("invoice", "allowance", "atm_refund", "credit_refund", "stored_value")
 
 COL = {name: index for index, name in enumerate(
     "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB AC AD AE".split())}
@@ -92,8 +94,8 @@ def ready_target(row: list) -> Optional[str]:
     status = _cell(row, "B")
     if status == "待退款" and _cell(row, "AB") and _cell(row, "AC"):
         return "已退款"
-    if status == "待收款" and _cell(row, "M") and _cell(row, "O"):
-        return "已收款"
+    if status == "待收款" and all(_cell(row, c) for c in ("M", "N", "O", "AA")):
+        return "已收款"  # 收款時間、金額、發票號碼、發票開立時間都有值
     if status == "待扣儲值金" and _cell(row, "M"):
         return "已扣儲值金"
     if status == "待返儲值金" and _cell(row, "AC"):
@@ -176,7 +178,10 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         elif not item["amount"]:
             item["missing"].append("缺收款金額（N）")
         elif not _cell(row, "O"):
-            item["manual"].append("請到【鯨躍發票】開立發票逐筆開立")
+            item["actions"].append("invoice")
+        else:
+            item["progress"].append("發票 ✓")
+            item["manual"].append("AA 發票開立時間空白，請確認發票後補上")
         return item
 
     if status in STORED_VALUE_STATUSES:
@@ -247,8 +252,11 @@ def scan(regions=None, fix_formulas: bool = True, log: Callable[[str], None] = p
 
 
 def queue_actions(items: list[dict], do_sync: bool, create_task: Callable, created_by: str = "清潔異動整合執行",
-                  log: Callable[[str], None] = print) -> list[dict]:
-    """依 ACTION_ORDER 建立本機 Agent 任務（每區每種動作一筆）；勾選回寫時最後再排一筆回寫。"""
+                  log: Callable[[str], None] = print,
+                  queue_invoices: Optional[Callable[[str, list[int]], dict]] = None) -> list[dict]:
+    """依 ACTION_ORDER 建立本機 Agent 任務（每區每種動作一筆）；勾選回寫時最後再排一筆回寫。
+
+    開立發票要先在網頁端組好發票資料（同【鯨躍發票】開立發票），由 queue_invoices(地區, 列號) 排入。"""
     tasks = []
     for action in ACTION_ORDER:
         agent_action = ACTIONS[action][1]
@@ -257,6 +265,14 @@ def queue_actions(items: list[dict], do_sync: bool, create_task: Callable, creat
             if action in item.get("selected", item["actions"]):
                 by_region.setdefault(item["region"], []).append(int(item["row"]))
         for region, rows in by_region.items():
+            if action == "invoice":
+                if queue_invoices is None:
+                    log(f"⚠️ {region} 開立發票未排入（{len(rows)} 筆）：請到【鯨躍發票】開立發票")
+                    continue
+                task = queue_invoices(region, sorted(rows))
+                tasks.append(task)
+                log(f"已排入：{region} 開立發票（{len(rows)} 筆）→ {task.get('task_id', '')}")
+                continue
             task = create_task(agent_action, {"area": region, "selected_rows": sorted(rows),
                                               "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
             tasks.append(task)

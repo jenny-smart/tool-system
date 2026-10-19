@@ -37,7 +37,8 @@ def _rows(items: list[dict]) -> pd.DataFrame:
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption(
         "只處理登記日期 2026/10/16 以後的列。盤點時會補 T（匯款金額）、Z（未稅金額）公式；"
-        "開立發票、二聯改三聯需逐筆確認，請到【鯨躍發票】對應功能處理。"
+        "待收款開立發票同【鯨躍發票】開立發票（沿用訂單發票設定，需人工按下一步及儲存）；"
+        "二聯改三聯請到【鯨躍發票】對應功能處理。"
     )
     regions = st.multiselect("地區", batch.REGIONS, default=batch.REGIONS, key="change_order_batch_regions")
     if st.button("🔍 盤點", key="change_order_batch_scan", type="primary"):
@@ -90,17 +91,25 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         st.write("本次會執行：" + "、".join(f"{batch.ACTIONS[a][0]} {n} 筆" for a, n in counts.items()))
     do_sync = st.checkbox("執行完後回寫系統（B 欄已完成、AE 尚未更新系統的列）", value=True,
                           key="change_order_batch_sync")
-    st.caption("執行順序：鯨躍折讓單 → 富邦 ATM 退款（需手機核准）→ 藍新信用卡退款 → 檸檬後台儲值金 → 回寫系統。"
+    st.caption("執行順序：鯨躍開立發票（每筆需人工按下一步及儲存）→ 鯨躍折讓單 → 富邦 ATM 退款（需手機核准）→ 藍新信用卡退款 → 檸檬後台儲值金 → 回寫系統。"
                "回寫完成會在 Jenny 行事曆留一筆紀錄。")
 
     if st.button("▶️ 執行勾選的動作", key="change_order_batch_run", disabled=not selected):
         agent_items = [item for item in selected if set(item["actions"]) - {"sync"}]
         if agent_items:
-            batch.queue_actions(selected, do_sync, create_task, created_by=username or "清潔異動整合執行", log=log)
+            batch.queue_actions(selected, do_sync, create_task, created_by=username or "清潔異動整合執行", log=log,
+                                queue_invoices=_queue_invoices)
             st.success("已排入本機 Agent，請到下方查看執行進度；完成後可再按一次「盤點」確認。")
             st.session_state.pop(STATE_KEY, None)
         elif do_sync:
             _sync_now(selected, log)
+
+
+def _queue_invoices(region: str, rows: list[int]) -> dict:
+    """同【鯨躍發票】開立發票：依訂單發票設定組資料、排入鯨躍填表任務。"""
+    from tools.invoice_center import ui as invoice_ui
+
+    return invoice_ui.queue_pending_invoices(region, rows)
 
 
 def _sync_now(selected: list[dict], log: Callable[[str], None]) -> None:
