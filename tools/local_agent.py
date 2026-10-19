@@ -407,6 +407,14 @@ def build_change_order_sync(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_internal_payment_record(params: dict[str, Any]) -> list[str]:
+    items = params.get("items") or []
+    if not items:
+        raise ValueError("留紀錄缺少勾選的列")
+    return [sys.executable, "-m", "tools.finance_management.internal_payment_batch", "record",
+            "--items", json.dumps(items, ensure_ascii=False)]
+
+
 def build_lemon_stored_value_adjustment(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     selected_rows = params.get("selected_rows") or []
@@ -728,6 +736,7 @@ register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
 register_action("newebpay.refund_pending", build_newebpay_refund_pending)
 register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjustment)
 register_action("change_order.sync", build_change_order_sync)
+register_action("internal_payment.record", build_internal_payment_record)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
 register_action("fubon.atm_refund", build_fubon_atm_refund)
