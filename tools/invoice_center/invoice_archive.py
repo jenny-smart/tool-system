@@ -23,8 +23,8 @@ UPDATE_LOG_SHEET = "鯨躍發票更新Log"
 UPDATE_LOG_HEADERS = ["執行時間", "功能", "地區", "期別", "狀態", "筆數", "訊息"]
 MONTHLY_ROOT_FOLDER_ID = "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
 DEFAULT_CONFIG = [
-    ["台北", "17EQNG8VM9N4YgxXGb23CNZxYT3HsDkQ2", MONTHLY_ROOT_FOLDER_ID, "TRUE", "紙本／中獎存財務路徑"],
-    ["台中", "12XktB_jDnd3ufkIZX2hweHdV3nv14tAH", MONTHLY_ROOT_FOLDER_ID, "TRUE", "紙本／中獎存財務路徑"],
+    ["台北", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "發票統一存承攬費路徑"],
+    ["台中", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "發票統一存承攬費路徑"],
     ["桃園", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設財務根目錄時存承攬費路徑"],
     ["新竹", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設財務根目錄時存承攬費路徑"],
     ["高雄", "", MONTHLY_ROOT_FOLDER_ID, "TRUE", "未設財務根目錄時存承攬費路徑"],
@@ -35,6 +35,8 @@ AREA_FOLDER_NAMES = {
     "桃園": "03.桃園專員",
     "新竹": "04.新竹專員",
     "高雄": "05.高雄專員",
+    "新北": "03.新北專員",
+    "家電": "07.家電專員",
 }
 NEW_PERIOD_HEADER = [
     "mail", "invoice number", "發票日期", "order number", "訂單日期",
@@ -267,6 +269,26 @@ def get_or_create_folder(drive: Any, parent_id: str, name: str) -> str:
     return created["id"]
 
 
+def get_or_create_area_folder(drive: Any, year_folder: str, area: str) -> str:
+    expected = AREA_FOLDER_NAMES[area]
+    query = f"'{_escape(year_folder)}' in parents and mimeType='{FOLDER_MIME}' and trashed=false"
+    matches = []
+    token = None
+    while True:
+        result = drive.files().list(
+            q=query, fields="files(id,name),nextPageToken", pageSize=100,
+            pageToken=token, supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        matches.extend(item for item in result.get("files", [])
+                       if re.sub(r"^[\d.\s]+", "", item["name"]) == f"{area}專員")
+        token = result.get("nextPageToken")
+        if not token:
+            break
+    if len(matches) > 1:
+        raise RuntimeError(f"{area} 有多個區域資料夾，請先確認：{matches}")
+    return matches[0]["id"] if matches else get_or_create_folder(drive, year_folder, expected)
+
+
 def _child_folders_starting_with(drive: Any, parent_id: str, prefix: str) -> list[dict[str, Any]]:
     query = (
         f"'{_escape(parent_id)}' in parents and name contains '{_escape(prefix)}' "
@@ -323,7 +345,7 @@ def get_or_create_period_folder(drive: Any, parent_id: str, period4: str) -> str
 def resolve_archive_folders(drive: Any, config: AreaRootConfig, yyyymm: str) -> ArchiveFolders:
     year = yyyymm[:4]
     contractor_year = get_or_create_folder(drive, config.contractor_root_id, f"{year}專員承攬服務費")
-    area_parent = get_or_create_folder(drive, contractor_year, AREA_FOLDER_NAMES[config.area])
+    area_parent = get_or_create_area_folder(drive, contractor_year, config.area)
     contractor_period = get_or_create_folder(drive, area_parent, f"{yyyymm}-2")
     if config.finance_root_id:
         finance_year = get_or_create_finance_year_folder(drive, config.finance_root_id, year, config.area)
@@ -604,6 +626,10 @@ class InvoiceArchiveProcessor:
         if prize_path is not None:
             upload_replacing(self.drive, prize_path, folders.prize_invoice)
 
+    def archive_paper_month(self, *, area: str, yyyymm: str, paper_path: Path) -> str:
+        _config, folders = self._config_and_folders(area, yyyymm)
+        return upload_replacing(self.drive, paper_path, folders.paper_invoice)
+
     def _download_named(self, folder_id: str, name: str, destination: Path) -> Path:
         query = f"'{_escape(folder_id)}' in parents and name='{_escape(name)}' and trashed=false"
         files = self.drive.files().list(q=query, fields="files(id,name)", pageSize=10, supportsAllDrives=True, includeItemsFromAllDrives=True).execute().get("files", [])
@@ -652,7 +678,7 @@ class InvoiceArchiveProcessor:
             contractor_year = get_or_create_folder(
                 self.drive, config.contractor_root_id, f"{period8[:4]}專員承攬服務費"
             )
-            area_parent = get_or_create_folder(self.drive, contractor_year, AREA_FOLDER_NAMES[area])
+            area_parent = get_or_create_area_folder(self.drive, contractor_year, area)
             folder_id = get_or_create_folder(self.drive, area_parent, f"{period8[:6]}-2")
         return upload_replacing(self.drive, prize_path, folder_id)
 
@@ -678,7 +704,7 @@ class InvoiceArchiveProcessor:
             contractor_year = get_or_create_folder(
                 self.drive, config.contractor_root_id, f"{period8[:4]}專員承攬服務費"
             )
-            annual_parent = get_or_create_folder(self.drive, contractor_year, AREA_FOLDER_NAMES[area])
+            annual_parent = get_or_create_area_folder(self.drive, contractor_year, area)
             file_id = self._find_named_anywhere(name)
         with tempfile.TemporaryDirectory(prefix="ei_prize_update_") as temp_dir:
             path = self._download_file(file_id, Path(temp_dir) / name)

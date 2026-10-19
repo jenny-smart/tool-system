@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -98,6 +99,25 @@ def build_cetustek_login(params: dict[str, Any]) -> list[str]:
     if area and area != "全區":
         command.extend(["--area", area])
     return command
+
+
+def build_cetustek_triplicate(params: dict[str, Any]) -> list[str]:
+    area, cdp_url = _common_invoice_args(params)
+    plan = params.get("plan")
+    if not area or area == "全區" or not isinstance(plan, dict):
+        raise ValueError("二聯改三聯需要指定地區及預覽資料")
+    return [sys.executable, "-m", "tools.invoice_center.triplicate_runner",
+            "--area", area, "--cdp-url", cdp_url,
+            "--plan", json.dumps(plan, ensure_ascii=False)]
+
+
+def build_cetustek_paper_update(params: dict[str, Any]) -> list[str]:
+    from tools.invoice_center.ei_export_all import normalize_month
+
+    area, cdp_url = _common_invoice_args(params)
+    month = normalize_month(str(params.get("month") or ""))
+    return [sys.executable, "-m", "tools.invoice_center.paper_update",
+            "--area", area or "全區", "--month", month, "--cdp-url", cdp_url]
 
 
 def build_cetustek_prize_update(params: dict[str, Any]) -> list[str]:
@@ -543,6 +563,33 @@ def build_fubon_supply_purchase(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    month = str(params.get("month") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    if area not in ("台中", "桃園", "新竹", "高雄", "家電"):
+        raise ValueError("固定費用富邦匯款請選擇單一地區")
+    if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", month):
+        raise ValueError("固定費用富邦匯款缺少正確期別（YYYYMM）")
+    command = [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_fixed_expense_transfer",
+        "--area",
+        area,
+        "--month",
+        month,
+        "--cdp-url",
+        cdp_url,
+    ]
+    selected_rows = params.get("selected_rows")
+    if selected_rows is not None:
+        if not selected_rows:
+            raise ValueError("請至少勾選一個固定費用科目")
+        command.extend(["--rows", ",".join(str(int(row)) for row in selected_rows)])
+    return command
+
+
 def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     resume = str(params.get("resume") or "login").strip()
@@ -618,6 +665,35 @@ def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_yuanta_salary_upload(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    period = str(params.get("period") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    include_contract = bool(params.get("include_contract", True))
+    include_internal = bool(params.get("include_internal", False))
+    transfer_fubon = bool(params.get("transfer_fubon", True))
+    if not area or area == "全區":
+        raise ValueError("元大薪資檔上傳請選擇單一區域")
+    if not re.fullmatch(r"\d{6}-[12]", period):
+        raise ValueError("元大薪資檔上傳期別須為 YYYYMM-1 或 YYYYMM-2")
+    if not include_contract and not include_internal:
+        raise ValueError("請至少選擇專員承攬或內勤薪資")
+    command = [
+        sys.executable, "-m", "tools.bank_statement.yuanta_salary_upload",
+        "--area", area, "--period", period, "--cdp-url", cdp_url,
+    ]
+    if not include_contract:
+        command.append("--no-contract")
+    if include_internal:
+        command.append("--internal")
+    if transfer_fubon:
+        command.append("--fubon-transfer")
+    expected_files = params.get("expected_files")
+    if isinstance(expected_files, list):
+        command.extend(["--expected-plan", json.dumps(expected_files, ensure_ascii=False)])
+    return command
+
+
 def build_git_pull(_params: dict[str, Any]) -> list[str]:
     """Update this checkout without rewriting local commits or modifications."""
     return ["git", "-C", str(PROJECT_ROOT), "pull", "--ff-only"]
@@ -645,6 +721,7 @@ register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.triplicate", build_cetustek_triplicate)
 register_action("cetustek.download", build_cetustek_download)
 register_action("cetustek.prize_update", build_cetustek_prize_update)
+register_action("cetustek.paper_update", build_cetustek_paper_update)
 register_action("cetustek.allowance", build_cetustek_allowance)
 register_action("cetustek.paper_invoice_pdf", build_cetustek_paper_invoice_pdf)
 register_action("cetustek.serial_import", build_cetustek_serial_import)
@@ -665,11 +742,13 @@ register_action("fubon.atm_refund", build_fubon_atm_refund)
 register_action("fubon.payment_request", build_fubon_payment_request)
 register_action("fubon.deposit_refund", build_fubon_deposit_refund)
 register_action("fubon.supply_purchase", build_fubon_supply_purchase)
+register_action("fubon.fixed_expense_transfer", build_fubon_fixed_expense_transfer)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
 register_action("yuanta.download", build_yuanta_download)
 register_action("yuanta.salary_status", build_yuanta_salary_status)
+register_action("yuanta.salary_upload", build_yuanta_salary_upload)
 register_action("system.git_pull", build_git_pull)
 register_action("system.agent_status", build_agent_status)
 register_action("system.agent_logs", build_agent_logs)

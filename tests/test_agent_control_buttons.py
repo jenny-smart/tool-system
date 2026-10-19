@@ -18,6 +18,13 @@ def test_agent_help_has_buttons_and_offline_recovery():
     assert "./scripts/local_agent_service.sh logs" in source
 
 
+def test_restart_and_update_can_be_queued_while_agent_is_offline():
+    source = _agent_help_source()
+    assert "pull_disabled = bool(running_tasks) or not tasks_read_ok" in source
+    assert 'bool(online_agents) and "system.agent_restart" not in supported_actions' in source
+    assert 'bool(online_agents) and "system.git_pull_restart" not in supported_actions' in source
+
+
 def test_prize_update_requires_loaded_agent_action():
     source = Path("toolapp.py").read_text(encoding="utf-8")
     assert 'if "cetustek.prize_update" not in actions:' in source

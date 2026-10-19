@@ -1,0 +1,267 @@
+"""Compare calendar exports with schedules without overwriting booked rows."""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
+
+FIELDS = ["服務人時", "備註", "姓名", "電話", "地址", "日期", "開始時間", "結束時間", "狀態"]
+META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容"]
+COLORS = {
+    "新增": {"red": 1, "green": .96, "blue": .72},
+    "未成單異動": {"red": 1, "green": .96, "blue": .72},
+    "已成單異動": {"red": 1, "green": .84, "blue": .67},
+    "需人工核對": {"red": 1, "green": .84, "blue": .67},
+    "本次日曆未見": {"red": 1, "green": .84, "blue": .84},
+}
+REPORT_HEADERS = ["比對時間", "工作表", "排程列號", "異動類型", "姓名", "電話", "原日期", "日曆日期",
+                  "訂單編號", "差異內容", "處理方式", "日曆事件ID", "比對識別碼"]
+
+
+def _text(value):
+    return str(value or "").strip()
+
+
+def _canonical(value, column):
+    text = _text(value)
+    if column in (0, 2, 4, 8):
+        return re.sub(r"\s+", "", text)
+    if column == 3:
+        digits = re.sub(r"\D", "", text)
+        return "0" + digits if len(digits) == 9 and digits.startswith("9") else digits
+    if column == 5:
+        for pattern in ("%Y/%m/%d", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(text, pattern).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+    if column in (6, 7):
+        for pattern in ("%H:%M", "%H:%M:%S"):
+            try:
+                return datetime.strptime(text, pattern).strftime("%H:%M")
+            except ValueError:
+                pass
+    return text
+
+
+def _key(values, columns):
+    return tuple(_canonical(values[c], c) for c in columns)
+
+
+def _diff(old, new):
+    return "；".join(f"{FIELDS[c]}：{_text(old[c]) or '空白'} → {_text(new[c]) or '空白'}"
+                    for c in range(9) if _canonical(old[c], c) != _canonical(new[c], c))
+
+
+def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=None):
+    """Return cell updates and a review report; ambiguous matches never create a new row."""
+    foreign_events = foreign_events or {}
+    old = {i + 2: (list(row) + [""] * 33)[:33] for i, row in enumerate(existing) if any(_text(v) for v in row)}
+    incoming = []
+    for row in sources:
+        if not any(_text(v) for v in row[:9]):
+            continue
+        padded = (list(row) + [""] * 19)[:19]
+        values = padded[:9] + [""] * 24
+        values[3] = _canonical(values[3], 3)
+        values[30] = _text(padded[18])
+        incoming.append(values)
+    event_counts = Counter(row[30] for row in incoming if row[30])
+    if any(count > 1 for count in event_counts.values()):
+        raise RuntimeError("日曆匯出有重複事件ID，未更新排程，請重新匯出核對")
+    unmatched_old, unmatched_new = set(old), set(range(len(incoming)))
+    pairs = {}
+
+    def match(key_old, key_new):
+        left, right = defaultdict(list), defaultdict(list)
+        for row in sorted(unmatched_old):
+            key = key_old(old[row])
+            if key: left[key].append(row)
+        for index in sorted(unmatched_new):
+            key = key_new(incoming[index])
+            if key: right[key].append(index)
+        for key in left.keys() & right.keys():
+            if len(left[key]) == len(right[key]) == 1:
+                row, index = left[key][0], right[key][0]
+                # Known IDs must not be paired with a different known event.
+                if old[row][30] and incoming[index][30] and old[row][30] != incoming[index][30]:
+                    continue
+                pairs[index] = row
+                unmatched_old.remove(row)
+                unmatched_new.remove(index)
+
+    match(lambda v: v[30], lambda v: v[30])
+    # Retrofit existing sheets conservatively, before their first event-ID snapshot.
+    for columns in ((2, 3, 4, 5, 6, 7), (2, 3, 4, 5), (2, 3, 4, 6, 7), (2, 3, 4), (2, 3)):
+        match(lambda v, c=columns: _key(v, c), lambda v, c=columns: _key(v, c))
+
+    updates, changes = [], []
+
+    def record(row, kind, before, after, detail, action, target_sheet=sheet_name):
+        signature = [target_sheet, row, kind, before[:9], after[:9], before[12], after[30]]
+        fingerprint = hashlib.sha256(json.dumps(signature, ensure_ascii=False, default=str).encode()).hexdigest()
+        changes.append({"row": row, "sheet": target_sheet, "kind": kind, "before": before,
+                        "after": after, "detail": detail, "action": action, "id": fingerprint})
+
+    for index, row in sorted(pairs.items(), key=lambda pair: pair[1]):
+        before, after = old[row], incoming[index]
+        detail = _diff(before, after)
+        values = before.copy()
+        if after[30]: values[30] = after[30]
+        kind = ""
+        if detail:
+            kind = "已成單異動" if _text(before[12]) else "未成單異動"
+            if not _text(before[12]): values[:9] = after[:9]
+            values[31:33] = [kind, detail]
+            record(row, kind, before, after, detail,
+                   "保留原排程與成單資訊，人工確認是否需異動訂單" if _text(before[12]) else "更新日曆欄位，保留既有作業結果")
+        if values != before:
+            updates.append({"row": row, "values": values, "old": before, "kind": kind})
+
+    ambiguous = set()
+    next_row = max(len(existing) + 2, max(old, default=1) + 1)
+    for index in sorted(unmatched_new):
+        after = incoming[index]
+        event_id = after[30]
+        if event_id and event_id in foreign_events:
+            for foreign_sheet, row, before in foreign_events[event_id]:
+                record(row, "跨月異動", before, after, _diff(before, after),
+                       "另一月份已有同一日曆事件；不新增排程，請人工核對", foreign_sheet)
+            continue
+        related = [row for row in unmatched_old if _key(old[row], (2, 3, 4)) == _key(after, (2, 3, 4))]
+        if related:
+            ambiguous.update(related)
+            record("", "需人工核對", old[related[0]], after,
+                   "同一客戶有多筆未對應排程，無法唯一判定日期／時段異動",
+                   "不新增待成單列；請依日曆事件ID核對原列")
+            continue
+        # A different known event for an existing booked customer can also be a deleted/recreated event.
+        booked_related = [row for row in old if _text(old[row][12]) and _key(old[row], (2, 3)) == _key(after, (2, 3))]
+        if booked_related:
+            ambiguous.update(booked_related)
+            record("", "需人工核對", old[booked_related[0]], after,
+                   "同一客戶已有成單，新增事件可能是刪除重建或額外服務",
+                   "不新增待成單列，人工確認後再加入排程")
+            continue
+        values = after.copy()
+        values[31:33] = ["新增", "本次日曆新增排程"]
+        updates.append({"row": next_row, "values": values, "old": None, "kind": "新增"})
+        record(next_row, "新增", [""] * 33, after, "本次日曆新增排程", "新增待處理排程；仍依狀態與單號判定是否可建單")
+        next_row += 1
+
+    for row in sorted(unmatched_old | ambiguous):
+        before = old[row]
+        if row not in ambiguous and coverage:
+            date = _canonical(before[5], 5)
+            if not (coverage[0] <= date <= coverage[1]):
+                continue
+        values = before.copy()
+        kind = "需人工核對" if row in ambiguous else "本次日曆未見"
+        detail = ("無法唯一比對日曆異動，請核對差異表" if row in ambiguous
+                  else "本次日曆匯出未包含此列；可能取消、移至其他月份或匯出範圍不同")
+        if not _text(before[12]) and _canonical(before[8], 8) == "未安排": values[8] = "待確認"
+        values[31:33] = [kind, detail]
+        if values != before:
+            updates.append({"row": row, "values": values, "old": before, "kind": kind})
+        record(row, kind, before, [""] * 33, detail,
+               "保留已成單資料，不自動刪除／重新成單" if _text(before[12]) else "保留原列，改待確認以停止自動成單")
+    return {"updates": updates, "changes": changes, "count": len(old) + sum(u["old"] is None for u in updates)}
+
+
+def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False, coverage=None):
+    """Write only changed cells; preserve booked A:AD and never clear a schedule."""
+    period = target_name[-6:]
+    in_month = []
+    for source_row in source_rows:
+        if len(source_row) < 6 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", _canonical(source_row[5], 5)):
+            raise RuntimeError("日曆匯出日期無法解析，未更新排程")
+        if _canonical(source_row[5], 5).replace("-", "")[:6] == period:
+            in_month.append(source_row)
+    source_rows = in_month
+    export_range = None
+    if coverage and len(coverage[0]) >= 2:
+        start, end = (_canonical(value, 5) for value in coverage[0][:2])
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", start) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", end) and start <= end:
+            export_range = (start, end)
+    created = False
+    try:
+        target = ss.worksheet(target_name)
+        last_column = {30: "AD", 31: "AE", 32: "AF"}.get(target.col_count, "AG")
+        existing_range = f"A2:{last_column}"
+        existing = target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
+        current_header = target.get(f"A1:{last_column}1", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
+        if current_header:
+            for offset, name in enumerate(META_HEADERS, 30):
+                if len(current_header[0]) > offset and _text(current_header[0][offset]) not in ("", name):
+                    raise RuntimeError("AE:AG 已有其他欄位，請先保留原資料並調整欄位，未更新排程")
+        if current_header and len(current_header[0]) >= 30: headers = current_header[0][:30]
+    except worksheet_not_found:
+        target, existing = None, []
+        created = True
+    # Detect moves to another month by stable event identity, avoiding duplicate orders.
+    area = target_name[:-6]
+    source_ids = {_text(row[18]) for row in source_rows if len(row) > 18 and _text(row[18])}
+    foreign = defaultdict(list)
+    if source_ids:
+        for sheet in ss.worksheets():
+            if sheet.title == target_name or sheet.col_count < 31 or not re.fullmatch(re.escape(area) + r"\d{6}", sheet.title): continue
+            for row_num, row in enumerate(sheet.get("A2:AE", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING"), 2):
+                values = (list(row) + [""] * 33)[:33]
+                if values[30] in source_ids: foreign[values[30]].append((sheet.title, row_num, values))
+    plan = plan_schedule(existing, source_rows, target_name, foreign, coverage=export_range)
+    if not compare_only:
+        if target is not None and target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != existing:
+            raise RuntimeError("排程在比對期間已有更新，未覆寫；請待成單完成後重新比對")
+        required_rows = max([len(existing) + 1, 2] + [u["row"] for u in plan["updates"]])
+        if target is None:
+            target = ss.add_worksheet(title=target_name, rows=max(required_rows + 10, 200), cols=33)
+        elif target.col_count < 33 or target.row_count < required_rows:
+            target.resize(rows=max(target.row_count, required_rows), cols=max(target.col_count, 33))
+        target.update(values=[list(headers[:30]) + META_HEADERS], range_name="A1:AG1", value_input_option="RAW")
+        year, month = int(target_name[-6:-2]), int(target_name[-2:])
+        previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
+        lookup_sheet = f"{area}{previous}"
+        updates, phones, colors = [], [], []
+        for change in plan["updates"]:
+            row, values, before = change["row"], change["values"], change["old"]
+            if before is None:
+                values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
+                updates.append({"range": f"A{row}:AG{row}", "values": [values]})
+                phones.append({"range": f"D{row}", "values": [[values[3]]]})
+            else:
+                if values[:9] != before[:9]:
+                    updates.append({"range": f"A{row}:I{row}", "values": [values[:9]]})
+                    phones.append({"range": f"D{row}", "values": [[values[3]]]})
+                updates.append({"range": f"AE{row}:AG{row}", "values": [values[30:33]]})
+            if change["kind"]:
+                colors.append({"range": f"A{row}:AG{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
+        if updates: target.batch_update(updates, value_input_option="USER_ENTERED")
+        if phones: target.batch_update(phones, value_input_option="RAW")
+        if colors: target.batch_format(colors)
+        target.freeze(rows=1)
+    report_name = f"排程差異_{target_name}"
+    try:
+        report = ss.worksheet(report_name)
+    except worksheet_not_found:
+        report = ss.add_worksheet(title=report_name, rows=max(len(plan["changes"]) + 10, 200), cols=13)
+    report_rows = report.get("A2:M")
+    known = {_text(row[12]) for row in report_rows if len(row) > 12}
+    timestamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S %z")
+    entries = []
+    for item in plan["changes"]:
+        report_id = item["id"] + (":preview" if compare_only else ":updated")
+        if report_id in known: continue
+        before, after = item["before"], item["after"]
+        entries.append([timestamp, item["sheet"], item["row"], item["kind"], after[2] or before[2],
+                        after[3] or before[3], before[5], after[5], before[12], item["detail"],
+                        ("只比對，未更新排程。" if compare_only else "") + item["action"], after[30] or before[30], report_id])
+        known.add(report_id)
+    report.update(values=[REPORT_HEADERS], range_name="A1:M1", value_input_option="RAW")
+    if entries: report.append_rows(entries, value_input_option="RAW")
+    report.freeze(rows=1)
+    counts = dict(Counter(item["kind"] for item in plan["changes"]))
+    report_url = f"https://docs.google.com/spreadsheets/d/{ss.id}/edit#gid={report.id}" if getattr(ss, "id", "") and getattr(report, "id", "") else ""
+    return {"report_url": report_url, "sheet": target_name, "count": plan["count"], "ok": True, "compare_only": compare_only,
+            "differences": counts, "report": report_name, "created": created and not compare_only}

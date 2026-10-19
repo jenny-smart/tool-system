@@ -566,6 +566,26 @@ def normalize_phone(phone: Any) -> str:
 def get_status(color: str) -> str:
     return STATUS_BY_COLOR.get(str(color or "").strip(), "")
 
+
+def _calendar_label_statuses(calendar: dict) -> dict[str, str]:
+    names = {
+        "待確認": "待確認", "已安排": "已安排", "已預約": "已安排",
+        "暫停": "暫停", "保留單": "保留單", "未安排": "未安排",
+    }
+    return {
+        label["id"]: names.get(str(label.get("name", "")).strip(), "")
+        for label in calendar.get("labelProperties", {}).get("eventLabels", [])
+        if label.get("id")
+    }
+
+
+def _event_schedule_status(event: dict, label_statuses: dict[str, str]) -> str:
+    label_id = event.get("eventLabelId")
+    if label_id:
+        # 自訂標籤優先；未知標籤不得再以相近的舊色碼推定狀態。
+        return label_statuses.get(label_id, "")
+    return get_status(event.get("colorId", ""))
+
 def to_number_safe(value: Any) -> float:
     try:
         return float(str(value).replace(",", "")) if value not in (None, "") else 0.0
@@ -622,6 +642,9 @@ def _fetch_calendar_events(
     if not calendar_id:
         raise ValueError(f"[{area_name}] Calendar ID 未設定，請在主控試算表「客服地區設定」填入")
 
+    calendar = cal_service.calendars().get(calendarId=calendar_id).execute()
+    label_statuses = _calendar_label_statuses(calendar)
+
     time_min = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     time_max = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -641,6 +664,8 @@ def _fetch_calendar_events(
 
         resp  = cal_service.events().list(**kwargs).execute()
         items = resp.get("items", [])
+        for event in items:
+            event["_schedule_status"] = _event_schedule_status(event, label_statuses)
         events.extend(items)
 
         page_token = resp.get("nextPageToken")
@@ -651,7 +676,7 @@ def _fetch_calendar_events(
     return events
 
 
-def _process_events(events: list, area_name: str) -> list[dict]:
+def _process_events(events: list, area_name: str, calendar_id: str = "") -> list[dict]:
     rows = []
     seen_keys: set[str] = set()
 
@@ -663,7 +688,7 @@ def _process_events(events: list, area_name: str) -> list[dict]:
             continue
 
         parsed   = parse_title(title)
-        status   = get_status(color)
+        status   = e.get("_schedule_status", get_status(color))
         location = e.get("location", "")
 
         start_raw = e.get("start", {}).get("dateTime") or e.get("start", {}).get("date", "")
@@ -680,7 +705,8 @@ def _process_events(events: list, area_name: str) -> list[dict]:
         start_str = start_dt.strftime("%H:%M")
         end_str   = end_dt.strftime("%H:%M")
 
-        unique_key = normalize_name(parsed["name"]) + "|||" + normalize_address(location) + "|||" + date_str
+        unique_key = (e.get("_calendar_event_key") or e.get("id")
+                      or "|||".join((normalize_name(parsed["name"]), normalize_address(location), date_str, start_str, end_str)))
         if unique_key in seen_keys:
             continue
         seen_keys.add(unique_key)
@@ -693,6 +719,7 @@ def _process_events(events: list, area_name: str) -> list[dict]:
         amount     = price * person_hrs
 
         rows.append({
+            "event_id":   f"{calendar_id or area_name}:{e['id']}" if e.get("id") else "",
             "service":    parsed["service"],
             "note":       parsed["note"],
             "name":       normalize_name(parsed["name"]),
@@ -717,17 +744,25 @@ def _process_events(events: list, area_name: str) -> list[dict]:
 
 
 def _enrich_with_stored_value(rows: list[dict], stored_info: dict[str, dict]) -> list[dict]:
-    subtotal_map: dict[str, float] = {}
+    subtotal_map: dict[tuple[str, str], float] = {}
     for r in rows:
         key = normalize_name_for_compare(r["name"])
-        subtotal_map[key] = subtotal_map.get(key, 0.0) + r["amount"]
+        period = r["start_dt"].strftime("%Y%m")
+        subtotal_map[(key, period)] = subtotal_map.get((key, period), 0.0) + r["amount"]
+
+    cumulative_map: dict[tuple[str, str], float] = {}
+    running_by_name: dict[str, float] = {}
+    for key, period in sorted(subtotal_map, key=lambda item: (item[0], item[1])):
+        running_by_name[key] = running_by_name.get(key, 0.0) + subtotal_map[(key, period)]
+        cumulative_map[(key, period)] = running_by_name[key]
 
     for r in rows:
         key  = normalize_name_for_compare(r["name"])
+        period = r["start_dt"].strftime("%Y%m")
         info = stored_info.get(key, {})
-        r["subtotal"] = subtotal_map.get(key, 0.0)
+        r["subtotal"] = subtotal_map.get((key, period), 0.0)
         r["balance"]  = info.get("totalBalance", 0.0)
-        r["diff"]     = r["balance"] - r["subtotal"]
+        r["diff"]     = r["balance"] - cumulative_map.get((key, period), 0.0)
         r["line"]     = info.get("lineValue", "")
 
     return rows
@@ -739,25 +774,30 @@ def _write_vip_sheet(
     rows: list[dict],
     start_dt: datetime,
     area_target_id: str = "",
+    end_dt=None,
+    sheet_name: str = "",
 ) -> str:
     target_id = area_target_id or _load_target_file_id()
     if not target_id:
         raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
 
     ss         = gc.open_by_key(target_id)
-    sheet_name = f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}"
+    sheet_name = sheet_name or f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}"
 
     try:
         sh = ss.worksheet(sheet_name)
         sh.clear()
     except gspread.WorksheetNotFound:
-        sh = ss.add_worksheet(title=sheet_name, rows=max(len(rows) + 10, 200), cols=20)
+        sh = ss.add_worksheet(title=sheet_name, rows=max(len(rows) + 10, 200), cols=22)
+
+    if getattr(sh, "col_count", 22) < 22:
+        sh.resize(cols=22)
 
     headers = [
         "服務人時", "備註", "姓名", "電話", "地址",
         "日期", "開始時間", "結束時間", "狀態", "",
         "星期", "單價", "人時", "金額",
-        "當月預約總金額", "儲值金餘額", "差額", "LINE@",
+        "當月預約總金額", "儲值金餘額", "累計差額（截至當月）", "LINE@", "日曆事件ID",
     ]
 
     rows = sorted(
@@ -770,13 +810,14 @@ def _write_vip_sheet(
     )
 
     out = [headers]
-    shown_names: set[str] = set()
+    shown_customer_months: set[tuple[str, str]] = set()
 
     for r in rows:
         compare_name = normalize_name_for_compare(r["name"])
-        is_first     = compare_name not in shown_names
+        customer_month = (compare_name, r["start_dt"].strftime("%Y%m"))
+        is_first     = customer_month not in shown_customer_months
         if is_first:
-            shown_names.add(compare_name)
+            shown_customer_months.add(customer_month)
 
         out.append([
             r["service"], r["note"], r["name"], r["phone"], r["address"],
@@ -786,13 +827,19 @@ def _write_vip_sheet(
             r["balance"]  if is_first else "",
             r["diff"]     if is_first else "",
             r["line"]     if is_first else "",
+            r.get("event_id", ""),
         ])
 
     sh.update(values=out, range_name="A1", value_input_option="USER_ENTERED")
     if rows:
         phones = [[normalize_phone(r["phone"])] for r in rows]
         sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
-        sh.sort((3, "asc"), range=f"A2:R{len(rows) + 1}")
+        sh.sort((3, "asc"), range=f"A2:S{len(rows) + 1}")
+    sh.update(
+        values=[["匯出開始日期", "匯出結束日期"],
+                [start_dt.strftime("%Y-%m-%d"), (end_dt or start_dt).strftime("%Y-%m-%d")]],
+        range_name="T1:U2", value_input_option="RAW",
+    )
     sh.freeze(rows=1)
 
     log.info("[%s] 定期VIP工作表寫入完成：%d 筆，工作表：%s", area_name, len(rows), sheet_name)
@@ -821,19 +868,35 @@ def step2_export_vip_calendar(
 
         try:
             events = _fetch_calendar_events(cal_service, calendar_id, start_dt, end_dt, area_name)
-            rows   = _process_events(events, area_name)
+            rows   = _process_events(events, area_name, calendar_id)
 
             if not rows:
-                log.warning("[%s] 指定日期範圍內無符合行程", area_name)
-                results[area_name] = {"count": 0, "sheet": "", "ok": True}
-                continue
-
+                log.warning("[%s] 指定日期範圍內無符合行程，仍更新空白日曆快照", area_name)
             _area_target = area.get("target_spreadsheet_id", "")
-            stored_info = _load_stored_value_info(gc, area_name, area_target_id=_area_target)
-            rows        = _enrich_with_stored_value(rows, stored_info)
-
-            sheet_name = _write_vip_sheet(gc, area_name, rows, start_dt, area_target_id=_area_target)
-            results[area_name] = {"count": len(rows), "sheet": sheet_name, "ok": True}
+            stored_info = _load_stored_value_info(gc, area_name, area_target_id=_area_target) if rows else {}
+            sheet_names = []
+            for period in _month_keys(start_dt, end_dt):
+                month_start = start_dt.replace(year=int(period[:4]), month=int(period[4:]), day=1,
+                                               hour=0, minute=0, second=0, microsecond=0)
+                next_month = (month_start.replace(year=month_start.year + 1, month=1)
+                              if month_start.month == 12 else month_start.replace(month=month_start.month + 1))
+                month_end = next_month - timedelta(seconds=1)
+                month_rows = [row for row in rows if row["start_dt"].strftime("%Y%m") == period]
+                month_rows = _enrich_with_stored_value(month_rows, stored_info)
+                sheet_names.append(_write_vip_sheet(
+                    gc, area_name, month_rows, max(start_dt, month_start), area_target_id=_area_target,
+                    end_dt=min(end_dt, month_end),
+                ))
+            if len(_month_keys(start_dt, end_dt)) > 1:
+                combined_rows = _enrich_with_stored_value(rows, stored_info)
+                combined_name = (
+                    f"定期VIP_{area_name}_{start_dt.strftime('%Y%m')}-{end_dt.strftime('%Y%m')}"
+                )
+                sheet_names.insert(0, _write_vip_sheet(
+                    gc, area_name, combined_rows, start_dt, area_target_id=_area_target,
+                    end_dt=end_dt, sheet_name=combined_name,
+                ))
+            results[area_name] = {"count": len(rows), "sheet": "、".join(sheet_names), "ok": True}
 
         except Exception as e:
             log.error("[%s] VIP日曆匯出失敗：%s", area_name, e)
@@ -882,62 +945,26 @@ def _build_vip_schedule_sheet(
     gc: gspread.Client,
     area: dict,
     period: str,
+    compare_only: bool = False,
 ) -> dict:
-    """由定期VIP日曆匯出表建立「地區yyyyMM」排程工作表。"""
+    """安全比對本月日曆，已成單異動保留原列供人工核對。"""
+    from tools.service_management.vip_schedule_diff import sync_schedule
     area_name = area["name"]
     target_id = area.get("target_spreadsheet_id", "") or _load_target_file_id()
     if not target_id:
         raise EnvironmentError(f"[{area_name}] 請在客服地區設定填入「目標試算表ID」")
-
     ss = gc.open_by_key(target_id)
-    source_name = f"定期VIP_{area_name}_{period}"
-    target_name = f"{area_name}{period}"
-    source = ss.worksheet(source_name)
-    source_rows = source.get("A2:J")
-
-    existing_extra: dict[tuple[str, ...], list[Any]] = {}
-    created = False
-    try:
-        target = ss.worksheet(target_name)
-        existing = target.get("A2:AD", value_render_option="FORMULA")
-        for row in existing:
-            if any(str(value).strip() for value in row):
-                existing_extra[_schedule_row_key(row)] = (list(row) + [""] * 30)[10:30]
-    except gspread.WorksheetNotFound:
-        created = True
-        # 新月份直接建立乾淨工作表，不複製上月，因此不會帶入上月格式、底色或公式。
-        target = ss.add_worksheet(
-            title=target_name,
-            rows=max(len(source_rows) + 10, 200),
-            cols=30,
-        )
-
-    header = target.get("A1:AD1", value_render_option="FORMULA")
-    headers = (header[0] if header and len(header[0]) >= 30 else VIP_SCHEDULE_FALLBACK_HEADERS)
-    output = [headers[:30]]
-    for source_row in source_rows:
-        first_ten = (list(source_row) + [""] * 10)[:10]
-        first_ten[3] = normalize_phone(first_ten[3])
-        # A:J 一律以本月日曆匯出工作表內容為準，I 欄狀態也直接使用日曆匯出結果。
-        # 新建工作表不沿用上月 K:AD；重跑既有月份才保留該月已產生的作業資料。
-        extras = existing_extra.get(_schedule_row_key(first_ten), [""] * 20)
-        output.append(first_ten + extras)
-
-    target.clear()
-    target.update(values=output, range_name="A1", value_input_option="USER_ENTERED")
-    if created:
-        target.batch_clear([f"K2:AD{max(target.row_count, 2)}"])
-    if source_rows:
-        phones = [[normalize_phone((list(row) + [""] * 4)[3])] for row in source_rows]
-        target.update(
-            values=phones,
-            range_name=f"D2:D{len(source_rows) + 1}",
-            value_input_option="RAW",
-        )
-        target.sort((3, "asc"), range=f"A2:AD{len(source_rows) + 1}")
-    target.freeze(rows=1)
-    log.info("[%s] VIP排程工作表建立完成：%s（%d 筆）", area_name, target_name, len(source_rows))
-    return {"sheet": target_name, "count": len(source_rows), "ok": True}
+    source = ss.worksheet(f"定期VIP_{area_name}_{period}")
+    result = sync_schedule(
+        ss, f"{area_name}{period}", source.get("A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
+        VIP_SCHEDULE_FALLBACK_HEADERS, gspread.WorksheetNotFound, compare_only=compare_only,
+        coverage=source.get("T2:U2") if getattr(source, "col_count", 21) >= 21 else [],
+    )
+    mode = "只比對" if compare_only else "安全更新"
+    log.info("[%s] VIP排程%s完成：%s（%d 筆）；差異：%s；差異工作表：%s",
+             area_name, mode, result["sheet"], result["count"], result["differences"], result["report"])
+    print("VIP_SCHEDULE_DIFF=" + json.dumps(result, ensure_ascii=False), flush=True)
+    return result
 
 
 def step3_build_vip_schedule_sheets(
@@ -945,6 +972,7 @@ def step3_build_vip_schedule_sheets(
     areas: list[dict],
     start_dt: datetime,
     end_dt: datetime,
+    compare_only: bool = False,
 ) -> dict:
     results = {}
     errors = []
@@ -952,7 +980,7 @@ def step3_build_vip_schedule_sheets(
         for period in _month_keys(start_dt, end_dt):
             key = f"{area['name']}{period}"
             try:
-                results[key] = _build_vip_schedule_sheet(gc, area, period)
+                results[key] = _build_vip_schedule_sheet(gc, area, period, compare_only=compare_only)
             except Exception as exc:
                 log.error("[%s] VIP排程工作表建立失敗：%s", key, exc)
                 errors.append(f"{key}: {exc}")
@@ -997,6 +1025,8 @@ def main() -> None:
                         help="匯出起始日期 YYYY-MM-DD（預設：本月1日）")
     parser.add_argument("--end",   type=str, default="",
                         help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
+    parser.add_argument("--compare-only", action="store_true",
+                        help="Step 3 只產生差異工作表，不更新排程內容或底色")
     args = parser.parse_args()
 
     if args.step in (0, 2, 3) and not (_load_target_file_id()):
@@ -1074,7 +1104,7 @@ def main() -> None:
         if args.step == 3:
             log.info("--- Step 3：建立VIP排程工作表 ---")
             try:
-                step3_build_vip_schedule_sheets(gc, areas, start_dt, end_dt)
+                step3_build_vip_schedule_sheets(gc, areas, start_dt, end_dt, compare_only=args.compare_only)
             except Exception as e:
                 errors.append(str(e))
                 log.error("Step 3 失敗：%s", e)

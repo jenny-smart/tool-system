@@ -2199,7 +2199,7 @@ def render_agent_help() -> None:
         st.caption("目前沒有執行中的工作。" if tasks_read_ok else "無法讀取目前工作，請重新檢查心跳後再試。")
 
     st.markdown("**更新程式：**")
-    pull_disabled = not online_agents or bool(running_tasks) or not tasks_read_ok
+    pull_disabled = bool(running_tasks) or not tasks_read_ok
     if st.button(
         "⬇️ Git Pull 更新程式",
         use_container_width=True,
@@ -2259,7 +2259,10 @@ def render_agent_help() -> None:
         if st.button(
             "🔄 重啟 Agent",
             use_container_width=True,
-            disabled=bool(running_tasks) or "system.agent_restart" not in supported_actions,
+            disabled=(
+                bool(running_tasks)
+                or (bool(online_agents) and "system.agent_restart" not in supported_actions)
+            ),
             key="agent_restart_button",
         ):
             task = create_local_agent_task(
@@ -2301,7 +2304,10 @@ def render_agent_help() -> None:
     if st.button(
         "⬇️ 更新程式＋重啟 Agent",
         use_container_width=True,
-        disabled=bool(running_tasks) or "system.git_pull_restart" not in supported_actions,
+        disabled=(
+            bool(running_tasks)
+            or (bool(online_agents) and "system.git_pull_restart" not in supported_actions)
+        ),
         key="agent_git_pull_restart_button",
     ):
         task = create_local_agent_task(
@@ -2477,11 +2483,19 @@ def queue_cetustek_download(*, month="", start_date=None, end_date=None, area="�
 
 def run_cetustek_paper_update(*, month="", start_date=None, end_date=None, area="全區"):
     month_text = str(month or "").strip()
-    if not month_text:
+    if not re.fullmatch(r"\d{6}", month_text) or not 1 <= int(month_text[4:]) <= 12:
         raise ValueError("紙本發票更新請輸入月份 YYYYMM")
-    from tools.invoice_center.invoice_archive import run_invoice_update
-
-    return run_invoice_update("paper", month_text, area)
+    agents = [row for row in list_local_agent_status(max_age_seconds=30) if row.get("online")]
+    if agents and not any(
+        "cetustek.paper_update" in str(row.get("actions") or "").split(",") for row in agents
+    ):
+        raise RuntimeError("Local Agent 尚未載入紙本發票更新新版，請到 🖥️Agent 更新程式並重啟")
+    task = create_local_agent_task(
+        "cetustek.paper_update",
+        {"month": month_text, "area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（Drive 缺檔時會自動登入鯨躍下載紙本發票）"
 
 
 def queue_cetustek_prize_update(*, month="", start_date=None, end_date=None, area="全區"):
@@ -3042,6 +3056,27 @@ def queue_yuanta_salary_status(*, month="", start_date=None, end_date=None, area
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_yuanta_salary_upload(
+    *, month="", start_date=None, end_date=None, area="全區",
+    include_contract=True, include_internal=False, transfer_fubon=True,
+    expected_files=None,
+):
+    task = create_local_agent_task(
+        "yuanta.salary_upload",
+        {
+            "area": area,
+            "period": str(month or "").strip(),
+            "include_contract": bool(include_contract),
+            "include_internal": bool(include_internal),
+            "transfer_fubon": bool(transfer_fubon),
+            "expected_files": list(expected_files or []),
+            "cdp_url": "http://127.0.0.1:9222",
+        },
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent 找檔並上傳至待放行）"
+
+
 def run_lemon_prepaid_amount(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from tools.prepaid_amount.prepaid_amount import run as run_prepaid_amount
 
@@ -3093,6 +3128,71 @@ def run_taipei_fixed_expense_billing(*, month="", start_date=None, end_date=None
     if result["errors"]:
         summary += f"｜⚠️ {'；'.join(result['errors'])}"
     return summary
+
+
+def run_fixed_expense_transfer(
+    *,
+    month="",
+    start_date=None,
+    end_date=None,
+    area="全區",
+    selected_rows=None,
+    on_progress=None,
+    execute_fubon_transfer=False,
+):
+    period = (month or "").strip()
+    if execute_fubon_transfer:
+        if area == "全區":
+            raise ValueError("執行富邦銀行匯款時，請選擇單一地區")
+        from tools.finance_management.fixed_expense_transfer import (
+            preview_fixed_expenses,
+            require_fubon_not_transferred,
+        )
+
+        preview = preview_fixed_expenses(period, area)
+        plans = preview.get("plans") or []
+        if not plans:
+            raise ValueError(f"{period}／{area} 第72列沒有可匯款金額")
+        require_fubon_not_transferred(plans[0], period, area)
+        selected_for_area = (
+            selected_rows.get(area, []) if isinstance(selected_rows, dict) else selected_rows
+        )
+        if selected_for_area is not None and not selected_for_area:
+            raise ValueError("請至少勾選一個固定費用科目")
+        task = create_local_agent_task(
+            "fubon.fixed_expense_transfer",
+            {
+                "area": area,
+                "month": period,
+                "selected_rows": selected_for_area,
+                "cdp_url": "http://127.0.0.1:9222",
+            },
+            created_by=st.session_state.get("username", "Tool System"),
+        )
+        return (
+            f"富邦匯款任務已建立：{task['task_id']}（等待本機 Agent）。"
+            "請在銀行畫面核對後人工確認；成功後系統會依序同步富邦明細及原訂分錄。"
+        )
+
+    from tools.finance_management.fixed_expense_transfer import transfer_fixed_expenses
+
+    result = transfer_fixed_expenses(
+        period,
+        area=area,
+        on_progress=on_progress,
+        selected_rows=selected_rows,
+    )
+    lines = result["summaries"] or ["沒有第72列 > 0 的地區"]
+    if result["skipped_areas"]:
+        lines.append("略過：" + "、".join(result["skipped_areas"]))
+    return "\n".join(lines)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_fixed_expense_transfer_preview(period: str, area: str, schema_version: int = 2):
+    from tools.finance_management.fixed_expense_transfer import preview_fixed_expenses
+
+    return preview_fixed_expenses(period, area)
 
 
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
@@ -3461,6 +3561,7 @@ FINANCE_TASKS = [
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
+    {"name": "【元大銀行】薪資檔上傳待放行", "handler": queue_yuanta_salary_upload, "enabled": True},
     {"name": "【鯨躍發票】開立發票", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】二聯改三聯", "handler": None, "enabled": True},
     {"name": "【鯨躍發票】鯨躍登入", "handler": queue_cetustek_login, "enabled": True},
@@ -3481,6 +3582,7 @@ FINANCE_TASKS = [
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
     {"name": "【藍新金流】藍新信用卡待退款", "handler": queue_newebpay_refund_pending, "enabled": True},
     {"name": "【財報】台北固定費用請款", "handler": run_taipei_fixed_expense_billing, "enabled": True},
+    {"name": "【財報】各區固定費用匯款", "handler": run_fixed_expense_transfer, "enabled": True},
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
@@ -3919,6 +4021,13 @@ monthly_order_functions = ["上半月訂單", "下半月訂單"]
 
 period = ""
 start_date_value = None
+yuanta_salary_include_contract = True
+yuanta_salary_include_internal = False
+yuanta_salary_transfer_fubon = True
+yuanta_salary_expected_files = []
+fixed_expense_execute_fubon = False
+fixed_expense_selected_rows = None
+vip_schedule_compare_only = False
 end_date_value = None
 monthly_date_mode = "期別"
 resume_target_sheet = ""
@@ -3996,6 +4105,35 @@ with date_col:
                     horizontal=True,
                     key="fubon_verification_mode",
                 )
+        elif selected_function == "【元大銀行】薪資檔上傳待放行":
+            st.markdown('<div class="field-label">📆 薪資期別</div>', unsafe_allow_html=True)
+            _default_half = "1" if today_date.day <= 15 else "2"
+            period = st.text_input(
+                "薪資期別",
+                value=f"{today_date:%Y%m}-{_default_half}",
+                placeholder="例如：202610-1",
+                label_visibility="collapsed",
+                key="finance_yuanta_salary_period",
+            )
+            yuanta_salary_include_contract = st.checkbox(
+                "專員承攬費／工具包押金",
+                value=True,
+                key="finance_yuanta_salary_contract",
+            )
+            yuanta_salary_include_internal = st.checkbox(
+                "期別元大帳戶-地區.xlsx（內勤薪資）",
+                value=False,
+                key="finance_yuanta_salary_internal",
+            )
+            yuanta_salary_transfer_fubon = st.checkbox(
+                "先由富邦匯總金額到元大帳戶",
+                value=True,
+                key="finance_yuanta_salary_transfer_fubon",
+            )
+            st.caption(
+                "Agent 會先列出檔案與合計；富邦轉帳須人工確認，成功後自動更新富邦明細，"
+                "再到元大上傳並審核至待放行。"
+            )
         elif selected_function == "【元大銀行】檢查薪資付款狀態":
             st.markdown('<div class="field-label">📆 付款日期</div>', unsafe_allow_html=True)
             st.info("固定查詢最近一週", icon="📅")
@@ -4265,6 +4403,28 @@ with date_col:
                 "格式：YYYYMM；新增 AWS／震旦行／眾點（查信）＋辦公室租金／管理費（固定金額）"
                 "共 5 筆請款記錄到「請款記錄／台北」"
             )
+        elif selected_function == "【財報】各區固定費用匯款":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202608",
+                label_visibility="collapsed",
+                key="finance_fixed_expense_transfer_period",
+            )
+            fixed_expense_execute_fubon = st.checkbox(
+                "執行富邦銀行匯款給台北",
+                value=False,
+                key="finance_fixed_expense_execute_fubon",
+                help="銀行端仍需人工核對並按確認；成功後才會同步明細與原訂分錄。",
+            )
+            if fixed_expense_execute_fubon:
+                st.caption(
+                    "富邦匯款須第72列 > 0 且第74列空白（代表尚未匯款）；請選單一地區。"
+                    "順序：富邦匯款 → 該區富邦更新 → 原訂分錄及請款記錄。"
+                )
+            else:
+                st.caption("格式：YYYYMM；篩選第72列 > 0，新增台北／各區富邦更新分錄及各區請款記錄")
         elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
             st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -4600,6 +4760,13 @@ with date_col:
                     end_date_value = st.date_input("結束日期", value=_today_date, key="crm_end_date")
                 st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
 
+            if selected_function == "【儲值】建立VIP排程工作表":
+                vip_schedule_compare_only = st.checkbox(
+                    "只比對差異，不更新排程工作表", value=False, key="vip_schedule_compare_only",
+                )
+                st.caption("更新時會標示新增／異動列；已有單號的列保留原排程與成單資訊。"
+                           "無法唯一比對或未見於本次匯出的列需人工核對，不會自動重新成單。")
+
         elif selected_function in ("【儲值】抓儲值金", "【CRM】更新排程決策報表",
                                    "【CRM】更新三個月未排名單", "【CRM】重新排序Raw"):
             st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
@@ -4714,6 +4881,7 @@ with area_col:
         "【元大銀行】元大登入",
         "【元大銀行】元大明細下載",
         "【元大銀行】檢查薪資付款狀態",
+        "【元大銀行】薪資檔上傳待放行",
         "【財報】工具包押金｜統計月份彙整（U–X）",
         "【財報】工具包押金｜批次依備註打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
@@ -4734,6 +4902,8 @@ with area_col:
     if selected_function == "【財報】台北固定費用請款":
         # 台北固定費用請款只會寫進請款記錄／台北，區域固定台北，不用選。
         area_select_options = ["台北"]
+    if selected_function == "【財報】各區固定費用匯款":
+        area_select_options = ["全區", "台中", "桃園", "新竹", "高雄"]
     if selected_function in (
         "【儲值金】轉檔",
         "【儲值金】搬運",
@@ -4778,6 +4948,93 @@ with area_col:
         st.caption("將執行全部已啟用地區")
     else:
         st.caption(f"只執行：{selected_area_value}")
+
+if system_type == "finance_management" and selected_function == "【財報】各區固定費用匯款":
+    if re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", (period or "").strip()):
+        try:
+            _fixed_expense_preview = get_fixed_expense_transfer_preview(
+                period.strip(), selected_area_value, 2
+            )
+            _preview_plans = _fixed_expense_preview["plans"]
+            if _preview_plans:
+                fixed_expense_selected_rows = {}
+                st.markdown("**📋 該月相關科目及金額**")
+                for _plan in _preview_plans:
+                    _destination = (
+                        f" → {_plan['report_area']}財報"
+                        if _plan["report_area"] != _plan["area"]
+                        else ""
+                    )
+                    st.caption(
+                        f"{_plan['area']}{_destination}｜第72列匯款金額："
+                        f"{int(_plan['total']):,}"
+                    )
+                    if _plan["transfer_mark"]:
+                        if fixed_expense_execute_fubon:
+                            st.warning(
+                                f"第74列已有匯款記錄 {_plan['transfer_mark']}，"
+                                "不能再次執行富邦匯款。"
+                            )
+                        elif re.search(
+                            r"\d{3,4}[./-]\d{1,2}[./-]\d{1,2}",
+                            str(_plan["transfer_mark"]),
+                        ):
+                            st.success(f"第74列匯款日期：{_plan['transfer_mark']}")
+                        else:
+                            st.caption(f"第74列匯款記錄：{_plan['transfer_mark']}")
+                    _subject_editor = st.data_editor(
+                        pd.DataFrame([
+                            {
+                                "執行": True,
+                                "來源": item.get("source_area", _plan["area"]),
+                                "來源列": int(item["row_number"]),
+                                "科目": item["subject"],
+                                "金額": int(item["amount"]),
+                            }
+                            for item in _plan["items"]
+                        ]),
+                        hide_index=True,
+                        use_container_width=True,
+                        disabled=["來源列", "科目", "金額"],
+                        column_config={
+                            "執行": st.column_config.CheckboxColumn(
+                                "執行", default=True, required=True
+                            ),
+                            "來源列": None,
+                            "金額": st.column_config.NumberColumn("金額", format="%,d"),
+                        },
+                        key=(
+                            f"fixed_expense_subjects_{period.strip()}_"
+                            f"{selected_area_value}_{_plan['area']}"
+                        ),
+                    )
+                    fixed_expense_selected_rows[str(_plan["area"])] = [
+                        int(row)
+                        for row in _subject_editor.loc[
+                            _subject_editor["執行"], "來源列"
+                        ].tolist()
+                    ]
+                    _selected_items = [
+                        item
+                        for item in _plan["items"]
+                        if int(item["row_number"])
+                        in fixed_expense_selected_rows[str(_plan["area"])]
+                    ]
+                    _selected_amount = sum(
+                        (-1 if item["subject"] == "稅捐" else 1)
+                        * int(item["amount"])
+                        for item in _selected_items
+                    )
+                    if _selected_items:
+                        st.caption(f"已勾選匯款金額：{_selected_amount:,}")
+                    else:
+                        st.warning("請至少勾選一個科目。")
+            else:
+                st.info("該期別沒有第72列 > 0 的固定費用資料。")
+            if _fixed_expense_preview["skipped_areas"] and selected_area_value == "全區":
+                st.caption("未符合條件：" + "、".join(_fixed_expense_preview["skipped_areas"]))
+        except Exception as exc:
+            st.warning(f"無法載入固定費用預覽：{exc}")
 
 refund_selected_rows = []
 if system_type == "finance_management" and selected_function == "【藍新金流】藍新信用卡待退款":
@@ -5048,8 +5305,72 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
     except Exception as exc:
         st.error(f"讀取清潔用品採購資料失敗：{exc}")
 
+yuanta_salary_preview_ready = True
+if system_type == "finance_management" and selected_function == "【元大銀行】薪資檔上傳待放行":
+    _yuanta_preview_key = (
+        str(period or "").strip(),
+        selected_area_value,
+        bool(yuanta_salary_include_contract),
+        bool(yuanta_salary_include_internal),
+        bool(yuanta_salary_transfer_fubon),
+    )
+    if st.button("🔎 檢查本次檔案與金額", use_container_width=True):
+        try:
+            from services.google_auth import get_drive_service
+            from tools.bank_statement.yuanta_salary_upload import find_salary_files
+
+            _yuanta_files = find_salary_files(
+                get_drive_service(),
+                str(period or "").strip(),
+                selected_area_value,
+                include_contract=yuanta_salary_include_contract,
+                include_internal=yuanta_salary_include_internal,
+            )
+            st.session_state["yuanta_salary_upload_preview"] = {
+                "key": _yuanta_preview_key,
+                "files": [
+                    {"kind": item.kind, "name": item.name, "amount": item.amount}
+                    for item in _yuanta_files
+                ],
+            }
+        except Exception as exc:
+            st.session_state.pop("yuanta_salary_upload_preview", None)
+            st.error(f"檢查檔案失敗：{exc}")
+
+    _saved_yuanta_preview = st.session_state.get("yuanta_salary_upload_preview", {})
+    yuanta_salary_preview_ready = _saved_yuanta_preview.get("key") == _yuanta_preview_key
+    if yuanta_salary_preview_ready:
+        _preview_rows = list(_saved_yuanta_preview.get("files") or [])
+        yuanta_salary_expected_files = [
+            {"name": row["name"], "amount": int(row["amount"])} for row in _preview_rows
+        ]
+        st.dataframe(
+            pd.DataFrame([
+                {"類型": row["kind"], "檔案": row["name"], "金額": int(row["amount"])}
+                for row in _preview_rows
+            ]),
+            hide_index=True,
+            use_container_width=True,
+        )
+        _yuanta_total = sum(int(row["amount"]) for row in _preview_rows)
+        st.markdown(f"**本次合計：NT$ {_yuanta_total:,}**")
+        if yuanta_salary_transfer_fubon:
+            st.info(f"執行時將先由富邦轉 NT$ {_yuanta_total:,} 至元大{selected_area_value}；銀行端須人工確認。")
+        else:
+            st.info("本次未勾選富邦轉元大，只執行元大薪資檔上傳待放行。")
+    else:
+        st.caption("請先檢查檔案與金額；確認完成後才可執行。")
+
 _run_button_label = "💾 儲存年度設定" if selected_function == SERVICE_DEEP_CLEAN_SETTINGS else "▶ 執行"
-run_clicked = st.button(_run_button_label, use_container_width=True)
+run_clicked = st.button(
+    _run_button_label,
+    use_container_width=True,
+    disabled=(
+        system_type == "finance_management"
+        and selected_function == "【元大銀行】薪資檔上傳待放行"
+        and not yuanta_salary_preview_ready
+    ),
+)
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -5406,6 +5727,14 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             if selected_function == "【富邦銀行】清潔用品採購":
                 finance_kwargs["selected_rows"] = fubon_supply_purchase_selected_rows
+            if selected_function == "【元大銀行】薪資檔上傳待放行":
+                finance_kwargs["include_contract"] = yuanta_salary_include_contract
+                finance_kwargs["include_internal"] = yuanta_salary_include_internal
+                finance_kwargs["transfer_fubon"] = yuanta_salary_transfer_fubon
+                finance_kwargs["expected_files"] = yuanta_salary_expected_files
+            if selected_function == "【財報】各區固定費用匯款":
+                finance_kwargs["execute_fubon_transfer"] = fixed_expense_execute_fubon
+                finance_kwargs["selected_rows"] = fixed_expense_selected_rows
             if selected_function in (
                 "【儲值金】轉檔",
                 "【儲值金】搬運",
@@ -5414,6 +5743,7 @@ if run_clicked:
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
                 "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）",
+                "【財報】各區固定費用匯款",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
                 "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
                 "【財報】年度review｜預覽公式調整",
@@ -5888,6 +6218,8 @@ if run_clicked:
                         "tools.service_management.stored_value",
                         "--step", step,
                     ]
+                    if step == "3" and vip_schedule_compare_only:
+                        cmd += ["--compare-only"]
                     if step != "1" and start_date_value and end_date_value:
                         cmd += ["--start", start_date_value.strftime("%Y-%m-%d"),
                                 "--end",   end_date_value.strftime("%Y-%m-%d")]
@@ -5937,6 +6269,20 @@ if run_clicked:
 
                 # 解析各 Step 結果，顯示部分成功
                 stdout_text = completed.stdout or ""
+                for _line in stdout_text.splitlines():
+                    if _line.startswith("VIP_SCHEDULE_DIFF="):
+                        try:
+                            _diff_result = json.loads(_line.split("=", 1)[1])
+                            _diff_counts = _diff_result.get("differences", {})
+                            st.info(f"{_diff_result['sheet']}：" + ("、".join(
+                                f"{_kind} {_count} 筆" for _kind, _count in _diff_counts.items()
+                            ) or "無新增差異"))
+                            if _diff_result.get("report_url"):
+                                st.markdown(f"[開啟排程差異表]({_diff_result['report_url']})")
+                            st.caption(f"詳細差異請查看工作表「{_diff_result['report']}」。"
+                                       + ("本次只比對，排程尚未更新。" if _diff_result.get("compare_only") else ""))
+                        except (ValueError, KeyError, TypeError):
+                            pass
                 success_steps = [l for l in stdout_text.splitlines() if "完成" in l and "ERROR" not in l and "失敗" not in l]
                 failed_steps  = [l for l in stdout_text.splitlines() if "失敗" in l and "[ERROR]" in l]
 

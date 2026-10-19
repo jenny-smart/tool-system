@@ -361,6 +361,16 @@ def _service_date_label(row: dict[str, Any]) -> str:
     return f"{row['date_str']}({row['weekday']})"
 
 
+def _service_dates_in_rows(rows: list[dict[str, Any]], dates_per_row: int = 3) -> str:
+    labels = [_service_date_label(row) for row in rows]
+    if not labels:
+        return "目前無排程"
+    return ",\n".join(
+        ", ".join(labels[index:index + dates_per_row])
+        for index in range(0, len(labels), dates_per_row)
+    )
+
+
 def _service_datetime_line(row: dict[str, Any]) -> str:
     return f"{row['date_str']}（週{row['weekday']}）{row['start_str']}–{row['end_str']}"
 
@@ -539,7 +549,7 @@ def _build_notice_text(
 ) -> str:
     all_rows = phase1_rows + phase2_rows
     monthly_confirmation = any(_is_monthly_confirmation(row) for row in all_rows)
-    service_dates = ", ".join(_service_date_label(row) for row in all_rows) or "目前無排程"
+    service_dates = _service_dates_in_rows(all_rows)
     service_times = "、".join(sorted({f"{row['start_str']}–{row['end_str']}" for row in all_rows})) or "目前無排程"
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
     deadline = f"建議您於 {reply_deadline} 前，" if reply_deadline.strip() else "如需調整，建議您儘早"
@@ -558,7 +568,7 @@ def _build_notice_text(
         contact = "請透過官方 LINE@ 與我們聯繫。\n"
         estimate_note = ""
     else:
-        month_dates = "\n".join(_service_date_label(row) for row in month_rows) or "目前無排程"
+        month_dates = _service_dates_in_rows(month_rows)
         month_times = "、".join(
             sorted({f"{row['start_str']}–{row['end_str']}" for row in month_rows})
         ) or "目前無排程"
@@ -568,7 +578,7 @@ def _build_notice_text(
             f"{month_dates}\n"
             f"服務時段：{month_times}\n\n"
             f"🕓 您原訂週期於年節期間（{_date_range(phase1_start, phase2_end)}）之服務安排如下：\n\n"
-            f"年節加價服務日期：{service_dates}\n"
+            f"年節加價服務日期：\n{service_dates}\n"
             f"服務時段：{service_times}\n\n"
             f"PART 1 次數／年節加價金額：{len(phase1_rows)} 次／{_money(phase1_total)}\n"
             f"PART 2 次數／年節加價金額：{len(phase2_rows)} 次／{_money(phase2_total)}\n\n"

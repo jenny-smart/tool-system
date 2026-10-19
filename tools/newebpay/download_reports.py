@@ -18,6 +18,10 @@ from tools.invoice_center.chrome_cdp import (
     connect_existing_chrome,
     find_existing_page,
 )
+from tools.invoice_center.invoice_archive import (
+    MONTHLY_ROOT_FOLDER_ID, get_google_services, get_or_create_folder,
+    get_or_create_area_folder, upload_replacing,
+)
 
 
 BASE_URL = "https://www.newebpay.com"
@@ -26,14 +30,7 @@ PAYMENT_URL = f"{BASE_URL}/sale/Sell_center/search_transaction?count=1"
 REFUND_URL = f"{BASE_URL}/payment/Credit_finance/search_credit_close"
 LOGOUT_URL = f"{BASE_URL}/company/company_procedures/logout"
 DEFAULT_ACCOUNTS_FILE = Path.home() / "NewebPay account" / "newebpay_accounts.json"
-BASE_GOOGLE_DRIVE = (
-    Path.home()
-    / "Library"
-    / "CloudStorage"
-    / "GoogleDrive-jenny@lemonclean.com.tw"
-    / "我的雲端硬碟"
-)
-PATH_HR = BASE_GOOGLE_DRIVE / "lemon_人事" / "03 服務分潤表"
+PATH_HR = Path(__file__).resolve().parents[2] / "outputs" / "newebpay"
 AREA_OUTPUT_DIRS = {
     "台北": "01.台北專員",
     "台中": "02.台中專員",
@@ -134,6 +131,13 @@ def area_output_dir(area: str, period: str, override: Path | None = None) -> Pat
         raise ValueError(f"尚未設定 {area} 的人事輸出資料夾")
     year = period[:4]
     return PATH_HR / f"{year}專員承攬服務費" / area_dir / period
+
+
+def archive_reports(drive, area: str, period: str, paths: list[Path]) -> list[str]:
+    year_folder = get_or_create_folder(drive, MONTHLY_ROOT_FOLDER_ID, f"{period[:4]}專員承攬服務費")
+    area_folder = get_or_create_area_folder(drive, year_folder, area)
+    period_folder = get_or_create_folder(drive, area_folder, period)
+    return [f"https://drive.google.com/file/d/{upload_replacing(drive, path, period_folder)}/view" for path in paths]
 
 
 def first_visible(page: Page, selectors: Iterable[str]) -> Locator:
@@ -514,7 +518,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--half", choices=("1", "2", "full"), default="full", help="full=整月（預設）；1=1～15日；2=16～月底")
     parser.add_argument("--area", help="只下載指定區域，例如 台北")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE, help=f"各區帳密 JSON（預設：{DEFAULT_ACCOUNTS_FILE}）")
-    parser.add_argument("--output", type=Path, help="自訂輸出根目錄；未指定時存到 Google Drive 人事目錄")
+    parser.add_argument("--output", type=Path, help="自訂本機輸出根目錄；未指定時下載至 outputs/newebpay 並上傳至固定 Drive 根目錄")
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     return parser.parse_args()
 
@@ -534,6 +538,7 @@ def main() -> int:
     print(f"區域：{', '.join(account.area for account in accounts)}")
 
     failures: list[str] = []
+    drive = get_google_services()[0] if args.output is None else None
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         shared_page = find_existing_page(context, ("newebpay.com",)) or context.new_page()
@@ -544,7 +549,8 @@ def main() -> int:
                     output = area_output_dir(account.area, period, args.output)
                     print(f"儲存位置：{output}")
                     files = run_account(context, account, start, end, period, output, page=shared_page)
-                    for file_path in files:
+                    results = archive_reports(drive, account.area, period, files) if drive is not None else files
+                    for file_path in results:
                         print(f"RESULT_FILE: {file_path}")
                 except Exception as exc:
                     failures.append(f"{account.area}: {exc}")

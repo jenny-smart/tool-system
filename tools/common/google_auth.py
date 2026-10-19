@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -12,10 +13,28 @@ SCOPES = [
 ]
 
 
+def _oauth_value(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if value:
+        return value
+    secrets_path = os.getenv("TOOLS_APP_SECRETS_FILE", "").strip()
+    if secrets_path and Path(secrets_path).expanduser().exists():
+        try:
+            import toml
+
+            raw = toml.loads(
+                Path(secrets_path).expanduser().read_text(encoding="utf-8")
+            ).get(name, "")
+            return str(raw or "").strip()
+        except Exception:
+            return ""
+    return ""
+
+
 def get_google_credentials() -> Credentials:
-    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
-    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
-    refresh_token = os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip()
+    client_id = _oauth_value("GOOGLE_OAUTH_CLIENT_ID")
+    client_secret = _oauth_value("GOOGLE_OAUTH_CLIENT_SECRET")
+    refresh_token = _oauth_value("GOOGLE_OAUTH_REFRESH_TOKEN")
 
     missing = []
 
