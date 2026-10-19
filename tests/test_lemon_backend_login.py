@@ -56,3 +56,17 @@ def test_all_tool_system_backend_logins_use_shared_flow():
         source = (root / name).read_text(encoding="utf-8")
         assert "lemon_backend_login import login as backend_login" in source, name
         assert 'find("input", {"name": "_token"})' not in source, name
+
+
+def test_synced_orders_system_copy_matches():
+    """orders-system 同步過來的 tools/orders_system/lemon_backend_login.py 程式內容要跟正本一致（說明文字除外）。"""
+    root = Path(__file__).resolve().parents[1]
+    copy = root / "tools/orders_system/lemon_backend_login.py"
+    if not copy.exists():
+        pytest.skip("orders-system 尚未同步過來")
+
+    def code(path):
+        text = path.read_text(encoding="utf-8")
+        return text[text.index('"""', 3) + 3:]  # 去掉檔頭說明（各 repo 註明正本位置不同）
+
+    assert code(copy) == code(root / "tools/common/lemon_backend_login.py")
