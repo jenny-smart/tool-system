@@ -371,6 +371,41 @@ def _service_dates_in_rows(rows: list[dict[str, Any]], dates_per_row: int = 3) -
     )
 
 
+def _service_time(row: dict[str, Any]) -> str:
+    return f"{row['start_str']}–{row['end_str']}"
+
+
+def _phase_service_schedule(
+    phase1_rows: list[dict[str, Any]],
+    phase2_rows: list[dict[str, Any]],
+) -> str:
+    all_rows = phase1_rows + phase2_rows
+    service_times = sorted({_service_time(row) for row in all_rows})
+    if len(service_times) <= 1:
+        service_time = service_times[0] if service_times else "目前無排程"
+        return (
+            f"PART 1 年節加價服務日期：\n{_service_dates_in_rows(phase1_rows)}\n"
+            f"PART 2 年節加價服務日期：\n{_service_dates_in_rows(phase2_rows)}\n"
+            f"服務時段：{service_time}\n"
+        )
+
+    sections: list[str] = []
+    for part, rows in ((1, phase1_rows), (2, phase2_rows)):
+        if not rows:
+            sections.append(f"PART {part} 年節加價服務日期：\n目前無排程")
+            continue
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(_service_time(row), []).append(row)
+        for service_time in sorted(grouped):
+            sections.append(
+                f"PART {part} 年節加價服務日期：\n"
+                f"{_service_dates_in_rows(grouped[service_time])}\n"
+                f"服務時段：{service_time}"
+            )
+    return "\n".join(sections) + "\n"
+
+
 def _service_datetime_line(row: dict[str, Any]) -> str:
     return f"{row['date_str']}（週{row['weekday']}）{row['start_str']}–{row['end_str']}"
 
@@ -549,8 +584,7 @@ def _build_notice_text(
 ) -> str:
     all_rows = phase1_rows + phase2_rows
     monthly_confirmation = any(_is_monthly_confirmation(row) for row in all_rows)
-    service_dates = _service_dates_in_rows(all_rows)
-    service_times = "、".join(sorted({f"{row['start_str']}–{row['end_str']}" for row in all_rows})) or "目前無排程"
+    phase_service_schedule = _phase_service_schedule(phase1_rows, phase2_rows)
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
     deadline = f"建議您於 {reply_deadline} 前，" if reply_deadline.strip() else "如需調整，建議您儘早"
     deadline_date = _reply_deadline_date(reply_deadline)
@@ -578,8 +612,7 @@ def _build_notice_text(
             f"{month_dates}\n"
             f"服務時段：{month_times}\n\n"
             f"🕓 您原訂週期於年節期間（{_date_range(phase1_start, phase2_end)}）之服務安排如下：\n"
-            f"年節加價服務日期：\n{service_dates}\n"
-            f"服務時段：{service_times}\n\n"
+            f"{phase_service_schedule}\n"
             f"PART 1 次數／年節加價金額：{len(phase1_rows)} 次／{_money(phase1_total)}\n"
             f"PART 2 次數／年節加價金額：{len(phase2_rows)} 次／{_money(phase2_total)}\n\n"
             f"{holiday_block}"
