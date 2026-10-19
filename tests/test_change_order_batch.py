@@ -54,8 +54,10 @@ def test_pending_charge_waits_for_payment_and_manual_invoice():
     assert plan(B="待收款")["missing"] == ["客人尚未付款（M 收款時間空白）"]
     assert plan(B="待收款", M="2026/09/20")["missing"] == ["缺收款金額（N）"]
     item = plan(B="待收款", M="2026/09/20", N="500")
-    assert item["missing"] == [] and item["manual"] == ["請到【鯨躍發票】開立發票逐筆開立"]
-    assert plan(B="待收款", M="2026/09/20", N="500", O="AB1")["manual"] == []
+    assert item["missing"] == [] and item["manual"] == [] and item["actions"] == ["invoice"]
+    assert plan(B="待收款", M="2026/09/20", N="500", O="AB1", AA="2026/10/19")["actions"] == ["sync"]
+    item = plan(B="待收款", M="2026/09/20", N="500", O="AB1")
+    assert item["actions"] == [] and "AA" in item["manual"][0]
 
 
 def test_stored_value_and_invoice_rows():
@@ -150,7 +152,7 @@ def test_sync_respects_selected_rows(monkeypatch):
 def test_already_processed_pending_rows_go_straight_to_sync():
     cases = [
         (dict(B="待退款", S="1000", AB="AL1", AC="2026/10/17"), "已退款"),
-        (dict(B="待收款", M="2026/10/17", N="500", O="AB12345678"), "已收款"),
+        (dict(B="待收款", M="2026/10/17", N="500", O="AB12345678", AA="2026/10/19 10:00:00"), "已收款"),
         (dict(B="待扣儲值金", N="500", M="2026/10/17"), "已扣儲值金"),
         (dict(B="待返儲值金", S="300", AC="2026/10/17"), "已返儲值金"),
         (dict(B="待處理發票", C="車馬費發票", O="AB1"), "已處理發票"),
@@ -162,7 +164,7 @@ def test_already_processed_pending_rows_go_straight_to_sync():
 
 
 def test_sync_region_sets_done_status_for_processed_pending_rows(monkeypatch):
-    values = [["h"], row(B="待收款", M="2026/10/17", N="500", O="AB1")]
+    values = [["h"], row(B="待收款", M="2026/10/17", N="500", O="AB1", AA="2026/10/19")]
     b_updates, synced, marked = [], [], []
 
     class WS:
@@ -197,3 +199,34 @@ def test_refund_amount_shows_what_will_actually_be_refunded():
     # ATM：顯示 T（扣手續費後實際匯出金額）
     assert plan(B="待退款", X="AB1", Z="952", S="1000", T="985", R="ATM", P="700", Q="1")["amount"] == "985"
     assert plan(B="待退款", X="AB1", Z="952", S="1000", R="ATM", P="700", Q="1")["amount"] == "1000"
+
+
+def test_queue_actions_invoice_first_via_ui_queue():
+    items = [
+        {"region": "台北", "row": 4, "actions": ["allowance"]},
+        {"region": "台北", "row": 320, "actions": ["invoice"]},
+        {"region": "台中", "row": 8, "actions": ["invoice"]},
+    ]
+    order = []
+
+    def create(action, params, created_by=""):
+        order.append((action, params.get("area") or tuple(params.get("regions", []))))
+        return {"task_id": str(len(order))}
+
+    def queue_invoices(region, rows):
+        order.append(("invoice", region, rows))
+        return {"task_id": "inv"}
+
+    batch.queue_actions(items, True, create, log=lambda *_: None, queue_invoices=queue_invoices)
+    assert order == [
+        ("invoice", "台北", [320]), ("invoice", "台中", [8]),
+        ("cetustek.allowance", "台北"),
+        ("change_order.sync", ("台北", "台中")),
+    ]
+
+
+def test_queue_actions_without_invoice_queue_skips_invoice():
+    created, logs = [], []
+    batch.queue_actions([{"region": "台北", "row": 320, "actions": ["invoice"]}], False,
+                        lambda action, params, created_by="": created.append(action) or {}, log=logs.append)
+    assert created == [] and "開立發票未排入" in logs[0]
