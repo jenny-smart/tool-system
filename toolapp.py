@@ -2074,6 +2074,13 @@ def render_log_page() -> None:
 # ═══════════════════════════════════════════════════════════
 # Local Agent 離線處理頁
 # ═══════════════════════════════════════════════════════════
+def _remember_agent_control_task(task) -> None:
+    """記下本頁這次送出的 Agent 更新／控制任務；Agent 頁只顯示這些任務的結果。"""
+    task_id = str((task or {}).get("task_id") or "") if isinstance(task, dict) else ""
+    if task_id:
+        st.session_state.setdefault("agent_control_task_ids", []).append(task_id)
+
+
 def render_agent_help() -> None:
     st.markdown("## 🖥️ Agent 狀態與重啟")
 
@@ -2219,6 +2226,7 @@ def render_agent_help() -> None:
         ok, message, _task = create_git_pull_task(
             created_by=st.session_state.get("username", "Tool System")
         )
+        _remember_agent_control_task(_task)
         list_local_agent_tasks.clear()
         if ok:
             st.success(message)
@@ -2230,8 +2238,11 @@ def render_agent_help() -> None:
     elif not tasks_read_ok:
         st.caption("無法確認 Agent 是否閒置，暫停更新以確保安全。")
 
+    # 只顯示這次在本頁按下的更新／控制結果，舊紀錄不顯示，避免誤判目前的更新狀態
+    session_control_ids = set(st.session_state.get("agent_control_task_ids", []))
     latest_pull = next(
-        (task for task in agent_tasks if task.get("action") == "system.git_pull"),
+        (task for task in agent_tasks
+         if task.get("action") == "system.git_pull" and task.get("task_id") in session_control_ids),
         None,
     )
     if latest_pull:
@@ -2277,6 +2288,7 @@ def render_agent_help() -> None:
                 {},
                 created_by=st.session_state.get("username", "Tool System"),
             )
+            _remember_agent_control_task(task)
             st.success(f"已送出重啟任務：{task['task_id']}")
             st.rerun()
     with control_cols[1]:
@@ -2291,6 +2303,7 @@ def render_agent_help() -> None:
                 {},
                 created_by=st.session_state.get("username", "Tool System"),
             )
+            _remember_agent_control_task(task)
             st.success(f"已送出狀態檢查：{task['task_id']}")
             st.rerun()
     with control_cols[2]:
@@ -2305,6 +2318,7 @@ def render_agent_help() -> None:
                 {},
                 created_by=st.session_state.get("username", "Tool System"),
             )
+            _remember_agent_control_task(task)
             st.success(f"已送出 Log 讀取：{task['task_id']}")
             st.rerun()
 
@@ -2319,6 +2333,7 @@ def render_agent_help() -> None:
             {},
             created_by=st.session_state.get("username", "Tool System"),
         )
+        _remember_agent_control_task(task)
         st.success(f"已送出更新＋重啟任務：{task['task_id']}")
         st.rerun()
 
@@ -2334,7 +2349,8 @@ def render_agent_help() -> None:
         ("system.agent_restart", "重啟 Agent"),
         ("system.git_pull_restart", "更新＋重啟 Agent"),
     ):
-        latest_control = next((task for task in agent_tasks if task.get("action") == action), None)
+        latest_control = next((task for task in agent_tasks
+                               if task.get("action") == action and task.get("task_id") in session_control_ids), None)
         if latest_control:
             with st.expander(f"{label}｜{latest_control.get('status', '')}", expanded=True):
                 st.write(latest_control.get("message") or "等待 Agent 執行；請按重新檢查心跳更新結果。")
