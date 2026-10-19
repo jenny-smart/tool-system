@@ -272,6 +272,38 @@ def select_merchant(page: Page, account: AreaAccount) -> None:
     raise RuntimeError(f"商店選單找不到：{account.merchant_label}")
 
 
+def logged_in_member(page: Page, timeout_ms: int = 5_000) -> str:
+    """頁首「lemon25您好，您管理的公司為…」的會員帳號；讀不到回傳空字串。"""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        try:
+            match = re.search(r"([A-Za-z0-9_.@-]+)\s*您好", page.locator("body").inner_text(timeout=2_000))
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
+        if time.monotonic() >= deadline:
+            return ""
+        page.wait_for_timeout(300)
+
+
+def is_expected_member(page: Page, account: AreaAccount) -> bool:
+    """登入中的會員帳號是否為這區（帳密檔 account）。"""
+    expected = str(account.account or "").strip().lower()
+    if not expected:
+        raise RuntimeError(f"藍新帳密檔的{account.area}尚未設定 account，無法確認登入的是哪一區")
+    return logged_in_member(page).strip().lower() == expected
+
+
+def check_member_after_login(page: Page, account: AreaAccount) -> None:
+    """登入後再確認一次是這區帳號，不是就停止（不在別區帳號下查詢或退款）。"""
+    if not is_expected_member(page, account):
+        raise RuntimeError(
+            f"藍新登入的會員帳號（{logged_in_member(page, 1_000) or '讀不到'}）不是{account.area}（{account.account}），已停止"
+        )
+    print(f"[{account.area}] 已確認登入的是{account.area}藍新帳號（{account.account}）。")
+
+
 def fill_enterprise_login(page: Page, account: AreaAccount) -> None:
     company_id, account_field, password = prepare_enterprise_login(page)
     company_id.fill(account.company_id)
@@ -297,8 +329,11 @@ def login(page: Page, account: AreaAccount) -> list[str]:
     page.on("dialog", show_dialog)
     page.on("response", show_login_response)
     if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
-        print(f"[{account.area}] 沿用目前藍新登入狀態。")
-        return login_messages
+        if is_expected_member(page, account):
+            print(f"[{account.area}] 沿用目前藍新登入狀態（{account.account}）。")
+            return login_messages
+        print(f"[{account.area}] 目前登入的藍新帳號（{logged_in_member(page, 1_000) or '讀不到'}）不是{account.area}，先登出再登入。")
+        logout(page, account.area)
     fill_enterprise_login(page, account)
 
     print(f"\n[{account.area}] 企業帳密已預填。")
@@ -309,6 +344,7 @@ def login(page: Page, account: AreaAccount) -> list[str]:
     refilled_after_failure = False
     while time.monotonic() < deadline:
         if "/sale/Sell_center/search_transaction" in page.url:
+            check_member_after_login(page, account)
             return login_messages
         if "/main/login_center/single_login" in page.url:
             company_id = visible_login_field(page, ('.MoComUbn', 'input[name="LoginUBN"]'))

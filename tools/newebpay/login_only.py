@@ -17,8 +17,12 @@ from tools.newebpay.download_reports import (
     DEFAULT_ACCOUNTS_FILE,
     AreaAccount,
     LOGIN_URL,
+    check_member_after_login,
     fill_enterprise_login,
+    is_expected_member,
     load_accounts,
+    logged_in_member,
+    logout,
 )
 
 
@@ -34,8 +38,11 @@ def wait_for_login(page: Page, account: AreaAccount, timeout: float = 30.0) -> N
 
     page.on("dialog", handle_dialog)
     if "newebpay.com" in page.url and "login_center/single_login" not in page.url:
-        print(f"[{account.area}] 沿用目前藍新登入狀態。")
-        return
+        if is_expected_member(page, account):
+            print(f"[{account.area}] 沿用目前藍新登入狀態（{account.account}）。")
+            return
+        print(f"[{account.area}] 目前登入的藍新帳號（{logged_in_member(page, 1_000) or '讀不到'}）不是{account.area}，先登出再登入。")
+        logout(page, account.area)
     fill_enterprise_login(page, account)
     print(f"[{account.area}] 藍新帳密已預填，請輸入驗證碼並按『企業會員登入』。")
 
@@ -47,6 +54,7 @@ def wait_for_login(page: Page, account: AreaAccount, timeout: float = 30.0) -> N
         login_field = visible_fields[0] if visible_fields else None
         field_visible = login_field is not None
         if not on_login_page and not field_visible:
+            check_member_after_login(page, account)
             print(f"[{account.area}] 藍新登入完成。")
             return
         if field_visible and login_field is not None and not login_field.input_value().strip():

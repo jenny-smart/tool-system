@@ -170,6 +170,15 @@ def login(page: Page, account: AreaAccount) -> None:
         getattr(dialog, "accept")()
 
     page.on("dialog", handle_dialog)
+    from tools.newebpay.download_reports import check_member_after_login, is_expected_member, logged_in_member
+
+    if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
+        # 接續目前畫面：已登入這區帳號就不用再輸入驗證碼
+        if is_expected_member(page, account):
+            print(f"[{account.area}] 沿用目前藍新登入狀態（{account.account}）。")
+            return
+        print(f"[{account.area}] 目前登入的藍新帳號（{logged_in_member(page, 1_000) or '讀不到'}）不是{account.area}，先登出再登入。")
+        logout(page, account.area)
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
     fill_enterprise_login(page, account)
     print(f"\n[{account.area}] 帳密已填入，請在 Chrome 輸入驗證碼並按企業會員登入。")
@@ -192,6 +201,7 @@ def login(page: Page, account: AreaAccount) -> None:
             page.wait_for_timeout(500)
             if needs_relogin:
                 continue
+            check_member_after_login(page, account)
             return
 
         if "/main/login_center/single_login" not in page.url:

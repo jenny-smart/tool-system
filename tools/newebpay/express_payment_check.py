@@ -24,6 +24,7 @@ from tools.newebpay.download_reports import (
     click_search,
     load_accounts,
     login,
+    logout,
     select_merchant,
 )
 from tools.newebpay.express_payment_data import (
@@ -258,11 +259,18 @@ def run(area: str, accounts_file: Path, cdp_url: str) -> int:
         if "newebpay.com" not in page.url:
             page.goto(LOGIN_URL, wait_until="domcontentloaded")
         login(page, account)
-        page.goto(QUERY_URL, wait_until="domcontentloaded", timeout=60_000)
-        select_merchant(page, account)
-        click_search(page)
-        payments = read_results(page)
-        written = append_new_payments(area, payments)
+        try:
+            page.goto(QUERY_URL, wait_until="domcontentloaded", timeout=60_000)
+            select_merchant(page, account)
+            click_search(page)
+            payments = read_results(page)
+            written = append_new_payments(area, payments)
+        finally:
+            # 查帳做完（或失敗）一律登出
+            try:
+                logout(page, area)
+            except Exception as exc:
+                print(f"[{area}] ⚠️ 藍新自動登出失敗，下次執行前請手動登出：{exc}")
         print(f"{area}：藍新快速查帳 {len(payments)} 筆，新增 {written} 筆，略過 {len(payments) - written} 筆。")
     return 0
 
