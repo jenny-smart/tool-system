@@ -331,25 +331,15 @@ class _CsrfTokenParser(HTMLParser):
 
 
 def _login_backend_session(email: str, password: str, area_name: str) -> requests.Session:
-    session = requests.Session()
-    headers = {"User-Agent": "Mozilla/5.0"}
-    resp = session.get(LOGIN_URL, headers=headers, timeout=30, allow_redirects=True)
-    resp.raise_for_status()
-    parser = _CsrfTokenParser()
-    parser.feed(resp.text)
-    if not parser.token:
-        raise RuntimeError(f"[{area_name}] 登入頁面找不到 _token")
+    """登入檸檬後台（共用 tools/common/lemon_backend_login；程式結束時自動登出）。"""
+    from tools.common.lemon_backend_login import login as backend_login
 
-    resp = session.post(
-        LOGIN_URL,
-        data={"_token": parser.token, "email": email, "password": password},
-        headers=headers,
-        timeout=30,
-        allow_redirects=True,
-    )
-    resp.raise_for_status()
-    if "login" in resp.url.lower():
-        raise RuntimeError(f"[{area_name}] 後台登入失敗")
+    session = requests.Session()
+    try:
+        backend_login(session, email, password, login_url=LOGIN_URL,
+                      headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+    except RuntimeError as exc:
+        raise RuntimeError(f"[{area_name}] 後台登入失敗：{exc}") from exc
     return session
 
 

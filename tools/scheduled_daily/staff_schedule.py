@@ -15,6 +15,15 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 try:
+    from tools.common.lemon_backend_login import login as backend_login
+except ModuleNotFoundError:  # 直接以腳本執行（cd 到此資料夾再 python xxx.py）時
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+    from tools.common.lemon_backend_login import login as backend_login
+
+try:
     import streamlit as st
     HAS_STREAMLIT = True
 except Exception:
@@ -107,37 +116,10 @@ def get_service_account_info():
 
 
 def login(email: str, password: str) -> requests.Session:
+    """登入檸檬後台（共用 tools/common/lemon_backend_login；程式結束時自動登出）。"""
     session = requests.Session()
-
     log(f"開始登入：{email}")
-
-    res = session.get(LOGIN_URL, headers=HEADERS, allow_redirects=True, timeout=60)
-    res.raise_for_status()
-
-    soup = BeautifulSoup(res.text, "html.parser")
-    token_input = soup.find("input", {"name": "_token"})
-
-    if not token_input:
-        raise RuntimeError("找不到 _token")
-
-    payload = {
-        "_token": token_input.get("value"),
-        "email": email,
-        "password": password,
-    }
-
-    login_res = session.post(
-        LOGIN_URL,
-        data=payload,
-        headers=HEADERS,
-        allow_redirects=True,
-        timeout=60,
-    )
-    login_res.raise_for_status()
-
-    if "login" in login_res.url.lower():
-        raise RuntimeError(f"{email} 登入失敗")
-
+    backend_login(session, email, password, login_url=LOGIN_URL, headers=HEADERS, timeout=60)
     log(f"登入成功：{email}")
     return session
 
