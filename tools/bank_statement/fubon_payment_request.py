@@ -11,7 +11,7 @@ from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
-from tools.bank_statement.fubon_payment_request_filter import pending_payment_requests
+from tools.bank_statement.fubon_payment_request_filter import merge_by_payee, pending_payment_requests
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
     choose_immediate_date,
@@ -78,12 +78,18 @@ def fill_payment_request(
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
 
 
-def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
+def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: bool = False) -> int:
     values = read_report_values(PAYMENT_REQUEST_TYPE, area)
     candidates = pending_payment_requests(values)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
     if not selected:
         raise ValueError("勾選列中沒有符合 A=待付款 且 F/G 欄完整的資料")
+    if merge:
+        # 同一收款對象合併成一筆轉帳（金額加總），轉完每一列都回填
+        selected = merge_by_payee(selected)
+        for item in selected:
+            if len(item["rows"]) > 1:
+                print(f"合併：{item['name']} {item['memo']}，合計 NT$ {item['amount']}")
 
     account = load_account("fubon", area, accounts_file.expanduser())
     spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, area)
@@ -100,13 +106,15 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
                 # 例外——不然腳本沒等最後一筆完成就結束，A/B 欄就不會回填。
                 wait_user_completed_transfer(page)
                 payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
-                service.spreadsheets().values().update(
-                    spreadsheetId=spreadsheet_id,
-                    range=f"'{sheet_title}'!A{item['sheet_row']}:B{item['sheet_row']}",
-                    valueInputOption="USER_ENTERED",
-                    body={"values": [["已付款", payment_date]]},
-                ).execute()
-                print(f"已回填第 {item['sheet_row']} 列：已付款／{payment_date}")
+                paid_rows = [int(row) for row in item.get("rows") or [item["sheet_row"]]]
+                for row in paid_rows:
+                    service.spreadsheets().values().update(
+                        spreadsheetId=spreadsheet_id,
+                        range=f"'{sheet_title}'!A{row}:B{row}",
+                        valueInputOption="USER_ENTERED",
+                        body={"values": [["已付款", payment_date]]},
+                    ).execute()
+                print(f"已回填第 {'、'.join(map(str, paid_rows))} 列：已付款／{payment_date}")
                 page = current_fubon_page(context, page) or page
             print("全部勾選資料均已完成付款並回填 A/B 欄。")
             print("開始下載今日富邦明細。")
@@ -124,11 +132,12 @@ def main() -> int:
     parser.add_argument("--rows", required=True, help="勾選的工作表列號，以逗號分隔")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
+    parser.add_argument("--merge", action="store_true", help="同一收款對象合併成一筆轉帳")
     args = parser.parse_args()
     rows = {int(value) for value in args.rows.split(",") if value.strip().isdigit()}
     if not rows:
         raise ValueError("沒有勾選請款記錄資料")
-    return run(args.area, rows, args.accounts_file, args.cdp_url)
+    return run(args.area, rows, args.accounts_file, args.cdp_url, merge=args.merge)
 
 
 if __name__ == "__main__":

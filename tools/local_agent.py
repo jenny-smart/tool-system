@@ -522,7 +522,7 @@ def build_fubon_payment_request(params: dict[str, Any]) -> list[str]:
         cdp_url,
         "--rows",
         ",".join(str(int(row)) for row in selected_rows),
-    ]
+    ] + (["--merge"] if params.get("merge") else [])
 
 
 def build_fubon_deposit_refund(params: dict[str, Any]) -> list[str]:

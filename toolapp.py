@@ -2773,7 +2773,8 @@ def queue_fubon_atm_refund(*, month="", start_date=None, end_date=None, area="�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
-def queue_fubon_payment_request(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+def queue_fubon_payment_request(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None,
+                                merge=False):
     if not selected_rows:
         raise ValueError("請先勾選要處理的請款記錄資料")
     task = create_local_agent_task(
@@ -2782,6 +2783,7 @@ def queue_fubon_payment_request(*, month="", start_date=None, end_date=None, are
             "area": area,
             "selected_rows": selected_rows,
             "cdp_url": "http://127.0.0.1:9222",
+            "merge": bool(merge),
         },
         created_by=st.session_state.get("username", "Tool System"),
     )
@@ -5443,6 +5445,7 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
         st.error(f"讀取富邦 ATM 退款資料失敗：{exc}")
 
 fubon_payment_request_selected_rows = []
+fubon_payment_request_merge = False
 if system_type == "finance_management" and selected_function == "【富邦銀行】請款記錄":
     try:
         from tools.bank_statement.fubon_payment_request_filter import pending_payment_requests
@@ -5482,6 +5485,25 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             f"待付款請款記錄：{len(_payment_request_candidates)} 筆；"
             f"已勾選：{len(fubon_payment_request_selected_rows)} 筆"
         )
+        fubon_payment_request_merge = st.checkbox(
+            "同一收款對象合併成一筆轉帳",
+            value=False,
+            key=f"fubon_payment_request_merge_{selected_area_value}",
+            help="收款對象與收款帳號都相同的勾選列合併轉一次（金額加總），完成後每一列都回填已付款。"
+                 "有的要合併、有的不合併時，請分兩次勾選執行。",
+        )
+        if fubon_payment_request_merge:
+            from tools.bank_statement.fubon_payment_request_filter import merge_by_payee
+
+            _merged = [
+                item for item in merge_by_payee([
+                    item for item in _payment_request_candidates
+                    if int(item["sheet_row"]) in fubon_payment_request_selected_rows
+                ])
+                if len(item["rows"]) > 1
+            ]
+            for item in _merged:
+                st.caption(f"將合併：{item['name']} {item['memo']}，合計 NT$ {item['amount']}")
     except Exception as exc:
         st.error(f"讀取請款記錄資料失敗：{exc}")
 
@@ -5986,6 +6008,7 @@ if run_clicked:
                 finance_kwargs["selected_rows"] = fubon_refund_selected_rows
             if selected_function == "【富邦銀行】請款記錄":
                 finance_kwargs["selected_rows"] = fubon_payment_request_selected_rows
+                finance_kwargs["merge"] = fubon_payment_request_merge
             if selected_function == "【富邦銀行】工具包押金退款":
                 finance_kwargs["selected_rows"] = fubon_deposit_refund_selected_rows
             if selected_function == "【富邦銀行】清潔用品採購":

@@ -48,8 +48,12 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                             disabled=[c for c in _rows(items[:1]).columns if c != RUN_COLUMN],
                             key="internal_payment_batch_editor")
     selected = [item for item, flag in zip(items, edited[RUN_COLUMN]) if flag]
+    merge = st.checkbox("請款記錄：同一收款對象合併成一筆轉帳", value=False, key="internal_payment_batch_merge",
+                        help="收款對象與收款帳號都相同的勾選列合併轉一次（金額加總），完成後每一列都回填已付款。"
+                             "有的要合併、有的不合併時，請分兩次勾選執行。")
     st.caption("執行順序：請款記錄 → 工具包押金退款 → 清潔用品採購 → 留紀錄。")
     if st.button(f"▶️ 執行勾選的 {len(selected)} 筆", key="internal_payment_batch_run", disabled=not selected):
-        batch.queue_actions(selected, create_task, created_by=username or "內部請款整合執行", log=log)
+        batch.queue_actions(selected, create_task, created_by=username or "內部請款整合執行", log=log,
+                            merge_payments=merge)
         st.success("已排入本機 Agent，請到下方查看執行進度。")
         st.session_state.pop(STATE_KEY, None)
