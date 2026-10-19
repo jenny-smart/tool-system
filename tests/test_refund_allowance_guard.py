@@ -1,0 +1,44 @@
+"""折讓單與退款成對：開立前查已開未回填、開立後讀不到單號再查、退款前缺折讓單號就跳過。"""
+from unittest.mock import MagicMock
+
+import pytest
+
+from tools.finance_management import refund_guard
+
+allowance = pytest.importorskip("tools.invoice_center.allowance_create")
+
+
+def _row(x="", ab=""):
+    row = [""] * 30
+    row[23], row[27] = x, ab
+    return row
+
+
+def test_refund_requires_allowance_number_when_invoice_exists():
+    values = [_row(), _row("FP56436829", ""), _row("FP56436854", "FP90000001"), _row("", "")]
+    assert refund_guard.missing_allowance(values, 2)
+    assert not refund_guard.missing_allowance(values, 3)
+    assert not refund_guard.missing_allowance(values, 4)  # 沒開發票不需要折讓單
+    sheet = MagicMock()
+    sheet.get_all_values.return_value = values
+    messages = []
+    assert refund_guard.ready_for_refund(sheet, 2, messages.append) is False
+    assert "未退款" in messages[0]
+    assert refund_guard.ready_for_refund(sheet, 3) is True
+
+
+ROWS = [
+    "1 115/09/02 FP56436829 FP90000001 黃傑 952 47 已開立",          # 以前別次的折讓（登記日前）
+    "2 115/10/19 FP56436829 FP90000077 黃傑 500 25 已開立",          # 金額不符
+    "3 115/10/19 FP56436829 FP90000099 黃傑 1,333 67 已開立",        # 這一筆
+]
+
+
+def test_parse_finds_this_allowance_only():
+    assert allowance.parse_allowance_rows(ROWS, "FP56436829", untaxed="1333.333", not_before="2026/10/19") == (
+        "2026/10/19", "FP90000099")
+
+
+def test_parse_ignores_voided_and_other_invoices():
+    rows = ["1 115/10/19 FP56436829 FP90000099 1,333 已作廢", "2 115/10/19 FP11111111 FP90000100 1,333"]
+    assert allowance.parse_allowance_rows(rows, "FP56436829", untaxed="1333.333", not_before="2026/10/19") is None

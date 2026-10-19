@@ -26,5 +26,6 @@ def pending_allowances(values: list[list[object]]) -> list[dict[str, object]]:
             "invoice_no": cells[23],
             "refund_amount": _amount(cells[18]),
             "untaxed_amount": _amount(cells[25]),
+            "registered_on": cells[4],
         })
     return result

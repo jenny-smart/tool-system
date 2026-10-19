@@ -16,6 +16,7 @@ from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
 ALLOWANCE_ADD_URL = "https://www.ei.com.tw/InvoiceRent/allowanceadd.jsp"
+ALLOWANCE_QUERY_URL = "https://www.ei.com.tw/InvoiceRent/allowancequery.jsp"
 
 
 def _visible(locator: Locator) -> Locator | None:
@@ -145,6 +146,80 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
     return _finish_allowance_save(page)
 
 
+def _roc_to_ad(text: str) -> str:
+    year, month, day = (int(part) for part in text.split("/"))
+    return f"{year + 1911}/{month:02d}/{day:02d}"
+
+
+def parse_allowance_rows(rows_text: list[str], invoice_no: str, *, untaxed: str = "",
+                         not_before: str = "") -> tuple[str, str] | None:
+    """從折讓單查詢結果各列文字，找這一筆的折讓單（日期、單號）。
+
+    條件：原發票為 invoice_no、未作廢、折讓日期不早於登記日期（not_before，YYYY/MM/DD）、
+    列中有這筆的未稅金額（四捨五入到整數，容許 ±1）。同一張發票以前別次的折讓不會被誤認。
+    """
+    invoice_no = invoice_no.strip().upper()
+    target = _money(untaxed) if untaxed else None
+    since = re.sub(r"\D", "", not_before)
+    for text in rows_text:
+        if invoice_no not in text.upper() or "作廢" in text:
+            continue
+        numbers = [n for n in re.findall(r"[A-Z]{2}\d{8,}", text.upper()) if n != invoice_no]
+        if not numbers:
+            continue
+        dates = re.findall(r"(?<!\d)(\d{3}/\d{2}/\d{2})(?!\d)", text)
+        allowance_date = _roc_to_ad(dates[0]) if dates else ""
+        if since and allowance_date and re.sub(r"\D", "", allowance_date) < since[:8]:
+            continue
+        if target is not None:
+            amounts = [_money(a) for a in re.findall(r"\d[\d,]*(?:\.\d+)?", text.replace(invoice_no, ""))]
+            if not any(abs(a - target.quantize(Decimal("1"))) <= 1 for a in amounts):
+                continue
+        return allowance_date, numbers[0]
+    return None
+
+
+def _query_row_inputs(page: Page, label: str) -> Locator:
+    row = page.locator("tr").filter(has=page.get_by_text(label, exact=True)).first
+    return row.locator("input[type='text'], input:not([type])")
+
+
+def find_existing_allowance(page: Page, invoice_no: str, days: int = 120, *, untaxed: str = "",
+                            not_before: str = "") -> tuple[str, str] | None:
+    """到鯨躍「折讓單查詢」用原發票號碼查近 days 天的折讓單；有就回傳（日期, 單號）。
+
+    用來確認「已開立但沒回填」：開立前先查，避免重複開立；開立後讀不到單號時再查一次補回。
+    查詢本身失敗會丟例外（呼叫端停止，不在不確定時開立）。
+    """
+    page.goto(ALLOWANCE_QUERY_URL, wait_until="domcontentloaded")
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    start = today.fromordinal(today.toordinal() - days)
+    roc = lambda d: f"{d.year - 1911}/{d.month:02d}/{d.day:02d}"  # noqa: E731
+    dates = _query_row_inputs(page, "折讓單日期")
+    if dates.count() < 2:
+        raise RuntimeError("鯨躍折讓單查詢頁找不到「折讓單日期」欄位，無法確認是否已開立折讓單")
+    for locator, value in ((dates.nth(0), roc(start)), (dates.nth(1), roc(today))):
+        locator.evaluate(
+            "(el, v) => { el.removeAttribute('readonly'); el.value = v; "
+            "el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); }",
+            value,
+        )
+    keyword = _query_row_inputs(page, "關鍵字")
+    if not keyword.count():
+        raise RuntimeError("鯨躍折讓單查詢頁找不到「關鍵字」欄位，無法確認是否已開立折讓單")
+    keyword.first.fill(invoice_no)
+    search = page.locator("a, button, input[type='button'], input[type='submit']").filter(has_text=re.compile(r"^\s*搜尋\s*$"))
+    if search.count():
+        search.first.click()
+    else:
+        page.locator("input[value='搜尋']").first.click()
+    page.wait_for_load_state("networkidle", timeout=20_000)
+    page.wait_for_timeout(800)
+    rows = page.locator("tr").filter(has_text=invoice_no)
+    texts = [rows.nth(i).inner_text() for i in range(rows.count())]
+    return parse_allowance_rows(texts, invoice_no, untaxed=untaxed, not_before=not_before)
+
+
 def _existing_allowance(values: list[list[str]], sheet_row: int) -> tuple[str, str]:
     row = values[sheet_row - 1] if 0 < sheet_row <= len(values) else []
     allowance_date = str(row[26]).strip() if len(row) > 26 else ""
@@ -187,12 +262,28 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                 )
                 continue
 
-            number = _create_one(
-                page,
-                str(item["invoice_no"]),
-                str(item["untaxed_amount"]),
-            )
-            allowance_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
+            invoice_no = str(item["invoice_no"])
+            # 開立前：鯨躍已有這張發票的折讓單（上次開了但沒回填）就補回，不重開
+            match_args = {"untaxed": str(item["untaxed_amount"]), "not_before": str(item.get("registered_on") or "")}
+            found = find_existing_allowance(page, invoice_no, **match_args)
+            if found:
+                allowance_date, number = found
+                print(f"第 {sheet_row} 列：鯨躍已有 {invoice_no} 的折讓單 {number}，不重開，補回 AA／AB")
+            else:
+                _open_allowance(page)
+                try:
+                    number = _create_one(page, invoice_no, str(item["untaxed_amount"]))
+                except Exception as exc:
+                    # 開立後讀不到單號：再查一次，有就補回；查不到才算開立失敗
+                    found = find_existing_allowance(page, invoice_no, **match_args)
+                    if not found:
+                        raise RuntimeError(f"第 {sheet_row} 列 {invoice_no} 折讓單未開立成功：{exc}") from exc
+                    allowance_date, number = found
+                    print(f"第 {sheet_row} 列：存檔後未讀到單號，查詢確認已開立 {number}，補回 AA／AB")
+                else:
+                    allowance_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
+                _open_allowance(page)
+            allowance_date = allowance_date or datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
 
             # One final read before writing, so a concurrent/manual update always wins.
             latest_values = worksheet.get_all_values()
