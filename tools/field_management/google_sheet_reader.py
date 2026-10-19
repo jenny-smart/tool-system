@@ -1,5 +1,6 @@
 import os
 import random
+import ssl
 import time
 
 from google.oauth2.credentials import Credentials as UserCredentials
@@ -32,6 +33,16 @@ def execute_with_retry(request, max_retries: int = 6):
                 continue
 
             raise
+        except (TimeoutError, ConnectionError, ssl.SSLError) as e:
+            # Drive 沒回應（讀取逾時、連線中斷）也重試，避免單次逾時讓整批失敗
+            wait = min(60, (2 ** attempt) * 5) + random.uniform(0, 1.5)
+            print(
+                f"⚠️ Google API 連線逾時/中斷（{e}），等待 {wait:.1f} 秒後重試 "
+                f"({attempt + 1}/{max_retries})",
+                flush=True,
+            )
+            time.sleep(wait)
+            continue
 
     return request.execute()
 
