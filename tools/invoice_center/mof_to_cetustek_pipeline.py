@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import sys
 import tempfile
 from pathlib import Path
@@ -50,7 +51,7 @@ def main() -> int:
     period_text = f"{year}年{label}期"
     filename = mof_serial.period_filename(year, label, args.area)
 
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
 
@@ -69,6 +70,8 @@ def main() -> int:
         # 2/3 鯨躍匯入
         # 接續目前畫面：第二層已是這區帳號就直接匯入，不重跑第一層登入
         ei_page = cetustek_serial.ensure_ei_login(context, args.area)
+        from tools.invoice_center.ei_session import logout_quietly
+        cleanup.callback(logout_quietly, ei_page, args.area)  # 匯入＋配號做完（或失敗）一律登出鯨躍第二層
         with tempfile.TemporaryDirectory(prefix="mof_serial_fetch_") as temp_dir:
             csv_path = cetustek_serial.fetch_mof_serial_csv(
                 args.area, year, label, Path(temp_dir) / filename

@@ -600,6 +600,7 @@ def main() -> int:
             for index, area in enumerate(areas):
                 credentials = credentials_for(area, accounts)
                 print(f"\n開始處理：{credentials.label}")
+                ei_page = None
                 try:
                     from tools.invoice_center.ei_session import prepare_download_session
 
@@ -669,6 +670,9 @@ def main() -> int:
                 except Exception as exc:
                     failures.append(f"{credentials.label}: {exc}")
                     print(f"  失敗：{exc}", file=sys.stderr)
+                    # 失敗也登出第二層，避免下一區或下次沿用到這區帳號
+                    from tools.invoice_center.ei_session import logout_quietly
+                    logout_quietly(ei_page, credentials.label)
         finally:
             if failures:
                 try:

@@ -1,6 +1,8 @@
 """Local Agent runner. Persist before irreversible actions; never blindly retry."""
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 import hashlib
 import json
@@ -281,9 +283,11 @@ def run(area: str, plan: dict, cdp_url: str) -> None:
             temp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
             temp.replace(path)
 
-        with sync_playwright() as playwright:
+        with sync_playwright() as playwright, ExitStack() as cleanup:
             _browser, context = connect_existing_chrome(playwright, cdp_url)
             page = _login(context, area, load_accounts(None))
+            from tools.invoice_center.ei_session import logout_quietly
+            cleanup.callback(logout_quietly, page, area)  # 做完一律登出
             process(page, get_worksheet(area), plan, state, save, BackendClient(key), key,
                     resume_allowance_no=resume_allowance_no, retry_unissued=retry_unissued)
 

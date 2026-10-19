@@ -36,3 +36,29 @@ def test_open_ei_page_reuses_existing_second_layer(monkeypatch):
     monkeypatch.setattr(ei_session, "login_portal", login)
     assert ei_session.open_ei_page(MagicMock(), "台中", {}) == (ei_page, True)
     login.assert_not_called()
+
+
+def test_logout_quietly_logs_out_and_never_raises(monkeypatch):
+    _real()
+    calls = []
+    monkeypatch.setattr(ei_session, "logout_second", lambda page, label: calls.append(label))
+    page = MagicMock()
+    page.is_closed.return_value = False
+    ei_session.logout_quietly(page, "台中")
+    assert calls == ["台中"]
+
+    def boom(page, label):
+        raise RuntimeError("網站沒回應")
+    monkeypatch.setattr(ei_session, "logout_second", boom)
+    ei_session.logout_quietly(page, "台中")  # 不拋例外，只提醒
+    ei_session.logout_quietly(None, "台中")
+
+
+def test_every_ei_function_logs_out_when_done():
+    """會登入鯨躍第二層的功能都要登記「做完一律登出」（鯨躍登入保留畫面給人工操作，例外）。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "tools" / "invoice_center"
+    for name in ("allowance_create", "paper_invoice_pdf", "triplicate_runner", "cetustek_serial",
+                 "prize_update", "paper_update", "mof_to_cetustek_pipeline", "ei_export_all"):
+        source = (root / f"{name}.py").read_text(encoding="utf-8")
+        assert "logout_quietly" in source or "logout_second(" in source, name

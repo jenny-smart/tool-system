@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 import tempfile
 from pathlib import Path
@@ -15,11 +17,12 @@ from tools.invoice_center.invoice_archive import InvoiceArchiveProcessor
 def download_paper(processor, area: str, month: str, cdp_url: str) -> None:
     accounts = load_accounts(None)
     start, end = month_range(month)
-    with tempfile.TemporaryDirectory(prefix="ei_paper_") as temp_dir, sync_playwright() as playwright:
+    with tempfile.TemporaryDirectory(prefix="ei_paper_") as temp_dir, sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
-        from tools.invoice_center.ei_session import open_ei_page
+        from tools.invoice_center.ei_session import logout_quietly, open_ei_page
 
         page, _reused = open_ei_page(context, area, accounts)
+        cleanup.callback(logout_quietly, page, area)  # 做完一律登出
         name = f"{month}紙本發票-{area}"
         downloaded = export_invoices(
             page, start, end, paper_only=True, csv=True, detail=False,

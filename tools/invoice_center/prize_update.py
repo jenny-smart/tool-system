@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 import re
 import tempfile
@@ -43,11 +45,12 @@ def run(area: str, period8: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
 
     accounts = load_accounts(None)
 
-    with tempfile.TemporaryDirectory(prefix="ei_prize_update_") as temp_dir, sync_playwright() as playwright:
+    with tempfile.TemporaryDirectory(prefix="ei_prize_update_") as temp_dir, sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
-        from tools.invoice_center.ei_session import open_ei_page
+        from tools.invoice_center.ei_session import logout_quietly, open_ei_page
 
         active_page, reused = open_ei_page(context, area, accounts)
+        cleanup.callback(logout_quietly, active_page, area)  # 做完一律登出
         print(f"[{area}] " + ("已登入正確鯨躍帳號，沿用目前登入狀態" if reused else "鯨躍登入完成"))
 
         target = Path(temp_dir) / f"{period8}中獎發票-{area}.zip"
