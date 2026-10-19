@@ -110,6 +110,54 @@ def fill_if_present(page: Page, selector: str, value: str) -> bool:
     return False
 
 
+def logged_in_account(page: Page) -> str:
+    """已登入畫面左上角「帳號：42627791」的帳號；讀不到回傳空字串。"""
+    try:
+        text = page.locator("body").inner_text(timeout=5000)
+    except Exception:
+        return ""
+    match = re.search(r"帳號\s*[:：]\s*([0-9A-Za-z]+)", text)
+    return match.group(1) if match else ""
+
+
+def is_expected_account(account: str, credentials: MOFCredentials) -> bool:
+    return bool(account) and account in {credentials.ubn.strip(), credentials.account.strip()} - {""}
+
+
+def logout_mof(page: Page) -> None:
+    """登出財政部電子發票平台，確認回到登入頁；登不出去就報錯（避免用錯的帳號繼續下載）。"""
+    page.once("dialog", lambda dialog: dialog.accept())
+    try:
+        page.get_by_text("登出", exact=False).first.click(timeout=10_000)
+    except Exception as exc:
+        raise RuntimeError(f"找不到「登出」按鈕，請手動登出財政部電子發票平台後再執行；目前頁面：{page.url}") from exc
+    try:
+        page.get_by_role("button", name=re.compile("確定|確認|是")).first.click(timeout=3000)
+    except Exception:
+        pass
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if "/accounts/login" in page.url or "/logout" in page.url:
+            print("[財政部電子發票] 已登出")
+            return
+        page.wait_for_timeout(500)
+    page.goto(MOF_LOGIN_URL, wait_until="domcontentloaded")
+    page.wait_for_timeout(3000)
+    if "/accounts/login" not in page.url:
+        raise RuntimeError(f"登出後仍是登入狀態，請手動登出財政部電子發票平台後再執行；目前頁面：{page.url}")
+    print("[財政部電子發票] 已登出")
+
+
+def ensure_expected_login(page: Page, credentials: MOFCredentials) -> None:
+    """確認目前登入的是這個地區的帳號；不是就報錯，絕不用別區帳號下載或存檔。"""
+    account = logged_in_account(page)
+    if not is_expected_account(account, credentials):
+        raise RuntimeError(
+            f"目前登入的帳號（{account or '讀不到'}）不是 {credentials.area} 的帳號（{credentials.masked_ubn}），"
+            "已停止，避免把別區的字軌存成這一區"
+        )
+
+
 def login_mof(page: Page, credentials: MOFCredentials) -> None:
     """開啟登入頁並預填統一編號／帳號（與密碼，若帳密檔內有設定）。
     驗證碼與送出登入一律留給使用者手動操作。"""
@@ -126,8 +174,14 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
     # dashboard，這裡就不用再走身分別／欄位那一整套（dashboard 上本來就
     # 沒有這些元素，硬找只會逾時報錯）。
     if "/accounts/login" not in page.url:
-        print(f"[財政部電子發票] 沿用目前登入狀態（{page.url}）")
-        return
+        account = logged_in_account(page)
+        if is_expected_account(account, credentials):
+            print(f"[財政部電子發票] 沿用目前登入狀態（{credentials.area}，帳號 {account}）")
+            return
+        # 已登入的是別區帳號（或讀不到帳號）：先登出再用這一區的帳號重新登入
+        print(f"[財政部電子發票] 目前登入的帳號（{account or '讀不到'}）不是 {credentials.area}，先登出再重新登入")
+        logout_mof(page)
+        page.goto(MOF_LOGIN_URL, wait_until="domcontentloaded")
 
     # 這是前端 SPA：domcontentloaded 只代表原始 HTML 載完，畫面（含身分別
     # 圖示）是等 JS 執行完才動態渲染出來的。不能像傳統網頁那樣馬上用
@@ -156,6 +210,7 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
         # A valid session can finish redirecting while we are waiting for the
         # login form. Treat that as success instead of reporting a missing field.
         if "/accounts/login" not in page.url:
+            ensure_expected_login(page, credentials)
             print(f"[財政部電子發票] 沿用目前登入狀態（{page.url}）")
             return
         raise RuntimeError(
@@ -184,7 +239,9 @@ def login_mof(page: Page, credentials: MOFCredentials) -> None:
     deadline = time.monotonic() + 300
     while time.monotonic() < deadline:
         if "/accounts/login" not in page.url:
-            print("[財政部電子發票] 登入成功")
+            page.wait_for_timeout(2000)  # 等左上角帳號資訊畫出來
+            ensure_expected_login(page, credentials)
+            print(f"[財政部電子發票] {credentials.area} 登入成功")
             return
         page.wait_for_timeout(1000)
     raise RuntimeError(f"登入等待逾時（5 分鐘），目前頁面：{page.url}")
@@ -340,14 +397,22 @@ def main() -> int:
         if args.login_only:
             return 0
 
-        downloads_dir = Path.home() / "MOF account" / "downloads"
-        filename = period_filename(year, label, area)
-        destination = downloads_dir / filename
-        download_serial_csv(page, year, label, destination)
-        print(f"已下載：{destination}")
+        try:
+            ensure_expected_login(page, credentials)  # 下載前再確認一次是這一區的帳號
+            downloads_dir = Path.home() / "MOF account" / "downloads"
+            filename = period_filename(year, label, area)
+            destination = downloads_dir / filename
+            download_serial_csv(page, year, label, destination)
+            print(f"已下載：{destination}")
 
-        message = archive_and_log(destination, area, year, label)
-        print(message)
+            message = archive_and_log(destination, area, year, label)
+            print(message)
+        finally:
+            # 每次下載完都登出，下一區（或下次）執行時一定重新用正確帳號登入
+            try:
+                logout_mof(page)
+            except Exception as exc:
+                print(f"⚠️ 登出失敗，下次執行前請手動登出：{exc}", file=sys.stderr)
     return 0
 
 
