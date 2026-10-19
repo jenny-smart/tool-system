@@ -35,6 +35,15 @@ def _oauth_value(name: str) -> str:
             continue
         if str(raw or "").strip():
             return str(raw).strip()
+    # Streamlit 雲端：secrets 不一定轉成環境變數（例如改了 secrets 但程式沒重啟），直接讀 st.secrets
+    try:
+        import streamlit as st
+
+        raw = st.secrets.get(name, "")
+    except Exception:
+        raw = ""
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
     return ""
 
 
