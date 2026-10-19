@@ -274,6 +274,12 @@ def _yuanta_formulas(r: int) -> list[str]:
     ]
 
 
+def _skip_blank(values: list[Any]) -> list[Any]:
+    """空白格送 None：Sheets API 會略過不寫，格子維持真正的空白。
+    送 "" 會變成「空字串」，看起來空白但 E<>0 會成立，公式判斷就錯了。"""
+    return [None if str(value).strip() == "" else value for value in values]
+
+
 def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]]):
     """拆成 (RAW 資料, USER_ENTERED 資料, 格式設定)；格式只加在有值的格子。
 
@@ -283,7 +289,7 @@ def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]]):
     end_row = start_row + len(rows) - 1
     if bank == "fubon":
         dates = [row[0:2] for row in rows]
-        raw = [{"range": f"D{start_row}:H{end_row}", "values": [row[2:7] for row in rows]}]
+        raw = [{"range": f"D{start_row}:H{end_row}", "values": [_skip_blank(row[2:7]) for row in rows]}]
         entered = [
             {"range": f"B{start_row}:C{end_row}", "values": dates},
             {"range": f"K{start_row}:P{end_row}", "values": [_fubon_formulas(start_row + i) for i in range(len(rows))]},
@@ -292,8 +298,8 @@ def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]]):
     else:
         dates = [row[1:3] for row in rows]
         raw = [
-            {"range": f"A{start_row}:A{end_row}", "values": [row[0:1] for row in rows]},
-            {"range": f"D{start_row}:I{end_row}", "values": [row[3:9] for row in rows]},
+            {"range": f"A{start_row}:A{end_row}", "values": [_skip_blank(row[0:1]) for row in rows]},
+            {"range": f"D{start_row}:I{end_row}", "values": [_skip_blank(row[3:9]) for row in rows]},
         ]
         entered = [
             {"range": f"B{start_row}:C{end_row}", "values": dates},
