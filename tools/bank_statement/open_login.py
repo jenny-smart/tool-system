@@ -512,6 +512,38 @@ def wait_fubon_query_form(
     raise RuntimeError("富邦未能進入交易明細查詢頁")
 
 
+def open_my_deposits(browser_context: BrowserContext, page: Page) -> Page:
+    """從富邦首頁進「我的存款」帳號清單（核對登入帳號、查明細都從這裡開始）。"""
+    print("步驟 1/4：點擊『我的存款』。")
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    try:
+        # 首頁同時存在多個輪播複本；選取真正位於視窗中的連結。
+        tile = visible_in_viewport(
+            page, 'a:has-text("我的存款")', timeout_ms=8_000
+        )
+        tile.evaluate("el => el.click()")
+    except Exception as text_error:
+        # 舊版首頁 class 作為相容備援。
+        try:
+            tile = visible_in_viewport(
+                page, "a.task_CBOQU003", timeout_ms=2_000
+            )
+            tile.evaluate("el => el.click()")
+        except Exception as selector_error:
+            raise RuntimeError(
+                f"找不到可點擊的『我的存款』（文字：{text_error}；選擇器：{selector_error}）"
+            ) from selector_error
+
+    page = wait_fubon_page_with_text(
+        browser_context, page, ("快速功能",), timeout_ms=20_000
+    )
+    print("已進入『我的存款』帳號清單。")
+    return page
+
+
 def open_fubon_statement(
     browser_context: BrowserContext,
     page: Page,
@@ -532,33 +564,7 @@ def open_fubon_statement(
 
     # 尚未在帳號清單時，從首頁點「我的存款」。
     if query_form is None and account_row is None:
-        print("步驟 1/4：點擊『我的存款』。")
-        try:
-            page.keyboard.press("Escape")
-        except Exception:
-            pass
-        try:
-            # 首頁同時存在多個輪播複本；選取真正位於視窗中的連結。
-            tile = visible_in_viewport(
-                page, 'a:has-text("我的存款")', timeout_ms=8_000
-            )
-            tile.evaluate("el => el.click()")
-        except Exception as text_error:
-            # 舊版首頁 class 作為相容備援。
-            try:
-                tile = visible_in_viewport(
-                    page, "a.task_CBOQU003", timeout_ms=2_000
-                )
-                tile.evaluate("el => el.click()")
-            except Exception as selector_error:
-                raise RuntimeError(
-                    f"找不到可點擊的『我的存款』（文字：{text_error}；選擇器：{selector_error}）"
-                ) from selector_error
-
-        page = wait_fubon_page_with_text(
-            browser_context, page, ("快速功能",), timeout_ms=20_000
-        )
-        print("已進入『我的存款』帳號清單。")
+        page = open_my_deposits(browser_context, page)
         account_row = find_account_row(page, account, timeout_ms=10_000)
 
     if query_form is None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -8,7 +10,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
 from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
@@ -94,9 +96,10 @@ def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str
     spreadsheet_id, sheet_title = resolve_report_location(SUPPLY_PURCHASE_TYPE, area)
     service = get_sheets_service()
     account = load_account("fubon", area, accounts_file.expanduser())
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
+        cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
         try:
             for item in selected:
                 rows_desc = "、".join(str(r) for r in item["rows"])
@@ -141,7 +144,7 @@ def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str
             today = datetime.now(ZoneInfo("Asia/Taipei")).date()
             page = run_download(context, page, account, today, today)
         except Exception:
-            # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
+            # 錯誤照常往外拋；登出由上面的 cleanup 負責。
             raise
     return 0
 

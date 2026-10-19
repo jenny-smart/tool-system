@@ -1,4 +1,5 @@
 import ast
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -29,7 +30,7 @@ def test_download_only_after_all_payments(kind, completed):
             raise RuntimeError('not completed')
         events.append('paid')
         return '2026-09-14 10:20:30'
-    ns = dict(datetime=datetime, ZoneInfo=ZoneInfo,
+    ns = dict(datetime=datetime, ZoneInfo=ZoneInfo, ExitStack=ExitStack, logout_quietly=MagicMock(),
         PAYMENT_REQUEST_TYPE='request', DEPOSIT_REFUND_TYPE='deposit',
         read_report_values=MagicMock(), pending_payment_requests=lambda _: [item, item],
         pending_deposit_refunds=lambda _: [item, item], load_account=MagicMock(),

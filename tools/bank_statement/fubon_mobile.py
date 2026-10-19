@@ -10,7 +10,7 @@ from pathlib import Path
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import existing_page, logout_and_close, run_download
+from tools.bank_statement.fubon_agent import existing_page, logout_and_close, run_download, verify_logged_in_account
 from tools.bank_statement.open_login import LOGIN_URLS, fill_fubon, is_fubon_logged_in, wait_fubon_login
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
@@ -98,6 +98,13 @@ def main() -> int:
         if args.mode == "capture":
             page = existing_page(context) or context.new_page()
             if is_fubon_logged_in(page):
+                matched, page = verify_logged_in_account(context, page, account)
+                if not matched:
+                    # 登入的是別區帳號：先登出，再走下面的登入流程（產生這區的驗證碼）
+                    print(f"目前登入的富邦不是{args.area}帳號，先登出再登入{args.area}。")
+                    logout_and_close(context, page)
+                    page = context.new_page()
+            if is_fubon_logged_in(page):
                 if args.resume == "download":
                     if not args.start or not args.end:
                         raise ValueError("富邦明細下載缺少日期")
@@ -126,6 +133,10 @@ def main() -> int:
         if not args.session_token or not args.captcha.strip():
             raise ValueError("缺少驗證 Session 或驗證碼")
         page = submit_captcha(context, args.session_token, args.captcha)
+        matched, page = verify_logged_in_account(context, page, account)
+        if not matched:
+            logout_and_close(context, page)
+            raise RuntimeError(f"登入後「我的存款」找不到{args.area}帳號（{account.bank_account[-5:]}），已登出並停止")
         if args.resume == "login":
             print(f"富邦／{args.area} 登入完成；沿用同一 Chrome Session。")
             return 0
