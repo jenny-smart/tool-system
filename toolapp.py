@@ -2487,11 +2487,19 @@ def queue_cetustek_download(*, month="", start_date=None, end_date=None, area="�
 
 def run_cetustek_paper_update(*, month="", start_date=None, end_date=None, area="全區"):
     month_text = str(month or "").strip()
-    if not month_text:
+    if not re.fullmatch(r"\d{6}", month_text) or not 1 <= int(month_text[4:]) <= 12:
         raise ValueError("紙本發票更新請輸入月份 YYYYMM")
-    from tools.invoice_center.invoice_archive import run_invoice_update
-
-    return run_invoice_update("paper", month_text, area)
+    agents = [row for row in list_local_agent_status(max_age_seconds=30) if row.get("online")]
+    if agents and not any(
+        "cetustek.paper_update" in str(row.get("actions") or "").split(",") for row in agents
+    ):
+        raise RuntimeError("Local Agent 尚未載入紙本發票更新新版，請到 🖥️Agent 更新程式並重啟")
+    task = create_local_agent_task(
+        "cetustek.paper_update",
+        {"month": month_text, "area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（Drive 缺檔時會自動登入鯨躍下載紙本發票）"
 
 
 def queue_cetustek_prize_update(*, month="", start_date=None, end_date=None, area="全區"):

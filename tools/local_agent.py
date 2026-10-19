@@ -101,6 +101,15 @@ def build_cetustek_login(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_cetustek_paper_update(params: dict[str, Any]) -> list[str]:
+    from tools.invoice_center.ei_export_all import normalize_month
+
+    area, cdp_url = _common_invoice_args(params)
+    month = normalize_month(str(params.get("month") or ""))
+    return [sys.executable, "-m", "tools.invoice_center.paper_update",
+            "--area", area or "全區", "--month", month, "--cdp-url", cdp_url]
+
+
 def build_cetustek_prize_update(params: dict[str, Any]) -> list[str]:
     area, cdp_url = _common_invoice_args(params)
     period = str(params.get("period") or params.get("month") or "").strip()
@@ -731,6 +740,7 @@ register_action("cetustek.login", build_cetustek_login)
 register_action("cetustek.triplicate", build_cetustek_triplicate)
 register_action("cetustek.download", build_cetustek_download)
 register_action("cetustek.prize_update", build_cetustek_prize_update)
+register_action("cetustek.paper_update", build_cetustek_paper_update)
 register_action("cetustek.allowance", build_cetustek_allowance)
 register_action("cetustek.paper_invoice_pdf", build_cetustek_paper_invoice_pdf)
 register_action("cetustek.serial_import", build_cetustek_serial_import)

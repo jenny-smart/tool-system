@@ -117,6 +117,46 @@ def test_regular_notice_contains_mail_merge_fields_and_next_service():
     assert "請您協助確認，若需要調整，請連繫我們～" in row[21]
 
 
+def test_regular_notice_formats_service_dates_three_per_row():
+    rows = [
+        _row(day)
+        for day in (
+            "2026-12-07",
+            "2026-12-14",
+            "2026-12-21",
+            "2026-12-28",
+            "2027-01-04",
+            "2027-01-11",
+            "2027-01-18",
+            "2027-01-25",
+            "2027-02-01",
+            "2027-02-15",
+            "2027-02-22",
+        )
+    ]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300,
+    )
+
+    notice = output[0][15]
+    assert (
+        "🕓 您原訂週期於（2026/12～2027/02）之服務安排如下：\n\n"
+        "2026/12/07(一), 2026/12/14(一), 2026/12/21(一),\n"
+        "2026/12/28(一), 2027/01/04(一), 2027/01/11(一),\n"
+        "2027/01/18(一), 2027/01/25(一), 2027/02/01(一),\n"
+        "2027/02/15(一), 2027/02/22(一)"
+    ) in notice
+    assert (
+        "年節加價服務日期：\n"
+        "2026/12/21(一), 2026/12/28(一), 2027/01/04(一),\n"
+        "2027/01/11(一), 2027/01/18(一), 2027/01/25(一),\n"
+        "2027/02/01(一)"
+    ) in notice
+
+
 def test_service_reminder_hides_pending_paused_and_lunar_holiday_services():
     rows = [
         _row("2026-12-18"),
