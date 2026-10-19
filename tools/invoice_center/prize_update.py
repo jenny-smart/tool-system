@@ -7,18 +7,13 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from tools.invoice_center.cetustek_login_only import ensure_expected_ei_login
 from tools.invoice_center.chrome_cdp import (
     DEFAULT_CDP_URL,
     connect_existing_chrome,
-    find_invoice_pages,
 )
 from tools.invoice_center.ei_export_all import (
-    credentials_for,
     export_prize_invoices,
     load_accounts,
-    login_portal,
-    open_second_login,
 )
 from tools.invoice_center.invoice_archive import InvoiceArchiveProcessor
 
@@ -47,26 +42,13 @@ def run(area: str, period8: str, cdp_url: str = DEFAULT_CDP_URL) -> int:
     print(f"[{area}] 重新匯出 {period8} 中獎清冊（全部／Excel）")
 
     accounts = load_accounts(None)
-    credentials = credentials_for(area, accounts)
 
     with tempfile.TemporaryDirectory(prefix="ei_prize_update_") as temp_dir, sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
-        portal_page, ei_page = find_invoice_pages(context)
+        from tools.invoice_center.ei_session import open_ei_page
 
-        if ei_page is not None:
-            active_page = ei_page
-            reused = ensure_expected_ei_login(active_page, credentials)
-            if reused:
-                print(f"[{area}] 已登入正確鯨躍帳號，沿用目前登入狀態")
-            else:
-                print(f"[{area}] 已切換並登入正確鯨躍帳號")
-        else:
-            if portal_page is None:
-                portal_page = context.new_page()
-            login_portal(portal_page, accounts)
-            active_page = open_second_login(context, portal_page)
-            ensure_expected_ei_login(active_page, credentials)
-            print(f"[{area}] 鯨躍登入完成")
+        active_page, reused = open_ei_page(context, area, accounts)
+        print(f"[{area}] " + ("已登入正確鯨躍帳號，沿用目前登入狀態" if reused else "鯨躍登入完成"))
 
         target = Path(temp_dir) / f"{period8}中獎發票-{area}.zip"
         prize_path = export_prize_invoices(active_page, period8, target)

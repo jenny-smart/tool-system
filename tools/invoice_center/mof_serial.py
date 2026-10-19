@@ -398,6 +398,22 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
     return destination
 
 
+def download_area_serial(page: Page, credentials: MOFCredentials, year: int, label: str) -> Path:
+    """財政部字軌下載的唯一共用流程：確認是這區帳號 → 下載 → 一律登出（成功或失敗都登出）。"""
+    destination = Path.home() / "MOF account" / "downloads" / period_filename(year, label, credentials.area)
+    try:
+        ensure_expected_login(page, credentials)  # 下載前再確認一次是這一區的帳號
+        download_serial_csv(page, year, label, destination)
+        print(f"[財政部電子發票] 已下載：{destination}")
+        return destination
+    finally:
+        # 每次下載完都登出，下一區（或下次）執行時一定重新用正確帳號登入
+        try:
+            logout_mof(page)
+        except Exception as exc:
+            print(f"[財政部電子發票] ⚠️ 自動登出失敗，下次執行前請手動登出：{exc}", file=sys.stderr)
+
+
 def archive_and_log(local_path: Path, area: str, year: int, label: str) -> str:
     period_text = f"{year}年{label}期"
     drive, sheets = get_google_services()
@@ -450,22 +466,8 @@ def main() -> int:
         if args.login_only:
             return 0
 
-        try:
-            ensure_expected_login(page, credentials)  # 下載前再確認一次是這一區的帳號
-            downloads_dir = Path.home() / "MOF account" / "downloads"
-            filename = period_filename(year, label, area)
-            destination = downloads_dir / filename
-            download_serial_csv(page, year, label, destination)
-            print(f"已下載：{destination}")
-
-            message = archive_and_log(destination, area, year, label)
-            print(message)
-        finally:
-            # 每次下載完都登出，下一區（或下次）執行時一定重新用正確帳號登入
-            try:
-                logout_mof(page)
-            except Exception as exc:
-                print(f"⚠️ 登出失敗，下次執行前請手動登出：{exc}", file=sys.stderr)
+        destination = download_area_serial(page, credentials, year, label)
+        print(archive_and_log(destination, area, year, label))
     return 0
 
 

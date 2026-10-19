@@ -10,14 +10,8 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Locator, Page, sync_playwright
 
 from tools.invoice_center.allowance_filter import pending_allowances
-from tools.invoice_center.cetustek_login_only import (
-    credentials_for,
-    ensure_expected_ei_login,
-    load_accounts,
-    login_portal,
-    open_second_login,
-)
-from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_invoice_pages
+from tools.invoice_center.cetustek_login_only import load_accounts
+from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
@@ -33,17 +27,10 @@ def _visible(locator: Locator) -> Locator | None:
 
 
 def _login(context: object, area: str, accounts: dict) -> Page:
-    credentials = credentials_for(area, accounts)
-    portal_page, ei_page = find_invoice_pages(context)
-    if ei_page is not None:
-        ensure_expected_ei_login(ei_page, credentials)
-        return ei_page
-    if portal_page is None:
-        portal_page = context.new_page()
-    login_portal(portal_page, accounts)
-    page = open_second_login(context, portal_page)
-    ensure_expected_ei_login(page, credentials)
-    return page
+    """接續目前畫面登入這區鯨躍第二層（共用 ei_session.open_ei_page）。"""
+    from tools.invoice_center.ei_session import open_ei_page
+
+    return open_ei_page(context, area, accounts)[0]
 
 
 def _open_allowance(page: Page) -> None:

@@ -5,28 +5,21 @@ import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-from tools.invoice_center.cetustek_login_only import ensure_expected_ei_login
-from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_invoice_pages
+from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 from tools.invoice_center.ei_export_all import (
-    archive_as_zip, credentials_for, export_invoices, load_accounts,
-    login_portal, month_range, normalize_month, open_second_login,
+    archive_as_zip, export_invoices, load_accounts, month_range, normalize_month,
 )
 from tools.invoice_center.invoice_archive import InvoiceArchiveProcessor
 
 
 def download_paper(processor, area: str, month: str, cdp_url: str) -> None:
     accounts = load_accounts(None)
-    credentials = credentials_for(area, accounts)
     start, end = month_range(month)
     with tempfile.TemporaryDirectory(prefix="ei_paper_") as temp_dir, sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
-        portal, page = find_invoice_pages(context)
-        if page is None:
-            if portal is None:
-                portal = context.new_page()
-            login_portal(portal, accounts)
-            page = open_second_login(context, portal)
-        ensure_expected_ei_login(page, credentials)
+        from tools.invoice_center.ei_session import open_ei_page
+
+        page, _reused = open_ei_page(context, area, accounts)
         name = f"{month}紙本發票-{area}"
         downloaded = export_invoices(
             page, start, end, paper_only=True, csv=True, detail=False,

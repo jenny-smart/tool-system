@@ -147,26 +147,12 @@ def main() -> int:
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
-        portal_page, ei_page = find_invoice_pages(context)
-        used_login_handler = False
+        from tools.invoice_center.ei_session import open_ei_page
 
-        if ei_page is not None:
-            active_page = ei_page
-            reused = ensure_expected_ei_login(active_page, credentials)
-            used_login_handler = not reused
-            if reused:
-                print(f"[{credentials.label}] 發現相同虛實合一 ID 的 EI 分頁，沿用登入狀態")
-        elif portal_page is not None:
-            login_portal(portal_page, accounts)
-            active_page = open_second_login(context, portal_page)
-            ensure_expected_ei_login(active_page, credentials)
-            used_login_handler = True
-        else:
-            portal_page = context.new_page()
-            login_portal(portal_page, accounts)
-            active_page = open_second_login(context, portal_page)
-            ensure_expected_ei_login(active_page, credentials)
-            used_login_handler = True
+        active_page, reused = open_ei_page(context, area, accounts)
+        used_login_handler = not reused
+        if reused:
+            print(f"[{credentials.label}] 發現相同虛實合一 ID 的 EI 分頁，沿用登入狀態")
 
         print(f"鯨躍第一層及 {credentials.label} EI 第二層登入完成")
 
