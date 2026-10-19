@@ -151,10 +151,39 @@ def test_regular_notice_formats_service_dates_three_per_row():
     ) in notice
     assert (
         "🕓 您原訂週期於年節期間（2026/12/15～2027/02/04）之服務安排如下：\n"
-        "年節加價服務日期：\n"
+        "PART 1 年節加價服務日期：\n"
         "2026/12/21(一), 2026/12/28(一), 2027/01/04(一),\n"
-        "2027/01/11(一), 2027/01/18(一), 2027/01/25(一),\n"
-        "2027/02/01(一)"
+        "2027/01/11(一), 2027/01/18(一)\n"
+        "PART 2 年節加價服務日期：\n"
+        "2027/01/25(一), 2027/02/01(一)\n"
+        "服務時段：09:00–12:00"
+    ) in notice
+
+
+def test_regular_notice_groups_each_part_dates_by_service_time():
+    rows = [
+        _row("2026-12-21", start_hour=9, end_hour=12),
+        _row("2026-12-28", start_hour=14, end_hour=17),
+        _row("2027-01-25", start_hour=9, end_hour=12),
+    ]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300,
+    )
+
+    notice = output[0][15]
+    assert (
+        "PART 1 年節加價服務日期：\n"
+        "2026/12/21(一)\n"
+        "服務時段：09:00–12:00\n"
+        "PART 1 年節加價服務日期：\n"
+        "2026/12/28(一)\n"
+        "服務時段：14:00–17:00\n"
+        "PART 2 年節加價服務日期：\n"
+        "2027/01/25(一)\n"
+        "服務時段：09:00–12:00"
     ) in notice
 
 
