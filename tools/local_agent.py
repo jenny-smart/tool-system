@@ -694,9 +694,19 @@ def build_yuanta_salary_upload(params: dict[str, Any]) -> list[str]:
     return command
 
 
+# 更新一律拉 origin/main；本機不在 main 時直接失敗並印出分支，避免「Already up to date」卻一直跑舊程式
+GIT_PULL_SCRIPT = (
+    'branch="$(git rev-parse --abbrev-ref HEAD)"; '
+    'echo "目前分支：$branch（$(git rev-parse --short HEAD)）"; '
+    'if [ "$branch" != "main" ]; then '
+    'echo "❌ 本機不在 main 分支，不會更新到最新程式。請在 Mac 終端機執行：git -C \"$PWD\" checkout main"; exit 1; fi; '
+    'git pull --ff-only origin main && echo "更新後：$(git rev-parse --short HEAD)"'
+)
+
+
 def build_git_pull(_params: dict[str, Any]) -> list[str]:
-    """Update this checkout without rewriting local commits or modifications."""
-    return ["git", "-C", str(PROJECT_ROOT), "pull", "--ff-only"]
+    """Update this checkout from origin/main without rewriting local commits or modifications."""
+    return ["/bin/sh", "-c", f'cd "{PROJECT_ROOT}" && {GIT_PULL_SCRIPT}']
 
 
 def build_agent_status(_params: dict[str, Any]) -> list[str]:
@@ -713,8 +723,8 @@ def build_agent_restart(_params: dict[str, Any]) -> list[str]:
     return ["/usr/bin/true"]
 
 
-def build_git_pull_restart(_params: dict[str, Any]) -> list[str]:
-    return ["git", "-C", str(PROJECT_ROOT), "pull", "--ff-only"]
+def build_git_pull_restart(params: dict[str, Any]) -> list[str]:
+    return build_git_pull(params)
 
 
 register_action("cetustek.login", build_cetustek_login)

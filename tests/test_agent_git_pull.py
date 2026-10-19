@@ -6,10 +6,11 @@ from tools import local_agent
 from tools import local_agent_queue as queue
 
 
-def test_git_pull_command_is_fast_forward_only():
-    assert local_agent.build_git_pull({}) == [
-        "git", "-C", str(local_agent.PROJECT_ROOT), "pull", "--ff-only",
-    ]
+def test_git_pull_command_is_fast_forward_only_from_main():
+    command = local_agent.build_git_pull({})
+    assert command[:2] == ["/bin/sh", "-c"]
+    assert "git pull --ff-only origin main" in command[2]
+    assert local_agent.build_git_pull_restart({}) == command
 
 
 def test_git_pull_is_rejected_while_agent_has_active_work(monkeypatch):
@@ -95,3 +96,27 @@ def test_failed_pull_preserves_local_repository(monkeypatch, tmp_path):
     assert result.returncode != 0
     assert (checkout / "tracked.txt").read_text(encoding="utf-8") == local_content
     assert _git("-C", str(checkout), "status", "--short").stdout == " M tracked.txt\n"
+
+
+def test_pull_refuses_when_checkout_is_not_on_main(monkeypatch, tmp_path):
+    remote = tmp_path / "remote.git"
+    checkout = tmp_path / "checkout"
+    _git("init", "--bare", str(remote))
+    _git("init", str(checkout))
+    _git("-C", str(checkout), "config", "user.email", "test@example.com")
+    _git("-C", str(checkout), "config", "user.name", "Test")
+    (checkout / "a.txt").write_text("a\n", encoding="utf-8")
+    _git("-C", str(checkout), "add", "a.txt")
+    _git("-C", str(checkout), "commit", "-m", "a")
+    _git("-C", str(checkout), "branch", "-M", "main")
+    _git("-C", str(checkout), "remote", "add", "origin", str(remote))
+    _git("-C", str(checkout), "push", "-u", "origin", "main")
+    _git("-C", str(checkout), "checkout", "-b", "codex/old-branch")
+
+    monkeypatch.setattr(local_agent, "PROJECT_ROOT", checkout)
+    result = subprocess.run(local_agent.build_git_pull({}), text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    assert result.returncode != 0
+    assert "codex/old-branch" in result.stdout
+    assert "不在 main" in result.stdout
