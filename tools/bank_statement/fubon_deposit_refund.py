@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +11,7 @@ from googleapiclient.errors import HttpError
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
 from tools.bank_statement.fubon_deposit_refund_filter import pending_deposit_refunds
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
@@ -133,9 +135,10 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     # 先驗證每一筆 S 欄都能實際寫入。若權限不足，銀行端完全不會開始退款。
     verify_writeback_access(service, spreadsheet_id, sheet_title, selected)
 
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
+        cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
         try:
             for item in selected:
                 row = int(item["sheet_row"])
@@ -170,7 +173,7 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
             today = datetime.now(ZoneInfo("Asia/Taipei")).date()
             page = run_download(context, page, account, today, today)
         except Exception:
-            # 發生錯誤時保留銀行頁，方便人工確認；不登出、不關閉。
+            # 錯誤照常往外拋；登出由上面的 cleanup 負責。
             raise
     return 0
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import time
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from tools.bank_statement.open_login import (
     has_visible_text,
     is_fubon_logged_in,
     open_fubon_statement,
+    open_my_deposits,
     parse_date,
     wait_fubon_login,
 )
@@ -33,11 +35,38 @@ def existing_page(context: BrowserContext) -> Page | None:
     return logged_in or (pages[-1] if pages else None)
 
 
+def page_shows_account(page: Page, account: BankAccount) -> bool:
+    """頁面（含 frame）上是否出現這區的完整銀行帳號（台北、台中各自不同帳號）。"""
+    digits = re.sub(r"\D", "", account.bank_account or "")
+    if not digits:
+        raise RuntimeError(f"bank_accounts.json 的富邦／{account.area} 尚未設定 bank_account，無法確認登入的是哪一區")
+    for frame in [page, *page.frames]:
+        try:
+            text = frame.locator("body").inner_text(timeout=3000)
+        except Exception:
+            continue
+        if digits in re.sub(r"[\s-]", "", text):
+            return True
+    return False
+
+
+def verify_logged_in_account(context: BrowserContext, page: Page, account: BankAccount) -> tuple[bool, Page]:
+    """到「我的存款」確認列表裡有這區的帳號；回傳（是否為這區、目前頁面）。"""
+    page = open_my_deposits(context, page)
+    return page_shows_account(page, account), page
+
+
 def ensure_login(context: BrowserContext, account: BankAccount) -> Page:
+    """接續目前畫面：已登入且是這區帳號就沿用；是別區帳號就先登出再登入這區。"""
     page = existing_page(context) or context.new_page()
     if is_fubon_logged_in(page):
-        print("偵測到富邦已登入，沿用 Agent Chrome 工作階段。")
-        return page
+        matched, page = verify_logged_in_account(context, page, account)
+        if matched:
+            print(f"偵測到富邦已登入，確認是{account.area}帳號（{account.bank_account[-5:]}），沿用目前工作階段。")
+            return page
+        print(f"目前登入的富邦不是{account.area}帳號（我的存款找不到 {account.bank_account[-5:]}），先登出再登入{account.area}。")
+        logout_and_close(context, page)
+        page = context.new_page()
     last_error: Exception | None = None
     for attempt in range(2):
         page.goto(LOGIN_URLS["fubon"], wait_until="domcontentloaded", timeout=30_000)
@@ -55,7 +84,22 @@ def ensure_login(context: BrowserContext, account: BankAccount) -> Page:
     if last_error is not None:
         raise last_error
     print("富邦帳密已預填，請在 Agent Chrome 輸入驗證碼並登入。")
-    return wait_fubon_login(context, page)
+    page = wait_fubon_login(context, page)
+    matched, page = verify_logged_in_account(context, page, account)
+    if not matched:
+        raise RuntimeError(
+            f"登入後「我的存款」找不到{account.area}帳號（{account.bank_account[-5:]}），已停止，請確認帳密檔或登入的帳號"
+        )
+    print(f"已確認登入的是{account.area}帳號（{account.bank_account[-5:]}）。")
+    return page
+
+
+def logout_quietly(context: BrowserContext, page: Page) -> None:
+    """做完一律登出富邦；登出失敗只提醒，不蓋掉原本的結果或錯誤。"""
+    try:
+        logout_and_close(context, page)
+    except Exception as exc:
+        print(f"⚠️ 富邦自動登出失敗，下次執行前請手動登出：{exc}")
 
 
 def wait_statement(

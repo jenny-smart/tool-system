@@ -149,6 +149,27 @@ def fill_row_inputs(page: Page, label: str, values: list[str]) -> None:
         field.fill(value)
 
 
+def _click_twd_transfer_entry(page: Page) -> None:
+    """點「臺幣轉帳」。首頁有功能磚；從「我的存款」（核對帳號後）回上一頁或改走上方選單。"""
+    errors = []
+    for attempt in ("tile", "back", "menu"):
+        try:
+            if attempt == "back":
+                page.go_back(wait_until="domcontentloaded", timeout=15_000)
+                page.wait_for_timeout(1000)
+            elif attempt == "menu":
+                visible_in_viewport(page, 'a:has-text("存款/外匯/轉帳")', timeout_ms=5_000).evaluate("el => el.click()")
+                page.wait_for_timeout(1000)
+            # 與明細下載點「我的存款」相同：排除輪播中畫面外的複本，
+            # 再直接觸發真正位於視窗內的連結。
+            tile = visible_in_viewport(page, 'a:has-text("臺幣轉帳")', timeout_ms=8_000)
+            tile.evaluate("el => el.click()")
+            return
+        except Exception as exc:
+            errors.append(f"{attempt}: {exc}")
+    raise RuntimeError(f"找不到可點擊的『臺幣轉帳』：{'；'.join(errors)}")
+
+
 def open_transfer_form(page: Page) -> Page:
     """開啟臺幣轉帳的「立即/預約轉帳」表單。
 
@@ -185,15 +206,7 @@ def open_transfer_form(page: Page) -> Page:
                 page.keyboard.press("Escape")
             except Exception:
                 pass
-            try:
-                # 與明細下載點「我的存款」相同：排除輪播中畫面外的複本，
-                # 再直接觸發真正位於視窗內的功能磚連結。
-                tile = visible_in_viewport(
-                    page, 'a:has-text("臺幣轉帳")', timeout_ms=8_000
-                )
-                tile.evaluate("el => el.click()")
-            except Exception as exc:
-                raise RuntimeError(f"找不到可點擊的『臺幣轉帳』：{exc}") from exc
+            _click_twd_transfer_entry(page)
             # 剛從首頁功能磚進入，中間那排麵包屑通常還沒出現「立即/預約轉帳」
             # 這一段，畫面上只有下方分頁籤列這一個同名文字，直接點文字即可。
             click_text(page, "立即/預約轉帳")

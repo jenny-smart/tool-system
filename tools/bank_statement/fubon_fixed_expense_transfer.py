@@ -1,6 +1,8 @@
 """各區固定費用：富邦匯款給台北後，同步明細並完成財報分錄。"""
 from __future__ import annotations
 
+from contextlib import ExitStack
+
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +11,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
     choose_saved_destination,
@@ -89,9 +91,10 @@ def run(
     bank_area = REPORT_AREA_NAMES.get(area, area)
     account = load_account("fubon", bank_area, accounts_file.expanduser())
 
-    with sync_playwright() as playwright:
+    with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
+        cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
         fill_fixed_expense_transfer(
             page, bank_area, account.bank_account, period, area, amount
         )
