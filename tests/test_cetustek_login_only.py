@@ -43,6 +43,17 @@ sys.modules.setdefault("tools.invoice_center.chrome_cdp", chrome_module)
 
 from tools.invoice_center import cetustek_login_only as login
 
+# 假模組只給上面的 import 用；用完移除，避免其他測試拿到假的 ei_export_all／chrome_cdp／playwright
+for _name, _stub in (
+    ("playwright", playwright_module),
+    ("playwright.sync_api", playwright_sync_module),
+    ("tools.invoice_center.cetustek_invoice_paste", paste_module),
+    ("tools.invoice_center.ei_export_all", export_module),
+    ("tools.invoice_center.chrome_cdp", chrome_module),
+):
+    if sys.modules.get(_name) is _stub:
+        del sys.modules[_name]
+
 
 class EISessionProbeTest(unittest.TestCase):
     def setUp(self) -> None:

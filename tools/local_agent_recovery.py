@@ -12,8 +12,10 @@ def recover_interrupted_tasks(agent_id: str = "") -> int:
     agent_id = agent_id or default_agent_id()
     recovered = 0
 
-    for task in list_tasks(limit=500, service=service, spreadsheet_id=spreadsheet_id):
-        if task.get("status") != "running":
+    # Keep this aligned with the control page. A smaller window can leave older
+    # interrupted tasks active forever, which in turn disables restart/update.
+    for task in list_tasks(limit=5000, service=service, spreadsheet_id=spreadsheet_id):
+        if task.get("status") not in {"running", "cancel_requested"}:
             continue
         if str(task.get("agent_id") or "") != agent_id:
             continue

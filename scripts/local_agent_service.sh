@@ -9,6 +9,7 @@ LOG_DIR="$HOME/Library/Logs/LemonToolsAgent"
 PID_FILE="$HOME/Library/Application Support/LemonToolsAgent/local-agent.pid"
 LAUNCHER="$HOME/Library/Application Support/LemonToolsAgent/start-local-agent.sh"
 LOGIN_COMMAND="$HOME/Library/Application Support/LemonToolsAgent/login-agent.command"
+WATCHDOG="$HOME/Library/Application Support/LemonToolsAgent/local-agent-watchdog.sh"
 OLD_RUNTIME_DIR="$HOME/Library/Application Support/LemonToolsAgent/tool-system"
 
 require_project() {
@@ -60,6 +61,18 @@ while (( ! stopping )); do
  done
 EOF
   chmod 700 "$LAUNCHER"
+
+  cat > "$WATCHDOG" <<EOF
+#!/bin/zsh
+PID_FILE="$PID_FILE"
+LOGIN_COMMAND="$LOGIN_COMMAND"
+if [[ -f "\$PID_FILE" ]] && kill -0 "\$(cat "\$PID_FILE")" 2>/dev/null; then
+  exit 0
+fi
+rm -f "\$PID_FILE"
+/usr/bin/open -g -a Terminal "\$LOGIN_COMMAND"
+EOF
+  chmod 700 "$WATCHDOG"
 }
 
 start_agent() {
@@ -92,14 +105,15 @@ install_service() {
 exec ${(q)PROJECT_DIR}/scripts/local_agent_service.sh start
 EOF
   chmod 700 "$LOGIN_COMMAND"
-  /usr/bin/python3 - "$TARGET_PLIST" "$LABEL" "$LOGIN_COMMAND" <<'PY'
+  /usr/bin/python3 - "$TARGET_PLIST" "$LABEL" "$WATCHDOG" <<'PY'
 import plistlib
 import sys
 with open(sys.argv[1], "wb") as output:
     plistlib.dump({
         "Label": sys.argv[2],
-        "ProgramArguments": ["/usr/bin/open", "-g", "-a", "Terminal", sys.argv[3]],
+        "ProgramArguments": [sys.argv[3]],
         "RunAtLoad": True,
+        "StartInterval": 30,
         "LimitLoadToSessionType": "Aqua",
     }, output)
 PY
@@ -129,7 +143,7 @@ case "${1:-status}" in
   uninstall)
     stop_agent
     launchctl bootout "gui/$UID/$LABEL" >/dev/null 2>&1 || true
-    rm -f "$TARGET_PLIST" "$LAUNCHER" "$LOGIN_COMMAND" "$PID_FILE"
+    rm -f "$TARGET_PLIST" "$LAUNCHER" "$LOGIN_COMMAND" "$WATCHDOG" "$PID_FILE"
     echo "uninstalled: $LABEL"
     ;;
   cleanup-old-runtime)

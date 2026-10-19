@@ -25,6 +25,14 @@ def _read_targets(cdp_url: str) -> list[dict]:
 def _start_agent_chrome(cdp_url: str) -> None:
     if cdp_url.rstrip("/") != DEFAULT_CDP_URL:
         return
+    # A responsive CDP endpoint means the dedicated Agent Chrome already
+    # exists. Do not use `open -na` in that case: it creates another window
+    # when Playwright is merely slow to finish attaching.
+    try:
+        _read_targets(cdp_url)
+        return
+    except Exception:
+        pass
     profile = Path.home() / "EI account" / "chrome_profile"
     profile.mkdir(parents=True, exist_ok=True)
     subprocess.run(
