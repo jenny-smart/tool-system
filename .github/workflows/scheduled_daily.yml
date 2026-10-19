@@ -351,14 +351,17 @@ jobs:
 
           BRANCH_NAME="${GITHUB_REF_NAME}"
 
-          if ! git pull --rebase origin "$BRANCH_NAME"; then
-            echo "❌ Log 提交成功，但 git pull --rebase 失敗"
-            exit 1
-          fi
-
-          if ! git push origin "HEAD:$BRANCH_NAME"; then
-            echo "❌ Log 提交成功，但 git push 失敗"
-            exit 1
-          fi
+          # GitHub 偶爾回 500，最多重試 4 次
+          for attempt in 1 2 3 4; do
+            if git pull --rebase origin "$BRANCH_NAME" && git push origin "HEAD:$BRANCH_NAME"; then
+              break
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "❌ Log 提交成功，但 git pull/push 重試 4 次仍失敗"
+              exit 1
+            fi
+            echo "⚠️ git pull/push 失敗，$((attempt * 5)) 秒後重試（$attempt/4）"
+            sleep $((attempt * 5))
+          done
 
           echo "✅ 日排程 Log 已提交"

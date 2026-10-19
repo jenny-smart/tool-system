@@ -39,6 +39,7 @@ jobs:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
 
       FIELD_SOURCE_FROM_DAILY: "1"
 
@@ -256,7 +257,17 @@ jobs:
           fi
 
           git commit -m "Update field logs"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # GitHub 偶爾回 500，最多重試 4 次
+          for attempt in 1 2 3 4; do
+            if git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              break
+            fi
+            if [ "$attempt" -eq 4 ]; then
+              echo "❌ 外場排程 Log 提交重試 4 次仍失敗"
+              exit 1
+            fi
+            echo "⚠️ git pull/push 失敗，$((attempt * 5)) 秒後重試（$attempt/4）"
+            sleep $((attempt * 5))
+          done
 
           echo "✅ 外場排程 Log 已提交"
