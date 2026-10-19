@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from tools.invoice_center.invoice_payload_queue import (
     list_pending_payloads,
@@ -21,6 +24,8 @@ INVOICE_FORM_SELECTORS = (
 )
 
 INVOICE_CREATE_URL = "https://www.ei.com.tw/InvoiceRent/invoiceadd.jsp"
+INVOICE_QUERY_URL = "https://www.ei.com.tw/InvoiceRent/invoicequery.jsp"
+QUERY_DAYS = 90
 INVOICE_NO_RE = re.compile(r"(?<![A-Z0-9])([A-Z]{2})[ -]?(\d{8})(?!\d)")
 MANUAL_SAVE_TIMEOUT_MS = 30 * 60 * 1000
 
@@ -392,6 +397,114 @@ def _paste_one(page: Any, payload_json: str) -> None:
             f"發票表單驗證失敗：orderid 預期 {expected_order_id}，實際 {actual_order_id or '空白'}"
         )
 
+def _parse_date(text: str) -> date | None:
+    """2026/10/19、115/10/19 → date；讀不到回傳 None。"""
+    match = re.search(r"(\d{3,4})[/.-](\d{1,2})[/.-](\d{1,2})", str(text or ""))
+    if not match:
+        return None
+    year, month, day = (int(part) for part in match.groups())
+    try:
+        return date(year if year > 1911 else year + 1911, month, day)
+    except ValueError:
+        return None
+
+
+def _roc(value: date) -> str:
+    return f"{value.year - 1911}/{value.month:02d}/{value.day:02d}"
+
+
+def _money(text: str) -> Decimal | None:
+    try:
+        return Decimal(re.sub(r"[^\d.]", "", str(text or ""))) if re.search(r"\d", str(text or "")) else None
+    except InvalidOperation:
+        return None
+
+
+def parse_invoice_rows(rows_text: list[str], order_no: str, *, amount: str = "",
+                       not_before: str = "") -> str | None:
+    """鯨躍開立發票查詢結果中，屬於這一筆的發票號碼。
+
+    同一訂單可能早就開過原訂單發票，所以只認：訂單編號相同（可帶 -N）、未作廢、
+    發票日期不早於登記日期（not_before），且有給金額時含稅金額相符（容許差 1 元）。
+    """
+    expected = re.sub(r"\s+", "", str(order_no or "")).upper()
+    if not expected:
+        return None
+    order_re = re.compile(rf"(?<![A-Z0-9]){re.escape(expected)}(?:-\d+)?(?![0-9])")
+    floor = _parse_date(not_before)
+    total = _money(amount)
+    for text in rows_text:
+        compact = re.sub(r"\s+", " ", str(text or "")).upper()
+        if not order_re.search(compact) or "作廢" in compact:
+            continue
+        invoice = INVOICE_NO_RE.search(compact)
+        if not invoice:
+            continue
+        dates = [d for d in (_parse_date(m) for m in re.findall(r"\d{3,4}/\d{1,2}/\d{1,2}", compact)) if d]
+        if floor and dates and max(dates) < floor:
+            continue
+        if total is not None:
+            numbers = {_money(m) for m in re.findall(r"\d[\d,]*(?:\.\d+)?", compact)}
+            if not any(n is not None and abs(n - total) <= 1 for n in numbers):
+                continue
+        return invoice.group(1) + invoice.group(2)
+    return None
+
+
+def _set_readonly_value(page: Any, selector: str, value: str) -> None:
+    page.locator(selector).first.evaluate(
+        "(el, v) => { el.removeAttribute('readonly'); el.value = v; "
+        "el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); }",
+        value,
+    )
+
+
+def find_existing_invoice(page: Any, order_no: str, *, amount: str = "", not_before: str = "") -> str | None:
+    """開立前到鯨躍「開立發票查詢」用訂單編號查；已開立就回傳發票號碼。
+
+    查詢本身失敗會丟例外（呼叫端停止，不在不確定時開立）。
+    """
+    today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+    start = _parse_date(not_before) or today - timedelta(days=QUERY_DAYS)
+    page.goto(INVOICE_QUERY_URL, wait_until="domcontentloaded")
+    if not page.locator("#date1").count() or not page.locator("#date2").count():
+        raise RuntimeError("鯨躍開立發票查詢頁找不到「發票日期」欄位，無法確認是否已開立")
+    _set_readonly_value(page, "#date1", _roc(min(start, today)))
+    _set_readonly_value(page, "#date2", _roc(today))
+    keyword = page.locator("tr").filter(has=page.get_by_text("關鍵字", exact=True)).first.locator(
+        "input[type='text'], input:not([type])")
+    if not keyword.count():
+        raise RuntimeError("鯨躍開立發票查詢頁找不到「關鍵字」欄位，無法確認是否已開立")
+    keyword.first.fill(order_no)
+    search = page.locator("a[onclick='queryInvoiceList();']")
+    if search.count() and search.first.is_visible():
+        search.first.click()
+    else:
+        texts = page.get_by_text("搜尋", exact=False)
+        visible = [texts.nth(i) for i in range(texts.count()) if texts.nth(i).is_visible()]
+        if not visible:
+            raise RuntimeError("鯨躍開立發票查詢頁找不到「搜尋」按鈕，無法確認是否已開立")
+        visible[0].click()
+    page.wait_for_function(
+        "() => Array.from(document.querySelectorAll('table'))"
+        ".some(t => t.innerText.includes('訂單編號') || t.innerText.includes('無資料'))",
+        timeout=20_000,
+    )
+    page.wait_for_timeout(800)
+    rows = page.locator("tr").filter(has_text=re.compile(re.escape(order_no), re.I))
+    texts = [rows.nth(i).inner_text() for i in range(rows.count())]
+    return parse_invoice_rows(texts, order_no, amount=amount, not_before=not_before)
+
+
+def _source_row_values(area: str, source_row: int) -> tuple[str, str]:
+    """清潔異動該列的（E 登記日期, N 收款金額）；讀不到回傳空字串。"""
+    from tools.lemon_backend.stored_value_sheet import get_worksheet
+
+    values = get_worksheet(area).get(f"E{source_row}:N{source_row}") if source_row >= 2 else []
+    row = list(values[0] if values else []) + [""] * 10
+    return str(row[0] or "").strip(), str(row[9] or "").strip()
+
+
 def process_pending_invoice_payloads(page: Any, area: str) -> int:
     pending = list_pending_payloads(area)
     if not pending:
@@ -446,6 +559,16 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         payload_json = str(item.get("payload_json") or "").strip()
         if not payload_json:
             update_payload_status(row_no, "failed", "Payload 空白")
+            continue
+        # 開立前：到鯨躍查詢這筆是否已開過（同訂單、登記日後、金額相符），有就回填不重開；
+        # 查詢失敗直接停止，不在不確定時開立
+        registered_on, amount = _source_row_values(area, source_row)
+        existing = find_existing_invoice(page, order_no, amount=amount, not_before=registered_on)
+        if existing:
+            write_invoice_result(area, source_row, order_no, existing)
+            update_payload_status(row_no, "completed", f"鯨躍已有發票，回填 O/AA：{existing}")
+            completed += 1
+            print(f"[{area}] {order_no}：鯨躍已開立發票 {existing}，已回填，未重複開立", flush=True)
             continue
         try:
             # 每張發票按「否」後會回到查詢頁；下一筆必須重新進入開立頁。
