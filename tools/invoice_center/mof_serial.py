@@ -317,26 +317,29 @@ def download_serial_csv(page: Page, year: int, label: str, destination: Path) ->
     else:
         row.first.click(timeout=8000, force=True)
 
-    with page.expect_download(timeout=60_000) as download_info:
-        try:
-            # The table also contains icon-only per-row download actions. Select the
-            # bulk button that has visible "下載" text after checking the target row.
-            download_button = page.locator("button[title='下載']").filter(has_text="下載")
-            if not download_button.count():
-                download_button = page.locator("button[title='下載']")
-            download_button.last.click(timeout=8000, force=True)
-        except Exception as e:
-            raise RuntimeError(f"找不到「下載」按鈕；目前頁面：{page.url}") from e
-        # 按下下載後會跳一個「注意事項」燈箱（提醒下載檔案編碼為 UTF-8），
-        # 畫面上的確認按鈕只有可見文字「是」，沒有 title 屬性。
-        try:
-            notice = page.get_by_text("下載檔案編碼為UTF-8", exact=False)
-            notice.first.wait_for(state="visible", timeout=8000)
-            page.get_by_role("button", name="是", exact=True).first.click(
-                timeout=8000, force=True
-            )
-        except Exception as e:
-            raise RuntimeError("下載確認燈箱出現後，無法點擊「是」") from e
+    try:
+        with page.expect_download(timeout=60_000) as download_info:
+            try:
+                # The table also contains icon-only per-row download actions. Select the
+                # bulk button that has visible "下載" text after checking the target row.
+                download_button = page.locator("button[title='下載']:visible").filter(has_text="下載")
+                if not download_button.count():
+                    download_button = page.locator("button[title='下載']:visible")
+                download_button.last.click(timeout=8000, force=True)
+            except Exception as e:
+                raise RuntimeError(f"找不到「下載」按鈕；目前頁面：{page.url}") from e
+            # 按下下載後會跳一個「注意事項」燈箱（提醒下載檔案編碼為 UTF-8），確認按鈕只有文字「是」。
+            # 頁面上藏著好幾份同樣的燈箱（實測 21 個隱藏的），只認看得到的那個「是」。
+            confirm = page.locator("button:visible").filter(has_text=re.compile(r"^\s*是\s*$"))
+            try:
+                confirm.first.wait_for(state="visible", timeout=10_000)
+            except Exception as e:
+                raise RuntimeError(f"按下「下載」後沒有出現確認燈箱（找不到看得到的「是」）；目前頁面：{page.url}") from e
+            confirm.first.click(timeout=8000)
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"按下「是」後 60 秒內沒有開始下載；目前頁面：{page.url}") from e
     download = download_info.value
     destination.parent.mkdir(parents=True, exist_ok=True)
     download.save_as(str(destination))

@@ -78,7 +78,15 @@ def main() -> int:
 
         downloads_dir = Path.home() / "MOF account" / "downloads"
         destination = downloads_dir / filename
-        mof_serial.download_serial_csv(mof_page, year, label, destination)
+        try:
+            mof_serial.ensure_expected_login(mof_page, credentials)  # 下載前再確認一次是這一區的帳號
+            mof_serial.download_serial_csv(mof_page, year, label, destination)
+        finally:
+            # 下載完（或失敗）一律登出，下一區一定重新用正確帳號登入
+            try:
+                mof_serial.logout_mof(mof_page)
+            except Exception as exc:
+                print(f"[財政部電子發票] ⚠️ 自動登出失敗：{exc}")
         print(f"[1/3] 已下載：{destination}")
         mof_serial.archive_and_log(destination, args.area, year, label)
         print("[1/3] 已歸檔到 Google Drive，並寫入鯨躍字軌匯入配號Log")
