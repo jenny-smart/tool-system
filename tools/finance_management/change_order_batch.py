@@ -12,6 +12,7 @@
   - 待處理發票（車馬費發票／異動發票／二聯改三聯）→ 需到鯨躍發票功能逐筆確認
   - 回寫系統：B 欄為 已退款／已收款／已扣儲值金／已返儲值金／已處理發票，
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
+    B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
   - 盤點時順手補 T（匯款金額）、Z（未稅金額）公式（只補空白格）。
 回寫完成後在 Jenny 行事曆建一筆紀錄事件（不跳提醒）。
 """
@@ -86,6 +87,22 @@ def needs_sync(row: list) -> bool:
     return status in DONE_STATUSES and _cell(row, "AE") != synced_marker(status)
 
 
+def ready_target(row: list) -> Optional[str]:
+    """B 欄還是待處理、但折讓單／退款／收款／發票／儲值金已在別處處理好的列 → 回寫後的完成狀態。"""
+    status = _cell(row, "B")
+    if status == "待退款" and _cell(row, "AB") and _cell(row, "AC"):
+        return "已退款"
+    if status == "待收款" and _cell(row, "M") and _cell(row, "O"):
+        return "已收款"
+    if status == "待扣儲值金" and _cell(row, "M"):
+        return "已扣儲值金"
+    if status == "待返儲值金" and _cell(row, "AC"):
+        return "已返儲值金"
+    if status == "待處理發票" and _cell(row, "O"):
+        return "已處理發票"
+    return None
+
+
 def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
     """單列盤點結果；不需處理（已回寫、登記日期在起算日前、無訂單編號）回傳 None。"""
     status, order_no = _cell(row, "B"), _cell(row, "G")
@@ -104,6 +121,15 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             return None
         item["amount"] = _amount(_cell(row, "S") or _cell(row, "N"))
         item["actions"].append("sync")
+        item["target_status"] = status
+        return item
+
+    target = ready_target(row)
+    if target:
+        item["amount"] = _amount(_cell(row, "S") or _cell(row, "N"))
+        item["actions"].append("sync")
+        item["target_status"] = target
+        item["progress"].append(f"已處理好，回寫後 B 欄改為「{target}」")
         return item
 
     if status == "待退款":
@@ -270,19 +296,21 @@ def sync_region(region: str, log: Callable[[str], None] = print,
     change_order = _change_order()
     ws = change_order.get_worksheet(region)
     values = ws.get_all_values()
-    targets = [(row_no, row) for row_no, row in enumerate(values[1:], start=2)
+    targets = [(row_no, row, item["target_status"]) for row_no, row in enumerate(values[1:], start=2)
                if (rows is None or row_no in rows)
                and (item := plan_row(region, row_no, row)) and item["actions"] == ["sync"]]
     result: dict[str, list] = {"done": [], "failed": []}
     if not targets:
         return result
     session = _login_session(region, ui_logger=log)
-    for row_no, row in targets:
-        status = _cell(row, "B")
+    for row_no, row, status in targets:
+        # 已處理好但 B 欄仍是待處理的列：以完成狀態回填後台，成功後才把 B 欄改成完成狀態
         sync_item = {"sheet_row": row_no, "kind": "refund" if "退" in status or "返" in status else "charge",
                      "status": status, "order_no": _cell(row, "G"), "raw": row}
         try:
             change_order.sync_one_to_purchase_edit(sync_item, session=session, ui_logger=log)
+            if _cell(row, "B") != status:
+                ws.update_acell(f"B{row_no}", status)
             change_order.mark_sheet_row_done(region, row_no, status, ui_logger=log)
             result["done"].append(row_no)
         except Exception as exc:

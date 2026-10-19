@@ -51,19 +51,37 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         st.success("沒有需要處理的列 🎉")
         return
 
+    sync_only = st.checkbox(
+        "📝 僅回寫系統（只列出 B 欄已完成或資料已處理好、尚未回寫的列；不執行折讓單、退款、儲值金等動作）",
+        value=False, key="change_order_batch_sync_only_mode")
+    if sync_only:
+        items = [item for item in items if item["actions"] == ["sync"]]
+        if not items:
+            st.info("沒有需要回寫系統的列。")
+            return
+
     runnable = [item for item in items if item["actions"]]
     missing = [item for item in items if item["missing"]]
     manual = [item for item in items if not item["actions"] and not item["missing"]]
-    st.markdown(f"共 **{len(items)}** 列：可自動執行 **{len(runnable)}** 列、"
-                f"未備妥（缺資料）**{len(missing)}** 列、需人工 **{len(manual)}** 列。")
+    if sync_only:
+        st.markdown(f"共 **{len(items)}** 列可回寫系統。")
+    else:
+        st.markdown(f"共 **{len(items)}** 列：可自動執行 **{len(runnable)}** 列、"
+                    f"未備妥（缺資料）**{len(missing)}** 列、需人工 **{len(manual)}** 列。")
     edited = st.data_editor(
         _rows(items),
         hide_index=True,
         width="stretch",
         disabled=[c for c in _rows(items[:1]).columns if c != RUN_COLUMN],
-        key="change_order_batch_editor",
+        key=f"change_order_batch_editor_{'sync' if sync_only else 'all'}",
     )
     selected = [item for item, flag in zip(items, edited[RUN_COLUMN]) if flag and item["actions"]]
+
+    if sync_only:
+        if st.button(f"▶️ 回寫勾選的 {len(selected)} 筆", key="change_order_batch_run", disabled=not selected):
+            _sync_now(selected, log)
+        return
+
     counts = {}
     for item in selected:
         for action in item["actions"]:
@@ -80,11 +98,17 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         if agent_items:
             batch.queue_actions(selected, do_sync, create_task, created_by=username or "清潔異動整合執行", log=log)
             st.success("已排入本機 Agent，請到下方查看執行進度；完成後可再按一次「盤點」確認。")
+            st.session_state.pop(STATE_KEY, None)
         elif do_sync:
-            with st.spinner("回寫系統中…"):
-                results = batch.sync(list(batch.selected_rows_by_region(selected)), log=log,
-                                     rows=batch.selected_rows_by_region(selected))
-            done = sum(len(r["done"]) for r in results.values())
-            failed = sum(len(r["failed"]) for r in results.values())
-            (st.success if not failed else st.warning)(f"回寫完成 {done} 筆，失敗 {failed} 筆")
-        st.session_state.pop(STATE_KEY, None)
+            _sync_now(selected, log)
+
+
+def _sync_now(selected: list[dict], log: Callable[[str], None]) -> None:
+    """只需回寫的列直接在雲端回寫（不經本機 Agent）。"""
+    rows = batch.selected_rows_by_region(selected)
+    with st.spinner("回寫系統中…"):
+        results = batch.sync(list(rows), log=log, rows=rows)
+    done = sum(len(r["done"]) for r in results.values())
+    failed = sum(len(r["failed"]) for r in results.values())
+    (st.success if not failed else st.warning)(f"回寫完成 {done} 筆，失敗 {failed} 筆")
+    st.session_state.pop(STATE_KEY, None)

@@ -38,7 +38,7 @@ def test_pending_refund_atm_and_credit():
     item = plan("桃園", B="待退款", X="AB1", Z="952", S="1000", R="ATM", P="700", Q="1")
     assert item["actions"] == ["allowance"] and "桃園 ATM 退款需人工" in item["manual"]
     item = plan(B="待退款", S="1000", R="現金", AB="X1", AC="2026/09/20")
-    assert item["actions"] == [] and item["progress"] == ["折讓單 ✓", "退款 ✓"]
+    assert item["actions"] == ["sync"] and item["target_status"] == "已退款"
     assert plan(B="待退款", X="AB1", Z="952", S="1000", R="現金")["manual"] == ["付款方式「現金」退款需人工"]
 
 
@@ -115,7 +115,10 @@ def test_sync_region_only_touches_done_rows(monkeypatch):
         def get_all_values(self):
             return values
 
-    synced, marked = [], []
+        def update_acell(self, cell, value):
+            b_updates.append((cell, value))
+
+    synced, marked, b_updates = [], [], []
 
     class CO:
         @staticmethod
@@ -142,3 +145,47 @@ def test_sync_respects_selected_rows(monkeypatch):
     monkeypatch.setattr(batch, "record_to_calendar", lambda *a, **k: None)
     batch.sync(["台北", "台中"], log=lambda *_: None, rows={"台北": [3]})
     assert calls == [("台北", {3}), ("台中", set())]
+
+
+def test_already_processed_pending_rows_go_straight_to_sync():
+    cases = [
+        (dict(B="待退款", S="1000", AB="AL1", AC="2026/10/17"), "已退款"),
+        (dict(B="待收款", M="2026/10/17", N="500", O="AB12345678"), "已收款"),
+        (dict(B="待扣儲值金", N="500", M="2026/10/17"), "已扣儲值金"),
+        (dict(B="待返儲值金", S="300", AC="2026/10/17"), "已返儲值金"),
+        (dict(B="待處理發票", C="車馬費發票", O="AB1"), "已處理發票"),
+    ]
+    for cells, target in cases:
+        item = plan(**cells)
+        assert item["actions"] == ["sync"] and item["target_status"] == target and item["missing"] == []
+    assert plan(B="待退款", S="1000", AB="AL1", R="信用卡")["actions"] == ["credit_refund"]
+
+
+def test_sync_region_sets_done_status_for_processed_pending_rows(monkeypatch):
+    values = [["h"], row(B="待收款", M="2026/10/17", N="500", O="AB1")]
+    b_updates, synced, marked = [], [], []
+
+    class WS:
+        def get_all_values(self):
+            return values
+
+        def update_acell(self, cell, value):
+            b_updates.append((cell, value))
+
+    class CO:
+        @staticmethod
+        def get_worksheet(region):
+            return WS()
+
+        @staticmethod
+        def sync_one_to_purchase_edit(item, session=None, ui_logger=None):
+            synced.append(item["status"])
+
+        @staticmethod
+        def mark_sheet_row_done(region, row_no, status, ui_logger=None):
+            marked.append((row_no, status))
+
+    monkeypatch.setattr(batch, "_change_order", lambda: CO)
+    monkeypatch.setattr(batch, "_login_session", lambda region, ui_logger=None: "session")
+    assert batch.sync_region("台北", log=lambda *_: None) == {"done": [2], "failed": []}
+    assert synced == ["已收款"] and b_updates == [("B2", "已收款")] and marked == [(2, "已收款")]
