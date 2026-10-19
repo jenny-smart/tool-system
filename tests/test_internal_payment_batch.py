@@ -6,8 +6,8 @@ from tools.scheduled_daily import fubon_pending_notify as notify
 
 
 def test_supply_months_only_unpaid():
-    values = [["h"], ["", "2026/09", *[""] * 15], ["", "2026/10"] + [""] * 14 + ["2026/10/05"],
-              ["", "2026.10", *[""] * 15]]
+    values = [["h"], ["", "2026/09", *[""] * 17], ["", "2026/10"] + [""] * 14 + ["2026/10/05"],
+              ["", "2026.10", *[""] * 17], ["", "2026.02"] + [""] * 16 + ["2026/02/10"]]
     assert batch._supply_months(values) == ["202609", "202610"]
 
 

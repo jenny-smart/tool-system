@@ -3,7 +3,7 @@
 三種內部請款（資料位置見主控表「財務帳務設定」）：
   - 請款記錄（財報「請款記錄」A＝待付款）            → 【富邦銀行】請款記錄
   - 工具包押金退款（H 押金＞0、S 空白）               → 【富邦銀行】工具包押金退款
-  - 清潔用品採購（進貨明細表，Q 匯款日期空白，依月份） → 【富邦銀行】清潔用品採購
+  - 清潔用品採購（進貨明細表，Q 匯款日期與 S 請款日期都空白，依月份） → 【富邦銀行】清潔用品採購
 勾選後依序排入本機 Agent（富邦轉帳仍需手機核准）；最後排一筆「留紀錄」，
 重新盤點勾選的列，已付款的列寫進 Jenny 行事曆（jenny@lemonclean.com.tw，不跳提醒）。
 每週二、五 10:00 的富邦待辦通知也用這裡的 scan() 列出待處理筆數。
@@ -31,12 +31,13 @@ KINDS = {
 
 
 def _supply_months(values: list[list[str]]) -> list[str]:
-    """進貨明細表裡還有未匯款（Q 空白）列的採購月份（B 欄，YYYYMM）。"""
+    """進貨明細表裡還有未付款（Q、S 都空白）列的採購月份（B 欄，YYYYMM）。"""
+    from tools.bank_statement.fubon_supply_purchase_filter import is_paid
+
     months = []
     for row in values[1:]:
         month = re.sub(r"\D", "", str(row[1] if len(row) > 1 else ""))[:6]
-        paid = str(row[16] if len(row) > 16 else "").strip()
-        if len(month) == 6 and not paid and month not in months:
+        if len(month) == 6 and not is_paid(row) and month not in months:
             months.append(month)
     return sorted(months)
 
