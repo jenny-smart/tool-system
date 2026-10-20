@@ -426,6 +426,14 @@ def _is_hidden_reminder_service(row: dict[str, Any]) -> bool:
     return "待確認" in status or "暫停" in status
 
 
+def _is_unarranged_service(row: dict[str, Any]) -> bool:
+    return str(row.get("status") or "").strip() == "未安排"
+
+
+def _is_pending_service(row: dict[str, Any]) -> bool:
+    return "待確認" in str(row.get("status") or "")
+
+
 def _holiday_pause_block(
     holiday_rows: list[dict[str, Any]],
     lunar_new_year_start: datetime | None,
@@ -592,9 +600,10 @@ def _build_notice_text(
     reply_deadline: str,
     lunar_new_year_start: datetime | None,
     lunar_new_year_end: datetime | None,
+    date_prompt_required: bool = False,
 ) -> str:
     all_rows = phase1_rows + phase2_rows
-    monthly_confirmation = any(_is_monthly_confirmation(row) for row in all_rows)
+    monthly_confirmation = date_prompt_required or any(_is_monthly_confirmation(row) for row in all_rows)
     phase_service_schedule = _phase_service_schedule(phase1_rows, phase2_rows)
     next_label = _service_date_label(next_service) if next_service else "目前尚無排程"
     deadline = f"建議您於 {reply_deadline} 前，" if reply_deadline.strip() else "如需調整，建議您儘早"
@@ -746,14 +755,21 @@ def build_notice_rows(
 
     output: list[list[Any]] = []
     for target in grouped.values():
-        p1 = sorted(target["phase1"], key=lambda row: row["start_dt"])
-        p2 = sorted(target["phase2"], key=lambda row: row["start_dt"])
+        p1_all = sorted(target["phase1"], key=lambda row: row["start_dt"])
+        p2_all = sorted(target["phase2"], key=lambda row: row["start_dt"])
+        p1 = [row for row in p1_all if _is_unarranged_service(row)]
+        p2 = [row for row in p2_all if _is_unarranged_service(row)]
         holiday = sorted(target["holiday"], key=lambda row: row["start_dt"])
-        if not p1 and not p2 and not holiday:
+        if not p1_all and not p2_all and not holiday:
             continue
         after_all = sorted(target["after"], key=lambda row: row["start_dt"])
         after = [row for row in after_all if not _is_hidden_reminder_service(row)]
-        month_rows = sorted(target["months"], key=lambda row: row["start_dt"])
+        month_rows_all = sorted(target["months"], key=lambda row: row["start_dt"])
+        month_rows = [row for row in month_rows_all if _is_unarranged_service(row)]
+        date_prompt_required = (
+            any(_is_pending_service(row) for row in month_rows_all)
+            or (bool(month_rows_all) and not month_rows)
+        )
         next_service = after[0] if after else None
         p1_total = sum(_extra_charge(row, phase1_weekday_rate, phase1_weekend_rate) for row in p1)
         p2_total = sum(_extra_charge(row, phase2_weekday_rate, phase2_weekend_rate) for row in p2)
@@ -778,10 +794,11 @@ def build_notice_rows(
             reply_deadline,
             lunar_new_year_start,
             lunar_new_year_end,
+            date_prompt_required,
         )
         line_url = target["line"]
         line_cell = f'=HYPERLINK("{line_url}","開啟 LINE")' if re.match(r"^https?://", line_url) else line_url
-        detail_rows = p1 + p2 + holiday + (after_all[:1] if after_all else [])
+        detail_rows = p1_all + p2_all + holiday + (after_all[:1] if after_all else [])
         output.append([
             area_name,
             "定期VIP",
@@ -790,8 +807,8 @@ def build_notice_rows(
             target["email"],
             target["address"],
             line_cell,
-            "\n".join(_service_label(row) for row in p1),
-            "\n".join(_service_label(row) for row in p2),
+            "\n".join(_service_label(row) for row in p1_all),
+            "\n".join(_service_label(row) for row in p2_all),
             _service_label(next_service) if next_service else "",
             len(p1),
             len(p2),
