@@ -6,13 +6,12 @@
   啟用 | 地區 | 適用起日 | 適用迄日 | 確認檔案ID | 確認工作表 | 姓名欄 | 電話欄 | 地址欄 |
   確認欄 | 確認值 | 備註欄 | 排程排除欄 | 排除關鍵字 | 確認表排除欄 | 說明
 
-- 只影響服務日期落在「適用起日～適用迄日」的排程列；期間外與平時完全不受影響。
-- 「確認欄」的值不在「確認值」內（例如 V 欄不是 TRUE）→ 先不約。
-- 「排程排除欄」（排程工作表，例如 A 欄＝日曆標題《》內容）或「確認表排除欄」
-  含任一「排除關鍵字」（例如 改、加）→ 先不約，留待最後再成單。
-- 先不約的列：狀態維持不變（仍是「未安排」），只在排程「預約條件」欄寫「先不約：原因」；
-  orders-system 批次成單看到「先不約」開頭就跳過。條件解除後重新更新排程，
-  該欄改為「可預約」即可成單。已有訂單編號的列不寫。
+只影響服務日期落在「適用起日～適用迄日」的未成單排程列，在排程 AG 右側寫四欄：
+  確認狀態：確認表「確認欄」的值（例如 V 欄 TRUE／FALSE）；找不到客人寫「查無」
+  確認備註：確認表「備註欄」的值（例如 W 欄）
+  改加標記：「排程排除欄」（例如 A 欄）或「確認表排除欄」含的排除關鍵字（例如 改、加）
+  預約條件：確認狀態不在「確認值」內、或有改加標記時寫「先不約」，否則空白
+狀態欄不改；orders-system 批次成單看到預約條件「先不約」就跳過。
 """
 from __future__ import annotations
 
@@ -34,6 +33,7 @@ EXAMPLE_RULES = [
      "年節大掃除：V 欄 TRUE 才預約；排程 A 欄含改／加先不約"],
 ]
 HOLD_PREFIX = "先不約"
+NOT_FOUND = "查無"
 
 
 def _text(value: Any) -> str:
@@ -119,8 +119,8 @@ def parse_rule(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[list[Any]], str]:
-    """回傳 gate(排程列) → 原因；空字串代表期間外、不受此規則影響。"""
+def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[list[Any]], Any]:
+    """回傳 gate(排程列) →（確認狀態, 改加標記, 預約條件）；None 代表期間外、不受此規則影響。"""
     def cell(row, index):
         return _text(row[index]) if index is not None and index < len(row) else ""
 
@@ -158,42 +158,37 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
         return [word for word in rule["exclude_words"] if word in text]
 
     def gate(values):
+        """回傳（確認狀態, 確認備註, 改加標記, 預約條件）；期間外回傳 None。"""
         service_date = _date(values[5])
         if not service_date or not (rule["start"] <= service_date <= rule["end"]):
-            return ""
+            return None
         matched = find(values)
-        notes = "；".join(dict.fromkeys(e["note"] for e in matched if e["note"]))
-        suffix = f"（{rule['sheet']} 備註：{notes}）" if notes else ""
-        schedule_marks = marks(cell(values, rule["schedule_exclude_col"]))
-        if schedule_marks:
-            return (f"先不約：排程 {rule['schedule_exclude_letter']} 欄標記「{'、'.join(schedule_marks)}」，"
-                    f"留待最後成單{suffix}")
-        if not matched:
-            return f"先不約：{rule['sheet']} 找不到此客戶，尚未確認"
-        source_marks = [m for e in matched for m in marks(e["excluded"])]
-        if source_marks:
-            return (f"先不約：{rule['sheet']} {rule['source_exclude_letter']} 欄標記"
-                    f"「{'、'.join(dict.fromkeys(source_marks))}」，留待最後成單{suffix}")
-        if not all(e["confirmed"] for e in matched):
-            raw = "、".join(dict.fromkeys(e["confirm_raw"] for e in matched))
-            return f"先不約：{rule['sheet']} {rule['confirm_letter']} 欄為 {raw}，尚未確認{suffix}"
-        return f"可預約：{rule['sheet']} {rule['confirm_letter']} 欄已確認{suffix}"
+        confirm = "、".join(dict.fromkeys(e["confirm_raw"] for e in matched)) if matched else NOT_FOUND
+        found = marks(cell(values, rule["schedule_exclude_col"]))
+        found += [m for e in matched for m in marks(e["excluded"])]
+        mark = "、".join(dict.fromkeys(found))
+        note = "；".join(dict.fromkeys(e["note"] for e in matched if e["note"]))
+        confirmed = bool(matched) and all(e["confirmed"] for e in matched)
+        return confirm, note, mark, ("" if confirmed and not mark else HOLD_PREFIX)
 
     return gate
 
 
-def is_hold(reason: str) -> bool:
-    return _text(reason).startswith(HOLD_PREFIX)
+def is_hold(condition: str) -> bool:
+    return _text(condition).startswith(HOLD_PREFIX)
 
 
-def combine_gates(gates: list[Callable[[list[Any]], str]]) -> Callable[[list[Any]], str] | None:
+def combine_gates(gates: list[Callable[[list[Any]], Any]]) -> Callable[[list[Any]], Any] | None:
     if not gates:
         return None
 
     def gate(values):
-        reasons = [reason for reason in (g(values) for g in gates) if reason]
-        held = [reason for reason in reasons if is_hold(reason)]
-        return "；".join(held or reasons)
+        results = [result for result in (g(values) for g in gates) if result]
+        if not results:
+            return None
+        join = lambda items: "、".join(dict.fromkeys(item for item in items if item))
+        return (join(r[0] for r in results), join(r[1] for r in results), join(r[2] for r in results),
+                HOLD_PREFIX if any(is_hold(r[3]) for r in results) else "")
 
     return gate
 

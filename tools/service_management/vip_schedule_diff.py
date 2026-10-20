@@ -8,7 +8,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
 FIELDS = ["服務人時", "備註", "姓名", "電話", "地址", "日期", "開始時間", "結束時間", "狀態"]
-META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容", "更新日期", "預約條件"]
+META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容", "更新日期"]
+GATE_HEADERS = ["確認狀態", "確認備註", "改加標記", "預約條件"]  # 排程預約條件，僅規則期間使用
 COLORS = {
     "新增": {"red": 1, "green": .96, "blue": .72},
     "未成單異動": {"red": 1, "green": .96, "blue": .72},
@@ -195,12 +196,12 @@ def _column(index):
     return result
 
 
-def _tracking_columns(header, rows):
+def _tracking_columns(header, rows, names=META_HEADERS):
     # Blank headers can still have user data underneath; append after all used cells.
     used = max([33] + [i + 1 for row in [header] + list(rows)
                            for i, value in enumerate(row) if _text(value)])
     columns = []
-    for name in META_HEADERS:
+    for name in names:
         matches = [i for i, value in enumerate(header) if i >= 33 and value == name]
         if len(matches) > 1:
             raise RuntimeError(f"追蹤欄位重複：{name}，未更新排程")
@@ -290,18 +291,14 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         header_range = f"A1:{last_column}1"
         current_header = target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
         header = current_header[0] if current_header else []
-        columns = _tracking_columns(header, physical_rows)
+        columns = _tracking_columns(header, physical_rows, META_HEADERS + GATE_HEADERS)
         read_columns = _read_tracking_columns(header, columns)
         existing = _internal_rows(physical_rows, read_columns)
         if len(header) >= 30: headers = header[:30]
     except worksheet_not_found:
         target, existing, physical_rows, header = None, [], [], []
-        columns = [33, 34, 35, 36, 37]
+        columns = list(range(33, 33 + len(META_HEADERS) + len(GATE_HEADERS)))
         created = True
-    # 預約條件 is a note for batch booking (it skips "先不約" rows); status stays as is.
-    # The column only exists while a rule applies (or once it has been written).
-    if gate is None and META_HEADERS[4] not in header[33:]:
-        columns = columns[:4]
     # Detect moves to another month by stable event identity, avoiding duplicate orders.
     area = re.sub(r"\d{6}(?:-\d{6})?$", "", target_name)
     source_ids = {_text(row[18]) for row in source_rows if len(row) > 18 and _text(row[18])}
@@ -319,12 +316,14 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
     plan = plan_schedule(existing, source_rows, target_name, foreign, coverage=export_range)
     final_rows = {i + 2: row for i, row in enumerate(existing)}
     final_rows.update({item["row"]: item["values"] for item in plan["updates"]})
-    gate_notes = {row: (gate(values) if gate and not _text(values[12]) else "")
-                  for row, values in final_rows.items()}
-    held_rows = sorted(row for row, note in gate_notes.items() if is_hold(note))
-    # Months outside the rule period get no empty 預約條件 column.
-    if len(columns) > 4 and META_HEADERS[4] not in header[33:] and not any(gate_notes.values()):
-        columns = columns[:4]
+    # 確認狀態／確認備註／改加標記／預約條件 are for batch booking (it skips 先不約 rows);
+    # status stays as is. Booked rows and months outside the rule period stay blank.
+    blank = ("",) * len(GATE_HEADERS)
+    gate_values = {row: tuple((gate(values) if gate and not _text(values[12]) else None) or blank)
+                   for row, values in final_rows.items()}
+    held_rows = sorted(row for row, values in gate_values.items() if is_hold(values[3]))
+    if not any(name in header[33:] for name in GATE_HEADERS) and not any(any(v) for v in gate_values.values()):
+        columns = columns[:len(META_HEADERS)]
     if not compare_only:
         if target is not None and (target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != physical_rows or
                                    target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != current_header):
@@ -337,7 +336,7 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             target.resize(rows=max(target.row_count, required_rows), cols=max(target.col_count, required_cols))
         if created:
             target.update(values=[list(headers[:30])], range_name="A1:AD1", value_input_option="RAW")
-        for column, name in zip(columns, META_HEADERS):
+        for column, name in zip(columns, META_HEADERS + GATE_HEADERS):
             target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
         updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
         updates, phones, colors = [], [], []
@@ -386,14 +385,18 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 updates.append({"range": timestamp_range, "values": [[updated_at]]})
             colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}",
                            "format": {"backgroundColor": {"red": 1, "green": .80, "blue": .80}}})
-        if len(columns) > 4:
-            for row, note in gate_notes.items():
+        gate_updates = []
+        if len(columns) > len(META_HEADERS):
+            for row, values in gate_values.items():
                 physical = physical_rows[row - 2] if row - 2 < len(physical_rows) else []
-                current = _text(physical[columns[4]]) if columns[4] < len(physical) else ""
-                if note != current:
-                    updates.append({"range": f"{_column(columns[4])}{row}", "values": [[note]]})
+                for column, value in zip(columns[len(META_HEADERS):], values):
+                    current = _text(physical[column]) if column < len(physical) else ""
+                    if value != current:
+                        gate_updates.append({"range": f"{_column(column)}{row}", "values": [[value]]})
         if updates: target.batch_update(updates, value_input_option="USER_ENTERED")
         if phones: target.batch_update(phones, value_input_option="RAW")
+        # Plain text: keep TRUE/FALSE as written and never evaluate a note as a formula.
+        if gate_updates: target.batch_update(gate_updates, value_input_option="RAW")
         if colors: target.batch_format(colors)
         target.freeze(rows=1)
     report_name = f"排程差異_{target_name}"
