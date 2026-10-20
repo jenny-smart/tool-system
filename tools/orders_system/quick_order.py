@@ -2047,6 +2047,17 @@ def _get_newest_coupon_code(session, base_url, prefix):
         return ""
 
 
+def _coupon_title(member_or_payload, order_no="", fallback="", amount=""):
+    """優惠券標題＝訂購人姓名＋原訂單末4碼－面額；沒有原訂單時用 fallback（手機）末4碼。"""
+    data = member_or_payload or {}
+    member = data.get("member", data) if isinstance(data, dict) else {}
+    name = str((member or {}).get("name") or "").strip()
+    tail = str(order_no or fallback or "").strip()[-4:]
+    title = f"{name}{tail}" if name else tail
+    amount_text = str(amount if amount not in (None, "") else "").strip()
+    return f"{title}-{amount_text}" if amount_text else title
+
+
 def _build_coupon_via_session(session, base_url, title, discount, date_s, date_e, prefix, piece, regions, service_items):
     """用既有 session 建優惠券，不重新登入。回傳實際優惠碼字串。"""
     coupon_add_url = f"{base_url}{COUPON_ADD_URL_PATH}"
@@ -2989,17 +3000,17 @@ def convert_order(
     today_str = date.today().strftime("%Y-%m-%d")
     coupon_prefix = order_no_a[-4:]
     coupon_discount = int(float(str(service_amount_a).replace(",", "")))
+    token_booking = get_csrf_token(session)
+    member_payload = get_member(session, phone_a, token_booking, clean_type_id)
+    if not member_payload:
+        raise Exception(f"電話 {phone_a} 查無會員資料")
     coupon_code = _build_coupon_via_session(
-        session, base_url, title=f"訂單轉換-{order_no_a}",
+        session, base_url, title=_coupon_title(member_payload, order_no_a, phone_a, coupon_discount),
         discount=coupon_discount, date_s=today_str, date_e=service_date_a,
         prefix=coupon_prefix, piece=2, regions=["台北", "台中"], service_items=["居家清潔", "裝修細清"],
     )
     if not coupon_code or coupon_code == coupon_prefix:
         raise Exception(f"折價券建立失敗，請至後台確認")
-    token_booking = get_csrf_token(session)
-    member_payload = get_member(session, phone_a, token_booking, clean_type_id)
-    if not member_payload:
-        raise Exception(f"電話 {phone_a} 查無會員資料")
     lookup_result = {"session": session, "token": token_booking, "phone": phone_a, "member_payload": member_payload, "base_url": base_url, "env_name": env_name}
     order_b_result = quick_create_order(
         env_name=env_name, payway=payway_a, region=region_a, lookup_result=lookup_result,
@@ -3223,7 +3234,7 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                     return ""
                 code = _build_coupon_via_session(
                     session, base_url,
-                    title=f"訂單轉換-{order_no_a}-B{idx+1}",
+                    title=_coupon_title(member_payload, order_no_a, amount=coupon_discount),
                     discount=coupon_discount,
                     date_s=today_str, date_e=new_date_s,
                     prefix=coupon_prefix, piece=1,
@@ -4640,13 +4651,34 @@ def stored_value_makeup_create_stored_order(
         }
     regions = [ctx["region"]] if ctx.get("region") else list(COUPON_COMPANY_ID_MAP.keys())
     services = ["居家清潔", "裝修細清"]
-    coupon_a = create_coupon(env_name, backend_email, backend_password, title=f"儲值金清零-{phone}", discount=ctx["plan"]["coupon_a"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_a"], piece="1", regions=regions, service_items=services)
-    code_a = coupon_a.get("coupon_code") or coupon_a.get("coupon_prefix") or ctx["prefix_a"]
-    stored_order = quick_create_order(env_name=env_name, payway="儲值金", region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_a, pricing_balance=ctx["balance"], allow_auto_lemon_shift=bool(allow_auto_lemon_shift))
-    lemon_result = assign_lemon_cleaners_to_order(session=stored_order["session"], base_url=_configure_environment(env_name), order_no_a=stored_order["order_no"], service_date=service_date, period_s=period_s, person_count=str(person), allow_auto_lemon_shift=bool(allow_auto_lemon_shift))
+    coupon_a = {}
+
+    def _make_coupon_a():
+        # 步驟 10：查到班表時段後才建立優惠券A，查無時段不留下沒用到的券。
+        coupon_a.update(create_coupon(env_name, backend_email, backend_password, title=_coupon_title(ctx["member"], "", phone, ctx["plan"]["coupon_a"]), discount=ctx["plan"]["coupon_a"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_a"], piece="1", regions=regions, service_items=services) or {})
+        return coupon_a.get("coupon_code") or coupon_a.get("coupon_prefix") or ctx["prefix_a"]
+
+    stored_order = quick_create_order(env_name=env_name, payway="儲值金", region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=_make_coupon_a, pricing_balance=ctx["balance"], allow_auto_lemon_shift=bool(allow_auto_lemon_shift))
+    # 儲值金清零單一律要換成檸檬人（與訂單轉換第一段相同）：排班頁沒有檸檬人時，
+    # 先到專員班表補檸檬人班再換；只補檸檬人，不動其他客人已配班專員。
+    lemon_result = assign_lemon_cleaners_to_order(session=stored_order["session"], base_url=_configure_environment(env_name), order_no_a=stored_order["order_no"], service_date=service_date, period_s=period_s, person_count=str(person), allow_auto_lemon_shift=True)
     note = (f"儲值金補價差第一段：儲值金折抵單 {stored_order['order_no']}，{ctx['day_type']}單價 {ctx['plan']['unit_price']} × {ctx['plan']['total_person_hours']}人時 = {ctx['plan']['dummy_price']}，優惠券A折抵 {ctx['plan']['coupon_a']} 元，剩餘 {ctx['plan']['stored_value_applied']} 元扣儲值金後總額應為 0，檸檬人勿動。")
     _update_order_note(stored_order["session"], _configure_environment(env_name), stored_order["order_no"], note)
     return {"stage": "stored_order", "balance": ctx["balance"], "plan": ctx["plan"], "day_type": ctx["day_type"], "coupon_a": coupon_a, "stored_order": stored_order, "lemon_result": lemon_result, "note": note, "address": ctx["address"], "region": ctx["region"], "phone": phone, "clean_type_id": clean_type_id, "service_date": service_date, "period_s": period_s, "hour": str(hour), "person": str(person), "coupon_prefix_base": coupon_prefix_base or phone, "coupon_valid_days": coupon_valid_days}
+
+
+def stored_value_makeup_retry_lemon(env_name, backend_email, backend_password, stored_stage):
+    """第一段儲值金單已成立但未換成檸檬人時，重新換檸檬人（會先補檸檬人班）。"""
+    base_url = _configure_environment(env_name)
+    session = requests.Session()
+    if not login(session, backend_email, backend_password):
+        raise Exception("後台登入失敗")
+    return assign_lemon_cleaners_to_order(
+        session=session, base_url=base_url,
+        order_no_a=stored_stage["stored_order"]["order_no"],
+        service_date=stored_stage["service_date"], period_s=stored_stage["period_s"],
+        person_count=str(stored_stage["person"]), allow_auto_lemon_shift=True,
+    )
 
 
 def stored_value_makeup_create_paid_order(
@@ -4663,12 +4695,16 @@ def stored_value_makeup_create_paid_order(
     regions = [ctx["region"]] if ctx.get("region") else list(COUPON_COMPANY_ID_MAP.keys())
     services = ["居家清潔", "裝修細清"]
     coupon_b = {}
-    code_b = ""
-    if ctx["balance"] > 0:
-        coupon_b = create_coupon(env_name, backend_email, backend_password, title=f"儲值金補價差客付-{phone}", discount=ctx["plan"]["coupon_b"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_b"], piece="1", regions=regions, service_items=services)
-        code_b = coupon_b.get("coupon_code") or coupon_b.get("coupon_prefix") or ctx["prefix_b"]
+
+    def _make_coupon_b():
+        # 步驟 10：查到班表時段後才建立優惠券B。
+        if ctx["balance"] <= 0:
+            return ""
+        coupon_b.update(create_coupon(env_name, backend_email, backend_password, title=_coupon_title(ctx["member"], stored_order_no, phone, ctx["plan"]["coupon_b"]), discount=ctx["plan"]["coupon_b"], date_s=ctx["today_str"], date_e=ctx["date_e"], prefix=ctx["prefix_b"], piece="1", regions=regions, service_items=services) or {})
+        return coupon_b.get("coupon_code") or coupon_b.get("coupon_prefix") or ctx["prefix_b"]
+
     invoice = _invoice_payload(invoice_mode, member_email=ctx["member"].get("email") or "", mobile_carrier=mobile_carrier, company_title=company_title, company_no=company_no)
-    paid_order = quick_create_order(env_name=env_name, payway=customer_payway, region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=code_b, pricing_balance=ctx["balance"], allow_auto_lemon_shift=bool(allow_auto_lemon_shift), **invoice)
+    paid_order = quick_create_order(env_name=env_name, payway=customer_payway, region=ctx["region"], lookup_result=ctx["lookup"], address=ctx["address"], clean_type_id=clean_type_id, date_s=service_date, period_s=period_s, hour=str(hour), person=str(person), discount_code=_make_coupon_b, pricing_balance=ctx["balance"], allow_auto_lemon_shift=bool(allow_auto_lemon_shift), **invoice)
     pair = f"儲值折抵單 {stored_order_no} + 客付補價差單 {paid_order['order_no']}" if stored_order_no else f"客付補價差單 {paid_order['order_no']}"
     note = f"儲值金補價差第二段：{pair}，客付單使用優惠券B折抵原儲值金餘額 {ctx['balance']} 元。"
     _update_order_note(paid_order["session"], _configure_environment(env_name), paid_order["order_no"], note)
