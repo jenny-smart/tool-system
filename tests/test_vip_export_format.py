@@ -43,7 +43,8 @@ def test_schedule_builder_passes_compare_only_to_safe_writer():
     book = SimpleNamespace(worksheet=lambda _name: source)
     client = SimpleNamespace(open_by_key=lambda _key: book)
     result = {"sheet": "台北202611", "count": 1, "differences": {}, "report": "差異"}
-    with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer:
+    with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer, \
+            patch("tools.service_management.booking_gate.load_area_gate", return_value=(None, [])):
         assert functions["_build_vip_schedule_sheet"](
             client, {"name": "台北", "target_spreadsheet_id": "test"}, "202611", compare_only=True
         ) == result
@@ -67,7 +68,8 @@ def test_schedule_builder_uses_combined_cross_month_source_and_target():
     book = SimpleNamespace(worksheet=lambda name: source, worksheets=lambda: [source])
     client = SimpleNamespace(open_by_key=lambda _key: book)
     result = {"sheet": "台北202701", "count": 1, "differences": {}, "report": "差異"}
-    with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer:
+    with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer, \
+            patch("tools.service_management.booking_gate.load_area_gate", return_value=(None, [])):
         assert functions["_build_vip_schedule_sheet"](
             client, {"name": "台北", "target_spreadsheet_id": "test"}, "202612", "202702"
         ) == result
