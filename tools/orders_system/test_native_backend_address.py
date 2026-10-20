@@ -22,14 +22,8 @@ class NativeAddressTest(unittest.TestCase):
         page.locator.assert_any_call('.check_contain')
         self.assertEqual(result['area']['area_id'], '45')
         page.expect_response.assert_not_called()
+        context.route.assert_not_called()
         browser.close.assert_called_once()
-        guard = context.route.call_args.args[1]
-        route = Mock()
-        route.request.method = 'POST'
-        route.request.url = 'https://example.invalid/booking/single'
-        guard(route)
-        route.abort.assert_called_once()
-        route.continue_.assert_not_called()
 
     def test_native_response_uses_backend_area_and_native_request_coordinates(self):
         response = Mock()

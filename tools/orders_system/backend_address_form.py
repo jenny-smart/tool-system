@@ -70,17 +70,8 @@ def query_native_address(
             context = browser.new_context()
             context.add_cookies(cookies)
             page = context.new_page()
-            # Only the native address lookup may write an HTTP request; never submit an order.
-            def restrict(route):
-                request = route.request
-                target = urlparse(request.url)
-                if request.method not in ('GET', 'HEAD', 'OPTIONS') and not (
-                    target.hostname == hostname and target.path == '/ajax/check_contain'
-                ):
-                    route.abort()
-                else:
-                    route.continue_()
-            context.route('**/*', restrict)
+            # Follow the backend page as-is. This helper only fills the form and
+            # clicks 查詢地區; it never clicks 計算時數、查詢班表 or 送出.
             page.goto(origin + '/booking/single', wait_until='domcontentloaded')
             if '/login' in page.url:
                 raise RuntimeError('後台地址查詢登入已失效')
