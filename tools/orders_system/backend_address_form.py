@@ -39,9 +39,44 @@ def _native_form_result(page):
     return {'return_code': '0000', 'area': area}
 
 
+def _select_option(page, selector, value):
+    """依後台下拉的 value 選取；value 對不到時才比對選項文字（臺／台視為相同）。"""
+    matched = page.locator(selector).evaluate(
+        """(el, value) => {
+            const norm = text => String(text || '').trim().replace(/臺/g, '台');
+            const options = Array.from(el.options || []);
+            const option = options.find(o => o.value === String(value))
+                || options.find(o => norm(o.textContent) === norm(value));
+            if (!option) return false;
+            el.value = option.value;
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            if (window.jQuery) window.jQuery(el).trigger('change');
+            return true;
+        }""",
+        str(value),
+    )
+    if not matched:
+        raise RuntimeError(f'後台下拉選單 {selector} 沒有「{value}」選項，尚未查班表')
+
+
+def _form_state(page):
+    """查詢地區失敗時附上表單目前的值，方便判斷卡在哪一步。"""
+    try:
+        state = page.evaluate(
+            """() => {
+                const value = selector => (document.querySelector(selector) || {}).value || '';
+                return ['#city', '#area', '#address', '#lat', '#lng', '#area_id', '#company_id']
+                    .map(selector => selector.slice(1) + '=' + value(selector)).join('，');
+            }"""
+        )
+    except Exception:
+        return ''
+    return f'（表單狀態：{state}）' if state else ''
+
+
 def query_native_address(
     session, base_url, member_id, address, clean_type_id, city="", country_id="",
-    address_id="", phone="",
+    address_id="", phone="", address_detail="", district="",
 ):
     try:
         from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
@@ -75,18 +110,18 @@ def query_native_address(
             page.goto(origin + '/booking/single', wait_until='domcontentloaded')
             if '/login' in page.url:
                 raise RuntimeError('後台地址查詢登入已失效')
-            for selector, value in (('#member_id', member_id), ('#clean_type_id', clean_type_id)):
-                page.locator(selector).evaluate('(el, value) => { el.value = value; }', str(value))
             try:
+                # 照後台畫面順序：選購買項目後才出現手機欄，按「查詢會員」後才出現地址區塊
+                # 與「查詢地區」按鈕；購買項目要觸發 change，頁面（Vue）才會記住，否則重繪時被清空。
+                _select_option(page, '#clean_type_id', clean_type_id)
+                if address_id and not str(phone or '').strip():
+                    raise RuntimeError('既有地址必須先用手機查詢會員，不能改走地址輸入欄位')
+                page.locator('#phone').fill(str(phone))
+                page.locator('input.get_member').click()
+                page.wait_for_function("() => String((document.querySelector('#member_id') || {}).value || '').trim()")
+                # 舊客有上次訂單時，頁面會在查詢會員 300ms 後帶入上次的縣市／鄉鎮市區，等它跑完再操作。
+                page.wait_for_timeout(500)
                 if address_id:
-                    if not str(phone or '').strip():
-                        raise RuntimeError('既有地址必須先用手機查詢會員，不能改走地址輸入欄位')
-                    phone_input = page.locator('input[placeholder="手機"]')
-                    phone_input.evaluate(
-                        '(el, value) => { el.value = value; el.dispatchEvent(new Event("input", {bubbles:true})); el.dispatchEvent(new Event("change", {bubbles:true})); }',
-                        str(phone),
-                    )
-                    page.locator('input.get_member').click()
                     page.wait_for_function(
                         "addressId => Array.from(document.querySelectorAll('select[name=\"addressId\"] option')).some(o => o.value === String(addressId))",
                         str(address_id),
@@ -97,18 +132,32 @@ def query_native_address(
                         str(address_id),
                     )
                 else:
-                    # 下拉選單沒有該地址，才使用新地址欄位。
-                    page.locator('#address').evaluate('(el, value) => { el.value = value; }', str(address))
+                    # 下拉選單沒有該地址，才使用新地址欄位：先選縣市、再選鄉鎮市區，
+                    # 剩餘地址填空白欄位，最後按後台自己的「查詢地區」。
+                    page.locator('#address').fill('')
                     if city:
-                        page.locator('#city').evaluate(
-                            '(el, value) => { el.value = value; el.dispatchEvent(new Event("change", {bubbles:true})); }',
-                            str(city),
+                        _select_option(page, '#city', city)
+                    if district or country_id:
+                        # 鄉鎮市區選項由選縣市後的頁面腳本產生，選項出現後才照畫面文字選取。
+                        target = district or country_id
+                        try:
+                            page.wait_for_function(
+                                """value => Array.from(document.querySelectorAll('#area option')).some(
+                                    o => o.value === String(value) || o.textContent.trim() === String(value))""",
+                                arg=str(target), timeout=15000,
+                            )
+                        except BrowserTimeout as exc:
+                            raise RuntimeError(f'後台鄉鎮市區選單沒有「{target}」（{city}），尚未查班表') from exc
+                        _select_option(page, '#area', target)
+                    page.locator('#address').fill(str(address_detail or address))
+                    # 「查詢地區」由後台頁面用 Google 地圖定位；地圖程式載入前按下不會有任何反應。
+                    try:
+                        page.wait_for_function(
+                            "() => typeof google !== 'undefined' && !!google.maps && typeof google.maps.Geocoder === 'function'",
+                            timeout=30000,
                         )
-                    if country_id:
-                        page.locator('#area').evaluate(
-                            '(el, value) => { el.value = value; el.dispatchEvent(new Event("change", {bubbles:true})); }',
-                            str(country_id),
-                        )
+                    except BrowserTimeout as exc:
+                        raise RuntimeError('後台頁面的地圖定位尚未載入，無法按查詢地區，尚未查班表') from exc
                     page.locator('.check_contain').click()
                 # Follow the backend form state instead of requiring a particular network
                 # response. Once these fields exist, the UI itself is ready for 計算時數.
@@ -122,7 +171,10 @@ def query_native_address(
                 result = _native_form_result(page)
             except BrowserTimeout as exc:
                 message = page.locator('.sweet-alert.visible h2').all_text_contents()
-                raise RuntimeError('後台查詢地區未完成：' + ('；'.join(message) or '服務區域欄位未帶入，尚未查班表')) from exc
+                raise RuntimeError(
+                    '後台查詢地區未完成：' + ('；'.join(message) or '服務區域欄位未帶入，尚未查班表')
+                    + _form_state(page)
+                ) from exc
             # Preserve the backend session's rotated cookies for subsequent requests.
             for cookie in context.cookies([origin]):
                 session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'], path=cookie['path'])
