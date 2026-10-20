@@ -10,8 +10,9 @@
 - 「確認欄」的值不在「確認值」內（例如 V 欄不是 TRUE）→ 先不約。
 - 「排程排除欄」（排程工作表，例如 A 欄＝日曆標題《》內容）或「確認表排除欄」
   含任一「排除關鍵字」（例如 改、加）→ 先不約，留待最後再成單。
-- 先不約的列：狀態由「未安排」改為「待確認」，批次建單不會處理；條件解除後
-  重新更新排程即恢復「未安排」。已有訂單編號的列一律不動。
+- 先不約的列：狀態維持不變（仍是「未安排」），只在排程「預約條件」欄寫「先不約：原因」；
+  orders-system 批次成單看到「先不約」開頭就跳過。條件解除後重新更新排程，
+  該欄改為「可預約」即可成單。已有訂單編號的列不寫。
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ EXAMPLE_RULES = [
      "2026大掃除", "C", "D", "F", "V", "TRUE", "W", "A", "改,加", "",
      "年節大掃除：V 欄 TRUE 才預約；排程 A 欄含改／加先不約"],
 ]
-HOLD_STATUS = "待確認"
+HOLD_PREFIX = "先不約"
 
 
 def _text(value: Any) -> str:
@@ -182,7 +183,7 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
 
 
 def is_hold(reason: str) -> bool:
-    return reason.startswith("先不約")
+    return _text(reason).startswith(HOLD_PREFIX)
 
 
 def combine_gates(gates: list[Callable[[list[Any]], str]]) -> Callable[[list[Any]], str] | None:

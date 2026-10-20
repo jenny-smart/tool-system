@@ -3,7 +3,6 @@ from copy import deepcopy
 import pytest
 
 from tools.service_management.booking_gate import build_gate, is_hold, parse_rule
-from tools.service_management.vip_schedule_diff import plan_schedule
 
 from tests.test_vip_schedule_diff import Book, MissingSheet, Sheet, old_row, source_row
 from tools.service_management.vip_schedule_diff import sync_schedule
@@ -72,28 +71,36 @@ def test_bad_column_letter_is_rejected():
         rule(確認欄="V欄")
 
 
-def test_plan_holds_unbooked_row_and_releases_after_confirmation():
+def test_sync_keeps_status_and_releases_note_after_confirmation():
     original = schedule()
+    sheet = Sheet("台北202701", [original])
     hold = build_gate(rule(), [confirm_row(confirmed="FALSE")])
-    plan = plan_schedule([original], [source_row(original)], "台北202701", gate=hold)
-    held = plan["updates"][0]["values"]
-    assert held[8] == "待確認"
+    sync_schedule(Book([sheet]), "台北202701", [source_row(original)], ["標題"] * 30, MissingSheet, gate=hold)
+    column = sheet.data[0].index("預約條件")
+    assert sheet.data[1][8] == "未安排" and sheet.data[1][column].startswith("先不約")
     release = build_gate(rule(), [confirm_row()])
-    plan = plan_schedule([held], [source_row(original)], "台北202701", gate=release)
-    assert plan["updates"][0]["values"][8] == "未安排"
+    result = sync_schedule(Book([sheet]), "台北202701", [source_row(original)], ["標題"] * 30, MissingSheet, gate=release)
+    assert sheet.data[1][8] == "未安排" and sheet.data[1][column].startswith("可預約")
+    assert result["booking_gate"]["held"] == 0
 
 
-def test_plan_never_regates_booked_rows():
+def test_booked_rows_get_no_booking_condition():
     booked = schedule(order="LC123")
+    sheet = Sheet("台北202701", [booked])
     hold = build_gate(rule(), [confirm_row(confirmed="FALSE")])
-    plan = plan_schedule([booked], [source_row(booked)], "台北202701", gate=hold)
-    assert plan["updates"] == []
+    result = sync_schedule(Book([sheet]), "台北202701", [source_row(booked)], ["標題"] * 30, MissingSheet, gate=hold)
+    column = sheet.data[0].index("預約條件")
+    assert len(sheet.data[1]) <= column or sheet.data[1][column] == ""
+    assert result["booking_gate"]["held"] == 0
 
 
-def test_new_calendar_row_is_held():
+def test_new_calendar_row_gets_hold_note_but_stays_unarranged():
+    sheet = Sheet("台北202701", [])
     hold = build_gate(rule(), [confirm_row(confirmed="FALSE")])
-    plan = plan_schedule([], [source_row(schedule())], "台北202701", gate=hold)
-    assert plan["updates"][0]["values"][8] == "待確認"
+    result = sync_schedule(Book([sheet]), "台北202701", [source_row(schedule())], ["標題"] * 30, MissingSheet, gate=hold)
+    column = sheet.data[0].index("預約條件")
+    assert sheet.data[1][8] == "未安排" and sheet.data[1][column].startswith("先不約")
+    assert result["booking_gate"]["held_rows"] == [2]
 
 
 def test_sync_writes_booking_condition_column_and_reports_held_rows():
@@ -102,7 +109,7 @@ def test_sync_writes_booking_condition_column_and_reports_held_rows():
     gate = build_gate(rule(), [confirm_row(confirmed="FALSE")])
     result = sync_schedule(Book([sheet]), "台北202701", [source_row(original)], ["標題"] * 30, MissingSheet, gate=gate)
     column = sheet.data[0].index("預約條件")
-    assert sheet.data[1][8] == "待確認"
+    assert sheet.data[1][8] == "未安排"
     assert sheet.data[1][column].startswith("先不約")
     assert result["booking_gate"] == {"enabled": True, "held": 1, "held_rows": [2]}
 

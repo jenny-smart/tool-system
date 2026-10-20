@@ -57,12 +57,8 @@ def _diff(old, new):
                     for c in range(9) if c not in ignored and _canonical(old[c], c) != _canonical(new[c], c))
 
 
-def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=None, gate=None):
-    """Return cell updates and a review report; ambiguous matches never create a new row.
-
-    gate(values) returns a 排程預約條件 reason; "先不約…" holds an unbooked 未安排 row as 待確認.
-    """
-    from tools.service_management.booking_gate import HOLD_STATUS, is_hold
+def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=None):
+    """Return cell updates and a review report; ambiguous matches never create a new row."""
     foreign_events = foreign_events or {}
     old = {i + 2: (list(row) + [""] * 33)[:33] for i, row in enumerate(existing) if any(_text(v) for v in row)}
     incoming = []
@@ -74,12 +70,6 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
         values[3] = _canonical(values[3], 3)
         values[30] = _text(padded[18])
         incoming.append(values)
-    held = set()
-    if gate:
-        for index, values in enumerate(incoming):
-            if _canonical(values[8], 8) == "未安排" and is_hold(gate(values)):
-                values[8] = HOLD_STATUS
-                held.add(index)
     event_counts = Counter(row[30] for row in incoming if row[30])
     if any(count > 1 for count in event_counts.values()):
         raise RuntimeError("日曆匯出有重複事件ID，未更新排程，請重新匯出核對")
@@ -120,10 +110,6 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
 
     for index, row in sorted(pairs.items(), key=lambda pair: pair[1]):
         before, after = old[row], incoming[index]
-        if index in held and _text(before[12]):
-            # Booked rows are never re-gated; keep the calendar status as exported.
-            after = after.copy()
-            after[8] = "未安排"
         detail = _diff(before, after)
         values = before.copy()
         if after[30]: values[30] = after[30]
@@ -312,7 +298,8 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         target, existing, physical_rows, header = None, [], [], []
         columns = [33, 34, 35, 36, 37]
         created = True
-    # 預約條件 only exists while a rule applies (or once it has been written).
+    # 預約條件 is a note for batch booking (it skips "先不約" rows); status stays as is.
+    # The column only exists while a rule applies (or once it has been written).
     if gate is None and META_HEADERS[4] not in header[33:]:
         columns = columns[:4]
     # Detect moves to another month by stable event identity, avoiding duplicate orders.
@@ -329,13 +316,12 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             foreign_columns = _tracking_columns(foreign_header, foreign_rows)
             for row_num, values in enumerate(_internal_rows(foreign_rows, _read_tracking_columns(foreign_header, foreign_columns)), 2):
                 if values[30] in source_ids: foreign[values[30]].append((sheet.title, row_num, values))
-    plan = plan_schedule(existing, source_rows, target_name, foreign, coverage=export_range, gate=gate)
+    plan = plan_schedule(existing, source_rows, target_name, foreign, coverage=export_range)
     final_rows = {i + 2: row for i, row in enumerate(existing)}
     final_rows.update({item["row"]: item["values"] for item in plan["updates"]})
     gate_notes = {row: (gate(values) if gate and not _text(values[12]) else "")
                   for row, values in final_rows.items()}
-    held_rows = sorted(row for row, note in gate_notes.items()
-                       if is_hold(note) and _canonical(final_rows[row][8], 8) == "待確認")
+    held_rows = sorted(row for row, note in gate_notes.items() if is_hold(note))
     if not compare_only:
         if target is not None and (target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != physical_rows or
                                    target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != current_header):
