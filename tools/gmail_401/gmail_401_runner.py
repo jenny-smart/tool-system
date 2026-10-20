@@ -141,6 +141,11 @@ def upload_to_drive(drive, folder_id, filename, data):
 
 
 def write_log_to_sheet(success, skipped, error, total):
+    from tools.common import unified_log
+
+    unified_log.write(system="Gmail401歸檔", function="掃描歸檔", run_type="排程", area="全區",
+                      target="Google Drive", status="成功" if error == 0 else "部分失敗",
+                      message=f"信件數={total}｜成功={success}｜略過={skipped}｜失敗={error}")
     try:
         master_id = os.environ.get(
             "TOOLS_APP_LOG_SPREADSHEET_ID",

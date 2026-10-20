@@ -163,6 +163,12 @@ def write_log(
         message,
     ]
 
+    from tools.common import unified_log
+
+    unified_log.write(system=SYSTEM_NAME, function=function_name, run_type=run_type, area=area,
+                      period=date_string, target=target_location, source_file=source_file_name,
+                      status=status, message=message)
+
     # ── Layer 1：中央打卡 ──────────────────────────────────
     if central_spreadsheet_id:
         try:

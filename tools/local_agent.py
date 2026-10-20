@@ -795,6 +795,33 @@ def command_for(task: dict[str, str]) -> list[str]:
     return builder(parse_params(task))
 
 
+def _last_error_line(log_text: str) -> str:
+    """失敗時抓 log 裡最後一行錯誤（RuntimeError: … 之類），找不到就取最後一行。"""
+    lines = [line.strip() for line in str(log_text or "").splitlines() if line.strip()]
+    lines = [line for line in lines if not line.startswith("[") or "FAILED" not in line]
+    for line in reversed(lines):
+        if "Error" in line or "錯誤" in line or "失敗" in line or line.startswith("❌"):
+            return line[:500]
+    return lines[-1][:500] if lines else ""
+
+
+def _unified_task_log(task: dict[str, str], status: str, message: str, log_text: str = "") -> None:
+    """本機 Agent 每個任務結束時，另寫一筆到主控表「tool-system執行Log-年度」。"""
+    from tools.common import unified_log
+
+    try:
+        params = json.loads(task.get("params_json") or "{}")
+    except (TypeError, ValueError):
+        params = {}
+    if status == "failed":
+        detail = _last_error_line(log_text)
+        message = f"{message}｜{detail}" if detail and detail not in message else message
+    period = params.get("start_date") or params.get("month") or params.get("period") or ""
+    unified_log.write(system="本機Agent", function=task.get("action", ""), run_type="本機Agent",
+                      area=params.get("area") or "", period=period, target=task.get("task_id", ""),
+                      status=status, message=message, operator=task.get("created_by", ""))
+
+
 def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
     row_number = int(task["_row"])
     task_id = task["task_id"]
@@ -935,6 +962,7 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
             service=service,
             spreadsheet_id=spreadsheet_id,
         )
+        _unified_task_log(task, status, message, preview)
         return return_code
     except Exception as exc:
         cancel_monitor_stop.set()
@@ -956,6 +984,7 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
             service=service,
             spreadsheet_id=spreadsheet_id,
         )
+        _unified_task_log(task, "failed", str(exc)[:500], preview)
         print(preview, file=sys.stderr, flush=True)
         return 1
 

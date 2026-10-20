@@ -323,6 +323,14 @@ def log_to_sheet(
         message,
     ]
 
+    from tools.common import unified_log
+
+    # 另同步一份到主控表「tool-system執行Log-年度」（各系統統一格式）
+    unified_log.write(system=system, function=function, run_type=run_type, area=area, period=period_or_date,
+                      target=target, source_file=source_file, status=status_text,
+                      message=(f"{message}\n{traceback_text}".strip() if status_text == "失敗" and traceback_text
+                               and traceback_text != message else message))
+
     append_row(service, spreadsheet_id, sheet_name, row)
 
     if status_text == "失敗":
