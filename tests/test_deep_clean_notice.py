@@ -212,8 +212,11 @@ def test_service_reminder_hides_pending_paused_and_lunar_holiday_services():
     notice = output[0][15]
     assert "農曆年暫停服務期間：2027/02/05-2027/02/10" in notice
     assert "原訂服務日期：\n2027/02/06（週一）09:00–12:00 暫停一次" in notice
-    assert notice.count("🕓 請於 2026/10/25 前告知欲安排的日期。") == 3
-    assert "您原訂週期於年節期間" not in notice
+    assert "2026/12/18(一)" in notice
+    assert "2027/01/06(一)" not in notice
+    assert "2027/02/03(一)" not in notice
+    assert "🕓 請於 2026/10/25 前告知欲安排的日期。" not in notice
+    assert notice.index("農曆年暫停服務期間") < notice.index("年節後第一次服務日期")
 
 
 def test_notice_lists_only_unarranged_dates_and_removes_paused_dates():
@@ -263,6 +266,25 @@ def test_notice_asks_for_dates_when_all_calendar_dates_are_paused():
     assert notice.count("🕓 請於 2026/10/25 前告知欲安排的日期。") == 3
     assert "您原訂週期於（2026/12～2027/02）" not in notice
     assert output[0][10:14] == [0, 0, 0, 0]
+
+
+def test_notice_lists_unarranged_dates_when_another_date_is_pending():
+    rows = [
+        _row("2026-12-28"),
+        _row("2027-01-29"),
+        _row("2027-02-26", status="待確認"),
+    ]
+    output = build_notice_rows(
+        "台北", rows, {},
+        datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, 23, 59, tzinfo=TZ),
+        datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, 23, 59, tzinfo=TZ),
+        100, 250, 200, 300, "2026/10/25",
+    )
+
+    notice = output[0][15]
+    assert "2026/12/28(一), 2027/01/29(一)" in notice
+    assert "2027/02/26(一)" not in notice
+    assert "🕓 請於 2026/10/25 前告知欲安排的日期。" not in notice
 
 
 def test_holiday_block_omits_original_service_label_when_address_has_none():

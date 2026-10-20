@@ -430,10 +430,6 @@ def _is_unarranged_service(row: dict[str, Any]) -> bool:
     return str(row.get("status") or "").strip() == "未安排"
 
 
-def _is_pending_service(row: dict[str, Any]) -> bool:
-    return "待確認" in str(row.get("status") or "")
-
-
 def _holiday_pause_block(
     holiday_rows: list[dict[str, Any]],
     lunar_new_year_start: datetime | None,
@@ -766,10 +762,7 @@ def build_notice_rows(
         after = [row for row in after_all if not _is_hidden_reminder_service(row)]
         month_rows_all = sorted(target["months"], key=lambda row: row["start_dt"])
         month_rows = [row for row in month_rows_all if _is_unarranged_service(row)]
-        date_prompt_required = (
-            any(_is_pending_service(row) for row in month_rows_all)
-            or (bool(month_rows_all) and not month_rows)
-        )
+        date_prompt_required = bool(month_rows_all) and not month_rows
         next_service = after[0] if after else None
         p1_total = sum(_extra_charge(row, phase1_weekday_rate, phase1_weekend_rate) for row in p1)
         p2_total = sum(_extra_charge(row, phase2_weekday_rate, phase2_weekend_rate) for row in p2)
