@@ -452,6 +452,14 @@ BOOKING_ENDPOINT_MAP = {name: booking_flow.route_for(name).path for name in ("�
 
 def normalize_booking_payway(payway):
     return booking_flow.normalize_payway(payway)
+
+
+def _read_payway(value):
+    """讀取既有訂單用：後台其他付款方式（如購物金、現金）回傳空字串，不中斷查詢。"""
+    try:
+        return booking_flow.normalize_payway(value)
+    except ValueError:
+        return ""
 from service_pricing import account_balance, customer_tier, unit_price as service_unit_price, apply_booking_price, load_config
 
 TAX_RATE = 1.05
@@ -1132,7 +1140,9 @@ def _normalize_city_for_country_id(city):
 
 
 def _split_booking_address(address):
-    address = _fix_address_district_order(str(address or "").strip(), fallback_district="")
+    # 客人常把郵遞區號貼在最前面（例如 108臺北市…）；後台縣市下拉不含郵遞區號。
+    address = re.sub(r"^\d{3,6}\s*", "", str(address or "").strip())
+    address = _fix_address_district_order(address, fallback_district="")
     result = {"city": "", "district": "", "country_id": "", "detail": address, "full": address}
     city_m = re.search(r"(?P<city>[^市縣區鄉鎮]{1,6}[市縣])", address)
     if not city_m:
@@ -1267,12 +1277,12 @@ def _extract_payway_line(joined_text):
             continue
         m_line = re.search(r"付款方式[：:]\s*(.+)", line)
         if m_line:
-            value = normalize_booking_payway(m_line.group(1).strip())
+            value = _read_payway(m_line.group(1).strip())
             if value in ("信用卡", "ATM", "儲值金"):
                 return value
     m = re.search(r"付款方式[：:]\s*([^\s\n]+)", text)
     if m:
-        value = normalize_booking_payway(m.group(1).strip())
+        value = _read_payway(m.group(1).strip())
         if value in ("信用卡", "ATM", "儲值金"):
             return value
     if "藍新ATM" in text or "ATM" in text:
@@ -4913,6 +4923,21 @@ def parse_new_customer_text(text):
     # 有統編但無抬頭 → 旗標，讓呼叫方去查抬頭
     result["need_lookup_title"] = bool(result.get("company_no") and not result.get("company_title"))
 
+    # 捐贈／紙本發票；捐贈碼沒寫時由後台預設捐贈碼帶入
+    result["invoice_mode"] = ""
+    result["donate_code"] = ""
+    if "捐贈" in _invoice_raw:
+        result["invoice_mode"] = "捐贈"
+        _donate_m = _re.search(r"(\d{3,7})", _invoice_raw)
+        result["donate_code"] = _donate_m.group(1) if _donate_m else ""
+        result["carrier"] = ""
+        result["company_no"] = ""
+    elif "紙本" in _invoice_raw:
+        result["invoice_mode"] = "紙本"
+        result["carrier"] = ""
+
+    result["discount_code"] = _find([r"(?:優惠代碼|優惠碼|折扣碼)\s*[：:]\s*(\S+)"], raw_text) or ""
+
     # ---------- 姓名 fallback（無標籤格式）----------
     # 排除掉已辨識為電話/Email/地址/坪數/付款方式的行，以及看起來像「標籤：內容」的行，
     # 剩下第一個非空行視為姓名。
@@ -5008,7 +5033,16 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         payway_code = "1"  # 預設信用卡
 
     # 發票設定
-    if company_no:
+    invoice_mode = str(customer.get("invoice_mode", "")).strip()
+    donate_code = str(customer.get("donate_code", "")).strip() or "8585"
+    discount_code = str(customer.get("discount_code", "")).strip()
+    if invoice_mode in ("捐贈", "捐贈發票", "紙本", "索取實體紙本"):
+        _inv = _invoice_payload(invoice_mode, donate_code=donate_code)
+        invoice_type = _inv["invoice_type_override"]
+        carrier_type_id = _inv["carrier_type_id_override"]
+        carrier_info = ""
+        company_no = company_title = ""
+    elif company_no:
         # 有統編 → 三聯式發票
         invoice_type = "3"
         carrier_type_id = "1"
@@ -5071,7 +5105,7 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         f"⚠️ 這支電話（{phone}）其實已經是舊客會員（姓名：{existing_member_name or member.get('name', '')}"
         f"{'，Email：' + existing_member_email if existing_member_email else ''}），不是新客！"
         "建議改用「舊客快速建單」流程處理，避免漏看歷史訂單/地址。"
-        if is_existing_member else ""
+        if is_existing_member and not customer.get("same_batch_member") else ""
     )
 
     # 新會員建立完成後，直接使用舊客建單的唯一核心流程。
@@ -5101,6 +5135,8 @@ def quick_create_new_customer_order(env_name, backend_email, backend_password, c
         company_title=company_title,
         invoice_type_override=invoice_type,
         carrier_type_id_override=carrier_type_id,
+        donate_code_override=donate_code,
+        discount_code=discount_code,
         extra_fields={
             "ping": ping,
             "serviceType": service_type,

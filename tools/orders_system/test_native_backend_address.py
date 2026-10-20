@@ -99,5 +99,15 @@ class NativeAddressTest(unittest.TestCase):
         native.assert_not_called()
         self.assertEqual(str(info['area_id']), '25')
 
-if __name__ == '__main__':
+
+class PostalCodeAddressSplitTest(unittest.TestCase):
+    def test_leading_postal_code_is_removed_before_city_dropdown(self):
+        parts = q._split_booking_address("108臺北市萬華區華江里環河南路二段250巷42弄5號3")
+        self.assertEqual(parts["city"], "台北市")
+        self.assertEqual(parts["district"], "萬華區")
+        self.assertTrue(parts["country_id"])
+        self.assertEqual(parts["detail"], "華江里環河南路二段250巷42弄5號3")
+
+
+if __name__ == "__main__":
     unittest.main()
