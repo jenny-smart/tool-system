@@ -237,6 +237,13 @@ def test_notice_lists_only_unarranged_dates_and_removes_paused_dates():
     )
     assert "2027/01/22(一)" not in notice
     assert "🕓 請於 2026/10/25 前告知欲安排的日期。" not in notice
+    assert (
+        "PART 1 年節加價服務日期：\n"
+        "2027/01/08(一)\n"
+        "PART 2 年節加價服務日期：\n"
+        "目前無排程\n"
+        "服務時段：09:00–12:00"
+    ) in notice
     assert output[0][10:14] == [1, 0, 300, 0]
 
 
