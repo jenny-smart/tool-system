@@ -322,6 +322,9 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
     gate_notes = {row: (gate(values) if gate and not _text(values[12]) else "")
                   for row, values in final_rows.items()}
     held_rows = sorted(row for row, note in gate_notes.items() if is_hold(note))
+    # Months outside the rule period get no empty 預約條件 column.
+    if len(columns) > 4 and META_HEADERS[4] not in header[33:] and not any(gate_notes.values()):
+        columns = columns[:4]
     if not compare_only:
         if target is not None and (target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != physical_rows or
                                    target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != current_header):

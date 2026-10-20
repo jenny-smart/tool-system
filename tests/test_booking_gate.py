@@ -89,8 +89,7 @@ def test_booked_rows_get_no_booking_condition():
     sheet = Sheet("台北202701", [booked])
     hold = build_gate(rule(), [confirm_row(confirmed="FALSE")])
     result = sync_schedule(Book([sheet]), "台北202701", [source_row(booked)], ["標題"] * 30, MissingSheet, gate=hold)
-    column = sheet.data[0].index("預約條件")
-    assert len(sheet.data[1]) <= column or sheet.data[1][column] == ""
+    assert "預約條件" not in sheet.data[0]
     assert result["booking_gate"]["held"] == 0
 
 
@@ -119,3 +118,14 @@ def test_sync_without_rule_adds_no_booking_condition_column():
     sheet = Sheet("台北202701", [original])
     sync_schedule(Book([sheet]), "台北202701", [source_row(original, **{"0": "2人"})], ["標題"] * 30, MissingSheet)
     assert "預約條件" not in sheet.data[0]
+
+
+def test_month_outside_rule_period_gets_no_booking_condition_column():
+    original = schedule(date="2026/11/10")
+    sheet = Sheet("台北202611", [original])
+    gate = build_gate(rule(), [confirm_row(confirmed="FALSE")])
+    result = sync_schedule(Book([sheet]), "台北202611", [source_row(original, **{"0": "2人"})], ["標題"] * 30,
+                           MissingSheet, gate=gate)
+    assert "預約條件" not in sheet.data[0]
+    assert sheet.data[1][8] == "未安排"
+    assert result["booking_gate"]["held"] == 0
