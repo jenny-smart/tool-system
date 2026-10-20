@@ -2006,25 +2006,34 @@ else:
                 with nc3:
                     nc_tel = st.text_input("市內電話（選填）", key="nc_tel")
                 nc_address = st.text_input("服務地址", key="nc_address")
-                na1, na2, na3, na4 = st.columns(4)
-                with na1:
-                    nc_date = st.date_input("服務日期", value=date.today() + timedelta(days=1), key="nc_date")
-                with na2:
-                    nc_period = st.selectbox("時段", PERIOD_OPTIONS, key="nc_period")
-                with na3:
-                    nc_person = st.number_input("人數", min_value=1, max_value=8, value=2, key="nc_person")
-                with na4:
-                    nc_hour = PERIOD_HOUR_MAP.get(nc_period, 3)
-                    st.markdown(f"<br><b>{nc_hour} 小時</b>", unsafe_allow_html=True)
+                nc_inline_n = st.number_input("建立筆數", min_value=1, max_value=10, value=1, key="nc_inline_n_orders")
+                nc_inline_entries = []
+                for _i in range(int(nc_inline_n)):
+                    if int(nc_inline_n) > 1:
+                        st.markdown(f"**第 {_i + 1} 筆**")
+                    na1, na2, na3, na4 = st.columns(4)
+                    with na1:
+                        nc_date = st.date_input("服務日期", value=date.today() + timedelta(days=1), key="nc_date" if _i == 0 else f"nc_date_{_i}")
+                    with na2:
+                        nc_period = st.selectbox("時段", PERIOD_OPTIONS, key="nc_period" if _i == 0 else f"nc_period_{_i}")
+                    with na3:
+                        nc_person = st.number_input("人數", min_value=1, max_value=8, value=2, key="nc_person" if _i == 0 else f"nc_person_{_i}")
+                    with na4:
+                        nc_hour = PERIOD_HOUR_MAP.get(nc_period, 3)
+                        st.markdown(f"<br><b>{nc_hour} 小時</b>", unsafe_allow_html=True)
+                    nc_inline_entries.append({"date": nc_date, "period": nc_period, "person": nc_person, "hour": nc_hour})
                 nb1, nb2 = st.columns(2)
                 with nb1:
                     nc_payway = st.selectbox("付款方式", ["信用卡", "ATM"], key="nc_payway")
                 with nb2:
-                    nc_invoice = st.selectbox("發票", ["會員載具（email）", "手機載具", "三聯式統編"], key="nc_invoice")
+                    nc_invoice = st.selectbox("發票", ["會員載具（email）", "手機載具", "紙本", "捐贈", "三聯式統編"], key="nc_invoice")
                 nc_carrier = ""
                 nc_company_title = ""
                 nc_company_no = ""
-                if nc_invoice == "手機載具":
+                nc_donate_code = ""
+                if nc_invoice == "捐贈":
+                    nc_donate_code = st.text_input("捐贈碼", value="8585", key="nc_donate_code")
+                elif nc_invoice == "手機載具":
                     nc_carrier = st.text_input("手機條碼", placeholder="/ABC1234", key="nc_carrier")
                 elif nc_invoice == "三聯式統編":
                     nci1, nci2 = st.columns(2)
@@ -2034,6 +2043,7 @@ else:
                         nc_company_no = st.text_input("統一編號", key="nc_company_no")
                 nc_clean_type = st.selectbox("服務類別", list(CLEAN_TYPE_ID_MAP.keys()), key="nc_clean_type")
                 nc_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="nc_allow_auto_lemon")
+                nc_inline_discount = st.text_input("優惠代碼（選填，有才填）", key="nc_inline_discount_code")
                 if st.button("🚀 建立新客訂單", use_container_width=True, key="nc_create_btn"):
                     # v8.15：開始新的一次建單嘗試前，先清空上一次殘留在畫面下方的舊結果，
                     # 避免這次失敗時，舊的成功訊息還留在畫面上跟新的錯誤訊息重疊混淆。
@@ -2043,40 +2053,47 @@ else:
                     elif not backend_email.strip() or not backend_password.strip():
                         st.error("請先輸入後台帳號密碼")
                     else:
-                        try:
-                            with st.spinner("建立會員 → 查詢地址 → 建立訂單…"):
-                                nc_result = qo.quick_create_new_customer_order(
-                                    env_name=env,
-                                    backend_email=backend_email.strip(),
-                                    backend_password=backend_password.strip(),
-                                    allow_auto_lemon_shift=nc_allow_auto_lemon,
-                                    customer={
-                                        "name": nc_name.strip(),
-                                        "phone": q_phone.strip(),
-                                        "email": nc_email.strip(),
-                                        "tel": nc_tel.strip(),
-                                        "address": nc_address.strip(),
-                                        "payway": nc_payway,
-                                        "clean_type_id": CLEAN_TYPE_ID_MAP[nc_clean_type],
-                                        "date_s": nc_date.strftime("%Y-%m-%d"),
-                                        "period_s": nc_period,
-                                        "hour": str(nc_hour),
-                                        "person": str(int(nc_person)),
-                                        "carrier": nc_carrier,
-                                        "company_title": nc_company_title,
-                                        "company_no": nc_company_no,
-                                    }
-                                )
-                                # 不立即發確認信，等 user 確認後再發
-                                nc_result["mail_sent"] = False
-                                nc_result["mail_msg"] = "尚未發送"
-                            st.session_state.q_order_result = nc_result
-                            if nc_result.get("lemon_assignment_ok") is False:
-                                st.error(nc_result.get("lemon_assignment_warning") or "訂單已建立，但樸檬人置換失敗，請先處理班表。")
-                            else:
-                                st.success(f"✅ 訂單建立成功：{nc_result['order_no']}")
-                        except Exception as e:
-                            st.error(f"建單失敗：{e}")
+                        _nc_invoice_mode = {"紙本": "紙本", "捐贈": "捐贈"}.get(nc_invoice, "")
+                        for _ei, _entry in enumerate(nc_inline_entries, start=1):
+                            try:
+                                with st.spinner(f"建立會員 → 查詢地址 → 建立訂單（第 {_ei}/{len(nc_inline_entries)} 筆）…"):
+                                    nc_result = qo.quick_create_new_customer_order(
+                                        env_name=env,
+                                        backend_email=backend_email.strip(),
+                                        backend_password=backend_password.strip(),
+                                        allow_auto_lemon_shift=nc_allow_auto_lemon,
+                                        customer={
+                                            "name": nc_name.strip(),
+                                            "phone": q_phone.strip(),
+                                            "email": nc_email.strip(),
+                                            "tel": nc_tel.strip(),
+                                            "address": nc_address.strip(),
+                                            "payway": nc_payway,
+                                            "clean_type_id": CLEAN_TYPE_ID_MAP[nc_clean_type],
+                                            "date_s": _entry["date"].strftime("%Y-%m-%d"),
+                                            "period_s": _entry["period"],
+                                            "hour": str(_entry["hour"]),
+                                            "person": str(int(_entry["person"])),
+                                            "carrier": nc_carrier,
+                                            "company_title": nc_company_title,
+                                            "company_no": nc_company_no,
+                                            "invoice_mode": _nc_invoice_mode,
+                                            "donate_code": nc_donate_code,
+                                            "discount_code": nc_inline_discount.strip(),
+                                            # 第 2 筆起會員是本次剛建立的，不是舊客
+                                            "same_batch_member": _ei > 1,
+                                        }
+                                    )
+                                    # 不立即發確認信，等 user 確認後再發
+                                    nc_result["mail_sent"] = False
+                                    nc_result["mail_msg"] = "尚未發送"
+                                st.session_state.q_order_result = nc_result
+                                if nc_result.get("lemon_assignment_ok") is False:
+                                    st.error(nc_result.get("lemon_assignment_warning") or "訂單已建立，但樸檬人置換失敗，請先處理班表。")
+                                else:
+                                    st.success(f"✅ 第{_ei}筆訂單建立成功：{nc_result['order_no']}　{_entry['date']} {_entry['period']}")
+                            except Exception as e:
+                                st.error(f"第{_ei}筆（{_entry['date']} {_entry['period']}）建單失敗：{e}")
             else:
                 member = member_payload.get("member", {})
                 addr_list = member_payload.get("member", {}).get("memberAddressList", [])
@@ -2158,10 +2175,11 @@ else:
                     q_invoice_carrier = ""
                     q_invoice_company_title = ""
                     q_invoice_company_no = ""
+                    q_invoice_donate_code = "8585"
                     if q_payway != "儲值金":
                         q_invoice_mode = st.selectbox(
                             "本次發票資訊",
-                            ["沿用上次發票設定", "會員載具", "手機載具", "三聯式"],
+                            ["沿用上次發票設定", "會員載具", "手機載具", "紙本", "捐贈", "三聯式"],
                             key="old_invoice_mode",
                             help="選擇非「沿用上次」時，會以本次填寫資料覆蓋歷史發票設定。",
                         )
@@ -2170,6 +2188,10 @@ else:
                                 "手機載具條碼",
                                 placeholder="/ABC1234",
                                 key="old_invoice_carrier",
+                            )
+                        elif q_invoice_mode == "捐贈":
+                            q_invoice_donate_code = st.text_input(
+                                "捐贈碼", value="8585", key="old_invoice_donate_code"
                             )
                         elif q_invoice_mode == "三聯式":
                             _old_inv_c1, _old_inv_c2 = st.columns(2)
@@ -2183,6 +2205,7 @@ else:
                                 )
                     else:
                         st.caption("發票資訊：儲值金訂單不開立發票")
+                    q_discount_code = st.text_input("優惠代碼（選填，有才填）", key="old_discount_code")
 
                     upcoming_orders = get_unserved_paid_orders(lookup["session"], lookup["phone"], member_payload, addr_options, today_value=date.today())
                     if upcoming_orders:
@@ -2252,6 +2275,7 @@ else:
                                         mobile_carrier=q_invoice_carrier,
                                         company_title=q_invoice_company_title,
                                         company_no=q_invoice_company_no,
+                                        donate_code=q_invoice_donate_code,
                                     )
                                 )
                             except Exception as e:
@@ -2262,7 +2286,7 @@ else:
                             for _i, entry in enumerate(old_entries, start=1):
                                 try:
                                     with st.spinner(f"建單中（第 {_i}/{len(old_entries)} 筆），請稍候…"):
-                                        result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=entry["date"].strftime("%Y-%m-%d"), period_s=entry["period"], hour=entry["hour"], person=entry["person"], allow_auto_lemon_shift=old_allow_auto_lemon, **_old_invoice_kwargs)
+                                        result = quick_create_order(env_name=env, payway=q_payway, region=q_region, lookup_result=lookup, address=q_address, clean_type_id=CLEAN_TYPE_ID_MAP[q_clean_type_confirm], date_s=entry["date"].strftime("%Y-%m-%d"), period_s=entry["period"], hour=entry["hour"], person=entry["person"], discount_code=q_discount_code.strip(), allow_auto_lemon_shift=old_allow_auto_lemon, **_old_invoice_kwargs)
                                         # 不立即發確認信，等 user 確認後再發
                                         result["mail_sent"] = False
                                         result["mail_msg"] = "尚未發送"
@@ -2439,13 +2463,14 @@ else:
             nc_notice = st.text_area("客服備註", height=80, key="nc_notice_d")
 
         nc_d_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="nc_d_allow_auto_lemon")
+        nc_discount_code = st.text_input("優惠代碼（選填，有才填；未填時使用貼上資料中的優惠代碼）", key="nc_discount_code_d")
 
         # 會員查詢後若表單已改動，不能再用舊的日期／時段快照送單。
         _nc_form_snapshot = {
             "env": env, "account": backend_email.strip(), "raw": nc_raw,
             "clean_type": nc_clean_type, "entries": [dict(entry) for entry in nc_entries],
             "manual_payway": st.session_state.get("nc_payway_manual_select", ""),
-            "allow_lemon": nc_d_allow_auto_lemon,
+            "allow_lemon": nc_d_allow_auto_lemon, "discount_code": nc_discount_code,
             "actual_time": nc_actual_time, "memo": nc_memo, "notice": nc_notice,
             "details": [nc_service_type, nc_room, nc_bathroom, nc_balcony,
                         nc_livingroom, nc_kitchen, nc_window, nc_shutter, nc_clothes],
@@ -2483,6 +2508,9 @@ else:
                 _nc_carrier = _parsed.get("carrier", "")
                 _nc_company_title = _parsed.get("company_title", "")
                 _nc_company_no = _parsed.get("company_no", "")
+                _nc_invoice_mode = _parsed.get("invoice_mode", "")
+                _nc_donate_code = _parsed.get("donate_code", "")
+                _nc_discount_code = nc_discount_code.strip() or _parsed.get("discount_code", "")
 
                 _missing = [k for k, v in [("姓名", _nc_name), ("電話", _nc_phone), ("Email", _nc_email), ("地址", _nc_address)] if not v.strip()]
                 if not _nc_payway:
@@ -2521,6 +2549,14 @@ else:
                             "period_s": nc_period,
                             "hour": str(nc_hour),
                             "person": str(int(nc_person)),
+                            "entries": [
+                                {"date_s": e["date"].strftime("%Y-%m-%d"), "period_s": e["period"],
+                                 "hour": str(e["hour"]), "person": str(int(e["person"]))}
+                                for e in nc_entries
+                            ],
+                            "invoice_mode": _nc_invoice_mode,
+                            "donate_code": _nc_donate_code,
+                            "discount_code": _nc_discount_code,
                             "payway": _nc_payway,
                             "carrier": _nc_carrier,
                             "company_title": _nc_company_title,
@@ -2562,6 +2598,11 @@ else:
                                                 "carrier": _nc_carrier,
                                                 "company_title": _nc_company_title,
                                                 "company_no": _nc_company_no,
+                                                "invoice_mode": _nc_invoice_mode,
+                                                "donate_code": _nc_donate_code,
+                                                "discount_code": _nc_discount_code,
+                                                # 第 2 筆起會員是本次剛建立的，不是舊客
+                                                "same_batch_member": _ei > 1,
                                                 "memo": nc_memo,
                                                 "notice": nc_notice,
                                                 "actual_time": nc_actual_time,
@@ -2598,40 +2639,60 @@ else:
                 f"（姓名：{_nc_pending['member_name']}），不是新客！"
                 + (f" 既有地址：{'、'.join(_nc_pending['existing_addresses'])}" if _nc_pending['existing_addresses'] else "")
             )
-            st.caption(f"本次預約：{_nc_pending['date_s']} {_nc_pending['period_s']}｜{_nc_pending['person']}人 × {_nc_pending['hour']}小時；補檸檬人使用相同時段。")
+            _pending_entries = _nc_pending.get("entries") or [{
+                "date_s": _nc_pending["date_s"], "period_s": _nc_pending["period_s"],
+                "hour": _nc_pending["hour"], "person": _nc_pending["person"],
+            }]
+            st.caption("本次預約：" + "、".join(
+                f"{e['date_s']} {e['period_s']}｜{e['person']}人 × {e['hour']}小時" for e in _pending_entries
+            ) + "；補檸檬人使用相同時段。")
             if st.button("➡️ 用舊客身份送出此預約", use_container_width=True, key="nc_to_old_submit_btn", type="primary"):
                 try:
-                    with st.spinner("以舊客身份建立訂單…"):
-                        _invoice = qo._invoice_payload(
-                            "三聯式" if (_nc_pending["company_title"] and _nc_pending["company_no"]) else ("手機載具" if _nc_pending["carrier"] else "會員載具"),
-                            member_email=_nc_pending["member_email"] or "",
-                            mobile_carrier=_nc_pending["carrier"],
-                            company_title=_nc_pending["company_title"],
-                            company_no=_nc_pending["company_no"],
-                        )
-                        _region_pending = get_region_by_address(_nc_pending["address"], ACCOUNTS) or "台北"
-                        old_result = qo.quick_create_order(
-                            env_name=env, payway=_nc_pending["payway"], region=_region_pending,
-                            lookup_result=_nc_pending["lookup"], address=_nc_pending["address"],
-                            clean_type_id=_nc_pending["clean_type_id"],
-                            date_s=_nc_pending["date_s"], period_s=_nc_pending["period_s"],
-                            hour=_nc_pending["hour"], person=_nc_pending["person"],
-                            carrier_info=_invoice["carrier_info"], company_no=_invoice["company_no"],
-                            company_title=_invoice["company_title"],
-                            invoice_type_override=_invoice["invoice_type_override"],
-                            carrier_type_id_override=_invoice["carrier_type_id_override"],
-                            allow_auto_lemon_shift=_nc_pending["allow_auto_lemon_shift"],
-                        )
-                        old_result["mail_sent"] = False
-                        try:
-                            old_result["line_message"] = build_line_message(old_result)
-                        except Exception as _e_line_old:
-                            old_result["line_message"] = ""
-                    st.session_state.nc_result = old_result
-                    st.session_state.nc_pending_old = None
-                    st.rerun()
+                    _pending_invoice_mode = _nc_pending.get("invoice_mode") or (
+                        "三聯式" if (_nc_pending["company_title"] and _nc_pending["company_no"])
+                        else ("手機載具" if _nc_pending["carrier"] else "會員載具")
+                    )
+                    _invoice = qo._invoice_payload(
+                        _pending_invoice_mode,
+                        member_email=_nc_pending["member_email"] or "",
+                        mobile_carrier=_nc_pending["carrier"],
+                        company_title=_nc_pending["company_title"],
+                        company_no=_nc_pending["company_no"],
+                        donate_code=_nc_pending.get("donate_code") or "8585",
+                    )
                 except Exception as e:
-                    st.error(f"以舊客身份建單失敗：{e}")
+                    st.error(f"發票資訊錯誤：{e}")
+                    st.stop()
+                _region_pending = get_region_by_address(_nc_pending["address"], ACCOUNTS) or "台北"
+                _pending_results = []
+                for _pi, _pe in enumerate(_pending_entries, start=1):
+                    try:
+                        with st.spinner(f"以舊客身份建立訂單（第 {_pi}/{len(_pending_entries)} 筆）…"):
+                            old_result = qo.quick_create_order(
+                                env_name=env, payway=_nc_pending["payway"], region=_region_pending,
+                                lookup_result=_nc_pending["lookup"], address=_nc_pending["address"],
+                                clean_type_id=_nc_pending["clean_type_id"],
+                                date_s=_pe["date_s"], period_s=_pe["period_s"],
+                                hour=_pe["hour"], person=_pe["person"],
+                                discount_code=_nc_pending.get("discount_code", ""),
+                                allow_auto_lemon_shift=_nc_pending["allow_auto_lemon_shift"],
+                                **_invoice,
+                            )
+                            old_result["mail_sent"] = False
+                            old_result.setdefault("date_s", _pe["date_s"])
+                            old_result.setdefault("hour", _pe["hour"])
+                            try:
+                                old_result["line_message"] = build_line_message(old_result)
+                            except Exception:
+                                old_result["line_message"] = ""
+                        _pending_results.append({"ok": True, "result": old_result})
+                    except Exception as e:
+                        _pending_results.append({"ok": False, "error": f"以舊客身份建單失敗：{e}", "date": _pe["date_s"], "period": _pe["period_s"]})
+                st.session_state.nc_results_multi = _pending_results
+                if len(_pending_results) == 1 and _pending_results[0]["ok"]:
+                    st.session_state.nc_result = _pending_results[0]["result"]
+                st.session_state.nc_pending_old = None
+                st.rerun()
 
         # v2026.07.07：多筆訂單結果顯示（建立筆數 > 1，或有任何一筆失敗時）
         _nc_multi = st.session_state.get("nc_results_multi") or []
