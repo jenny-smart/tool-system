@@ -388,17 +388,8 @@ def _finish_reserve_order(session, base_url: str, order_no: str, service_date: s
     return row
 
 
-def create_reserve_orders_batch(
-    *, env_name: str, lookup_result, region: str, address: str,
-    plan_rows: Sequence[dict], clean_type_id: str = "1", sleep_seconds: float = 1.0,
-) -> dict:
-    """儲值金保留單照批次成單邏輯：每一輪先重新分析各日期剩餘未配班人數，
-    再把這一輪要成立的日期時段一次勾選、一次送出（每個時段一張）。"""
-    _assert_supported_env(env_name)
-    if not address:
-        raise ValueError("請先選擇保留會員的服務地址")
-    batch_id = _build_batch_id()
-    base_url = lookup_result.get("base_url") or qo._configure_environment(env_name)
+def start_reserve_job(plan_rows: Sequence[dict], payway: str) -> dict:
+    """建立保留單工作狀態；之後每呼叫一次 run_reserve_round 執行一輪，可在輪與輪之間暫停。"""
     remaining: Dict[str, int] = {}
     keep_people: Dict[str, int] = {}
     for row in plan_rows or []:
@@ -411,28 +402,52 @@ def create_reserve_orders_batch(
         slot = f"{row.get('service_date')}_{period}"
         remaining[slot] = remaining.get(slot, 0) + target
         keep_people[slot] = int(row.get("market_people_target") or 0)
-    total_target = sum(remaining.values())
-    results: List[dict] = []
-    round_no = 0
-    while any(n > 0 for n in remaining.values()):
-        round_no += 1
-        # 每一輪建單前，重新分析各日期剩餘未配班人數。
-        active: List[str] = []
-        schedules: Dict[str, Dict[str, Dict[str, object]]] = {}
-        for slot in [x for x, n in remaining.items() if n > 0]:
-            service_date, period = slot.split("_", 1)
-            if service_date not in schedules:
-                schedules[service_date] = parse_schedule_unassigned(fetch_schedule_html(lookup_result, service_date), service_date)
-            people = int((schedules[service_date].get(period) or {}).get("unassigned_people") or 0)
-            if people < max(2, keep_people.get(slot, 0) + 2):
-                results.append({
-                    "success": False, "stopped": True, "service_date": service_date, "period": period,
-                    "message": f"第 {round_no} 輪：即時未配班只剩 {people} 人，已停止此時段後續保留單（尚餘 {remaining[slot]} 張未建）。",
-                })
-                remaining[slot] = 0
-                continue
-            active.append(slot)
-        created_this_round = 0
+    return {
+        "batch_id": _build_batch_id(), "payway": qo.normalize_booking_payway(payway),
+        "remaining": remaining, "keep_people": keep_people,
+        "target_orders": sum(remaining.values()), "round": 0, "results": [], "done": not remaining,
+    }
+
+
+def run_reserve_round(
+    state: dict, *, env_name: str, lookup_result, region: str, address: str, clean_type_id: str = "1",
+) -> dict:
+    """執行一輪保留單：先重新分析各日期剩餘未配班人數，再建立每個時段各一張。
+
+    儲值金：這一輪的日期時段一次勾選、一次送出（批次成單）；
+    信用卡／ATM：後台一次只能一個時段，逐時段各送一張。
+    """
+    _assert_supported_env(env_name)
+    if not address:
+        raise ValueError("請先選擇保留會員的服務地址")
+    if state.get("done"):
+        return state
+    remaining, keep_people, results = state["remaining"], state["keep_people"], state["results"]
+    batch_id = state["batch_id"]
+    state["round"] += 1
+    round_no = state["round"]
+    base_url = lookup_result.get("base_url") or qo._configure_environment(env_name)
+
+    def stop(slot, message):
+        service_date, period = slot.split("_", 1)
+        results.append({"success": False, "stopped": True, "service_date": service_date, "period": period,
+                        "round": round_no, "message": f"第 {round_no} 輪：{message}（尚餘 {remaining[slot]} 張未建）"})
+        remaining[slot] = 0
+
+    active: List[str] = []
+    schedules: Dict[str, Dict[str, Dict[str, object]]] = {}
+    for slot in [x for x, n in remaining.items() if n > 0]:
+        service_date, period = slot.split("_", 1)
+        if service_date not in schedules:
+            schedules[service_date] = parse_schedule_unassigned(fetch_schedule_html(lookup_result, service_date), service_date)
+        people = int((schedules[service_date].get(period) or {}).get("unassigned_people") or 0)
+        if people < max(2, keep_people.get(slot, 0) + 2):
+            stop(slot, f"即時未配班只剩 {people} 人，已停止此時段後續保留單")
+            continue
+        active.append(slot)
+
+    created = 0
+    if state["payway"] == "儲值金":
         by_hour: Dict[int, List[str]] = {}
         for slot in active:
             by_hour.setdefault(PERIOD_HOURS[slot.split("_", 1)[1]], []).append(slot)
@@ -444,10 +459,7 @@ def create_reserve_orders_batch(
                 )
             except Exception as exc:
                 for slot in slots:
-                    service_date, period = slot.split("_", 1)
-                    results.append({"success": False, "service_date": service_date, "period": period,
-                                    "message": f"第 {round_no} 輪送出失敗：{exc}"})
-                    remaining[slot] = 0
+                    stop(slot, f"送出失敗：{exc}")
                 continue
             session = outcome.get("session") or lookup_result["session"]
             for order in outcome.get("orders") or []:
@@ -456,30 +468,55 @@ def create_reserve_orders_batch(
                 row["round"] = round_no
                 results.append(row)
                 remaining[order["slot"]] -= 1
-                created_this_round += 1
+                created += 1
                 if not row["customer_memo_ok"]:
-                    results.append({"success": False, "stopped": True, "service_date": order["date"], "period": order["period_s"],
-                                    "message": f"訂單 {order['order_no']} 已成立，但客人備註未成功寫入『{SYSTEM_RESERVE_MEMO}』，已停止此時段後續建立。"})
-                    remaining[order["slot"]] = 0
+                    stop(order["slot"], f"訂單 {order['order_no']} 已成立，但客人備註未成功寫入『{SYSTEM_RESERVE_MEMO}』，已停止此時段後續建立")
             for slot in outcome.get("unavailable") or []:
-                service_date, period = slot.split("_", 1)
-                results.append({"success": False, "service_date": service_date, "period": period,
-                                "message": f"第 {round_no} 輪：{service_date} {period} 無可預約人力（後台查詢班表結果沒有這個時段），已停止此時段（尚餘 {remaining[slot]} 張未建）。"})
-                remaining[slot] = 0
+                stop(slot, f"{slot.replace('_', ' ')} 無可預約人力（後台查詢班表結果沒有這個時段），已停止此時段")
             for slot in outcome.get("not_created") or []:
-                service_date, period = slot.split("_", 1)
                 reason = "後台回覆儲值金餘額不足" if outcome.get("failed_count") else "送出後未找到新訂單，請至後台確認"
-                results.append({"success": False, "service_date": service_date, "period": period,
-                                "message": f"第 {round_no} 輪：{reason}，已停止此時段（尚餘 {remaining[slot]} 張未建）。"})
-                remaining[slot] = 0
-        if not created_this_round:
-            break
-        if sleep_seconds:
+                stop(slot, f"{reason}，已停止此時段")
+    else:
+        for slot in active:
+            service_date, period = slot.split("_", 1)
+            one = create_reserve_orders_for_slot(
+                env_name=env_name, lookup_result=lookup_result, region=region, address=address,
+                service_date=service_date, period=period, reserve_rate=0, target_orders=1,
+                payway=state["payway"], clean_type_id=clean_type_id, batch_id=batch_id,
+                stop_when_market_people_below=keep_people.get(slot, 0), sleep_seconds=0,
+            )
+            for row in one.get("results") or []:
+                row["round"] = round_no
+                if row.get("success"):
+                    results.append(row)
+                    remaining[slot] -= 1
+                    created += 1
+                else:
+                    stop(slot, str(row.get("message") or "建立失敗"))
+    state["success_count"] = sum(1 for r in results if r.get("success"))
+    state["done"] = created == 0 or not any(n > 0 for n in remaining.values())
+    return state
+
+
+def create_reserve_orders_batch(
+    *, env_name: str, lookup_result, region: str, address: str,
+    plan_rows: Sequence[dict], clean_type_id: str = "1", sleep_seconds: float = 1.0,
+    payway: str = "儲值金",
+) -> dict:
+    """不需暫停時，一次跑完所有輪。"""
+    _assert_supported_env(env_name)
+    if not address:
+        raise ValueError("請先選擇保留會員的服務地址")
+    state = start_reserve_job(plan_rows, payway)
+    while not state["done"]:
+        run_reserve_round(state, env_name=env_name, lookup_result=lookup_result, region=region,
+                          address=address, clean_type_id=clean_type_id)
+        if not state["done"] and sleep_seconds:
             time.sleep(float(sleep_seconds))
     return {
-        "batch_id": batch_id, "target_orders": total_target, "rounds": round_no,
-        "success_count": sum(1 for r in results if r.get("success")),
-        "slot_count": len(remaining), "results": results,
+        "batch_id": state["batch_id"], "target_orders": state["target_orders"], "rounds": state["round"],
+        "success_count": sum(1 for r in state["results"] if r.get("success")),
+        "slot_count": len(state["remaining"]), "results": state["results"],
     }
 
 

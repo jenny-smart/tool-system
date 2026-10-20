@@ -17,6 +17,8 @@ from reserve_optimizer import (
     create_reserve_orders_for_plan,
     login_reserve_member,
     member_addresses,
+    run_reserve_round,
+    start_reserve_job,
 )
 
 
@@ -162,26 +164,60 @@ def render_reserve_create(backend_email: str, backend_password: str, env: str) -
     st.info(f"目前選擇 {len(selected_rows)} 個日期／時段，預計建立 {total_orders} 張保留單。")
     machine = _env_label(env)
     confirm = st.checkbox(f"我確認要在{machine}建立以上 {total_orders} 張檸檬保留單", key="reserve_create_confirm")
-    if st.button("確認建立檸檬保留單", type="primary", width="stretch", disabled=not confirm or total_orders <= 0, key="reserve_create_execute"):
-        execution_status = st.status(f"已收到建立指令，準備建立 {total_orders} 張保留單…", expanded=True)
+    job = st.session_state.get("reserve_create_job")
+    running = bool(job) and not job.get("done")
+    if st.button("確認建立檸檬保留單", type="primary", width="stretch", disabled=not confirm or total_orders <= 0 or running, key="reserve_create_execute"):
         try:
-            if payway == "儲值金":
-                execution_status.write("照批次成單：每一輪先重新分析各日期剩餘未配班人數，再一次勾選所有日期時段送出…")
-            else:
-                execution_status.write("信用卡／ATM 一次只能送一個時段：逐日期／時段重新確認即時班表並建立訂單…")
-            with st.spinner(f"正在{machine}建立保留單..."):
-                result = create_reserve_orders_for_plan(env_name=env, lookup_result=lookup, region=region, address=address, plan_rows=selected_rows, payway=payway, continue_after_slot_error=True)
-            st.session_state.reserve_menu_last_create = result
-            execution_status.update(label=f"建立完成：成功 {result.get('success_count', 0)} / {result.get('target_orders', 0)} 張", state="complete", expanded=False)
-            st.success(f"建立完成：成功 {result.get('success_count', 0)} / {result.get('target_orders', 0)} 張")
+            job = start_reserve_job(selected_rows, payway)
+            job["status"] = "running"
+            st.session_state.reserve_create_job = job
+            st.rerun()
         except Exception as exc:
-            message = str(exc).strip() or f"{type(exc).__name__}: {exc!r}"
-            execution_status.update(label="建立失敗", state="error", expanded=True)
-            execution_status.write(message)
-            st.error(f"建立失敗：{message}")
-    result = st.session_state.get("reserve_menu_last_create")
-    if result and result.get("results"):
-        st.dataframe(pd.DataFrame(result["results"]), width="stretch", hide_index=True)
+            st.error(f"建立失敗：{str(exc).strip() or type(exc).__name__}")
+    _render_reserve_create_job(env, lookup, region, address)
+
+
+def _render_reserve_create_job(env, lookup, region, address) -> None:
+    """一輪一輪執行保留單；每輪結束才重繪，此時可按暫停／繼續／結束。"""
+    job = st.session_state.get("reserve_create_job")
+    if not job:
+        return
+    status = job.get("status")
+    if job.get("done"):
+        status = "done"
+    left = sum(job["remaining"].values())
+    st.markdown("#### 3. 建立進度")
+    st.progress(
+        min(1.0, job.get("success_count", 0) / max(1, job["target_orders"])),
+        text=f"已完成 {job['round']} 輪；成功 {job.get('success_count', 0)} / {job['target_orders']} 張；尚餘 {left} 張",
+    )
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("⏸️ 暫停生成", width="stretch", key="reserve_create_pause", disabled=status != "running"):
+            job["status"] = status = "paused"
+    with c2:
+        if st.button("▶️ 繼續生成", width="stretch", key="reserve_create_resume", disabled=status != "paused"):
+            job["status"] = status = "running"
+    with c3:
+        if st.button("⏹️ 結束並清除進度", width="stretch", key="reserve_create_stop"):
+            st.session_state.pop("reserve_create_job", None)
+            st.rerun()
+    if status == "paused":
+        st.warning(f"已暫停：第 {job['round']} 輪完成後停止，尚餘 {left} 張未建。按「繼續生成」會先重新分析剩餘人力再接著建。")
+    elif status == "done":
+        st.success(f"建立完成：成功 {job.get('success_count', 0)} / {job['target_orders']} 張，共 {job['round']} 輪。")
+    if job["results"]:
+        st.dataframe(pd.DataFrame(job["results"]), width="stretch", hide_index=True)
+    if status == "running":
+        st.info(f"正在執行第 {job['round'] + 1} 輪：重新分析各日期剩餘人力後送出…（按「暫停生成」會在本輪結束後暫停）")
+        try:
+            # 這一輪中間不呼叫畫面元件，避免按鈕觸發重繪時中斷在送單途中。
+            run_reserve_round(job, env_name=env, lookup_result=lookup, region=region, address=address)
+        except Exception as exc:
+            job["status"] = "paused"
+            job["results"].append({"success": False, "round": job["round"], "message": f"本輪執行失敗，已暫停：{exc}"})
+        st.session_state.reserve_create_job = job
+        st.rerun()
 
 
 def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -> None:
@@ -243,6 +279,9 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
                     f"客人備註符合 {debug.get('memo_matches', 0)} 張；"
                     f"明細讀取失敗 {debug.get('detail_errors', 0)} 張。"
                 )
+
+    # 取消進度放在清單之前：全部取消完、清單變空時仍要顯示進度與結果。
+    _render_reserve_cancel_job(env, backend_email, backend_password, _env_label(env))
 
     rows = st.session_state.get("reserve_menu_cancel_rows") or []
     if not rows:
@@ -314,42 +353,69 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
         key="reserve_cancel_confirm",
         disabled=selected_count <= 0,
     )
+    cancel_job = st.session_state.get("reserve_cancel_job")
+    cancel_running = bool(cancel_job) and cancel_job.get("status") != "done"
     if st.button(
         "確認取消檸檬保留單",
         type="primary",
         width="stretch",
-        disabled=not confirm or selected_count <= 0,
+        disabled=not confirm or selected_count <= 0 or cancel_running,
         key="reserve_cancel_execute",
     ):
-        cancel_status = st.status(f"已收到取消指令，準備處理 {selected_count} 張保留單…", expanded=True)
-        try:
-            cancel_status.write("正在逐張重新確認最新客人備註並取消…")
-            with st.spinner(f"正在{machine}逐張重新檢查客人備註並取消..."):
-                # 只把使用者實際勾選的 rows 傳入；count 等於所選張數，因此
-                # cancel_reserve_orders 不會碰到未選取的安全可取消單。
-                results = cancel_reserve_orders(
-                    env,
-                    backend_email.strip(),
-                    backend_password.strip(),
-                    selected_rows,
-                    selected_count,
-                )
-            st.session_state.reserve_menu_cancel_result = results
-            # 已取消的單從清單移除，下一次重繪前清空選取。
-            done = {str(r.get("order_no") or "") for r in results if r.get("ok")}
-            st.session_state.reserve_menu_cancel_rows = [
-                r for r in st.session_state.get("reserve_menu_cancel_rows") or []
-                if str(r.get("order_no") or "") not in done
-            ]
-            st.session_state.reserve_cancel_clear_selection = True
-            cancel_status.update(label=f"取消流程完成：處理 {len(results)} 張", state="complete", expanded=False)
-            st.success("取消流程執行完成；若備註已被改成人工客人保留內容，該筆會自動跳過。")
-        except Exception as exc:
-            message = str(exc).strip() or f"{type(exc).__name__}: {exc!r}"
-            cancel_status.update(label="取消失敗", state="error", expanded=True)
-            cancel_status.write(message)
-            st.error(f"取消失敗：{message}")
+        st.session_state.reserve_cancel_job = {"pending": selected_rows, "results": [], "total": selected_count, "status": "running"}
+        st.session_state.reserve_menu_cancel_result = []
+        st.session_state.reserve_cancel_clear_selection = True
+        st.rerun()
 
-    results = st.session_state.get("reserve_menu_cancel_result") or []
-    if results:
-        st.dataframe(pd.DataFrame(results), width="stretch", hide_index=True)
+
+CANCEL_CHUNK_SIZE = 3
+
+
+def _render_reserve_cancel_job(env, backend_email, backend_password, machine) -> None:
+    """分批取消（每批 3 張）；每批結束才重繪，此時可按暫停／繼續／結束。"""
+    job = st.session_state.get("reserve_cancel_job")
+    if not job:
+        return
+    if not job["pending"]:
+        job["status"] = "done"
+    status = job["status"]
+    done_count = len(job["results"])
+    st.markdown("#### 取消進度")
+    st.progress(min(1.0, done_count / max(1, job["total"])), text=f"已處理 {done_count} / {job['total']} 張")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("⏸️ 暫停取消", width="stretch", key="reserve_cancel_pause", disabled=status != "running"):
+            job["status"] = status = "paused"
+    with c2:
+        if st.button("▶️ 繼續取消", width="stretch", key="reserve_cancel_resume", disabled=status != "paused"):
+            job["status"] = status = "running"
+    with c3:
+        if st.button("⏹️ 結束並清除進度", width="stretch", key="reserve_cancel_stop"):
+            st.session_state.pop("reserve_cancel_job", None)
+            st.rerun()
+    if status == "paused":
+        st.warning(f"已暫停：尚有 {len(job['pending'])} 張未取消。")
+    elif status == "done":
+        ok = sum(1 for r in job["results"] if r.get("ok"))
+        st.success(f"取消完成：成功 {ok} / {job['total']} 張；若備註已被改成人工客人保留內容或已取消過，該筆會自動跳過。")
+    if job["results"]:
+        st.dataframe(pd.DataFrame(job["results"]), width="stretch", hide_index=True)
+    if status == "running" and job["pending"]:
+        chunk = job["pending"][:CANCEL_CHUNK_SIZE]
+        st.info(f"正在{machine}取消 {len(chunk)} 張（按「暫停取消」會在這批結束後暫停）…")
+        try:
+            # 這一批中間不呼叫畫面元件，避免按鈕觸發重繪時中斷在取消途中。
+            results = cancel_reserve_orders(env, backend_email.strip(), backend_password.strip(), chunk, len(chunk))
+        except Exception as exc:
+            results = [{**row, "ok": False, "message": f"取消失敗：{exc}"} for row in chunk]
+        job["pending"] = job["pending"][len(chunk):]
+        job["results"].extend(results)
+        done = {str(r.get("order_no") or "") for r in results if r.get("ok")}
+        st.session_state.reserve_menu_cancel_rows = [
+            r for r in st.session_state.get("reserve_menu_cancel_rows") or []
+            if str(r.get("order_no") or "") not in done
+        ]
+        st.session_state.reserve_menu_cancel_result = job["results"]
+        st.session_state.reserve_cancel_job = job
+        st.rerun()
+
