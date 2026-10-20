@@ -11,6 +11,13 @@ import orders
 from reserve_sheet_log import append_log_rows
 
 SYSTEM_RESERVE_MEMO = "系統保留單"
+CANCELLED_RESERVE_MEMO = "取消系統保留單"
+
+
+def _is_active_reserve_memo(memo: str) -> bool:
+    """客人備註是「系統保留單」且還沒被取消（取消後會改成「取消系統保留單」）。"""
+    memo = str(memo or "").strip()
+    return SYSTEM_RESERVE_MEMO in memo and CANCELLED_RESERVE_MEMO not in memo
 
 
 def _assert_supported_env(env_name: str) -> None:
@@ -40,11 +47,11 @@ def mark_system_reserve_order(env_name: str, backend_email: str, backend_passwor
 def _memo_matches_filter(memo: str, memo_filter: str) -> bool:
     memo = str(memo or "").strip()
     if memo_filter == "僅系統保留單":
-        return SYSTEM_RESERVE_MEMO in memo
+        return _is_active_reserve_memo(memo)
     if memo_filter == "僅空白":
         return memo == ""
     if memo_filter == "系統保留單或空白":
-        return memo == "" or SYSTEM_RESERVE_MEMO in memo
+        return memo == "" or _is_active_reserve_memo(memo)
     if memo_filter == "全部（僅供查看）":
         return True
     raise ValueError(f"未知客人備註篩選：{memo_filter}")
@@ -179,7 +186,7 @@ def find_reserve_orders(
             continue
         item = dict(row)
         item["customer_memo"] = memo
-        item["cancel_eligible"] = (memo == "" or SYSTEM_RESERVE_MEMO in memo)
+        item["cancel_eligible"] = (memo == "" or _is_active_reserve_memo(memo))
         for key in (
             "amount", "total_amount", "order_amount", "price", "fare", "car_fare",
             "traffic_fee", "trafficFee", "staff", "staff_names", "service_staff",
@@ -225,6 +232,12 @@ def cancel_reserve_orders(
             current_memo = str(detail.get("memo") or "").strip()
         except Exception as exc:
             skipped.append({**row, "ok": False, "message": f"取消前讀取客人備註失敗，已跳過：{exc}"})
+            continue
+        if CANCELLED_RESERVE_MEMO in current_memo:
+            skipped.append({
+                **row, "ok": False, "customer_memo": current_memo,
+                "message": "此保留單已取消過，已跳過。",
+            })
             continue
         if current_memo and SYSTEM_RESERVE_MEMO not in current_memo:
             skipped.append({

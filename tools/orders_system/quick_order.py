@@ -1799,13 +1799,14 @@ def _query_booking_slot_with_lemon_retry(session, base_url, payway, data, token,
     return raw, token, pre
 
 
-def quick_create_order(
-    env_name, payway, region, lookup_result, address, clean_type_id,
+def _prepare_booking_data(
+    env_name, payway, lookup_result, address, clean_type_id,
     date_s, period_s, hour, person="2", fallback_fare="0", discount_code="",
     payment_type="", carrier_info="", company_no="", company_title="",
     invoice_type_override="", carrier_type_id_override="", donate_code_override="",
-    extra_fields=None, allow_auto_lemon_shift=False, pricing_balance=None,
+    extra_fields=None, pricing_balance=None,
 ):
+    """成單步驟 1–5：會員、地址（查詢地區）、坪數與計算時數；查班表前的共用資料。"""
     payway = normalize_booking_payway(payway)
     base_url = _configure_environment(env_name)
     session = lookup_result["session"]
@@ -1905,6 +1906,113 @@ def quick_create_order(
     base_data["fare"] = first_nonzero(calc_fields.get("fare"), best_addr.get("fare"), default="0")
     if base_data["price"] in ("", "0", "0.0") and payway != "儲值金":
         raise Exception("計算時數後金額為 0，請確認坪數/時數設定是否正確")
+    return {
+        "payway": payway, "base_url": base_url, "session": session, "token": token,
+        "base_data": base_data, "phone": phone, "member_name": member_name,
+        "selected_address": selected_address,
+    }
+
+
+def _slot_of_block(joined_text, wanted_slots):
+    """依訂單卡片的服務日期與時間，對回本次送出的 date_period。"""
+    service_date, service_time = _parse_service_date_time_loose(joined_text)
+    time_compact = str(service_time or "").replace(" ", "")
+    for slot in wanted_slots:
+        slot_date, slot_period = slot.split("_", 1)
+        if service_date != slot_date:
+            continue
+        display = display_period_text(slot_period.split("-")[0], slot_period.split("-")[1]).replace(" ", "")
+        if slot_period.replace(" ", "") in time_compact or (display and display in time_compact):
+            return slot
+    return ""
+
+
+def quick_create_stored_value_orders(
+    env_name, region, lookup_result, address, clean_type_id, slots, hour, person="2",
+    extra_fields=None,
+):
+    """儲值金頁一次勾選多個日期時段送出（與批次成單相同，date_list[] 多選）。
+
+    slots 為 ``YYYY-MM-DD_HH:MM-HH:MM`` 清單，同一次送出的時段時數必須相同。
+    回傳每個時段成立的訂單，以及後台沒有回傳（無人力）或送出後未成立的時段。
+    """
+    slots = [str(x) for x in slots or [] if str(x).strip()]
+    if not slots:
+        raise ValueError("尚未選擇要成立的日期時段")
+    first_date, first_period = slots[0].split("_", 1)
+    ctx = _prepare_booking_data(
+        env_name, "儲值金", lookup_result, address, clean_type_id, first_date, first_period, hour,
+        person=person, extra_fields=extra_fields,
+    )
+    session, base_url, token, base_data = ctx["session"], ctx["base_url"], ctx["token"], ctx["base_data"]
+    phone, member_name = ctx["phone"], ctx["member_name"]
+    # 步驟 5–6：查詢班表，只勾後台實際回傳的日期時段。
+    raw = orders.get_all_sections_raw(session, base_data, token)
+    available = [slot for slot in slots if slot_exists_in_section_response(raw, slot)]
+    unavailable = [slot for slot in slots if slot not in available]
+    if not available:
+        return {"orders": [], "unavailable": unavailable, "not_created": [], "failed_count": 0}
+    booking_url = _booking_url_for_payway(base_url, "儲值金")
+    token = _fetch_csrf_from_url(session, booking_url) or token
+    before = set(list_order_numbers_for_phone(session, phone, name=member_name))
+    resp = session.post(
+        booking_url, data=booking_flow.build_submit_pairs(base_data, token, "儲值金", available),
+        headers=HEADERS, allow_redirects=True,
+    )
+    created = {}
+    for wait_seconds in (1, 2, 3, 5, 8):
+        time.sleep(wait_seconds)
+        for block in _fetch_purchase_blocks_for_phone(session, phone, name=member_name):
+            order_no = block.get("order_no")
+            if not order_no or order_no in before or order_no in created:
+                continue
+            slot = _slot_of_block("\n".join(block.get("lines", [])), available)
+            if slot:
+                created[order_no] = slot
+        if len(created) >= len(available):
+            break
+    orders_out = []
+    for order_no, slot in created.items():
+        meta = fetch_order_meta_by_order_no(session, order_no)
+        date_s, period_s = slot.split("_", 1)
+        orders_out.append({
+            "order_no": order_no, "slot": slot, "date": date_s, "period_s": period_s,
+            "staff": meta.get("服務人員") or format_staff_from_cleaners(
+                extract_cleaners_from_section_response(raw, slot), people=person),
+            "session": session,
+        })
+    created_slots = list(created.values())
+    not_created = []
+    for slot in available:
+        if slot in created_slots:
+            created_slots.remove(slot)
+        else:
+            not_created.append(slot)
+    return {
+        "orders": orders_out, "unavailable": unavailable, "not_created": not_created,
+        "failed_count": booking_flow.stored_value_failed_count(resp), "session": session,
+    }
+
+
+def quick_create_order(
+    env_name, payway, region, lookup_result, address, clean_type_id,
+    date_s, period_s, hour, person="2", fallback_fare="0", discount_code="",
+    payment_type="", carrier_info="", company_no="", company_title="",
+    invoice_type_override="", carrier_type_id_override="", donate_code_override="",
+    extra_fields=None, allow_auto_lemon_shift=False, pricing_balance=None,
+):
+    _ctx = _prepare_booking_data(
+        env_name, payway, lookup_result, address, clean_type_id, date_s, period_s, hour,
+        person=person, fallback_fare=fallback_fare, discount_code=discount_code,
+        payment_type=payment_type, carrier_info=carrier_info, company_no=company_no,
+        company_title=company_title, invoice_type_override=invoice_type_override,
+        carrier_type_id_override=carrier_type_id_override,
+        donate_code_override=donate_code_override, extra_fields=extra_fields,
+        pricing_balance=pricing_balance,
+    )
+    payway, base_url, session, token = _ctx["payway"], _ctx["base_url"], _ctx["session"], _ctx["token"]
+    base_data, phone, member_name = _ctx["base_data"], _ctx["phone"], _ctx["member_name"]
+    selected_address = _ctx["selected_address"]
     slot = f"{date_s}_{period_s}"
     raw_section, token, auto_shift_result = _query_booking_slot_with_lemon_retry(
         session, base_url, payway, base_data, token, slot, allow_auto_lemon_shift,

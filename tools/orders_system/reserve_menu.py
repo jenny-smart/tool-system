@@ -165,8 +165,11 @@ def render_reserve_create(backend_email: str, backend_password: str, env: str) -
     if st.button("確認建立檸檬保留單", type="primary", width="stretch", disabled=not confirm or total_orders <= 0, key="reserve_create_execute"):
         execution_status = st.status(f"已收到建立指令，準備建立 {total_orders} 張保留單…", expanded=True)
         try:
-            execution_status.write("正在逐日期／時段重新確認即時班表並建立訂單…")
-            with st.spinner(f"正在{machine}逐張重新確認班表並建立保留單..."):
+            if payway == "儲值金":
+                execution_status.write("照批次成單：每一輪先重新分析各日期剩餘未配班人數，再一次勾選所有日期時段送出…")
+            else:
+                execution_status.write("信用卡／ATM 一次只能送一個時段：逐日期／時段重新確認即時班表並建立訂單…")
+            with st.spinner(f"正在{machine}建立保留單..."):
                 result = create_reserve_orders_for_plan(env_name=env, lookup_result=lookup, region=region, address=address, plan_rows=selected_rows, payway=payway, continue_after_slot_error=True)
             st.session_state.reserve_menu_last_create = result
             execution_status.update(label=f"建立完成：成功 {result.get('success_count', 0)} / {result.get('target_orders', 0)} 張", state="complete", expanded=False)
@@ -262,6 +265,10 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
     order_map = {str(r.get("order_no") or ""): r for r in safe_rows if str(r.get("order_no") or "")}
     order_nos = list(order_map.keys())
 
+    # 取消完成後要清空選取：必須在選單元件建立前處理，不能在建立後修改。
+    if st.session_state.pop("reserve_cancel_clear_selection", False):
+        st.session_state.reserve_cancel_selected_order_nos = []
+        st.session_state.reserve_cancel_confirm = False
     # 清理舊查詢留下、已不存在於目前結果的選取值。
     current_selected = [
         x for x in st.session_state.get("reserve_cancel_selected_order_nos", [])
@@ -328,7 +335,13 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
                     selected_count,
                 )
             st.session_state.reserve_menu_cancel_result = results
-            st.session_state.reserve_cancel_selected_order_nos = []
+            # 已取消的單從清單移除，下一次重繪前清空選取。
+            done = {str(r.get("order_no") or "") for r in results if r.get("ok")}
+            st.session_state.reserve_menu_cancel_rows = [
+                r for r in st.session_state.get("reserve_menu_cancel_rows") or []
+                if str(r.get("order_no") or "") not in done
+            ]
+            st.session_state.reserve_cancel_clear_selection = True
             cancel_status.update(label=f"取消流程完成：處理 {len(results)} 張", state="complete", expanded=False)
             st.success("取消流程執行完成；若備註已被改成人工客人保留內容，該筆會自動跳過。")
         except Exception as exc:
