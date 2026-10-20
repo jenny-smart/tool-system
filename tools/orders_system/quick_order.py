@@ -1884,12 +1884,8 @@ def quick_create_order(
     raw_section, token, auto_shift_result = _query_booking_slot_with_lemon_retry(
         session, base_url, payway, base_data, token, slot, allow_auto_lemon_shift,
     )
+    # 與批次成單一致：以後台班表回傳的可勾選時段為準，不另外比對未配班名單。
     cleaners = extract_cleaners_from_section_response(raw_section, slot)
-    # 後台 get_section 偶爾會回傳已綁在其他訂單的人員。送單前
-    # 另查同日重疊訂單；有任何占用衝突就不 POST 建單。
-    _assert_booking_staff_unassigned(
-        session, base_url, date_s, period_s, cleaners, needed_people=person,
-    )
     # 正式送出前一律向這筆訂單實際使用的建單網址取得最新 token。
     booking_url = _booking_url_for_payway(base_url, payway)
     _fresh_token = _fetch_csrf_from_url(session, booking_url)
@@ -1897,10 +1893,6 @@ def quick_create_order(
         token = _fresh_token
     staff_display = format_staff_from_cleaners(cleaners, people=person)
     before_order_nos = list_order_numbers_for_phone(session, phone, name=member_name)
-    # 貼近真正 POST 再查一次，縮小第一次檢查後被別筆訂單先占用的競態窗口。
-    _assert_booking_staff_unassigned(
-        session, base_url, date_s, period_s, cleaners, needed_people=person,
-    )
     booking_resp = session.post(booking_url, data=_build_booking_submit_data(base_data, token, payway, slot), headers=HEADERS, allow_redirects=True)
     display_period = display_period_text(period_s.split("-")[0], period_s.split("-")[1])
     after_order_nos = set()
