@@ -995,6 +995,11 @@ if _selected_target is None:
 _selected_option = FUNCTION_OPTIONS[_selected_target]
 _system_key, mode = _selected_option[1], _selected_option[2]
 
+# 按下功能按鈕／出現錯誤時另寫一筆到主控表「orders-system執行Log-年度」（各系統統一格式）
+import unified_log as _unified_log
+
+_unified_log.install_streamlit_hooks(st, _selected_option[0], str(st.session_state.get("username", "") or ""))
+
 st.markdown("<hr>", unsafe_allow_html=True)
 
 if _system_key == "memo":
