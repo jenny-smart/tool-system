@@ -2576,10 +2576,11 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
     stored_value = int(float(member_payload.get("storedValue", 0) or 0))
 
     target_address = str(row0["地址"]).strip().split(",")[0]
-    # 與新客／舊客單筆共用地址流程；由後台決定區域與是否可成單。
+    # 批次維持既有地址下拉選單流程：使用匹配到的 addressId 與保存欄位。
     from quick_order import resolve_backend_booking_address
     best_addr, address_parts, addr_check = resolve_backend_booking_address(
         session, member_payload, target_address, token, clean_type_id,
+        phone=phone, refresh_saved_address_via_native_form=False,
     )
     selected_address = str(best_addr.get("address") or target_address).strip()
     area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}

@@ -12,6 +12,7 @@ class SavedAddressFieldsTest(unittest.TestCase):
     def payload(self, **fields):
         item = {'id': 302, 'address': ADDRESS, 'countryId': 12,
                 'companyId': 0, 'areaId': 0, 'lat': 0, 'lng': 0,
+                'memo': '此地址客服備註',
                 'purchase': {'company_id': 1, 'area_id': 25, 'country_id': 12,
                              'lat': 25.02, 'lng': 121.52}}
         item.update(fields)
@@ -35,13 +36,18 @@ class SavedAddressFieldsTest(unittest.TestCase):
         info = orders.pick_best_address_info(self.payload(purchase=None), ADDRESS)
         self.assertEqual((info['area_id'], info['company_id'], info['lat'], info['lng']), ('', '', '', ''))
 
-    def test_saved_coordinates_are_used_without_address_lookup(self):
+    def test_saved_address_is_refreshed_by_backend_native_lookup(self):
         with patch.object(q, 'check_contain', side_effect=AssertionError('address lookup must not be called')) as check, \
              patch.object(q, 'geocode_address', side_effect=AssertionError('Google must not be called')), \
-             patch('backend_address_form.query_native_address', side_effect=AssertionError('browser must not be launched')):
+             patch('backend_address_form.query_native_address', return_value={
+                 'area': {'area_id': 25, 'company_id': 1, 'lat': 25.03, 'lng': 121.53}
+             }) as native:
             info, _, _ = q.resolve_backend_booking_address('session', self.payload(), ADDRESS, 'token', '1')
         check.assert_not_called()
+        native.assert_called_once()
         self.assertEqual((info['area_id'], info['company_id']), (25, 1))
+        self.assertEqual((info['lat'], info['lng']), (25.03, 121.53))
+        self.assertEqual(info['notice'], '此地址客服備註')
 
     def test_batch_receives_saved_region_fields(self):
         row = {'購買項目': '居家清潔', '電話': '0900000000', '地址': ADDRESS,
@@ -49,6 +55,7 @@ class SavedAddressFieldsTest(unittest.TestCase):
         with patch.object(orders, 'st', None), \
              patch.object(orders, 'get_member', return_value=self.payload()), \
              patch.object(q, 'check_contain', return_value={}), \
+             patch('backend_address_form.query_native_address', side_effect=AssertionError('batch must not launch dropdown browser')), \
              patch.object(orders, 'prepare_base_order_data', side_effect=RuntimeError('stop before calculation')) as prepare:
             with self.assertRaisesRegex(RuntimeError, 'stop before calculation'):
                 orders.process_one_group(object(), [(1, row)], 'token', None, '台北')

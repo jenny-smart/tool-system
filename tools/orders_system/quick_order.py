@@ -432,6 +432,7 @@ import requests
 from bs4 import BeautifulSoup
 
 import orders
+import booking_flow
 from orders import (
     login, get_csrf_token, get_member, pick_best_address_info,
     geocode_address, check_contain, calculate_hour, extract_calc_fields,
@@ -445,21 +446,12 @@ from orders import (
 from accounts import ACCOUNTS
 from env import BASE_URL_DEV, BASE_URL_PROD, ORDER_PREFIX_DEV, ORDER_PREFIX_PROD
 
-PAYWAY_MAP = {"信用卡": "1", "ATM": "2", "儲值金": "4"}
-BOOKING_ENDPOINT_MAP = {"信用卡": "/booking/single", "ATM": "/booking/single", "儲值金": "/booking/stored_value_routine"}
+PAYWAY_MAP = {name: booking_flow.route_for(name).payway_code for name in ("信用卡", "ATM", "儲值金")}
+BOOKING_ENDPOINT_MAP = {name: booking_flow.route_for(name).path for name in ("信用卡", "ATM", "儲值金")}
 
 
 def normalize_booking_payway(payway):
-    text = str(payway or "").strip()
-    if text in PAYWAY_MAP:
-        return text
-    if "儲值金" in text:
-        return "儲值金"
-    if "信用卡" in text or "刷卡" in text:
-        return "信用卡"
-    if "ATM" in text.upper() or "匯款" in text or "轉帳" in text or "藍新" in text:
-        return "ATM"
-    return text
+    return booking_flow.normalize_payway(payway)
 from service_pricing import account_balance, customer_tier, unit_price as service_unit_price, apply_booking_price, load_config
 
 TAX_RATE = 1.05
@@ -642,7 +634,7 @@ def _configure_environment(env_name):
 
 
 def _booking_url_for_payway(base_url, payway):
-    return f"{base_url}{BOOKING_ENDPOINT_MAP.get(payway, '/booking/single')}"
+    return booking_flow.booking_url(base_url, payway)
 
 
 def _get_booking_token_for_payway(session, base_url, payway):
@@ -660,25 +652,7 @@ def _fetch_csrf_from_url(session, url):
 
 
 def _build_booking_submit_data(base_data, token, payway, slot):
-    data = {**base_data, "_token": token}
-    if payway in ("信用卡", "ATM"):
-        data["date_s"] = ""
-        data["datePeriod"] = slot
-    else:
-        # 儲值金訂單：v2026.07.10 修正——實際查看 /booking/stored_value_routine
-        # 頁面原始 HTML 後發現，這個頁面本身「有」payway 欄位，只是選項只有
-        # 一個「儲值金」（<option value="4">儲值金</option>），而且是 required
-        # 的必填 select。之前誤以為這個頁面不需要 payway 而整個拿掉，導致
-        # 後台收到的表單缺少必填欄位，這才是付款方式空白、訂單卡在待付款、
-        # 儲值金沒有真的被扣除的真正原因（不是先前懷疑的 token 來源問題）。
-        # 這個頁面也沒有發票相關欄位（invoice_type/carrier_type_id 等），
-        # 那幾個繼續拿掉是對的。
-        data["date_list[]"] = [slot]
-        data["payway"] = "4"
-        for _k in ("invoice_type", "carrier_type_id", "carrier_info",
-                   "company_title", "company_no", "donate_code"):
-            data.pop(_k, None)
-    return data
+    return booking_flow.build_submit_data(base_data, token, payway, slot)
 
 
 def get_last_purchase_fetch_debug():
@@ -1611,89 +1585,70 @@ def get_unserved_paid_orders(session, phone, member_payload, known_addresses, to
     return upcoming
 
 
-def _area_from_check_reply(reply):
-    """從後台「查詢地址」回覆取出服務區域；缺 area_id/company_id 視為查無。"""
-    if not isinstance(reply, dict) or reply.get("return_code") not in (None, "", "0000"):
-        return {}
-    area = reply.get("area") if isinstance(reply.get("area"), dict) else {}
-    if not str(area.get("area_id") or "").strip() or not str(area.get("company_id") or "").strip():
-        return {}
-    return area
-
-
-def _lookup_backend_service_area(session, member_payload, address, token, clean_type_id):
-    """模擬後台按「查詢地址」：取得服務區域與座標。
-
-    1. 先用 Google 座標 + /ajax/check_contain。
-    2. 查不到再用後台頁面原生「查詢地址」按鈕（由後台自己定位）。
-    回傳 (area_dict, reply, errors)。
-    """
-    member = (member_payload or {}).get("member", {}) or {}
-    member_id = str(member.get("member_id") or "")
-    errors = []
-    lat, lng = geocode_address(address)
-    try:
-        reply = check_contain(session, member_id, address, lat, lng, token, clean_type_id)
-        area = _area_from_check_reply(reply)
-        if area:
-            area = dict(area)
-            area.setdefault("lat", lat or "")
-            area.setdefault("lng", lng or "")
-            if not area.get("lat"):
-                area["lat"] = lat or ""
-            if not area.get("lng"):
-                area["lng"] = lng or ""
-            return area, reply, errors
-        errors.append("查詢地址未回傳服務區域" + ("" if lat else "（無座標）"))
-    except Exception as exc:
-        errors.append(f"查詢地址：{exc}")
-    try:
-        from backend_address_form import query_native_address
-        reply = query_native_address(session, orders.BASE_URL, member_id, address, clean_type_id)
-        area = _area_from_check_reply(reply)
-        if area:
-            return dict(area), reply, errors
-        errors.append("後台原生查詢地址未回傳服務區域")
-    except Exception as exc:
-        errors.append(f"後台原生查詢地址：{exc}")
-    return {}, {}, errors
-
-
-def resolve_backend_booking_address(session, member_payload, address, token, clean_type_id):
-    """組出成單地址資料（新客、舊客新地址、舊客既有地址共用）。
-
-    - 會員既有地址已存服務區域：直接沿用，不另外查詢。
-    - 新客／建了會員但沒成單／舊客新地址：沒有可用區域時，比照後台手動
-      成單按「查詢地址」，補上 area_id、company_id、lat、lng，送單時後台
-      會以新地址建立。
-    - 查不到服務區域就停止並說明原因，不會用預設區域亂成單。
-    """
+def resolve_backend_booking_address(
+    session, member_payload, address, token, clean_type_id, phone="",
+    refresh_saved_address_via_native_form=True,
+):
+    """依後台原生「查詢地區」按鈕取得服務區域，不自行查地圖或猜區域。"""
     best_addr = dict(pick_best_address_info(member_payload, address) or {})
     selected_address = str(address).strip()
     best_addr["address"] = selected_address
     address_parts = _split_booking_address(selected_address)
-    # country_id 是後台縣市區下拉值，與服務區域 area_id 不同。
-    best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
-    has_area = all(str(best_addr.get(k) or "").strip() for k in ("area_id", "company_id", "lat", "lng"))
-    if has_area:
+    if not refresh_saved_address_via_native_form:
+        # 批次維持原本的下拉地址流程：保留匹配到的 addressId 與該地址保存欄位；
+        # 不額外啟動單筆舊客使用的瀏覽器表單刷新。
+        best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
         return best_addr, address_parts, {}
-    lookup_address = address_parts.get("full") or selected_address
-    area, reply, errors = _lookup_backend_service_area(
-        session, member_payload, lookup_address, token, clean_type_id,
-    )
-    if not area:
-        if str(best_addr.get("addressId") or "").strip():
-            # 會員既有地址查詢失敗時，沿用原本存好的資料交給後台判斷。
-            return best_addr, address_parts, {}
-        raise Exception(
-            f"地址查不到服務區域，尚未查班表：{selected_address}。"
-            + "；".join(errors)
-            + "。請確認地址是否在服務範圍，或到後台按「查詢地址」確認。"
+    _assert_address_region_resolved(address_parts, selected_address)
+    member = member_payload.get("member", {}) if isinstance(member_payload, dict) else {}
+    member_id = str(member.get("member_id") or "")
+    if not member_id:
+        raise Exception("查詢地區前缺少會員編號，已停止成單")
+
+    if best_addr.get("addressId"):
+        member_addresses = member.get("memberAddressList", []) if isinstance(member, dict) else []
+        matching = next(
+            (
+                item for item in member_addresses
+                if str(item.get("id") or "").strip() == str(best_addr["addressId"]).strip()
+            ),
+            {},
         )
-    for key in ("area_id", "company_id", "lat", "lng"):
-        if not str(best_addr.get(key) or "").strip() and str(area.get(key) or "").strip():
-            best_addr[key] = area.get(key)
-    return best_addr, address_parts, reply if isinstance(reply, dict) else {}
+        purchase = matching.get("purchase") if isinstance(matching.get("purchase"), dict) else {}
+        best_addr["notice"] = str(
+            matching.get("memo")
+            or purchase.get("notice")
+            or purchase.get("service_notice")
+            or best_addr.get("notice")
+            or ""
+        )
+
+    # 只操作後台自己的查詢地區按鈕；該頁如何定位地址由後台負責。
+    from backend_address_form import query_native_address
+    addr_check = query_native_address(
+        session, orders.BASE_URL, member_id, selected_address, clean_type_id,
+        city=address_parts.get("city", ""),
+        country_id=address_parts.get("country_id", ""),
+        address_id=best_addr.get("addressId", ""),
+        phone=phone or member.get("phone") or member.get("mobile") or member.get("tel") or "",
+    )
+    area_info = addr_check.get("area") if isinstance(addr_check, dict) else {}
+    if not isinstance(area_info, dict):
+        area_info = {}
+    area_id = area_info.get("area_id") or area_info.get("areaId")
+    company_id = area_info.get("company_id") or area_info.get("companyId")
+    if not area_id or not company_id:
+        raise Exception("後台查詢地區未回傳服務區域，已停止成單")
+
+    # country_id 是後台縣市區下拉值，與服務區域 area_id 不同；不互相猜值。
+    best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
+    best_addr["area_id"] = area_id
+    best_addr["company_id"] = company_id
+    best_addr["lat"] = area_info.get("lat") or best_addr.get("lat", "")
+    best_addr["lng"] = area_info.get("lng") or best_addr.get("lng", "")
+    _validate_area_not_known_bad(selected_address, area_info, context="查詢地區")
+    _validate_address_before_submit(selected_address, area_id, context="查詢地區")
+    return best_addr, address_parts, addr_check
 
 
 def quick_check_available_slots(env_name, payway, lookup_result, address, clean_type_id, date_s, hour, person="2", periods=None, period_hours=None):
@@ -1706,6 +1661,7 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
     member = member_payload.get("member", {})
     best_addr, address_parts, addr_check = resolve_backend_booking_address(
         session, member_payload, address, token, clean_type_id,
+        phone=lookup_result.get("phone", ""),
     )
     selected_address_for_lookup = str(address).strip()
     selected_address_for_submit = str(best_addr.get("address") or address).strip()
@@ -1804,7 +1760,7 @@ def quick_create_order(
     env_name, payway, region, lookup_result, address, clean_type_id,
     date_s, period_s, hour, person="2", fallback_fare="0", discount_code="",
     payment_type="", carrier_info="", company_no="", company_title="",
-    invoice_type_override="", carrier_type_id_override="",
+    invoice_type_override="", carrier_type_id_override="", donate_code_override="",
     extra_fields=None, allow_auto_lemon_shift=False, pricing_balance=None,
 ):
     payway = normalize_booking_payway(payway)
@@ -1818,7 +1774,7 @@ def quick_create_order(
         raise Exception("此電話查無會員資料，請先走新客人資訊收集流程建立會員後再建單")
     member = member_payload.get("member", {})
     best_addr, address_parts, addr_check = resolve_backend_booking_address(
-        session, member_payload, address, token, clean_type_id,
+        session, member_payload, address, token, clean_type_id, phone=phone,
     )
     address_for_lookup = str(best_addr.get("address") or address).strip()
     address_for_submit = address_for_lookup
@@ -1842,7 +1798,11 @@ def quick_create_order(
     carrier_info = str(first_nonzero(carrier_info, purchase_info.get("carrierInfo") if purchase_info else "", member.get("email") or "", default=""))
     company_title = str(first_nonzero(company_title, purchase_info.get("companyTitle", "") if purchase_info else "", default=""))
     company_no = str(first_nonzero(company_no, purchase_info.get("companyNo", "") if purchase_info else "", default=""))
-    donate_code = str(purchase_info.get("donateCode", "8585") if purchase_info else "8585")
+    donate_code = str(first_nonzero(
+        donate_code_override,
+        purchase_info.get("donateCode", "") if purchase_info else "",
+        default="8585",
+    ))
     old_purchase = best_addr.get("purchase", {}) if isinstance(best_addr.get("purchase"), dict) else {}
 
     def pick(key, default=""):
@@ -1962,11 +1922,7 @@ def quick_create_order(
     order_no = _find_matching_order_after_submit()
     if not order_no:
         if payway == "儲值金":
-            try:
-                reply = booking_resp.json()
-                failed_count = int(reply["count"])
-            except (ValueError, TypeError, KeyError):
-                failed_count = 0
+            failed_count = booking_flow.stored_value_failed_count(booking_resp)
             if failed_count > 0:
                 raise Exception(f"後台回覆儲值金／購物金餘額不足，有 {failed_count} 筆無法成立訂單。")
         raise Exception("送單結果待確認：尚未找到唯一符合本次資料的新訂單。請先查後台訂單，避免重複送單。")
@@ -4559,8 +4515,15 @@ def calc_stored_value_plan(sv, new_service_price=None, day_type="平日", total_
     return {"unit_price": unit_price, "dummy_price": dummy_price, "coupon_a": coupon_a, "coupon_b": coupon_b, "customer_pays": customer_pays, "n": n, "total_person_hours": ph or n, "stored_value_applied": min(sv, dummy_price), "stored_order_total_after_coupon": max(dummy_price - coupon_a - sv, 0), "zero_total_stored_order": bool(zero_total_stored_order)}
 
 
-def _invoice_payload(invoice_mode, member_email="", mobile_carrier="", company_title="", company_no=""):
+def _invoice_payload(
+    invoice_mode, member_email="", mobile_carrier="", company_title="", company_no="",
+    donate_code="8585",
+):
     mode = str(invoice_mode or "會員載具").strip()
+    if mode in ("捐贈", "捐贈發票"):
+        if not str(donate_code or "").strip():
+            raise Exception("捐贈發票需填寫捐贈碼")
+        return {"invoice_type_override": "1", "carrier_type_id_override": "", "carrier_info": "", "company_title": "", "company_no": "", "donate_code_override": str(donate_code).strip(), "payment_type": "B2C"}
     if mode == "手機載具":
         if not str(mobile_carrier or "").strip().startswith("/"):
             raise Exception("手機載具需以 / 開頭")
@@ -4569,6 +4532,10 @@ def _invoice_payload(invoice_mode, member_email="", mobile_carrier="", company_t
         if not str(company_title or "").strip() or not str(company_no or "").strip():
             raise Exception("三聯式發票需填寫抬頭與統編")
         return {"invoice_type_override": "3", "carrier_type_id_override": "1", "carrier_info": "", "company_title": str(company_title).strip(), "company_no": str(company_no).strip(), "payment_type": "B2B"}
+    if mode in ("紙本", "索取實體紙本"):
+        return {"invoice_type_override": "2", "carrier_type_id_override": "4", "carrier_info": "", "company_title": "", "company_no": "", "payment_type": "B2C"}
+    if not str(member_email or "").strip():
+        raise Exception("會員載具需有 Email")
     return {"invoice_type_override": "2", "carrier_type_id_override": "1", "carrier_info": str(member_email or "").strip(), "company_title": "", "company_no": "", "payment_type": "B2C"}
 
 

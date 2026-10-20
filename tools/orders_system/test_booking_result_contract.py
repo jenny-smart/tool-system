@@ -33,7 +33,7 @@ class BookingResultTest(unittest.TestCase):
         mock('_check_order_no_duplicate', return_value=(False, 1))
         stack.enter_context(patch.object(q.time, 'sleep'))
         return q.quick_create_order('dev', payway, '',
-            {'session': session, 'phone': '', 'member_payload': {'member': {'member_id': '1'}}},
+            {'session': session, 'phone': '', 'member_payload': {'member': {'member_id': '1', 'email': 'member@example.com'}}},
             '測試地址', '1', '2026-09-20', '09:00-11:00', '2')
 
     def test_uses_backend_final_total(self):
