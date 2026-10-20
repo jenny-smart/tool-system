@@ -2,9 +2,10 @@
 檸檬家事客服排程－儲值功能
 tools/service_management/stored_value.py
 
-最後更新：2026-08-12
+最後更新：2026-10-20
 
 Change Log：
+- 2026-10-20：匯出定期VIP後，依姓名（C 欄）把內勤工作表單「{年度}大掃除」的回覆狀態、備註（V、W 欄）同步到定期VIP工作表 V、W 欄。
 - 2026-08-12：確認全跑參數允許 --step 0，並依序執行 Step 1 儲值結算與 Step 2 VIP 對帳。
 - 2026-08-12：修正部署版錯誤引用 crm_export；本檔維持完整獨立實作，不再依賴舊相容入口。
 - 2026-08-12：將完整儲值實作由 crm_export.py 正式移至 stored_value.py，名稱與功能一致。
@@ -917,6 +918,88 @@ def _write_vip_sheet(
     return sheet_name
 
 
+DEEP_CLEAN_REPLY_HEADERS = ["回覆狀態", "備註"]
+
+
+def _deep_clean_reply_map(values: list[list[Any]]) -> dict[str, tuple[str, str]]:
+    """「{年度}大掃除」工作表：姓名（C 欄）→（回覆狀態 V 欄、備註 W 欄）。"""
+    if not values:
+        return {}
+    header = [str(h).strip() for h in values[0]]
+
+    def col(name: str, fallback: int) -> int:
+        return header.index(name) if name in header else fallback
+
+    name_i, reply_i, note_i = col("姓名", 2), col("回覆狀態", 21), col("備註", 22)
+    result = {}
+    for row in values[1:]:
+        padded = list(row) + [""] * max(0, max(name_i, reply_i, note_i) + 1 - len(row))
+        name = str(padded[name_i]).strip()
+        if name:
+            result[name] = (str(padded[reply_i]).strip(), str(padded[note_i]).strip())
+    return result
+
+
+def _sync_deep_clean_replies(
+    gc: gspread.Client,
+    area_name: str,
+    target_id: str,
+    sheet_name: str,
+    deep_clean_settings: list[Any],
+    start_dt: datetime,
+    end_dt: datetime,
+) -> int:
+    """姓名（C 欄）相同時，將內勤工作表單「{年度}大掃除」的 V、W 欄同步到定期VIP工作表 V、W 欄。"""
+    from tools.common.year_roots import root_file_id
+
+    replies: dict[str, tuple[str, str]] = {}
+    for setting in sorted(deep_clean_settings, key=lambda s: s.season_year):
+        if setting.phase1_start.date() > end_dt.date() or setting.phase2_end.date() < start_dt.date():
+            continue
+        tab = f"{setting.season_year}大掃除"
+        try:
+            office_id = root_file_id("內勤工作表單", area_name, year=setting.season_year)
+            values = gc.open_by_key(office_id).worksheet(tab).get_all_values()
+        except Exception as exc:
+            log.warning("[%s] 讀取內勤工作表單「%s」失敗，略過回覆狀態同步：%s", area_name, tab, exc)
+            continue
+        replies.update(_deep_clean_reply_map(values))
+    if not replies:
+        return 0
+
+    sh = gc.open_by_key(target_id).worksheet(sheet_name)
+    names = [str(row[0]).strip() if row else "" for row in sh.get("C2:C")]
+    if getattr(sh, "col_count", 23) < 23:
+        sh.resize(cols=23)
+    matched = [replies.get(name) for name in names]
+    end_row = len(names) + 1
+    sh.update(values=[[DEEP_CLEAN_REPLY_HEADERS[0]]] + [[m[0] if m else ""] for m in matched],
+              range_name=f"V1:V{end_row}", value_input_option="USER_ENTERED")
+    sh.update(values=[[DEEP_CLEAN_REPLY_HEADERS[1]]] + [[m[1] if m else ""] for m in matched],
+              range_name=f"W1:W{end_row}", value_input_option="RAW")
+
+    # 回覆狀態沿用來源的核取方塊；先清掉舊驗證，只在有對應的列設定核取方塊。
+    column = {"sheetId": sh.id, "startColumnIndex": 21, "endColumnIndex": 22}
+    requests_ = [{"setDataValidation": {"range": {**column, "startRowIndex": 1}}}]
+    row_i = 0
+    while row_i < len(matched):
+        if matched[row_i] is None:
+            row_i += 1
+            continue
+        first = row_i
+        while row_i < len(matched) and matched[row_i] is not None:
+            row_i += 1
+        requests_.append({"setDataValidation": {
+            "range": {**column, "startRowIndex": first + 1, "endRowIndex": row_i + 1},
+            "rule": {"condition": {"type": "BOOLEAN"}},
+        }})
+    sh.spreadsheet.batch_update({"requests": requests_})
+
+    count = sum(m is not None for m in matched)
+    log.info("[%s] 大掃除回覆狀態同步完成：%d 列，工作表：%s", area_name, count, sheet_name)
+    return count
+
+
 def step2_export_vip_calendar(
     gc: gspread.Client,
     areas: list[dict],
@@ -972,6 +1055,14 @@ def step2_export_vip_calendar(
                     gc, area_name, combined_rows, start_dt, area_target_id=_area_target,
                     end_dt=end_dt, sheet_name=combined_name,
                 ))
+            try:
+                for name in sheet_names:
+                    _sync_deep_clean_replies(
+                        gc, area_name, _area_target or _load_target_file_id(), name,
+                        deep_clean_settings, start_dt, end_dt,
+                    )
+            except Exception as exc:
+                log.warning("[%s] 大掃除回覆狀態同步失敗（VIP匯出已完成）：%s", area_name, exc)
             results[area_name] = {"count": len(rows), "sheet": "、".join(sheet_names), "ok": True}
 
         except Exception as e:
