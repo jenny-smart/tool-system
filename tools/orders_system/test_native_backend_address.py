@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, MagicMock, patch
-from backend_address_form import _address_result
+from backend_address_form import _address_result, _native_form_result
 import quick_order as q
 
 
@@ -14,16 +14,14 @@ class NativeAddressTest(unittest.TestCase):
         context = browser.new_context.return_value
         page = context.new_page.return_value
         page.url = 'https://example.invalid/booking/single'
-        response = page.expect_response.return_value.__enter__.return_value.value
-        response.status = 200
-        response.json.return_value = {'return_code': '0000', 'area': {'area_id': 45, 'company_id': 1}}
-        response.request.post_data = 'lat=25.1&lng=121.1'
+        page.evaluate.return_value = {'area_id': '45', 'company_id': '1', 'lat': '25.1', 'lng': '121.1'}
         context.cookies.return_value = []
         with patch('playwright.sync_api.sync_playwright', driver):
             result = query_native_address(requests.Session(), 'https://example.invalid', '1', '測試地址', '1')
         page.goto.assert_called_once_with('https://example.invalid/booking/single', wait_until='domcontentloaded')
         page.locator.assert_any_call('.check_contain')
-        self.assertEqual(result['area']['area_id'], 45)
+        self.assertEqual(result['area']['area_id'], '45')
+        page.expect_response.assert_not_called()
         browser.close.assert_called_once()
         guard = context.route.call_args.args[1]
         route = Mock()
@@ -40,6 +38,17 @@ class NativeAddressTest(unittest.TestCase):
         result = _address_result(response)
         self.assertEqual(result['area'], {'area_id': 45, 'company_id': 1, 'lat': '25.1', 'lng': '121.1'})
 
+    def test_native_form_result_uses_backend_ready_fields(self):
+        page = Mock()
+        page.evaluate.return_value = {'area_id': '45', 'company_id': '1', 'lat': '25.1', 'lng': '121.1'}
+        self.assertEqual(_native_form_result(page)['area']['area_id'], '45')
+
+    def test_native_form_result_requires_service_area(self):
+        page = Mock()
+        page.evaluate.return_value = {'area_id': '', 'company_id': ''}
+        with self.assertRaisesRegex(RuntimeError, '服務區域'):
+            _native_form_result(page)
+
     def test_saved_address_selects_dropdown_instead_of_typing_address(self):
         import requests
         from backend_address_form import query_native_address
@@ -49,10 +58,7 @@ class NativeAddressTest(unittest.TestCase):
         context = browser.new_context.return_value
         page = context.new_page.return_value
         page.url = 'https://example.invalid/booking/single'
-        response = page.expect_response.return_value.__enter__.return_value.value
-        response.status = 200
-        response.json.return_value = {'return_code': '0000', 'area': {'area_id': 45, 'company_id': 1}}
-        response.request.post_data = 'lat=25.1&lng=121.1'
+        page.evaluate.return_value = {'area_id': '45', 'company_id': '1', 'lat': '25.1', 'lng': '121.1'}
         context.cookies.return_value = []
         locators = {}
         page.locator.side_effect = lambda selector: locators.setdefault(selector, MagicMock())
