@@ -36,17 +36,15 @@ class SavedAddressFieldsTest(unittest.TestCase):
         info = orders.pick_best_address_info(self.payload(purchase=None), ADDRESS)
         self.assertEqual((info['area_id'], info['company_id'], info['lat'], info['lng']), ('', '', '', ''))
 
-    def test_saved_address_is_refreshed_by_backend_native_lookup(self):
+    def test_saved_address_uses_dropdown_fields_without_native_lookup(self):
         with patch.object(q, 'check_contain', side_effect=AssertionError('address lookup must not be called')) as check, \
              patch.object(q, 'geocode_address', side_effect=AssertionError('Google must not be called')), \
-             patch('backend_address_form.query_native_address', return_value={
-                 'area': {'area_id': 25, 'company_id': 1, 'lat': 25.03, 'lng': 121.53}
-             }) as native:
+             patch('backend_address_form.query_native_address', side_effect=AssertionError('saved dropdown must not be located')) as native:
             info, _, _ = q.resolve_backend_booking_address('session', self.payload(), ADDRESS, 'token', '1')
         check.assert_not_called()
-        native.assert_called_once()
+        native.assert_not_called()
         self.assertEqual((info['area_id'], info['company_id']), (25, 1))
-        self.assertEqual((info['lat'], info['lng']), (25.03, 121.53))
+        self.assertEqual((info['lat'], info['lng']), (25.02, 121.52))
         self.assertEqual(info['notice'], '此地址客服備註')
 
     def test_batch_receives_saved_region_fields(self):

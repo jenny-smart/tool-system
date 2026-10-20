@@ -1599,12 +1599,7 @@ def resolve_backend_booking_address(
         # 不額外啟動單筆舊客使用的瀏覽器表單刷新。
         best_addr["country_id"] = address_parts.get("country_id") or best_addr.get("country_id", "")
         return best_addr, address_parts, {}
-    _assert_address_region_resolved(address_parts, selected_address)
     member = member_payload.get("member", {}) if isinstance(member_payload, dict) else {}
-    member_id = str(member.get("member_id") or "")
-    if not member_id:
-        raise Exception("查詢地區前缺少會員編號，已停止成單")
-
     if best_addr.get("addressId"):
         member_addresses = member.get("memberAddressList", []) if isinstance(member, dict) else []
         matching = next(
@@ -1622,6 +1617,17 @@ def resolve_backend_booking_address(
             or best_addr.get("notice")
             or ""
         )
+        # 舊客已有相同下拉地址時，只選該 addressId，沿用該地址保存的區域資料
+        # 與客服備註。下拉選取不保證會觸發 /ajax/check_contain，不能再等待
+        # 地址定位回覆；否則正確的既有地址會被誤判為查詢逾時。
+        best_addr["country_id"] = best_addr.get("country_id") or address_parts.get("country_id", "")
+        return best_addr, address_parts, {}
+
+    # 舊客下拉選單沒有相同地址時，才視為新增地址並操作後台原生查詢地區。
+    _assert_address_region_resolved(address_parts, selected_address)
+    member_id = str(member.get("member_id") or "")
+    if not member_id:
+        raise Exception("查詢地區前缺少會員編號，已停止成單")
 
     # 只操作後台自己的查詢地區按鈕；該頁如何定位地址由後台負責。
     from backend_address_form import query_native_address

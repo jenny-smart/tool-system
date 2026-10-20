@@ -38,6 +38,16 @@ class BackendAddressTest(unittest.TestCase):
         self.assertEqual(info['addressId'], '7')
         self.assertEqual(info['area_id'], 88)
 
+    def test_existing_address_does_not_run_native_address_lookup(self):
+        payload = {'member': {'member_id': '1', 'memberAddressList': [
+            {'id': 7, 'address': ADDRESS, 'areaId': 88, 'companyId': 2, 'lat': '25', 'lng': '121'}
+        ]}}
+        with patch('backend_address_form.query_native_address', side_effect=AssertionError('saved dropdown must not be located')) as native:
+            info, _, reply = q.resolve_backend_booking_address(object(), payload, ADDRESS, 'token', '1')
+        native.assert_not_called()
+        self.assertEqual(info['addressId'], '7')
+        self.assertEqual(reply, {})
+
     def test_other_address_is_not_reused(self):
         info, _, _ = self.resolve(
             {'area': {'area_id': 88, 'company_id': 2}},

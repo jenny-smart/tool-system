@@ -89,13 +89,14 @@ class NativeAddressTest(unittest.TestCase):
         self.assertEqual(info['address'], address)
         self.assertEqual(info.get('area_id'), '25')
 
-    def test_existing_address_keeps_input_and_saved_form_coordinates(self):
+    def test_existing_address_keeps_saved_dropdown_fields_without_lookup(self):
         address = '臺北市大安區金華街233號2樓'
-        stored = {'id': 7, 'address': address, 'lat': '25.1', 'lng': '121.1'}
-        with patch('backend_address_form.query_native_address', return_value={'area': {'area_id': '25', 'company_id': '1', 'lat': '25.1', 'lng': '121.1'}}), \
+        stored = {'id': 7, 'address': address, 'areaId': '25', 'companyId': '1', 'lat': '25.1', 'lng': '121.1'}
+        with patch('backend_address_form.query_native_address', side_effect=AssertionError('saved dropdown must not be located')) as native, \
              patch.object(q, 'check_contain', side_effect=AssertionError('must not query address')) as direct:
             info, _, _ = q.resolve_backend_booking_address('session', {'member': {'member_id': 1, 'memberAddressList': [stored]}}, address, 'token', '1')
         direct.assert_not_called()
+        native.assert_not_called()
         self.assertEqual(str(info['area_id']), '25')
 
 if __name__ == '__main__':
