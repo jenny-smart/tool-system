@@ -406,6 +406,7 @@ def start_reserve_job(plan_rows: Sequence[dict], payway: str) -> dict:
         "batch_id": _build_batch_id(), "payway": qo.normalize_booking_payway(payway),
         "remaining": remaining, "keep_people": keep_people,
         "target_orders": sum(remaining.values()), "round": 0, "results": [], "done": not remaining,
+        "stopped_orders": 0,
     }
 
 
@@ -431,7 +432,8 @@ def run_reserve_round(
     def stop(slot, message):
         service_date, period = slot.split("_", 1)
         results.append({"success": False, "stopped": True, "service_date": service_date, "period": period,
-                        "round": round_no, "message": f"第 {round_no} 輪：{message}（尚餘 {remaining[slot]} 張未建）"})
+                        "round": round_no, "message": f"第 {round_no} 輪：{message}（此時段停止，{remaining[slot]} 張未建）"})
+        state["stopped_orders"] = state.get("stopped_orders", 0) + remaining[slot]
         remaining[slot] = 0
 
     active: List[str] = []

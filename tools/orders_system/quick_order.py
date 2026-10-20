@@ -1927,6 +1927,30 @@ def _slot_of_block(joined_text, wanted_slots):
     return ""
 
 
+def _order_blocks_for_dates(session, phone, dates, max_pages=20):
+    """依服務日期逐日查訂單列表並翻頁。
+
+    後台訂單列表依服務日期由新到舊排序、每頁 20 筆；同一會員較晚日期的單很多時，
+    較早日期的新單不會出現在第一頁，因此不能只讀第一頁。
+    """
+    blocks = {}
+    for service_date in sorted(set(dates)):
+        for page in range(1, max_pages + 1):
+            params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
+            params.update({"phone": normalize_phone(phone), "clean_date_s": service_date,
+                           "clean_date_e": service_date, "page": str(page)})
+            resp = session.get(orders.PURCHASE_URL, params=params, headers=HEADERS, allow_redirects=True)
+            if resp.status_code != 200:
+                break
+            page_blocks = [b for b in extract_order_cards_from_purchase_html(resp.text) if b.get("order_no")]
+            new = [b for b in page_blocks if b["order_no"] not in blocks]
+            if not new:
+                break
+            for block in new:
+                blocks[block["order_no"]] = block
+    return list(blocks.values())
+
+
 def quick_create_stored_value_orders(
     env_name, region, lookup_result, address, clean_type_id, slots, hour, person="2",
     extra_fields=None,
@@ -1954,7 +1978,8 @@ def quick_create_stored_value_orders(
         return {"orders": [], "unavailable": unavailable, "not_created": [], "failed_count": 0}
     booking_url = _booking_url_for_payway(base_url, "儲值金")
     token = _fetch_csrf_from_url(session, booking_url) or token
-    before = set(list_order_numbers_for_phone(session, phone, name=member_name))
+    dates = [slot.split("_", 1)[0] for slot in available]
+    before = {b["order_no"] for b in _order_blocks_for_dates(session, phone, dates)}
     resp = session.post(
         booking_url, data=booking_flow.build_submit_pairs(base_data, token, "儲值金", available),
         headers=HEADERS, allow_redirects=True,
@@ -1962,7 +1987,7 @@ def quick_create_stored_value_orders(
     created = {}
     for wait_seconds in (1, 2, 3, 5, 8):
         time.sleep(wait_seconds)
-        for block in _fetch_purchase_blocks_for_phone(session, phone, name=member_name):
+        for block in _order_blocks_for_dates(session, phone, dates):
             order_no = block.get("order_no")
             if not order_no or order_no in before or order_no in created:
                 continue
@@ -2028,7 +2053,14 @@ def quick_create_order(
     if _fresh_token:
         token = _fresh_token
     staff_display = format_staff_from_cleaners(cleaners, people=person)
-    before_order_nos = list_order_numbers_for_phone(session, phone, name=member_name)
+    def _blocks_on_service_date():
+        # 第一頁依服務日期排序只有 20 筆；再依本次服務日期翻頁查，避免新單在後面頁數找不到。
+        merged = {b.get("order_no"): b for b in _fetch_purchase_blocks_for_phone(session, phone, name=member_name) if b.get("order_no")}
+        for b in _order_blocks_for_dates(session, phone, [date_s]):
+            merged.setdefault(b["order_no"], b)
+        return list(merged.values())
+
+    before_order_nos = {b["order_no"] for b in _blocks_on_service_date()} | set(list_order_numbers_for_phone(session, phone, name=member_name))
     booking_resp = session.post(booking_url, data=_build_booking_submit_data(base_data, token, payway, slot), headers=HEADERS, allow_redirects=True)
     display_period = display_period_text(period_s.split("-")[0], period_s.split("-")[1])
     after_order_nos = set()
@@ -2041,7 +2073,7 @@ def quick_create_order(
             break
 
     def _find_matching_order_after_submit():
-        blocks = _fetch_purchase_blocks_for_phone(session, phone, name=member_name)
+        blocks = _blocks_on_service_date()
         target_addr_norm = normalize_addr_for_match(selected_address)
         target_period_compact = str(period_s or "").replace(" ", "")
         target_display_compact = str(display_period or "").replace(" ", "")

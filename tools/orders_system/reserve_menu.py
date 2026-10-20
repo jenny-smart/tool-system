@@ -189,7 +189,8 @@ def _render_reserve_create_job(env, lookup, region, address) -> None:
     st.markdown("#### 3. 建立進度")
     st.progress(
         min(1.0, job.get("success_count", 0) / max(1, job["target_orders"])),
-        text=f"已完成 {job['round']} 輪；成功 {job.get('success_count', 0)} / {job['target_orders']} 張；尚餘 {left} 張",
+        text=(f"已完成 {job['round']} 輪；成功 {job.get('success_count', 0)} / {job['target_orders']} 張；"
+              f"待建 {left} 張；已停止 {job.get('stopped_orders', 0)} 張（原因見下表 message 欄）"),
     )
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -205,9 +206,16 @@ def _render_reserve_create_job(env, lookup, region, address) -> None:
     if status == "paused":
         st.warning(f"已暫停：第 {job['round']} 輪完成後停止，尚餘 {left} 張未建。按「繼續生成」會先重新分析剩餘人力再接著建。")
     elif status == "done":
-        st.success(f"建立完成：成功 {job.get('success_count', 0)} / {job['target_orders']} 張，共 {job['round']} 輪。")
+        stopped = job.get("stopped_orders", 0)
+        msg = f"建立完成：成功 {job.get('success_count', 0)} / {job['target_orders']} 張，共 {job['round']} 輪。"
+        if stopped:
+            st.warning(msg + f" 有 {stopped} 張因時段停止未建立，原因見下表 message 欄。")
+        else:
+            st.success(msg)
     if job["results"]:
-        st.dataframe(pd.DataFrame(job["results"]), width="stretch", hide_index=True)
+        df = pd.DataFrame(job["results"])
+        front = [c for c in ("success", "round", "service_date", "period", "order_no", "staff", "message") if c in df.columns]
+        st.dataframe(df[front + [c for c in df.columns if c not in front]], width="stretch", hide_index=True)
     if status == "running":
         st.info(f"正在執行第 {job['round'] + 1} 輪：重新分析各日期剩餘人力後送出…（按「暫停生成」會在本輪結束後暫停）")
         try:
@@ -280,11 +288,13 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
                     f"明細讀取失敗 {debug.get('detail_errors', 0)} 張。"
                 )
 
-    # 取消進度放在清單之前：全部取消完、清單變空時仍要顯示進度與結果。
-    _render_reserve_cancel_job(env, backend_email, backend_password, _env_label(env))
+    def _show_cancel_job():
+        # 取消進度放在選取區塊下方；清單已全部取消變空時，也要顯示進度與結果。
+        _render_reserve_cancel_job(env, backend_email, backend_password, _env_label(env))
 
     rows = st.session_state.get("reserve_menu_cancel_rows") or []
     if not rows:
+        _show_cancel_job()
         return
     df = pd.DataFrame(rows)
     cols = [c for c in ["service_date", "period", "order_no", "customer_memo", "cancel_eligible"] if c in df.columns]
@@ -296,8 +306,10 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
     st.write(f"查到 **{len(rows)} 張**；目前符合安全取消條件 **{len(safe_rows)} 張**。")
     if st.session_state.get("reserve_menu_cancel_filter") == "全部（僅供查看）":
         st.warning("『全部（僅供查看）』不開放取消，請改用其他客人備註篩選後重新查詢。")
+        _show_cancel_job()
         return
     if not safe_rows:
+        _show_cancel_job()
         return
 
     st.markdown("#### 選擇要取消的保留單")
@@ -366,6 +378,7 @@ def render_reserve_cancel(backend_email: str, backend_password: str, env: str) -
         st.session_state.reserve_menu_cancel_result = []
         st.session_state.reserve_cancel_clear_selection = True
         st.rerun()
+    _show_cancel_job()
 
 
 CANCEL_CHUNK_SIZE = 3

@@ -17,7 +17,7 @@ class LazyDiscountCodeTest(unittest.TestCase):
              patch.object(q, "calculate_hour", return_value={"data": {"hour": 4, "price": 8000, "fare": 0}}), \
              patch.object(q, "_query_booking_slot_with_lemon_retry", retry), \
              patch.object(q, "list_order_numbers_for_phone", side_effect=[set(), {"NEW"}, {"NEW"}, {"NEW"}, {"NEW"}]), \
-             patch.object(q, "_fetch_purchase_blocks_for_phone", return_value=[{"order_no": "NEW", "lines": ["新北市中和區測試路1號"]}]), \
+             patch.object(q, "_fetch_purchase_blocks_for_phone", side_effect=[[]] + [[{"order_no": "NEW", "lines": ["新北市中和區測試路1號"]}]] * 5), \
              patch.object(q, "_parse_service_date_time_loose", return_value=("2026-10-25", "14:00-18:00")), \
              patch.object(q, "_extract_payway_line", return_value="信用卡"), \
              patch.object(q, "fetch_order_meta_by_order_no", return_value={}), \
