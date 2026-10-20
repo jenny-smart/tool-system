@@ -1743,6 +1743,26 @@ def quick_check_available_slots(env_name, payway, lookup_result, address, clean_
     return rows
 
 
+def _sections_on_date(raw, service_date):
+    """列出後台查詢班表回覆中，指定日期的所有時段（只讀取，不做判斷）。"""
+    try:
+        data = json.loads(str(raw or ""))
+    except Exception:
+        return ""
+    if isinstance(data, dict):
+        data = data.get("data") or data.get("result") or data.get("sections") or []
+    sections = []
+    for item in (data if isinstance(data, list) else []):
+        if not isinstance(item, dict) or str(item.get("date") or "").strip() != str(service_date):
+            continue
+        section = str(item.get("section") or "").strip()
+        cleaners = item.get("cleaner") or []
+        names = "、".join(str(x) for x in cleaners) if isinstance(cleaners, list) else str(cleaners)
+        if section:
+            sections.append(f"{section}（{names}）" if names else section)
+    return "；".join(sections)
+
+
 def _query_booking_slot_with_lemon_retry(session, base_url, payway, data, token, slot, allow_auto_lemon_shift):
     """與批次一致：查完整班表，必要時補班、更新 token 並重新查詢。"""
     raw = orders.get_all_sections_raw(session, data, token)
@@ -1762,15 +1782,19 @@ def _query_booking_slot_with_lemon_retry(session, base_url, payway, data, token,
         raw = orders.get_all_sections_raw(session, data, token)
         found = slot_exists_in_section_response(raw, slot)
     if not found:
+        service_date_of_slot = slot.split("_", 1)[0]
         details = [str(pre.get("message") or "")]
         for item in pre.get("skipped", []) or []:
             if isinstance(item, dict):
                 details.append(f"{item.get('name', '')}：{item.get('reason') or item.get('message') or ''}")
         shift_message = "；".join(x for x in details if x)
+        period_of_slot = slot.split("_", 1)[1] if "_" in slot else ""
+        others = _sections_on_date(raw, service_date_of_slot)
         raise Exception(
-            f"後台未回傳可預約時段：{slot}。"
+            f"{service_date_of_slot} {period_of_slot}（{data.get('person', '')} 人）無可預約人力："
+            "後台查詢班表結果沒有這個時段。"
             + (f"補檸檬人結果：{shift_message}。" if shift_message else "")
-            + f"後台班表回覆：{str(raw)[:300]}"
+            + (f"當天可預約：{others}。" if others else "當天沒有任何可預約時段。")
         )
     return raw, token, pre
 
@@ -1852,7 +1876,8 @@ def quick_create_order(
         "person": str(person), "date_s": date_s, "period_s": period_s,
         "period": "", "cycle": "1", "fare": "", "memo": "",
         "notice": str(best_addr.get("notice") or old_purchase.get("notice") or ""),
-        "discount_code": str(discount_code or ""), "payment": str(payment_type or ""),
+        "discount_code": "" if callable(discount_code) else str(discount_code or ""),
+        "payment": str(payment_type or ""),
         "carrierInfo": str(carrier_info or ""), "companyNo": str(company_no or ""),
         "companyTitle": str(company_title or ""), "payway": PAYWAY_MAP.get(payway, "2"),
         "invoice_type": invoice_type, "carrier_type_id": carrier_type_id,
@@ -1886,6 +1911,9 @@ def quick_create_order(
     )
     # 與批次成單一致：以後台班表回傳的可勾選時段為準，不另外比對未配班名單。
     cleaners = extract_cleaners_from_section_response(raw_section, slot)
+    if callable(discount_code):
+        # 步驟 10：查到班表時段後才產生優惠代碼（例如訂單轉換的折價券）。
+        base_data["discount_code"] = str(discount_code() or "")
     # 正式送出前一律向這筆訂單實際使用的建單網址取得最新 token。
     booking_url = _booking_url_for_payway(base_url, payway)
     _fresh_token = _fetch_csrf_from_url(session, booking_url)
@@ -1982,7 +2010,7 @@ def quick_create_order(
         "order_no": order_no, "address": selected_address, "date": date_s,
         "period": display_period, "period_s": period_s, "person": str(person),
         "price": price_no_tax, "price_with_tax": price_with_tax, "service_amount": price_with_tax,
-        "order_total": order_total,
+        "order_total": order_total, "discount_code": base_data.get("discount_code", ""),
         "fare": base_data["fare"], "payway": payway, "region": region,
         "clean_type_id": str(clean_type_id),
         "staff": meta.get("服務人員") or staff_display, "service_status": meta.get("服務狀態", "未處理"),
@@ -3187,8 +3215,13 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
             coupon_prefix = f"c{order_no_a[-3:]}{idx+1}{datetime.now().strftime('%H%M%S')}"
             coupon_discount = min(price_with_tax, remaining_coupon_budget)
             coupon_code = ""
-            if coupon_discount > 0:
-                coupon_code = _build_coupon_via_session(
+
+            # 折價券是成單步驟 10（優惠代碼），查到班表時段後才建立；
+            # 查無時段時不建券，避免留下沒用到的折價券。
+            def _make_coupon(idx=idx, coupon_prefix=coupon_prefix, coupon_discount=coupon_discount, new_date_s=new_date_s):
+                if coupon_discount <= 0:
+                    return ""
+                code = _build_coupon_via_session(
                     session, base_url,
                     title=f"訂單轉換-{order_no_a}-B{idx+1}",
                     discount=coupon_discount,
@@ -3197,19 +3230,23 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
                     regions=[region_a] if region_a else ["台北", "台中"],
                     service_items=["居家清潔", "裝修細清"],
                 )
-                if not coupon_code:
+                if not code:
                     raise Exception(
                         f"折價券建立失敗：prefix={coupon_prefix}，折抵金額={coupon_discount}。"
                         "已停止建立新訂單，避免後台 /booking/single 因無效優惠碼回 500。"
                     )
-                remaining_coupon_budget -= coupon_discount
+                return code
+
             order_result = quick_create_order(
                 env_name=env_name, payway=payway_a, region=region_a,
                 lookup_result=lookup_result, address=address_a,
                 clean_type_id=clean_type_id, date_s=new_date_s, period_s=new_period_s,
-                hour=new_hour, person=new_person, discount_code=coupon_code,
+                hour=new_hour, person=new_person, discount_code=_make_coupon,
                 allow_auto_lemon_shift=bool(new_order.get("allow_lemon", False)),
             )
+            coupon_code = order_result.get("discount_code", "")
+            if coupon_code:
+                remaining_coupon_budget -= coupon_discount
             new_order_nos.append(order_result["order_no"])
 
             service_due = _service_due_after_fare(session, order_result["order_no"])
@@ -3253,9 +3290,9 @@ def convert_order_stage2_create_new_orders(stage1_result, new_orders):
             new_order_results.append({
                 "index": idx + 1, "date_s": new_date_s, "period_s": new_period_s,
                 "hour": new_hour, "person": new_person, "order_no": None,
-                "error": (
-                    f"{e}\n"
-                    f"🔧 第二段B{idx+1}：payway={payway_a}，coupon_prefix={locals().get('coupon_prefix', '')}，"
+                "error": str(e),
+                "debug": (
+                    f"第二段B{idx+1}：payway={payway_a}，coupon_prefix={locals().get('coupon_prefix', '')}，"
                     f"coupon_code={locals().get('coupon_code', '')}，coupon_discount={locals().get('coupon_discount', '')}，"
                     f"price_with_tax={locals().get('price_with_tax', '')}，remaining_coupon_budget={remaining_coupon_budget}"
                 ),

@@ -35,7 +35,7 @@ class LemonRetryTest(unittest.TestCase):
     def test_disabled_never_adds_shifts(self):
         with patch.object(q.orders, 'get_all_sections_raw', return_value='[]'), \
              patch.object(q, 'ensure_lemon_cleaner_shifts') as shift:
-            with self.assertRaisesRegex(Exception, '後台未回傳可預約時段'):
+            with self.assertRaisesRegex(Exception, '無可預約人力'):
                 q._query_booking_slot_with_lemon_retry(object(), '', 'ATM', {'person': '2'}, '', SLOT, False)
             shift.assert_not_called()
 
