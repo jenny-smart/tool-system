@@ -389,21 +389,32 @@ def _phase_service_schedule(
             f"服務時段：{service_time}\n"
         )
 
-    sections: list[str] = []
+    grouped: dict[str, dict[int, list[dict[str, Any]]]] = {}
     for part, rows in ((1, phase1_rows), (2, phase2_rows)):
-        if not rows:
-            sections.append(f"PART {part} 年節加價服務日期：\n目前無排程")
-            continue
-        grouped: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            grouped.setdefault(_service_time(row), []).append(row)
-        for service_time in sorted(grouped):
-            sections.append(
-                f"PART {part} 年節加價服務日期：\n"
-                f"{_service_dates_in_rows(grouped[service_time])}\n"
-                f"服務時段：{service_time}"
-            )
-    return "\n".join(sections) + "\n"
+            grouped.setdefault(_service_time(row), {1: [], 2: []})[part].append(row)
+
+    ordered_times = sorted(
+        grouped,
+        key=lambda service_time: min(
+            row["start_dt"]
+            for rows in grouped[service_time].values()
+            for row in rows
+        ),
+    )
+    sections: list[str] = []
+    for service_time in ordered_times:
+        lines: list[str] = []
+        for part in (1, 2):
+            rows = grouped[service_time][part]
+            if rows:
+                lines.extend((
+                    f"PART {part} 年節加價服務日期：",
+                    _service_dates_in_rows(rows),
+                ))
+        lines.append(f"服務時段：{service_time}")
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections) + "\n"
 
 
 def _service_datetime_line(row: dict[str, Any]) -> str:
