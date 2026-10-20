@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -50,6 +51,7 @@ NOTICE_HEADERS = [
     "日曆備註",
     "服務狀態",
     "服務日期提醒內容",
+    "通知內容（無符號）",
 ]
 
 NONROUTINE_NOTICE_HEADERS = [
@@ -359,6 +361,16 @@ def _non_two_person_services(rows: list[dict[str, Any]]) -> str:
 
 def _service_date_label(row: dict[str, Any]) -> str:
     return f"{row['date_str']}({row['weekday']})"
+
+
+def _email_safe_notice(text: str) -> str:
+    without_symbols = "".join(
+        character
+        for character in text
+        if unicodedata.category(character) not in {"So", "Sk"}
+        and character not in {"\ufe0f", "\u200d"}
+    )
+    return "\n".join(line.strip() for line in without_symbols.splitlines())
 
 
 def _service_dates_in_rows(rows: list[dict[str, Any]], dates_per_row: int = 3) -> str:
@@ -819,6 +831,7 @@ def build_notice_rows(
                 phase1_start, phase2_end, holiday,
                 lunar_new_year_start, lunar_new_year_end,
             ),
+            _email_safe_notice(notice),
         ])
 
     return sorted(output, key=lambda row: (str(row[2]), str(row[5])))

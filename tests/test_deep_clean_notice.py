@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from tools.service_management.deep_clean_notice import (
     DeepCleanSettings,
+    NOTICE_HEADERS,
     _extra_charge,
     _canonical_settings_values,
     _comparison_values,
@@ -115,6 +116,12 @@ def test_regular_notice_contains_mail_merge_fields_and_next_service():
     assert "2026/12/07（週一）09:00–12:00" in row[21]
     assert "年節後第一次服務日期：2027/02/12(一)" in row[21]
     assert "請您協助確認，若需要調整，請連繫我們～" in row[21]
+    assert len(row) == 23
+    assert NOTICE_HEADERS[22] == "通知內容（無符號）"
+    assert "親愛的 王小明 您好：" in row[22]
+    assert "2026年節大掃除期間：2026/12/15～2027/02/04" in row[22]
+    for symbol in "❤️🎉✨🧽📍💰🕓💛🍋🌟":
+        assert symbol not in row[22]
 
 
 def test_regular_notice_formats_service_dates_three_per_row():
