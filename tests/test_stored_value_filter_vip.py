@@ -33,6 +33,8 @@ def test_zero_out_steps():
     assert zero_out_steps(17600, 2500, "17600") == [("VIP退券儲值金歸零", 17600), ("VIP退券剩餘餘額歸零", 2500)]
     assert zero_out_steps(17600, 0, "15000") == [("VIP退券儲值金歸零", 17600)]
     assert zero_out_steps(0, 2500, "") == [("VIP退券剩餘餘額歸零", 2500)]
+    # 重跑：上次已扣退款金額 17,600，只剩購物金 → 只扣剩餘餘額（人工確認）
+    assert zero_out_steps(0, 2500, "17600") == [("VIP退券剩餘餘額歸零", 2500)]
     assert zero_out_steps(0, 0, "1000") == []
 
 
@@ -43,6 +45,9 @@ def test_manual_submit_waits_until_record_appears(monkeypatch):
 
     class Page:
         polls = 0
+
+        def is_closed(self):
+            return False
 
         def locator(self, selector):
             page = self
@@ -76,3 +81,30 @@ def test_zero_out_first_step_auto_rest_manual(monkeypatch):
     item = {"order_no": "LC001983201", "note": "", "refund_amount": "17600"}
     assert adj._zero_out(object(), item, "10/21") is True
     assert calls == [("17600", False), ("2500", True)]
+
+
+def test_rerun_with_only_remainder_waits_for_manual(monkeypatch):
+    import pytest
+
+    adj = pytest.importorskip("tools.lemon_backend.stored_value_adjustment")
+    balances = iter([(0, 2500), (0, 0)])
+    calls = []
+    monkeypatch.setattr(adj, "_balances", lambda page, order_no: next(balances))
+    monkeypatch.setattr(adj, "_submit_adjustment",
+                        lambda page, step, date_text, manual_submit=False: calls.append((step["amount"], manual_submit)) or True)
+    adj._zero_out(object(), {"order_no": "LC1", "note": "", "refund_amount": "17600"}, "10/22")
+    assert calls == [("2500", True)]
+
+
+def test_manual_wait_stops_when_page_closed():
+    import pytest
+
+    adj = pytest.importorskip("tools.lemon_backend.stored_value_adjustment")
+
+    class Closed:
+        def is_closed(self):
+            return True
+
+    with pytest.raises(RuntimeError, match="頁面已關閉"):
+        adj._wait_manual_submit(Closed(), "LC1", "2500", "note")
+    adj._logout(Closed())  # 不應拋錯
