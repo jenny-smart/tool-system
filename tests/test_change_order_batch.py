@@ -230,3 +230,29 @@ def test_queue_actions_without_invoice_queue_skips_invoice():
     batch.queue_actions([{"region": "台北", "row": 320, "actions": ["invoice"]}], False,
                         lambda action, params, created_by="": created.append(action) or {}, log=logs.append)
     assert created == [] and "開立發票未排入" in logs[0]
+
+
+def test_vip_refund_coupon_flow():
+    # ① 尚未歸零：提示人工歸零，可先開折讓單，不退款
+    item = plan(B="VIP待退券", X="AB1", Z="952", S="1000", R="信用卡")
+    assert item["actions"] == ["allowance"] and "歸零" in item["manual"][0]
+    # ② 已歸零（M）、折讓單完成：信用卡走藍新
+    item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", R="信用卡")
+    assert item["actions"] == ["credit_refund"] and item["manual"] == []
+    # ③ ATM：台北／台中富邦退款；桃園／新竹／高雄先不處理
+    cells = dict(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", T="985", R="ATM", P="012", Q="1")
+    assert plan("台中", **cells)["actions"] == ["atm_refund"]
+    for region in ("桃園", "新竹", "高雄"):
+        item = plan(region, **cells)
+        assert item["actions"] == [] and item["manual"] == [] and item["missing"] == []
+        assert f"{region} ATM 退券先不處理" in item["progress"]
+    # ④ 退款完成 → 回寫，B 欄改為 VIP已退券
+    item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", AC="2026/10/22", S="1000", R="ATM")
+    assert item["actions"] == ["sync"] and item["target_status"] == "VIP已退券"
+    assert plan(B="VIP已退券")["actions"] == ["sync"]
+    assert plan(B="VIP已退券", AE="更新系統（B欄：VIP已退券）") is None
+
+
+def test_formula_fixes_include_vip_refund_coupon():
+    updates = batch.formula_fixes([["header"], row(B="VIP待退券", S="1000")])
+    assert [u["range"] for u in updates] == ["T2", "Z2"]

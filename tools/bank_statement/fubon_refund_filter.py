@@ -9,7 +9,7 @@ def _cell(row: list[str], column: int) -> str:
 
 
 def pending_atm_refunds(values: list[list[str]]) -> list[dict[str, object]]:
-    """Return 清潔異動 rows where B=待退款 and R=ATM.
+    """Return 清潔異動 rows where B=待退款／VIP待退券 and R=ATM.
 
     Sheet columns used by the transfer flow: H customer, P bank code,
     Q destination account, and T refund amount. K (後台備註) is included
@@ -22,7 +22,7 @@ def pending_atm_refunds(values: list[list[str]]) -> list[dict[str, object]]:
         bank_code = re.sub(r"\D", "", _cell(row, 15))
         account_number = re.sub(r"\D", "", _cell(row, 16))
         amount_text = re.sub(r"[^0-9.]", "", _cell(row, 19))
-        if status != "待退款" or payway != "ATM":
+        if status not in ("待退款", "VIP待退券") or payway != "ATM":
             continue
         if not bank_code or not account_number or not amount_text:
             continue
@@ -38,6 +38,7 @@ def pending_atm_refunds(values: list[list[str]]) -> list[dict[str, object]]:
         result.append(
             {
                 "sheet_row": sheet_row,
+                "status": status,
                 "order_no": _cell(row, 6),
                 "customer": _cell(row, 7),
                 "note": _cell(row, 10),

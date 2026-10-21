@@ -40,3 +40,9 @@ def test_pending_allowances_keeps_existing_filters():
     row[27] = "AL12345678"
 
     assert pending_allowances([header, row]) == []
+
+
+def test_pending_allowances_includes_vip_refund_coupon():
+    row = [""] * 28
+    row[1], row[6], row[18], row[23], row[25] = "VIP待退券", "LC00123456", "1,400", "FP12345678", "1333.333"
+    assert [item["sheet_row"] for item in pending_allowances([[""] * 28, row])] == [2]

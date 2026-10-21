@@ -63,3 +63,19 @@ def test_newebpay_refund_skips_login_when_no_allowance(monkeypatch):
     monkeypatch.setattr(refund_pending, "load_accounts", lambda *a: pytest.fail("不應讀帳號"))
     monkeypatch.setattr(refund_pending, "sync_playwright", lambda: pytest.fail("不應開瀏覽器登入"))
     assert refund_pending.run("台北", MagicMock(), "http://x", {2}) == 0
+
+
+def _vip(m="", x="", ab=""):
+    row = _row(x, ab)
+    row[1], row[12] = "VIP待退券", m
+    return row
+
+
+def test_vip_refund_waits_for_stored_value_zeroed():
+    values = [_row(), _vip(), _vip("2026/10/21"), _vip("2026/10/21", "FP1", "")]
+    messages = []
+    ready = refund_guard.ready_items(values, [{"sheet_row": 2}, {"sheet_row": 3}, {"sheet_row": 4}], messages.append)
+    assert [item["sheet_row"] for item in ready] == [3]
+    assert "歸零" in messages[0] and "折讓單號" in messages[1]
+    assert refund_guard.refunded_status("VIP待退券") == "VIP已退券"
+    assert refund_guard.refunded_status("待退款") == "已退款"
