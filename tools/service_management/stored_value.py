@@ -2,9 +2,10 @@
 檸檬家事客服排程－儲值功能
 tools/service_management/stored_value.py
 
-最後更新：2026-08-12
+最後更新：2026-10-20
 
 Change Log：
+- 2026-10-20：建立VIP排程工作表時套用主控試算表「排程預約條件」（例如年節大掃除 V 欄 TRUE 才預約、A 欄含改／加先不約）。
 - 2026-08-12：確認全跑參數允許 --step 0，並依序執行 Step 1 儲值結算與 Step 2 VIP 對帳。
 - 2026-08-12：修正部署版錯誤引用 crm_export；本檔維持完整獨立實作，不再依賴舊相容入口。
 - 2026-08-12：將完整儲值實作由 crm_export.py 正式移至 stored_value.py，名稱與功能一致。
@@ -1045,12 +1046,21 @@ def _build_vip_schedule_sheet(
     suffix = f"{start_period}-{end_period}" if is_cross_month else start_period
     source = ss.worksheet(f"定期VIP_{area_name}_{suffix}")
     target_name = f"{area_name}{suffix}"
+    from tools.service_management.booking_gate import RULE_SHEET_NAME, load_area_gate
+    gate, gate_rules = load_area_gate(gc, area_name, gspread.WorksheetNotFound)
+    if gate_rules:
+        log.info("[%s] 套用「%s」：%s", area_name, RULE_SHEET_NAME, "、".join(gate_rules))
     result = sync_schedule(
         ss, target_name, source.get("A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
         VIP_SCHEDULE_FALLBACK_HEADERS, gspread.WorksheetNotFound, compare_only=compare_only,
         coverage=source.get("T2:U2") if getattr(source, "col_count", 21) >= 21 else [],
         period_filter="" if is_cross_month else start_period,
+        gate=gate,
     )
+    if gate_rules:
+        result.setdefault("booking_gate", {})["rules"] = gate_rules
+        log.info("[%s] 預約條件先不約：%d 列（狀態不變，預約條件欄標示，批次成單跳過）",
+                 area_name, result["booking_gate"].get("held", 0))
     mode = "只比對" if compare_only else "安全更新"
     log.info("[%s] VIP排程%s完成：%s（%d 筆）；差異：%s；差異工作表：%s",
              area_name, mode, result["sheet"], result["count"], result["differences"], result["report"])
