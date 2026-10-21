@@ -5,7 +5,7 @@
 # 欄位相同，每個系統每年一張；新年度自動建表。寫入失敗只印警告，不影響原本流程。
 #
 # orders-system 原本沒有執行 Log，ordersapp 用 install_streamlit_hooks() 記錄：
-#   按下功能按鈕 → 一筆「執行」；之後同一次執行出現錯誤訊息（st.error）→ 一筆「失敗」。
+#   按下功能按鈕 → 一筆「執行」；之後第一個成功訊息（st.success）→「成功」、錯誤（st.error）→「失敗」。
 # ============================================================
 from __future__ import annotations
 
@@ -65,37 +65,61 @@ def write(client=None, **fields: Any) -> None:
         print(f"[unified_log] 寫入統一執行 Log 失敗（不影響主流程）: {exc}")
 
 
-def _ctx(st) -> dict[str, str]:
+MAX_ERRORS_PER_CLICK = 3
+
+
+def _ctx(st) -> dict[str, Any]:
     """目前功能存在各自的 session（多人同時使用不互相混到）；沒有 session 時用模組變數。"""
     state = getattr(st, "session_state", None)
     if state is None:
         return _context
     if "_unified_log_ctx" not in state:
-        state["_unified_log_ctx"] = {"function": "", "operator": "", "clicked": ""}
+        state["_unified_log_ctx"] = {}
     return state["_unified_log_ctx"]
 
 
+def report(st, level: str, message: Any) -> None:
+    """按下按鈕後的結果：success → 成功（每次按鈕只記一筆），error → 失敗（最多 3 筆）。"""
+    try:
+        ctx = _ctx(st)
+        if not ctx.get("clicked"):
+            return
+        if level == "success" and not ctx.get("succeeded"):
+            ctx["succeeded"] = True
+            status = "成功"
+        elif level == "error" and ctx.get("errors", 0) < MAX_ERRORS_PER_CLICK:
+            ctx["errors"] = ctx.get("errors", 0) + 1
+            status = "失敗"
+        else:
+            return
+        write(function=f"{ctx.get('function', '')}／{ctx['clicked']}", status=status, message=message,
+              operator=ctx.get("operator", ""))
+    except Exception:
+        pass
+
+
 def install_streamlit_hooks(st, function_name: str, operator: str = "") -> None:
-    """記錄目前功能；st.button 被按下時寫「執行」，之後 st.error 寫「失敗」。每次 rerun 呼叫一次。"""
-    _ctx(st).update(function=function_name, operator=operator, clicked="")
+    """每次頁面重跑呼叫一次：按下按鈕寫「執行」，之後第一個成功訊息寫「成功」、錯誤寫「失敗」。"""
+    _ctx(st).update(function=function_name, operator=operator, clicked="", succeeded=False, errors=0)
     if getattr(st.button, "_unified_log", False):
         return
-    original_button, original_error = st.button, st.error
+    original_button, original_success, original_error = st.button, st.success, st.error
 
     def button(label, *args, **kwargs):
         clicked = original_button(label, *args, **kwargs)
         if clicked:
             ctx = _ctx(st)
-            ctx["clicked"] = str(label).strip()
+            ctx.update(clicked=str(label).strip(), succeeded=False, errors=0)
             write(function=f"{ctx['function']}／{ctx['clicked']}", status="執行", operator=ctx["operator"])
         return clicked
 
+    def success(body, *args, **kwargs):
+        report(st, "success", body)
+        return original_success(body, *args, **kwargs)
+
     def error(body, *args, **kwargs):
-        ctx = _ctx(st)
-        if ctx["clicked"]:
-            write(function=f"{ctx['function']}／{ctx['clicked']}", status="失敗", message=body,
-                  operator=ctx["operator"])
+        report(st, "error", body)
         return original_error(body, *args, **kwargs)
 
     button._unified_log = True
-    st.button, st.error = button, error
+    st.button, st.success, st.error = button, success, error
