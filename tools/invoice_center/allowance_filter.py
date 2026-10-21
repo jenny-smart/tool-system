@@ -16,7 +16,7 @@ def pending_allowances(values: list[list[object]]) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
     for sheet_row, row in enumerate(values[1:], start=2):
         cells = [str(value or "").strip() for value in row] + [""] * 28
-        if cells[1] != "待退款" or not cells[23] or not _amount(cells[25]) or cells[27]:
+        if cells[1] not in ("待退款", "VIP待退券") or not cells[23] or not _amount(cells[25]) or cells[27]:
             continue
         result.append({
             "sheet_row": sheet_row,

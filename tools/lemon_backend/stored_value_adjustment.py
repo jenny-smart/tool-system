@@ -12,11 +12,17 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
 from tools.lemon_backend.config import get_credentials
-from tools.lemon_backend.stored_value_filter import build_note, pending_stored_value_adjustments
+from tools.lemon_backend.stored_value_filter import (
+    build_note,
+    parse_balances,
+    pending_stored_value_adjustments,
+    zero_out_steps,
+)
 from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
 BASE_URL = "https://backend.lemonclean.com.tw"
+MANUAL_SUBMIT_TIMEOUT = 15 * 60  # 秒：VIP待退券歸零等人工按送出的上限
 
 
 def _visible(locator: Locator) -> Locator | None:
@@ -126,7 +132,23 @@ def _logout(page: Page) -> None:
         page.goto(href, wait_until="domcontentloaded")
 
 
-def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> bool:
+def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> None:
+    """等人工確認並按送出，直到儲值金歷程出現這一筆（金額＋備註）。"""
+    print(f"⏸ {order_no} 已填好扣款 NT$ {int(amount):,}／備註「{note}」，請確認後在異動視窗按「送出」")
+    deadline = time.monotonic() + MANUAL_SUBMIT_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            if _already_done(page, order_no, amount, note):
+                print(f"已確認送出：{order_no}／NT$ {int(amount):,}")
+                return
+        except Exception:
+            pass  # 送出後頁面重新載入中
+        page.wait_for_timeout(1_000)
+    raise RuntimeError(f"{order_no} 等候人工送出逾時（{MANUAL_SUBMIT_TIMEOUT // 60} 分鐘），未回填 M")
+
+
+def _submit_adjustment(page: Page, item: dict[str, object], date_text: str, *, manual_submit: bool = False) -> bool:
+    """manual_submit：只填表，由人工按送出（VIP待退券歸零）。"""
     order_no = str(item["order_no"])
     amount = str(item["amount"])
     note = build_note(str(item["note"]), date_text, str(item["suffix"]))
@@ -169,6 +191,9 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
 
     dialog_messages: list[str] = []
     page.once("dialog", lambda dialog: (dialog_messages.append(dialog.message), dialog.accept()))
+    if manual_submit:
+        _wait_manual_submit(page, order_no, amount, note)
+        return True
     send = (
         _visible(modal.get_by_role("button", name="送出", exact=True))
         or _visible(modal.get_by_role("button", name="確定", exact=True))
@@ -184,12 +209,40 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
     return True
 
 
+def _balances(page: Page, order_no: str) -> tuple[int, int]:
+    balances = parse_balances(page.locator("body").inner_text())
+    if balances is None:
+        raise RuntimeError(f"{order_no} 儲值金歷程頁讀不到儲值金餘額／購物金餘額")
+    return balances
+
+
+def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
+    """VIP待退券：依頁面餘額把儲值金及購物金都扣到 0，扣款筆數見 zero_out_steps。
+
+    後台扣到 0 需人工操作：Agent 只填表，每一筆都等人工按送出。"""
+    order_no = str(item["order_no"])
+    stored, shopping = _balances(page, order_no)
+    if stored < 0 or shopping < 0:
+        raise RuntimeError(f"{order_no} 餘額為負數（儲值金 {stored}／購物金 {shopping}），請人工確認")
+    steps = zero_out_steps(stored, shopping, str(item.get("refund_amount", "")))
+    print(f"{order_no} 目前儲值金餘額 {stored:,}、購物金餘額 {shopping:,}、退款金額 {item.get('refund_amount') or '-'}，"
+          f"扣款 {'＋'.join(f'{amount:,}' for _, amount in steps) or '0'}")
+    created = False
+    for suffix, amount in steps:
+        step = {**item, "amount": str(amount), "suffix": suffix}
+        created = _submit_adjustment(page, step, date_text, manual_submit=True) or created
+    stored, shopping = _balances(page, order_no)
+    if stored or shopping:
+        raise RuntimeError(f"{order_no} 歸零後仍有儲值金 {stored:,}／購物金 {shopping:,}，請人工確認")
+    return created
+
+
 def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
     worksheet = get_worksheet(area)
     pending = pending_stored_value_adjustments(worksheet.get_all_values())
     pending = [item for item in pending if int(item["sheet_row"]) in selected_rows]
     if not pending:
-        raise ValueError("勾選列已不是待扣／待退儲值金，或缺少訂單編號／金額")
+        raise ValueError("勾選列已不是待扣／待返儲值金／VIP待退券（未歸零），或缺少訂單編號／金額")
     date_text = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%m/%d")
     completed = 0
     with sync_playwright() as playwright:
@@ -200,7 +253,10 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
             for item in pending:
                 print(f"處理第 {item['sheet_row']} 列：{item['order_no']}／{item['action']} NT$ {item['amount']}")
                 page = _open_history(page, str(item["order_no"]))
-                created = _submit_adjustment(page, item, date_text)
+                if item.get("zero_out"):
+                    created = _zero_out(page, item, date_text)
+                else:
+                    created = _submit_adjustment(page, item, date_text)
                 if not str(item["completed_at"]).strip():
                     completed_at = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d %H:%M:%S")
                     worksheet.update_cell(

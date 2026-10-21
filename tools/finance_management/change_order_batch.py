@@ -7,11 +7,16 @@
     未備妥的列不執行任何動作；每日檢查只提醒未備妥的列。
   - 待退款：① 開折讓單（有 X 原發票、Z 未稅金額，AB 空白）
             ② 退款（AC 空白）：R＝ATM → 富邦 ATM 退款（台北／台中）；R＝信用卡 → 藍新退款；其他付款方式 → 需人工
+  - VIP待退券：① 【檸檬後台】異動儲值金：依儲值金歷程頁餘額把儲值金及購物金都扣到 0
+                 （退款金額 S 大於儲值金時先扣 S、再扣剩餘餘額）；Agent 填表、人工按送出，完成後填 M 歸零時間
+              ② 開折讓單（同待退款）
+              ③ 退款（M 已歸零才退）：R＝信用卡 → 藍新退款；R＝ATM → 台北／台中富邦 ATM 退款，
+                 桃園／新竹／高雄先不處理；退款完成 AC 填退款時間、B 欄改為 VIP已退券，再回寫檸檬後台
   - 待收款：M 收款時間空白 → 未備妥；M、N 有值、O 發票空白 → 開立發票（同【鯨躍發票】開立發票：
             沿用訂單發票設定、Agent 填表、人工按下一步及儲存，回填 O／AA）
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
   - 待處理發票（車馬費發票／異動發票／二聯改三聯）→ 需到鯨躍發票功能逐筆確認
-  - 回寫系統：B 欄為 已退款／已收款／已扣儲值金／已返儲值金／已處理發票，
+  - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
   - 盤點時順手補 T（匯款金額）、Z（未稅金額）公式（只補空白格）。
@@ -32,7 +37,8 @@ REGIONS = ["台北", "台中", "桃園", "新竹", "高雄"]
 CUTOFF = date(2026, 10, 16)
 RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
 
-DONE_STATUSES = ("已退款", "已收款", "已扣儲值金", "已返儲值金", "已處理發票")
+DONE_STATUSES = ("已退款", "VIP已退券", "已收款", "已扣儲值金", "已返儲值金", "已處理發票")
+REFUND_STATUSES = {"待退款", "VIP待退券"}
 STORED_VALUE_STATUSES = {"待扣儲值金", "待返儲值金"}
 ATM_REFUND_REGIONS = {"台北", "台中"}
 # 只列出、不自動處理的狀態（已完成或不需處理）
@@ -94,6 +100,8 @@ def ready_target(row: list) -> Optional[str]:
     status = _cell(row, "B")
     if status == "待退款" and _cell(row, "AB") and _cell(row, "AC"):
         return "已退款"
+    if status == "VIP待退券" and all(_cell(row, c) for c in ("M", "AB", "AC")):
+        return "VIP已退券"  # 儲值金／購物金已歸零、折讓單、退款都完成
     if status == "待收款" and all(_cell(row, c) for c in ("M", "N", "O", "AA")):
         return "已收款"  # 收款時間、金額、發票號碼、發票開立時間都有值
     if status == "待扣儲值金" and _cell(row, "M"):
@@ -134,13 +142,19 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         item["progress"].append(f"已處理好，回寫後 B 欄改為「{target}」")
         return item
 
-    if status == "待退款":
+    if status in REFUND_STATUSES:
+        is_vip = status == "VIP待退券"
         # missing＝缺資料還不能處理（未備妥）；manual＝資料齊全但要人工或到其他功能逐筆處理
         # 顯示實際會退的金額：ATM 是 T（扣手續費後的匯款金額），信用卡等其他方式是 S（退款金額）
         is_atm = "ATM" in item["payway"].upper()
         item["amount"] = _amount(_cell(row, "T")) if is_atm and _amount(_cell(row, "T")) else _amount(_cell(row, "S"))
         if not _amount(_cell(row, "S")):
             item["missing"].append("缺退款金額（S）")
+        if is_vip:
+            if _cell(row, "M"):
+                item["progress"].append("儲值金／購物金歸零 ✓")
+            else:
+                item["actions"].append("stored_value")  # 儲值金及購物金歸零
         if _cell(row, "AB"):
             item["progress"].append("折讓單 ✓")
         elif not _cell(row, "X"):
@@ -155,6 +169,10 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             payway = item["payway"].upper()
             if not payway:
                 item["missing"].append("缺付款方式（R）")
+            elif is_vip and "ATM" in payway and region not in ATM_REFUND_REGIONS:
+                item["progress"].append(f"{region} ATM 退券先不處理")
+            elif is_vip and not _cell(row, "M"):
+                pass  # 儲值金／購物金歸零後才退款
             elif "ATM" in payway:
                 if not re.sub(r"\D", "", _cell(row, "P")) or not re.sub(r"\D", "", _cell(row, "Q")):
                     item["missing"].append("缺退款銀行代碼／帳號（P／Q）")
@@ -203,10 +221,10 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
 
 
 def formula_fixes(values: list[list]) -> list[dict[str, Any]]:
-    """S 退款金額有值、T 或 Z 空白的待退款列 → 補公式（只補空白格）。"""
+    """S 退款金額有值、T 或 Z 空白的待退款／VIP待退券列 → 補公式（只補空白格）。"""
     updates = []
     for row_no, row in enumerate(values[1:], start=2):
-        if _cell(row, "B") != "待退款" or not _amount(_cell(row, "S")):
+        if _cell(row, "B") not in REFUND_STATUSES or not _amount(_cell(row, "S")):
             continue
         reg_date = parse_reg_date(_cell(row, "E"))
         if reg_date is None or reg_date < CUTOFF:

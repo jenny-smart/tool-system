@@ -12,7 +12,7 @@ def pending_credit_card_refunds(values: list[list[str]]) -> list[dict[str, objec
     rows: list[dict[str, object]] = []
     for row_number, row in enumerate(values[1:], start=2):
         status, order_no, payway, amount = _cell(row, 1), _cell(row, 6), _cell(row, 17), _cell(row, 18)
-        if status != "待退款" or payway != "信用卡" or not order_no or not amount:
+        if status not in ("待退款", "VIP待退券") or payway != "信用卡" or not order_no or not amount:
             continue
         normalized = re.sub(r"[^0-9.]", "", amount)
         try:
@@ -22,6 +22,7 @@ def pending_credit_card_refunds(values: list[list[str]]) -> list[dict[str, objec
         if parsed_amount > 0:
             rows.append({
                 "sheet_row": row_number,
+                "status": status,
                 "order_no": order_no,
                 "customer": _cell(row, 7),
                 "note": _cell(row, 10),

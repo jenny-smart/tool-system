@@ -13,7 +13,7 @@ from playwright.sync_api import Locator, Page, sync_playwright
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
 from tools.lemon_backend.stored_value_sheet import get_worksheet
-from tools.finance_management.refund_guard import ready_for_refund, ready_items
+from tools.finance_management.refund_guard import ready_for_refund, ready_items, refunded_status
 from tools.newebpay.refund_filter import pending_credit_card_refunds
 from tools.newebpay.download_reports import (
     DEFAULT_ACCOUNTS_FILE,
@@ -176,12 +176,12 @@ def run(area: str, accounts_file: Path, cdp_url: str, selected_rows: set[int] | 
     pending = pending_credit_card_refunds(values)
     if selected_rows is not None:
         pending = [item for item in pending if int(item["sheet_row"]) in selected_rows]
-    print(f"{area}：待退款＋信用卡共 {len(pending)} 筆。")
+    print(f"{area}：待退款／VIP待退券＋信用卡共 {len(pending)} 筆。")
     total = len(pending)
     pending = ready_items(values, pending)  # 登入藍新前先排除缺折讓單號的列
     if not pending:
         if total:
-            print("沒有已完成折讓單的列，不登入藍新。")
+            print("沒有可退款的列（缺折讓單或 VIP 尚未歸零），不登入藍新。")
         return 0
     account = load_accounts(accounts_file.expanduser(), area)[0]
     today = datetime.now(ZoneInfo("Asia/Taipei")).date()
@@ -204,7 +204,8 @@ def run(area: str, accounts_file: Path, cdp_url: str, selected_rows: set[int] | 
                 _set_order_query(page, order_no, start, end)
                 requested_at = _refund_requested_at(page, order_no)
                 worksheet.update(range_name=f"AC{sheet_row}", values=[[requested_at]], value_input_option="RAW")
-                worksheet.update(range_name=f"B{sheet_row}", values=[["已退款"]], value_input_option="USER_ENTERED")
+                done_status = refunded_status(str(item.get("status", "")))
+                worksheet.update(range_name=f"B{sheet_row}", values=[[done_status]], value_input_option="USER_ENTERED")
                 print(f"完成：{order_no}；退款申請時間 {requested_at}")
                 completed += 1
                 _close_detail_by_backdrop(page)

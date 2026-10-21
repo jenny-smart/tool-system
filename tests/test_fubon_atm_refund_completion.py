@@ -48,4 +48,5 @@ def test_atm_refund_updates_after_completion_then_downloads_statement() -> None:
 
     assert wait_index < update_index < download_index
     assert 'f"AC{item[\'sheet_row\']}"' in source
-    assert '"values": [["已退款"]]' in source
+    assert '"values": [[done_status]]' in source
+    assert 'done_status = refunded_status(str(item.get("status", "")))' in source
