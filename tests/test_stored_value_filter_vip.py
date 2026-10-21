@@ -34,3 +34,31 @@ def test_zero_out_steps():
     assert zero_out_steps(17600, 0, "15000") == [("VIP退券儲值金歸零", 17600)]
     assert zero_out_steps(0, 2500, "") == [("VIP退券剩餘餘額歸零", 2500)]
     assert zero_out_steps(0, 0, "1000") == []
+
+
+def test_manual_submit_waits_until_record_appears(monkeypatch):
+    import pytest
+
+    adj = pytest.importorskip("tools.lemon_backend.stored_value_adjustment")
+
+    class Page:
+        polls = 0
+
+        def locator(self, selector):
+            page = self
+
+            class Body:
+                def inner_text(self):
+                    page.polls += 1
+                    return "LC001 10/21VIP退券扣退款金額 18,000" if page.polls >= 3 else "LC001 儲值金餘額：17,600"
+            return Body()
+
+        def wait_for_timeout(self, ms):
+            pass
+
+    page = Page()
+    adj._wait_manual_submit(page, "LC001", "18000", "10/21VIP退券扣退款金額")
+    assert page.polls == 3
+    monkeypatch.setattr(adj, "MANUAL_SUBMIT_TIMEOUT", 0)
+    with pytest.raises(RuntimeError, match="逾時"):
+        adj._wait_manual_submit(Page(), "LC001", "2100", "10/21VIP退券剩餘餘額歸零")

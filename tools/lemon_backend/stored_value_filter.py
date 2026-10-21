@@ -107,7 +107,7 @@ def parse_balances(text: str) -> tuple[int, int] | None:
 
 
 def zero_out_steps(stored: int, shopping: int, refund_amount: str = "") -> list[tuple[str, int]]:
-    """VIP待退券歸零要扣的每一筆（備註後綴, 金額），全部用「扣款／異動費」。
+    """VIP待退券歸零要扣的每一筆（備註後綴, 金額），全部用「扣款／異動費」，Agent 填表、人工按送出。
 
     後台扣款先扣儲值金、不足再扣購物金：
       - 退款金額大於儲值金：第一筆扣退款金額，第二筆扣剩下的餘額（購物金）。
