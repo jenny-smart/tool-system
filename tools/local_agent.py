@@ -572,6 +572,33 @@ def build_fubon_supply_purchase(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_fubon_internal_payment(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    payment_rows = params.get("payment_rows") or []
+    deposit_rows = params.get("deposit_rows") or []
+    supply = {str(month): [int(row) for row in rows] for month, rows in (params.get("supply") or {}).items() if rows}
+    if area not in ("台北", "台中"):
+        raise ValueError("富邦內部請款目前只支援台北、台中")
+    if not (payment_rows or deposit_rows or supply):
+        raise ValueError("請先勾選要處理的內部請款資料")
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_internal_payment",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+        "--payment-rows",
+        ",".join(str(int(row)) for row in payment_rows),
+        "--deposit-rows",
+        ",".join(str(int(row)) for row in deposit_rows),
+        "--supply",
+        json.dumps(supply, ensure_ascii=False),
+    ] + (["--merge"] if params.get("merge") else [])
+
+
 def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     month = str(params.get("month") or "").strip()
@@ -763,6 +790,7 @@ register_action("fubon.atm_refund", build_fubon_atm_refund)
 register_action("fubon.payment_request", build_fubon_payment_request)
 register_action("fubon.deposit_refund", build_fubon_deposit_refund)
 register_action("fubon.supply_purchase", build_fubon_supply_purchase)
+register_action("fubon.internal_payment", build_fubon_internal_payment)
 register_action("fubon.fixed_expense_transfer", build_fubon_fixed_expense_transfer)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)

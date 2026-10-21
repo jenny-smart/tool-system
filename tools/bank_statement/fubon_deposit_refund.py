@@ -117,7 +117,8 @@ def write_payment_date(
         ) from exc
 
 
-def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
+def prepare(area: str, rows: set[int]) -> dict:
+    """進銀行前先讀報表、挑出勾選列，並確認 S 欄可寫（失敗就不登入富邦）。"""
     values = read_report_values(DEPOSIT_REFUND_TYPE, area)
     candidates = pending_deposit_refunds(values)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
@@ -127,54 +128,60 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     # 保持工作表原列順序，支援一次勾選多筆並逐筆完成。
     selected.sort(key=lambda item: int(item["sheet_row"]))
 
-    destination_name = read_destination_name(DEPOSIT_REFUND_TYPE, area)
-    account = load_account("fubon", area, accounts_file.expanduser())
     spreadsheet_id, sheet_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
     service = get_sheets_service()
 
     # 先驗證每一筆 S 欄都能實際寫入。若權限不足，銀行端完全不會開始退款。
     verify_writeback_access(service, spreadsheet_id, sheet_title, selected)
+    return {"selected": selected, "spreadsheet_id": spreadsheet_id, "sheet_title": sheet_title,
+            "service": service, "destination_name": read_destination_name(DEPOSIT_REFUND_TYPE, area)}
 
+
+def pay(context, page: Page, area: str, account, prepared: dict) -> Page:
+    """在已登入的富邦頁面逐筆退款並回填 S 欄（不下載明細、不登出）。"""
+    for item in prepared["selected"]:
+        row = int(item["sheet_row"])
+        print(f"準備第 {row} 列：NT$ {item['amount']}／備註：{item['memo']}")
+        fill_deposit_refund(page, area, account.bank_account, prepared["destination_name"], item)
+
+        # 每筆都要確認富邦完成頁，而且金額必須對應本筆；成功後立即回填
+        # S 欄，回填成功才會進下一筆，避免多筆流程中發生重複退款。
+        completed_at = wait_user_completed_transfer(
+            page,
+            require_completed_at=True,
+            expected_amount=str(item["amount"]),
+        )
+        if completed_at:
+            payment_date = datetime.strptime(
+                completed_at[:10], "%Y-%m-%d"
+            ).strftime("%Y/%m/%d")
+        else:
+            payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
+
+        write_payment_date(
+            prepared["service"],
+            prepared["spreadsheet_id"],
+            prepared["sheet_title"],
+            row,
+            payment_date,
+        )
+        print(f"已回填第 {row} 列 S 欄：{payment_date}")
+        page = current_fubon_page(context, page) or page
+    print("全部勾選的工具包押金退款均已完成付款並回填 S 欄。")
+    return page
+
+
+def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
+    prepared = prepare(area, rows)
+    account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
         cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
-        try:
-            for item in selected:
-                row = int(item["sheet_row"])
-                print(f"準備第 {row} 列：NT$ {item['amount']}／備註：{item['memo']}")
-                fill_deposit_refund(page, area, account.bank_account, destination_name, item)
-
-                # 每筆都要確認富邦完成頁，而且金額必須對應本筆；成功後立即回填
-                # S 欄，回填成功才會進下一筆，避免多筆流程中發生重複退款。
-                completed_at = wait_user_completed_transfer(
-                    page,
-                    require_completed_at=True,
-                    expected_amount=str(item["amount"]),
-                )
-                if completed_at:
-                    payment_date = datetime.strptime(
-                        completed_at[:10], "%Y-%m-%d"
-                    ).strftime("%Y/%m/%d")
-                else:
-                    payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
-
-                write_payment_date(
-                    service,
-                    spreadsheet_id,
-                    sheet_title,
-                    row,
-                    payment_date,
-                )
-                print(f"已回填第 {row} 列 S 欄：{payment_date}")
-                page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已完成付款並回填 S 欄。")
-            print("開始下載今日富邦明細。")
-            today = datetime.now(ZoneInfo("Asia/Taipei")).date()
-            page = run_download(context, page, account, today, today)
-        except Exception:
-            # 錯誤照常往外拋；登出由上面的 cleanup 負責。
-            raise
+        page = pay(context, page, area, account, prepared)
+        print("開始下載今日富邦明細。")
+        today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+        run_download(context, page, account, today, today)
     return 0
 
 
