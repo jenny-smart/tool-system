@@ -19,7 +19,7 @@ STATUS_CONFIG = {
         "suffix": "已返",
         "completed_status": "已返儲值金",
     },  # S 金額、AC 時間
-    # VIP待退券：退款金額（S）不一定等於儲值金，金額以儲值金歷程頁的餘額為準，
+    # VIP待退券：退款金額（S）不一定等於儲值金，金額以儲值金歷程頁的餘額為準（見 zero_out_steps），
     # 儲值金及購物金都扣到 0；M 填歸零時間，B 欄維持 VIP待退券（之後還要開折讓單、退款）。
     "VIP待退券": {
         "action": "扣款",
@@ -78,6 +78,7 @@ def pending_stored_value_adjustments(values: list[list[str]]) -> list[dict[str, 
                 "time_column": int(config["time_column"]) + 1,
                 "completed_at": _cell(row, int(config["time_column"])),
                 "zero_out": zero_out,
+                "refund_amount": normalize_amount(_cell(row, 18)) if zero_out else "",  # S
             }
         )
     return rows
@@ -103,3 +104,28 @@ def parse_balances(text: str) -> tuple[int, int] | None:
             return None
         values.append(int(match.group(1).replace(",", "")))
     return values[0], values[1]
+
+
+def zero_out_steps(stored: int, shopping: int, refund_amount: str = "") -> list[tuple[str, int]]:
+    """VIP待退券歸零要扣的每一筆（備註後綴, 金額），全部用「扣款／異動費」。
+
+    後台扣款先扣儲值金、不足再扣購物金：
+      - 退款金額大於儲值金：第一筆扣退款金額，第二筆扣剩下的餘額（購物金）。
+      - 其他：第一筆扣儲值金餘額，第二筆扣購物金餘額。
+    """
+    total = stored + shopping
+    if total <= 0:
+        return []
+    try:
+        refund = int(float(refund_amount or 0))
+    except ValueError:
+        refund = 0
+    if refund > stored:
+        first = min(refund, total)
+        steps = [("VIP退券扣退款金額", first)]
+    else:
+        first = stored
+        steps = [("VIP退券儲值金歸零", first)] if first else []
+    if total - first:
+        steps.append(("VIP退券剩餘餘額歸零", total - first))
+    return steps
