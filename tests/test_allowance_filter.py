@@ -46,3 +46,16 @@ def test_pending_allowances_includes_vip_refund_coupon():
     row = [""] * 28
     row[1], row[6], row[18], row[23], row[25] = "VIP待退券", "LC00123456", "1,400", "FP12345678", "1333.333"
     assert [item["sheet_row"] for item in pending_allowances([[""] * 28, row])] == [2]
+
+
+def test_paid_year_from_backend_order():
+    from types import SimpleNamespace
+
+    from tools.invoice_center.allowance_create import paid_year
+
+    order = SimpleNamespace(invoice_no="VG92494110", extra={}, raw_text="總金額：50000 付款方式：信用卡 付款日期：2025-11-05 14:39:15")
+    assert paid_year(order, "VG92494110") == 2025
+    assert paid_year(SimpleNamespace(invoice_no="VG92494110", extra={"paid_at": "2026/01/02"}, raw_text=""), "VG92494110") == 2026
+    assert paid_year(order, "AB00000000") is None  # 發票號碼不符
+    assert paid_year(SimpleNamespace(invoice_no="VG92494110", extra={}, raw_text=""), "VG92494110") is None
+    assert paid_year(None, "VG92494110") is None

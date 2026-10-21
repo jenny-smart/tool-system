@@ -100,8 +100,34 @@ def _search_invoice(page: Page, invoice_no: str) -> None:
     page.locator("a[onclick='SearchInvoice();']").click()
 
 
+def paid_year(order, invoice_no: str) -> int | None:
+    """原發票年度＝檸檬後台訂單的付款日期年份；訂單發票號碼不符或沒有付款日期回傳 None。"""
+    if order is None or str(order.invoice_no or "").strip().upper() != invoice_no.strip().upper():
+        return None
+    paid = str((order.extra or {}).get("paid_at") or "")
+    if not paid:
+        match = re.search(r"付款日期\s*[：:]\s*(\d{4})[-/]\d{1,2}[-/]\d{1,2}", order.raw_text or "")
+        paid = match[1] if match else ""
+    return int(paid[:4]) if paid[:4].isdigit() else None
+
+
+def _invoice_year(backend, order_no: str, invoice_no: str) -> int | None:
+    if backend is None:
+        return None
+    try:
+        year = paid_year(backend.get_order(order_no), invoice_no)
+    except Exception as exc:
+        print(f"⚠️ {order_no} 讀取檸檬後台付款日期失敗：{exc}")
+        return None
+    if year is None:
+        print(f"⚠️ {order_no} 後台查無付款日期或發票號碼不符，改從最新年度往前查原發票")
+    else:
+        print(f"{order_no} 付款日期年份 {year}，以 {year} 年度查原發票 {invoice_no}")
+    return year
+
+
 def _search_recent_years(page: Page, invoice_no: str, years: int = 2) -> None:
-    """沒指定年度：先查最新年度，查不到再查前一年（例如 VIP 原發票是去年儲值時開的）。"""
+    """查不到付款年份時的備援：先查最新年度，查不到再查前一年。"""
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
     year = page.locator("#qyear")
@@ -287,6 +313,13 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
             return 0
         raise ValueError("沒有可執行的待退款折讓資料")
 
+    from tools.lemon_backend.client import BackendClient
+
+    try:
+        backend = BackendClient(area)  # 讀訂單付款日期，決定原發票年度
+    except Exception as exc:
+        print(f"⚠️ {area} 檸檬後台帳密讀取失敗，原發票改從最新年度往前查：{exc}")
+        backend = None
     accounts = load_accounts(None)
     with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
@@ -316,9 +349,10 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                 allowance_date, number = found
                 print(f"第 {sheet_row} 列：鯨躍已有 {invoice_no} 的折讓單 {number}，不重開，補回 AA／AB")
             else:
+                invoice_year = _invoice_year(backend, str(item["order_no"]), invoice_no)
                 _open_allowance(page)
                 try:
-                    number = _create_one(page, invoice_no, str(item["untaxed_amount"]))
+                    number = _create_one(page, invoice_no, str(item["untaxed_amount"]), invoice_year=invoice_year)
                 except Exception as exc:
                     # 開立後讀不到單號：再查一次，有就補回；查不到才算開立失敗
                     found = find_existing_allowance(page, invoice_no, **match_args)
