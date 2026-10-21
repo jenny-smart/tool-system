@@ -91,7 +91,7 @@ def test_schedule_customer_key_uses_name_phone_and_address():
 
 def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
     functions = _load_functions(
-        "normalize_name_for_compare", "normalize_phone", "_write_vip_sheet"
+        "normalize_text", "normalize_name_for_compare", "normalize_address", "normalize_phone", "_write_vip_sheet"
     )
     functions["_write_topup_list"] = lambda *args: ""
 
@@ -296,7 +296,8 @@ def test_step3_passes_run_period_when_booking_gate_flag_is_set():
     from datetime import timedelta
     functions = _load_functions("step3_build_vip_schedule_sheets", "_month_keys")
     calls = []
-    functions["_build_vip_schedule_sheet"] = lambda gc, area, s, e, compare_only=False, booking_gate=None: calls.append(booking_gate) or {}
+    functions["_build_vip_schedule_sheet"] = (
+        lambda gc, area, s, e, compare_only=False, booking_gate=None, sort_rows=False: calls.append(booking_gate) or {})
     tz = timezone(timedelta(hours=8))
     start, end = datetime(2026, 12, 1, tzinfo=tz), datetime(2027, 2, 28, 23, 59, tzinfo=tz)
     functions["step3_build_vip_schedule_sheets"](None, [{"name": "台北"}], start, end)
@@ -382,3 +383,32 @@ def test_topup_list_is_not_created_when_nobody_needs_topup():
     ss = SimpleNamespace(worksheet=missing, add_worksheet=lambda **kw: created.append(kw))
     assert functions["_write_topup_list"](ss, "需儲值名單_台北_202612", [_visit(7, balance=9999)]) == ""
     assert created == []
+
+
+def test_export_sorts_by_base_name_then_address_then_date():
+    functions = _load_functions("normalize_text", "normalize_name_for_compare", "normalize_address",
+                                "normalize_phone", "_write_vip_sheet")
+    functions["_write_topup_list"] = lambda *args: ""
+    writes = []
+
+    class Sheet:
+        def clear(self): pass
+        def update(self, **kwargs): writes.append(kwargs)
+        def freeze(self, **kwargs): pass
+        def batch_format(self, formats): pass
+
+    client = SimpleNamespace(open_by_key=lambda _key: SimpleNamespace(worksheet=lambda _name: Sheet()))
+
+    def row(name, address, day):
+        return {"service": "", "note": "", "name": name, "phone": "0912345678", "address": address,
+                "date_str": f"2026/12/{day:02d}", "start_str": "09:00", "end_str": "12:00", "status": "未安排",
+                "weekday": "", "price": 0, "person_hrs": 0, "amount": 0, "subtotal": 0, "balance": 0, "diff": 0,
+                "line": "", "start_dt": datetime(2026, 12, day)}
+
+    rows = [row("劉家熙-6樓", "內湖6樓", 1), row("劉家熙-4樓", "內湖4樓", 8), row("劉家熙-4樓", "內湖4樓", 2),
+            row("劉家熙-6樓", "內湖6樓", 9), row("王小明", "大安", 5)]
+    functions["_write_vip_sheet"](client, "台北", rows, datetime(2026, 12, 1), area_target_id="t")
+    out = next(w["values"] for w in writes if w.get("range_name") == "A1")
+    assert [(r[2], r[5]) for r in out[1:]] == [
+        ("劉家熙-4樓", "2026/12/02"), ("劉家熙-4樓", "2026/12/08"),
+        ("劉家熙-6樓", "2026/12/01"), ("劉家熙-6樓", "2026/12/09"), ("王小明", "2026/12/05")]

@@ -275,6 +275,42 @@ def _internal_rows(rows, columns):
              [row[col] if col < len(row) else "" for col in columns[:3]]) for row in rows]
 
 
+def _base_name(value):
+    """姓名去掉「-4樓」等後綴，與定期VIP匯出的排序一致。"""
+    return re.sub(r"\s*-.*$", "", re.sub(r"[－–—─]", "-", re.sub(r"\s+", " ", _text(value)))).strip()
+
+
+def _sort_order(rows):
+    """排程列依 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序；空白列放最後。回傳 {原列號: 新列號}。"""
+    def key(row):
+        values = rows[row]
+        blank = not any(_text(v) for v in values[:9])
+        return (blank, _base_name(values[2]), _canonical(values[4], 4), _canonical(values[5], 5),
+                _canonical(values[6], 6), row)
+    return {row: index for index, row in enumerate(sorted(rows, key=key), 2)}
+
+
+def _sort_sheet(ss, target, final_rows):
+    """以暫時輔助欄寫入新列號後整列排序（K:AG、底色與同列公式一起移動），再刪除輔助欄。"""
+    last = max(final_rows, default=1)
+    rows = {row: final_rows.get(row, [""] * 33) for row in range(2, last + 1)}
+    new_row = _sort_order(rows)
+    if all(old == new for old, new in new_row.items()):
+        return new_row
+    helper = target.col_count
+    target.resize(rows=target.row_count, cols=helper + 1)
+    target.update(values=[[new_row[row]] for row in range(2, last + 1)],
+                  range_name=f"{_column(helper)}2:{_column(helper)}{last}", value_input_option="RAW")
+    ss.batch_update({"requests": [
+        {"sortRange": {"range": {"sheetId": target.id, "startRowIndex": 1, "endRowIndex": last,
+                                 "startColumnIndex": 0, "endColumnIndex": helper + 1},
+                       "sortSpecs": [{"dimensionIndex": helper, "sortOrder": "ASCENDING"}]}},
+        {"deleteDimension": {"range": {"sheetId": target.id, "dimension": "COLUMNS",
+                                       "startIndex": helper, "endIndex": helper + 1}}},
+    ]})
+    return new_row
+
+
 def _same_day_rows(existing, updates):
     rows = {i + 2: row for i, row in enumerate(existing)}
     rows.update({item["row"]: item["values"] for item in updates})
@@ -314,8 +350,12 @@ def _balance_attention_rows(existing, updates, sources):
 
 
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False,
-                  coverage=None, period_filter=None, gate=None):
-    """Update calendar A:J; preserve existing K:AG and never clear a schedule."""
+                  coverage=None, period_filter=None, gate=None, sort_rows=False):
+    """Update calendar A:J; preserve existing K:AG and never clear a schedule.
+
+    sort_rows：更新後整列依 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序，與定期VIP匯出相同；
+    差異表與回傳的列號會換成排序後的列號。
+    """
     from tools.service_management.booking_gate import is_hold
     period = target_name[-6:] if period_filter is None else period_filter
     filtered_rows = []
@@ -493,6 +533,12 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         if gate_updates: target.batch_update(gate_updates, value_input_option="RAW")
         if colors: target.batch_format(colors)
         target.freeze(rows=1)
+        if sort_rows:
+            moved = _sort_sheet(ss, target, final_rows)
+            for item in plan["changes"]:
+                if item["sheet"] == target_name and isinstance(item["row"], int):
+                    item["row"] = moved.get(item["row"], item["row"])
+            held_rows = sorted(moved.get(row, row) for row in held_rows)
     report_name = f"排程差異_{target_name}"
     try:
         report = ss.worksheet(report_name)

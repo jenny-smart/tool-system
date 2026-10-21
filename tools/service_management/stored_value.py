@@ -954,10 +954,12 @@ def _write_vip_sheet(
         "當月預約總金額", "儲值金餘額", "累計差額（截至當月）", "LINE@", "日曆事件ID",
     ]
 
+    # 姓名（去掉「-4樓」等後綴）→ 地址 → 日期 → 開始時間；排程工作表排序用同一規則。
     rows = sorted(
         rows,
         key=lambda r: (
             normalize_name_for_compare(r["name"]),
+            normalize_address(r["address"]),
             r["start_dt"],
             r["start_str"],
         ),
@@ -1127,6 +1129,7 @@ def _build_vip_schedule_sheet(
     end_period: str = "",
     compare_only: bool = False,
     booking_gate: tuple[str, str] | None = None,
+    sort_rows: bool = False,
 ) -> dict:
     """安全比對本月日曆，已成單異動保留原列供人工核對。
 
@@ -1157,6 +1160,7 @@ def _build_vip_schedule_sheet(
         coverage=source.get("T2:U2") if getattr(source, "col_count", 21) >= 21 else [],
         period_filter="" if is_cross_month else start_period,
         gate=gate,
+        sort_rows=sort_rows,
     )
     if gate_rules:
         result.setdefault("booking_gate", {})["rules"] = gate_rules
@@ -1177,6 +1181,7 @@ def step3_build_vip_schedule_sheets(
     end_dt: datetime,
     compare_only: bool = False,
     booking_gate: bool = False,
+    sort_rows: bool = False,
 ) -> dict:
     results = {}
     gate_period = (start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")) if booking_gate else None
@@ -1187,7 +1192,8 @@ def step3_build_vip_schedule_sheets(
         key = f"{area['name']}{suffix}"
         try:
             results[key] = _build_vip_schedule_sheet(
-                gc, area, periods[0], periods[-1], compare_only=compare_only, booking_gate=gate_period
+                gc, area, periods[0], periods[-1], compare_only=compare_only, booking_gate=gate_period,
+                sort_rows=sort_rows,
             )
         except Exception as exc:
             log.error("[%s] VIP排程工作表建立失敗：%s", key, exc)
@@ -1235,6 +1241,8 @@ def main() -> None:
                         help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
     parser.add_argument("--booking-gate", action="store_true",
                         help="Step 3／4 套用排程預約條件（期間＝本次 --start～--end）")
+    parser.add_argument("--sort-schedule", action="store_true",
+                        help="Step 3／4 更新後依 姓名→地址→日期→開始時間 排序（與定期VIP匯出相同）")
     parser.add_argument("--compare-only", action="store_true",
                         help="Step 3 只產生差異工作表，不更新排程內容或底色")
     args = parser.parse_args()
@@ -1322,7 +1330,7 @@ def main() -> None:
             log.info("--- Step 3：建立VIP排程工作表 ---")
             try:
                 step3_build_vip_schedule_sheets(gc, areas, start_dt, end_dt, compare_only=args.compare_only,
-                                                booking_gate=args.booking_gate)
+                                                booking_gate=args.booking_gate, sort_rows=args.sort_schedule)
             except Exception as e:
                 errors.append(str(e))
                 log.error("Step 3 失敗：%s", e)

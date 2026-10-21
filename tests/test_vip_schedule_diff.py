@@ -618,3 +618,65 @@ def test_single_month_sheet_keeps_previous_month_lookup():
     sheet = Sheet('台北202701', [])
     sync(Book([sheet]), [source_row(old_row(event='e1', date='2027/01/04'))], name='台北202701')
     assert sheet.data[1][9] == "=xlookup(E2,'台北202612'!E:E,'台北202612'!J:J)"
+
+
+class SortableSheet(Sheet):
+    id = 99
+
+    def update(self, values, range_name, **kwargs):
+        col, row = re.match(r'([A-Z]+)(\d+)', range_name).groups()
+        index = 0
+        for char in col: index = index * 26 + ord(char) - 64
+        for offset, line in enumerate(values):
+            target_row = int(row) - 1 + offset
+            while len(self.data) <= target_row: self.data.append([])
+            cells = self.data[target_row]
+            while len(cells) < index - 1 + len(line): cells.append('')
+            cells[index - 1:index - 1 + len(line)] = line
+
+
+class SortableBook(Book):
+    def batch_update(self, body):
+        for request in body['requests']:
+            sheet = next(s for s in self.sheets.values() if getattr(s, 'id', None) == 99)
+            if 'sortRange' in request:
+                spec = request['sortRange']
+                helper = spec['sortSpecs'][0]['dimensionIndex']
+                start, end = spec['range']['startRowIndex'], spec['range']['endRowIndex']
+                block = [row + [''] * (helper + 1 - len(row)) for row in sheet.data[start:end]]
+                sheet.data[start:end] = sorted(block, key=lambda row: row[helper])
+            if 'deleteDimension' in request:
+                index = request['deleteDimension']['range']['startIndex']
+                sheet.data = [row[:index] + row[index + 1:] for row in sheet.data]
+
+
+def test_sort_order_uses_base_name_then_address_then_date():
+    from tools.service_management.vip_schedule_diff import _sort_order
+
+    def row(name, address, date):
+        values = [''] * 33
+        values[2], values[4], values[5], values[6] = name, address, date, '09:00'
+        return values
+    rows = {2: row('王小明', '大安', '2026/12/05'), 3: row('劉家熙-6樓', '內湖6樓', '2026/12/01'),
+            4: row('劉家熙-4樓', '內湖4樓', '2026/12/08'), 5: [''] * 33, 6: row('劉家熙-4樓', '內湖4樓', '2026/12/02')}
+    assert _sort_order(rows) == {6: 2, 4: 3, 3: 4, 2: 5, 5: 6}
+
+
+def test_sync_sorts_whole_rows_and_report_uses_sorted_row_numbers():
+    wang = old_row(event='w', date='2026/12/05')
+    li1 = old_row(event='l1', date='2026/12/14')
+    li1[2], li1[4], li1[26] = '李曉微', '台北市大安區師大路', '客服備註-李1214'
+    li2 = old_row(event='l2', date='2027/02/15')
+    li2[2], li2[4] = '李曉微', '台北市大安區師大路'
+    added = old_row(event='l3', date='2027/02/01')
+    added[0], added[2], added[4] = '加2人3', '李曉微', '台北市大安區師大路'
+    sheet = SortableSheet('台北202612-202702', [wang, li1, li2])
+    book = SortableBook([sheet])
+    sync_schedule(book, '台北202612-202702', [source_row(wang), source_row(li1), source_row(li2), source_row(added)],
+                  ['標題'] * 30, MissingSheet, period_filter='', sort_rows=True)
+    assert [(r[2], r[5]) for r in sheet.data[1:5]] == [
+        ('李曉微', '2026/12/14'), ('李曉微', '2027/02/01'), ('李曉微', '2027/02/15'), ('王小明', '2026/12/05')]
+    assert sheet.data[1][26] == '客服備註-李1214'
+    assert all(len(row) < 40 for row in sheet.data)  # helper column removed
+    report = book.sheets['排程差異_台北202612-202702'].data
+    assert [line[2] for line in report[1:] if line[3] == '新增'] == [3]
