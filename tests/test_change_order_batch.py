@@ -233,9 +233,9 @@ def test_queue_actions_without_invoice_queue_skips_invoice():
 
 
 def test_vip_refund_coupon_flow():
-    # ① 尚未歸零：提示人工歸零，可先開折讓單，不退款
+    # ① 尚未歸零：儲值金／購物金歸零＋開折讓單，不退款
     item = plan(B="VIP待退券", X="AB1", Z="952", S="1000", R="信用卡")
-    assert item["actions"] == ["allowance"] and "歸零" in item["manual"][0]
+    assert item["actions"] == ["stored_value", "allowance"] and item["manual"] == []
     # ② 已歸零（M）、折讓單完成：信用卡走藍新
     item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", R="信用卡")
     assert item["actions"] == ["credit_refund"] and item["manual"] == []

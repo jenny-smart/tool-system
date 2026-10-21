@@ -7,7 +7,8 @@
     未備妥的列不執行任何動作；每日檢查只提醒未備妥的列。
   - 待退款：① 開折讓單（有 X 原發票、Z 未稅金額，AB 空白）
             ② 退款（AC 空白）：R＝ATM → 富邦 ATM 退款（台北／台中）；R＝信用卡 → 藍新退款；其他付款方式 → 需人工
-  - VIP待退券：① 到【檸檬後台】儲值金歷程把儲值金及購物金歸零（同待扣儲值金，需人工，完成後填 M 歸零時間）
+  - VIP待退券：① 【檸檬後台】異動儲值金：依儲值金歷程頁餘額把購物金及儲值金都扣到 0
+                 （退款金額 S 不一定等於儲值金），完成後填 M 歸零時間
               ② 開折讓單（同待退款）
               ③ 退款（M 已歸零才退）：R＝信用卡 → 藍新退款；R＝ATM → 台北／台中富邦 ATM 退款，
                  桃園／新竹／高雄先不處理；退款完成 AC 填退款時間、B 欄改為 VIP已退券，再回寫檸檬後台
@@ -153,7 +154,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             if _cell(row, "M"):
                 item["progress"].append("儲值金／購物金歸零 ✓")
             else:
-                item["manual"].append("請到【檸檬後台】儲值金歷程把儲值金及購物金歸零，完成後填 M 欄歸零時間")
+                item["actions"].append("stored_value")  # 儲值金及購物金歸零
         if _cell(row, "AB"):
             item["progress"].append("折讓單 ✓")
         elif not _cell(row, "X"):

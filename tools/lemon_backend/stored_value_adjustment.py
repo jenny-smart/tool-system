@@ -12,7 +12,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome, find_existing_page
 from tools.lemon_backend.config import get_credentials
-from tools.lemon_backend.stored_value_filter import build_note, pending_stored_value_adjustments
+from tools.lemon_backend.stored_value_filter import build_note, parse_balances, pending_stored_value_adjustments
 from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
@@ -126,7 +126,8 @@ def _logout(page: Page) -> None:
         page.goto(href, wait_until="domcontentloaded")
 
 
-def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> bool:
+def _submit_adjustment(page: Page, item: dict[str, object], date_text: str, *, item_label: str = "異動費") -> bool:
+    """item_label：異動視窗第三個下拉（項目）要選的選項，比對時只要選項文字包含即可。"""
     order_no = str(item["order_no"])
     amount = str(item["amount"])
     note = build_note(str(item["note"]), date_text, str(item["suffix"]))
@@ -152,10 +153,10 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
         raise RuntimeError(f"{order_no} 異動視窗只有 {selects.count()} 個下拉欄位")
     order_select, action_select, item_select = selects.nth(0), selects.nth(1), selects.nth(2)
     order_select.locator("option", has_text=order_no).first.wait_for(state="attached", timeout=15_000)
-    item_select.locator("option", has_text="異動費").first.wait_for(state="attached", timeout=15_000)
+    item_select.locator("option", has_text=item_label).first.wait_for(state="attached", timeout=15_000)
     _select_option(order_select, order_no, contains=True)
     _select_option(action_select, str(item["action"]))
-    _select_option(item_select, "異動費")
+    _select_option(item_select, item_label, contains=item_label != "異動費")
 
     amount_field = _first_visible(
         page,
@@ -184,12 +185,40 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str) -> b
     return True
 
 
+def _balances(page: Page, order_no: str) -> tuple[int, int]:
+    balances = parse_balances(page.locator("body").inner_text())
+    if balances is None:
+        raise RuntimeError(f"{order_no} 儲值金歷程頁讀不到儲值金餘額／購物金餘額")
+    return balances
+
+
+def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
+    """VIP待退券：依頁面餘額把購物金、儲值金都扣到 0（退款金額不一定等於儲值金）。
+
+    先扣購物金：異動視窗沒有購物金項目時，在扣任何金額前就停下，不會只扣一半。"""
+    order_no = str(item["order_no"])
+    stored, shopping = _balances(page, order_no)
+    print(f"{order_no} 目前儲值金餘額 {stored:,}、購物金餘額 {shopping:,}，全部歸零")
+    created = False
+    for label, balance, item_label in (("購物金", shopping, "購物金"), ("儲值金", stored, "異動費")):
+        if balance < 0:
+            raise RuntimeError(f"{order_no} {label}餘額為負數（{balance}），請人工確認")
+        if balance == 0:
+            continue
+        step = {**item, "amount": str(balance), "suffix": f"{label}歸零"}
+        created = _submit_adjustment(page, step, date_text, item_label=item_label) or created
+    stored, shopping = _balances(page, order_no)
+    if stored or shopping:
+        raise RuntimeError(f"{order_no} 歸零後仍有儲值金 {stored:,}／購物金 {shopping:,}，請人工確認")
+    return created
+
+
 def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
     worksheet = get_worksheet(area)
     pending = pending_stored_value_adjustments(worksheet.get_all_values())
     pending = [item for item in pending if int(item["sheet_row"]) in selected_rows]
     if not pending:
-        raise ValueError("勾選列已不是待扣／待退儲值金，或缺少訂單編號／金額")
+        raise ValueError("勾選列已不是待扣／待返儲值金／VIP待退券（未歸零），或缺少訂單編號／金額")
     date_text = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%m/%d")
     completed = 0
     with sync_playwright() as playwright:
@@ -200,7 +229,10 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
             for item in pending:
                 print(f"處理第 {item['sheet_row']} 列：{item['order_no']}／{item['action']} NT$ {item['amount']}")
                 page = _open_history(page, str(item["order_no"]))
-                created = _submit_adjustment(page, item, date_text)
+                if item.get("zero_out"):
+                    created = _zero_out(page, item, date_text)
+                else:
+                    created = _submit_adjustment(page, item, date_text)
                 if not str(item["completed_at"]).strip():
                     completed_at = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d %H:%M:%S")
                     worksheet.update_cell(
