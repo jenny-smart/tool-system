@@ -178,3 +178,38 @@ def test_run_writes_unified_log(monkeypatch):
     except RuntimeError:
         pass
     assert calls[1]["status"] == "失敗" and calls[1]["message"] == "壞了"
+
+
+def test_mark_refunded_plan():
+    from tools.finance_management.trainee_field_fee import (
+        normalize_refund_date,
+        plan_field_marks,
+        plan_mark_refunded,
+    )
+
+    assert normalize_refund_date("2026/1/9") == "2026/01/09"
+    refund = [
+        ["h"] * 9,
+        ["t", "林沚罄", "", "", "", "", "", "2000", "2026/10/21"],
+        ["t", "林怡君", "", "", "", "", "", "3200", "2026/10/22"],
+        ["t", "官志憲", "", "", "", "", "", "2400", "2026/10/16"],  # 押金 G 已註記，略過
+        ["t", "張三", "", "", "", "", "", "2000", ""],  # 尚未退款
+    ]
+    deposit = [
+        ["專員姓名"],
+        ["林沚罄", "0", "", "", "退訓", "", ""],
+        ["林怡君", "0", "", "", "退訓", "", ""],
+        ["官志憲", "0", "", "", "退訓", "", "2026/10/16已匯款"],
+        ["張三", "2000", "", "", "退訓", "", ""],
+    ]
+    items, warnings = plan_mark_refunded(refund, deposit)
+    assert [(i["name"], i["date"], i["deposit_row"], i["field_amount"]) for i in items] == [
+        ("林沚罄", "2026/10/21", 2, Decimal(0)),
+        ("林怡君", "2026/10/22", 3, Decimal(1200)),
+    ]
+    assert warnings == []
+
+    sheets = {"新人實境": [FIELD_HEADER, _field_row("", "林怡君", "200", "2"), _field_row("202610-1", "林怡君", "200", "2"),
+                         _field_row("", "林怡君", "200", "2"), _field_row("", "林怡君", "200", "2")]}
+    cells, total = plan_field_marks(sheets, "林怡君")
+    assert cells == [("新人實境", 2), ("新人實境", 4), ("新人實境", 5)] and total == Decimal(1200)
