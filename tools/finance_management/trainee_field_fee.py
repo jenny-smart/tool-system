@@ -380,6 +380,27 @@ def _read(service, spreadsheet_id: str, title: str, cols: str = "A:Z") -> list[l
 
 
 def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
+    """執行並寫一筆到主控表「tool-system執行Log-年度」（成功、失敗都記）。"""
+    from tools.common import unified_log
+
+    log_fields = dict(system="外場排程系統", function="新訓退訓實境費用", run_type="手動",
+                      area=area, period=datetime.now(TW_TZ).strftime("%Y%m%d"), target=FEE_SHEET)
+    try:
+        result = _update_refund_and_fee_sheet(area)
+    except Exception as exc:
+        unified_log.write(status="失敗", message=str(exc), **log_fields)
+        raise
+    message = (
+        f"退款金額 H 欄更新 {result['h_updated']} 列；新增 {result['fee_rows']} 人；"
+        f"身分證打勾 {result['id_checked']} 人"
+    )
+    if result["warnings"]:
+        message += "；注意：" + "；".join(result["warnings"])
+    unified_log.write(status="成功", message=message, **log_fields)
+    return result
+
+
+def _update_refund_and_fee_sheet(area: str) -> dict[str, object]:
     service = get_sheets_service()
     spreadsheet_id, refund_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
 

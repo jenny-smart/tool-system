@@ -153,3 +153,28 @@ def test_fee_sheet_append_only_new_names():
 
     formula = '=ARRAYFORMULA(IF(A3="","",IFERROR(VLOOKUP(A3,IMPORTRANGE("x","y!C:G"),{2,3,5},FALSE),)))'
     assert d_formula_for_row(formula, 23) == '=ARRAYFORMULA(IF(A23="","",IFERROR(VLOOKUP(A23,IMPORTRANGE("x","y!C:G"),2,FALSE),)))'
+
+
+def test_run_writes_unified_log(monkeypatch):
+    from tools.common import unified_log
+    from tools.finance_management import trainee_field_fee
+
+    calls = []
+    monkeypatch.setattr(unified_log, "write", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(
+        trainee_field_fee, "_update_refund_and_fee_sheet",
+        lambda area: {"h_updated": 0, "fee_rows": 1, "id_checked": 1, "warnings": ["X"]},
+    )
+    trainee_field_fee.update_refund_and_fee_sheet("台北")
+    assert calls[0]["status"] == "成功" and calls[0]["function"] == "新訓退訓實境費用"
+    assert "注意：X" in calls[0]["message"]
+
+    def boom(area):
+        raise RuntimeError("壞了")
+
+    monkeypatch.setattr(trainee_field_fee, "_update_refund_and_fee_sheet", boom)
+    try:
+        trainee_field_fee.update_refund_and_fee_sheet("台北")
+    except RuntimeError:
+        pass
+    assert calls[1]["status"] == "失敗" and calls[1]["message"] == "壞了"
