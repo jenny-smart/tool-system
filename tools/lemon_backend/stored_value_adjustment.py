@@ -148,7 +148,7 @@ def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> No
 
 
 def _submit_adjustment(page: Page, item: dict[str, object], date_text: str, *, manual_submit: bool = False) -> bool:
-    """manual_submit：只填表，由人工按送出（VIP待退券歸零）。"""
+    """manual_submit：只填表，由人工按送出（VIP待退券歸零的剩餘餘額）。"""
     order_no = str(item["order_no"])
     amount = str(item["amount"])
     note = build_note(str(item["note"]), date_text, str(item["suffix"]))
@@ -219,7 +219,7 @@ def _balances(page: Page, order_no: str) -> tuple[int, int]:
 def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
     """VIP待退券：依頁面餘額把儲值金及購物金都扣到 0，扣款筆數見 zero_out_steps。
 
-    後台扣到 0 需人工操作：Agent 只填表，每一筆都等人工按送出。"""
+    第一筆（退款金額或儲值金）由 Agent 直接送出；之後扣剩餘餘額的那一筆由 Agent 填表、等人工確認按送出。"""
     order_no = str(item["order_no"])
     stored, shopping = _balances(page, order_no)
     if stored < 0 or shopping < 0:
@@ -228,9 +228,9 @@ def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
     print(f"{order_no} 目前儲值金餘額 {stored:,}、購物金餘額 {shopping:,}、退款金額 {item.get('refund_amount') or '-'}，"
           f"扣款 {'＋'.join(f'{amount:,}' for _, amount in steps) or '0'}")
     created = False
-    for suffix, amount in steps:
+    for index, (suffix, amount) in enumerate(steps):
         step = {**item, "amount": str(amount), "suffix": suffix}
-        created = _submit_adjustment(page, step, date_text, manual_submit=True) or created
+        created = _submit_adjustment(page, step, date_text, manual_submit=index > 0) or created
     stored, shopping = _balances(page, order_no)
     if stored or shopping:
         raise RuntimeError(f"{order_no} 歸零後仍有儲值金 {stored:,}／購物金 {shopping:,}，請人工確認")
