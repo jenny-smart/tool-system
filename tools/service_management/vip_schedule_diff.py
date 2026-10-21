@@ -275,6 +275,50 @@ def _internal_rows(rows, columns):
              [row[col] if col < len(row) else "" for col in columns[:3]]) for row in rows]
 
 
+def _base_name(value):
+    """姓名去掉「-4樓」等後綴，與定期VIP匯出的排序一致。"""
+    return re.sub(r"\s*-.*$", "", re.sub(r"[－–—─]", "-", re.sub(r"\s+", " ", _text(value)))).strip()
+
+
+UNSEEN_KINDS = ("本次日曆未見", "需人工核對")
+
+
+def _sort_order(rows):
+    """排程列依 姓氏總筆劃 → 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序，與定期VIP匯出相同；
+    日曆已對應不到的列（本次日曆未見／需人工核對）不刪除，集中放在下方；空白列放最後。
+    回傳 {原列號: 新列號}。"""
+    from tools.common.stroke_order import name_sort_key
+
+    def key(row):
+        values = rows[row]
+        blank = not any(_text(v) for v in values[:9])
+        unseen = _text(values[31]) in UNSEEN_KINDS
+        return (blank, unseen, name_sort_key(_base_name(values[2])), _canonical(values[4], 4), _canonical(values[5], 5),
+                _canonical(values[6], 6), row)
+    return {row: index for index, row in enumerate(sorted(rows, key=key), 2)}
+
+
+def _sort_sheet(ss, target, final_rows):
+    """以暫時輔助欄寫入新列號後整列排序（K:AG、底色與同列公式一起移動），再刪除輔助欄。"""
+    last = max(final_rows, default=1)
+    rows = {row: final_rows.get(row, [""] * 33) for row in range(2, last + 1)}
+    new_row = _sort_order(rows)
+    if all(old == new for old, new in new_row.items()):
+        return new_row
+    helper = target.col_count
+    target.resize(rows=target.row_count, cols=helper + 1)
+    target.update(values=[[new_row[row]] for row in range(2, last + 1)],
+                  range_name=f"{_column(helper)}2:{_column(helper)}{last}", value_input_option="RAW")
+    ss.batch_update({"requests": [
+        {"sortRange": {"range": {"sheetId": target.id, "startRowIndex": 1, "endRowIndex": last,
+                                 "startColumnIndex": 0, "endColumnIndex": helper + 1},
+                       "sortSpecs": [{"dimensionIndex": helper, "sortOrder": "ASCENDING"}]}},
+        {"deleteDimension": {"range": {"sheetId": target.id, "dimension": "COLUMNS",
+                                       "startIndex": helper, "endIndex": helper + 1}}},
+    ]})
+    return new_row
+
+
 def _same_day_rows(existing, updates):
     rows = {i + 2: row for i, row in enumerate(existing)}
     rows.update({item["row"]: item["values"] for item in updates})
@@ -314,8 +358,12 @@ def _balance_attention_rows(existing, updates, sources):
 
 
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False,
-                  coverage=None, period_filter=None, gate=None):
-    """Update calendar A:J; preserve existing K:AG and never clear a schedule."""
+                  coverage=None, period_filter=None, gate=None, sort_rows=False):
+    """Update calendar A:J; preserve existing K:AG and never clear a schedule.
+
+    sort_rows：更新後整列依 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序，與定期VIP匯出相同；
+    差異表與回傳的列號會換成排序後的列號。
+    """
     from tools.service_management.booking_gate import is_hold
     period = target_name[-6:] if period_filter is None else period_filter
     filtered_rows = []
@@ -408,10 +456,29 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
         updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
         updates, phones, colors = [], [], []
+        # A combined sheet (台北202612-202702) has no separate month sheets inside its range,
+        # so every row looks up the month before the range starts (台北202611).
+        combined_start = re.search(r"(\d{6})-\d{6}$", target_name)
+        base_sheet, titles = "", set()
+        if combined_start:
+            year, month = int(combined_start.group(1)[:4]), int(combined_start.group(1)[4:])
+            base_sheet = f"{area}{year - 1}12" if month == 1 else f"{area}{year}{month - 1:02d}"
+            titles = {sheet.title for sheet in ss.worksheets()}
+
+        def repaired_lookup(formula, row_num):
+            # Repair earlier #REF! lookups that pointed at a month sheet that does not exist.
+            ref = re.fullmatch(r"=xlookup\(E\d+,'([^']+)'!E:E,'[^']+'!J:J\)", _text(formula), re.I)
+            if base_sheet and ref and ref.group(1) != base_sheet and ref.group(1) not in titles:
+                return f"=xlookup(E{row_num},'{base_sheet}'!E:E,'{base_sheet}'!J:J)"
+            return ""
+
         for change in plan["updates"]:
             row, values, before = change["row"], change["values"], change["old"]
             service_date = _canonical(values[5], 5)
-            year, month = (int(service_date[:4]), int(service_date[5:7])) if service_date else (int(period[:4]), int(period[4:]))
+            if combined_start:
+                year, month = int(combined_start.group(1)[:4]), int(combined_start.group(1)[4:])
+            else:
+                year, month = (int(service_date[:4]), int(service_date[5:7])) if service_date else (int(period[:4]), int(period[4:]))
             previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
             lookup_sheet = f"{area}{previous}"
             if before is None:
@@ -420,6 +487,7 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 phones.append({"range": f"D{row}", "values": [[values[3]]]})
             else:
                 if values[:9] != before[:9]:
+                    values[9] = repaired_lookup(values[9], row) or values[9]
                     if _canonical(values[4], 4) != _canonical(before[4], 4):
                         values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
                         if values[9] != before[9]:
@@ -435,6 +503,12 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 updates.append({"range": f"{_column(columns[3])}{row}", "values": [[updated_at]]})
             if change["kind"]:
                 colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
+        if combined_start and not created:
+            touched = {item["range"] for item in updates}
+            for row_num, physical in enumerate(physical_rows, 2):
+                fixed = repaired_lookup(physical[9] if len(physical) > 9 else "", row_num)
+                if fixed and f"A{row_num}:J{row_num}" not in touched and f"A{row_num}:AD{row_num}" not in touched:
+                    updates.append({"range": f"J{row_num}", "values": [[fixed]]})
         if not created and read_columns[:3] != columns[:3]:
             for row_num, values in enumerate(existing, 2):
                 if any(u["row"] == row_num for u in plan["updates"]): continue
@@ -467,6 +541,12 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         if gate_updates: target.batch_update(gate_updates, value_input_option="RAW")
         if colors: target.batch_format(colors)
         target.freeze(rows=1)
+        if sort_rows:
+            moved = _sort_sheet(ss, target, final_rows)
+            for item in plan["changes"]:
+                if item["sheet"] == target_name and isinstance(item["row"], int):
+                    item["row"] = moved.get(item["row"], item["row"])
+            held_rows = sorted(moved.get(row, row) for row in held_rows)
     report_name = f"排程差異_{target_name}"
     try:
         report = ss.worksheet(report_name)

@@ -834,7 +834,10 @@ def build_notice_rows(
             _email_safe_notice(notice),
         ])
 
-    return sorted(output, key=lambda row: (str(row[2]), str(row[5])))
+    # 與定期VIP匯出相同：姓氏總筆劃 → 姓名（去後綴）→ 地址。
+    from tools.common.stroke_order import name_sort_key
+    return sorted(output, key=lambda row: (name_sort_key(normalize_name_for_compare(str(row[2]))),
+                                           normalize_address(str(row[5])), str(row[2])))
 
 
 def _write_notice_sheet(

@@ -4952,6 +4952,12 @@ with date_col:
                 st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
 
             if selected_function in ("【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
+                st.checkbox(
+                    "更新後依匯出日曆順序排序（姓名 → 地址 → 日期 → 開始時間）",
+                    value=True, key="schedule_sort_rows",
+                    help="整列一起移動，K:AG 成單資料與底色跟著該列；排程差異表的列號會換成排序後的列號。"
+                         "列號可能改變，請勿在批次成單執行中更新排程。",
+                )
                 st.caption("自動比對並更新 A:J、標示異動列；既有 K:AG 與右側自訂資料保留。"
                            "異動前後內容及更新日期時間直接顯示在 AG 右側；已有訂單編號不會清除或重新成單。"
                            "無法唯一對應的列保留原資料並註記核對原因；同姓名、地址、日期多筆列標為淡紫色，可能為該次人數／時數異動。")
@@ -6576,6 +6582,8 @@ if run_clicked:
                         ) + f"（{start_date_value} ～ {end_date_value}）", "info")
                     elif step in ("3", "4"):
                         add_log("未套用排程預約條件", "info")
+                    if step in ("3", "4") and st.session_state.get("schedule_sort_rows", True):
+                        cmd.append("--sort-schedule")
                     add_log(f"儲值執行：{selected_function}（step={step}）", "info")
 
                 # ── CRM 功能 ──────────────────────────────────
