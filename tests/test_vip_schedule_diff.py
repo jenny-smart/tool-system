@@ -482,3 +482,25 @@ def test_balance_recovery_preview_does_not_write_timestamp_or_color():
     sync(Book([sheet]), [source], compare_only=True)
     assert sheet.data == before
     assert not sheet.batches and not sheet.formats
+
+
+def test_first_build_of_new_schedule_is_baseline_without_new_highlight():
+    sources = [source_row(old_row(event=f'e{day}', date=f'2026/11/{day}')) for day in (10, 17)]
+    plan = plan_schedule([], sources, '台北202611')
+    assert [u['kind'] for u in plan['updates']] == ['', '']
+    assert all(u['values'][31:33] == ['', ''] for u in plan['updates'])
+    assert plan['changes'] == [] and plan['count'] == 2
+
+
+def test_recreated_sheet_has_no_new_colors_and_later_additions_are_marked():
+    first = old_row(event='e10', date='2026/11/10')
+    book = Book([])
+    sync(book, [source_row(first)])
+    sheet = book.sheets['台北202611']
+    assert sheet.formats == []
+    change = sheet.data[0].index('日曆異動', 33)
+    assert sheet.data[1][2] == '王小明' and (sheet.data[1] + [''] * 40)[change] == ''
+    later = old_row(event='e17', date='2026/11/17')
+    sync(book, [source_row(first), source_row(later)])
+    assert sheet.data[2][change] == '新增'
+    assert any(item['range'].startswith('A3:') for item in sheet.formats)

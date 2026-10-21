@@ -62,6 +62,7 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
     """Return cell updates and a review report; ambiguous matches never create a new row."""
     foreign_events = foreign_events or {}
     old = {i + 2: (list(row) + [""] * 33)[:33] for i, row in enumerate(existing) if any(_text(v) for v in row)}
+    baseline = not old
     incoming = []
     for row in sources:
         if not any(_text(v) for v in row[:9]):
@@ -159,9 +160,13 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
                    "不新增待成單列，人工確認後再加入排程")
             continue
         values = after.copy()
-        values[31:33] = ["新增", "本次日曆新增排程"]
-        updates.append({"row": next_row, "values": values, "old": None, "kind": "新增"})
-        record(next_row, "新增", [""] * 33, after, "本次日曆新增排程", "新增待處理排程；仍依狀態與單號判定是否可建單")
+        if baseline:
+            # First build of a new or emptied schedule is the baseline, not a calendar change.
+            updates.append({"row": next_row, "values": values, "old": None, "kind": ""})
+        else:
+            values[31:33] = ["新增", "本次日曆新增排程"]
+            updates.append({"row": next_row, "values": values, "old": None, "kind": "新增"})
+            record(next_row, "新增", [""] * 33, after, "本次日曆新增排程", "新增待處理排程；仍依狀態與單號判定是否可建單")
         next_row += 1
 
     for row in sorted(unmatched_old | ambiguous):
