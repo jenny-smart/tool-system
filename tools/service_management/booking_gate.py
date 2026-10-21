@@ -1,12 +1,10 @@
-"""排程預約條件：暫時性的分階段預約規則（例如年節大掃除期間）。
+"""排程預約條件：暫時性的分階段預約（例如年節大掃除期間）。
 
-規則全部放在主控試算表「排程預約條件」工作表，一列一條規則，可隨時啟用／停用、
-改檔案、改工作表、改欄位或改關鍵字，不需改程式：
+在客服排程系統執行「建立VIP排程工作表」或「全跑」時，畫面勾選「套用預約條件」才會套用；
+期間跟著畫面的匯出起迄日。確認檔案、工作表與各欄位也在畫面設定，存在主控試算表
+「排程預約條件」工作表（每個地區一列），下次自動帶入。
 
-  啟用 | 地區 | 適用起日 | 適用迄日 | 確認檔案ID | 確認工作表 | 姓名欄 | 電話欄 | 地址欄 |
-  確認欄 | 確認值 | 備註欄 | 排程排除欄 | 排除關鍵字 | 確認表排除欄 | 已確認欄 | 已確認關鍵字 | 說明
-
-只影響服務日期落在「適用起日～適用迄日」的未成單排程列，在排程 AG 右側寫五欄：
+套用時，匯出範圍內的未成單排程列，在 AG 右側寫五欄：
   回覆確認：確認表「確認欄」的值（例如 V 欄 TRUE／FALSE）；找不到客人寫「查無」
   確認備註：確認表「備註欄」的值（例如 W 欄）
   改加標記：「排程排除欄」（例如 A 欄）或「確認表排除欄」含的排除關鍵字（例如 改、加）
@@ -19,26 +17,26 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 RULE_SHEET_NAME = "排程預約條件"
 RULE_HEADERS = [
-    "啟用", "地區", "適用起日", "適用迄日", "確認檔案ID", "確認工作表", "姓名欄", "電話欄", "地址欄",
-    "確認欄", "確認值", "備註欄", "排程排除欄", "排除關鍵字", "確認表排除欄", "已確認欄", "已確認關鍵字", "說明",
+    "地區", "確認檔案ID", "確認工作表", "姓名欄", "電話欄", "地址欄", "確認欄", "確認值", "備註欄",
+    "排程排除欄", "排除關鍵字", "確認表排除欄", "已確認欄", "已確認關鍵字", "更新時間",
 ]
-# 首次建立工作表時的範例列；之後一律以工作表內容為準。
-EXAMPLE_RULES = [
-    ["TRUE", "台北", "2026-12-15", "2027-02-04", "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
-     "2026大掃除", "C", "D", "F", "V", "TRUE", "W", "A", "改,加", "", "B", "已確認",
-     "年節大掃除：先約可約，再看改加、已確認，最後 review 未回覆"],
-]
-# 工作表標題的滑鼠提示，建立工作表時寫入。
+# 畫面第一次開啟時的預設值；之後一律以工作表內容為準。
+DEFAULT_SETTINGS = {
+    "確認檔案ID": "", "確認工作表": "", "姓名欄": "C", "電話欄": "D", "地址欄": "F",
+    "確認欄": "V", "確認值": "TRUE", "備註欄": "W", "排程排除欄": "A", "排除關鍵字": "改,加",
+    "確認表排除欄": "", "已確認欄": "B", "已確認關鍵字": "已確認",
+}
+AREA_DEFAULTS = {
+    "台北": {"確認檔案ID": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44", "確認工作表": "2026大掃除"},
+}
+# 工作表標題的滑鼠提示。
 HEADER_NOTES = {
-    "啟用": "TRUE＝更新排程工作表時套用這一列規則。\nFALSE 或空白＝不套用；再更新一次排程，已寫入的回覆確認、確認備註、改加標記、已確認、預約條件五欄會清空。\n只有更新排程時才會讀取，改完要再更新一次排程才生效。",
-    "地區": "套用的地區：台北、台中，或「全區」／「共用」＝所有地區。",
-    "適用起日": "服務日期從這天起才套用（YYYY-MM-DD）。期間外的排程列不受影響。",
-    "適用迄日": "服務日期到這天為止才套用（YYYY-MM-DD）。",
+    "地區": "一個地區一列；由客服排程系統執行畫面儲存。是否套用與期間在執行畫面決定（期間＝匯出起迄日）。",
     "確認檔案ID": "確認表所在的試算表 ID，或直接貼整個網址。",
     "確認工作表": "確認表的工作表名稱，例如 2026大掃除。",
     "姓名欄": "確認表中客人姓名所在欄位字母，用來對應排程的客人。",
@@ -46,13 +44,13 @@ HEADER_NOTES = {
     "地址欄": "確認表中地址所在欄位字母；同電話不同地址會分開對應。",
     "確認欄": "確認表中客人「已回覆確認」所在欄位字母，例如 V。值會帶入排程「回覆確認」欄。",
     "確認值": "確認欄的值是這些才算已回覆確認（預約條件＝可約），可填多個，用逗號分隔，例如 TRUE。",
-    "備註欄": "確認表中備註所在欄位字母，例如 W。值會帶入排程「確認備註」欄，只供參考，不影響約不約。",
+    "備註欄": "確認表中備註所在欄位字母，例如 W。值會帶入排程「確認備註」欄，只供參考。",
     "排程排除欄": "排程工作表中要檢查排除關鍵字的欄位字母，例如 A（日曆標題第一個《》內容）。",
-    "排除關鍵字": "排程排除欄或確認表排除欄含這些字，預約條件＝改加，可填多個，用逗號分隔，例如 改,加。找到的字會帶入排程「改加標記」欄。",
+    "排除關鍵字": "含這些字，預約條件＝改加，可填多個，用逗號分隔，例如 改,加。找到的字會帶入排程「改加標記」欄。",
     "確認表排除欄": "選填。確認表中也要檢查排除關鍵字的欄位字母；空白＝不檢查。",
     "已確認欄": "排程工作表中判斷「原本每月確認、改成已確認」的欄位字母，例如 B（日曆標題 <> 備註）。空白＝不檢查。",
     "已確認關鍵字": "已確認欄含這些字，預約條件＝已確認，可填多個，用逗號分隔，例如 已確認。",
-    "說明": "自由填寫，程式不讀取。",
+    "更新時間": "最後一次從執行畫面儲存的時間（台北時間）。",
 }
 # 預約條件的階段，依判斷順序；批次成單畫面勾選本次要約哪幾個階段。
 STAGE_CHANGE, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY = "改加", "已確認", "可約", "未回覆"
@@ -62,10 +60,6 @@ NOT_FOUND = "查無"
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _enabled(value: Any) -> bool:
-    return _text(value).upper() in ("TRUE", "1", "是", "啟用", "V", "Y", "YES")
 
 
 def _words(value: Any) -> list[str]:
@@ -115,11 +109,12 @@ def _address(value: Any) -> str:
     return re.sub(r"[－–—]", "-", text).replace("臺", "台")
 
 
-def parse_rule(record: dict[str, Any]) -> dict[str, Any]:
+def parse_rule(record: dict[str, Any], start: Any = "", end: Any = "") -> dict[str, Any]:
+    """設定列＋本次匯出起迄日 → 規則；起迄日空白代表該側不限制。"""
     rule = {header: _text(record.get(header)) for header in RULE_HEADERS}
-    start, end = _date(rule["適用起日"]), _date(rule["適用迄日"])
-    if not start or not end or start > end:
-        raise ValueError(f"「{RULE_SHEET_NAME}」{rule['地區']} 適用起迄日格式錯誤（YYYY-MM-DD）")
+    start, end = _date(start), _date(end)
+    if start and end and start > end:
+        raise ValueError("預約條件期間錯誤：起日晚於迄日")
     if not rule["確認檔案ID"] or not rule["確認工作表"] or not rule["確認欄"]:
         raise ValueError(f"「{RULE_SHEET_NAME}」{rule['地區']} 需填確認檔案ID、確認工作表與確認欄")
     return {
@@ -186,7 +181,7 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
 
     def gate(values):
         service_date = _date(values[5])
-        if not service_date or not (rule["start"] <= service_date <= rule["end"]):
+        if not service_date or not ((rule["start"] or service_date) <= service_date <= (rule["end"] or service_date)):
             return None
         matched = find(values)
         confirm = "、".join(dict.fromkeys(e["confirm_raw"] for e in matched)) if matched else NOT_FOUND
@@ -247,25 +242,46 @@ def _write_header_notes(ss, sheet) -> None:
         pass
 
 
-def load_rules(gc, area_name: str, worksheet_not_found=Exception) -> list[dict[str, Any]]:
+def _settings_records(gc, worksheet_not_found=Exception):
     ss = _master_spreadsheet(gc)
     try:
         sheet = ss.worksheet(RULE_SHEET_NAME)
     except worksheet_not_found:
-        sheet = ss.add_worksheet(title=RULE_SHEET_NAME, rows=50, cols=len(RULE_HEADERS))
-        sheet.update(values=[RULE_HEADERS] + EXAMPLE_RULES, range_name="A1", value_input_option="USER_ENTERED")
-        _write_header_notes(ss, sheet)
+        return ss, None, []
     values = sheet.get_all_values()
     header = [_text(v) for v in (values[0] if values else [])]
-    rules = []
-    for row in values[1:]:
-        record = {name: (row[i] if i < len(row) else "") for i, name in enumerate(header)}
-        if not _enabled(record.get("啟用")):
-            continue
-        if _text(record.get("地區")) not in (area_name, "全區", "共用"):
-            continue
-        rules.append(parse_rule(record))
-    return rules
+    records = [{name: (row[i] if i < len(row) else "") for i, name in enumerate(header) if name}
+               for row in values[1:] if any(_text(v) for v in row)]
+    return ss, sheet, records
+
+
+def load_settings(gc, area_name: str, worksheet_not_found=Exception) -> dict[str, str]:
+    """該地區的設定；沒有時回傳預設值（台北預設 2026大掃除）。舊版規則表欄位一樣讀得到。"""
+    _, _, records = _settings_records(gc, worksheet_not_found)
+    record = next((r for r in records if _text(r.get("地區")) == area_name), None)
+    settings = {**DEFAULT_SETTINGS, **AREA_DEFAULTS.get(area_name, {})}
+    if record:
+        # 舊版規則表沒有的欄位（例如已確認欄）沿用預設值。
+        settings.update({k: _text(v) for k, v in record.items() if k in DEFAULT_SETTINGS})
+    return {"地區": area_name, **settings}
+
+
+def save_settings(gc, area_name: str, settings: dict[str, Any], worksheet_not_found=Exception) -> None:
+    """寫回該地區一列；其他地區保留；工作表一律整理成目前欄位。"""
+    parse_rule({**settings, "地區": area_name})  # validate before saving
+    ss, sheet, records = _settings_records(gc, worksheet_not_found)
+    now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+    row = {**{k: _text(settings.get(k)) for k in DEFAULT_SETTINGS}, "地區": area_name, "更新時間": now}
+    others = [r for r in records if _text(r.get("地區")) and _text(r.get("地區")) != area_name]
+    rows = [[_text(r.get(h)) for h in RULE_HEADERS] for r in others] + [[row[h] for h in RULE_HEADERS]]
+    if sheet is None:
+        sheet = ss.add_worksheet(title=RULE_SHEET_NAME, rows=50, cols=len(RULE_HEADERS))
+    else:
+        sheet.clear()
+        if getattr(sheet, "col_count", len(RULE_HEADERS)) < len(RULE_HEADERS):
+            sheet.resize(cols=len(RULE_HEADERS))
+    sheet.update(values=[RULE_HEADERS] + rows, range_name="A1", value_input_option="RAW")
+    _write_header_notes(ss, sheet)
 
 
 def _open_source(gc, spreadsheet_id: str):
@@ -277,16 +293,14 @@ def _open_source(gc, spreadsheet_id: str):
         return get_gspread_client().open_by_key(spreadsheet_id)
 
 
-def load_area_gate(gc, area_name: str, worksheet_not_found=Exception) -> tuple[Callable | None, list[str]]:
-    """讀取該地區所有啟用規則；確認表讀取失敗時直接報錯，避免誤約未確認的客人。"""
-    gates, descriptions = [], []
-    for rule in load_rules(gc, area_name, worksheet_not_found):
-        try:
-            source = _open_source(gc, rule["spreadsheet_id"]).worksheet(rule["sheet"])
-            rows = source.get_all_values()[1:]
-        except Exception as exc:
-            raise RuntimeError(f"無法讀取預約確認表 {rule['sheet']}（{rule['spreadsheet_id']}）：{exc}；"
-                               "未更新排程，避免預約未確認的客人") from exc
-        gates.append(build_gate(rule, rows))
-        descriptions.append(f"{rule['sheet']} {rule['start']}～{rule['end']}")
-    return combine_gates(gates), descriptions
+def load_area_gate(gc, area_name: str, start: Any = "", end: Any = "",
+                   worksheet_not_found=Exception) -> tuple[Callable | None, list[str]]:
+    """依該地區設定與本次匯出起迄日建立判斷；確認表讀取失敗時直接報錯，避免誤約。"""
+    rule = parse_rule(load_settings(gc, area_name, worksheet_not_found), start, end)
+    try:
+        source = _open_source(gc, rule["spreadsheet_id"]).worksheet(rule["sheet"])
+        rows = source.get_all_values()[1:]
+    except Exception as exc:
+        raise RuntimeError(f"無法讀取預約確認表 {rule['sheet']}（{rule['spreadsheet_id']}）：{exc}；"
+                           "未更新排程，避免預約未確認的客人") from exc
+    return combine_gates([build_gate(rule, rows)]), [f"{rule['sheet']} {rule['start']}～{rule['end']}"]

@@ -52,11 +52,25 @@ def _key(values, columns):
     return tuple(_canonical(values[c], c) for c in columns)
 
 
+def _slot_text(values):
+    start, end = _canonical(values[6], 6), _canonical(values[7], 7)
+    return f"{start or '空白'}–{end or '空白'}"
+
+
 def _diff(old, new):
     # Booking writes 已安排 to Sheets; calendar 未安排 is not a service change.
     ignored = {8} if _text(old[12]) and _canonical(old[8], 8) == "已安排" and _canonical(new[8], 8) == "未安排" else set()
-    return "；".join(f"{FIELDS[c]}：{_text(old[c]) or '空白'} → {_text(new[c]) or '空白'}"
-                    for c in range(9) if c not in ignored and _canonical(old[c], c) != _canonical(new[c], c))
+    parts = []
+    for c in range(9):
+        if c in ignored or c == 7:
+            continue
+        if c == 6:
+            # Start and end read as one service slot, e.g. 時段：08:30–12:30 → 14:00–18:00.
+            if any(_canonical(old[i], i) != _canonical(new[i], i) for i in (6, 7)):
+                parts.append(f"時段：{_slot_text(old)} → {_slot_text(new)}")
+        elif _canonical(old[c], c) != _canonical(new[c], c):
+            parts.append(f"{FIELDS[c]}：{_text(old[c]) or '空白'} → {_text(new[c]) or '空白'}")
+    return "；".join(parts)
 
 
 def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=None):
@@ -102,6 +116,32 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
     for columns in ((2, 3, 4, 5, 6, 7), (2, 3, 4, 5), (2, 3, 4, 6, 7), (2, 3, 4), (2, 3)):
         match(lambda v, c=columns: _key(v, c), lambda v, c=columns: _key(v, c),
               allow_recreated=columns in ((2, 3, 4, 5, 6, 7), (2, 3, 4, 5)))
+
+    # One customer's remaining unbooked rows pair with their new calendar events in date
+    # order (e.g. 每月確認 → 已確認 on another date): no order can be lost, so each row is
+    # updated in place instead of listing every candidate. Any booked row keeps manual review.
+    def slot(values):
+        return _canonical(values[5], 5), _canonical(values[6], 6)
+
+    def in_coverage(values):
+        return not coverage or coverage[0] <= _canonical(values[5], 5) <= coverage[1]
+
+    left, right = defaultdict(list), defaultdict(list)
+    for row in unmatched_old:
+        if in_coverage(old[row]):
+            left[(_key(old[row], (2, 3, 4)), _canonical(old[row][8], 8) == "暫停")].append(row)
+    for index in unmatched_new:
+        if incoming[index][30] not in foreign_events:
+            right[(_key(incoming[index], (2, 3, 4)), _canonical(incoming[index][8], 8) == "暫停")].append(index)
+    for key in left.keys() & right.keys():
+        customer_rows = [row for row in old if _key(old[row], (2, 3, 4)) == key[0]]
+        if any(_text(old[row][12]) for row in customer_rows):
+            continue
+        for row, index in zip(sorted(left[key], key=lambda r: slot(old[r])),
+                              sorted(right[key], key=lambda i: slot(incoming[i]))):
+            pairs[index] = row
+            unmatched_old.remove(row)
+            unmatched_new.remove(index)
 
     updates, changes = [], []
 
