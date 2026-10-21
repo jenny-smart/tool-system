@@ -3262,7 +3262,7 @@ def run_trainee_field_fee_update(*, month="", start_date=None, end_date=None, ar
     result = update_refund_and_fee_sheet(area)
     message = (
         f"完成：退款金額 H 欄更新 {result['h_updated']} 列；"
-        f"新訓退訓實境費用 {result['fee_rows']} 人，身分證已打勾 {result['id_checked']} 人"
+        f"新訓退訓實境費用新增 {result['fee_rows']} 人，身分證打勾 {result['id_checked']} 人"
     )
     if result["warnings"]:
         message += "；注意：" + "；".join(result["warnings"])
@@ -4984,7 +4984,7 @@ with date_col:
         if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
             st.info(
                 "工具包押金退款 H 欄（I 欄退款日期空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總（從基本資料、協議規章建檔年度開始找）＋工具包押金 B 欄；"
-                "再重建新訓退訓實境費用 A3 起（H>2000，B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
+                "再把 H>2000 且表上還沒有的人接在新訓退訓實境費用最後一筆之後（B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
                 icon="🧾",
             )
 

@@ -6,12 +6,13 @@
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
    （新人實境、新人實習從該人在「基本資料、協議規章」的建檔年度開始找，
    逐年讀「{年度}專員薪資相關-{地區}」加總到今年度；名冊沒有此人時，今年度找不到才找前一年度）
-2. 新訓退訓實境費用 A3 起：工具包押金退款 H > 2000 的 B 欄姓名，B 欄＝H − 2000；
+2. 新訓退訓實境費用：只往下補新人，表上已有的列（含手動加的）都保留；
+   工具包押金退款 H > 2000、且表上還沒有的人，接在 A3 起最後一筆之後填姓名，B 欄＝H − 2000；
    D 欄若 D3 是公式就把公式往下填滿（公式改成只回傳身分證，不再溢出到 E–F）；
    E–F 取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄生日、G 欄地址，
    找不到才沿用既有資料或工具包押金 M–N；生日是 4 位數西元年（2026 年起建檔都是）
    一律減 1911 轉成民國年（例如 1997/2/4 → 86/02/04），已是民國年的原樣帶入。
-3. C 欄：雲端資料夾（根目錄或 YYYY新訓退訓 底下）有該人姓名的資料夾、
+3. C 欄（新增的人，以及既有列尚未打勾的人）：雲端資料夾（根目錄或 YYYY新訓退訓 底下）有該人姓名的資料夾、
    且資料夾內有檔案（身分證）即打勾。
 """
 
@@ -333,20 +334,40 @@ def sum_fees_by_year(
     }
 
 
-def _fill_down_d(service, spreadsheet_id: str, n: int) -> None:
-    """把新訓退訓實境費用 D3 的公式往下填到 D{2+n}。"""
-    meta = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id, fields="sheets.properties(sheetId,title)"
-    ).execute()
-    sheet_id = next(
-        s["properties"]["sheetId"] for s in meta["sheets"] if s["properties"]["title"] == FEE_SHEET
-    )
-    source = {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 3, "endColumnIndex": 4}
-    dest = dict(source, startRowIndex=3, endRowIndex=2 + n)
-    service.spreadsheets().batchUpdate(
-        spreadsheetId=spreadsheet_id,
-        body={"requests": [{"copyPaste": {"source": source, "destination": dest, "pasteType": "PASTE_FORMULA"}}]},
-    ).execute()
+def d_formula_for_row(d3_formula: str, row: int) -> str:
+    """D3 公式改成第 row 列使用，且 VLOOKUP 只回傳身分證（不溢出到 E–F）。"""
+    return _ID_ONLY_RE.sub("2", re.sub(r"\bA3\b", f"A{row}", d3_formula))
+
+
+def plan_fee_append(
+    refund_values: list[list],
+    h_overrides: dict[int, Decimal],
+    fee_values: list[list],
+) -> dict[str, object]:
+    """新訓退訓實境費用只往下補新人：表上沒有、且 H > 2000 的人接在最後一筆之後。"""
+    existing: dict[str, int] = {}
+    last = 2
+    recheck_rows: dict[str, int] = {}
+    for r, row in enumerate(fee_values[2:], start=3):
+        name = _cell(row, 0)
+        if not name:
+            continue
+        last = r
+        existing.setdefault(name, r)
+        if _cell(row, 2).upper() != "TRUE":
+            recheck_rows.setdefault(name, r)
+    new_names: list[str] = []
+    for r, row in enumerate(refund_values[1:], start=2):
+        name = _cell(row, 1)
+        h = h_overrides.get(r, _num(_cell(row, 7)))
+        if name and h > DEPOSIT_BASE and name not in existing and name not in new_names:
+            new_names.append(name)
+    return {
+        "new_names": new_names,
+        "next_row": last + 1,
+        "recheck_rows": recheck_rows,
+        "recheck_names": list(recheck_rows),
+    }
 
 
 def _read(service, spreadsheet_id: str, title: str, cols: str = "A:Z") -> list[list]:
@@ -414,68 +435,57 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
         ).execute()
 
     fee_values = _read(service, spreadsheet_id, FEE_SHEET, "A:F")
-    names = sorted({
-        _cell(row, 1)
-        for r, row in enumerate(refund_values[1:], start=2)
-        if _cell(row, 1) and updates.get(r, _num(_cell(row, 7))) > DEPOSIT_BASE
-    })
-    has_id = find_id_owners(names) if names else {}
+    plan = plan_fee_append(refund_values, updates, fee_values)
+    has_id = find_id_owners(plan["new_names"] + plan["recheck_names"]) if (
+        plan["new_names"] or plan["recheck_names"]
+    ) else {}
     roster = roster_info(roster_values)
-    fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, roster)
+    candidate_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, roster)
+    seen: set[str] = set()
+    new_rows = []
+    for row in candidate_rows:
+        if row[0] in plan["new_names"] and row[0] not in seen:
+            seen.add(row[0])
+            new_rows.append(row)
 
-    d3 = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{FEE_SHEET}'!D3",
-        valueRenderOption="FORMULA",
-    ).execute().get("values", [[""]])
-    d3_text = str(d3[0][0] if d3 and d3[0] else "")
-    d_formula = d3_text.startswith("=")
-    n = len(fee_rows)
-
-    if d_formula:
-        # 原公式 VLOOKUP(...,{2,3,5}) 會溢出到 E–F，改成只回傳身分證，E–F 由程式寫入
-        id_only = _ID_ONLY_RE.sub("2", d3_text)
-        if id_only != d3_text:
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{FEE_SHEET}'!D3",
-                valueInputOption="USER_ENTERED",
-                body={"values": [[id_only]]},
-            ).execute()
-
-    last_row = max(len(fee_values), 2 + n)
-    if last_row >= 3:
-        clear_ranges = [f"'{FEE_SHEET}'!A3:C{last_row}", f"'{FEE_SHEET}'!E3:F{last_row}"]
-        if not d_formula:
-            clear_ranges.append(f"'{FEE_SHEET}'!D3:D{last_row}")
-        service.spreadsheets().values().batchClear(
-            spreadsheetId=spreadsheet_id, body={"ranges": clear_ranges}
-        ).execute()
-        # 清空後 C 欄核取方塊會變空白，補回 FALSE 維持核取方塊顯示
-        service.spreadsheets().values().update(
+    data = []
+    start = plan["next_row"]
+    end = start + len(new_rows) - 1
+    if new_rows:
+        d3 = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{FEE_SHEET}'!C3:C{last_row}",
-            valueInputOption="RAW",
-            body={"values": [[False] for _ in range(last_row - 2)]},
-        ).execute()
-    if fee_rows:
-        if d_formula:
-            data = [
-                {"range": f"'{FEE_SHEET}'!A3:C{2 + n}", "values": [r[:3] for r in fee_rows]},
-                {"range": f"'{FEE_SHEET}'!E3:F{2 + n}", "values": [r[4:] for r in fee_rows]},
-            ]
+            range=f"'{FEE_SHEET}'!D3",
+            valueRenderOption="FORMULA",
+        ).execute().get("values", [[""]])
+        d3_text = str(d3[0][0] if d3 and d3[0] else "")
+        data.append({"range": f"'{FEE_SHEET}'!A{start}:C{end}", "values": [r[:3] for r in new_rows]})
+        data.append({"range": f"'{FEE_SHEET}'!E{start}:F{end}", "values": [r[4:] for r in new_rows]})
+        if d3_text.startswith("="):
+            # D 欄沿用 D3 公式（改成只回傳身分證，E–F 由程式寫入）
+            data.append({
+                "range": f"'{FEE_SHEET}'!D{start}:D{end}",
+                "values": [[d_formula_for_row(d3_text, start + i)] for i in range(len(new_rows))],
+            })
         else:
-            data = [{"range": f"'{FEE_SHEET}'!A3:F{2 + n}", "values": fee_rows}]
-        service.spreadsheets().values().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"valueInputOption": "RAW", "data": data},
-        ).execute()
-        if d_formula and n > 1:
-            _fill_down_d(service, spreadsheet_id, n)
+            data.append({"range": f"'{FEE_SHEET}'!D{start}:D{end}", "values": [[r[3]] for r in new_rows]})
+    # 既有列 C 欄未勾、這次雲端找到身分證的補打勾
+    rechecked = [r for name, r in plan["recheck_rows"].items() if has_id.get(name)]
+    for r in rechecked:
+        data.append({"range": f"'{FEE_SHEET}'!C{r}", "values": [[True]]})
+    if data:
+        # 公式需 USER_ENTERED；其餘值（生日等）先用 RAW 寫入避免被轉成日期
+        formula_data = [d for d in data if str(d["values"][0][0]).startswith("=")]
+        value_data = [d for d in data if d not in formula_data]
+        for option, chunk in (("RAW", value_data), ("USER_ENTERED", formula_data)):
+            if chunk:
+                service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=spreadsheet_id,
+                    body={"valueInputOption": option, "data": chunk},
+                ).execute()
 
     return {
         "h_updated": len(changed),
-        "fee_rows": len(fee_rows),
-        "id_checked": sum(1 for r in fee_rows if r[2]),
+        "fee_rows": len(new_rows),
+        "id_checked": sum(1 for r in new_rows if r[2]) + len(rechecked),
         "warnings": warnings,
     }
