@@ -6688,7 +6688,7 @@ if run_clicked:
                             _stages = (_diff_result.get("booking_gate") or {}).get("stages") or {}
                             if _stages:
                                 st.info("預約條件：" + "、".join(
-                                    f"{_name} {_stages[_name]} 列" for _name in ("可約", "改加", "已確認", "未回覆") if _name in _stages))
+                                    f"{_name} {_stages[_name]} 列" for _name in ("可約", "改加", "人時不足", "已確認", "未回覆") if _name in _stages))
                             if _diff_result.get("report_url"):
                                 st.markdown(f"[開啟排程差異表]({_diff_result['report_url']})")
                             st.caption(f"詳細差異請查看工作表「{_diff_result['report']}」。"

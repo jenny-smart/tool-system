@@ -34,7 +34,7 @@ def sync(sheet, rows, gate, name="台北202701"):
 def gate_cells(sheet, row=1):
     header = sheet.data[0]
     values = sheet.data[row] + [""] * len(header)
-    return [values[header.index(name)] for name in ("回覆確認", "確認備註", "改加標記", "已確認", "預約條件")]
+    return [values[header.index(name)] for name in ("回覆確認", "確認備註", "改加標記", "已確認", "人時", "預約條件")]
 
 
 def test_rule_reads_columns_and_url():
@@ -53,16 +53,16 @@ def test_outside_period_is_not_affected():
     gate = build_gate(rule(), [confirm_row(confirmed="FALSE")])
     assert gate(schedule(date="2026/11/30")) is None
     assert gate(schedule(date="2027/03/01")) is None
-    assert gate(schedule(date="2027/02/26"))[4] == "未回覆"
+    assert gate(schedule(date="2027/02/26"))[-1] == "未回覆"
 
 
 @pytest.mark.parametrize("confirmed,service,note,expected", [
-    ("TRUE", "定期清潔", "", ("TRUE", "1/20改3人4", "", "", "可約")),
-    ("TRUE", "改", "", ("TRUE", "1/20改3人4", "改", "", "改加")),
-    ("FALSE", "定期清潔", "", ("FALSE", "1/20改3人4", "", "", "未回覆")),
-    ("FALSE", "3人4小時加", "已確認", ("FALSE", "1/20改3人4", "加", "已確認", "改加")),
-    ("FALSE", "定期清潔", "已確認", ("FALSE", "1/20改3人4", "", "已確認", "已確認")),
-    ("", "定期清潔", "每月確認", ("空白", "1/20改3人4", "", "", "未回覆")),
+    ("TRUE", "定期清潔", "", ("TRUE", "1/20改3人4", "", "", "6", "可約")),
+    ("TRUE", "改", "", ("TRUE", "1/20改3人4", "改", "", "6", "改加")),
+    ("FALSE", "定期清潔", "", ("FALSE", "1/20改3人4", "", "", "6", "未回覆")),
+    ("FALSE", "3人4小時加", "已確認", ("FALSE", "1/20改3人4", "加", "已確認", "9", "改加")),
+    ("FALSE", "定期清潔", "已確認", ("FALSE", "1/20改3人4", "", "已確認", "6", "已確認")),
+    ("", "定期清潔", "每月確認", ("空白", "1/20改3人4", "", "", "6", "未回覆")),
 ])
 def test_stage_order_is_change_then_confirmed_then_ready(confirmed, service, note, expected):
     gate = build_gate(rule(), [confirm_row(confirmed=confirmed, note="1/20改3人4")])
@@ -78,7 +78,7 @@ def test_old_rule_sheet_without_confirmed_columns_defaults_to_b():
 
 def test_missing_customer_is_held():
     gate = build_gate(rule(), [confirm_row(phone="0900000000", name="別人")])
-    assert gate(schedule()) == ("查無", "", "", "", "未回覆")
+    assert gate(schedule()) == ("查無", "", "", "", "6", "未回覆")
 
 
 def test_matches_same_phone_different_floor_by_address():
@@ -87,13 +87,13 @@ def test_matches_same_phone_different_floor_by_address():
     gate = build_gate(rule(), rows)
     four = schedule(); four[2], four[4] = "劉家熙-4樓", "台北市內湖區4樓"
     six = schedule(); six[2], six[4] = "劉家熙-6樓", "台北市內湖區6樓"
-    assert gate(four)[4] == "可約" and gate(six)[4] == "未回覆"
+    assert gate(four)[-1] == "可約" and gate(six)[-1] == "未回覆"
 
 
 def test_combined_rules_hold_if_any_rule_holds():
     gate = combine_gates([build_gate(rule(), [confirm_row()]),
                           build_gate(rule(確認工作表="其他"), [confirm_row(confirmed="FALSE")])])
-    assert gate(schedule()) == ("TRUE、FALSE", "", "", "", "未回覆")
+    assert gate(schedule()) == ("TRUE、FALSE", "", "", "", "6", "未回覆")
 
 
 def test_sync_writes_four_columns_as_text_and_keeps_status():
@@ -101,7 +101,7 @@ def test_sync_writes_four_columns_as_text_and_keeps_status():
     sheet = Sheet("台北202701", [original])
     result = sync(sheet, [source_row(original)], build_gate(rule(), [confirm_row(confirmed="FALSE", note="=1+1")]))
     assert sheet.data[1][8] == "未安排"
-    assert gate_cells(sheet) == ["FALSE", "=1+1", "", "", "未回覆"]
+    assert gate_cells(sheet) == ["FALSE", "=1+1", "", "", "6", "未回覆"]
     assert any(kwargs.get("value_input_option") == "RAW" and any("=1+1" in str(u["values"]) for u in updates)
                for updates, kwargs in sheet.batches)
     assert result["booking_gate"] == {"enabled": True, "held": 1, "held_rows": [2], "stages": {"未回覆": 1}}
@@ -112,7 +112,7 @@ def test_sync_releases_after_confirmation():
     sheet = Sheet("台北202701", [original])
     sync(sheet, [source_row(original)], build_gate(rule(), [confirm_row(confirmed="FALSE")]))
     result = sync(sheet, [source_row(original)], build_gate(rule(), [confirm_row()]))
-    assert gate_cells(sheet) == ["TRUE", "", "", "", "可約"]
+    assert gate_cells(sheet) == ["TRUE", "", "", "", "6", "可約"]
     assert result["booking_gate"]["held"] == 0
 
 
@@ -127,7 +127,7 @@ def test_booked_rows_get_no_gate_columns():
 def test_new_calendar_row_gets_values_but_stays_unarranged():
     sheet = Sheet("台北202701", [])
     result = sync(sheet, [source_row(schedule())], build_gate(rule(), [confirm_row(confirmed="FALSE")]))
-    assert sheet.data[1][8] == "未安排" and gate_cells(sheet)[4] == "未回覆"
+    assert sheet.data[1][8] == "未安排" and gate_cells(sheet)[5] == "未回覆"
     assert result["booking_gate"]["held_rows"] == [2]
 
 
@@ -137,7 +137,7 @@ def test_month_outside_rule_period_gets_no_gate_columns():
     # A November-only run passes its own period; the row is outside a December-only gate.
     result = sync(sheet, [source_row(original, **{"0": "2人"})],
                   build_gate(rule("2026-12-01", "2026-12-31"), [confirm_row(confirmed="FALSE")]), name="台北202611")
-    assert not set(sheet.data[0]) & {"回覆確認", "確認備註", "改加標記", "已確認", "預約條件"}
+    assert not set(sheet.data[0]) & {"回覆確認", "確認備註", "改加標記", "已確認", "人時", "預約條件"}
     assert sheet.data[1][8] == "未安排" and result["booking_gate"]["held"] == 0
 
 
@@ -146,7 +146,7 @@ def test_rule_turned_off_clears_existing_columns():
     sheet = Sheet("台北202701", [original])
     sync(sheet, [source_row(original)], build_gate(rule(), [confirm_row(confirmed="FALSE", note="x")]))
     sync(sheet, [source_row(original)], None)
-    assert gate_cells(sheet) == ["", "", "", "", ""]
+    assert gate_cells(sheet) == ["", "", "", "", "", ""]
 
 
 def test_sync_without_rule_adds_no_columns():
@@ -226,13 +226,13 @@ def test_area_gate_uses_run_period(monkeypatch):
     monkeypatch.setattr(gate_module, "_open_source", lambda gc, sid: source)
     gate, descriptions = gate_module.load_area_gate(None, "台北", "2026-12-01", "2027-02-28", worksheet_not_found=missing)
     assert descriptions == ["2026大掃除 2026-12-01～2027-02-28"]
-    assert gate(schedule(date="2027/02/26"))[4] == "可約" and gate(schedule(date="2027/03/01")) is None
+    assert gate(schedule(date="2027/02/26"))[-1] == "可約" and gate(schedule(date="2027/03/01")) is None
 
 
 def test_blank_period_means_no_limit_and_reversed_period_is_rejected():
     gate = build_gate(rule("", ""), [confirm_row()])
-    assert gate(schedule(date="2026/11/01"))[4] == "可約"
-    assert gate(schedule(date="2027/02/26"))[4] == "可約"
+    assert gate(schedule(date="2026/11/01"))[-1] == "可約"
+    assert gate(schedule(date="2027/02/26"))[-1] == "可約"
     with pytest.raises(ValueError):
         rule("2027-03-01", "2027-02-28")
 
@@ -261,3 +261,34 @@ def test_ui_defaults_on_during_deep_clean_and_returns_settings(monkeypatch):
     off = ui.render(st, ["台北"], date(2026, 11, 1), date(2026, 11, 30))
     assert off == {"enabled": False, "settings": {}}
     assert ui.render(st, ["台北"], None, None) is None
+
+
+@pytest.mark.parametrize("service,start,end,hours,stage", [
+    ("1人4小時", "14:00", "18:00", "4", "人時不足"),
+    ("2人", "9:00", "11:00", "4", "人時不足"),
+    ("定期清潔", "9:00", "12:00", "6", "可約"),
+    ("3人4小時", "14:00", "18:00", "12", "可約"),
+    ("2人2或2人3", "14:00", "16:00", "4", "人時不足"),
+    ("改", "9:00", "11:00", "4", "人時不足"),
+    ("改", "9:00", "12:00", "6", "改加"),
+])
+def test_person_hours_below_minimum_is_held(service, start, end, hours, stage):
+    row = schedule(service=service, start=start)
+    row[7] = end
+    result = build_gate(rule(), [confirm_row()])(row)
+    assert result[4] == hours and result[5] == stage
+
+
+def test_minimum_person_hours_is_configurable_and_blank_disables():
+    row = schedule(service="1人4小時", start="14:00")
+    row[7] = "18:00"
+    assert build_gate(rule(最低人時="4"), [confirm_row()])(row)[5] == "可約"
+    assert build_gate(rule(最低人時=""), [confirm_row()])(row)[5] == "可約"
+    # 不檢查人時後，4 人時的列才依改加、已確認、未回覆判斷。
+    changed = schedule(service="1人4小時改", start="14:00")
+    changed[7] = "18:00"
+    assert build_gate(rule(), [confirm_row()])(changed)[5] == "人時不足"
+    assert build_gate(rule(最低人時=""), [confirm_row()])(changed)[5] == "改加"
+    assert build_gate(rule(最低人時=""), [confirm_row(confirmed="FALSE")])(row)[5] == "未回覆"
+    with pytest.raises(ValueError):
+        rule(最低人時="六")

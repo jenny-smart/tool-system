@@ -507,7 +507,7 @@ def test_recreated_sheet_has_no_new_colors_and_later_additions_are_marked():
 
 
 def _monthly(event, date, start='14:00', end='18:00', note='每月確認', status='待確認', order=''):
-    row = old_row(event=event, date=date, start=start, status=status, order=order)
+    row = old_row(event=event, date=date, start=start, status=status, order=order, service='2人4')
     row[1], row[7] = note, end
     return row
 
