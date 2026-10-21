@@ -341,6 +341,24 @@ def sync_region(region: str, log: Callable[[str], None] = print,
     if not targets:
         return result
     session = _login_session(region, ui_logger=log)
+    try:
+        _sync_targets(change_order, ws, region, targets, session, result, log)
+    finally:
+        _logout_session(change_order, session, region, log)
+    return result
+
+
+def _logout_session(change_order, session, region: str, log: Callable[[str], None]) -> None:
+    """回寫完一律登出這區檸檬後台（requests 連線，不影響 Chrome）；登出失敗只提醒。"""
+    try:
+        session.get(f"{change_order.BASE_URL}/logout", timeout=20)
+        log(f"【{region}】檸檬後台已登出")
+    except Exception as exc:
+        log(f"⚠️ 【{region}】檸檬後台登出失敗：{exc}")
+
+
+def _sync_targets(change_order, ws, region: str, targets: list, session, result: dict,
+                  log: Callable[[str], None]) -> None:
     for row_no, row, status in targets:
         # 已處理好但 B 欄仍是待處理的列：以完成狀態回填後台，成功後才把 B 欄改成完成狀態
         sync_item = {"sheet_row": row_no, "kind": "refund" if "退" in status or "返" in status else "charge",
@@ -354,7 +372,6 @@ def sync_region(region: str, log: Callable[[str], None] = print,
         except Exception as exc:
             result["failed"].append((row_no, str(exc)))
             log(f"❌ 【{region}】第 {row_no} 列 {sync_item['order_no']} 回寫失敗：{exc}")
-    return result
 
 
 def build_record_text(results: dict[str, dict], today: date) -> tuple[str, str]:
