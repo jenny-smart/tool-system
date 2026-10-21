@@ -680,3 +680,20 @@ def test_sync_sorts_whole_rows_and_report_uses_sorted_row_numbers():
     assert all(len(row) < 40 for row in sheet.data)  # helper column removed
     report = book.sheets['排程差異_台北202612-202702'].data
     assert [line[2] for line in report[1:] if line[3] == '新增'] == [3]
+
+
+def test_rows_no_longer_in_calendar_move_below_the_calendar_rows():
+    gone = old_row(event='gone', date='2026/12/03', order='LC7', status='已安排')
+    gone[2] = '王小明'
+    kept = old_row(event='kept', date='2026/12/10')
+    other = old_row(event='other', date='2026/12/05')
+    other[2], other[4] = '李曉微', '台北市大安區師大路'
+    sheet = SortableSheet('台北202612', [gone, kept, other])
+    book = SortableBook([sheet])
+    sync_schedule(book, '台北202612', [source_row(kept), source_row(other)], ['標題'] * 30, MissingSheet,
+                  sort_rows=True)
+    assert [(r[2], r[5]) for r in sheet.data[1:4]] == [
+        ('李曉微', '2026/12/05'), ('王小明', '2026/12/10'), ('王小明', '2026/12/03')]
+    assert sheet.data[3][12] == 'LC7'
+    report = book.sheets['排程差異_台北202612'].data
+    assert [line[2] for line in report[1:] if line[3] == '本次日曆未見'] == [4]
