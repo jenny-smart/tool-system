@@ -573,3 +573,26 @@ def test_monthly_confirm_pairing_also_updates_booking_gate_columns():
     second = sheet.data[2] + [''] * len(header)
     # The run period covers 2027/02/26 (customers may move after the holiday).
     assert second[5] == '2027/02/26' and second[confirmed] == '' and second[stage] == '未回覆'
+
+
+def _with_topup(row, flag):
+    source = source_row(row)
+    return source + [''] * (21 - len(source)) + [flag]
+
+
+def test_schedule_copies_topup_flag_from_export_by_event_id():
+    first, second = old_row(event='e1', date='2026/12/07'), old_row(event='e2', date='2026/12/21')
+    booked = old_row(event='e3', date='2026/12/28', order='LC1', status='已安排')
+    sheet = Sheet('台北202612', [first, second, booked])
+    sync(Book([sheet]), [_with_topup(first, ''), _with_topup(second, '需儲值'), _with_topup(booked, '需儲值')],
+         name='台北202612')
+    column = sheet.data[0].index('需儲值')
+    cells = [(row + [''] * (column + 1))[column] for row in sheet.data[1:4]]
+    assert cells == ['', '需儲值', '']
+
+
+def test_schedule_adds_no_topup_column_when_nobody_needs_topup():
+    row = old_row(event='e1')
+    sheet = Sheet('台北202611', [row])
+    sync(Book([sheet]), [_with_topup(row, '')])
+    assert '需儲值' not in sheet.data[0]

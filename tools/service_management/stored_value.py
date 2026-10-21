@@ -831,7 +831,95 @@ def _enrich_with_stored_value(rows: list[dict], stored_info: dict[str, dict]) ->
         r["diff"]     = r["balance"] - cumulative_map.get((key, period), 0.0)
         r["line"]     = info.get("lineValue", "")
 
+    return _mark_topup_rows(rows)
+
+
+TOPUP_FLAG = "需儲值"
+# 已安排（已成單，金額已從餘額扣除）與暫停不計入需儲值累計。
+TOPUP_SKIP_STATUSES = ("已安排", "暫停")
+
+
+def _mark_topup_rows(rows: list[dict]) -> list[dict]:
+    """同一客人依服務日期累計金額，超過儲值金餘額的那幾次標「需儲值」。"""
+    by_customer: dict[str, list[dict]] = {}
+    for r in rows:
+        r["topup"] = ""
+        if r.get("status") in TOPUP_SKIP_STATUSES or not r.get("amount"):
+            continue
+        by_customer.setdefault(normalize_name_for_compare(r["name"]), []).append(r)
+    for customer_rows in by_customer.values():
+        running = 0.0
+        for r in sorted(customer_rows, key=lambda row: (row["start_dt"], row.get("start_str", ""))):
+            running += float(r["amount"] or 0)
+            if running > float(r.get("balance") or 0) + 1e-9:
+                r["topup"] = TOPUP_FLAG
     return rows
+
+
+TOPUP_LIST_HEADERS = [
+    "姓名", "電話", "地址", "備註", "需儲值次數", "需儲值日期", "期間預約總金額", "儲值金餘額", "差額", "LINE@",
+    "通知狀態", "通知備註",
+]
+TOPUP_MANUAL_HEADERS = ("通知狀態", "通知備註")
+
+
+def build_topup_list(rows: list[dict]) -> list[list[Any]]:
+    """依客人整理需儲值名單（只列有「需儲值」的客人），依第一次約不到的日期排序。"""
+    customers: dict[str, dict] = {}
+    for r in sorted(rows, key=lambda row: (row["start_dt"], row.get("start_str", ""))):
+        key = normalize_name_for_compare(r["name"])
+        counted = r.get("status") not in TOPUP_SKIP_STATUSES and r.get("amount")
+        item = customers.setdefault(key, {"row": r, "notes": [], "dates": [], "total": 0.0, "first": None})
+        if r.get("note") and r["note"] not in item["notes"]:
+            item["notes"].append(r["note"])
+        if counted:
+            item["total"] += float(r["amount"] or 0)
+        if r.get("topup"):
+            item["dates"].append(r["start_dt"].strftime("%m/%d"))
+            item["first"] = item["first"] or r["start_dt"]
+    result = []
+    for item in sorted((i for i in customers.values() if i["dates"]), key=lambda i: i["first"]):
+        r, balance = item["row"], float(item["row"].get("balance") or 0)
+        result.append([
+            r["name"], r["phone"], r["address"], "、".join(item["notes"]), len(item["dates"]),
+            "、".join(item["dates"]), item["total"], balance, balance - item["total"], r.get("line", ""), "", "",
+        ])
+    return result
+
+
+def _write_topup_list(ss: Any, sheet_name: str, rows: list[dict]) -> str:
+    """每次匯出重新產生需儲值名單；手動填的通知狀態／通知備註依姓名＋電話保留。"""
+    list_rows = build_topup_list(rows)
+    try:
+        sh = ss.worksheet(sheet_name)
+        old = sh.get_all_values()
+    except gspread.WorksheetNotFound:
+        sh, old = None, []
+    if old:
+        header = old[0]
+        index = {name: header.index(name) for name in ("姓名", "電話", *TOPUP_MANUAL_HEADERS) if name in header}
+        kept = {}
+        for row in old[1:]:
+            cells = row + [""] * len(header)
+            if "姓名" in index and "電話" in index:
+                kept[(normalize_name_for_compare(cells[index["姓名"]]), normalize_phone(cells[index["電話"]]))] = [
+                    cells[index[name]] if name in index else "" for name in TOPUP_MANUAL_HEADERS]
+        for row in list_rows:
+            manual = kept.get((normalize_name_for_compare(row[0]), normalize_phone(row[1])))
+            if manual:
+                row[-len(TOPUP_MANUAL_HEADERS):] = manual
+    if sh is None:
+        if not list_rows:
+            return ""
+        sh = ss.add_worksheet(title=sheet_name, rows=max(len(list_rows) + 20, 100), cols=len(TOPUP_LIST_HEADERS))
+    sh.clear()
+    sh.update(values=[TOPUP_LIST_HEADERS] + list_rows, range_name="A1", value_input_option="USER_ENTERED")
+    if list_rows:
+        sh.update(values=[[normalize_phone(row[1])] for row in list_rows],
+                  range_name=f"B2:B{len(list_rows) + 1}", value_input_option="RAW")
+    sh.freeze(rows=1)
+    log.info("需儲值名單更新完成：%s（%d 位）", sheet_name, len(list_rows))
+    return sheet_name
 
 
 def _write_vip_sheet(
@@ -913,7 +1001,11 @@ def _write_vip_sheet(
                 [start_dt.strftime("%Y-%m-%d"), (end_dt or start_dt).strftime("%Y-%m-%d")]],
         range_name="T1:U2", value_input_option="RAW",
     )
+    # V 欄：同一客人依日期累計超過儲值金餘額的那幾次標「需儲值」。
+    sh.update(values=[[TOPUP_FLAG]] + [[r.get("topup", "")] for r in rows],
+              range_name=f"V1:V{len(rows) + 1}", value_input_option="RAW")
     sh.freeze(rows=1)
+    _write_topup_list(ss, sheet_name.replace("定期VIP_", "需儲值名單_", 1), rows)
 
     log.info("[%s] 定期VIP工作表寫入完成：%d 筆，工作表：%s", area_name, len(rows), sheet_name)
     return sheet_name
@@ -1059,7 +1151,8 @@ def _build_vip_schedule_sheet(
     else:
         log.info("[%s] 未套用排程預約條件", area_name)
     result = sync_schedule(
-        ss, target_name, source.get("A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
+        ss, target_name, source.get("A2:V" if getattr(source, "col_count", 22) >= 22
+                                    else "A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
         VIP_SCHEDULE_FALLBACK_HEADERS, gspread.WorksheetNotFound, compare_only=compare_only,
         coverage=source.get("T2:U2") if getattr(source, "col_count", 21) >= 21 else [],
         period_filter="" if is_cross_month else start_period,

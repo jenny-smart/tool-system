@@ -14,7 +14,8 @@ def _load_functions(*names):
     tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
     nodes = [
         node for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name in names
+        if (isinstance(node, ast.FunctionDef) and node.name in names)
+        or (isinstance(node, ast.Assign) and any(getattr(t, "id", "").startswith("TOPUP_") for t in node.targets))
     ]
     namespace = {
         "Any": object,
@@ -92,6 +93,7 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
     functions = _load_functions(
         "normalize_name_for_compare", "normalize_phone", "_write_vip_sheet"
     )
+    functions["_write_topup_list"] = lambda *args: ""
 
     class Sheet:
         def __init__(self):
@@ -180,7 +182,8 @@ def test_calendar_export_writes_only_combined_cross_month_sheet():
 
 
 def test_cross_month_balance_uses_monthly_subtotal_and_cumulative_difference():
-    functions = _load_functions("normalize_text", "normalize_name_for_compare", "_enrich_with_stored_value")
+    functions = _load_functions("normalize_text", "normalize_name_for_compare", "_enrich_with_stored_value",
+                                "_mark_topup_rows")
     rows = [
         {"name": "王小明", "amount": 3000, "start_dt": datetime(2026, 12, 1)},
         {"name": "王小明", "amount": 4000, "start_dt": datetime(2027, 1, 1)},
@@ -299,3 +302,83 @@ def test_step3_passes_run_period_when_booking_gate_flag_is_set():
     functions["step3_build_vip_schedule_sheets"](None, [{"name": "台北"}], start, end)
     functions["step3_build_vip_schedule_sheets"](None, [{"name": "台北"}], start, end, booking_gate=True)
     assert calls == [None, ("2026-12-01", "2027-02-28")]
+
+
+def _topup_functions():
+    functions = _load_functions("normalize_text", "normalize_name_for_compare", "normalize_phone",
+                                "_mark_topup_rows", "build_topup_list", "_write_topup_list")
+    functions["gspread"] = SimpleNamespace(WorksheetNotFound=KeyError)
+    return functions
+
+
+def _visit(day, amount=1200, status="未安排", name="王小明", balance=3000, note=""):
+    month, d = (12, day) if day > 0 else (1, -day)
+    year = 2026 if month == 12 else 2027
+    return {"name": name, "phone": "0912345678", "address": "台北市", "note": note, "line": "line",
+            "status": status, "amount": amount, "balance": balance,
+            "start_dt": datetime(year, month, d), "start_str": "09:00"}
+
+
+def test_topup_marks_only_visits_beyond_balance_and_skips_booked_and_paused():
+    mark = _topup_functions()["_mark_topup_rows"]
+    rows = [_visit(7), _visit(14, status="已安排"), _visit(21), _visit(28, status="暫停"),
+            _visit(-4, 1350), _visit(-18, 1350)]
+    mark(rows)
+    assert [r["topup"] for r in rows] == ["", "", "", "", "需儲值", "需儲值"]
+    enough = [_visit(7, balance=10000), _visit(21, balance=10000)]
+    assert [r["topup"] for r in mark(enough)] == ["", ""]
+
+
+def test_topup_list_groups_customers_with_dates_and_difference():
+    functions = _topup_functions()
+    rows = functions["_mark_topup_rows"]([
+        _visit(7), _visit(21), _visit(-4, 1350, note="每月確認"), _visit(-18, 1350),
+        _visit(10, name="李小華", balance=100000),
+    ])
+    assert functions["build_topup_list"](rows) == [[
+        "王小明", "0912345678", "台北市", "每月確認", 2, "01/04、01/18", 5100.0, 3000.0, -2100.0, "line", "", "",
+    ]]
+
+
+def test_topup_list_keeps_manual_notice_columns_and_drops_customers_no_longer_short():
+    functions = _topup_functions()
+
+    class Sheet:
+        def __init__(self, values):
+            self.values, self.updates = values, []
+
+        def get_all_values(self):
+            return self.values
+
+        def clear(self):
+            self.values = []
+
+        def update(self, values, range_name, **kwargs):
+            self.updates.append((range_name, values))
+            if range_name == "A1":
+                self.values = values
+
+        def freeze(self, **kwargs):
+            pass
+
+    header = functions["TOPUP_LIST_HEADERS"]
+    old = [header,
+           ["王小明", "912345678"] + [""] * 8 + ["已通知", "10/20 LINE"],
+           ["陳大同", "0911111111"] + [""] * 8 + ["已通知", ""]]
+    sheet = Sheet(old)
+    ss = SimpleNamespace(worksheet=lambda name: sheet)
+    rows = functions["_mark_topup_rows"]([_visit(7), _visit(21), _visit(-4)])
+    functions["_write_topup_list"](ss, "需儲值名單_台北_202612-202702", rows)
+    assert len(sheet.values) == 2 and sheet.values[1][0] == "王小明"
+    assert sheet.values[1][-2:] == ["已通知", "10/20 LINE"]
+
+
+def test_topup_list_is_not_created_when_nobody_needs_topup():
+    functions = _topup_functions()
+    created = []
+
+    def missing(name):
+        raise KeyError(name)
+    ss = SimpleNamespace(worksheet=missing, add_worksheet=lambda **kw: created.append(kw))
+    assert functions["_write_topup_list"](ss, "需儲值名單_台北_202612", [_visit(7, balance=9999)]) == ""
+    assert created == []
