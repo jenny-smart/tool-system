@@ -284,14 +284,16 @@ UNSEEN_KINDS = ("本次日曆未見", "需人工核對")
 
 
 def _sort_order(rows):
-    """排程列依 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序，與定期VIP匯出相同；
+    """排程列依 姓氏總筆劃 → 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序，與定期VIP匯出相同；
     日曆已對應不到的列（本次日曆未見／需人工核對）不刪除，集中放在下方；空白列放最後。
     回傳 {原列號: 新列號}。"""
+    from tools.common.stroke_order import name_sort_key
+
     def key(row):
         values = rows[row]
         blank = not any(_text(v) for v in values[:9])
         unseen = _text(values[31]) in UNSEEN_KINDS
-        return (blank, unseen, _base_name(values[2]), _canonical(values[4], 4), _canonical(values[5], 5),
+        return (blank, unseen, name_sort_key(_base_name(values[2])), _canonical(values[4], 4), _canonical(values[5], 5),
                 _canonical(values[6], 6), row)
     return {row: index for index, row in enumerate(sorted(rows, key=key), 2)}
 

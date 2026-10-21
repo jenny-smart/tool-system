@@ -954,11 +954,12 @@ def _write_vip_sheet(
         "當月預約總金額", "儲值金餘額", "累計差額（截至當月）", "LINE@", "日曆事件ID",
     ]
 
-    # 姓名（去掉「-4樓」等後綴）→ 地址 → 日期 → 開始時間；排程工作表排序用同一規則。
+    # 姓氏總筆劃 → 姓名（去掉「-4樓」等後綴）→ 地址 → 日期 → 開始時間；排程工作表排序用同一規則。
+    from tools.common.stroke_order import name_sort_key
     rows = sorted(
         rows,
         key=lambda r: (
-            normalize_name_for_compare(r["name"]),
+            name_sort_key(normalize_name_for_compare(r["name"])),
             normalize_address(r["address"]),
             r["start_dt"],
             r["start_str"],

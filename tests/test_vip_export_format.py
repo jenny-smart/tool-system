@@ -131,22 +131,23 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
         client, "台北", rows, datetime(2026, 10, 1), area_target_id="sheet-id"
     )
 
-    assert [row[2] for row in sheet.updates[0]["values"][1:]] == ["李小華", "王小明"]
+    # 姓氏總筆劃：王（4）在李（7）前面。
+    assert [row[2] for row in sheet.updates[0]["values"][1:]] == ["王小明", "李小華"]
     assert sheet.updates[1] == {
-        "values": [["0987654321"], ["0912345678"]],
+        "values": [["0912345678"], ["0987654321"]],
         "range_name": "D2:D3",
         "value_input_option": "RAW",
     }
     assert sheet.formats[0]["range"] == "A2:S200"
-    assert [row[18] for row in sheet.updates[0]["values"][1:]] == ["event-li", "event-wang"]
+    assert [row[18] for row in sheet.updates[0]["values"][1:]] == ["event-wang", "event-li"]
     assert sheet.updates[2]["range_name"] == "T1:U2"
     # Export itself also highlights both active and paused same-day visits.
     duplicate = {**rows[0], "address": "台北市", "event_id": "event-wang-paused", "status": "暫停"}
     rows[0]["address"] = "台北市"
     sheet.updates.clear()
     functions["_write_vip_sheet"](client, "台北", rows + [duplicate], datetime(2026, 10, 1), area_target_id="sheet-id")
-    assert [item["range"] for item in sheet.formats[1:]] == ["A3:S3", "A4:S4"]
-    assert sheet.updates[0]["values"][3][8] == "暫停"
+    assert [item["range"] for item in sheet.formats[1:]] == ["A2:S2", "A3:S3"]
+    assert sheet.updates[0]["values"][2][8] == "暫停"
 
 
 
@@ -410,5 +411,13 @@ def test_export_sorts_by_base_name_then_address_then_date():
     functions["_write_vip_sheet"](client, "台北", rows, datetime(2026, 12, 1), area_target_id="t")
     out = next(w["values"] for w in writes if w.get("range_name") == "A1")
     assert [(r[2], r[5]) for r in out[1:]] == [
-        ("劉家熙-4樓", "2026/12/02"), ("劉家熙-4樓", "2026/12/08"),
-        ("劉家熙-6樓", "2026/12/01"), ("劉家熙-6樓", "2026/12/09"), ("王小明", "2026/12/05")]
+        ("王小明", "2026/12/05"), ("劉家熙-4樓", "2026/12/02"), ("劉家熙-4樓", "2026/12/08"),
+        ("劉家熙-6樓", "2026/12/01"), ("劉家熙-6樓", "2026/12/09")]
+
+
+def test_name_sort_key_orders_surnames_by_taiwan_stroke_count():
+    from tools.common.stroke_order import name_sort_key, strokes
+    assert [strokes(c) for c in "王李何劉黃蔡陳鄭邱連藍蘇嚴魏"] == [4, 7, 7, 15, 12, 15, 11, 15, 8, 11, 18, 20, 20, 18]
+    names = ["黃秀玲", "王小明", "黃煦芬", "劉冠亨", "何雅芳", "李曉微", "台灣大幸", "Amy", "陳靜萱"]
+    assert sorted(names, key=name_sort_key) == [
+        "王小明", "台灣大幸", "何雅芳", "李曉微", "陳靜萱", "黃煦芬", "黃秀玲", "劉冠亨", "Amy"]

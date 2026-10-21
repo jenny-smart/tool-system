@@ -659,7 +659,8 @@ def test_sort_order_uses_base_name_then_address_then_date():
         return values
     rows = {2: row('王小明', '大安', '2026/12/05'), 3: row('劉家熙-6樓', '內湖6樓', '2026/12/01'),
             4: row('劉家熙-4樓', '內湖4樓', '2026/12/08'), 5: [''] * 33, 6: row('劉家熙-4樓', '內湖4樓', '2026/12/02')}
-    assert _sort_order(rows) == {6: 2, 4: 3, 3: 4, 2: 5, 5: 6}
+    # 王（4 劃）→ 劉（15 劃）；劉家熙兩個地址各自依日期。
+    assert _sort_order(rows) == {2: 2, 6: 3, 4: 4, 3: 5, 5: 6}
 
 
 def test_sync_sorts_whole_rows_and_report_uses_sorted_row_numbers():
@@ -675,11 +676,11 @@ def test_sync_sorts_whole_rows_and_report_uses_sorted_row_numbers():
     sync_schedule(book, '台北202612-202702', [source_row(wang), source_row(li1), source_row(li2), source_row(added)],
                   ['標題'] * 30, MissingSheet, period_filter='', sort_rows=True)
     assert [(r[2], r[5]) for r in sheet.data[1:5]] == [
-        ('李曉微', '2026/12/14'), ('李曉微', '2027/02/01'), ('李曉微', '2027/02/15'), ('王小明', '2026/12/05')]
-    assert sheet.data[1][26] == '客服備註-李1214'
+        ('王小明', '2026/12/05'), ('李曉微', '2026/12/14'), ('李曉微', '2027/02/01'), ('李曉微', '2027/02/15')]
+    assert sheet.data[2][26] == '客服備註-李1214'
     assert all(len(row) < 40 for row in sheet.data)  # helper column removed
     report = book.sheets['排程差異_台北202612-202702'].data
-    assert [line[2] for line in report[1:] if line[3] == '新增'] == [3]
+    assert [line[2] for line in report[1:] if line[3] == '新增'] == [4]
 
 
 def test_rows_no_longer_in_calendar_move_below_the_calendar_rows():
@@ -693,7 +694,7 @@ def test_rows_no_longer_in_calendar_move_below_the_calendar_rows():
     sync_schedule(book, '台北202612', [source_row(kept), source_row(other)], ['標題'] * 30, MissingSheet,
                   sort_rows=True)
     assert [(r[2], r[5]) for r in sheet.data[1:4]] == [
-        ('李曉微', '2026/12/05'), ('王小明', '2026/12/10'), ('王小明', '2026/12/03')]
+        ('王小明', '2026/12/10'), ('李曉微', '2026/12/05'), ('王小明', '2026/12/03')]
     assert sheet.data[3][12] == 'LC7'
     report = book.sheets['排程差異_台北202612'].data
     assert [line[2] for line in report[1:] if line[3] == '本次日曆未見'] == [4]
