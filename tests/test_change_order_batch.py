@@ -236,16 +236,23 @@ def test_vip_refund_coupon_flow():
     # ① 尚未歸零：儲值金／購物金歸零＋開折讓單，不退款
     item = plan(B="VIP待退券", X="AB1", Z="952", S="1000", R="信用卡")
     assert item["actions"] == ["stored_value", "allowance"] and item["manual"] == []
+    assert "儲值金歸零及折讓單完成後才退款" in item["progress"]
+    # 已歸零但折讓單還沒開：只開折讓單，不退款
+    item = plan(B="VIP待退券", M="2026/10/21", X="AB1", Z="952", S="1000", R="信用卡")
+    assert item["actions"] == ["allowance"]
     # ② 已歸零（M）、折讓單完成：信用卡走藍新
     item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", R="信用卡")
     assert item["actions"] == ["credit_refund"] and item["manual"] == []
-    # ③ ATM：台北／台中富邦退款；桃園／新竹／高雄先不處理
+    # ③ 信用卡：各區都由 Agent 走藍新；ATM：台北／台中富邦，桃園／新竹／高雄由財務處理
     cells = dict(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", T="985", R="ATM", P="012", Q="1")
-    assert plan("台中", **cells)["actions"] == ["atm_refund"]
+    for region in batch.REGIONS:
+        assert plan(region, **{**cells, "R": "信用卡"})["actions"] == ["credit_refund"]
+    for region in ("台北", "台中"):
+        assert plan(region, **cells)["actions"] == ["atm_refund"]
     for region in ("桃園", "新竹", "高雄"):
         item = plan(region, **cells)
         assert item["actions"] == [] and item["manual"] == [] and item["missing"] == []
-        assert f"{region} ATM 退券先不處理" in item["progress"]
+        assert "退款由財務處理（完成後填 AC 退款時間）" in item["progress"]
     # ④ 退款完成 → 回寫，B 欄改為 VIP已退券
     item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", AC="2026/10/22", S="1000", R="ATM")
     assert item["actions"] == ["sync"] and item["target_status"] == "VIP已退券"
@@ -256,3 +263,4 @@ def test_vip_refund_coupon_flow():
 def test_formula_fixes_include_vip_refund_coupon():
     updates = batch.formula_fixes([["header"], row(B="VIP待退券", S="1000")])
     assert [u["range"] for u in updates] == ["T2", "Z2"]
+

@@ -62,3 +62,17 @@ def test_manual_submit_waits_until_record_appears(monkeypatch):
     monkeypatch.setattr(adj, "MANUAL_SUBMIT_TIMEOUT", 0)
     with pytest.raises(RuntimeError, match="逾時"):
         adj._wait_manual_submit(Page(), "LC001", "2100", "10/21VIP退券剩餘餘額歸零")
+
+
+def test_zero_out_first_step_auto_rest_manual(monkeypatch):
+    import pytest
+
+    adj = pytest.importorskip("tools.lemon_backend.stored_value_adjustment")
+    balances = iter([(17600, 2500), (0, 0)])
+    calls = []
+    monkeypatch.setattr(adj, "_balances", lambda page, order_no: next(balances))
+    monkeypatch.setattr(adj, "_submit_adjustment",
+                        lambda page, step, date_text, manual_submit=False: calls.append((step["amount"], manual_submit)) or True)
+    item = {"order_no": "LC001983201", "note": "", "refund_amount": "17600"}
+    assert adj._zero_out(object(), item, "10/21") is True
+    assert calls == [("17600", False), ("2500", True)]

@@ -77,6 +77,9 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         key=f"change_order_batch_editor_{'sync' if sync_only else 'all'}",
     )
     selected = [item for item, flag in zip(items, edited[RUN_COLUMN]) if flag and item["actions"]]
+    for item in (item for item, flag in zip(items, edited[RUN_COLUMN]) if flag and not item["actions"]):
+        st.warning(f"{item['region']} 第 {item['row']} 列（{item['status']}）沒有可自動執行的動作，勾選不會執行："
+                   f"{blocked_reason(item)}")
 
     if sync_only:
         if st.button(f"▶️ 回寫勾選的 {len(selected)} 筆", key="change_order_batch_run", disabled=not selected):
@@ -103,6 +106,12 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
             st.session_state.pop(STATE_KEY, None)
         elif do_sync:
             _sync_now(selected, log)
+
+
+def blocked_reason(item: dict) -> str:
+    """勾選了但沒有可執行動作的列：說明原因（缺資料、需人工、或進度上已在等待）。"""
+    reasons = item["missing"] + item["manual"] + item["progress"]
+    return "；".join(reasons) or "目前沒有需要執行的動作"
 
 
 def _queue_invoices(region: str, rows: list[int]) -> dict:
