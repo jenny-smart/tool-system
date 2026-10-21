@@ -95,11 +95,37 @@ def _finish_allowance_save(page: Page) -> str:
     raise RuntimeError("未讀到折讓成功單號；如已開立，請填入已開立折讓單號接續新發票")
 
 
+def _search_invoice(page: Page, invoice_no: str) -> None:
+    page.locator("#invoicenumber").fill(invoice_no)
+    page.locator("a[onclick='SearchInvoice();']").click()
+
+
+def _search_recent_years(page: Page, invoice_no: str, years: int = 2) -> None:
+    """沒指定年度：先查最新年度，查不到再查前一年（例如 VIP 原發票是去年儲值時開的）。"""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    year = page.locator("#qyear")
+    remark = page.locator("#s_remark")
+    for index in range(1, years + 1):
+        year.select_option(index=index)
+        _search_invoice(page, invoice_no)
+        try:
+            remark.wait_for(state="visible", timeout=10_000 if index < years else 30_000)
+            return
+        except PlaywrightTimeoutError:
+            if index == years:
+                raise RuntimeError(f"最近 {years} 個年度都查無原發票 {invoice_no}，請確認發票號碼／年度") from None
+            ok = page.locator("#alertify-ok")
+            if ok.is_visible():
+                ok.click()  # 關掉「查無發票」提示再查前一年
+            print(f"{invoice_no} 在 {year.locator('option').nth(index).inner_text().strip()} 年度查無，改查前一年")
+
+
 def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int | None = None,
                 require_full: bool = False, before_save=None) -> str:
     year = page.locator("#qyear")
     if invoice_year is None:
-        year.select_option(index=1)
+        _search_recent_years(page, invoice_no)
     else:
         choices = []
         for option in year.locator("option").all():
@@ -112,9 +138,9 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
         if len(choices) != 1:
             raise RuntimeError("找不到原發票年度，禁止折讓")
         year.select_option(value=choices[0])
-    page.locator("#invoicenumber").fill(invoice_no)
-    page.locator("a[onclick='SearchInvoice();']").click()
-    page.locator("#s_remark").wait_for(state="visible")
+    if invoice_year is not None:
+        _search_invoice(page, invoice_no)
+        page.locator("#s_remark").wait_for(state="visible")
 
     available_text = page.locator("body").inner_text()
     sales_match = re.search(r"銷售額[\s\S]*?應稅:\$\s*([\d,]+(?:\.\d+)?)", available_text)
