@@ -5,6 +5,7 @@ tools/service_management/stored_value.py
 最後更新：2026-10-20
 
 Change Log：
+- 2026-10-21：排程預約條件改由執行畫面勾選（--booking-gate），期間跟著匯出起迄日。
 - 2026-10-20：建立VIP排程工作表時套用主控試算表「排程預約條件」（例如年節大掃除 V 欄 TRUE 才預約、A 欄含改／加先不約）。
 - 2026-08-12：確認全跑參數允許 --step 0，並依序執行 Step 1 儲值結算與 Step 2 VIP 對帳。
 - 2026-08-12：修正部署版錯誤引用 crm_export；本檔維持完整獨立實作，不再依賴舊相容入口。
@@ -1033,8 +1034,12 @@ def _build_vip_schedule_sheet(
     start_period: str,
     end_period: str = "",
     compare_only: bool = False,
+    booking_gate: tuple[str, str] | None = None,
 ) -> dict:
-    """安全比對本月日曆，已成單異動保留原列供人工核對。"""
+    """安全比對本月日曆，已成單異動保留原列供人工核對。
+
+    booking_gate＝（起日, 迄日）時套用排程預約條件，期間跟著本次匯出起迄日；None＝不套用。
+    """
     from tools.service_management.vip_schedule_diff import sync_schedule
     area_name = area["name"]
     target_id = area.get("target_spreadsheet_id", "") or _load_target_file_id()
@@ -1047,9 +1052,12 @@ def _build_vip_schedule_sheet(
     source = ss.worksheet(f"定期VIP_{area_name}_{suffix}")
     target_name = f"{area_name}{suffix}"
     from tools.service_management.booking_gate import RULE_SHEET_NAME, load_area_gate
-    gate, gate_rules = load_area_gate(gc, area_name, gspread.WorksheetNotFound)
-    if gate_rules:
+    gate, gate_rules = None, []
+    if booking_gate:
+        gate, gate_rules = load_area_gate(gc, area_name, *booking_gate, worksheet_not_found=gspread.WorksheetNotFound)
         log.info("[%s] 套用「%s」：%s", area_name, RULE_SHEET_NAME, "、".join(gate_rules))
+    else:
+        log.info("[%s] 未套用排程預約條件", area_name)
     result = sync_schedule(
         ss, target_name, source.get("A2:S" if getattr(source, "col_count", 19) >= 19 else "A2:R"),
         VIP_SCHEDULE_FALLBACK_HEADERS, gspread.WorksheetNotFound, compare_only=compare_only,
@@ -1075,8 +1083,10 @@ def step3_build_vip_schedule_sheets(
     start_dt: datetime,
     end_dt: datetime,
     compare_only: bool = False,
+    booking_gate: bool = False,
 ) -> dict:
     results = {}
+    gate_period = (start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")) if booking_gate else None
     errors = []
     for area in areas:
         periods = _month_keys(start_dt, end_dt)
@@ -1084,7 +1094,7 @@ def step3_build_vip_schedule_sheets(
         key = f"{area['name']}{suffix}"
         try:
             results[key] = _build_vip_schedule_sheet(
-                gc, area, periods[0], periods[-1], compare_only=compare_only
+                gc, area, periods[0], periods[-1], compare_only=compare_only, booking_gate=gate_period
             )
         except Exception as exc:
             log.error("[%s] VIP排程工作表建立失敗：%s", key, exc)
@@ -1130,6 +1140,8 @@ def main() -> None:
                         help="匯出起始日期 YYYY-MM-DD（預設：本月1日）")
     parser.add_argument("--end",   type=str, default="",
                         help="匯出結束日期 YYYY-MM-DD（預設：本月最後一天）")
+    parser.add_argument("--booking-gate", action="store_true",
+                        help="Step 3／4 套用排程預約條件（期間＝本次 --start～--end）")
     parser.add_argument("--compare-only", action="store_true",
                         help="Step 3 只產生差異工作表，不更新排程內容或底色")
     args = parser.parse_args()
@@ -1216,7 +1228,8 @@ def main() -> None:
         if args.step == 3 or (args.step == 4 and not errors):
             log.info("--- Step 3：建立VIP排程工作表 ---")
             try:
-                step3_build_vip_schedule_sheets(gc, areas, start_dt, end_dt, compare_only=args.compare_only)
+                step3_build_vip_schedule_sheets(gc, areas, start_dt, end_dt, compare_only=args.compare_only,
+                                                booking_gate=args.booking_gate)
             except Exception as e:
                 errors.append(str(e))
                 log.error("Step 3 失敗：%s", e)

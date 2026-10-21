@@ -5646,6 +5646,17 @@ if system_type == "finance_management" and selected_function == "【元大銀行
     else:
         st.caption("請先檢查檔案與金額；確認完成後才可執行。")
 
+booking_gate_state = None
+if system_type == "service_schedule" and selected_function in (
+    "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）",
+):
+    from tools.service_management import booking_gate_ui
+    from tools.service_management.stored_value import SERVICE_AREA_GROUPS
+    booking_gate_state = booking_gate_ui.render(
+        st, list(SERVICE_AREA_GROUPS.get(selected_area_value, (selected_area_value,))),
+        start_date_value, end_date_value,
+    )
+
 _run_button_label = "💾 儲存年度設定" if selected_function == SERVICE_DEEP_CLEAN_SETTINGS else "▶ 執行"
 run_clicked = st.button(
     _run_button_label,
@@ -6554,6 +6565,17 @@ if run_clicked:
                                 "--end",   end_date_value.strftime("%Y-%m-%d")]
                     if selected_area_value and selected_area_value != "全區":
                         cmd += ["--area", selected_area_value]
+                    if step in ("3", "4") and booking_gate_state and booking_gate_state.get("enabled"):
+                        from tools.service_management import booking_gate_ui
+                        _gate_errors = booking_gate_ui.save(booking_gate_state)
+                        if _gate_errors:
+                            raise RuntimeError("排程預約條件設定有誤，未執行：" + "；".join(_gate_errors))
+                        cmd.append("--booking-gate")
+                        add_log("套用排程預約條件：" + "、".join(
+                            f"{_area} {_cfg.get('確認工作表', '')}" for _area, _cfg in booking_gate_state["settings"].items()
+                        ) + f"（{start_date_value} ～ {end_date_value}）", "info")
+                    elif step in ("3", "4"):
+                        add_log("未套用排程預約條件", "info")
                     add_log(f"儲值執行：{selected_function}（step={step}）", "info")
 
                 # ── CRM 功能 ──────────────────────────────────
@@ -6606,6 +6628,10 @@ if run_clicked:
                             st.info(f"{_diff_result['sheet']}：" + ("、".join(
                                 f"{_kind} {_count} 筆" for _kind, _count in _diff_counts.items()
                             ) or "無新增差異"))
+                            _stages = (_diff_result.get("booking_gate") or {}).get("stages") or {}
+                            if _stages:
+                                st.info("預約條件：" + "、".join(
+                                    f"{_name} {_stages[_name]} 列" for _name in ("可約", "改加", "已確認", "未回覆") if _name in _stages))
                             if _diff_result.get("report_url"):
                                 st.markdown(f"[開啟排程差異表]({_diff_result['report_url']})")
                             st.caption(f"詳細差異請查看工作表「{_diff_result['report']}」。"

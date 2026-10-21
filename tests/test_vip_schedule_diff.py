@@ -555,9 +555,9 @@ def test_slot_change_is_written_as_one_time_range():
 
 def test_monthly_confirm_pairing_also_updates_booking_gate_columns():
     from tools.service_management.booking_gate import build_gate, parse_rule
-    rule = parse_rule({"啟用": "TRUE", "地區": "台北", "適用起日": "2026-12-15", "適用迄日": "2027-02-04",
-                       "確認檔案ID": "F", "確認工作表": "2026大掃除", "確認欄": "V", "備註欄": "W",
-                       "排程排除欄": "A", "排除關鍵字": "改,加", "已確認欄": "B", "已確認關鍵字": "已確認"})
+    rule = parse_rule({"地區": "台北", "確認檔案ID": "F", "確認工作表": "2026大掃除", "確認欄": "V", "備註欄": "W",
+                       "排程排除欄": "A", "排除關鍵字": "改,加", "已確認欄": "B", "已確認關鍵字": "已確認"},
+                      "2026-12-01", "2027-02-28")
     confirm = [""] * 23
     confirm[2], confirm[3], confirm[5], confirm[21] = '王小明', '0912345678', '台北市大安區', 'FALSE'
     rows = [_monthly('old1', '2027/01/07'), _monthly('old2', '2027/02/04')]
@@ -571,5 +571,5 @@ def test_monthly_confirm_pairing_also_updates_booking_gate_columns():
     assert sheet.data[1][1] == '已確認' and sheet.data[1][5] == '2027/01/29' and sheet.data[1][8] == '未安排'
     assert sheet.data[1][confirmed] == '已確認' and sheet.data[1][stage] == '已確認'
     second = sheet.data[2] + [''] * len(header)
-    # 2027/02/26 is after the rule period (2027-02-04), so no stage is written.
-    assert second[5] == '2027/02/26' and second[confirmed] == '' and second[stage] == ''
+    # The run period covers 2027/02/26 (customers may move after the holiday).
+    assert second[5] == '2027/02/26' and second[confirmed] == '' and second[stage] == '未回覆'

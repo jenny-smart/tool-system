@@ -268,3 +268,34 @@ def test_lunar_holiday_event_is_paused_and_not_deducted():
 
     assert row["status"] == "暫停"
     assert row["amount"] == 0
+
+
+def test_schedule_builder_applies_booking_gate_only_when_requested_with_run_period():
+    from unittest.mock import patch
+    functions = _load_functions("_build_vip_schedule_sheet")
+    functions.update({"VIP_SCHEDULE_FALLBACK_HEADERS": [""] * 30, "json": __import__("json")})
+    source = SimpleNamespace(get=lambda _range: [["data"]])
+    client = SimpleNamespace(open_by_key=lambda _key: SimpleNamespace(worksheet=lambda _name: source))
+    result = {"sheet": "台北202612", "count": 1, "differences": {}, "report": "差異", "booking_gate": {"stages": {}}}
+    gate = object()
+    with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer, \
+            patch("tools.service_management.booking_gate.load_area_gate", return_value=(gate, ["x"])) as loader:
+        functions["_build_vip_schedule_sheet"](client, {"name": "台北", "target_spreadsheet_id": "t"}, "202612")
+        loader.assert_not_called()
+        assert writer.call_args.kwargs["gate"] is None
+        functions["_build_vip_schedule_sheet"](client, {"name": "台北", "target_spreadsheet_id": "t"}, "202612",
+                                               booking_gate=("2026-12-01", "2027-02-28"))
+    assert loader.call_args.args[1:] == ("台北", "2026-12-01", "2027-02-28")
+    assert writer.call_args.kwargs["gate"] is gate
+
+
+def test_step3_passes_run_period_when_booking_gate_flag_is_set():
+    from datetime import timedelta
+    functions = _load_functions("step3_build_vip_schedule_sheets", "_month_keys")
+    calls = []
+    functions["_build_vip_schedule_sheet"] = lambda gc, area, s, e, compare_only=False, booking_gate=None: calls.append(booking_gate) or {}
+    tz = timezone(timedelta(hours=8))
+    start, end = datetime(2026, 12, 1, tzinfo=tz), datetime(2027, 2, 28, 23, 59, tzinfo=tz)
+    functions["step3_build_vip_schedule_sheets"](None, [{"name": "台北"}], start, end)
+    functions["step3_build_vip_schedule_sheets"](None, [{"name": "台北"}], start, end, booking_gate=True)
+    assert calls == [None, ("2026-12-01", "2027-02-28")]
