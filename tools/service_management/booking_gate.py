@@ -29,7 +29,7 @@ RULE_HEADERS = [
 ]
 # 首次建立工作表時的範例列；之後一律以工作表內容為準。
 EXAMPLE_RULES = [
-    ["TRUE", "台北", "2026-12-15", "2027-02-04", "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
+    ["TRUE", "台北", "2026-12-15", "2027-02-28", "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
      "2026大掃除", "C", "D", "F", "V", "TRUE", "W", "A", "改,加", "", "B", "已確認",
      "年節大掃除：先約可約，再看改加、已確認，最後 review 未回覆"],
 ]
@@ -37,8 +37,8 @@ EXAMPLE_RULES = [
 HEADER_NOTES = {
     "啟用": "TRUE＝更新排程工作表時套用這一列規則。\nFALSE 或空白＝不套用；再更新一次排程，已寫入的回覆確認、確認備註、改加標記、已確認、預約條件五欄會清空。\n只有更新排程時才會讀取，改完要再更新一次排程才生效。",
     "地區": "套用的地區：台北、台中，或「全區」／「共用」＝所有地區。",
-    "適用起日": "服務日期從這天起才套用（YYYY-MM-DD）。期間外的排程列不受影響。",
-    "適用迄日": "服務日期到這天為止才套用（YYYY-MM-DD）。",
+    "適用起日": "服務日期從這天起才套用（YYYY-MM-DD）；空白＝不限制。期間外的排程列不受影響。",
+    "適用迄日": "服務日期到這天為止才套用（YYYY-MM-DD）；空白＝不限制。客人可能改到年後，建議設到日曆匯出的最後一天（例如 2 月底）。",
     "確認檔案ID": "確認表所在的試算表 ID，或直接貼整個網址。",
     "確認工作表": "確認表的工作表名稱，例如 2026大掃除。",
     "姓名欄": "確認表中客人姓名所在欄位字母，用來對應排程的客人。",
@@ -118,7 +118,8 @@ def _address(value: Any) -> str:
 def parse_rule(record: dict[str, Any]) -> dict[str, Any]:
     rule = {header: _text(record.get(header)) for header in RULE_HEADERS}
     start, end = _date(rule["適用起日"]), _date(rule["適用迄日"])
-    if not start or not end or start > end:
+    # Blank start/end means no limit on that side; a filled but unreadable date is an error.
+    if (rule["適用起日"] and not start) or (rule["適用迄日"] and not end) or (start and end and start > end):
         raise ValueError(f"「{RULE_SHEET_NAME}」{rule['地區']} 適用起迄日格式錯誤（YYYY-MM-DD）")
     if not rule["確認檔案ID"] or not rule["確認工作表"] or not rule["確認欄"]:
         raise ValueError(f"「{RULE_SHEET_NAME}」{rule['地區']} 需填確認檔案ID、確認工作表與確認欄")
@@ -186,7 +187,7 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
 
     def gate(values):
         service_date = _date(values[5])
-        if not service_date or not (rule["start"] <= service_date <= rule["end"]):
+        if not service_date or not ((rule["start"] or service_date) <= service_date <= (rule["end"] or service_date)):
             return None
         matched = find(values)
         confirm = "、".join(dict.fromkeys(e["confirm_raw"] for e in matched)) if matched else NOT_FOUND

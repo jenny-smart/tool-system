@@ -188,3 +188,15 @@ def test_existing_confirm_status_column_is_renamed_and_reused():
 
 def test_is_hold_means_every_stage_except_ready():
     assert [is_hold(s) for s in ("改加", "已確認", "可約", "未回覆", "")] == [True, True, False, True, False]
+
+
+def test_blank_period_means_no_limit_and_bad_date_is_rejected():
+    gate = build_gate(rule(適用起日="", 適用迄日=""), [confirm_row()])
+    assert gate(schedule(date="2026/11/01"))[4] == "可約"
+    assert gate(schedule(date="2027/02/26"))[4] == "可約"
+    until_feb = build_gate(rule(適用迄日="2027-02-28"), [confirm_row()])
+    assert until_feb(schedule(date="2027/02/26"))[4] == "可約"
+    with pytest.raises(ValueError):
+        rule(適用迄日="2月底")
+    with pytest.raises(ValueError):
+        rule(適用起日="2027-03-01", 適用迄日="2027-02-28")
