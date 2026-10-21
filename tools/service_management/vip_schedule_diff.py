@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 FIELDS = ["服務人時", "備註", "姓名", "電話", "地址", "日期", "開始時間", "結束時間", "狀態"]
 META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容", "更新日期"]
-GATE_HEADERS = ["回覆確認", "確認備註", "改加標記", "已確認", "預約條件"]  # 排程預約條件，僅規則期間使用
+GATE_HEADERS = ["回覆確認", "確認備註", "改加標記", "已確認", "人時", "預約條件"]  # 排程預約條件，僅規則期間使用
 LEGACY_GATE_HEADERS = {"確認狀態": "回覆確認"}
 TOPUP_HEADERS = ["需儲值"]  # 定期VIP匯出 V 欄：依日期累計超過儲值金餘額的那幾次
 EXTRA_HEADERS = GATE_HEADERS + TOPUP_HEADERS
