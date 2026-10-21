@@ -504,3 +504,42 @@ def test_recreated_sheet_has_no_new_colors_and_later_additions_are_marked():
     sync(book, [source_row(first), source_row(later)])
     assert sheet.data[2][change] == '新增'
     assert any(item['range'].startswith('A3:') for item in sheet.formats)
+
+
+def _monthly(event, date, start='14:00', end='18:00', note='每月確認', status='待確認', order=''):
+    row = old_row(event=event, date=date, start=start, status=status, order=order)
+    row[1], row[7] = note, end
+    return row
+
+
+def test_monthly_confirm_rows_moved_to_new_dates_update_each_row_in_place():
+    rows = [_monthly('old1', '2027/01/07'), _monthly('old2', '2027/02/04')]
+    sources = [source_row(_monthly('new1', '2027/01/29', note='已確認', status='未安排')),
+               source_row(_monthly('new2', '2027/02/26'))]
+    plan = plan_schedule(rows, sources, '台北202701-202702')
+    by_row = {u['row']: u['values'] for u in plan['updates']}
+    assert by_row[2][1] == '已確認' and by_row[2][5] == '2027/01/29' and by_row[2][8] == '未安排'
+    assert by_row[2][31] == '未成單異動'
+    assert by_row[2][32] == '備註：每月確認 → 已確認；日期：2027/01/07 → 2027/01/29；狀態：待確認 → 未安排'
+    assert by_row[3][5] == '2027/02/26' and by_row[3][32] == '日期：2027/02/04 → 2027/02/26'
+    assert all('日曆候選' not in item['detail'] for item in plan['changes'])
+    assert [item['kind'] for item in plan['changes']] == ['未成單異動', '未成單異動']
+
+
+def test_three_unbooked_rows_pair_in_date_order_and_extra_event_is_added():
+    rows = [_monthly(f'o{n}', d, '8:30', '12:30') for n, d in enumerate(('2026/12/15', '2027/01/19', '2027/02/16'))]
+    sources = [source_row(_monthly(f'n{n}', d, note='已確認', status='未安排'))
+               for n, d in enumerate(('2026/12/28', '2027/01/25', '2027/02/01', '2027/02/22'))]
+    plan = plan_schedule(rows, sources, '台北202612-202702')
+    dates = {u['row']: u['values'][5] for u in plan['updates']}
+    assert [dates[2], dates[3], dates[4]] == ['2026/12/28', '2027/01/25', '2027/02/01']
+    assert dates[5] == '2027/02/22'
+    assert [c['kind'] for c in plan['changes']].count('新增') == 1
+
+
+def test_customer_with_a_booked_row_still_needs_manual_review():
+    rows = [_monthly('old1', '2027/01/07', order='LC1', status='已安排'), _monthly('old2', '2027/02/04')]
+    sources = [source_row(_monthly('new1', '2027/01/29')), source_row(_monthly('new2', '2027/02/26'))]
+    plan = plan_schedule(rows, sources, '台北202701-202702')
+    assert any(c['kind'] == '需人工核對' for c in plan['changes'])
+    assert next(u for u in plan['updates'] if u['row'] == 2)['values'][5] == '2027/01/07'
