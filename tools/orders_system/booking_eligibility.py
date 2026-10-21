@@ -3,7 +3,7 @@
 
 可建單＝訂單編號空白＋狀態「未安排」＋「預約條件」空白或屬於本次預約對象。
 「預約條件」由 tool-system 更新排程時依主控試算表「排程預約條件」寫入階段：
-改加、已確認、可約、未回覆（例如年節大掃除）；狀態本身不改。
+改加、人時不足、已確認、可約、未回覆（例如年節大掃除）；狀態本身不改。
 本次預約對象由批次畫面勾選，預設只有「可約」。
 """
 from __future__ import annotations
@@ -13,9 +13,9 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 HOLD_COLUMN = "預約條件"
-STAGE_READY, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY = "可約", "改加", "已確認", "未回覆"
+STAGE_READY, STAGE_CHANGE, STAGE_SHORT, STAGE_CONFIRMED, STAGE_NO_REPLY = "可約", "改加", "人時不足", "已確認", "未回覆"
 # 畫面顯示順序＝建議預約順序。
-STAGES = (STAGE_READY, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY)
+STAGES = (STAGE_READY, STAGE_CHANGE, STAGE_SHORT, STAGE_CONFIRMED, STAGE_NO_REPLY)
 DEFAULT_STAGES = (STAGE_READY,)
 
 # 每個 Streamlit 工作階段在自己的執行緒執行，ContextVar 不會互相影響。

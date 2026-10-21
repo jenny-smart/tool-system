@@ -162,7 +162,7 @@ def render_stage_filter(st, key):
         "本次預約對象（排程「預約條件」欄；空白的列一律照常判斷）", list(STAGES),
         default=list(DEFAULT_STAGES), key=key,
     )
-    st.caption("建議順序：可約 → 改加 → 已確認 → 未回覆。單一客人要例外處理，可直接改該列「預約條件」。")
+    st.caption("建議順序：可約 → 改加 → 人時不足 → 已確認 → 未回覆。單一客人要例外處理，可直接改該列「預約條件」。")
     set_booking_stages(stages)
     return stages
 

@@ -110,6 +110,9 @@ def test_o_text_widget_lists_counts_and_returns_selection(monkeypatch):
 def test_selected_stages_decide_which_rows_can_be_booked():
     from booking_eligibility import booking_stages, current_booking_stages
     rows = {stage: {**BASE, '預約條件': stage} for stage in ('可約', '改加', '已確認', '未回覆', '')}
+    assert not can_create_order({**BASE, '預約條件': '人時不足'})
+    with booking_stages(['人時不足']):
+        assert can_create_order({**BASE, '預約條件': '人時不足'})
     assert current_booking_stages() == ('可約',)
     assert [s for s, row in rows.items() if can_create_order(row)] == ['可約', '']
     with booking_stages(['改加']):
@@ -152,7 +155,7 @@ def test_stage_widget_defaults_to_ready_and_sets_current_stages():
     try:
         assert guard.render_stage_filter(st, 'k') == ['可約', '改加']
         assert st.multiselect.call_args.kwargs['default'] == ['可約']
-        assert st.multiselect.call_args.args[1] == ['可約', '改加', '已確認', '未回覆']
+        assert st.multiselect.call_args.args[1] == ['可約', '改加', '人時不足', '已確認', '未回覆']
         assert current_booking_stages() == ('可約', '改加')
     finally:
         set_booking_stages(('可約',))
