@@ -142,3 +142,25 @@ def test_sync_without_rule_adds_no_columns():
     sheet = Sheet("台北202701", [original])
     sync(sheet, [source_row(original, **{"0": "2人"})], None)
     assert "預約條件" not in sheet.data[0]
+
+
+def test_rule_sheet_is_created_with_header_notes(monkeypatch):
+    from unittest.mock import MagicMock
+    import tools.service_management.booking_gate as gate_module
+
+    class Missing(Exception):
+        pass
+
+    ss = MagicMock()
+    ss.worksheet.side_effect = Missing()
+    sheet = ss.add_worksheet.return_value
+    sheet.id = 7
+    sheet.get_all_values.return_value = [gate_module.RULE_HEADERS] + gate_module.EXAMPLE_RULES
+    monkeypatch.setattr(gate_module, "_master_spreadsheet", lambda gc: ss)
+    rules = gate_module.load_rules(None, "台北", Missing)
+    assert len(rules) == 1 and rules[0]["confirm_letter"] == "V"
+    request = ss.batch_update.call_args.args[0]["requests"][0]["updateCells"]
+    notes = [cell["note"] for cell in request["rows"][0]["values"]]
+    assert request["range"]["sheetId"] == 7 and request["fields"] == "note"
+    assert len(notes) == len(gate_module.RULE_HEADERS) and all(notes)
+    assert notes[0].startswith("TRUE＝更新排程工作表時套用這一列規則")

@@ -32,6 +32,25 @@ EXAMPLE_RULES = [
      "2026大掃除", "C", "D", "F", "V", "TRUE", "W", "A", "改,加", "",
      "年節大掃除：V 欄 TRUE 才預約；排程 A 欄含改／加先不約"],
 ]
+# 工作表標題的滑鼠提示，建立工作表時寫入。
+HEADER_NOTES = {
+    "啟用": "TRUE＝更新排程工作表時套用這一列規則。\nFALSE 或空白＝不套用；再更新一次排程，已寫入的確認狀態、確認備註、改加標記、預約條件四欄會清空。\n只有更新排程時才會讀取，改完要再更新一次排程才生效。",
+    "地區": "套用的地區：台北、台中，或「全區」／「共用」＝所有地區。",
+    "適用起日": "服務日期從這天起才套用（YYYY-MM-DD）。期間外的排程列不受影響。",
+    "適用迄日": "服務日期到這天為止才套用（YYYY-MM-DD）。",
+    "確認檔案ID": "確認表所在的試算表 ID，或直接貼整個網址。",
+    "確認工作表": "確認表的工作表名稱，例如 2026大掃除。",
+    "姓名欄": "確認表中客人姓名所在欄位字母，用來對應排程的客人。",
+    "電話欄": "確認表中電話所在欄位字母。",
+    "地址欄": "確認表中地址所在欄位字母；同電話不同地址會分開對應。",
+    "確認欄": "確認表中「已確認」所在欄位字母，例如 V。值會帶入排程「確認狀態」欄。",
+    "確認值": "確認欄的值是這些才算已確認，可填多個，用逗號分隔，例如 TRUE。",
+    "備註欄": "確認表中備註所在欄位字母，例如 W。值會帶入排程「確認備註」欄，只供參考，不影響約不約。",
+    "排程排除欄": "排程工作表中要檢查排除關鍵字的欄位字母，例如 A（日曆標題第一個《》內容）。",
+    "排除關鍵字": "排程排除欄或確認表排除欄含這些字就先不約，可填多個，用逗號分隔，例如 改,加。找到的字會帶入排程「改加標記」欄。",
+    "確認表排除欄": "選填。確認表中也要檢查排除關鍵字的欄位字母；空白＝不檢查。",
+    "說明": "自由填寫，程式不讀取。",
+}
 HOLD_PREFIX = "先不約"
 NOT_FOUND = "查無"
 
@@ -201,6 +220,19 @@ def _master_spreadsheet(gc):
     return gc.open_by_key(master_id)
 
 
+def _write_header_notes(ss, sheet) -> None:
+    """標題列加上滑鼠提示；失敗不影響排程更新。"""
+    try:
+        ss.batch_update({"requests": [{"updateCells": {
+            "range": {"sheetId": sheet.id, "startRowIndex": 0, "endRowIndex": 1,
+                      "startColumnIndex": 0, "endColumnIndex": len(RULE_HEADERS)},
+            "rows": [{"values": [{"note": HEADER_NOTES.get(name, "")} for name in RULE_HEADERS]}],
+            "fields": "note",
+        }}]})
+    except Exception:
+        pass
+
+
 def load_rules(gc, area_name: str, worksheet_not_found=Exception) -> list[dict[str, Any]]:
     ss = _master_spreadsheet(gc)
     try:
@@ -208,6 +240,7 @@ def load_rules(gc, area_name: str, worksheet_not_found=Exception) -> list[dict[s
     except worksheet_not_found:
         sheet = ss.add_worksheet(title=RULE_SHEET_NAME, rows=50, cols=len(RULE_HEADERS))
         sheet.update(values=[RULE_HEADERS] + EXAMPLE_RULES, range_name="A1", value_input_option="USER_ENTERED")
+        _write_header_notes(ss, sheet)
     values = sheet.get_all_values()
     header = [_text(v) for v in (values[0] if values else [])]
     rules = []
