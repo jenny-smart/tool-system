@@ -11,8 +11,9 @@
                  （退款金額 S 大於儲值金時先扣 S、再扣剩餘餘額）；第一筆 Agent 直接送出，
                  剩餘餘額那筆 Agent 填表、人工確認按送出，完成後填 M 歸零時間
               ② 開折讓單（同待退款）
-              ③ 退款（M 已歸零才退）：R＝信用卡 → 藍新退款；R＝ATM → 台北／台中富邦 ATM 退款，
-                 桃園／新竹／高雄先不處理；退款完成 AC 填退款時間、B 欄改為 VIP已退券，再回寫檸檬後台
+              ③ 退款（M 已歸零、AB 折讓單已開才退）：台北／台中 R＝信用卡 → 藍新退款、R＝ATM → 富邦 ATM 退款；
+                 桃園／新竹／高雄退款由財務處理（財務填 AC）；退款完成 AC 填退款時間、B 欄改為 VIP已退券，
+                 再回寫檸檬後台
   - 待收款：M 收款時間空白 → 未備妥；M、N 有值、O 發票空白 → 開立發票（同【鯨躍發票】開立發票：
             沿用訂單發票設定、Agent 填表、人工按下一步及儲存，回填 O／AA）
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
@@ -170,10 +171,10 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             payway = item["payway"].upper()
             if not payway:
                 item["missing"].append("缺付款方式（R）")
-            elif is_vip and "ATM" in payway and region not in ATM_REFUND_REGIONS:
-                item["progress"].append(f"{region} ATM 退券先不處理")
-            elif is_vip and not _cell(row, "M"):
-                pass  # 儲值金／購物金歸零後才退款
+            elif is_vip and region not in ATM_REFUND_REGIONS:
+                item["progress"].append(f"{region} 退款由財務處理（完成後填 AC 退款時間）")
+            elif is_vip and not (_cell(row, "M") and _cell(row, "AB")):
+                item["progress"].append("儲值金歸零及折讓單完成後才退款")
             elif "ATM" in payway:
                 if not re.sub(r"\D", "", _cell(row, "P")) or not re.sub(r"\D", "", _cell(row, "Q")):
                     item["missing"].append("缺退款銀行代碼／帳號（P／Q）")
