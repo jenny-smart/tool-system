@@ -2,6 +2,8 @@
 """批次建單優化＋雲端批次成單。"""
 from __future__ import annotations
 import argparse
+import json
+import os
 import time
 from cloud_booking_progress import Progress
 from collections import defaultdict
@@ -9,7 +11,7 @@ from accounts import ACCOUNTS
 import batch_booking_optimized as batch_opt
 from orders import get_region_by_address
 from batch_recovery_meta import install_patch as install_recovery_meta_patch
-from selected_row_status_guard import install_patch as install_selected_row_status_guard, _auto_filter_rows, _safe_load_candidates
+from selected_row_status_guard import install_patch as install_selected_row_status_guard, _auto_filter_rows, _held_rows, _safe_load_candidates
 from hybrid_batch_runner import run_process_web_hybrid
 
 install_selected_row_status_guard()
@@ -21,7 +23,7 @@ def _bool_text(value) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = "", allow_auto_lemon=False, retry_failed=False):
+def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = "", allow_auto_lemon=False, retry_failed=False, o_texts=None):
     excluded = excluded or set()
     candidates = _safe_load_candidates(batch_opt, sheet_name, allow_failed=retry_failed)
     allowed_rows = None
@@ -30,7 +32,7 @@ def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selec
         if filter_mode in ("no_schedule", "both"):
             allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "no_schedule", region=selected_region or None, allow_failed=retry_failed, candidates=candidates))
         if filter_mode in ("missing_order", "both"):
-            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None, allow_failed=retry_failed, candidates=candidates))
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, "missing_order", region=selected_region or None, allow_failed=retry_failed, candidates=candidates, o_texts=o_texts))
     result = []
     for _, row in candidates.sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
@@ -46,7 +48,16 @@ def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selec
     return result
 
 
-def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False, retry_failed=False) -> int:
+def held_rows(sheet_name: str, filter_mode: str = "all", selected_region: str = "", retry_failed=False, o_texts=None):
+    """先不約略過的列；顯示用，失敗時不影響成單。"""
+    try:
+        return _held_rows(batch_opt, sheet_name, filter_mode, selected_region or None, allow_failed=retry_failed, o_texts=o_texts)
+    except Exception as exc:
+        print(f"HELD_UNAVAILABLE: 無法計算先不約列數：{exc}", flush=True)
+        return []
+
+
+def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False, retry_failed=False, o_texts=None) -> int:
     attempted = set()
     success_total = fail_total = 0
     progress = Progress(sheet_name)
@@ -55,10 +66,16 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
     candidate_total = 0
     started = time.monotonic()
     print(f"FILTER mode={filter_mode}; region={selected_region or 'auto'}; auto_lemon_shift={'ON' if allow_auto_lemon else 'OFF'}; retry_failed={'ON' if retry_failed else 'OFF'}", flush=True)
+    if o_texts and filter_mode in ("missing_order", "both"):
+        print(f"FILTER O欄內容：{'｜'.join(o_texts)}", flush=True)
     print("STRATEGY multi-row-groups-first -> single-rows; Calendar only after order writeback", flush=True)
     while True:
-        pending = load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed)
+        pending = load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed, o_texts)
         if target_total is None:
+            held = held_rows(sheet_name, filter_mode, selected_region, retry_failed, o_texts)
+            progress.held = len(held)
+            if held:
+                print(f"HELD 先不約略過 {len(held)} 列：{','.join(map(str, held))}", flush=True)
             candidate_total = len(pending)
             target_total = min(len(pending), max_rows) if max_rows else len(pending)
             progress.publish('準備成單', 0, 0, 0, len(pending), target_total)
@@ -122,11 +139,23 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
         if pause_seconds:
             time.sleep(pause_seconds)
-    remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed))
+    remaining = len(load_pending(sheet_name, attempted, filter_mode, selected_region, allow_auto_lemon, retry_failed, o_texts))
     progress.publish('完成' if not fail_total else '部分失敗', processed, success_total, fail_total,
                      remaining, target_total or 0)
-    print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining}", flush=True)
+    print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining} held={progress.held}", flush=True)
     return 0 if fail_total == 0 else 2
+
+
+def _o_texts_from_env():
+    """O 欄勾選內容以 JSON 經環境變數傳入，避免特殊字元進入 shell 指令。"""
+    raw = os.getenv("O_TEXTS_JSON", "").strip()
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw)
+    except ValueError:
+        raise SystemExit("O_TEXTS_JSON 格式錯誤，未執行成單")
+    return [str(v) for v in values] if isinstance(values, list) else []
 
 
 def main():
@@ -142,7 +171,8 @@ def main():
     a = p.parse_args()
     if a.chunk_size < 1:
         p.error("--chunk-size 必須 >= 1")
-    return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(), _bool_text(a.allow_auto_lemon), _bool_text(a.retry_failed))
+    return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(),
+               _bool_text(a.allow_auto_lemon), _bool_text(a.retry_failed), _o_texts_from_env())
 
 
 if __name__ == "__main__":

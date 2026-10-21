@@ -667,11 +667,13 @@ def get_region_by_address(address, accounts_config):
 
 
 def should_process_row(row):
-    return str(row.get("狀態", "")).strip() == "未安排" and is_blank(row.get("訂單編號", ""))
+    from booking_eligibility import can_create_order
+    return can_create_order(row)
 
 
 def should_create_order(row):
-    return str(row.get("狀態", "")).strip() == "未安排" and is_blank(row.get("訂單編號", ""))
+    from booking_eligibility import can_create_order
+    return can_create_order(row)
 
 
 # =========================

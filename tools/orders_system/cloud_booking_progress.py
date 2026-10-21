@@ -5,7 +5,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 TITLE = '_雲端成單進度'
-HEADERS = ['執行識別', '工作表', '階段', '處理列數', '成功列數', '失敗列數', '剩餘列數', '本次目標列數', '目前列號', '更新時間']
+HEADERS = ['執行識別', '工作表', '階段', '處理列數', '成功列數', '失敗列數', '剩餘列數', '本次目標列數', '目前列號', '更新時間',
+           '先不約略過列數']
 
 
 def decode(values):
@@ -17,8 +18,14 @@ def decode(values):
             return None
     except (TypeError, ValueError):
         return None
-    return dict(zip(['key', 'sheet', 'phase', 'processed', 'success', 'failed', 'remaining', 'total', 'rows', 'updated_at'],
-                    list(values[:3]) + counts + list(values[8:10])))
+    snapshot = dict(zip(['key', 'sheet', 'phase', 'processed', 'success', 'failed', 'remaining', 'total', 'rows', 'updated_at'],
+                        list(values[:3]) + counts + list(values[8:10])))
+    # 舊版進度列沒有第 11 欄；空白或不合法都視為 0。
+    try:
+        snapshot['held'] = max(int(values[10]), 0) if len(values) > 10 and str(values[10]).strip() else 0
+    except (TypeError, ValueError):
+        snapshot['held'] = 0
+    return snapshot
 
 
 def read_progress(run_id, attempt=1):
@@ -31,7 +38,7 @@ def read_progress(run_id, attempt=1):
     key = f'{run_id}:{attempt}'
     keys = sheet.col_values(1)
     matches = [i for i, value in enumerate(keys, 1) if value == key]
-    return decode(sheet.get(f'A{matches[-1]}:J{matches[-1]}')[0]) if matches else None
+    return decode(sheet.get(f'A{matches[-1]}:K{matches[-1]}')[0]) if matches else None
 
 
 class Progress:
@@ -41,6 +48,7 @@ class Progress:
         self.sheet = None
         self.row = None
         self.last_published = None
+        self.held = 0
 
     def publish(self, phase, processed, success, failed, remaining, total, rows=''):
         if self.key.startswith(':'):
@@ -56,15 +64,17 @@ class Progress:
                 try:
                     self.sheet = book.worksheet(TITLE)
                 except gspread.WorksheetNotFound:
-                    self.sheet = book.add_worksheet(title=TITLE, rows=200, cols=10)
-                    self.sheet.update(range_name='A1:J1', values=[HEADERS], value_input_option='RAW')
+                    self.sheet = book.add_worksheet(title=TITLE, rows=200, cols=len(HEADERS))
+                if self.sheet.col_count < len(HEADERS):
+                    self.sheet.resize(cols=len(HEADERS))
+                self.sheet.update(range_name='A1:K1', values=[HEADERS], value_input_option='RAW')
             values = [self.key, self.name, phase, processed, success, failed, remaining, total, rows,
-                      datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')]
+                      datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'), self.held]
             if self.row is None:
                 result = self.sheet.append_row(values, value_input_option='RAW')
                 self.row = int(re.search(r'!A(\d+)', result['updates']['updatedRange']).group(1))
             else:
-                self.sheet.update(range_name=f'A{self.row}:J{self.row}', values=[values], value_input_option='RAW')
+                self.sheet.update(range_name=f'A{self.row}:K{self.row}', values=[values], value_input_option='RAW')
             self.last_published = time.monotonic()
         except Exception:
             print('PROGRESS_UNAVAILABLE: 無法同步畫面進度；成單流程繼續，請查看日誌。', flush=True)

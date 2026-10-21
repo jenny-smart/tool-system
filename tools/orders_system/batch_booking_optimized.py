@@ -93,8 +93,9 @@ def _load_candidates(sheet_name: str) -> pd.DataFrame:
     for c in REQUIRED_COLUMNS:
         work[c] = work[c].map(_text)
 
-    # 建單候選必須同時符合 I 欄未安排、M 欄訂單編號空白。
-    work = work[work["狀態"].eq("未安排") & work["訂單編號"].eq("")]
+    # 建單候選：I 欄未安排、M 欄訂單編號空白、預約條件非「先不約」（三種批次共用）。
+    from booking_eligibility import can_create_order
+    work = work[work.apply(can_create_order, axis=1).astype(bool)] if len(work) else work
     work = work[
         work["姓名"].ne("")
         & work["電話"].ne("")

@@ -16,6 +16,7 @@ import requests
 
 import orders as _orders
 from accounts import ACCOUNTS
+from booking_eligibility import create_block_reason
 
 _BASE_RUN_PROCESS_WEB = _orders.run_process_web
 _BASE_STAGE_CALENDAR_COLOR = _orders.stage_calendar_color
@@ -278,6 +279,15 @@ def _recover_before_create(
     if not blanks:
         return ws, [], [], [], 0
 
+    # 三種批次共用：狀態非未安排、或預約條件「先不約」的列只做中斷復原，不建新單。
+    not_creatable = {}
+    for row_no, row, _key in blanks:
+        reason = create_block_reason(row)
+        if reason:
+            not_creatable[row_no] = reason
+    for row_no, reason in sorted(not_creatable.items()):
+        logger(f"⏭️ 第 {row_no} 列不建單：{reason}")
+
     session = requests.Session()
     if not _orders.login(session, backend_email, backend_password):
         raise RuntimeError("後台登入失敗，無法執行批次建單斷點檢查")
@@ -345,7 +355,7 @@ def _recover_before_create(
         recovered_set = set(recovered)
         blocked_set = set(blocked)
         for row_no, _ in row_items:
-            if row_no not in recovered_set and row_no not in blocked_set:
+            if row_no not in recovered_set and row_no not in blocked_set and row_no not in not_creatable:
                 remaining.append(row_no)
 
     return ws, sorted(remaining), sorted(recovered), sorted(blocked), len(blanks)

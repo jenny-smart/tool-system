@@ -15,12 +15,12 @@ def test_publisher_updates_one_row_per_attempt_and_contains_no_customer_data():
     with patch.dict('os.environ', {'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '2'}):
         progress = Progress('sheet')
     sheet = MagicMock()
-    sheet.append_row.return_value = {'updates': {'updatedRange': "'_雲端成單進度'!A4:J4"}}
+    sheet.append_row.return_value = {'updates': {'updatedRange': "'_雲端成單進度'!A4:K4"}}
     progress.sheet = sheet
     progress.publish('成單中', 0, 0, 0, 2, 2, '22')
     progress.publish('完成', 2, 1, 1, 0, 2)
     assert sheet.append_row.call_count == 1
-    assert sheet.update.call_args.kwargs['range_name'] == 'A4:J4'
+    assert sheet.update.call_args.kwargs['range_name'] == 'A4:K4'
     assert sheet.update.call_args.kwargs['values'][0][:8] == ['123:2', 'sheet', '完成', 2, 1, 1, 0, 2]
 
 
@@ -43,6 +43,7 @@ def test_live_group_callback_reports_completed_rows_before_finish():
     with patch.object(cloud, 'load_pending', side_effect=pending), \
          patch.object(cloud, 'ACCOUNTS', {'台北': {'email': 'test', 'password': 'test'}}), \
          patch.object(cloud, 'run_process_web_hybrid', side_effect=run_group), \
+         patch.object(cloud, 'held_rows', return_value=[]), \
          patch.object(cloud, 'Progress') as reporter:
         assert cloud.run('sheet', pause_seconds=0) == 2
     calls = [call.args for call in reporter.return_value.publish.call_args_list]
@@ -78,3 +79,33 @@ def test_page_renders_attempt_specific_progress_and_failure_snapshot():
     st.columns.return_value[0].metric.assert_called_once_with('已處理', '3 列')
     assert st.session_state['cloud_live_123_2'] == snapshot
     assert '中止前最後回報' in st.caption.call_args.args[0]
+
+
+def test_held_count_is_published_and_old_rows_default_to_zero():
+    assert decode(['123:2', 'sheet', '成單中', '3', '2', '1', '7', '10', '22', 'time'])['held'] == 0
+    assert decode(['123:2', 'sheet', '成單中', '3', '2', '1', '7', '10', '22', 'time', '4'])['held'] == 4
+    rows = [(2, '台北', '')]
+    with patch.object(cloud, 'load_pending', side_effect=lambda sheet, excluded, *a: [r for r in rows if r[0] not in excluded]), \
+         patch.object(cloud, 'ACCOUNTS', {'台北': {'email': 'test', 'password': 'test'}}), \
+         patch.object(cloud, 'run_process_web_hybrid', return_value={'success_count': 1, 'fail_count': 0}), \
+         patch.object(cloud, 'held_rows', return_value=[5, 6]), \
+         patch.object(cloud, 'Progress') as reporter:
+        assert cloud.run('sheet', pause_seconds=0) == 0
+    assert reporter.return_value.held == 2
+
+
+def test_page_shows_held_rows():
+    import ast
+    from pathlib import Path
+    import cloud_booking_progress
+    source = Path('cloud_batch_booking_ui.py').read_text()
+    fn = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == '_render_live_progress')
+    st = MagicMock()
+    st.session_state = {}
+    st.columns.return_value = [MagicMock() for _ in range(4)]
+    ns = {'st': st}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), 'ui', 'exec'), ns)
+    snapshot = decode(['123:2', 'sheet', '成單中', '3', '2', '1', '7', '10', '22', 'time', '3'])
+    with patch.object(cloud_booking_progress, 'read_progress', return_value=snapshot):
+        ns['_render_live_progress']({'id': 123, 'run_attempt': 2, 'status': 'in_progress'})
+    assert '先不約略過 3 列' in st.info.call_args.args[0]
