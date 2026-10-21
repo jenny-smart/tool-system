@@ -42,3 +42,14 @@ def test_agent_failure_message_includes_error_line(monkeypatch):
     local_agent._unified_task_log(task, "failed", "執行失敗（exit 1）", log)
     assert calls[0]["area"] == "台北" and calls[0]["period"] == "2026-10-20"
     assert "富邦登入逾時" in calls[0]["message"] and calls[0]["operator"] == "排程系統"
+    assert calls[0]["function"] == "【富邦銀行】富邦明細下載" and calls[0]["source_file"] == "fubon.download"
+
+
+def test_every_registered_agent_action_has_chinese_label():
+    import re
+    from pathlib import Path
+    from tools import local_agent
+
+    source = Path(local_agent.__file__).read_text(encoding="utf-8")
+    actions = re.findall(r'^register_action\("([^"]+)"', source, re.M)
+    assert actions and not [a for a in actions if a not in local_agent.ACTION_LABELS]
