@@ -11,6 +11,8 @@ FIELDS = ["服務人時", "備註", "姓名", "電話", "地址", "日期", "開
 META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容", "更新日期"]
 GATE_HEADERS = ["回覆確認", "確認備註", "改加標記", "已確認", "預約條件"]  # 排程預約條件，僅規則期間使用
 LEGACY_GATE_HEADERS = {"確認狀態": "回覆確認"}
+TOPUP_HEADERS = ["需儲值"]  # 定期VIP匯出 V 欄：依日期累計超過儲值金餘額的那幾次
+EXTRA_HEADERS = GATE_HEADERS + TOPUP_HEADERS
 COLORS = {
     "新增": {"red": 1, "green": .96, "blue": .72},
     "未成單異動": {"red": 1, "green": .96, "blue": .72},
@@ -339,13 +341,13 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         header = current_header[0] if current_header else []
         # Earlier 確認狀態 column is reused (and renamed) as 回覆確認.
         header = [LEGACY_GATE_HEADERS.get(v, v) if i >= 33 else v for i, v in enumerate(header)]
-        columns = _tracking_columns(header, physical_rows, META_HEADERS + GATE_HEADERS)
+        columns = _tracking_columns(header, physical_rows, META_HEADERS + EXTRA_HEADERS)
         read_columns = _read_tracking_columns(header, columns)
         existing = _internal_rows(physical_rows, read_columns)
         if len(header) >= 30: headers = header[:30]
     except worksheet_not_found:
         target, existing, physical_rows, header = None, [], [], []
-        columns = list(range(33, 33 + len(META_HEADERS) + len(GATE_HEADERS)))
+        columns = list(range(33, 33 + len(META_HEADERS) + len(EXTRA_HEADERS)))
         created = True
     # Detect moves to another month by stable event identity, avoiding duplicate orders.
     area = re.sub(r"\d{6}(?:-\d{6})?$", "", target_name)
@@ -371,8 +373,25 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                    for row, values in final_rows.items()}
     held_rows = sorted(row for row, values in gate_values.items() if is_hold(values[-1]))
     stage_counts = dict(Counter(values[-1] for values in gate_values.values() if values[-1]))
-    if not any(name in header[33:] for name in GATE_HEADERS) and not any(any(v) for v in gate_values.values()):
-        columns = columns[:len(META_HEADERS)]
+    # 需儲值 comes from the export's V column, matched by event ID, else by customer and slot.
+    topup_by_id, topup_by_slot = {}, {}
+    for source_row in source_rows:
+        flag = _text(source_row[21]) if len(source_row) > 21 else ""
+        if len(source_row) > 18 and _text(source_row[18]):
+            topup_by_id[_text(source_row[18])] = flag
+        topup_by_slot[_key(source_row, (2, 3, 4, 5, 6, 7))] = flag
+    topup_values = {row: ((topup_by_id.get(values[30]) if values[30] in topup_by_id
+                           else topup_by_slot.get(_key(values, (2, 3, 4, 5, 6, 7)), "")) or "",)
+                    if not _text(values[12]) else ("",)
+                    for row, values in final_rows.items()}
+    # Each extra group gets columns only when it has data now or was written before.
+    extra_groups, meta_columns, offset = [], columns[:len(META_HEADERS)], len(META_HEADERS)
+    for names, group_values in ((GATE_HEADERS, gate_values), (TOPUP_HEADERS, topup_values)):
+        group_columns = columns[offset:offset + len(names)]
+        offset += len(names)
+        if any(name in header[33:] for name in names) or any(any(v) for v in group_values.values()):
+            extra_groups.append((names, group_columns, group_values))
+    columns = meta_columns + [c for _, group_columns, _ in extra_groups for c in group_columns]
     if not compare_only:
         if target is not None and (target.get(existing_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != physical_rows or
                                    target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != current_header):
@@ -385,7 +404,7 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             target.resize(rows=max(target.row_count, required_rows), cols=max(target.col_count, required_cols))
         if created:
             target.update(values=[list(headers[:30])], range_name="A1:AD1", value_input_option="RAW")
-        for column, name in zip(columns, META_HEADERS + GATE_HEADERS):
+        for column, name in zip(columns, META_HEADERS + [n for names, _, _ in extra_groups for n in names]):
             target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
         updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
         updates, phones, colors = [], [], []
@@ -435,10 +454,10 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}",
                            "format": {"backgroundColor": {"red": 1, "green": .80, "blue": .80}}})
         gate_updates = []
-        if len(columns) > len(META_HEADERS):
-            for row, values in gate_values.items():
+        for _, group_columns, group_values in extra_groups:
+            for row, values in group_values.items():
                 physical = physical_rows[row - 2] if row - 2 < len(physical_rows) else []
-                for column, value in zip(columns[len(META_HEADERS):], values):
+                for column, value in zip(group_columns, values):
                     current = _text(physical[column]) if column < len(physical) else ""
                     if value != current:
                         gate_updates.append({"range": f"{_column(column)}{row}", "values": [[value]]})
