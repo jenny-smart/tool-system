@@ -118,6 +118,7 @@ class CloudDispatchTest(unittest.TestCase):
                     'optimized_cloud_confirm': True,
                 }.get(kw.get('key'), False)
                 st.button.return_value = True
+                st.multiselect.return_value = ['可約']
                 with patch.object(ui, 'st', st), patch.object(ui, '_render_cloud_status'), \
                      patch.object(cloud, 'load_pending', return_value=[(3, '台北', '')]) as pending, \
                      patch.object(ui, '_dispatch', return_value={}) as dispatch:
@@ -125,7 +126,8 @@ class CloudDispatchTest(unittest.TestCase):
                 self.assertIs(pending.call_args.kwargs['retry_failed'], retry)
                 self.assertIs(dispatch.call_args.args[6], retry)
                 self.assertEqual(dispatch.call_args.args[7], [])
-                self.assertEqual(st.session_state['optimized_cloud_pending_key'], ('sheet', '台北', 'all', False, retry, ()))
+                self.assertEqual(dispatch.call_args.args[8], ['可約'])
+                self.assertEqual(st.session_state['optimized_cloud_pending_key'], ('sheet', '台北', 'all', False, retry, (), ('可約',)))
 
 
 class CloudStatusTest(unittest.TestCase):

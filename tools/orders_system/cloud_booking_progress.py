@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 TITLE = '_雲端成單進度'
 HEADERS = ['執行識別', '工作表', '階段', '處理列數', '成功列數', '失敗列數', '剩餘列數', '本次目標列數', '目前列號', '更新時間',
-           '先不約略過列數']
+           '未選對象略過列數']
 
 
 def decode(values):

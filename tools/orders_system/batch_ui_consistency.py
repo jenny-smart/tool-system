@@ -36,7 +36,7 @@ def _region_credentials(region: str, fallback_email: str, fallback_password: str
 
 def render_optimized_like_batch(backend_email: str, backend_password: str, env: str) -> None:
     import batch_booking_optimized as batch_opt
-    from selected_row_status_guard import _auto_filter_rows, _held_for_request, render_o_text_filter
+    from selected_row_status_guard import _auto_filter_rows, _held_for_request, held_message, render_o_text_filter, render_stage_filter
 
     st = batch_opt.st
     batch_opt.step("4", "執行設定")
@@ -61,7 +61,8 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
     st.markdown('<div class="hint-box">建單與回填優先；只有勾選改日曆且該筆已有訂單編號後，才初始化 Google Calendar。</div>', unsafe_allow_html=True)
     allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="batch_opt_allow_auto_lemon")
     st.caption("指定範圍及自動篩選可包含失敗列；調整後可直接重試，不必清空 N 欄結果。")
-    st.caption("三種批次共用建單條件：訂單編號空白＋狀態未安排＋「預約條件」欄不是「先不約」；先不約的列會略過並在執行過程註明原因。")
+    st.caption("三種批次共用建單條件：訂單編號空白＋狀態未安排＋「預約條件」空白或在本次預約對象內；其他列會略過並在執行過程註明原因。")
+    render_stage_filter(st, "batch_opt_booking_stages")
     auto_no_slot = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="batch_opt_auto_no_slot")
     auto_missing_o = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="batch_opt_auto_missing_o")
     o_texts = render_o_text_filter(st, batch_opt, sheet_name, region, "batch_opt_o_texts") if auto_missing_o else []
@@ -113,14 +114,14 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
         held = _held_for_request(batch_opt, sheet_name, region, explicit_rows, modes, o_texts=o_texts)
         invalid = [row_no for row_no in invalid if row_no not in set(held)]
         if held:
-            ui_log(f"⏭️ 先不約略過 {len(held)} 列：" + "、".join(map(str, held)))
+            ui_log(f"⏭️ {held_message(batch_opt, sheet_name, held)}：" + "、".join(map(str, held)))
         if invalid:
             ui_log("⏭️ 略過不符合執行條件列：" + "、".join(map(str, invalid)))
         if region_mismatch:
             ui_log(f"⏭️ 略過非{region}列：" + "、".join(map(str, region_mismatch)))
         if not target_rows:
             if held:
-                st.info(f"先不約略過 {len(held)} 列，沒有其他符合執行條件的列。")
+                st.info(f"{held_message(batch_opt, sheet_name, held)}，沒有其他符合執行條件的列。")
                 return
             raise ValueError("指定範圍內沒有符合執行條件的列。")
 
@@ -136,7 +137,7 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
             allow_auto_lemon_shift=allow_auto_lemon, selected_rows=target_rows,
         ) or {}
         st.success(f"執行完成：成功 {int(result.get('success_count', 0) or 0)}，失敗 {int(result.get('fail_count', 0) or 0)}，"
-                   f"先不約略過 {len(held)}，其他略過 {len(invalid) + len(region_mismatch)}。")
+                   f"未選對象略過 {len(held)}，其他略過 {len(invalid) + len(region_mismatch)}。")
     except Exception as exc:
         ui_log(f"❌ 執行失敗：{exc}")
         st.error(f"執行失敗：{exc}")

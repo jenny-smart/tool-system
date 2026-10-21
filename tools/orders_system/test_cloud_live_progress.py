@@ -108,4 +108,24 @@ def test_page_shows_held_rows():
     snapshot = decode(['123:2', 'sheet', '成單中', '3', '2', '1', '7', '10', '22', 'time', '3'])
     with patch.object(cloud_booking_progress, 'read_progress', return_value=snapshot):
         ns['_render_live_progress']({'id': 123, 'run_attempt': 2, 'status': 'in_progress'})
-    assert '先不約略過 3 列' in st.info.call_args.args[0]
+    assert '未選入本次預約對象略過 3 列' in st.info.call_args.args[0]
+
+
+def test_cloud_stages_env_defaults_and_validates():
+    import pytest
+    with patch.dict('os.environ', {'STAGES_JSON': ''}):
+        assert cloud._stages_from_env() == ['可約']
+    with patch.dict('os.environ', {'STAGES_JSON': '["改加", "已確認"]'}):
+        assert cloud._stages_from_env() == ['改加', '已確認']
+    with patch.dict('os.environ', {'STAGES_JSON': '["先不約"]'}), pytest.raises(SystemExit):
+        cloud._stages_from_env()
+
+
+def test_cloud_main_runs_with_selected_stages():
+    from booking_eligibility import current_booking_stages
+    seen = []
+    with patch.dict('os.environ', {'STAGES_JSON': '["改加"]', 'O_TEXTS_JSON': ''}), \
+         patch('sys.argv', ['cloud_batch_booking.py', '--sheet', 's']), \
+         patch.object(cloud, 'run', side_effect=lambda *a, **k: seen.append(current_booking_stages()) or 0):
+        assert cloud.main() == 0
+    assert seen == [('改加',)] and current_booking_stages() == ('可約',)

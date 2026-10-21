@@ -279,7 +279,7 @@ def _recover_before_create(
     if not blanks:
         return ws, [], [], [], 0
 
-    # 三種批次共用：狀態非未安排、或預約條件「先不約」的列只做中斷復原，不建新單。
+    # 三種批次共用：狀態非未安排、或預約條件不在本次預約對象的列只做中斷復原，不建新單。
     not_creatable = {}
     for row_no, row, _key in blanks:
         reason = create_block_reason(row)

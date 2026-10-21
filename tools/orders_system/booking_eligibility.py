@@ -1,16 +1,42 @@
 # -*- coding: utf-8 -*-
 """三種批次成單共用的建單條件（批次建單／批次建單優化／雲端批次成單）。
 
-可建單＝訂單編號空白＋狀態「未安排」＋「預約條件」欄不是「先不約」開頭。
-「預約條件」由 tool-system 更新排程時依主控試算表「排程預約條件」寫入
-（例如年節大掃除：確認表 V 欄非 TRUE、或 A 欄標記改／加），狀態本身不改。
+可建單＝訂單編號空白＋狀態「未安排」＋「預約條件」空白或屬於本次預約對象。
+「預約條件」由 tool-system 更新排程時依主控試算表「排程預約條件」寫入階段：
+改加、已確認、可約、未回覆（例如年節大掃除）；狀態本身不改。
+本次預約對象由批次畫面勾選，預設只有「可約」。
 """
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 HOLD_COLUMN = "預約條件"
-HOLD_PREFIX = "先不約"
+STAGE_READY, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY = "可約", "改加", "已確認", "未回覆"
+# 畫面顯示順序＝建議預約順序。
+STAGES = (STAGE_READY, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY)
+DEFAULT_STAGES = (STAGE_READY,)
+
+# 每個 Streamlit 工作階段在自己的執行緒執行，ContextVar 不會互相影響。
+_allowed_stages = ContextVar("allowed_booking_stages", default=DEFAULT_STAGES)
+
+
+def set_booking_stages(stages) -> None:
+    _allowed_stages.set(tuple(stages))
+
+
+@contextmanager
+def booking_stages(stages):
+    token = _allowed_stages.set(tuple(stages))
+    try:
+        yield
+    finally:
+        _allowed_stages.reset(token)
+
+
+def current_booking_stages() -> tuple:
+    return _allowed_stages.get()
 
 
 def _scalar(value):
@@ -31,9 +57,16 @@ def normalize_status(value) -> str:
     return re.sub(r"\s+", "", text)
 
 
+def booking_stage(row) -> str:
+    return _text(row.get(HOLD_COLUMN, ""))
+
+
 def hold_reason(row) -> str:
-    text = _text(row.get(HOLD_COLUMN, ""))
-    return text if text.startswith(HOLD_PREFIX) else ""
+    """預約條件不在本次預約對象內時回傳原因；空白（平常月份）一律可約。"""
+    stage = booking_stage(row)
+    if not stage or stage in current_booking_stages():
+        return ""
+    return f"預約條件「{stage}」不在本次預約對象"
 
 
 def create_block_reason(row) -> str:

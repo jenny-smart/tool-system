@@ -4,7 +4,8 @@ from __future__ import annotations
 import types
 import pandas as pd
 import orders
-from booking_eligibility import HOLD_COLUMN, can_create_order, can_process_row, hold_reason, normalize_status
+from booking_eligibility import (DEFAULT_STAGES, HOLD_COLUMN, STAGES, booking_stage, can_create_order, can_process_row,
+                                 hold_reason, normalize_status, set_booking_stages)
 
 _INSTALLED = False
 _ORIGINAL_LOAD_WORKSHEET = orders.load_worksheet
@@ -111,7 +112,7 @@ def _mode_mask(batch_opt, work, mode, o_texts=None):
 
 
 def _held_for_request(batch_opt, sheet_name, region, rows=(), modes=(), mode_scope=None, allow_failed=True, o_texts=None):
-    """指定列號＋自動篩選共同的先不約列；三種批次結果都以此顯示「先不約略過 N 列」。"""
+    """指定列號＋自動篩選中，因預約條件不在本次預約對象而略過的列；三種批次共用。"""
     held = set(_held_rows(batch_opt, sheet_name, "all", region, allow_failed, rows=rows)) if rows else set()
     for mode in modes:
         held.update(_held_rows(batch_opt, sheet_name, mode, region, allow_failed, rows=mode_scope, o_texts=o_texts))
@@ -119,7 +120,7 @@ def _held_for_request(batch_opt, sheet_name, region, rows=(), modes=(), mode_sco
 
 
 def _held_rows(batch_opt, sheet_name, mode="all", region=None, allow_failed=False, rows=None, o_texts=None):
-    """若沒有「先不約」就會成為建單候選的列號；三種批次用來顯示「先不約略過 N 列」。"""
+    """若預約條件在本次預約對象內就會成為建單候選的列號；三種批次用來顯示略過筆數。"""
     _, df = _load_worksheet_unique(sheet_name)
     if df.empty: return []
     work = df.copy()
@@ -131,6 +132,39 @@ def _held_rows(batch_opt, sheet_name, mode="all", region=None, allow_failed=Fals
     if region: work = work[work.apply(lambda row: batch_opt.get_region_by_address(batch_opt._text(row.get("地址")), __import__("accounts").ACCOUNTS) == region, axis=1).astype(bool)] if len(work) else work
     if not len(work): return []
     return sorted(work.loc[_mode_mask(batch_opt, work, mode, o_texts), "__sheet_row__"].astype(int).tolist())
+
+
+def _held_stage_text(batch_opt, sheet_name, rows):
+    """略過列依預約條件分類，例如「改加 3、未回覆 5」。"""
+    if not rows: return ""
+    _, df = _load_worksheet_unique(sheet_name)
+    wanted = {int(x) for x in rows}
+    counts = {}
+    for _, row in df.iterrows():
+        if int(row["__sheet_row__"]) in wanted:
+            stage = booking_stage(row) or "其他"
+            counts[stage] = counts.get(stage, 0) + 1
+    order = list(STAGES)
+    return "、".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: order.index(kv[0]) if kv[0] in order else 99))
+
+
+def held_message(batch_opt, sheet_name, rows):
+    try:
+        detail = _held_stage_text(batch_opt, sheet_name, rows)
+    except Exception:
+        detail = ""
+    return f"未選入本次預約對象略過 {len(rows)} 列" + (f"（{detail}）" if detail else "")
+
+
+def render_stage_filter(st, key):
+    """三種批次共用：勾選本次要約排程「預約條件」的哪些階段（預設只有可約）。"""
+    stages = st.multiselect(
+        "本次預約對象（排程「預約條件」欄；空白的列一律照常判斷）", list(STAGES),
+        default=list(DEFAULT_STAGES), key=key,
+    )
+    st.caption("建議順序：可約 → 改加 → 已確認 → 未回覆。單一客人要例外處理，可直接改該列「預約條件」。")
+    set_booking_stages(stages)
+    return stages
 
 
 def render_o_text_filter(st, batch_opt, sheet_name, region, key, allow_failed=True):

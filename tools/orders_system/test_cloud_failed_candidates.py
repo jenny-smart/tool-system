@@ -21,7 +21,7 @@ def test_failed_rows_excluded_from_candidates_and_auto_filters():
         {**base, '__sheet_row__': 4, '結果': ' 失敗\u200b '},
         {**base, '__sheet_row__': 5, '結果': '', '狀態': '已安排'},
         {**base, '__sheet_row__': 6, '結果': '失敗', '訂單編號': 'LC123'},
-        {**base, '__sheet_row__': 7, '結果': '', '預約條件': '先不約：2026大掃除 V 欄為 FALSE，尚未確認'},
+        {**base, '__sheet_row__': 7, '結果': '', '預約條件': '未回覆'},
     ]
     namespace = {'pd': pd, 're': re, '_load_worksheet_unique': lambda _: (None, pd.DataFrame(rows)),
                  'O_BLANK_OPTION': '（O欄空白）', '_ORDER_NO_PATTERN': r'(?:LC|TT|KK)\d+',

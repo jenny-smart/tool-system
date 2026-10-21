@@ -11,26 +11,27 @@ BASE = {'姓名': '王小明', '電話': '0912345678', '地址': '台北市大�
 
 def test_shared_rule_requires_blank_order_unarranged_and_no_hold():
     assert can_create_order(BASE)
-    assert can_create_order({**BASE, '預約條件': '可預約：2026大掃除 V 欄已確認'})
-    assert not can_create_order({**BASE, '預約條件': '先不約：2026大掃除 V 欄為 FALSE，尚未確認'})
+    assert can_create_order({**BASE, '預約條件': '可約'})
+    assert not can_create_order({**BASE, '預約條件': '未回覆'})
+    assert not can_create_order({**BASE, '預約條件': '先不約'})  # 舊版值不在任何階段，不約
     assert not can_create_order({**BASE, '狀態': '待確認'})
     assert not can_create_order({**BASE, '訂單編號': 'LC1'})
     assert can_create_order({k: v for k, v in BASE.items() if k != '預約條件'})
 
 
 def test_rows_with_order_still_processed_for_mail_and_calendar():
-    assert can_process_row({**BASE, '訂單編號': 'LC1', '預約條件': '先不約：x'})
-    assert not can_process_row({**BASE, '預約條件': '先不約：x'})
+    assert can_process_row({**BASE, '訂單編號': 'LC1', '預約條件': '改加'})
+    assert not can_process_row({**BASE, '預約條件': '改加'})
 
 
 def test_reason_is_shown_for_skipped_rows():
     assert create_block_reason({**BASE, '狀態': '暫停'}) == '狀態為「暫停」，非未安排'
-    assert create_block_reason({**BASE, '預約條件': '先不約：排程 A 欄標記「改」'}).startswith('先不約')
+    assert create_block_reason({**BASE, '預約條件': '改加'}) == '預約條件「改加」不在本次預約對象'
 
 
 def test_all_batch_runners_share_recover_filter(monkeypatch):
     rows = [{**BASE, '__sheet_row__': 2},
-            {**BASE, '__sheet_row__': 3, '預約條件': '先不約：排程 A 欄標記「改」，留待最後成單'},
+            {**BASE, '__sheet_row__': 3, '預約條件': '改加'},
             {**BASE, '__sheet_row__': 4, '狀態': '待確認'}]
     monkeypatch.setattr(safety, '_configure_runtime', lambda env: None)
     monkeypatch.setattr(safety._orders, 'load_worksheet', lambda name: (object(), pd.DataFrame(rows)))
@@ -42,14 +43,14 @@ def test_all_batch_runners_share_recover_filter(monkeypatch):
     _, remaining, recovered, blocked, _ = safety._recover_before_create(
         'dev', '台北', 'e', 'p', '台北202701', 2, 4, None, ['建單'], logs.append)
     assert remaining == [2] and recovered == [] and blocked == []
-    assert any('第 3 列不建單：先不約' in line for line in logs)
+    assert any('第 3 列不建單：預約條件「改加」' in line for line in logs)
     assert any('第 4 列不建單：狀態為「待確認」' in line for line in logs)
 
 
 def test_held_rows_match_filters_used_by_all_three_batches(monkeypatch):
     from types import SimpleNamespace
     import selected_row_status_guard as guard
-    hold = '先不約：2026大掃除 V 欄為 FALSE，尚未確認'
+    hold = '未回覆'
     rows = [{**BASE, '__sheet_row__': 2, '預約條件': hold, '原因': '無班表', '結果': '失敗'},
             {**BASE, '__sheet_row__': 3, '預約條件': hold, '原因': '找不到訂單編號', '結果': ''},
             {**BASE, '__sheet_row__': 4, '預約條件': hold, '狀態': '暫停', '結果': ''},
@@ -104,3 +105,54 @@ def test_o_text_widget_lists_counts_and_returns_selection(monkeypatch):
     assert options == ['（O欄空白）', '無訂單編號'] and '都不選' in label
     assert st.multiselect.call_args.kwargs['format_func']('無訂單編號') == '無訂單編號（2 列）'
     assert guard.render_o_text_filter(st, None, '', '台北', 'k') == []
+
+
+def test_selected_stages_decide_which_rows_can_be_booked():
+    from booking_eligibility import booking_stages, current_booking_stages
+    rows = {stage: {**BASE, '預約條件': stage} for stage in ('可約', '改加', '已確認', '未回覆', '')}
+    assert current_booking_stages() == ('可約',)
+    assert [s for s, row in rows.items() if can_create_order(row)] == ['可約', '']
+    with booking_stages(['改加']):
+        assert [s for s, row in rows.items() if can_create_order(row)] == ['改加', '']
+    with booking_stages(['可約', '已確認', '未回覆']):
+        assert [s for s, row in rows.items() if can_create_order(row)] == ['可約', '已確認', '未回覆', '']
+    with booking_stages([]):
+        assert [s for s, row in rows.items() if can_create_order(row)] == ['']
+    assert current_booking_stages() == ('可約',)
+
+
+def test_recover_filter_follows_selected_stage(monkeypatch):
+    from booking_eligibility import booking_stages
+    rows = [{**BASE, '__sheet_row__': 2, '預約條件': '可約'}, {**BASE, '__sheet_row__': 3, '預約條件': '改加'}]
+    monkeypatch.setattr(safety, '_configure_runtime', lambda env: None)
+    monkeypatch.setattr(safety._orders, 'load_worksheet', lambda name: (object(), pd.DataFrame(rows)))
+    monkeypatch.setattr(safety._orders, 'get_region_by_address', lambda address, accounts: '台北')
+    monkeypatch.setattr(safety._orders, 'login', lambda session, email, password: True)
+    monkeypatch.setattr(safety, '_row_key', lambda row: ('0912345678', 'addr', '2027-01-20', 'p', 'p'))
+    monkeypatch.setattr(safety, '_fetch_phone_blocks', lambda session, phone: [])
+    with booking_stages(['改加']):
+        _, remaining, _, _, _ = safety._recover_before_create('dev', '台北', 'e', 'p', 's', 2, 3, None, ['建單'], print)
+    assert remaining == [3]
+
+
+def test_held_message_groups_skipped_rows_by_stage(monkeypatch):
+    import selected_row_status_guard as guard
+    rows = [{**BASE, '__sheet_row__': n, '預約條件': stage}
+            for n, stage in ((2, '未回覆'), (3, '改加'), (4, '未回覆'), (5, '可約'))]
+    monkeypatch.setattr(guard, '_load_worksheet_unique', lambda name: (None, pd.DataFrame(rows)))
+    assert guard.held_message(None, 's', [2, 3, 4]) == '未選入本次預約對象略過 3 列（改加 1、未回覆 2）'
+
+
+def test_stage_widget_defaults_to_ready_and_sets_current_stages():
+    from unittest.mock import MagicMock
+    import selected_row_status_guard as guard
+    from booking_eligibility import current_booking_stages, set_booking_stages
+    st = MagicMock()
+    st.multiselect.return_value = ['可約', '改加']
+    try:
+        assert guard.render_stage_filter(st, 'k') == ['可約', '改加']
+        assert st.multiselect.call_args.kwargs['default'] == ['可約']
+        assert st.multiselect.call_args.args[1] == ['可約', '改加', '已確認', '未回覆']
+        assert current_booking_stages() == ('可約', '改加')
+    finally:
+        set_booking_stages(('可約',))

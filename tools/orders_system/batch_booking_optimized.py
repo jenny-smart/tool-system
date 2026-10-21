@@ -93,7 +93,7 @@ def _load_candidates(sheet_name: str) -> pd.DataFrame:
     for c in REQUIRED_COLUMNS:
         work[c] = work[c].map(_text)
 
-    # 建單候選：I 欄未安排、M 欄訂單編號空白、預約條件非「先不約」（三種批次共用）。
+    # 建單候選：I 欄未安排、M 欄訂單編號空白、預約條件空白或在本次預約對象內（三種批次共用）。
     from booking_eligibility import can_create_order
     work = work[work.apply(can_create_order, axis=1).astype(bool)] if len(work) else work
     work = work[

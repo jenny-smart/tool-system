@@ -11,8 +11,9 @@ from accounts import ACCOUNTS
 import batch_booking_optimized as batch_opt
 from orders import get_region_by_address
 from batch_recovery_meta import install_patch as install_recovery_meta_patch
-from selected_row_status_guard import install_patch as install_selected_row_status_guard, _auto_filter_rows, _held_rows, _safe_load_candidates
+from selected_row_status_guard import install_patch as install_selected_row_status_guard, _auto_filter_rows, _held_rows, _safe_load_candidates, held_message
 from hybrid_batch_runner import run_process_web_hybrid
+from booking_eligibility import DEFAULT_STAGES, STAGES, booking_stages
 
 install_selected_row_status_guard()
 install_recovery_meta_patch()
@@ -49,11 +50,11 @@ def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selec
 
 
 def held_rows(sheet_name: str, filter_mode: str = "all", selected_region: str = "", retry_failed=False, o_texts=None):
-    """先不約略過的列；顯示用，失敗時不影響成單。"""
+    """未選入本次預約對象而略過的列；顯示用，失敗時不影響成單。"""
     try:
         return _held_rows(batch_opt, sheet_name, filter_mode, selected_region or None, allow_failed=retry_failed, o_texts=o_texts)
     except Exception as exc:
-        print(f"HELD_UNAVAILABLE: 無法計算先不約列數：{exc}", flush=True)
+        print(f"HELD_UNAVAILABLE: 無法計算未選對象略過列數：{exc}", flush=True)
         return []
 
 
@@ -75,7 +76,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
             held = held_rows(sheet_name, filter_mode, selected_region, retry_failed, o_texts)
             progress.held = len(held)
             if held:
-                print(f"HELD 先不約略過 {len(held)} 列：{','.join(map(str, held))}", flush=True)
+                print(f"HELD {held_message(batch_opt, sheet_name, held)}：{','.join(map(str, held))}", flush=True)
             candidate_total = len(pending)
             target_total = min(len(pending), max_rows) if max_rows else len(pending)
             progress.publish('準備成單', 0, 0, 0, len(pending), target_total)
@@ -158,6 +159,20 @@ def _o_texts_from_env():
     return [str(v) for v in values] if isinstance(values, list) else []
 
 
+def _stages_from_env():
+    """本次預約對象以 JSON 經環境變數傳入；未提供時只約「可約」。"""
+    raw = os.getenv("STAGES_JSON", "").strip()
+    if not raw:
+        return list(DEFAULT_STAGES)
+    try:
+        values = json.loads(raw)
+    except ValueError:
+        raise SystemExit("STAGES_JSON 格式錯誤，未執行成單")
+    if not isinstance(values, list) or any(str(v) not in STAGES for v in values):
+        raise SystemExit(f"STAGES_JSON 只能包含：{'、'.join(STAGES)}，未執行成單")
+    return [str(v) for v in values]
+
+
 def main():
     p = argparse.ArgumentParser(description="批次建單優化＋雲端批次成單")
     p.add_argument("--sheet", required=True)
@@ -171,8 +186,11 @@ def main():
     a = p.parse_args()
     if a.chunk_size < 1:
         p.error("--chunk-size 必須 >= 1")
-    return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(),
-               _bool_text(a.allow_auto_lemon), _bool_text(a.retry_failed), _o_texts_from_env())
+    stages = _stages_from_env()
+    print(f"STAGES 本次預約對象：{'、'.join(stages) or '（無，只約預約條件空白的列）'}", flush=True)
+    with booking_stages(stages):
+        return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(),
+                   _bool_text(a.allow_auto_lemon), _bool_text(a.retry_failed), _o_texts_from_env())
 
 
 if __name__ == "__main__":

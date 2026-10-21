@@ -1150,7 +1150,9 @@ if mode == "批次建單（Google Sheet）":
     st.markdown('<div class="hint-box">可自由組合，例如只寄確認信、只改日曆，或全流程一起跑。</div>', unsafe_allow_html=True)
     batch_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="batch_allow_auto_lemon")
     st.caption("指定範圍及自動篩選可包含失敗列；調整後可直接重試，不必清空 N 欄結果。")
-    st.caption("三種批次共用建單條件：訂單編號空白＋狀態未安排＋「預約條件」欄不是「先不約」；先不約的列會略過並在執行過程註明原因。")
+    st.caption("三種批次共用建單條件：訂單編號空白＋狀態未安排＋「預約條件」空白或在本次預約對象內；其他列會略過並在執行過程註明原因。")
+    from selected_row_status_guard import render_stage_filter
+    render_stage_filter(st, "batch_booking_stages")
     auto_no_slot_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="auto_no_slot_rows")
     auto_missing_o_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="auto_missing_o_rows")
     from selected_row_status_guard import render_o_text_filter
@@ -1193,7 +1195,8 @@ if mode == "批次建單（Google Sheet）":
                 except Exception:
                     held_only = []
                 if held_only:
-                    st.info(f"先不約略過 {len(held_only)} 列（{'、'.join(map(str, held_only))}），沒有其他符合自動篩選條件的列。"); st.stop()
+                    from selected_row_status_guard import held_message
+                    st.info(f"{held_message(batch_booking_optimized, sheet_name.strip(), held_only)}（{'、'.join(map(str, held_only))}），沒有其他符合自動篩選條件的列。"); st.stop()
                 st.info("沒有符合自動篩選條件的列。"); st.stop()
         else:
             try:
@@ -1218,9 +1221,10 @@ if mode == "批次建單（Google Sheet）":
                 held_rows = _held_for_request(batch_booking_optimized, sheet_name.strip(), region, target_rows)
         except Exception as e:
             held_rows = []
-            ui_log(f"⚠️ 無法計算先不約列數：{e}")
+            ui_log(f"⚠️ 無法計算未選對象略過列數：{e}")
         if held_rows:
-            ui_log(f"⏭️ 先不約略過 {len(held_rows)} 列：" + "、".join(map(str, held_rows)))
+            from selected_row_status_guard import held_message
+            ui_log(f"⏭️ {held_message(batch_booking_optimized, sheet_name.strip(), held_rows)}：" + "、".join(map(str, held_rows)))
         with st.spinner("執行中，請稍候…"):
             row_label = "、".join(map(str, target_rows))
             ui_log(f"▶ 指定列 {row_label}，依列號逐筆單筆成單，不分組…")
@@ -1250,7 +1254,7 @@ if mode == "批次建單（Google Sheet）":
             c1.metric("執行筆數", total_processed)
             c2.metric("成功", total_success)
             c3.metric("失敗", total_fail)
-            c4.metric("先不約略過", len(held_rows))
+            c4.metric("未選對象略過", len(held_rows))
             if total_fail == 0 and total_processed > 0:
                 st.success(f"✅ 全部完成，共處理 **{total_processed}** 筆，成功 **{total_success}** 筆。")
             elif total_fail > 0:
@@ -1258,7 +1262,7 @@ if mode == "批次建單（Google Sheet）":
             else:
                 st.info("執行完成，無資料被處理。")
             if held_rows:
-                st.info(f"先不約略過 {len(held_rows)} 列（預約條件標示「先不約」）：" + "、".join(map(str, held_rows)))
+                st.info(f"未選入本次預約對象略過 {len(held_rows)} 列：" + "、".join(map(str, held_rows)))
 
 
 
