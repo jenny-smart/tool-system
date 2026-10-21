@@ -1985,8 +1985,10 @@ def quick_create_stored_value_orders(
         headers=HEADERS, allow_redirects=True,
     )
     created = {}
-    for wait_seconds in (1, 2, 3, 5, 8):
-        time.sleep(wait_seconds)
+    # 第一次不等待直接查；數量不夠才逐步等後台出單。
+    for wait_seconds in (0, 1, 2, 3, 5, 8):
+        if wait_seconds:
+            time.sleep(wait_seconds)
         for block in _order_blocks_for_dates(session, phone, dates):
             order_no = block.get("order_no")
             if not order_no or order_no in before or order_no in created:
@@ -1998,12 +2000,11 @@ def quick_create_stored_value_orders(
             break
     orders_out = []
     for order_no, slot in created.items():
-        meta = fetch_order_meta_by_order_no(session, order_no)
         date_s, period_s = slot.split("_", 1)
         orders_out.append({
             "order_no": order_no, "slot": slot, "date": date_s, "period_s": period_s,
-            "staff": meta.get("服務人員") or format_staff_from_cleaners(
-                extract_cleaners_from_section_response(raw, slot), people=person),
+            # 不再逐張開訂單明細；專員用查詢班表時後台回傳的名單。
+            "staff": format_staff_from_cleaners(extract_cleaners_from_section_response(raw, slot), people=person),
             "session": session,
         })
     created_slots = list(created.values())

@@ -361,17 +361,40 @@ def create_reserve_orders_for_slot(
     }
 
 
+def _mark_reserve_notes(session, base_url: str, order_no: str) -> Tuple[bool, str]:
+    """開一次訂單修改頁，同時寫入客人備註「系統保留單」與處理備註，其餘欄位保留原值。"""
+    purchase_id = _purchase_id_from_order_no(order_no)
+    if not purchase_id:
+        return False, "無法由訂單編號取得 purchase_id"
+    edit_url = f"{base_url}/purchase/edit/{purchase_id}"
+    resp = session.get(edit_url, headers=qo.HEADERS, allow_redirects=True)
+    if resp.status_code != 200:
+        return False, f"無法開啟訂單修改頁：HTTP {resp.status_code}"
+    token = re.search(r'<meta name="csrf-token" content="([^"]+)"', resp.text) or re.search(r'name="_token"[^>]*value="([^"]+)"', resp.text)
+    if not token:
+        return False, "無法取得訂單修改頁 CSRF token"
+    payload = qo._build_purchase_edit_payload_from_page(
+        resp.text, token.group(1),
+        overrides={"memo": SYSTEM_RESERVE_MEMO, "memoProcess": CUSTOMER_SERVICE_NOTE},
+    )
+    post = session.post(
+        edit_url, data=payload,
+        headers={**qo.HEADERS, "Content-Type": "application/x-www-form-urlencoded"},
+        allow_redirects=True,
+    )
+    if post.status_code not in (200, 302):
+        return False, f"備註寫入失敗：HTTP {post.status_code}"
+    return True, ""
+
+
 def _finish_reserve_order(session, base_url: str, order_no: str, service_date: str, period: str,
                           staff: str, amount, batch_id: str) -> dict:
-    """保留單成立後：客人備註「系統保留單」、客服備註、寫入紀錄表。"""
+    """保留單成立後：一次寫入客人備註「系統保留單」與處理備註（紀錄表由呼叫端整輪一次寫入）。"""
     try:
-        customer_memo_ok, customer_memo_msg = _mark_customer_memo_as_system_reserve(session, base_url, order_no)
+        customer_memo_ok, customer_memo_msg = _mark_reserve_notes(session, base_url, order_no)
     except Exception as memo_exc:
-        customer_memo_ok, customer_memo_msg = False, f"客人備註註記失敗：{memo_exc}"
-    try:
-        note_ok, note_msg = qo._update_order_note(session, base_url, order_no, CUSTOMER_SERVICE_NOTE)
-    except Exception as note_exc:
-        note_ok, note_msg = False, f"訂單已成立，但客服備註寫入失敗：{note_exc}"
+        customer_memo_ok, customer_memo_msg = False, f"備註寫入失敗：{memo_exc}"
+    note_ok, note_msg = customer_memo_ok, customer_memo_msg
     row = {
         "success": True, "order_no": order_no, "staff": staff,
         "service_date": service_date, "period": period, "order_amount": amount,
@@ -379,13 +402,21 @@ def _finish_reserve_order(session, base_url: str, order_no: str, service_date: s
         "customer_memo": SYSTEM_RESERVE_MEMO if customer_memo_ok else "",
         "customer_memo_message": customer_memo_msg, "note_ok": note_ok, "note_message": note_msg,
     }
-    try:
-        row["sheet_log_count"] = append_log_rows("成立", [row], batch_id=batch_id)
-        row["sheet_log_error"] = ""
-    except Exception as log_exc:
-        row["sheet_log_count"] = 0
-        row["sheet_log_error"] = str(log_exc)
     return row
+
+
+def _log_round_rows(rows: List[dict], batch_id: str) -> None:
+    """整輪成立的保留單一次寫入紀錄表（原本每張各寫一次）。"""
+    if not rows:
+        return
+    try:
+        count = append_log_rows("成立", rows, batch_id=batch_id)
+        error = ""
+    except Exception as log_exc:
+        count, error = 0, str(log_exc)
+    for row in rows:
+        row["sheet_log_count"] = count
+        row["sheet_log_error"] = error
 
 
 def start_reserve_job(plan_rows: Sequence[dict], payway: str) -> dict:
@@ -438,10 +469,17 @@ def run_reserve_round(
 
     active: List[str] = []
     schedules: Dict[str, Dict[str, Dict[str, object]]] = {}
+    pages: List[str] = []
     for slot in [x for x, n in remaining.items() if n > 0]:
         service_date, period = slot.split("_", 1)
         if service_date not in schedules:
-            schedules[service_date] = parse_schedule_unassigned(fetch_schedule_html(lookup_result, service_date), service_date)
+            # 班表頁一次顯示一整週；同一週的日期共用同一頁，不重複讀取。
+            label = f"{service_date[5:]}（"
+            html = next((h for h in pages if label in h), None)
+            if html is None:
+                html = fetch_schedule_html(lookup_result, service_date)
+                pages.append(html)
+            schedules[service_date] = parse_schedule_unassigned(html, service_date)
         people = int((schedules[service_date].get(period) or {}).get("unassigned_people") or 0)
         if people < max(2, keep_people.get(slot, 0) + 2):
             stop(slot, f"即時未配班只剩 {people} 人，已停止此時段後續保留單")
@@ -464,15 +502,18 @@ def run_reserve_round(
                     stop(slot, f"送出失敗：{exc}")
                 continue
             session = outcome.get("session") or lookup_result["session"]
+            round_rows = []
             for order in outcome.get("orders") or []:
                 row = _finish_reserve_order(session, base_url, order["order_no"], order["date"],
                                             order["period_s"], order.get("staff"), 0, batch_id)
                 row["round"] = round_no
                 results.append(row)
+                round_rows.append(row)
                 remaining[order["slot"]] -= 1
                 created += 1
                 if not row["customer_memo_ok"]:
                     stop(order["slot"], f"訂單 {order['order_no']} 已成立，但客人備註未成功寫入『{SYSTEM_RESERVE_MEMO}』，已停止此時段後續建立")
+            _log_round_rows(round_rows, batch_id)
             for slot in outcome.get("unavailable") or []:
                 stop(slot, f"{slot.replace('_', ' ')} 無可預約人力（後台查詢班表結果沒有這個時段），已停止此時段")
             for slot in outcome.get("not_created") or []:
