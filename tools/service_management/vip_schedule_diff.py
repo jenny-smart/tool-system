@@ -9,7 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 FIELDS = ["服務人時", "備註", "姓名", "電話", "地址", "日期", "開始時間", "結束時間", "狀態"]
 META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容", "更新日期"]
-GATE_HEADERS = ["確認狀態", "確認備註", "改加標記", "預約條件"]  # 排程預約條件，僅規則期間使用
+GATE_HEADERS = ["回覆確認", "確認備註", "改加標記", "已確認", "預約條件"]  # 排程預約條件，僅規則期間使用
+LEGACY_GATE_HEADERS = {"確認狀態": "回覆確認"}
 COLORS = {
     "新增": {"red": 1, "green": .96, "blue": .72},
     "未成單異動": {"red": 1, "green": .96, "blue": .72},
@@ -296,6 +297,8 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         header_range = f"A1:{last_column}1"
         current_header = target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
         header = current_header[0] if current_header else []
+        # Earlier 確認狀態 column is reused (and renamed) as 回覆確認.
+        header = [LEGACY_GATE_HEADERS.get(v, v) if i >= 33 else v for i, v in enumerate(header)]
         columns = _tracking_columns(header, physical_rows, META_HEADERS + GATE_HEADERS)
         read_columns = _read_tracking_columns(header, columns)
         existing = _internal_rows(physical_rows, read_columns)
@@ -321,12 +324,13 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
     plan = plan_schedule(existing, source_rows, target_name, foreign, coverage=export_range)
     final_rows = {i + 2: row for i, row in enumerate(existing)}
     final_rows.update({item["row"]: item["values"] for item in plan["updates"]})
-    # 確認狀態／確認備註／改加標記／預約條件 are for batch booking (it skips 先不約 rows);
+    # 回覆確認／確認備註／改加標記／已確認／預約條件 let batch booking pick stages;
     # status stays as is. Booked rows and months outside the rule period stay blank.
     blank = ("",) * len(GATE_HEADERS)
     gate_values = {row: tuple((gate(values) if gate and not _text(values[12]) else None) or blank)
                    for row, values in final_rows.items()}
-    held_rows = sorted(row for row, values in gate_values.items() if is_hold(values[3]))
+    held_rows = sorted(row for row, values in gate_values.items() if is_hold(values[-1]))
+    stage_counts = dict(Counter(values[-1] for values in gate_values.values() if values[-1]))
     if not any(name in header[33:] for name in GATE_HEADERS) and not any(any(v) for v in gate_values.values()):
         columns = columns[:len(META_HEADERS)]
     if not compare_only:
@@ -428,4 +432,5 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
     report_url = f"https://docs.google.com/spreadsheets/d/{ss.id}/edit#gid={report.id}" if getattr(ss, "id", "") and getattr(report, "id", "") else ""
     return {"report_url": report_url, "sheet": target_name, "count": plan["count"], "ok": True, "compare_only": compare_only,
             "differences": counts, "report": report_name, "created": created and not compare_only,
-            "booking_gate": {"enabled": gate is not None, "held": len(held_rows), "held_rows": held_rows}}
+            "booking_gate": {"enabled": gate is not None, "held": len(held_rows), "held_rows": held_rows,
+                             "stages": stage_counts}}

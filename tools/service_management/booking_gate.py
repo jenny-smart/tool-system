@@ -1,17 +1,18 @@
-"""排程預約條件：暫時性的「確認後才可預約」規則（例如年節大掃除期間）。
+"""排程預約條件：暫時性的分階段預約規則（例如年節大掃除期間）。
 
 規則全部放在主控試算表「排程預約條件」工作表，一列一條規則，可隨時啟用／停用、
-改檔案、改工作表、改欄位或改排除字，不需改程式：
+改檔案、改工作表、改欄位或改關鍵字，不需改程式：
 
   啟用 | 地區 | 適用起日 | 適用迄日 | 確認檔案ID | 確認工作表 | 姓名欄 | 電話欄 | 地址欄 |
-  確認欄 | 確認值 | 備註欄 | 排程排除欄 | 排除關鍵字 | 確認表排除欄 | 說明
+  確認欄 | 確認值 | 備註欄 | 排程排除欄 | 排除關鍵字 | 確認表排除欄 | 已確認欄 | 已確認關鍵字 | 說明
 
-只影響服務日期落在「適用起日～適用迄日」的未成單排程列，在排程 AG 右側寫四欄：
-  確認狀態：確認表「確認欄」的值（例如 V 欄 TRUE／FALSE）；找不到客人寫「查無」
+只影響服務日期落在「適用起日～適用迄日」的未成單排程列，在排程 AG 右側寫五欄：
+  回覆確認：確認表「確認欄」的值（例如 V 欄 TRUE／FALSE）；找不到客人寫「查無」
   確認備註：確認表「備註欄」的值（例如 W 欄）
   改加標記：「排程排除欄」（例如 A 欄）或「確認表排除欄」含的排除關鍵字（例如 改、加）
-  預約條件：確認狀態不在「確認值」內、或有改加標記時寫「先不約」，否則空白
-狀態欄不改；orders-system 批次成單看到預約條件「先不約」就跳過。
+  已確認：「已確認欄」（例如排程 B 欄＝日曆備註）含「已確認關鍵字」
+  預約條件：依序判斷 改加 → 已確認 → 可約（回覆確認在確認值內）→ 未回覆
+狀態欄不改；orders-system 批次成單依畫面勾選的「本次預約對象」決定約哪些階段。
 """
 from __future__ import annotations
 
@@ -24,17 +25,17 @@ from typing import Any, Callable
 RULE_SHEET_NAME = "排程預約條件"
 RULE_HEADERS = [
     "啟用", "地區", "適用起日", "適用迄日", "確認檔案ID", "確認工作表", "姓名欄", "電話欄", "地址欄",
-    "確認欄", "確認值", "備註欄", "排程排除欄", "排除關鍵字", "確認表排除欄", "說明",
+    "確認欄", "確認值", "備註欄", "排程排除欄", "排除關鍵字", "確認表排除欄", "已確認欄", "已確認關鍵字", "說明",
 ]
 # 首次建立工作表時的範例列；之後一律以工作表內容為準。
 EXAMPLE_RULES = [
     ["TRUE", "台北", "2026-12-15", "2027-02-04", "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44",
-     "2026大掃除", "C", "D", "F", "V", "TRUE", "W", "A", "改,加", "",
-     "年節大掃除：V 欄 TRUE 才預約；排程 A 欄含改／加先不約"],
+     "2026大掃除", "C", "D", "F", "V", "TRUE", "W", "A", "改,加", "", "B", "已確認",
+     "年節大掃除：先約可約，再看改加、已確認，最後 review 未回覆"],
 ]
 # 工作表標題的滑鼠提示，建立工作表時寫入。
 HEADER_NOTES = {
-    "啟用": "TRUE＝更新排程工作表時套用這一列規則。\nFALSE 或空白＝不套用；再更新一次排程，已寫入的確認狀態、確認備註、改加標記、預約條件四欄會清空。\n只有更新排程時才會讀取，改完要再更新一次排程才生效。",
+    "啟用": "TRUE＝更新排程工作表時套用這一列規則。\nFALSE 或空白＝不套用；再更新一次排程，已寫入的回覆確認、確認備註、改加標記、已確認、預約條件五欄會清空。\n只有更新排程時才會讀取，改完要再更新一次排程才生效。",
     "地區": "套用的地區：台北、台中，或「全區」／「共用」＝所有地區。",
     "適用起日": "服務日期從這天起才套用（YYYY-MM-DD）。期間外的排程列不受影響。",
     "適用迄日": "服務日期到這天為止才套用（YYYY-MM-DD）。",
@@ -43,15 +44,19 @@ HEADER_NOTES = {
     "姓名欄": "確認表中客人姓名所在欄位字母，用來對應排程的客人。",
     "電話欄": "確認表中電話所在欄位字母。",
     "地址欄": "確認表中地址所在欄位字母；同電話不同地址會分開對應。",
-    "確認欄": "確認表中「已確認」所在欄位字母，例如 V。值會帶入排程「確認狀態」欄。",
-    "確認值": "確認欄的值是這些才算已確認，可填多個，用逗號分隔，例如 TRUE。",
+    "確認欄": "確認表中客人「已回覆確認」所在欄位字母，例如 V。值會帶入排程「回覆確認」欄。",
+    "確認值": "確認欄的值是這些才算已回覆確認（預約條件＝可約），可填多個，用逗號分隔，例如 TRUE。",
     "備註欄": "確認表中備註所在欄位字母，例如 W。值會帶入排程「確認備註」欄，只供參考，不影響約不約。",
     "排程排除欄": "排程工作表中要檢查排除關鍵字的欄位字母，例如 A（日曆標題第一個《》內容）。",
-    "排除關鍵字": "排程排除欄或確認表排除欄含這些字就先不約，可填多個，用逗號分隔，例如 改,加。找到的字會帶入排程「改加標記」欄。",
+    "排除關鍵字": "排程排除欄或確認表排除欄含這些字，預約條件＝改加，可填多個，用逗號分隔，例如 改,加。找到的字會帶入排程「改加標記」欄。",
     "確認表排除欄": "選填。確認表中也要檢查排除關鍵字的欄位字母；空白＝不檢查。",
+    "已確認欄": "排程工作表中判斷「原本每月確認、改成已確認」的欄位字母，例如 B（日曆標題 <> 備註）。空白＝不檢查。",
+    "已確認關鍵字": "已確認欄含這些字，預約條件＝已確認，可填多個，用逗號分隔，例如 已確認。",
     "說明": "自由填寫，程式不讀取。",
 }
-HOLD_PREFIX = "先不約"
+# 預約條件的階段，依判斷順序；批次成單畫面勾選本次要約哪幾個階段。
+STAGE_CHANGE, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY = "改加", "已確認", "可約", "未回覆"
+STAGES = (STAGE_CHANGE, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY)
 NOT_FOUND = "查無"
 
 
@@ -135,11 +140,14 @@ def parse_rule(record: dict[str, Any]) -> dict[str, Any]:
         "exclude_words": _words(rule["排除關鍵字"]),
         "source_exclude_col": column_index(rule["確認表排除欄"]),
         "source_exclude_letter": rule["確認表排除欄"].upper(),
+        # 舊版規則表沒有這兩欄時，預設看排程 B 欄（日曆備註）是否含「已確認」。
+        "confirmed_col": column_index(rule["已確認欄"] if "已確認欄" in record else "B"),
+        "confirmed_words": _words(rule["已確認關鍵字"] if "已確認關鍵字" in record else "已確認"),
     }
 
 
 def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[list[Any]], Any]:
-    """回傳 gate(排程列) →（確認狀態, 改加標記, 預約條件）；None 代表期間外、不受此規則影響。"""
+    """回傳 gate(排程列) →（回覆確認, 確認備註, 改加標記, 已確認, 預約條件）；None 代表期間外。"""
     def cell(row, index):
         return _text(row[index]) if index is not None and index < len(row) else ""
 
@@ -177,7 +185,6 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
         return [word for word in rule["exclude_words"] if word in text]
 
     def gate(values):
-        """回傳（確認狀態, 確認備註, 改加標記, 預約條件）；期間外回傳 None。"""
         service_date = _date(values[5])
         if not service_date or not (rule["start"] <= service_date <= rule["end"]):
             return None
@@ -187,14 +194,19 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
         found += [m for e in matched for m in marks(e["excluded"])]
         mark = "、".join(dict.fromkeys(found))
         note = "；".join(dict.fromkeys(e["note"] for e in matched if e["note"]))
-        confirmed = bool(matched) and all(e["confirmed"] for e in matched)
-        return confirm, note, mark, ("" if confirmed and not mark else HOLD_PREFIX)
+        confirmed_text = cell(values, rule["confirmed_col"])
+        confirmed_note = "、".join(w for w in rule["confirmed_words"] if w in confirmed_text)
+        replied = bool(matched) and all(e["confirmed"] for e in matched)
+        stage = (STAGE_CHANGE if mark else STAGE_CONFIRMED if confirmed_note
+                 else STAGE_READY if replied else STAGE_NO_REPLY)
+        return confirm, note, mark, confirmed_note, stage
 
     return gate
 
 
-def is_hold(condition: str) -> bool:
-    return _text(condition).startswith(HOLD_PREFIX)
+def is_hold(stage: str) -> bool:
+    """可約以外的階段，預設批次成單不約。"""
+    return _text(stage) in STAGES and _text(stage) != STAGE_READY
 
 
 def combine_gates(gates: list[Callable[[list[Any]], Any]]) -> Callable[[list[Any]], Any] | None:
@@ -206,8 +218,10 @@ def combine_gates(gates: list[Callable[[list[Any]], Any]]) -> Callable[[list[Any
         if not results:
             return None
         join = lambda items: "、".join(dict.fromkeys(item for item in items if item))
-        return (join(r[0] for r in results), join(r[1] for r in results), join(r[2] for r in results),
-                HOLD_PREFIX if any(is_hold(r[3]) for r in results) else "")
+        # Several rules: the strictest stage wins; 可約 only when every rule says so.
+        stage = next(s for s in (STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY, STAGE_READY)
+                     if any(r[4] == s for r in results))
+        return tuple(join(r[i] for r in results) for i in range(4)) + (stage,)
 
     return gate
 

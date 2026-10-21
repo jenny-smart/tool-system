@@ -1059,8 +1059,9 @@ def _build_vip_schedule_sheet(
     )
     if gate_rules:
         result.setdefault("booking_gate", {})["rules"] = gate_rules
-        log.info("[%s] 預約條件先不約：%d 列（狀態不變，預約條件欄標示，批次成單跳過）",
-                 area_name, result["booking_gate"].get("held", 0))
+        stages = result["booking_gate"].get("stages") or {}
+        log.info("[%s] 預約條件：%s（狀態不變；批次成單依勾選的本次預約對象成單）", area_name,
+                 "、".join(f"{name} {count} 列" for name, count in stages.items()) or "無")
     mode = "只比對" if compare_only else "安全更新"
     log.info("[%s] VIP排程%s完成：%s（%d 筆）；差異：%s；差異工作表：%s",
              area_name, mode, result["sheet"], result["count"], result["differences"], result["report"])
