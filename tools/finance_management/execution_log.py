@@ -37,6 +37,9 @@ def _ensure_log_sheet(service, spreadsheet_id: str) -> None:
 
 def log_execution(tool: str, area: str, status: str, message: str = "") -> None:
     """打卡一筆執行記錄。任何失敗都吞掉（記錄本身不該讓主要功能跟著失敗）。"""
+    from tools.common import unified_log
+
+    unified_log.write(system="財務管理", function=tool, area=area, status=status, message=message)
     try:
         service = get_sheets_service()
         spreadsheet_id = get_master_spreadsheet_id()
