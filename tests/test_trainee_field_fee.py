@@ -134,3 +134,22 @@ def test_already_refunded_by_accounting_still_counts():
     refund = [["h"] * 9, ["t", "林怡君", "", "", "", "", "", "", ""]]
     updates, _ = compute_refund_updates(refund, fees, deposits)
     assert updates == {2: Decimal(3200)}
+
+
+def test_fee_sheet_append_only_new_names():
+    from tools.finance_management.trainee_field_fee import d_formula_for_row, plan_fee_append
+
+    refund = [
+        ["h"] * 9,
+        ["t", "李政擧", "", "", "", "", "", "3200"],
+        ["t", "林怡君", "", "", "", "", "", ""],
+        ["t", "張三", "", "", "", "", "", "2000"],
+    ]
+    fee = [["姓名"], [], ["李政擧", "1200", "TRUE"], ["鄭軫云", "400", "FALSE"], ["", "", "FALSE"]]
+    plan = plan_fee_append(refund, {3: Decimal(3200)}, fee)
+    assert plan["new_names"] == ["林怡君"]
+    assert plan["next_row"] == 5
+    assert plan["recheck_rows"] == {"鄭軫云": 4}
+
+    formula = '=ARRAYFORMULA(IF(A3="","",IFERROR(VLOOKUP(A3,IMPORTRANGE("x","y!C:G"),{2,3,5},FALSE),)))'
+    assert d_formula_for_row(formula, 23) == '=ARRAYFORMULA(IF(A23="","",IFERROR(VLOOKUP(A23,IMPORTRANGE("x","y!C:G"),2,FALSE),)))'
