@@ -269,7 +269,8 @@ def test_ui_defaults_on_during_deep_clean_and_returns_settings(monkeypatch):
     ("定期清潔", "9:00", "12:00", "6", "可約"),
     ("3人4小時", "14:00", "18:00", "12", "可約"),
     ("2人2或2人3", "14:00", "16:00", "4", "人時不足"),
-    ("改", "9:00", "11:00", "4", "改加"),
+    ("改", "9:00", "11:00", "4", "人時不足"),
+    ("改", "9:00", "12:00", "6", "改加"),
 ])
 def test_person_hours_below_minimum_is_held(service, start, end, hours, stage):
     row = schedule(service=service, start=start)
@@ -283,5 +284,11 @@ def test_minimum_person_hours_is_configurable_and_blank_disables():
     row[7] = "18:00"
     assert build_gate(rule(最低人時="4"), [confirm_row()])(row)[5] == "可約"
     assert build_gate(rule(最低人時=""), [confirm_row()])(row)[5] == "可約"
+    # 不檢查人時後，4 人時的列才依改加、已確認、未回覆判斷。
+    changed = schedule(service="1人4小時改", start="14:00")
+    changed[7] = "18:00"
+    assert build_gate(rule(), [confirm_row()])(changed)[5] == "人時不足"
+    assert build_gate(rule(最低人時=""), [confirm_row()])(changed)[5] == "改加"
+    assert build_gate(rule(最低人時=""), [confirm_row(confirmed="FALSE")])(row)[5] == "未回覆"
     with pytest.raises(ValueError):
         rule(最低人時="六")

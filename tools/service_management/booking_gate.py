@@ -10,7 +10,7 @@
   改加標記：「排程排除欄」（例如 A 欄）或「確認表排除欄」含的排除關鍵字（例如 改、加）
   已確認：「已確認欄」（例如排程 B 欄＝日曆備註）含「已確認關鍵字」
   人時：人數 × 時數（人數取 A 欄「N人」，沒寫時 2 人）
-  預約條件：依序判斷 改加 → 人時不足（未滿最低人時）→ 已確認 → 可約（回覆確認在確認值內）→ 未回覆
+  預約條件：依序判斷 人時不足（未滿最低人時）→ 改加 → 已確認 → 可約（回覆確認在確認值內）→ 未回覆
 狀態欄不改；orders-system 批次成單依畫面勾選的「本次預約對象」決定約哪些階段。
 """
 from __future__ import annotations
@@ -51,13 +51,13 @@ HEADER_NOTES = {
     "確認表排除欄": "選填。確認表中也要檢查排除關鍵字的欄位字母；空白＝不檢查。",
     "已確認欄": "排程工作表中判斷「原本每月確認、改成已確認」的欄位字母，例如 B（日曆標題 <> 備註）。空白＝不檢查。",
     "已確認關鍵字": "已確認欄含這些字，預約條件＝已確認，可填多個，用逗號分隔，例如 已確認。",
-    "最低人時": "人數 × 時數未滿此數，預約條件＝人時不足（例如 6：1人4小時、2人2小時先不約）。"
+    "最低人時": "人數 × 時數未滿此數，預約條件＝人時不足（最先判斷，例如 6：1人4小時、2人2小時先不約）。"
                "人數取 A 欄「2人」等寫法，沒寫時為 2 人；時數為開始到結束時間。空白＝不檢查。",
     "更新時間": "最後一次從執行畫面儲存的時間（台北時間）。",
 }
 # 預約條件的階段，依判斷順序；批次成單畫面勾選本次要約哪幾個階段。
 STAGE_CHANGE, STAGE_SHORT, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY = "改加", "人時不足", "已確認", "可約", "未回覆"
-STAGES = (STAGE_CHANGE, STAGE_SHORT, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY)
+STAGES = (STAGE_SHORT, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY)
 NOT_FOUND = "查無"
 
 
@@ -227,7 +227,8 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
         replied = bool(matched) and all(e["confirmed"] for e in matched)
         hours = person_hours(values)
         short = rule["min_person_hours"] is not None and hours is not None and hours < rule["min_person_hours"] - 1e-9
-        stage = (STAGE_CHANGE if mark else STAGE_SHORT if short else STAGE_CONFIRMED if confirmed_note
+        # 人時不足最先判斷；最低人時留空（不檢查）時才依改加、已確認、可約、未回覆判斷。
+        stage = (STAGE_SHORT if short else STAGE_CHANGE if mark else STAGE_CONFIRMED if confirmed_note
                  else STAGE_READY if replied else STAGE_NO_REPLY)
         return confirm, note, mark, confirmed_note, _hours_text(hours), stage
 
@@ -249,7 +250,7 @@ def combine_gates(gates: list[Callable[[list[Any]], Any]]) -> Callable[[list[Any
             return None
         join = lambda items: "、".join(dict.fromkeys(item for item in items if item))
         # Several rules: the strictest stage wins; 可約 only when every rule says so.
-        stage = next(s for s in (STAGE_CHANGE, STAGE_SHORT, STAGE_CONFIRMED, STAGE_NO_REPLY, STAGE_READY)
+        stage = next(s for s in (STAGE_SHORT, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY, STAGE_READY)
                      if any(r[-1] == s for r in results))
         return tuple(join(r[i] for r in results) for i in range(5)) + (stage,)
 
