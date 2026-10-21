@@ -3254,6 +3254,14 @@ def run_deposit_report_mark_from_notes(*, month="", start_date=None, end_date=No
     return message
 
 
+def run_trainee_field_fee_mark_refunded(*, area="全區", **_):
+    from tools.finance_management.trainee_field_fee import mark_refunded
+
+    if area not in ("台北", "台中"):
+        raise ValueError("請選擇台北或台中")
+    return f"完成：{mark_refunded(area)['message']}"
+
+
 def run_trainee_field_fee_update(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.trainee_field_fee import update_refund_and_fee_sheet
 
@@ -3804,6 +3812,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【新人排程】新人訓練",
         "【新人排程】新人入職",
         "【新訓退款】新訓退訓實境費用",
+        "【新訓退款】新訓退訓實境費用已退款",
         "【專員請款】請款資料審核",
     ],
     # ── ★ 新增：客服排程系統功能清單 ────────────────────────
@@ -3911,7 +3920,7 @@ FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】
 FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
 FIELD_CLAIM_BATCH = "【專員請款】請款資料審核"
 FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH,)
-FIELD_TRAINEE_FEE_FUNCTIONS = ("【新訓退款】新訓退訓實境費用",)
+FIELD_TRAINEE_FEE_FUNCTIONS = ("【新訓退款】新訓退訓實境費用", "【新訓退款】新訓退訓實境費用已退款")
 FIELD_EXTRA_FUNCTIONS = (
     FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS
     + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
@@ -4981,7 +4990,14 @@ with date_col:
     elif system_type == "field_daily_schedule" and selected_function in FIELD_EXTRA_FUNCTIONS:
         today_date = datetime.now(TW_TZ).date()
 
-        if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+        if selected_function == "【新訓退款】新訓退訓實境費用已退款":
+            st.info(
+                "工具包押金退款 I 欄已填退款日期、但工具包押金 G 欄還空白的人：G 欄填「退款日期已匯款」；"
+                "H−2000 大於 0 時，新人實境／新人實習該人 A 欄空白的列也填「退款日期已匯款」",
+                icon="🧾",
+            )
+
+        elif selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
             st.info(
                 "工具包押金退款 H 欄（I 欄退款日期空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總（從基本資料、協議規章建檔年度開始找）＋工具包押金 B 欄；"
                 "再把 H>2000 且表上還沒有的人接在新訓退訓實境費用最後一筆之後（B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
@@ -6079,7 +6095,10 @@ if run_clicked:
 
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
-                if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+                if selected_function == "【新訓退款】新訓退訓實境費用已退款":
+                    add_log(f"✅ {run_trainee_field_fee_mark_refunded(area=selected_area_value)}", "success")
+
+                elif selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
                     add_log(f"✅ {run_trainee_field_fee_update(area=selected_area_value)}", "success")
 
                 elif selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:

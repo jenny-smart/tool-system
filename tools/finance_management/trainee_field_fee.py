@@ -380,6 +380,27 @@ def _read(service, spreadsheet_id: str, title: str, cols: str = "A:Z") -> list[l
 
 
 def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
+    """執行並寫一筆到主控表「tool-system執行Log-年度」（成功、失敗都記）。"""
+    from tools.common import unified_log
+
+    log_fields = dict(system="外場排程系統", function="新訓退訓實境費用", run_type="手動",
+                      area=area, period=datetime.now(TW_TZ).strftime("%Y%m%d"), target=FEE_SHEET)
+    try:
+        result = _update_refund_and_fee_sheet(area)
+    except Exception as exc:
+        unified_log.write(status="失敗", message=str(exc), **log_fields)
+        raise
+    message = (
+        f"退款金額 H 欄更新 {result['h_updated']} 列；新增 {result['fee_rows']} 人；"
+        f"身分證打勾 {result['id_checked']} 人"
+    )
+    if result["warnings"]:
+        message += "；注意：" + "；".join(result["warnings"])
+    unified_log.write(status="成功", message=message, **log_fields)
+    return result
+
+
+def _update_refund_and_fee_sheet(area: str) -> dict[str, object]:
     service = get_sheets_service()
     spreadsheet_id, refund_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
 
@@ -487,5 +508,136 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
         "h_updated": len(changed),
         "fee_rows": len(new_rows),
         "id_checked": sum(1 for r in new_rows if r[2]) + len(rechecked),
+        "warnings": warnings,
+    }
+
+
+# ── 【新訓退款】新訓退訓實境費用已退款 ─────────────────────────────
+
+PAID_SUFFIX = "已匯款"  # 與既有資料（例如「2026/10/16已匯款」）及工具包押金財報的判斷一致
+
+
+def normalize_refund_date(text: str) -> str:
+    """I 欄退款日期統一成 YYYY/MM/DD（2026/1/9 → 2026/01/09）；不是日期回傳空字串。"""
+    match = re.match(r"^\s*(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", text)
+    if not match:
+        return ""
+    year, month, day = (int(g) for g in match.groups())
+    return f"{year:04d}/{month:02d}/{day:02d}"
+
+
+def plan_mark_refunded(
+    refund_values: list[list],
+    deposit_values: list[list],
+) -> tuple[list[dict[str, object]], list[str]]:
+    """找出 I 欄已填退款日期、但工具包押金 G 欄尚未註記的人。
+
+    回傳 ([{name, date, deposit_row, field_amount}], 提醒)；
+    field_amount＝H − 2000（實境／實習費用），大於 0 才需要註記新人實境／實習 A 欄。
+    """
+    deposit_rows: dict[str, int] = {}
+    deposit_marked: dict[str, bool] = {}
+    for r, row in enumerate(deposit_values[1:], start=2):
+        name = _cell(row, 0)
+        if name and name not in deposit_rows:
+            deposit_rows[name] = r
+            deposit_marked[name] = bool(_cell(row, 6))
+
+    items: list[dict[str, object]] = []
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for r, row in enumerate(refund_values[1:], start=2):
+        name, date_text = _cell(row, 1), _cell(row, 8)
+        if not name or not date_text or "略過" in _cell(row, 6) or name in seen:
+            continue
+        if name not in deposit_rows:
+            continue
+        if deposit_marked[name]:
+            continue
+        date = normalize_refund_date(date_text)
+        if not date:
+            warnings.append(f"第 {r} 列 {name} 退款日期「{date_text}」無法辨識，未處理")
+            continue
+        seen.add(name)
+        items.append({
+            "name": name,
+            "date": date,
+            "deposit_row": deposit_rows[name],
+            "field_amount": _num(_cell(row, 7)) - DEPOSIT_BASE,
+        })
+    return items, warnings
+
+
+def plan_field_marks(
+    sheets: dict[str, list[list]],
+    name: str,
+) -> tuple[list[tuple[str, int]], Decimal]:
+    """新人實境／實習中該人 A 欄空白的列：回傳 ([(分頁, 列號)], J×K 合計)。"""
+    cells: list[tuple[str, int]] = []
+    total = Decimal(0)
+    for title, values in sheets.items():
+        for r, row in enumerate(values[1:], start=2):
+            if _cell(row, 2) == name and not _cell(row, 0):
+                cells.append((title, r))
+                total += _num(_cell(row, 9)) * _num(_cell(row, 10))
+    return cells, total
+
+
+def mark_refunded(area: str = "台北") -> dict[str, object]:
+    """執行並寫一筆到主控表「tool-system執行Log-年度」（成功、失敗都記）。"""
+    from tools.common import unified_log
+
+    log_fields = dict(system="外場排程系統", function="新訓退訓實境費用已退款", run_type="手動",
+                      area=area, period=datetime.now(TW_TZ).strftime("%Y%m%d"), target=DEPOSIT_SHEET)
+    try:
+        result = _mark_refunded(area)
+    except Exception as exc:
+        unified_log.write(status="失敗", message=str(exc), **log_fields)
+        raise
+    message = f"工具包押金 G 欄註記 {result['deposit_marked']} 人；新人實境／實習 A 欄註記 {result['field_marked']} 列"
+    if result["names"]:
+        message += f"（{'、'.join(result['names'])}）"
+    if result["warnings"]:
+        message += "；注意：" + "；".join(result["warnings"])
+    unified_log.write(status="成功", message=message, **log_fields)
+    result["message"] = message
+    return result
+
+
+def _mark_refunded(area: str) -> dict[str, object]:
+    service = get_sheets_service()
+    spreadsheet_id, refund_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
+    refund_values = _read(service, spreadsheet_id, refund_title)
+    deposit_values = _read(service, spreadsheet_id, DEPOSIT_SHEET, "A:G")
+    items, warnings = plan_mark_refunded(refund_values, deposit_values)
+
+    sheets = {t: _read(service, spreadsheet_id, t, "A:K") for t in FIELD_SHEETS} if items else {}
+    data = []
+    field_marked = 0
+    for item in items:
+        note = f"{item['date']}{PAID_SUFFIX}"
+        data.append({"range": f"'{DEPOSIT_SHEET}'!G{item['deposit_row']}", "values": [[note]]})
+        amount = item["field_amount"]
+        if amount <= 0:
+            continue
+        cells, total = plan_field_marks(sheets, str(item["name"]))
+        if not cells:
+            warnings.append(f"{item['name']} 實境費用 {_fmt(amount)}，但今年度新人實境／實習找不到 A 欄空白的列，請人工註記")
+            continue
+        if total != amount:
+            warnings.append(f"{item['name']} 實境費用 {_fmt(amount)}，A 欄空白列合計 {_fmt(total)}，請確認")
+        for title, r in cells:
+            data.append({"range": f"'{title}'!A{r}", "values": [[note]]})
+        field_marked += len(cells)
+
+    if data:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": data},
+        ).execute()
+    return {
+        "deposit_marked": len(items),
+        "field_marked": field_marked,
+        "names": [str(i["name"]) for i in items],
         "warnings": warnings,
     }
