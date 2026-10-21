@@ -596,3 +596,25 @@ def test_schedule_adds_no_topup_column_when_nobody_needs_topup():
     sheet = Sheet('台北202611', [row])
     sync(Book([sheet]), [_with_topup(row, '')])
     assert '需儲值' not in sheet.data[0]
+
+
+def test_combined_sheet_rows_look_up_month_before_range():
+    existing = old_row(event='e1', date='2027/01/04')
+    existing[9] = "=xlookup(E2,'台北202612'!E:E,'台北202612'!J:J)"
+    other = old_row(event='e3', date='2027/02/15')
+    other[9] = "=xlookup(E3,'台北202611'!E:E,'台北202611'!J:J)"
+    sheet = Sheet('台北202612-202702', [existing, other])
+    previous = Sheet('台北202611')
+    new = old_row(event='e2', date='2027/02/01')
+    sync_schedule(Book([sheet, previous]), '台北202612-202702',
+                  [source_row(existing), source_row(other), source_row(new)], ['標題'] * 30, MissingSheet,
+                  period_filter='')
+    assert sheet.data[1][9] == "=xlookup(E2,'台北202611'!E:E,'台北202611'!J:J)"
+    assert sheet.data[2][9] == "=xlookup(E3,'台北202611'!E:E,'台北202611'!J:J)"
+    assert sheet.data[3][9] == "=xlookup(E4,'台北202611'!E:E,'台北202611'!J:J)"
+
+
+def test_single_month_sheet_keeps_previous_month_lookup():
+    sheet = Sheet('台北202701', [])
+    sync(Book([sheet]), [source_row(old_row(event='e1', date='2027/01/04'))], name='台北202701')
+    assert sheet.data[1][9] == "=xlookup(E2,'台北202612'!E:E,'台北202612'!J:J)"

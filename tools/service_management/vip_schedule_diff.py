@@ -408,10 +408,29 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
         updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
         updates, phones, colors = [], [], []
+        # A combined sheet (台北202612-202702) has no separate month sheets inside its range,
+        # so every row looks up the month before the range starts (台北202611).
+        combined_start = re.search(r"(\d{6})-\d{6}$", target_name)
+        base_sheet, titles = "", set()
+        if combined_start:
+            year, month = int(combined_start.group(1)[:4]), int(combined_start.group(1)[4:])
+            base_sheet = f"{area}{year - 1}12" if month == 1 else f"{area}{year}{month - 1:02d}"
+            titles = {sheet.title for sheet in ss.worksheets()}
+
+        def repaired_lookup(formula, row_num):
+            # Repair earlier #REF! lookups that pointed at a month sheet that does not exist.
+            ref = re.fullmatch(r"=xlookup\(E\d+,'([^']+)'!E:E,'[^']+'!J:J\)", _text(formula), re.I)
+            if base_sheet and ref and ref.group(1) != base_sheet and ref.group(1) not in titles:
+                return f"=xlookup(E{row_num},'{base_sheet}'!E:E,'{base_sheet}'!J:J)"
+            return ""
+
         for change in plan["updates"]:
             row, values, before = change["row"], change["values"], change["old"]
             service_date = _canonical(values[5], 5)
-            year, month = (int(service_date[:4]), int(service_date[5:7])) if service_date else (int(period[:4]), int(period[4:]))
+            if combined_start:
+                year, month = int(combined_start.group(1)[:4]), int(combined_start.group(1)[4:])
+            else:
+                year, month = (int(service_date[:4]), int(service_date[5:7])) if service_date else (int(period[:4]), int(period[4:]))
             previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
             lookup_sheet = f"{area}{previous}"
             if before is None:
@@ -420,6 +439,7 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 phones.append({"range": f"D{row}", "values": [[values[3]]]})
             else:
                 if values[:9] != before[:9]:
+                    values[9] = repaired_lookup(values[9], row) or values[9]
                     if _canonical(values[4], 4) != _canonical(before[4], 4):
                         values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
                         if values[9] != before[9]:
@@ -435,6 +455,12 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 updates.append({"range": f"{_column(columns[3])}{row}", "values": [[updated_at]]})
             if change["kind"]:
                 colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
+        if combined_start and not created:
+            touched = {item["range"] for item in updates}
+            for row_num, physical in enumerate(physical_rows, 2):
+                fixed = repaired_lookup(physical[9] if len(physical) > 9 else "", row_num)
+                if fixed and f"A{row_num}:J{row_num}" not in touched and f"A{row_num}:AD{row_num}" not in touched:
+                    updates.append({"range": f"J{row_num}", "values": [[fixed]]})
         if not created and read_columns[:3] != columns[:3]:
             for row_num, values in enumerate(existing, 2):
                 if any(u["row"] == row_num for u in plan["updates"]): continue
