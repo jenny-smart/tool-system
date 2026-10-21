@@ -108,3 +108,31 @@ def test_manual_wait_stops_when_page_closed():
     with pytest.raises(RuntimeError, match="頁面已關閉"):
         adj._wait_manual_submit(Closed(), "LC1", "2500", "note")
     adj._logout(Closed())  # 不應拋錯
+
+
+def test_logout_opens_new_tab_when_page_closed():
+    import pytest
+
+    adj = pytest.importorskip("tools.lemon_backend.stored_value_adjustment")
+    visited = []
+
+    class Tab:
+        url = ""
+
+        def is_closed(self):
+            return False
+
+        def goto(self, url, **kwargs):
+            visited.append(url)
+            self.url = f"{adj.BASE_URL}/login"  # 登出後回登入頁
+
+    class Closed:
+        def is_closed(self):
+            return True
+
+    class Context:
+        def new_page(self):
+            return Tab()
+
+    adj._logout(Closed(), Context())
+    assert visited[0] == f"{adj.BASE_URL}/logout"

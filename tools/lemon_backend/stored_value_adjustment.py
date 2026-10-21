@@ -126,13 +126,27 @@ def _already_done(page: Page, order_no: str, amount: str, note: str) -> bool:
     return order_no in compact and compact_note in compact and amount in compact
 
 
-def _logout(page: Page) -> None:
-    if page.is_closed():
-        return  # 頁面已被關閉，不需要也無法登出
-    links = page.locator('a[href*="logout"]')
-    href = links.first.get_attribute("href") if links.count() else ""
-    if href:
-        page.goto(href, wait_until="domcontentloaded")
+def _logout(page: Page, context=None) -> None:
+    """做完一律登出檸檬後台；頁面被關掉時另開分頁登出（登入狀態存在瀏覽器，不登出會留著）。
+    登出失敗只提醒，不蓋掉原本的結果或錯誤。"""
+    try:
+        if page.is_closed():
+            if context is None:
+                print("⚠️ 檸檬後台頁面已關閉，無法自動登出，請手動登出")
+                return
+            page = context.new_page()
+            href = ""
+        else:
+            links = page.locator('a[href*="logout"]')
+            href = links.first.get_attribute("href") if links.count() else ""
+        page.goto(urljoin(BASE_URL, href) if href else f"{BASE_URL}/logout", wait_until="domcontentloaded")
+        page.goto(f"{BASE_URL}/purchase", wait_until="domcontentloaded", timeout=60_000)
+        if "/login" in page.url:
+            print("檸檬後台已登出。")
+        else:
+            print(f"⚠️ 檸檬後台登出後仍在 {page.url}，請手動登出")
+    except Exception as exc:
+        print(f"⚠️ 檸檬後台自動登出失敗，請手動登出：{exc}")
 
 
 def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> None:
@@ -277,7 +291,7 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                     completed += 1
                     print(f"完成：{item['order_no']}／{date_text}{item['suffix']}")
         finally:
-            _logout(page)
+            _logout(page, context)
     print(f"檸檬後台儲值金異動完成：{completed}/{len(pending)} 筆（其餘為已存在而略過）")
     return 0
 

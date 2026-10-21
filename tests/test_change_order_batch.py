@@ -264,3 +264,39 @@ def test_formula_fixes_include_vip_refund_coupon():
     updates = batch.formula_fixes([["header"], row(B="VIP待退券", S="1000")])
     assert [u["range"] for u in updates] == ["T2", "Z2"]
 
+
+
+def test_sync_region_logs_out_after_sync(monkeypatch):
+    values = [["h"], row(B="已退款")]
+    gets = []
+
+    class WS:
+        def get_all_values(self):
+            return values
+
+        def update_acell(self, cell, value):
+            pass
+
+    class Session:
+        def get(self, url, timeout=None):
+            gets.append(url)
+
+    class CO:
+        BASE_URL = "https://backend.example"
+
+        @staticmethod
+        def get_worksheet(region):
+            return WS()
+
+        @staticmethod
+        def sync_one_to_purchase_edit(item, session=None, ui_logger=None):
+            raise RuntimeError("找不到訂單")
+
+        @staticmethod
+        def mark_sheet_row_done(region, row_no, status, ui_logger=None):
+            pass
+
+    monkeypatch.setattr(batch, "_change_order", lambda: CO)
+    monkeypatch.setattr(batch, "_login_session", lambda region, ui_logger=None: Session())
+    result = batch.sync_region("台北", log=lambda *_: None)
+    assert result["failed"] and gets == ["https://backend.example/logout"]  # 失敗也登出
