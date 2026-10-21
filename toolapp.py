@@ -1196,6 +1196,10 @@ def _append_log_entry(message: str, level: str = "info") -> str:
 
 def add_log(message: str, level: str = "info") -> None:
     _append_log_entry(message, level)
+    if level in ("success", "error"):
+        from tools.common import unified_log
+
+        unified_log.report(st, level, message)
 
     # 執行按鈕按下後，後面可能會接著跑很久（例如套用公式要跑幾十秒到
     # 幾分鐘），這段期間畫面上的日誌框早就畫好了、不會自動更新。這裡
@@ -3995,6 +3999,17 @@ if not system_names:
     st.error("目前角色沒有可執行的系統權限，請聯絡管理員。")
     st.stop()
 
+# 獨立頁面（業績報表、Drive 授權、Agent 離線處理、排程 Log）的按鈕也記入統一 Log；主畫面稍後會依選的功能更新
+from tools.common import unified_log as _unified_log
+
+_unified_log.install_streamlit_hooks(
+    st,
+    system={"report": "業績報表", "oauth": "Drive 授權設定", "agent_help": "Agent 離線處理",
+            "log": "排程 Log"}.get(str(st.session_state.view), "主畫面"),
+    function=str(st.session_state.view),
+    operator=str(st.session_state.get("username", "") or ""),
+)
+
 if st.session_state.view == "report":
     if not can_access_page("report"):
         st.error("你沒有權限查看業績報表")
@@ -4027,6 +4042,10 @@ if st.session_state.view == "log":
 selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
 if selected_system_cfg.get("type") == "gmail_401":
     from tools.gmail_401.gmail_401 import run_gmail_401
+    from tools.common import unified_log as _unified_log_401
+
+    _unified_log_401.install_streamlit_hooks(st, system="Gmail401歸檔", function="掃描並歸檔401附件",
+                                             operator=str(st.session_state.get("username", "") or ""))
     run_gmail_401()
     st.stop()
 # ────────────────────────────────────────────────────────
@@ -4152,6 +4171,16 @@ with func_col:
             label_visibility="collapsed",
             key="selected_function",
         )
+
+# 網頁上按下的每個功能都記一筆到主控表「tool-system執行Log-年度」（執行／成功／失敗）
+from tools.common import unified_log as _unified_log
+
+_unified_log.install_streamlit_hooks(
+    st,
+    system=system_name,
+    function=selected_function or system_name,
+    operator=str(st.session_state.get("username", "") or ""),
+)
 
 if system_type == "finance_management" and selected_function == "【富邦銀行】內部請款整合執行":
     st.markdown("</div>", unsafe_allow_html=True)
@@ -5212,6 +5241,7 @@ with area_col:
         label_visibility="collapsed",
         key=area_select_key,
     )
+    _unified_log.set_context(st, area=selected_area_value)
 
     selected_areas = [selected_area_value]
 
