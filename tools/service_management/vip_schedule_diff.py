@@ -52,11 +52,25 @@ def _key(values, columns):
     return tuple(_canonical(values[c], c) for c in columns)
 
 
+def _slot_text(values):
+    start, end = _canonical(values[6], 6), _canonical(values[7], 7)
+    return f"{start or '空白'}–{end or '空白'}"
+
+
 def _diff(old, new):
     # Booking writes 已安排 to Sheets; calendar 未安排 is not a service change.
     ignored = {8} if _text(old[12]) and _canonical(old[8], 8) == "已安排" and _canonical(new[8], 8) == "未安排" else set()
-    return "；".join(f"{FIELDS[c]}：{_text(old[c]) or '空白'} → {_text(new[c]) or '空白'}"
-                    for c in range(9) if c not in ignored and _canonical(old[c], c) != _canonical(new[c], c))
+    parts = []
+    for c in range(9):
+        if c in ignored or c == 7:
+            continue
+        if c == 6:
+            # Start and end read as one service slot, e.g. 時段：08:30–12:30 → 14:00–18:00.
+            if any(_canonical(old[i], i) != _canonical(new[i], i) for i in (6, 7)):
+                parts.append(f"時段：{_slot_text(old)} → {_slot_text(new)}")
+        elif _canonical(old[c], c) != _canonical(new[c], c):
+            parts.append(f"{FIELDS[c]}：{_text(old[c]) or '空白'} → {_text(new[c]) or '空白'}")
+    return "；".join(parts)
 
 
 def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=None):

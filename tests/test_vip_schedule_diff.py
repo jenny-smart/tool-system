@@ -306,7 +306,7 @@ def test_recreated_event_changed_hours_still_reports_real_difference():
     row[8] = '已安排'
     plan = plan_schedule([row], [source_row(row, **{'6': '8:30', '8': '未安排', '30': 'new'})], '台北202611')
     assert plan['changes'][0]['kind'] == '已成單異動'
-    assert '開始時間' in plan['changes'][0]['detail']
+    assert '時段：09:00–12:00 → 08:30–12:00' in plan['changes'][0]['detail']
     assert '狀態' not in plan['changes'][0]['detail']
     assert plan['updates'][0]['values'][6] == '8:30'
     assert plan['updates'][0]['values'][8] == '已安排'
@@ -320,7 +320,7 @@ def test_inline_change_details_and_date_do_not_refresh_on_identical_rerun():
     source = source_row(row, **{'6': '8:30'})
     sync(book, [source])
     assert sheet.data[0][36] == '更新日期'
-    assert '開始時間：9:00 → 8:30' in sheet.data[1][35]
+    assert '時段：09:00–12:00 → 08:30–12:00' in sheet.data[1][35]
     assert re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', sheet.data[1][36])
     sheet.batches.clear()
     sync(book, [source])
@@ -543,3 +543,33 @@ def test_customer_with_a_booked_row_still_needs_manual_review():
     plan = plan_schedule(rows, sources, '台北202701-202702')
     assert any(c['kind'] == '需人工核對' for c in plan['changes'])
     assert next(u for u in plan['updates'] if u['row'] == 2)['values'][5] == '2027/01/07'
+
+
+def test_slot_change_is_written_as_one_time_range():
+    original = _monthly('o1', '2026/12/15', '8:30', '12:30')
+    plan = plan_schedule([original], [source_row(_monthly('o1', '2026/12/15', '14:00', '18:00'))], '台北202612')
+    assert plan['updates'][0]['values'][32] == '時段：08:30–12:30 → 14:00–18:00'
+    only_end = plan_schedule([original], [source_row(_monthly('o1', '2026/12/15', '8:30', '13:00'))], '台北202612')
+    assert only_end['updates'][0]['values'][32] == '時段：08:30–12:30 → 08:30–13:00'
+
+
+def test_monthly_confirm_pairing_also_updates_booking_gate_columns():
+    from tools.service_management.booking_gate import build_gate, parse_rule
+    rule = parse_rule({"啟用": "TRUE", "地區": "台北", "適用起日": "2026-12-15", "適用迄日": "2027-02-04",
+                       "確認檔案ID": "F", "確認工作表": "2026大掃除", "確認欄": "V", "備註欄": "W",
+                       "排程排除欄": "A", "排除關鍵字": "改,加", "已確認欄": "B", "已確認關鍵字": "已確認"})
+    confirm = [""] * 23
+    confirm[2], confirm[3], confirm[5], confirm[21] = '王小明', '0912345678', '台北市大安區', 'FALSE'
+    rows = [_monthly('old1', '2027/01/07'), _monthly('old2', '2027/02/04')]
+    sheet = Sheet('台北202701-202702', rows)
+    sources = [source_row(_monthly('new1', '2027/01/29', note='已確認', status='未安排')),
+               source_row(_monthly('new2', '2027/02/26'))]
+    sync_schedule(Book([sheet]), '台北202701-202702', sources, ['標題'] * 30, MissingSheet,
+                  period_filter='', gate=build_gate(rule, [confirm]))
+    header = sheet.data[0]
+    confirmed, stage = header.index('已確認'), header.index('預約條件')
+    assert sheet.data[1][1] == '已確認' and sheet.data[1][5] == '2027/01/29' and sheet.data[1][8] == '未安排'
+    assert sheet.data[1][confirmed] == '已確認' and sheet.data[1][stage] == '已確認'
+    second = sheet.data[2] + [''] * len(header)
+    # 2027/02/26 is after the rule period (2027-02-04), so no stage is written.
+    assert second[5] == '2027/02/26' and second[confirmed] == '' and second[stage] == ''
