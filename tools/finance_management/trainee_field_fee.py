@@ -112,12 +112,16 @@ def roster_start_years(values: list[list]) -> dict[str, int]:
 
 
 def field_fees(sheets: list[list[list]]) -> dict[str, Decimal]:
-    """新人實境／新人實習：A 欄空白的列，依 C 欄姓名加總 J×K。"""
+    """新人實境／新人實習：依 C 欄姓名加總 J×K。
+
+    A 欄空白（未付）或「YYYY/MM/DD已匯款」（隨押金退款一起匯）都算；
+    A 欄是期別（例如 202610-1，已隨薪資發放）的不算。
+    """
     totals: dict[str, Decimal] = {}
     for values in sheets:
         for row in values[1:]:
-            name = _cell(row, 2)
-            if not name or _cell(row, 0):
+            name, paid = _cell(row, 2), _cell(row, 0)
+            if not name or (paid and "已匯款" not in paid):
                 continue
             totals[name] = totals.get(name, Decimal(0)) + _num(_cell(row, 9)) * _num(_cell(row, 10))
     return totals
@@ -155,8 +159,16 @@ def compute_refund_updates(
         if name not in deposits:
             warnings.append(f"{name} 在「{DEPOSIT_SHEET}」找不到，未更新")
             continue
-        updates[rows[0]] = fees.get(name, Decimal(0)) + _num(_cell(deposits[name], 1))
+        updates[rows[0]] = fees.get(name, Decimal(0)) + deposit_amount(deposits[name])
     return updates, warnings
+
+
+def deposit_amount(row: list) -> Decimal:
+    """工具包押金 B 欄；會計已先退款（B 歸 0、G 欄「已匯款」）時以押金 2000 計。"""
+    amount = _num(_cell(row, 1))
+    if amount == 0 and "已匯款" in _cell(row, 6):
+        return DEPOSIT_BASE
+    return amount
 
 
 def build_fee_rows(
@@ -380,10 +392,15 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
     warnings = update_warnings + warnings
     if earlier:
         warnings.append(f"以下人員實境費用含前年度：{'、'.join(earlier)}")
-    changed = {
-        r: v for r, v in updates.items()
-        if _num(_cell(refund_values[r - 1], 7)) != v or not _cell(refund_values[r - 1], 7)
-    }
+    # 只填 H 欄空白的列；已有金額（可能是人工調整）不覆蓋，不一致時提醒
+    changed = {r: v for r, v in updates.items() if not _cell(refund_values[r - 1], 7)}
+    for r, v in updates.items():
+        old = _cell(refund_values[r - 1], 7)
+        if old and _num(old) != v:
+            warnings.append(
+                f"第 {r} 列 {_cell(refund_values[r - 1], 1)} H 欄已有 {old}，試算為 {_fmt(v)}，未覆蓋請人工確認"
+            )
+    updates = changed
     if changed:
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=spreadsheet_id,

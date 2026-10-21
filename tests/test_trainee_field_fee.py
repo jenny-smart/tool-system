@@ -118,3 +118,19 @@ def test_pick_spreadsheet_prefers_exact_and_skips_disabled():
     files.append({"id": "exact", "name": "2025專員名冊與時數-台北"})
     assert pick_spreadsheet("2025專員名冊與時數-台北", files) == "exact"
     assert pick_spreadsheet("2024專員名冊與時數-台北", files) == ""
+
+
+def test_already_refunded_by_accounting_still_counts():
+    """林怡君：I 欄未填，但實境 A 欄已標「已匯款」、押金 B 已歸 0。"""
+    shijing = [
+        FIELD_HEADER,
+        _field_row("2026/10/21已匯款", "林怡君", "200", "2.00"),
+        _field_row("2026/10/21已匯款", "林怡君", "200", "2.00"),
+        _field_row("2026/10/21已匯款", "林怡君", "200", "2.00"),
+        _field_row("202610-1", "林怡君", "200", "2.00"),
+    ]
+    fees = field_fees([shijing])
+    deposits = deposit_lookup([["專員姓名"], ["林怡君", "0", "", "", "退訓", "", "2026/10/21已匯款"]])
+    refund = [["h"] * 9, ["t", "林怡君", "", "", "", "", "", "", ""]]
+    updates, _ = compute_refund_updates(refund, fees, deposits)
+    assert updates == {2: Decimal(3200)}
