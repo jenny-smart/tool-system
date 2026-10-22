@@ -862,7 +862,7 @@ def budget_prize_formula(url: str) -> str:
 def update_budget(rollover, response_id: str) -> None:
     """「春酒預算編列new」：{Y-1}→{Y}、{Y-1}-1→{Y}-1 複製分頁（{Y} 內引用改指 {Y}-1），
     {Y}-1 A1 匯入回覆檔「統計」A1:M20（得獎人＋抽獎統計，預算公式依 H:M 位置引用）、O1 起帶入春酒統計表 Q 欄起，
-    {Y} AA:AD 帶入中獎名單；皆用 IMPORTRANGE 連動（第一次需在預算表按「允許存取」）。"""
+    {Y} AA:AD（地區、姓名、獎項、金額）帶入中獎名單、AF:AG 每人合計；皆用 IMPORTRANGE 連動（第一次需在預算表按「允許存取」）。"""
     y, py = rollover.new_year, rollover.new_year - 1
     main, sub, pmain, psub = str(y), f"{y}-1", str(py), f"{py}-1"
     found = find_sheet_loose(rollover, BUDGET_FILE_NAME)
@@ -890,13 +890,16 @@ def update_budget(rollover, response_id: str) -> None:
     url = f"https://docs.google.com/spreadsheets/d/{response_id}"
     st = f"\'{STATS_SHEET}\'"
     ensure_columns(rollover, fid, sub, "BZ")
-    ensure_columns(rollover, fid, main, "AD")
+    ensure_columns(rollover, fid, main, "AG")
     rollover.sheets.spreadsheets().values().batchClear(spreadsheetId=fid, body={"ranges": [
-        f"'{sub}'!A1:M20", f"'{sub}'!O1:BZ80", f"'{main}'!AA2:AD300"]}).execute()
+        f"'{sub}'!A1:M20", f"'{sub}'!O1:BZ80", f"'{main}'!AA2:AD300", f"'{main}'!AF2:AG300"]}).execute()
     rollover._values_batch(fid, [
         {"range": f"'{sub}'!A1", "values": [[f'=IMPORTRANGE("{url}","{SUMMARY_SHEET}!A1:M20")']]},
         {"range": f"'{sub}'!O1", "values": [[f'=IMPORTRANGE("{url}","{st}!{SUMMARY_COL}1:{shift(LOTTERY_STAT_COL, 5)}40")']]},
         {"range": f"'{main}'!AA2", "values": [[budget_prize_formula(url)]]},
+        # AF 每人一列（原本手動貼中獎清單）、AG 每人合計
+        {"range": f"'{main}'!AF2", "values": [['=IFERROR(UNIQUE(FILTER(AB2:AB,AB2:AB<>"")),"")']]},
+        {"range": f"'{main}'!AG2", "values": [[f'=IF(AF{r}="","",SUMIF(AB:AB,AF{r},AD:AD))'] for r in range(2, 301)]},
     ])
     rollover.log(f"  {BUDGET_FILE_NAME}：{sub} 抽獎／參與統計、{main} 中獎名單已連動"
                  f"（第一次開啟請在 {sub}!A1 按「允許存取」）")
