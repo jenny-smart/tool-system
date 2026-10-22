@@ -1019,7 +1019,7 @@ if mode == "颱風假訂單移轉":
     import typhoon_transfer_ui
 
     step("3", "颱風假訂單移轉")
-    typhoon_transfer_ui.render(backend_email, backend_password, env)
+    typhoon_transfer_ui.render(backend_email, backend_password, env, copy_button=copy_button)
     st.stop()
 
 # =========================================================

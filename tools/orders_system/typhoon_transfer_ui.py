@@ -24,7 +24,7 @@ def _rows_to_frame(rows):
     ])
 
 
-def render(backend_email, backend_password, env):
+def render(backend_email, backend_password, env, copy_button=None):
     st.caption(
         "依颱風假當天的時段，逐筆用後台「修改日期」移到移轉區間：先選日期、時段維持原時段。"
         "名單為後台「服務日期＋已付款」搜尋結果由上而下的順序，依序排入，第一天排不下才換下一天。"
@@ -35,7 +35,7 @@ def render(backend_email, backend_password, env):
     with c2:
         range_text = st.text_input("移轉日期區間", value="", placeholder="2027/03/01-2027/03/05", key="tt_range")
     day_type = st.selectbox("移轉日別", tt.DAY_TYPES, key="tt_day_type",
-                            help="平日／假日價格不同，預設只移到與颱風假相同日別的日期。")
+                            help="平日（週一～五，國定假日也算平日）與週末（週六、日）價格不同，預設只移到與颱風假相同日別的日期。")
 
     if st.button("🔍 查詢颱風假當天訂單", type="primary", use_container_width=True, key="tt_search"):
         if not backend_email.strip() or not backend_password.strip():
@@ -123,16 +123,20 @@ def render(backend_email, backend_password, env):
     if results:
         ok = sum(1 for r in results if r.get("success"))
         (st.success if ok == len(results) else st.warning)(f"完成：成功 {ok} 筆，失敗 {len(results) - ok} 筆")
+        copy_rows = tt.result_copy_rows(results)
         st.dataframe(pd.DataFrame([
             {
                 "結果": "✅" if r.get("success") else "❌",
-                "時段": r["period"],
-                "訂單編號": r["order_no"],
-                "姓名": r["name"],
-                "新日期": r.get("new_date", ""),
+                **{k: v for k, v in c.items() if k not in ("結果", "說明")},
                 "新專員": r.get("new_staff", ""),
                 "說明": r.get("message", ""),
                 "略過日期": "；".join(r.get("attempts") or []),
             }
-            for r in results
+            for r, c in zip(results, copy_rows)
         ]), hide_index=True, use_container_width=True)
+        copy_label = "複製原日期時段／移轉後日期時段（貼到 Google Sheets 會自動分欄）"
+        if copy_button:
+            copy_button(copy_label, tt.results_tsv(results), "tt_copy_results")
+        else:
+            st.caption(copy_label)
+            st.code(tt.results_tsv(results), language=None)
