@@ -139,7 +139,7 @@ def test_one_form_failure_does_not_stop_other_regions(monkeypatch):
     monkeypatch.setattr(sb, "get_forms_service", lambda: object())
     updated = []
 
-    def fake_update(rollover, forms, form_id, form_name, names, excluded):
+    def fake_update(rollover, forms, form_id, form_name, names, excluded, area=""):
         if "台北" in form_name:
             raise RuntimeError("權限不足")
         updated.append(form_name)
@@ -242,3 +242,25 @@ def test_response_formula_pulls_linked_tab():
     assert sb.response_formula("參與回應", "A2:G") == \
         "=IFERROR(FILTER('參與回應'!A2:G,'參與回應'!A2:A<>\"\"),\"\")"
     assert sb.RESPONSE_TABS["春酒獎項投票-台北"] == ("投票回應-台北", "A2:H")
+
+
+def test_region_tag_and_response_tab_target():
+    form = {"items": [{"title": "問題2.請問您的姓名是？", "questionItem": {}},
+                      {"title": "問題3.『家事達人獎』", "questionItem": {}}]}
+    reqs = sb.region_tag_updates(form, "台北")
+    assert [r["updateItem"]["item"]["title"] for r in reqs] == ["問題2.請問您的姓名是？（台北）"]
+    assert sb.region_tag_updates({"items": [reqs[0]["updateItem"]["item"]]}, "台北") == []
+    assert sb.response_tab_target(["時間戳記", "問題2.請問您的姓名是？（新竹）", "『家事達人獎』"]) == "投票回應-新竹"
+    assert sb.response_tab_target(["時間戳記", "問題3.請問您的飲食習慣需求是？"]) == "參與回應"
+    assert sb.response_tab_target(["時間戳記", "『家事達人獎』"]) is None
+
+
+def test_link_response_tabs_renames_new_tabs():
+    data = {"春酒參與統計": {}, "春酒獎項投票-台北": {},
+            "表單回應 1": cells([["時間戳記", "問題1.請問您的中文全名是？", "問題3.請問您的飲食習慣需求是？"]]),
+            "表單回應 2": cells([["時間戳記", "問題2.姓名（台北）", "『家事達人獎』"]])}
+    fake = FakeSheets(data)
+    rollover = Rollover(None, fake, "x", 2027, dry_run=False, log=lambda m: None)
+    sb.link_response_tabs(rollover, "resp")
+    assert "參與回應" in fake.data and "投票回應-台北" in fake.data
+    assert any(isinstance(d, dict) and d.get("range") == "'春酒獎項投票-台北'!A2" for d in fake.requests)

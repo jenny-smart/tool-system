@@ -24,7 +24,8 @@ tools/annual_rollover/spring_banquet.py
      「歷年得獎人」中 G1 年內得過「同一獎項」的人
 
 表單回覆要連到哪個試算表，Forms API 無法設定，仍需在表單「回覆」頁手動連結；
-連結後 Google 會新增工作表，請改名為 RESPONSE_TABS 的名稱（參與回應、投票回應-地區）。
+連結後 Google 會新增工作表；再執行一次春酒專區，程式會依標題列自動改名為 RESPONSE_TABS 的名稱
+（參與回應、投票回應-地區；投票表單姓名題目會先加上（地區）以便分辨）。
 """
 
 from __future__ import annotations
@@ -297,6 +298,46 @@ def response_formula(tab: str, rng: str) -> str:
     return f"=IFERROR(FILTER('{tab}'!{rng},'{tab}'!A2:A<>\"\"),\"\")"
 
 
+def response_tab_target(header: List[str]) -> Optional[str]:
+    """依新增回應工作表的標題列判斷是哪份表單的回應：參與表單有「飲食習慣」，投票表單姓名題目帶（地區）。"""
+    text = " ".join(header)
+    if "家事達人獎" in text:
+        for a in ROSTER_AREAS:
+            if f"（{a}）" in text:
+                return RESPONSE_TABS[f"春酒獎項投票-{a}"][0]
+        return None
+    if "飲食習慣" in text or "參與春酒" in text:
+        return RESPONSE_TABS[ATTEND_SHEET][0]
+    return None
+
+
+def link_response_tabs(rollover, file_id: str) -> None:
+    """表單連結試算表後 Google 新增的工作表自動改成固定名稱，並重寫帶入公式。"""
+    ids = sheet_ids(rollover, file_id)
+    known = set(RESPONSE_TABS) | {tab for tab, _ in RESPONSE_TABS.values()}
+    reqs, renamed = [], []
+    for title, sid in ids.items():
+        if title in known or not re.match(r"^(表單回應|表單回覆|Form Responses)\s*\d*$", title):
+            continue
+        header = (read(rollover, file_id, f"'{title}'!A1:Z1") or [[]])[0]
+        target = response_tab_target(header)
+        if not target:
+            rollover.log(f"  ⚠ 無法判斷「{title}」是哪份表單的回應，請檢查投票表單姓名題目是否帶地區")
+        elif target in ids or target in renamed:
+            rollover.log(f"  ⚠ 「{target}」已存在，「{title}」未改名（可能重複連結表單）")
+        else:
+            reqs.append({"updateSheetProperties": {"properties": {"sheetId": sid, "title": target},
+                                                   "fields": "title"}})
+            renamed.append(target)
+            rollover.log(f"  回應工作表「{title}」→「{target}」")
+    if rollover.dry_run or not reqs:
+        return
+    batch_update(rollover, file_id, reqs)
+    ids = sheet_ids(rollover, file_id)
+    rollover._values_batch(file_id, [{"range": f"'{s}'!A2", "values": [[response_formula(tab, rng)]]}
+                                     for s, (tab, rng) in RESPONSE_TABS.items() if s in ids])
+
+
 def prepare_response_file(rollover, file_id: str, event: Dict[str, Any]) -> None:
     """新建的回覆試算表：名冊分頁改年度、記錄去年得獎人、清空待填欄位並設黃底、文字與公式改新年度。"""
     y = rollover.new_year
@@ -522,10 +563,24 @@ def update_attendance_form(rollover, forms, form_id: str, event_date: date, peri
     rollover.log("  ⚠ 參與統計表單找不到「方便於MM/DD(週)…參與春酒」的題目，日期未更新")
 
 
+def region_tag_updates(form: Dict[str, Any], area: str) -> List[Dict[str, Any]]:
+    """投票表單「姓名」題目尾端加上（地區），連結試算表後才能從標題列分辨是哪一區的回應。"""
+    tag = f"（{area}）"
+    reqs = []
+    for index, item in enumerate(form.get("items", [])):
+        title = item.get("title", "")
+        if "姓名" in title and "questionItem" in item and not title.rstrip().endswith(tag):
+            item = dict(item, title=title.rstrip() + tag)
+            reqs.append({"updateItem": {"item": item, "location": {"index": index}, "updateMask": "title"}})
+    return reqs
+
+
 def update_vote_form(rollover, forms, form_id: str, form_name: str, names: List[str],
-                     excluded: Dict[str, Set[str]]) -> None:
+                     excluded: Dict[str, Set[str]], area: str = "") -> None:
     form = forms.forms().get(formId=form_id).execute()
     reqs = vote_choice_updates(form, names, excluded)
+    if area:
+        reqs += region_tag_updates(form, area)
     for req in reqs:
         item = req["updateItem"]["item"]
         count = len(item["questionItem"]["question"]["choiceQuestion"]["options"])
@@ -599,6 +654,10 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
                 prepare_response_file(rollover, response["new_id"], event)
             update_roster(rollover, response["new_id"], roster)
         try:
+            link_response_tabs(rollover, response["new_id"])
+        except Exception as exc:
+            rollover.log(f"  ⚠ 回應工作表改名失敗：{exc}")
+        try:
             excluded, inner = vote_exclusions(rollover, response["new_id"])
         except Exception as exc:
             rollover.log(f"  ⚠ 讀不到「{WINNERS_SHEET}」／內勤名單，投票選項不排除：{exc}")
@@ -613,7 +672,7 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
     for a in targets:
         names = [r[0] for r in roster[a] if r[0] not in inner]
         jobs.append((votes[a]["new_name"], lambda forms, a=a, names=names: update_vote_form(
-            rollover, forms, votes[a]["new_id"], votes[a]["new_name"], names, excluded)))
+            rollover, forms, votes[a]["new_id"], votes[a]["new_name"], names, excluded, a)))
     forms = None
     if jobs:
         try:
@@ -628,6 +687,6 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
         except Exception as exc:
             rollover.log(f"  ✗ 更新表單「{name}」失敗：{exc}")
             records.append({"kind": "表單", "old_name": name, "old_id": "", "new_name": "找不到來源", "new_id": ""})
-    rollover.log("  ⚠ 表單回覆連到「" + RESPONSE_FILE_NAME.format(Y=y) + "」需在各表單「回覆」頁手動設定，"
-                 "新增的工作表請改名為：" + "、".join(tab for tab, _ in RESPONSE_TABS.values()))
+    rollover.log("  ⚠ 各表單「回覆」頁連結至「" + RESPONSE_FILE_NAME.format(Y=y)
+                 + "」後，請再執行一次春酒專區，程式會自動把新增的回應工作表改名")
     return records
