@@ -90,6 +90,11 @@ LOTTERY_CATEGORIES = (                                   # 順序＝預算表「
     + [(f"{a}內勤", "inner", a) for a in ("台北", "桃園", "新竹", "高雄")]
     + [(f"{a}眷屬{k}", k, a) for a in ("台北", "桃園", "新竹", "台中") for k in ("半", "全")])
 BUDGET_FILE_NAME = "春酒預算編列new"
+SUMMARY_SHEET = "統計"                                    # 預算表「{Y}-1」A1 以 IMPORTRANGE 匯入 A1:M20
+SUMMARY_AWARDS = ["家事達人獎", "最佳進步獎", "良師益友獎", "最佳人緣獎", "勤奮獎"]
+WINNERS_PER_AREA = 2
+SUMMARY_AREAS = ["台北", "桃園", "新竹", "台中"]            # 沿用 2026「統計」列順序
+PRIZE_SHEET = "中獎/簽名表"                               # 每 3 欄一組：獎項、金額、簽名（姓名）
 TOP_N = 5
 VOTE_AWARD_COLS = [("家事達人獎", "E"), ("最佳進步獎", "F"), ("良師益友獎", "G"), ("最佳人緣獎", "H")]
 ERROR_MARKS = ("#REF!", "#VALUE!", "#NAME?", "#ERROR!", "#DIV/0!")
@@ -397,6 +402,29 @@ def lottery_stat_formulas() -> Dict[str, List[List[str]]]:
     return {f"{LOTTERY_STAT_COL}1": rows}
 
 
+def summary_sheet_values() -> Dict[str, List[List[str]]]:
+    """「統計」工作表（沿用 2026 格式）：A:F 各區得獎人（每區 2 列，取自得獎人提詞「地區/姓名」）、
+    H:M 抽獎統計（＝春酒統計表 AO:AT）、第 18 列合計。"""
+    pr = f"'{PROMPT_SHEET}'"
+    rows = [[""] + [f"『{a}』" for a in SUMMARY_AWARDS]]
+    for i, area in enumerate(SUMMARY_AREAS):
+        for n in range(1, WINNERS_PER_AREA + 1):
+            r = len(rows) + 1
+            head = 2 + i * WINNERS_PER_AREA
+            row = [area if n == 1 else ""]
+            for k in range(len(SUMMARY_AWARDS)):
+                c = col_name(2 + k)
+                col = (f"INDEX({pr}!$A$2:$H$40,0,MATCH(\"*\"&MID({c}$1,2,LEN({c}$1)-2)&\"*\","
+                       f"{pr}!$A$1:$H$1,0))")
+                row.append(f'=IFERROR(REGEXREPLACE(INDEX(FILTER({col},LEFT({col},LEN($A${head})+1)=$A${head}&"/"),'
+                           f'{n}),"^[^/]+/",""),"")')
+            rows.append(row)
+    st = f"'{STATS_SHEET}'"
+    return {"A1": rows,
+            "H1": [[f"={{{st}!{LOTTERY_STAT_COL}1:{shift(LOTTERY_STAT_COL, 5)}17}}"]],
+            "I18": [[f"=SUM({c}2:{c}17)" for c in "IJKLM"]]}
+
+
 def lottery_formula(r: int, new_year: int) -> str:
     """春酒統計表 P 欄抽獎資格：Y，或列出不符合原因（到職未滿3月、請假N月、均時未達）。
     內勤看內勤名冊 C 欄；專員看名冊到職日（春酒日期為基準）、前一年 0 小時月份（到職後）、U 欄達門檻。"""
@@ -521,6 +549,8 @@ def prepare_response_file(rollover, file_id: str, event: Dict[str, Any]) -> None
     if PROMPT_SHEET in ids:
         archive_winners(rollover, file_id, y - 2)
 
+    if PRIZE_SHEET in ids:
+        clear_prize_names(rollover, file_id, ids[PRIZE_SHEET], y)
     clear = [(s, rng, bg) for s, rng, bg in TEMPLATE_CLEAR if s in ids]
     rollover.log(f"  清空去年資料：{'、'.join(f'{s}!{rng}' for s, rng, _ in clear)}")
     rollover.sheets.spreadsheets().values().batchClear(
@@ -539,6 +569,27 @@ def prepare_response_file(rollover, file_id: str, event: Dict[str, Any]) -> None
     data += [{"range": f"'{s}'!A2", "values": [[response_formula(tab, rng)]]}
              for s, (tab, rng) in RESPONSE_TABS.items() if s in ids]
     rollover._values_batch(file_id, data)
+
+
+def prize_name_cells(values: List[List[str]]) -> List[str]:
+    """中獎/簽名表每組第 3 欄（簽名）有姓名的儲存格（表頭「簽名」除外），A1 位置。"""
+    cells = []
+    for r, row in enumerate(values, start=1):
+        for k in range(2, len(row), 3):
+            if str(row[k]).strip() not in ("", "簽名"):
+                cells.append(f"{col_name(k + 1)}{r}")
+    return cells
+
+
+def clear_prize_names(rollover, file_id: str, sheet_id: int, year: int) -> None:
+    """新年度：清掉中獎/簽名表所有頁的得獎人姓名，各頁標題「2026/03/14檸檬春酒-中獎清單」改成新年度。"""
+    cells = prize_name_cells(read(rollover, file_id, f"'{PRIZE_SHEET}'!A1:L300"))
+    if cells:
+        rollover.sheets.spreadsheets().values().batchClear(
+            spreadsheetId=file_id, body={"ranges": [f"'{PRIZE_SHEET}'!{c}" for c in cells]}).execute()
+    batch_update(rollover, file_id, [{"findReplace": {
+        "find": r"^\d{4}(/\d{1,2}/\d{1,2})?檸檬春酒-中獎清單$", "replacement": f"{year}檸檬春酒-中獎清單",
+        "searchByRegex": True, "sheetId": sheet_id}}])
 
 
 def update_roster(rollover, file_id: str, roster: Dict[str, List[List[str]]]) -> None:
@@ -611,8 +662,12 @@ def repair_formulas(rollover, file_id: str, manual: Optional[Dict[str, List[str]
             "地區", "姓名", "回覆", "到職日", "參加否", "葷/素食", "攜伴否", "攜伴人數", "眷屬6歲以下",
             "眷屬7-12歲", "眷屬13歲以上", f"{y}年到職（本人付費）", "達時數門檻", "平均時數", "去年得獎獎項",
             "抽獎資格"]]})
+    if SUMMARY_SHEET not in ids:
+        batch_update(rollover, file_id, [{"addSheet": {"properties": {"title": SUMMARY_SHEET}}}])
+    values.batchClear(spreadsheetId=file_id, body={"ranges": [f"'{SUMMARY_SHEET}'!A1:M20"]}).execute()
+    data += [{"range": f"'{SUMMARY_SHEET}'!{cell}", "values": v} for cell, v in summary_sheet_values().items()]
     rollover._values_batch(file_id, data)
-    rollover.log(f"  公式檢查與修復：{STATS_SHEET}、{GIFT_SHEET}、抽獎籤、表單回應帶入公式已重寫")
+    rollover.log(f"  公式檢查與修復：{STATS_SHEET}、{SUMMARY_SHEET}、{GIFT_SHEET}、抽獎籤、表單回應帶入公式已重寫")
 
     problems = []
     for name, rng in [(STATS_SHEET, "A1:AT60"), (sheet, "A1:AB60"), (GIFT_SHEET, "A1:H60"), ("抽獎籤", "A1:K20")]:
@@ -798,14 +853,15 @@ def budget_prize_formula(url: str) -> str:
     """預算表 {Y}!AA2：中獎/簽名表四個區塊（獎項、金額、簽名＝姓名）合併 → 地區、姓名、獎項、金額。"""
     return (f'=LET(s,IMPORTRANGE("{url}","\'中獎/簽名表\'!A3:L200"),'
             "v,VSTACK(CHOOSECOLS(s,1,2,3),CHOOSECOLS(s,4,5,6),CHOOSECOLS(s,7,8,9),CHOOSECOLS(s,10,11,12)),"
-            'f,FILTER(v,INDEX(v,,3)<>"",INDEX(v,,1)<>""),'
+            'f,FILTER(v,INDEX(v,,3)<>"",INDEX(v,,3)<>"簽名",ISNUMBER(INDEX(v,,2))),'
             f'st,IMPORTRANGE("{url}","\'{STATS_SHEET}\'!A2:B{STATS_ROWS}"),'
-            'HSTACK(IFNA(XLOOKUP(INDEX(f,,3),INDEX(st,,2),INDEX(st,,1)),""),INDEX(f,,3),INDEX(f,,1),INDEX(f,,2)))')
+            'HSTACK(ARRAYFORMULA(IFNA(XLOOKUP(INDEX(f,,3),INDEX(st,,2),INDEX(st,,1)),"")),'
+            'INDEX(f,,3),INDEX(f,,1),INDEX(f,,2)))')
 
 
 def update_budget(rollover, response_id: str) -> None:
     """「春酒預算編列new」：{Y-1}→{Y}、{Y-1}-1→{Y}-1 複製分頁（{Y} 內引用改指 {Y}-1），
-    {Y}-1 H1:M17 帶入抽獎統計（預算公式依位置引用）、O1 起帶入春酒統計表 Q 欄起全部統計，
+    {Y}-1 A1 匯入回覆檔「統計」A1:M20（得獎人＋抽獎統計，預算公式依 H:M 位置引用）、O1 起帶入春酒統計表 Q 欄起，
     {Y} AA:AD 帶入中獎名單；皆用 IMPORTRANGE 連動（第一次需在預算表按「允許存取」）。"""
     y, py = rollover.new_year, rollover.new_year - 1
     main, sub, pmain, psub = str(y), f"{y}-1", str(py), f"{py}-1"
@@ -836,14 +892,14 @@ def update_budget(rollover, response_id: str) -> None:
     ensure_columns(rollover, fid, sub, "BZ")
     ensure_columns(rollover, fid, main, "AD")
     rollover.sheets.spreadsheets().values().batchClear(spreadsheetId=fid, body={"ranges": [
-        f"'{sub}'!H1:M17", f"'{sub}'!O1:BZ80", f"'{main}'!AA2:AD300"]}).execute()
+        f"'{sub}'!A1:M20", f"'{sub}'!O1:BZ80", f"'{main}'!AA2:AD300"]}).execute()
     rollover._values_batch(fid, [
-        {"range": f"'{sub}'!H1", "values": [[f'=IMPORTRANGE("{url}","{st}!{LOTTERY_STAT_COL}1:{shift(LOTTERY_STAT_COL, 5)}17")']]},
+        {"range": f"'{sub}'!A1", "values": [[f'=IMPORTRANGE("{url}","{SUMMARY_SHEET}!A1:M20")']]},
         {"range": f"'{sub}'!O1", "values": [[f'=IMPORTRANGE("{url}","{st}!{SUMMARY_COL}1:{shift(LOTTERY_STAT_COL, 5)}40")']]},
         {"range": f"'{main}'!AA2", "values": [[budget_prize_formula(url)]]},
     ])
     rollover.log(f"  {BUDGET_FILE_NAME}：{sub} 抽獎／參與統計、{main} 中獎名單已連動"
-                 f"（第一次開啟請在 {sub}!H1 按「允許存取」）")
+                 f"（第一次開啟請在 {sub}!A1 按「允許存取」）")
 
 
 # ---------- 主流程 ----------

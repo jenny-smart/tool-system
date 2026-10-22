@@ -365,7 +365,7 @@ def test_update_budget_copies_tabs_and_links(monkeypatch):
     fr = next(r["findReplace"] for r in calls["batch"] if "findReplace" in r)
     assert fr["find"] == "'2026-1'!" and fr["replacement"] == "'2027-1'!"
     ranges = {d["range"]: d["values"][0][0] for d in calls["values"]}
-    assert "'春酒統計表'!AO1:AT17" in ranges["'2027-1'!H1"]
+    assert ranges["'2027-1'!A1"].endswith('"統計!A1:M20")')
     assert "中獎/簽名表" in ranges["'2027'!AA2"]
 
 
@@ -387,3 +387,18 @@ def test_ensure_columns_appends_when_narrow():
     rollover = type("Ro", (), {"sheets": Sheets()})()
     sb.ensure_columns(rollover, "f", "春酒統計表", "AZ")
     assert sent == [{"appendDimension": {"sheetId": 7, "dimension": "COLUMNS", "length": 52 - 39}}]
+
+
+def test_summary_sheet_layout_matches_budget():
+    v = sb.summary_sheet_values()
+    rows = v["A1"]
+    assert rows[0][1] == "『家事達人獎』" and rows[0][5] == "『勤奮獎』"
+    assert [r[0] for r in rows[1:]] == ["台北", "", "桃園", "", "新竹", "", "台中", ""]
+    assert "$A$2&\"/\"" in rows[2][1] and ",2),\"^[^/]+/\"" in rows[2][1]
+    assert v["H1"][0][0] == "={'春酒統計表'!AO1:AT17}" and v["I18"][0][0] == "=SUM(I2:I17)"
+
+
+def test_prize_name_cells_skip_headers():
+    values = [["2026/03/14檸檬春酒-中獎清單"], ["獎項", "金額", "簽名", "獎項", "金額", "簽名"],
+              ["陸獎", "1,000", "x", "陸獎", "1,000", "張智皓"], ["陸獎", "1,000", ""]]
+    assert sb.prize_name_cells(values) == ["C3", "F3"]
