@@ -11,6 +11,7 @@ from accounts import ACCOUNTS
 from batch_recovery_meta import install_patch as install_recovery_meta_patch
 from selected_row_status_guard import install_patch as install_selected_row_status_guard, render_o_text_filter, render_stage_filter
 from batch_booking_safety import install_streamlit_batch_hooks
+import dev_sheet_copy
 
 install_selected_row_status_guard()
 install_recovery_meta_patch()
@@ -34,7 +35,7 @@ def _token():
     return ""
 
 
-def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon, retry_failed=False, o_texts=(), stages=("可約",)):
+def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon, retry_failed=False, o_texts=(), stages=("可約",), env="prod"):
     token = _token()
     if not token:
         raise RuntimeError("尚未設定 ORDERS_GITHUB_TOKEN；需提供可啟動 orders-system Actions 的 GitHub Token。")
@@ -54,6 +55,7 @@ def _dispatch(sheet, chunk_size, max_rows, filter_mode, region, allow_auto_lemon
             "o_texts": json.dumps(list(o_texts or []), ensure_ascii=False),
             "stages": json.dumps(list(stages), ensure_ascii=False),
             "pricing_json": json.dumps(load_config()),
+            "env": "dev" if dev_sheet_copy.is_dev(env) else "prod",
         }},
         timeout=30,
     )
@@ -248,9 +250,9 @@ def _render_cloud_status():
 
 def render(env: str):
     st.subheader("批次建單優化＋雲端批次成單")
-    if env != "prod":
-        st.warning("雲端批次成單只允許正式機 prod。")
-        return
+    is_dev = dev_sheet_copy.is_dev(env)
+    if is_dev:
+        st.warning("🧪 測試機 dev：雲端會連 backend-dev 建單，只執行「建單」，不寄確認信、不改 Google 日曆，並在工作表副本回填。")
 
     status_panel = st.container()
 
@@ -264,9 +266,10 @@ def render(env: str):
     st.info("💡 雲端版由篩選條件自動取得列號；中斷重跑會先反查後台，避免重複建單。")
 
     st.markdown("#### 3　執行項目")
+    cloud_actions = ["建單"] if is_dev else ["建單", "寄確認信", "改 Google 日曆"]
     st.multiselect(
-        "執行項目", ["建單", "寄確認信", "改 Google 日曆"],
-        default=["建單", "寄確認信", "改 Google 日曆"], disabled=True,
+        "執行項目", cloud_actions,
+        default=cloud_actions, disabled=True,
         key="optimized_cloud_actions", label_visibility="collapsed",
     )
     allow_auto_lemon = st.checkbox(
@@ -290,7 +293,7 @@ def render(env: str):
     )
     if auto_missing_o:
         import batch_booking_optimized as batch_opt
-        o_texts = render_o_text_filter(st, batch_opt, sheet, region, "optimized_cloud_o_texts", allow_failed=retry_failed)
+        o_texts = render_o_text_filter(st, batch_opt, dev_sheet_copy.read_sheet(st, env, sheet), region, "optimized_cloud_o_texts", allow_failed=retry_failed)
     else:
         o_texts = []
     c1, c2 = st.columns(2)
@@ -307,11 +310,12 @@ def render(env: str):
     _sync_cloud_settings(pending_key + (int(chunk), int(max_rows)))
     st.caption("雲端預設略過 N 欄結果為「失敗」的列；調整後勾選「重試失敗列」，不必清空結果。要補檸檬人時請同時勾選上方補檸檬人選項。同一次執行中，每列處理後不會在下一輪重複執行。")
 
+    dev_sheet_copy.render_notice(st, env, sheet, "optimized_cloud")
     if st.button("檢查待成單筆數", disabled=not sheet, key="optimized_cloud_check"):
         try:
             from cloud_batch_booking import load_pending
             rows = [row_no for row_no, _, _ in load_pending(
-                sheet, filter_mode=filter_mode, selected_region=region, allow_auto_lemon=allow_auto_lemon,
+                dev_sheet_copy.read_sheet(st, env, sheet), filter_mode=filter_mode, selected_region=region, allow_auto_lemon=allow_auto_lemon,
                 retry_failed=retry_failed, o_texts=o_texts,
             )]
             st.session_state.optimized_cloud_pending = len(rows)
@@ -325,10 +329,16 @@ def render(env: str):
         if rows:
             st.caption("列號：" + "、".join(map(str, rows[:100])) + ("…" if len(rows) > 100 else ""))
 
-    confirm = st.checkbox("我確認執行：建單＋寄確認信＋同步 Google 日曆", key="optimized_cloud_confirm")
+    confirm_label = "我確認在測試機 dev 執行：只建單（工作表副本回填）" if is_dev else "我確認執行：建單＋寄確認信＋同步 Google 日曆"
+    confirm = st.checkbox(confirm_label, key="optimized_cloud_confirm")
     if st.button("🚀  開始雲端批次成單", type="primary", use_container_width=True, disabled=not(sheet and confirm), key="optimized_cloud_start"):
         try:
-            st.session_state['optimized_cloud_dispatch'] = _dispatch(sheet, int(chunk), int(max_rows), filter_mode, region, allow_auto_lemon, retry_failed, o_texts, stages)
+            run_sheet = dev_sheet_copy.resolve_run_sheet(st, env, sheet)
+            if is_dev:
+                st.info(f"🧪 測試機 dev：本次使用測試副本「{run_sheet}」（原分頁「{sheet}」不受影響）。")
+                st.session_state['optimized_cloud_dispatch'] = _dispatch(run_sheet, int(chunk), int(max_rows), filter_mode, region, allow_auto_lemon, retry_failed, o_texts, stages, env="dev")
+            else:
+                st.session_state['optimized_cloud_dispatch'] = _dispatch(run_sheet, int(chunk), int(max_rows), filter_mode, region, allow_auto_lemon, retry_failed, o_texts, stages)
             st.success("已交給 GitHub Actions 雲端執行；可關閉瀏覽器或電腦。")
             st.markdown(f"[查看雲端執行進度](https://github.com/{REPO}/actions/workflows/{WORKFLOW})")
         except Exception as exc:

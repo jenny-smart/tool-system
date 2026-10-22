@@ -18,6 +18,7 @@ from booking_eligibility import DEFAULT_STAGES, STAGES, booking_stages
 install_selected_row_status_guard()
 install_recovery_meta_patch()
 ACTIONS = ["建單", "寄確認信", "改 Google 日曆"]
+DEV_ACTIONS = ["建單"]  # 測試機 dev：不寄確認信、不改正式 Google 日曆
 
 
 def _bool_text(value) -> bool:
@@ -58,7 +59,10 @@ def held_rows(sheet_name: str, filter_mode: str = "all", selected_region: str = 
         return []
 
 
-def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False, retry_failed=False, o_texts=None) -> int:
+def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode="all", selected_region="", allow_auto_lemon=False, retry_failed=False, o_texts=None, env_name="prod") -> int:
+    env_name = "dev" if str(env_name or "").strip().lower() == "dev" else "prod"
+    actions = DEV_ACTIONS if env_name == "dev" else ACTIONS
+    print(f"ENV {env_name}; sheet={sheet_name}; actions={'、'.join(actions)}", flush=True)
     attempted = set()
     success_total = fail_total = 0
     progress = Progress(sheet_name)
@@ -114,8 +118,8 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                     progress.publish('成單中', processed_base + done, success_base + ok, fail_base + bad,
                                      max(candidate_total - processed_base - done, 0), target_total, str(current))
                 result = run_process_web_hybrid(
-                    env_name="prod", region=region, backend_email=email, backend_password=password,
-                    sheet_name=sheet_name, start_row=min(rows), end_row=max(rows), selected_actions=ACTIONS,
+                    env_name=env_name, region=region, backend_email=email, backend_password=password,
+                    sheet_name=sheet_name, start_row=min(rows), end_row=max(rows), selected_actions=actions,
                     logger=lambda msg: print(str(msg), flush=True), allow_auto_lemon_shift=allow_auto_lemon,
                     selected_rows=rows, progress_callback=report_group,
                 ) or {}
@@ -183,6 +187,7 @@ def main():
     p.add_argument("--region", default="")
     p.add_argument("--allow-auto-lemon", default="false")
     p.add_argument("--retry-failed", default="false", help="已調整後，明確允許重試 N 欄失敗列")
+    p.add_argument("--env", choices=["prod", "dev"], default="prod", help="dev＝測試機 backend-dev，只建單")
     a = p.parse_args()
     if a.chunk_size < 1:
         p.error("--chunk-size 必須 >= 1")
@@ -190,7 +195,7 @@ def main():
     print(f"STAGES 本次預約對象：{'、'.join(stages) or '（無，只約預約條件空白的列）'}", flush=True)
     with booking_stages(stages):
         return run(a.sheet.strip(), a.chunk_size, max(a.max_rows, 0), max(a.pause_seconds, 0), a.filter_mode, a.region.strip(),
-                   _bool_text(a.allow_auto_lemon), _bool_text(a.retry_failed), _o_texts_from_env())
+                   _bool_text(a.allow_auto_lemon), _bool_text(a.retry_failed), _o_texts_from_env(), a.env)
 
 
 if __name__ == "__main__":

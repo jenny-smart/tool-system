@@ -460,6 +460,7 @@ from cleaner_reminders import find_paid_cleaner_reminders
 from accounts import ACCOUNTS
 from memo_system.ui import render_memo_system
 import batch_booking_optimized
+import dev_sheet_copy
 import cloud_batch_booking_ui
 import reserve_menu
 
@@ -1145,8 +1146,8 @@ if mode == "批次建單（Google Sheet）":
     st.markdown('<div class="hint-box">💡 列號支援：單列 <code>2</code>、逗號分隔 <code>2,3,5</code>、區間 <code>2,3,5-7</code></div>', unsafe_allow_html=True)
     st.markdown("<hr>", unsafe_allow_html=True)
     step("3", "執行項目")
-    default_actions = (["建單", "寄確認信", "改 Google 日曆"] if env == "prod" else ["建單"])
-    selected_actions = st.multiselect("執行項目", options=["建單", "寄確認信", "改 Google 日曆"], default=default_actions, label_visibility="collapsed")
+    default_actions = dev_sheet_copy.default_actions(env)
+    selected_actions = st.multiselect("執行項目", options=dev_sheet_copy.action_options(env), default=default_actions, label_visibility="collapsed")
     st.markdown('<div class="hint-box">可自由組合，例如只寄確認信、只改日曆，或全流程一起跑。</div>', unsafe_allow_html=True)
     batch_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="batch_allow_auto_lemon")
     st.caption("指定範圍及自動篩選可包含失敗列；調整後可直接重試，不必清空 N 欄結果。")
@@ -1156,7 +1157,8 @@ if mode == "批次建單（Google Sheet）":
     auto_no_slot_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="auto_no_slot_rows")
     auto_missing_o_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="auto_missing_o_rows")
     from selected_row_status_guard import render_o_text_filter
-    o_texts = render_o_text_filter(st, batch_booking_optimized, sheet_name.strip(), region, "batch_o_texts") if auto_missing_o_rows else []
+    o_texts = render_o_text_filter(st, batch_booking_optimized, dev_sheet_copy.read_sheet(st, env, sheet_name), region, "batch_o_texts") if auto_missing_o_rows else []
+    dev_sheet_copy.render_notice(st, env, sheet_name, "batch_booking")
     st.markdown("<hr>", unsafe_allow_html=True)
     run_clicked = st.button("🚀  開始執行", use_container_width=True)
     with st.expander("📄  執行過程", expanded=True):
@@ -1172,6 +1174,14 @@ if mode == "批次建單（Google Sheet）":
             st.error("請輸入工作表名稱"); st.stop()
         if not selected_actions:
             st.error("請至少選擇一個執行項目"); st.stop()
+        if dev_sheet_copy.is_dev(env):
+            # 測試機：先複製分頁，後續篩選、建單、回填都改用副本。
+            _source_sheet = sheet_name.strip()
+            try:
+                sheet_name = dev_sheet_copy.resolve_run_sheet(st, env, _source_sheet)
+            except Exception as e:
+                st.error(f"建立測試副本失敗：{e}"); st.stop()
+            st.info(f"🧪 測試機 dev：本次使用測試副本「{sheet_name}」（原分頁「{_source_sheet}」不受影響）。")
         if auto_no_slot_rows or auto_missing_o_rows:
             try:
                 candidate_rows = parse_row_input(row_input) if row_input.strip() else []
@@ -1534,6 +1544,12 @@ elif mode == "週末服務 LINE 提醒":
         wr_date_s = st.date_input("服務日期-起", value=_default_sat, key="wr_date_s")
     with wr_c2:
         wr_date_e = st.date_input("服務日期-迄", value=_default_sun, key="wr_date_e")
+    wr_typhoon_reminder = st.checkbox(
+        "加入颱風停班提醒",
+        value=False,
+        key="wr_typhoon_reminder",
+        help="勾選後，LINE 文案會加入人事行政局公告放假時取消服務的提醒。",
+    )
 
     if st.button("🔍 查詢已付款名單", use_container_width=True, type="primary", key="wr_search"):
         if not backend_email.strip() or not backend_password.strip():
@@ -1546,6 +1562,7 @@ elif mode == "週末服務 LINE 提醒":
                     _orders, _debug = find_paid_weekend_orders(
                         env, backend_email.strip(), backend_password.strip(),
                         wr_date_s.strftime("%Y-%m-%d"), wr_date_e.strftime("%Y-%m-%d"),
+                        typhoon_reminder=wr_typhoon_reminder,
                     )
                     _tracking = load_tracking_rows()
                 st.session_state.wr_rows = merge_tracking_rows(_orders, _tracking)
@@ -1661,7 +1678,7 @@ elif mode == "週末服務 LINE 提醒":
             st.markdown("#### LINE 提醒訊息")
             for _idx, _row in enumerate(wr_rows):
                 with st.expander(f"{_row['服務日期']} {_row['服務時間']}｜{_row['姓名']}｜{_row['訂單編號']}"):
-                    st.text_area("訊息", _row["LINE訊息"], height=220, key=f"wr_msg_{_row['訂單編號']}")
+                    st.text_area("訊息", _row["LINE訊息"], height=300, key=f"wr_msg_{_row['訂單編號']}")
                     copy_button("複製訊息", _row["LINE訊息"], f"wr_copy_{_idx}")
                     if _row.get("LINE"):
                         st.link_button("開啟 LINE 聊天", _row["LINE"])

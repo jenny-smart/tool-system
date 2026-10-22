@@ -103,6 +103,65 @@ def classify_hsinchu_row(plan: str, address: str) -> str:
     return ""
 
 
+def _address_area(address: str) -> str:
+    address = str(address or "").replace("臺", "台")
+    addr_k = any(keyword in address for keyword in KAOHSIUNG_ADDRESS_KEYWORDS)
+    addr_h = "新竹" in address
+    return "高雄" if addr_k and not addr_h else ("新竹" if addr_h and not addr_k else "")
+
+
+def _phone_key(phone: str) -> str:
+    return "".join(ch for ch in str(phone or "") if ch.isdigit())
+
+
+def resolve_hsinchu_areas(
+    rows: List[List[str]],
+    phone_area: Callable[[str], str],
+    needs_lookup: Callable[[List[str]], bool] = lambda row: True,
+    log: Optional[Callable[[str], None]] = None,
+) -> List[str]:
+    """新竹儲值金結算每一列（不含標題）歸「高雄」或「新竹」。
+    1. classify_hsinchu_row（方案名稱／地址）
+    2. 分不出來：同一支手機其他列靠地址判斷得出來就用它
+    3. 還是分不出來且 needs_lookup(列) 為真：用手機查近期訂單（同一支手機只查一次）
+    4. 都不行：原規則（高雄方案或地址含高雄／台南才算高雄）
+    欄位：D(3) 電話、E(4) 地址、H(7) 方案。"""
+    def cell(row: List[str], i: int) -> str:
+        return str(row[i]).strip() if len(row) > i else ""
+
+    areas = [classify_hsinchu_row(cell(r, 7), cell(r, 4)) for r in rows]
+    by_phone: Dict[str, set] = {}
+    for r, definite in zip(rows, areas):  # 只看本身判斷得出來、且是靠地址判斷的列
+        area = _address_area(cell(r, 4)) if definite else ""
+        if area and _phone_key(cell(r, 3)):
+            by_phone.setdefault(_phone_key(cell(r, 3)), set()).add(area)
+    known = {k: next(iter(v)) for k, v in by_phone.items() if len(v) == 1}
+
+    pending: List[str] = []
+    for r, area in zip(rows, areas):
+        key = _phone_key(cell(r, 3))
+        if not area and key and key not in known and key not in pending and needs_lookup(r):
+            pending.append(key)
+    looked: Dict[str, str] = {}
+    if pending and log:
+        log(f"  新竹／高雄分不出來的客戶 {len(pending)} 位，用手機查近期訂單…")
+    for i, key in enumerate(pending, start=1):
+        looked[key] = phone_area(key) or ""
+        if log and (i % 10 == 0 or i == len(pending)):
+            log(f"  手機查訂單 {i}/{len(pending)}（判斷出 {sum(1 for v in looked.values() if v)} 位）")
+
+    result = []
+    for r, area in zip(rows, areas):
+        key = _phone_key(cell(r, 3))
+        area = area or known.get(key, "") or looked.get(key, "")
+        if not area:
+            plan, address = cell(r, 7), cell(r, 4)
+            area = "高雄" if plan in KAOHSIUNG_PLAN_NAMES or any(
+                k in address for k in KAOHSIUNG_ADDRESS_KEYWORDS) else "新竹"
+        result.append(area)
+    return result
+
+
 class VipStoredValueWorkflow:
     def __init__(
         self,
@@ -568,18 +627,9 @@ class VipStoredValueWorkflow:
         original_count = len(rows)
 
         filtered = []
-        for row in rows:
-            h_value = row[7].strip() if len(row) >= 8 else ""
-            e_value = row[4].strip() if len(row) >= 5 else ""
-            area = classify_hsinchu_row(h_value, e_value)
-            if not area:
-                area = self.phone_area(row[3] if len(row) >= 4 else "")
-            if area:
-                matched = area == "高雄"
-            else:
-                matched = h_value in KAOHSIUNG_PLAN_NAMES or any(
-                    keyword in e_value for keyword in KAOHSIUNG_ADDRESS_KEYWORDS
-                )
+        areas = resolve_hsinchu_areas(rows, self.phone_area)
+        for row, area in zip(rows, areas):
+            matched = area == "高雄"
 
             if keep_matching and matched:
                 filtered.append(row)
