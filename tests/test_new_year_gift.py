@@ -89,8 +89,13 @@ class GiftSheets:
         return _Req(run)
 
 
-ORDER_HEADER = ["　　　　", "訂單編號", "購買日期", "付款日期"] + [""] * 8 + [
-    "客戶姓名", "客戶地址", "聯絡電話", "EMAIL", "LINE網址"] + [""] * 9 + ["儲值金成本"]
+SETTLE_HEADER = ["mv_id", "客戶姓名", "email", "電話", "地址", "LINE@", "購買日期", "購買項目", "購買原價", "服務金額",
+                 "移轉訂單編號", "移轉剩餘時數", "移轉剩餘金額", "剩餘儲值金", "剩餘購物金", "會員等級",
+                 "最後一次消費時間", "最後一次消費訂單", "最後一次服務時間", "VIP時數備註"]
+
+
+def _settle_row(name, phone, address, line, date, plan, price):
+    return ["1", name, "a@b", phone, address, line, date, plan, price] + [""] * 11
 
 
 def _setup(threshold=""):
@@ -99,8 +104,9 @@ def _setup(threshold=""):
         {"id": "send26", "name": "2026春節送禮名單", "mimeType": SHEET_MIME, "parent": "y26"},
         {"id": "rootfile", "name": "春節送禮名單", "mimeType": SHEET_MIME, "parent": ROOT},
         {"id": "y27", "name": "2027", "mimeType": FOLDER_MIME, "parent": ROOT},
-        {"id": "tp", "name": "2027儲值金-台北.xls", "mimeType": "application/vnd.ms-excel", "parent": "y27"},
-        {"id": "tp_old", "name": "2027儲值金-台北", "mimeType": SHEET_MIME, "parent": "y27"},
+        {"id": "tp", "name": "2027儲值金結算-台北.xls", "mimeType": "application/vnd.ms-excel", "parent": "y27"},
+        {"id": "tp_old", "name": "2027儲值金結算-台北", "mimeType": SHEET_MIME, "parent": "y27"},
+        {"id": "tp_order", "name": "2027儲值金-台北.xlsx", "mimeType": "application/vnd.ms-excel", "parent": "y27"},
         {"id": "vip", "name": "2026VIP券-台北.xls", "mimeType": "application/vnd.ms-excel", "parent": "y27"},
     ])
     sheets = GiftSheets({"rootfile": ["統計", "2026春節送禮名單", "2025春節送禮名單"],
@@ -139,9 +145,9 @@ def test_gift_download_replaces_area_file_and_falls_back():
     logs = []
     roll = _roll(drive, sheets, logs, gift_downloader=downloader)
     roll._gift_download(drive.items["y27"])
-    assert calls == [(a, 2026) for a in nyg.GIFT_AREAS]
+    assert calls == [(a, 2026) for a in nyg.GIFT_AREAS if a != "高雄"]   # 高雄從新竹拆出，不另外下載
     assert drive.items["tp"].get("trashed") is True                     # 同名舊 xls 換掉
-    new = next(i for i in drive.items.values() if i["name"] == "2027儲值金-台北.xlsx")
+    new = next(i for i in drive.items.values() if i["name"] == "2027儲值金結算-台北.xlsx")
     assert new["parent"] == "y27"
     assert not drive.items["tp_old"].get("trashed")                       # 已轉好的試算表不動
     assert roll._gift_sources(roll.children("y27"))["台北"]["id"] == new["id"]
@@ -162,14 +168,13 @@ def test_gift_stats_builds_summary_and_reports_bands():
             item = req.execute()
             sheets.tabs[item["id"]] = {"sheet1": 0}
             sheets.reads[(item["id"], "'sheet1'")] = [
-                ORDER_HEADER,
-                ["", "LC1", "2026/1/2", "2026/1/3"] + [""] * 8 + ["王小明", "台北市大安區仁愛路1號", "912345678",
-                                                                 "a@b", "L1"] + [""] * 9 + ["50,000"]]
+                SETTLE_HEADER, _settle_row("王小明", "0912345678", "台北市大安區仁愛路1號", "L1",
+                                           "2026-01-02", "儲值金50000", "50000")]
             return item
         return _Req(run)
     drive.copy = copy
 
-    pivot_range = f"'台北儲值金'!AC2:AD"
+    pivot_range = f"'台北儲值金'!V2:W"
     orig_batch_get = sheets.batchGet
 
     def batch_get(spreadsheetId, ranges, **kw):
@@ -187,12 +192,15 @@ def test_gift_stats_builds_summary_and_reports_bands():
     temp = next(i for i in drive.items.values() if i["name"].endswith("_轉檔暫存"))
     assert temp.get("trashed") is True
     data = sheets.writes[(sid, "'台北儲值金'!A1")]
-    assert data[0][0] == "欄A" and data[0][12] == "客戶姓名" and data[1][26] == "50,000"
+    assert data[0][1] == "客戶姓名" and data[1][3] == "0912345678" and data[1][8] == "50000"
     pivot = next(r["updateCells"] for _, r in sheets.requests if "updateCells" in r)
-    assert pivot["start"]["columnIndex"] == len(ORDER_HEADER) + 1
+    assert pivot["start"]["columnIndex"] == len(SETTLE_HEADER) + 1
+    date_filter = pivot["rows"][0]["values"][0]["pivotTable"]["filterSpecs"][0]
+    assert date_filter["filterCriteria"]["condition"]["values"][0]["userEnteredValue"] == "=YEAR('購買日期')=2026"
     assert sheets.writes[(sid, "'郵遞區號'!A1:B375")][1] == ["100", "台北市中正區"]
     formula = sheets.writes[(sid, "'2027送禮名單'!A2")][0][0]
-    assert "'台北儲值金'!AC2:AC" in formula and "'台北儲值金'!AD2:AD>=t" in formula
+    assert "'台北儲值金'!V2:V" in formula and "'台北儲值金'!W2:W>=t" in formula
+    assert "FILTER('台北儲值金'!$E:$E,'台北儲值金'!$B:$B=x,'台北儲值金'!$E:$E<>\"\")" in formula   # 地址取第一個非空白
     table = sheets.writes[(sid, "'區間統計'!A1")]
     assert table[0][3:] == ["5萬以下", "5萬～8萬", "8萬～10萬", "10萬～12萬", "12萬以上"]
     assert table[1][0] == "台北" and table[-1][0] == "全區"
@@ -201,6 +209,28 @@ def test_gift_stats_builds_summary_and_reports_bands():
     # 第一階段不產生送禮名單檔、不寫門檻
     assert not any(i["name"] == "2027春節送禮名單" for i in drive.items.values())
     assert (sid, "'設定'!B1") not in sheets.writes
+
+
+def test_gift_stats_splits_kaohsiung_from_hsinchu():
+    drive, sheets = _setup()
+    del drive.items["tp"], drive.items["tp_old"], drive.items["tp_order"]
+    drive.items["hc"] = {"id": "hc", "name": "2027儲值金結算-新竹", "mimeType": SHEET_MIME, "parent": "y27"}
+    sheets.tabs["hc"] = {"sheet1": 0}
+    sheets.reads[("hc", "'sheet1'")] = [
+        SETTLE_HEADER,
+        _settle_row("新竹甲", "0911", "新竹市東區1號", "", "2026-01-02", "儲值金50000", "50000"),
+        _settle_row("高雄乙", "0922", "高雄市三民區1號", "", "2026-01-02", "儲值金50000", "50000"),
+        _settle_row("不明丙", "0933", "", "", "2026-01-02", "儲值金50000", "50000"),   # 手機查到高雄
+        _settle_row("不明丁", "0944", "", "", "2026-01-02", "儲值金50000", "50000"),   # 查不到 → 新竹
+    ]
+    lookups = []
+    roll = _roll(drive, sheets, gift_phone_lookup=lambda p: lookups.append(p) or {"0933": "高雄"}.get(p, ""))
+    roll.run_gift_stats()
+    sid = next(i for i in drive.items.values() if i["name"] == "2027名單統整")["id"]
+    hsinchu = [r[1] for r in sheets.writes[(sid, "'新竹儲值金'!A1")][1:]]
+    kaohsiung = [r[1] for r in sheets.writes[(sid, "'高雄儲值金'!A1")][1:]]
+    assert hsinchu == ["新竹甲", "不明丁"] and kaohsiung == ["高雄乙", "不明丙"]
+    assert sorted(lookups) == ["0933", "0944"]                 # 分不出來的才查，各查一次
 
 
 def _stage2(rows=None):
@@ -278,13 +308,16 @@ def test_gift_dry_run_creates_nothing():
 
 def test_gift_helpers():
     assert gift_headers(["　　　　", "訂單編號", ""]) == ["欄A", "訂單編號", "欄C"]
-    p = gift_pivot(5, 10, 63, 2026, "付款日期")
-    assert p["rows"][0]["sourceColumnOffset"] == 12 and p["values"][0]["sourceColumnOffset"] == 26
-    spec = p["filterSpecs"][0]
-    assert spec["columnOffsetIndex"] == 3 and spec["filterCriteria"]["visibleByDefault"] is True
-    assert spec["filterCriteria"]["condition"]["values"][0]["userEnteredValue"] == "=YEAR('付款日期')=2026"
-    f = gift_list_formula([("台北", "台北儲值金", "BM", "BN"), ("桃園", "桃園儲值金", "BM", "BN")], 374)
-    assert f.startswith("=LET(t,'設定'!$B$1,") and f.count("FILTER(") == 3
+    p = gift_pivot(5, 10, 20, 2026, "購買日期")
+    assert p["rows"][0]["sourceColumnOffset"] == 1 and p["values"][0]["sourceColumnOffset"] == 8
+    date, plan, name = p["filterSpecs"]
+    assert date["columnOffsetIndex"] == 6 and all(f["filterCriteria"]["visibleByDefault"] for f in p["filterSpecs"])
+    assert date["filterCriteria"]["condition"]["values"][0]["userEnteredValue"] == "=YEAR('購買日期')=2026"
+    assert plan["columnOffsetIndex"] == 7 and plan["filterCriteria"]["condition"]["type"] == "TEXT_STARTS_WITH"
+    assert plan["filterCriteria"]["condition"]["values"][0]["userEnteredValue"] == "儲值金"
+    assert name["columnOffsetIndex"] == 1 and name["filterCriteria"]["condition"]["values"][0]["userEnteredValue"] == "保留"
+    f = gift_list_formula([("台北", "台北儲值金", "V", "W"), ("桃園", "桃園儲值金", "V", "W")], 374)
+    assert f.startswith("=LET(t,'設定'!$B$1,") and f.count("FILTER(") == 9
     assert "'郵遞區號'!$B$2:$B$375" in f and 'MAP(n,LAMBDA(x,"桃園"))' in f
 
 
