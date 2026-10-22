@@ -235,7 +235,7 @@ GIFT_STAT_BANDS = [50000, 80000, 100000, 120000]
 GIFT_STAT_SHEET = "區間統計"
 _IMPORTRANGE = re.compile(r'(?i)importrange\(\s*"([^"]+)"\s*,\s*"([^"!]+)!([^"]+)"\s*\)')
 
-EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品", GIFT_STAT_FUNCTION, GIFT_LIST_FUNCTION}   # 不依「生成新年度」列的功能
+EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春酒專區", GIFT_STAT_FUNCTION, GIFT_LIST_FUNCTION}   # 不依「生成新年度」列的功能
 
 # 「生成新年度」A 欄名稱 → 功能名稱
 ROW_FUNCTIONS = {"財務報表": "財務報表", "內勤表單": "內勤表單", "專員名冊/薪資檔": "專員表單",
@@ -2037,6 +2037,14 @@ class Rollover:
                 extra += job()
             except Exception as exc:
                 self.log(f"  ✗ {func} 失敗：{exc}")
+        if "春酒專區" in funcs:
+            from tools.annual_rollover.spring_banquet import run_spring_area
+
+            self.log("春酒專區")
+            try:
+                extra += run_spring_area(self, area)
+            except Exception as exc:
+                self.log(f"  ✗ 春酒專區 失敗：{exc}")
         for func in ("專員表單", "內勤表單", "財務報表"):
             if func not in funcs:
                 continue

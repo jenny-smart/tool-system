@@ -3402,6 +3402,7 @@ NEW_YEAR_FUNCTION_ROWS = {
     "內勤薪資": ["內勤薪資"],
     "行銷費用總管理": ["行銷費用總管理"],
     "清潔用品": ["清潔用品"],
+    "春酒專區": ["春酒專區"],
     "春節禮品名單統計": ["春節禮品名單統計"],   # 第一階段：各地區資料統計
     "春節送禮名單產生": ["春節送禮名單產生"],   # 第二階段：畫面設定金額後產生送禮名單
 }
@@ -3414,9 +3415,12 @@ NEW_YEAR_FUNCTION_AREAS = {
     "內勤薪資": ["全區", "台北", "桃園"],
     "行銷費用總管理": ["全區"],
     "清潔用品": ["全區"],
+    "春酒專區": ["全區", "台北", "台中", "桃園", "新竹"],
     "春節禮品名單統計": ["全區"],
     "春節送禮名單產生": ["全區"],
 }
+SPRING_EVENT_FUNCTION = "春酒專區"
+SPRING_EVENT_PERIODS = ["中午", "晚上", "下午", "早上"]
 # 可「只整理已存在檔案」的功能（整理只是清空數字與改年度，重跑結果相同）
 NEW_YEAR_TIDY_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春節送禮名單產生"}
 
@@ -3481,7 +3485,7 @@ def run_year_root_check(action, year, on_progress=None):
 
 
 def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=False, area="全區",
-                          gift_threshold=None, on_progress=None):
+                          spring_event=None, gift_threshold=None, on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
     import importlib
 
@@ -3502,6 +3506,7 @@ def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=Fal
         get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
         int(year_text), dry_run=dry_run, fresh=fresh, tidy=tidy, log=log, gift_threshold=gift_threshold,
     )
+    rollover.spring_event = spring_event  # 春酒專區：{"date": date, "period": "中午"}
     try:
         records = rollover.run("all", names=names, area=area or "全區")
     except Exception as exc:
@@ -5140,6 +5145,14 @@ with date_col:
                 "只整理已存在檔案（不重建、不改名，直接清空數字與改年度；已輸入的資料會被清掉）",
                 key="new_year_rollover_tidy",
             )
+        if selected_function == SPRING_EVENT_FUNCTION:
+            st.markdown('<div class="field-label">🍶 春酒日期與時段</div>', unsafe_allow_html=True)
+            s1, s2 = st.columns(2)
+            with s1:
+                st.date_input("春酒日期", value=None, key="spring_event_date")
+            with s2:
+                st.selectbox("時段", SPRING_EVENT_PERIODS, key="spring_event_period")
+            st.caption("會改「參與統計表單」出席題目的日期，例：方便於03/13(六)中午；未填日期則不改。")
         st.caption(
             "依主控表「生成新年度」分頁，把前一年度資料夾與檔案複製成新年度，"
             "結果寫回該列 I 欄，新檔 ID、檔名、生成時間寫入「生成新年度Log」，並自動帶入「年度工作檔ID_GID總表」。先「預覽」確認，再「執行」。"
@@ -6232,8 +6245,13 @@ if run_clicked:
                 f"{' / 重新生成' if fresh else ''}{' / 只整理已存在檔案' if tidy else ''}")
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
+                spring_event = None
+                if selected_function == SPRING_EVENT_FUNCTION and st.session_state.get("spring_event_date"):
+                    spring_event = {"date": st.session_state["spring_event_date"],
+                                    "period": st.session_state.get("spring_event_period", "中午")}
                 result = run_new_year_generate(
                     period, selected_function, dry_run=dry_run, fresh=fresh, tidy=tidy, area=selected_area_value,
+                    spring_event=spring_event,
                     gift_threshold=(st.session_state.get("new_year_gift_threshold")
                                     if selected_function == "春節送禮名單產生" else None),
                     on_progress=lambda msg, level="info": add_log(msg, level),
