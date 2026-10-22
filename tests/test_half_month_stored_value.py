@@ -35,7 +35,7 @@ def functions():
     nodes += [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     def request(method, url, params):
         return SimpleNamespace(prepare=lambda: SimpleNamespace(url=url + '?' + urlencode(params)))
-    ns = dict(export_south_sources=export_south_sources, filter_workbook_rows=filter_workbook_rows, merge_workbook_files=merge_workbook_files, save_preserved_excel=save_preserved_excel, download_export=lambda *a: excel_bytes(pd.DataFrame({'狀態':[''], '訂單編號':['LC1']})), read_excel=lambda *a: pd.DataFrame({'狀態':[''], '訂單編號':['LC1']}), re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, log=lambda *args: None)
+    ns = dict(export_south_sources=export_south_sources, filter_workbook_rows=filter_workbook_rows, merge_workbook_files=merge_workbook_files, save_preserved_excel=save_preserved_excel, download_export=lambda *a: excel_bytes(pd.DataFrame({'狀態':[''], '訂單編號':['LC1']})), read_excel=lambda *a: pd.DataFrame({'狀態':[''], '訂單編號':['LC1']}), re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, PHONE_LOOKUP_MAX_PAGES=3, log=lambda *args: None)
     exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(SOURCE), 'exec'), ns)
     return ns
 
@@ -90,7 +90,7 @@ class StoredValueTests(unittest.TestCase):
             return by_phone if 'phone' in f else by_name
         ns['purchase_records'] = fetch
         self.assertEqual(ns['stored_value_customer_city'](object(), order), '高雄')   # 最近一筆可分區的是台南
-        self.assertEqual(calls[-1], {'phone':'0912345678','p_board':'on'})
+        self.assertEqual(calls[-1], {'max_pages':3,'phone':'0912345678','p_board':'on'})
         # 姓名查不到任何地址也一樣改用手機
         ns['purchase_records'] = lambda session, **f: by_phone[:1] if 'phone' in f else []
         self.assertEqual(ns['stored_value_customer_city'](object(), order), '新竹')

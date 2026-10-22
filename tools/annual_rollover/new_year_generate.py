@@ -1367,22 +1367,22 @@ class Rollover:
         return cache[key]
 
     def _gift_split_kaohsiung(self, values: List[List[str]]) -> Tuple[List[List[str]], List[List[str]]]:
-        """新竹結算拆成 (新竹, 高雄)，規則同儲值金結算轉檔：方案名稱／地址判斷，分不出來用手機查近期訂單，
-        再不行沿用原規則（高雄方案或地址含高雄／台南才算高雄）。"""
-        from config.vip_config import KAOHSIUNG_ADDRESS_KEYWORDS, KAOHSIUNG_FILTER_VALUES
-        from services.vip_workflow import classify_hsinchu_row
+        """新竹結算拆成 (新竹, 高雄)，規則同儲值金結算轉檔（services.vip_workflow.resolve_hsinchu_areas）；
+        只有會算進樞紐的列（前一年度、儲值金、非保留帳號）分不出來時才用手機查近期訂單。"""
+        from services.vip_workflow import resolve_hsinchu_areas
 
-        hsinchu, kaohsiung = [values[0]], [values[0]]
-        plan_i, addr_i, phone_i = (col_index(GIFT_PLAN_COL), col_index(GIFT_ADDRESS_COL),
-                                   col_index(GIFT_PHONE_COL))
-        for row in values[1:]:
+        date_i, plan_i, name_i = col_index(GIFT_DATE_COL), col_index(GIFT_PLAN_COL), col_index(GIFT_NAME_COL)
+
+        def counted(row: List[str]) -> bool:
             cell = lambda i: str(row[i]).strip() if len(row) > i else ""
-            plan, address = cell(plan_i), cell(addr_i)
-            area = classify_hsinchu_row(plan, address) or self._gift_phone_area(cell(phone_i))
-            if not area:
-                area = "高雄" if plan in KAOHSIUNG_FILTER_VALUES or any(
-                    k in address for k in KAOHSIUNG_ADDRESS_KEYWORDS) else "新竹"
-            (kaohsiung if area == "高雄" else hsinchu).append(row)
+            return (cell(date_i).startswith(str(self.prev_year)) and cell(plan_i).startswith(GIFT_PLAN_PREFIX)
+                    and GIFT_EXCLUDE_NAME_KEYWORD not in cell(name_i))
+
+        rows = values[1:]
+        areas = resolve_hsinchu_areas(rows, self._gift_phone_area, counted, self.log)
+        hsinchu = [values[0]] + [r for r, a in zip(rows, areas) if a != "高雄"]
+        kaohsiung = [values[0]] + [r for r, a in zip(rows, areas) if a == "高雄"]
+        self.log(f"  新竹結算拆分：新竹 {len(hsinchu) - 1} 筆、高雄 {len(kaohsiung) - 1} 筆")
         return hsinchu, kaohsiung
 
     def _gift_sources(self, listing: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
