@@ -885,9 +885,13 @@ FUNCTION_OPTIONS = [
      "orders", "取消訂單"),
     ("檸檬保留單取消：依期間、複選時段與客人備註安全篩選並批次取消保留單。",
      "orders", "檸檬保留單取消"),
+    ("檸檬保留刪除地址：只留信義路、館前路兩個地址，其他不再使用的客人地址一次刪除。",
+     "orders", "檸檬保留刪除地址"),
     ("VIP 訂單／Google 日曆同步：同時查詢後台訂單與 Google 日曆，支援異動日期／時段、"
      "取消／暫停、新增或修改日曆事件。",
      "orders", "VIP 訂單／Google 日曆同步"),
+    ("颱風假訂單移轉：颱風假當天訂單依時段逐筆用「修改日期」移到指定日期區間，時段不變。",
+     "orders", "颱風假訂單移轉"),
     ("訂單客服備註：舊客回購備註回填、新成單提醒建立、客服備忘錄整理。",
      "memo", "訂單客服備註"),
     ("儲值獎金備註：搜尋購買項目儲值金、客服備註空白的訂單，依姓名把獎金專員名字加進客服備註。",
@@ -1011,6 +1015,17 @@ if mode == "檸檬保留單建單":
 
 if mode == "檸檬保留單取消":
     reserve_menu.render_reserve_cancel(backend_email, backend_password, env)
+    st.stop()
+
+if mode == "檸檬保留刪除地址":
+    reserve_menu.render_reserve_address_cleanup(backend_email, backend_password, env)
+    st.stop()
+
+if mode == "颱風假訂單移轉":
+    import typhoon_transfer_ui
+
+    step("3", "颱風假訂單移轉")
+    typhoon_transfer_ui.render(backend_email, backend_password, env, copy_button=copy_button)
     st.stop()
 
 # =========================================================
