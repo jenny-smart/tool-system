@@ -726,3 +726,15 @@ def test_user_added_proxy_column_is_reused():
     sheet.col_count = 36
     sync(Book([sheet]), [source_row(row)])
     assert sheet.data[0].count('代客保留') == 1 and sheet.data[0][35] == '代客保留'
+
+
+def test_unchanged_monthly_rows_get_phone_fallback_but_custom_formulas_stay():
+    legacy = old_row(event='e1', date='2026/11/04')
+    legacy[9] = "=xlookup(E2,'台北202610'!E:E,'台北202610'!J:J)"
+    custom = old_row(event='e2', date='2026/11/05')
+    custom[2:5] = ['李小華', '0922333444', '台北市信義區']
+    custom[9] = "=IFNA(xlookup(E3,'台北202610'!E:E,'台北202610'!J:J),\"居家清潔\")"
+    sheet = Sheet('台北202611', [legacy, custom])
+    sync(Book([sheet]), [source_row(legacy), source_row(custom, **{'0': '2人'})])
+    assert sheet.data[1][9] == _lookup(2, '台北202610')
+    assert sheet.data[2][9] == custom[9]

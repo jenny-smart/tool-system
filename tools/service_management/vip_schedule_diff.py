@@ -499,7 +499,11 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
         def repaired_lookup(formula, row_num):
             # Repair earlier #REF! lookups that pointed at a month sheet that does not exist,
             # and upgrade address-only lookups to also fall back to the phone number.
-            ref = re.match(r"=(?:IFNA\()?xlookup\(E\d+,'([^']+)'!E:E,'[^']+'!J:J\)", _text(formula), re.I)
+            # Only the exact formulas this tool writes are touched; hand-written ones stay.
+            text = _text(formula)
+            ref = (re.fullmatch(r"=xlookup\(E\d+,'([^']+)'!E:E,'\1'!J:J\)", text, re.I)
+                   or re.fullmatch(r"=IFNA\(xlookup\(E\d+,'([^']+)'!E:E,'\1'!J:J\),"
+                                   r"xlookup\(D\d+,'\1'!D:D,'\1'!J:J\)\)", text, re.I))
             if not ref:
                 return ""
             sheet = ref.group(1)
@@ -539,7 +543,8 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 updates.append({"range": f"{_column(columns[3])}{row}", "values": [[updated_at]]})
             if change["kind"]:
                 colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
-        if combined_start and not created:
+        if not created:
+            # Every existing row, changed or not: old address-only lookups get the phone fallback.
             touched = {item["range"] for item in updates}
             for row_num, physical in enumerate(physical_rows, 2):
                 fixed = repaired_lookup(physical[9] if len(physical) > 9 else "", row_num)
