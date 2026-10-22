@@ -614,6 +614,7 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                     )
                 st.session_state.cancel_order_results = rows
                 st.session_state.cancel_order_debug = debug_rows
+                st.session_state.cancel_order_last_result = []  # 新搜尋：清掉上一次的取消結果
                 # 有填電話沿用原本預設全勾；沒填電話（全部客人）預設不勾，避免誤取消。
                 default_checked = bool(str(phone or "").strip())
                 st.session_state.cancel_order_selected = {r["purchase_id"]: default_checked for r in rows}
@@ -645,6 +646,19 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                     f"付款狀態：{d.get('payment_status') or '（解析不到）'}"
                     + (f"　原因：{d['reason']}" if d.get("reason") else "")
                 )
+
+    last_result = st.session_state.get("cancel_order_last_result") or []
+    if last_result:
+        ok = sum(1 for item in last_result if item.get("ok"))
+        st.markdown(f"#### 剛才的取消結果：成功 {ok} 筆，失敗 {len(last_result) - ok} 筆")
+        st.caption("重新搜尋後這裡會清空。")
+        for item in last_result:
+            if item.get("ok") and item.get("note_ok"):
+                st.success(f"✅ {item.get('order_no') or item.get('purchase_id')}：取消成功，備註已寫入")
+            elif item.get("ok"):
+                st.warning(f"⚠️ {item.get('order_no') or item.get('purchase_id')}：{item.get('message')}")
+            else:
+                st.error(f"❌ {item.get('order_no') or item.get('purchase_id')}：{item.get('message')}")
 
     rows = st.session_state.get("cancel_order_results") or []
     if not rows:
@@ -688,17 +702,6 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
         st.session_state.cancel_order_pending = selected
         st.session_state.cancel_order_dialog_open = True
         st.rerun()
-
-    last_result = st.session_state.get("cancel_order_last_result") or []
-    if last_result:
-        st.markdown("#### 最近一次取消結果")
-        for item in last_result:
-            if item.get("ok") and item.get("note_ok"):
-                st.success(f"✅ {item.get('order_no') or item.get('purchase_id')}：取消成功，備註已寫入")
-            elif item.get("ok"):
-                st.warning(f"⚠️ {item.get('order_no') or item.get('purchase_id')}：{item.get('message')}")
-            else:
-                st.error(f"❌ {item.get('order_no') or item.get('purchase_id')}：{item.get('message')}")
 
     if not st.session_state.get("cancel_order_dialog_open"):
         return
