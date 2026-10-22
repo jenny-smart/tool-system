@@ -133,7 +133,8 @@ def render(backend_email, backend_password, env, copy_button=None):
                 "略過日期": "；".join(r.get("attempts") or []),
             }
             for r, c in zip(results, copy_rows)
-        ]), hide_index=True, use_container_width=True)
+        ]), hide_index=True, use_container_width=True,
+            column_config={"LINE@連結": st.column_config.LinkColumn("LINE@連結", display_text="開啟聊天")})
         copy_label = "複製原日期時段／移轉後日期時段（貼到 Google Sheets 會自動分欄）"
         if copy_button:
             copy_button(copy_label, tt.results_tsv(results), "tt_copy_results")

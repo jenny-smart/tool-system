@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 
 import orders
 import quick_order as qo
+from weekend_reminders import _line_urls_from_html
 
 
 SKIPPED_ORDER_STATUSES = {"取消訂單", "已退款"}
@@ -135,9 +136,11 @@ def find_typhoon_orders(env_name, backend_email, backend_password, typhoon_date,
         if resp.status_code != 200:
             raise RuntimeError(f"訂單查詢失敗（HTTP {resp.status_code}）")
         blocks = orders.extract_order_cards_from_purchase_html(resp.text)
+        line_urls = _line_urls_from_html(resp.text)
         for block in blocks:
             row = _order_row_from_block(block, typhoon_date)
             if row and row["order_no"] and row["payment_status"] == "已付款":
+                row["line_url"] = line_urls.get(row["order_no"], "")
                 found.setdefault(row["order_no"], row)
         if len(blocks) < 20:
             hit_page_limit = False
@@ -254,7 +257,7 @@ def transfer_typhoon_orders(env_name, backend_email, backend_password, typhoon_d
     return results
 
 
-RESULT_COPY_HEADERS = ["訂單編號", "姓名", "電話", "原日期", "原時段", "新日期", "新時段", "結果", "說明"]
+RESULT_COPY_HEADERS = ["訂單編號", "姓名", "電話", "LINE@連結", "原日期", "原時段", "新日期", "新時段", "結果", "說明"]
 
 
 def result_copy_rows(results):
@@ -264,6 +267,7 @@ def result_copy_rows(results):
             "訂單編號": r.get("order_no", ""),
             "姓名": r.get("name", ""),
             "電話": r.get("phone", ""),
+            "LINE@連結": r.get("line_url", ""),
             "原日期": r.get("service_date_before", ""),
             "原時段": r.get("period", ""),
             "新日期": r.get("new_date", "") if r.get("success") else "",
