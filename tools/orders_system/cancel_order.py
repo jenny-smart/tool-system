@@ -610,6 +610,9 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                 # 有填電話沿用原本預設全勾；沒填電話（全部客人）預設不勾，避免誤取消。
                 default_checked = bool(str(phone or "").strip())
                 st.session_state.cancel_order_selected = {r["purchase_id"]: default_checked for r in rows}
+                # 清掉上一次搜尋留下的勾選狀態，改用這次的預設值。
+                for key in [k for k in st.session_state if str(k).startswith("cancel_order_pick_")]:
+                    del st.session_state[key]
                 st.session_state.cancel_order_search_status = payment_status
                 if not rows:
                     st.warning(
@@ -645,6 +648,20 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
     st.caption(f"本次付款狀態：{searched_status}")
     st.warning("取消屬於高影響操作，送出前請再次確認訂單編號與服務日期。")
 
+    pick_keys = [f"cancel_order_pick_{row['purchase_id']}_{i}" for i, row in enumerate(rows)]
+    defaults = st.session_state.get("cancel_order_selected", {})
+    for key, row in zip(pick_keys, rows):
+        st.session_state.setdefault(key, bool(defaults.get(row["purchase_id"], False)))
+    b1, b2, _ = st.columns([1, 1, 3])
+    with b1:
+        if st.button("✅ 全選", key="cancel_order_select_all", use_container_width=True):
+            for key in pick_keys:
+                st.session_state[key] = True
+    with b2:
+        if st.button("⬜ 全部取消選取", key="cancel_order_clear_all", use_container_width=True):
+            for key in pick_keys:
+                st.session_state[key] = False
+
     selected = []
     for i, row in enumerate(rows):
         label = (
@@ -652,13 +669,9 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
             f"{row.get('service_date')} {row.get('period')}　"
             f"{row.get('name')} {row.get('phone')}　付款狀態：{row.get('payment_status') or searched_status}"
         )
-        checked = st.checkbox(
-            label,
-            value=st.session_state.get("cancel_order_selected", {}).get(row["purchase_id"], False),
-            key=f"cancel_order_pick_{row['purchase_id']}_{i}",
-        )
-        if checked:
+        if st.checkbox(label, key=pick_keys[i]):
             selected.append(row)
+    st.caption(f"目前已勾選 {len(selected)} / {len(rows)} 筆")
 
     if not selected:
         st.info("請至少勾選一筆要取消的訂單")
