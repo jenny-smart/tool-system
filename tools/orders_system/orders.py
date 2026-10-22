@@ -2601,10 +2601,12 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
 
     target_address = str(row0["地址"]).strip().split(",")[0]
     # 批次維持既有地址下拉選單流程：使用匹配到的 addressId 與保存欄位。
+    # 代客保留列用檸檬保留帳號建單，帳號裡沒有客人地址時改用後台「查詢地區」取得服務區域。
+    import proxy_reserve
     from quick_order import resolve_backend_booking_address
     best_addr, address_parts, addr_check = resolve_backend_booking_address(
         session, member_payload, target_address, token, clean_type_id,
-        phone=phone, refresh_saved_address_via_native_form=False,
+        phone=phone, refresh_saved_address_via_native_form=proxy_reserve.needs_native_address(row0),
     )
     selected_address = str(best_addr.get("address") or target_address).strip()
     area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}

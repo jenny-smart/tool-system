@@ -53,3 +53,12 @@ class ProxyReserveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_needs_native_address_only_for_proxy_rows():
+    df = pd.DataFrame([{"姓名": "王亭雅", "電話": "0912269511", "代客保留": "TRUE"},
+                       {"姓名": "王孟如", "電話": "0989125030", "代客保留": "FALSE"}])
+    pr.apply(df)
+    assert pr.needs_native_address(df.iloc[0]) is True
+    assert pr.needs_native_address(df.iloc[1]) is False
+    assert pr.needs_native_address({}) is False
