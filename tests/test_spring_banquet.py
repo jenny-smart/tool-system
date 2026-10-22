@@ -402,3 +402,11 @@ def test_prize_name_cells_skip_headers():
     values = [["2026/03/14檸檬春酒-中獎清單"], ["獎項", "金額", "簽名", "獎項", "金額", "簽名"],
               ["陸獎", "1,000", "x", "陸獎", "1,000", "張智皓"], ["陸獎", "1,000", ""]]
     assert sb.prize_name_cells(values) == ["C3", "F3"]
+
+
+def test_prize_list_formulas():
+    f = sb.prize_list_formulas()
+    assert "'參與回應'!B:B" in f["Z2"][0][0] and "'參與回應'!C:C" in f["Z2"][0][0]
+    assert "CHOOSECOLS(f,3,1,2)" in f["AA2"][0][0]
+    assert "SUMIF(AA2:AA300,AE2:AE300,AC2:AC300)" in f["AF2"][0][0]
+    assert sb.budget_prize_formula("U") == "=IMPORTRANGE(\"U\",\"'中獎/簽名表'!Z2:AC300\")"

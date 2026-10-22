@@ -113,7 +113,7 @@ TEMPLATE_CLEAR: List[Tuple[str, str, bool]] = (
         (PROMPT_SHEET, "A2:D13", True),
         ("中獎/簽名表", "C4:C40", True), ("中獎/簽名表", "F4:F40", True),
         ("中獎/簽名表", "I4:I40", True), ("中獎/簽名表", "L4:L40", True),
-        ("中獎/簽名表", "AA2:AC150", True), ("中獎/簽名表", "AE2:AE150", True),
+        ("中獎/簽名表", "Z2:AC300", False), ("中獎/簽名表", "AE2:AF300", False),   # 改由公式帶入
         ("分桌/獎項", "F2:H12", True),
         ("工作分配", "A2:B20", True), ("工作分配", "F2:F20", True), ("工作分配", "J2:J20", True),
     ])
@@ -441,6 +441,26 @@ def lottery_formula(r: int, new_year: int) -> str:
             f'IF(XLOOKUP($B{r},{rs}!$B:$B,{rs}!$U:$U,"")="Y","","均時未達")),IF(t="","Y",t)),"資料不足")))')
 
 
+PRIZE_LIST_RANGES = ["Z2:AC300", "AE2:AF300"]
+
+
+def prize_list_formulas() -> Dict[str, List[List[str]]]:
+    """中獎/簽名表右側：AA:AC 中獎紀錄（左邊四組 獎項／金額／簽名 合併，姓名、獎項、金額）、Z 地區（參與回應）、
+    AE 參加者（春酒統計表參加＝是）、AF 每人中獎合計（0＝還沒抽到獎）。"""
+    st = f"'{STATS_SHEET}'"
+    return {
+        "Z1": [["地區", "姓名", "獎項", "=SUM(AC2:AC)", "", "參加者", "=SUM(AF2:AF)"]],
+        "AA2": [['=IFERROR(LET(v,VSTACK(CHOOSECOLS(A3:L300,1,2,3),CHOOSECOLS(A3:L300,4,5,6),'
+                 'CHOOSECOLS(A3:L300,7,8,9),CHOOSECOLS(A3:L300,10,11,12)),'
+                 'f,FILTER(v,INDEX(v,,3)<>"",INDEX(v,,3)<>"簽名",ISNUMBER(INDEX(v,,2))),'
+                 'CHOOSECOLS(f,3,1,2)),"")']],
+        "Z2": [[f'=ARRAYFORMULA(IF(AA2:AA300="","",IFNA(XLOOKUP(AA2:AA300,\'{ATTEND_SRC}\'!B:B,'
+                f'\'{ATTEND_SRC}\'!C:C),"")))']],                     # 地區＝參與回應「所屬店別」
+        "AE2": [[f'=IFERROR(FILTER({st}!B2:B{STATS_ROWS},{st}!E2:E{STATS_ROWS}="是"),"")']],
+        "AF2": [['=ARRAYFORMULA(IF(AE2:AE300="","",SUMIF(AA2:AA300,AE2:AE300,AC2:AC300)))']],
+    }
+
+
 def other_formulas() -> Dict[str, List[List[str]]]:
     """眷屬收費、抽獎籤、表單回應帶入公式：{'工作表'!儲存格: 值}。"""
     st = f"'{STATS_SHEET}'"
@@ -459,6 +479,7 @@ def other_formulas() -> Dict[str, List[List[str]]]:
     }
     for sheet, (tab, rng) in RESPONSE_TABS.items():
         out[f"'{sheet}'!A2"] = [[response_formula(tab, rng)]]
+    out.update({f"'{PRIZE_SHEET}'!{c}": v for c, v in prize_list_formulas().items()})
     return out
 
 
@@ -646,6 +667,10 @@ def repair_formulas(rollover, file_id: str, manual: Optional[Dict[str, List[str]
     values = rollover.sheets.spreadsheets().values()
     data = [{"range": cell, "values": v} for cell, v in other_formulas().items()
             if cell.split("!")[0].strip("'") in ids]
+    if PRIZE_SHEET in ids:
+        ensure_columns(rollover, file_id, PRIZE_SHEET, "AF")
+        values.batchClear(spreadsheetId=file_id, body={
+            "ranges": [f"'{PRIZE_SHEET}'!{r}" for r in PRIZE_LIST_RANGES]}).execute()
     if STATS_SHEET in ids:
         manual = manual_snapshot(rollover, file_id) if manual is None else manual
         roster = read(rollover, file_id, f"'{sheet}'!A2:B1000") if sheet in ids else []
@@ -850,13 +875,8 @@ def update_vote_form(rollover, forms, form_id: str, form_name: str, names: List[
 
 # ---------- 春酒預算 ----------
 def budget_prize_formula(url: str) -> str:
-    """預算表 {Y}!AA2：中獎/簽名表四個區塊（獎項、金額、簽名＝姓名）合併 → 地區、姓名、獎項、金額。"""
-    return (f'=LET(s,IMPORTRANGE("{url}","\'中獎/簽名表\'!A3:L200"),'
-            "v,VSTACK(CHOOSECOLS(s,1,2,3),CHOOSECOLS(s,4,5,6),CHOOSECOLS(s,7,8,9),CHOOSECOLS(s,10,11,12)),"
-            'f,FILTER(v,INDEX(v,,3)<>"",INDEX(v,,3)<>"簽名",ISNUMBER(INDEX(v,,2))),'
-            f'st,IMPORTRANGE("{url}","\'{STATS_SHEET}\'!A2:B{STATS_ROWS}"),'
-            'HSTACK(ARRAYFORMULA(IFNA(XLOOKUP(INDEX(f,,3),INDEX(st,,2),INDEX(st,,1)),"")),'
-            'INDEX(f,,3),INDEX(f,,1),INDEX(f,,2)))')
+    """預算表 {Y}!AA2：中獎/簽名表 Z:AC（地區、姓名、獎項、金額）。"""
+    return f'=IMPORTRANGE("{url}","\'{PRIZE_SHEET}\'!Z2:AC300")'
 
 
 def update_budget(rollover, response_id: str) -> None:
