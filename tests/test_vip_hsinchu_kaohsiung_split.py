@@ -86,3 +86,17 @@ def test_lookup_failure_falls_back_to_old_rule():
     kept, _ = wf.filter_rows_by_h_column("x", keep_matching=True)
     assert kept == 1 and wf.sheets.ws.written[-1][1] == "丁"   # 原規則：高雄方案算高雄
     assert wf._phone_lookup_error == "登入失敗"
+
+
+def test_resolve_uses_other_rows_of_same_phone_and_only_looks_up_needed_rows():
+    from services.vip_workflow import resolve_hsinchu_areas
+
+    rows = [_row("甲", "0911", "高雄市三民區1號", "轉換"),
+            _row("甲", "0911", "", "儲值金50000"),               # 同手機另一列地址是高雄 → 高雄，不查
+            _row("乙", "0922", "", "轉換"),                       # 不需要查（needs_lookup 為假）→ 原規則新竹
+            _row("丙", "0933", "", "儲值金50000")]               # 要查
+    calls, logs = [], []
+    areas = resolve_hsinchu_areas(rows, lambda p: calls.append(p) or "高雄",
+                                  needs_lookup=lambda r: r[7].startswith("儲值金"), log=logs.append)
+    assert areas == ["高雄", "高雄", "新竹", "高雄"] and calls == ["0933"]
+    assert any("1 位" in m for m in logs) and any("1/1" in m for m in logs)

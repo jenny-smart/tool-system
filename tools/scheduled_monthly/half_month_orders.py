@@ -71,6 +71,7 @@ TZ = timezone(timedelta(hours=8))
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 KAOHSIUNG_MERGE_REGIONS = ["台南", "高雄"]
 STORED_VALUE_MERGE_CITIES = {"新竹", "高雄"}
+PHONE_LOOKUP_MAX_PAGES = 3
 AREA_FOLDER_NAMES = {
     "台北": "01.台北專員", "台中": "02.台中專員", "桃園": "03.桃園專員",
     "新竹": "04.新竹專員", "高雄": "05.高雄專員",
@@ -345,10 +346,10 @@ def export_original(session: requests.Session, city: str, start: str, end: str) 
     return read_excel(download_export(session, start, end, keyword))
 
 
-def purchase_records(session: requests.Session, **filters) -> list[dict[str, Any]]:
+def purchase_records(session: requests.Session, max_pages: int = 1000, **filters) -> list[dict[str, Any]]:
     """讀取訂單搜尋的全部分頁；登入失效或資料格式異常時停止。"""
     records = []
-    for page in range(1, 1001):
+    for page in range(1, max_pages + 1):
         res = session.get(
             EXPORT_URL.rsplit("/", 1)[0], params={**filters, "page": page},
             headers=HEADERS, allow_redirects=True, timeout=60,
@@ -363,7 +364,7 @@ def purchase_records(session: requests.Session, **filters) -> list[dict[str, Any
         records.extend(payload["data"])
         if page >= int(payload.get("last_page", 1)):
             return records
-    raise RuntimeError("訂單搜尋超過 1000 頁，停止避免漏資料")
+    raise RuntimeError(f"訂單搜尋超過 {max_pages} 頁，停止避免漏資料")
 
 
 def _customer_key(value: Any) -> str:
@@ -391,7 +392,14 @@ def area_by_phone(session: requests.Session, phone: Any) -> str:
         digits = "0" + digits
     if len(digits) < 9:
         return ""
-    items = [item for item in purchase_records(session, phone=digits, p_board="on")
+    try:  # 一支手機的訂單不會超過幾頁；超過代表搜尋沒套用手機條件，直接放棄避免翻遍全部訂單
+        records = purchase_records(session, max_pages=PHONE_LOOKUP_MAX_PAGES, phone=digits, p_board="on")
+    except RuntimeError as exc:
+        if "超過" in str(exc):
+            log(f"⚠️ 手機 {digits} 查詢超過 {PHONE_LOOKUP_MAX_PAGES} 頁，略過")
+            return ""
+        raise
+    items = [item for item in records
              if re.sub(r"\D", "", str(item.get("phone") or "")).endswith(digits[-9:])]
     for item in sorted(items, key=_order_recency, reverse=True):
         city = _address_city(item.get("address"))
