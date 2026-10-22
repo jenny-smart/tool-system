@@ -47,7 +47,7 @@ def test_roster_rows_threshold_and_award_columns():
     rows = sb.roster_rows("台北", [["王小明", "'0912", "2020-01-01", "正常"]], {"王小明": [10] * 12}, 2, 2027)
     assert rows[0][:6] == ["台北", "王小明", "'0912", "2020-01-01", "正常", 10]
     assert rows[0][20] == "=IF(T2>$AB$1,\"Y\",\"\")"
-    assert "未回覆" in rows[0][23] and "春酒獎項投票-" in rows[0][24]
+    assert "未回覆" in rows[0][23] and "投票回應-" in rows[0][24]
     assert "=$B2" in rows[0][21] and "\"2025\"" in rows[0][21] and "\"2024\"" in rows[0][22]
 
 
@@ -64,7 +64,7 @@ def test_stats_formulas_payment_year_and_top5():
     assert len(person["C2"]) == sb.STATS_ROWS - 1
     summary = sb.stats_summary_formulas(2027)
     assert summary["Q1"][1][9] == "2027到職本人付費"
-    assert ",5,2)" in summary["Q19"][1][1] and "春酒獎項投票-台北" in summary["Q19"][1][1]
+    assert ",5,2)" in summary["Q19"][1][1] and "投票回應-台北" in summary["Q19"][1][1]
     assert "Q40" in summary                      # 第 4 區（台中）區塊
     others = sb.other_formulas()
     assert "'春酒統計表'!E2:E300=\"是\"" in others["'眷屬收費'!A2"][0][0]
@@ -220,7 +220,7 @@ def cells(rows, start_row=1, start_col=0):
     return {(start_row + i, start_col + c): v for i, row in enumerate(rows) for c, v in enumerate(row)}
 
 
-def test_prepare_and_update_roster_with_fake_sheets():
+def test_prepare_and_update_roster_with_fake_sheets(monkeypatch):
     data = {
         "2026春酒專員名冊": {}, "2026春酒內勤名冊": cells([["地區", "姓名"], ["台北/台中內勤", "張齊恩"]]),
         "得獎人提詞": cells([["『家事達人獎』", "『最佳進步獎』"], ["台北/楊超顯", "台北/余世烽"], ["說明", "說明"]]),
@@ -230,7 +230,7 @@ def test_prepare_and_update_roster_with_fake_sheets():
     }
     fake = FakeSheets(data)
     rollover = Rollover(None, fake, "x", 2027, dry_run=False, log=lambda m: None)
-    rollover.find_file_by_name = lambda name: None
+    monkeypatch.setattr(sb, "find_sheet_loose", lambda rollover, name: None)
 
     sb.prepare_response_file(rollover, "resp", {"date": date(2027, 3, 13)})
     assert ["'2025", "台北", "家事達人獎", "楊超顯"] in fake.appended
@@ -274,3 +274,44 @@ def test_link_response_tabs_renames_new_tabs():
     sb.link_response_tabs(rollover, "resp")
     assert "參與回應" in fake.data and "投票回應-台北" in fake.data
     assert any(isinstance(d, dict) and d.get("range") == "'春酒獎項投票-台北'!A2" for d in fake.requests)
+
+
+def test_update_vote_form_text_name_question():
+    """姓名是簡答題（只加地區標題），不可因沒有 choiceQuestion 而中斷整份表單更新。"""
+    form = {"items": [
+        {"title": "問題2.請問您的姓名是？", "questionItem": {"question": {"textQuestion": {}}}},
+        {"title": "問題3.\n您覺得『家事達人獎』，應由誰得獎呢？",
+         "questionItem": {"question": {"choiceQuestion": {"type": "RADIO", "options": [{"value": "舊人"}]}}}},
+    ]}
+    sent = []
+
+    class Forms:
+        def forms(self):
+            return self
+
+        def get(self, formId):
+            return type("R", (), {"execute": lambda _: form})()
+
+        def batchUpdate(self, formId, body):
+            sent.append(body)
+            return type("R", (), {"execute": lambda _: {}})()
+
+    rollover = type("Ro", (), {"dry_run": False, "log": lambda self, m: None})()
+    sb.update_vote_form(rollover, Forms(), "f", "2026年度投票（台北）", ["王小明"], {}, "台北")
+    reqs = sent[0]["requests"]
+    assert len(reqs) == 2
+    assert reqs[1]["updateItem"]["item"]["title"].endswith("（台北）")
+
+
+def test_find_sheet_loose_ignores_trailing_space():
+    files = [{"id": "x", "name": "2026桃園專員薪資(外場)-備份"}, {"id": "t", "name": "2026桃園專員薪資(外場) "}]
+
+    class Drive:
+        def files(self):
+            return self
+
+        def list(self, **kw):
+            return type("R", (), {"execute": lambda _: {"files": files}})()
+
+    rollover = type("Ro", (), {"drive": Drive()})()
+    assert sb.find_sheet_loose(rollover, "2026桃園專員薪資(外場)")["id"] == "t"

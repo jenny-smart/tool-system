@@ -61,6 +61,8 @@ ROSTER_HEADER = (["地區", "姓名", "電話", "到職日期", "狀態"] + [str
                     "參加回覆", "投票回覆"])
 THRESHOLD_LABEL_CELL, THRESHOLD_CELL, DEFAULT_THRESHOLD = "AA1", "AB1", 48
 ATTEND_SHEET = "春酒參與統計"
+ATTEND_SRC = "參與回應"            # 公式直接讀表單回應工作表（A 時間 B 姓名 … G 是否參加）
+VOTE_SRC = "投票回應-{a}"          # 投票回應（D 姓名、E～H 各獎項）
 GIFT_SHEET = "眷屬收費"
 WINNERS_SHEET = "歷年得獎人"
 WINNERS_HEADER = ["投票年度", "地區", "獎項", "姓名"]
@@ -220,10 +222,20 @@ def parse_hours(values: List[List[str]]) -> Dict[str, List[float]]:
     return hours
 
 
+def find_sheet_loose(rollover, name: str) -> Optional[Dict[str, Any]]:
+    """依檔名找試算表，忽略頭尾空白（例：「2026桃園專員薪資(外場) 」尾端多空白）。"""
+    q = name.replace("\\", "\\\\").replace("'", "\\'")
+    res = rollover.drive.files().list(
+        q=f"name contains '{q}' and mimeType = '{SHEET_MIME}' and trashed = false",
+        fields="files(id,name)", pageSize=20, supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
+    return next((f for f in res.get("files", []) if f["name"].strip() == name), None)
+
+
 def load_hours(rollover, area: str) -> Dict[str, List[float]]:
     y = rollover.prev_year
     for pattern in HOURS_FILE_NAMES:
-        found = rollover.find_file_by_name(pattern.format(y=y, a=area))
+        found = find_sheet_loose(rollover, pattern.format(y=y, a=area))
         if found:
             sheet = HOURS_SHEET.format(y=y)
             try:
@@ -245,7 +257,7 @@ def award_formula(row: int, year: int) -> str:
 def roster_rows(area: str, staff: List[List[str]], hours: Dict[str, List[float]], start_row: int,
                 new_year: int) -> List[List[Any]]:
     """專員名冊每列：A～E 個資、F～Q 月時數、R～U 公式、V/W 去年／前年得獎（投票年度 Y-2、Y-3）、
-    X 參加回覆（春酒參與統計 G）、Y 投票回覆（該區春酒獎項投票 D 欄姓名）。"""
+    X 參加回覆（參與回應 G）、Y 投票回覆（該區投票回應 D 欄姓名）。"""
     z = "$" + re.sub(r"(\d+)", r"$\1", THRESHOLD_CELL)
     rows = []
     for offset, (name, phone, onboard, status) in enumerate(staff):
@@ -253,9 +265,9 @@ def roster_rows(area: str, staff: List[List[str]], hours: Dict[str, List[float]]
         rows.append([area, name, phone, onboard, status, *hours.get(name, [0] * 12),
                      f"=SUM(F{r}:Q{r})", f"=COUNTIF(F{r}:Q{r},\"<>0\")", f"=IFERROR(R{r}/S{r},0)",
                      f"=IF(T{r}>{z},\"Y\",\"\")", award_formula(r, new_year - 2), award_formula(r, new_year - 3),
-                     f"=IF($B{r}=\"\",\"\",IFERROR(XLOOKUP($B{r},'{ATTEND_SHEET}'!$B:$B,"
-                     f"'{ATTEND_SHEET}'!$G:$G),\"未回覆\"))",
-                     f"=IF($B{r}=\"\",\"\",IFERROR(IF(COUNTIF(INDIRECT(\"'春酒獎項投票-\"&$A{r}&\"'!D:D\"),"
+                     f"=IF($B{r}=\"\",\"\",IFERROR(XLOOKUP($B{r},'{ATTEND_SRC}'!$B:$B,"
+                     f"'{ATTEND_SRC}'!$G:$G),\"未回覆\"))",
+                     f"=IF($B{r}=\"\",\"\",IFERROR(IF(COUNTIF(INDIRECT(\"'投票回應-\"&$A{r}&\"'!D:D\"),"
                      f"$B{r})>0,\"已投票\",\"未投票\"),\"\"))"])
     return rows
 
@@ -270,14 +282,14 @@ def attend_order(roster_names: List[List[str]], inner: List[List[str]]) -> List[
 def stats_person_formulas(new_year: int) -> Dict[str, List[List[str]]]:
     """春酒統計表 A～O 公式：{起始儲存格: 列資料}（I～K 眷屬人數為人工欄，不在此）。"""
     rs, inn, at = (f"'{ROSTER_SHEET.format(Y=new_year)}'", f"'{INNER_SHEET.format(Y=new_year)}'",
-                   f"'{ATTEND_SHEET}'")
+                   f"'{ATTEND_SRC}'")
     stack = (f"={{FILTER({rs}!A2:B,{rs}!B2:B<>\"\",ISNA(MATCH({rs}!B2:B,{inn}!B2:B,0)));"
              f"FILTER({inn}!A2:B,{inn}!B2:B<>\"\")}}")
     left, right = [], []
     for r in range(2, STATS_ROWS + 1):
         g = lambda x: f'=IF($B{r}="","",{x})'
         look = lambda c: g(f'IFERROR(XLOOKUP($B{r},{at}!$B:$B,{at}!${c}:${c}),"")')
-        left.append([g(f'IF(COUNTIF({at}!$B:$B,$B{r})>0,"已回覆","未回覆")'),
+        left.append([g(f'IFERROR(IF(COUNTIF({at}!$B:$B,$B{r})>0,"已回覆","未回覆"),"未回覆")'),
                      g(f'IFERROR(XLOOKUP($B{r},{rs}!$B:$B,{rs}!$D:$D),"")'),
                      look("G"), look("D"), look("E"), look("F")])
         right.append([f'=IF(IFERROR($D{r}>=DATE({new_year},1,1),FALSE),"Y","")',
@@ -309,7 +321,7 @@ def stats_summary_formulas(new_year: int) -> Dict[str, List[List[str]]]:
     out["Q18"] = [[f"投票前{TOP_N}名（勤奮獎依名冊總時數）"]]
     for i, area in enumerate(ROSTER_AREAS):
         r = 19 + i * (TOP_N + 2)
-        vote = f"'春酒獎項投票-{area}'"
+        vote = f"'{VOTE_SRC.format(a=area)}'"
         header, formulas = [area], [""]
         for award, c in VOTE_AWARD_COLS:
             header += [award, "票數"]
@@ -690,8 +702,9 @@ def update_vote_form(rollover, forms, form_id: str, form_name: str, names: List[
         reqs += region_tag_updates(form, area)
     for req in reqs:
         item = req["updateItem"]["item"]
-        count = len(item["questionItem"]["question"]["choiceQuestion"]["options"])
-        rollover.log(f"  {form_name}：{item['title'].splitlines()[0]} → {count} 個選項")
+        choice = item["questionItem"]["question"].get("choiceQuestion")
+        what = f"{len(choice['options'])} 個選項" if req["updateItem"]["updateMask"].endswith("options") else "標題加地區"
+        rollover.log(f"  {form_name}：{item['title'].splitlines()[0]} → {what}")
     if reqs and not rollover.dry_run:
         forms.forms().batchUpdate(formId=form_id, body={"requests": reqs}).execute()
 
