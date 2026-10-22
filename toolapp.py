@@ -4960,8 +4960,8 @@ with date_col:
         elif selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
             st.markdown('<div class="field-label">📆 匯出設定</div>', unsafe_allow_html=True)
             _crm_mode = st.radio(
-                "匯出方式", ["期別（月份）", "日期區間"],
-                horizontal=True, label_visibility="collapsed", key="crm_date_mode",
+                "匯出方式", ["期別（月份）", "月份區間"],
+                horizontal=True, label_visibility="collapsed", key="crm_date_mode_month_range",
             )
             import calendar as _calendar
             if _crm_mode == "期別（月份）":
@@ -4992,12 +4992,25 @@ with date_col:
                     st.error("期別格式錯誤，請輸入 yyyyMM，多個用逗號分隔")
                     start_date_value = end_date_value = None
             else:
-                _d1, _d2 = st.columns(2)
-                with _d1:
-                    start_date_value = st.date_input("起始日期", value=_today_date.replace(day=1), key="crm_start_date")
-                with _d2:
-                    end_date_value = st.date_input("結束日期", value=_today_date, key="crm_end_date")
-                st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
+                # 月份區間：起始月 1 日 ～ 結束月最後一天。
+                _this_month = _today_date.year * 12 + _today_date.month - 1
+                _month_options = [(_m // 12, _m % 12 + 1) for _m in range(_this_month - 12, _this_month + 19)]
+                _this_index = _month_options.index((_today_date.year, _today_date.month))
+                _m1, _m2 = st.columns(2)
+                with _m1:
+                    _start_month = st.selectbox("起始月份", _month_options, index=_this_index,
+                                                format_func=lambda ym: f"{ym[0]}/{ym[1]:02d}", key="crm_start_month")
+                with _m2:
+                    _end_month = st.selectbox("結束月份", _month_options, index=_this_index,
+                                              format_func=lambda ym: f"{ym[0]}/{ym[1]:02d}", key="crm_end_month")
+                if _end_month < _start_month:
+                    st.error("結束月份不可早於起始月份")
+                    start_date_value = end_date_value = None
+                else:
+                    start_date_value = datetime(_start_month[0], _start_month[1], 1, tzinfo=TW_TZ).date()
+                    end_date_value = datetime(_end_month[0], _end_month[1],
+                                              _calendar.monthrange(*_end_month)[1], tzinfo=TW_TZ).date()
+                    st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
 
             if selected_function in ("【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
                 st.checkbox(
