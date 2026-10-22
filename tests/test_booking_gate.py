@@ -6,13 +6,13 @@ from tools.service_management.vip_schedule_diff import sync_schedule
 from tests.test_vip_schedule_diff import Book, MissingSheet, Sheet, old_row, source_row
 
 
-def rule(start="2026-12-01", end="2027-02-28", **changes):
+def rule(start="2026-12-01", end="2027-02-28", short_periods=None, **changes):
     record = {"地區": "台北",
               "確認檔案ID": "https://docs.google.com/spreadsheets/d/FILE123/edit", "確認工作表": "2026大掃除",
               "姓名欄": "C", "電話欄": "D", "地址欄": "F", "確認欄": "V", "確認值": "TRUE", "備註欄": "W",
               "排程排除欄": "A", "排除關鍵字": "改,加", "確認表排除欄": "", "已確認欄": "B", "已確認關鍵字": "已確認"}
     record.update(changes)
-    return parse_rule(record, start, end)
+    return parse_rule(record, start, end, short_periods)
 
 
 def confirm_row(name="王小明", phone="0912345678", address="台北市大安區", confirmed="TRUE", note=""):
@@ -292,3 +292,17 @@ def test_minimum_person_hours_is_configurable_and_blank_disables():
     assert build_gate(rule(最低人時=""), [confirm_row(confirmed="FALSE")])(row)[5] == "未回覆"
     with pytest.raises(ValueError):
         rule(最低人時="六")
+
+
+def test_person_hours_only_checked_inside_deep_clean_period():
+    # 匯出 12/1～2/28 讓客人看到完整四個月；大掃除期間 12/15～2/4 才檢查人時。
+    gate = build_gate(rule(short_periods=[("2026-12-15", "2027-02-04")]), [confirm_row()])
+    for date, stage in (("2026/12/01", "可約"), ("2026/12/15", "人時不足"), ("2027/01/20", "人時不足"),
+                        ("2027/02/04", "人時不足"), ("2027/02/26", "可約")):
+        row = schedule(date=date, service="1人4小時", start="14:00")
+        row[7] = "18:00"
+        assert gate(row)[4:] == ("4", stage), date
+    # 匯出期間沒有大掃除設定時不檢查人時。
+    row = schedule(service="1人4小時", start="14:00")
+    row[7] = "18:00"
+    assert build_gate(rule(short_periods=[]), [confirm_row()])(row)[5] == "可約"
