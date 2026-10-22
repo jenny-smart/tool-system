@@ -28,6 +28,12 @@ def _text(value):
     return str(value or "").strip()
 
 
+def _lookup_formula(row, sheet):
+    """購買項目：上月同地址；地址改了或上月沒有這個地址時，改查上月同電話。"""
+    return (f"=IFNA(xlookup(E{row},'{sheet}'!E:E,'{sheet}'!J:J),"
+            f"xlookup(D{row},'{sheet}'!D:D,'{sheet}'!J:J))")
+
+
 def _canonical(value, column):
     text = _text(value)
     if column in (0, 2, 4, 8):
@@ -466,11 +472,16 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             titles = {sheet.title for sheet in ss.worksheets()}
 
         def repaired_lookup(formula, row_num):
-            # Repair earlier #REF! lookups that pointed at a month sheet that does not exist.
-            ref = re.fullmatch(r"=xlookup\(E\d+,'([^']+)'!E:E,'[^']+'!J:J\)", _text(formula), re.I)
-            if base_sheet and ref and ref.group(1) != base_sheet and ref.group(1) not in titles:
-                return f"=xlookup(E{row_num},'{base_sheet}'!E:E,'{base_sheet}'!J:J)"
-            return ""
+            # Repair earlier #REF! lookups that pointed at a month sheet that does not exist,
+            # and upgrade address-only lookups to also fall back to the phone number.
+            ref = re.match(r"=(?:IFNA\()?xlookup\(E\d+,'([^']+)'!E:E,'[^']+'!J:J\)", _text(formula), re.I)
+            if not ref:
+                return ""
+            sheet = ref.group(1)
+            if base_sheet and sheet != base_sheet and sheet not in titles:
+                sheet = base_sheet
+            new = _lookup_formula(row_num, sheet)
+            return new if new != _text(formula) else ""
 
         for change in plan["updates"]:
             row, values, before = change["row"], change["values"], change["old"]
@@ -482,16 +493,16 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
             lookup_sheet = f"{area}{previous}"
             if before is None:
-                values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
+                values[9] = _lookup_formula(row, lookup_sheet)
                 updates.append({"range": f"A{row}:AD{row}", "values": [values[:30]]})
                 phones.append({"range": f"D{row}", "values": [[values[3]]]})
             else:
                 if values[:9] != before[:9]:
                     values[9] = repaired_lookup(values[9], row) or values[9]
                     if _canonical(values[4], 4) != _canonical(before[4], 4):
-                        values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
+                        values[9] = _lookup_formula(row, lookup_sheet)
                         if values[9] != before[9]:
-                            values[32] += f"；購買項目：{_text(before[9]) or '空白'} → 上月地址查詢公式"
+                            values[32] += f"；購買項目：{_text(before[9]) or '空白'} → 上月地址／電話查詢公式"
                             for item in plan["changes"]:
                                 if item["sheet"] == target_name and item["row"] == row:
                                     item["detail"] = values[32]
