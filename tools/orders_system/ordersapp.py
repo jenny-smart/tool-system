@@ -1544,6 +1544,12 @@ elif mode == "週末服務 LINE 提醒":
         wr_date_s = st.date_input("服務日期-起", value=_default_sat, key="wr_date_s")
     with wr_c2:
         wr_date_e = st.date_input("服務日期-迄", value=_default_sun, key="wr_date_e")
+    wr_typhoon_reminder = st.checkbox(
+        "加入颱風停班提醒",
+        value=False,
+        key="wr_typhoon_reminder",
+        help="勾選後，LINE 文案會加入人事行政局公告放假時取消服務的提醒。",
+    )
 
     if st.button("🔍 查詢已付款名單", use_container_width=True, type="primary", key="wr_search"):
         if not backend_email.strip() or not backend_password.strip():
@@ -1556,6 +1562,7 @@ elif mode == "週末服務 LINE 提醒":
                     _orders, _debug = find_paid_weekend_orders(
                         env, backend_email.strip(), backend_password.strip(),
                         wr_date_s.strftime("%Y-%m-%d"), wr_date_e.strftime("%Y-%m-%d"),
+                        typhoon_reminder=wr_typhoon_reminder,
                     )
                     _tracking = load_tracking_rows()
                 st.session_state.wr_rows = merge_tracking_rows(_orders, _tracking)
@@ -1671,7 +1678,7 @@ elif mode == "週末服務 LINE 提醒":
             st.markdown("#### LINE 提醒訊息")
             for _idx, _row in enumerate(wr_rows):
                 with st.expander(f"{_row['服務日期']} {_row['服務時間']}｜{_row['姓名']}｜{_row['訂單編號']}"):
-                    st.text_area("訊息", _row["LINE訊息"], height=220, key=f"wr_msg_{_row['訂單編號']}")
+                    st.text_area("訊息", _row["LINE訊息"], height=300, key=f"wr_msg_{_row['訂單編號']}")
                     copy_button("複製訊息", _row["LINE訊息"], f"wr_copy_{_idx}")
                     if _row.get("LINE"):
                         st.link_button("開啟 LINE 聊天", _row["LINE"])
