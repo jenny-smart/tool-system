@@ -57,11 +57,17 @@ def test_attend_order_puts_inner_last_without_duplicates():
     assert sb.attend_order(roster, inner) == ["王小明", "張齊恩", "沈宛茹"]
 
 
-def test_attend_row_formulas_payment_year():
-    left, right = sb.attend_row_formulas(2027, "2027春酒專員名冊")
-    assert len(left) == sb.ATTEND_ROWS - 1
-    assert right[0][0] == '=IF(AND(ISNUMBER($O2),$O2>=DATE(2027,1,1)),"Y","")'
-    assert "'2027春酒專員名冊'!$V:$V" in right[0][3]
+def test_stats_formulas_payment_year_and_top5():
+    person = sb.stats_person_formulas(2027)
+    assert person["A2"][0][0].startswith("={FILTER('2027春酒專員名冊'!A2:B")
+    assert person["L2"][0][0] == '=IF(IFERROR($D2>=DATE(2027,1,1),FALSE),"Y","")'
+    assert len(person["C2"]) == sb.STATS_ROWS - 1
+    summary = sb.stats_summary_formulas(2027)
+    assert summary["Q1"][1][9] == "2027到職本人付費"
+    assert ",5,2)" in summary["Q19"][1][1] and "春酒獎項投票-台北" in summary["Q19"][1][1]
+    assert "Q40" in summary                      # 第 4 區（台中）區塊
+    others = sb.other_formulas()
+    assert "'春酒統計表'!E2:E300=\"是\"" in others["'眷屬收費'!A2"][0][0]
 
 
 def test_attendance_title_and_description():
@@ -218,7 +224,8 @@ def test_prepare_and_update_roster_with_fake_sheets():
     data = {
         "2026春酒專員名冊": {}, "2026春酒內勤名冊": cells([["地區", "姓名"], ["台北/台中內勤", "張齊恩"]]),
         "得獎人提詞": cells([["『家事達人獎』", "『最佳進步獎』"], ["台北/楊超顯", "台北/余世烽"], ["說明", "說明"]]),
-        "春酒參與統計": cells([["王小明", "", "", "", "", "", "", "1", "", "2"]], start_row=2, start_col=12),
+        "春酒參與統計": {},
+        "春酒統計表": cells([["王小明", "", "", "", "", "", "", "1", "", "2"]], start_row=2, start_col=1),
         "活動流程": {},
     }
     fake = FakeSheets(data)
@@ -232,10 +239,13 @@ def test_prepare_and_update_roster_with_fake_sheets():
     assert any(d["range"] == "'活動流程'!A3" and d["values"][0][0] == "日期：2027年03月13日(六)"
                for d in data_writes)
 
+    manual = sb.manual_snapshot(rollover, "resp")
     sb.update_roster(rollover, "resp", {"台北": [["王小明", "'0912", "2020-01-01", "正常"],
                                                ["張齊恩", "'0911", "2020-01-01", "正常"]]})
-    manual = next(d for d in fake.requests if isinstance(d, dict) and d.get("range") == "'春酒參與統計'!T2")
-    assert manual["values"] == [["1", "", "2"], ["", "", ""]]   # 王小明的眷屬人數保留；張齊恩列在內勤
+    fake.data["2027春酒專員名冊"] = cells([["台北", "王小明"], ["台北", "張齊恩"]], start_row=2)
+    sb.repair_formulas(rollover, "resp", manual)
+    kept = next(d for d in fake.requests if isinstance(d, dict) and d.get("range") == "'春酒統計表'!I2")
+    assert kept["values"] == [["1", "", "2"], ["", "", ""]]   # 王小明的眷屬人數保留；張齊恩列在內勤
 
 
 def test_response_formula_pulls_linked_tab():
