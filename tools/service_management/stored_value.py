@@ -782,7 +782,8 @@ def _process_events(
         people     = parse_service_people(parsed["service"])
         hours      = calc_hours(start_dt, end_dt)
         person_hrs = people * hours
-        amount     = 0 if lunar_pause else price * person_hrs
+        # 暫停不收費，金額空白；未安排、待確認等其他狀態照常計入。
+        amount     = "" if status == "暫停" else price * person_hrs
 
         rows.append({
             "event_id":   f"{calendar_id or area_name}:{e['id']}" if e.get("id") else "",
@@ -814,7 +815,7 @@ def _enrich_with_stored_value(rows: list[dict], stored_info: dict[str, dict]) ->
     for r in rows:
         key = normalize_name_for_compare(r["name"])
         period = r["start_dt"].strftime("%Y%m")
-        subtotal_map[(key, period)] = subtotal_map.get((key, period), 0.0) + r["amount"]
+        subtotal_map[(key, period)] = subtotal_map.get((key, period), 0.0) + float(r["amount"] or 0)
 
     cumulative_map: dict[tuple[str, str], float] = {}
     running_by_name: dict[str, float] = {}
@@ -1150,7 +1151,14 @@ def _build_vip_schedule_sheet(
     from tools.service_management.booking_gate import RULE_SHEET_NAME, load_area_gate
     gate, gate_rules = None, []
     if booking_gate:
-        gate, gate_rules = load_area_gate(gc, area_name, *booking_gate, worksheet_not_found=gspread.WorksheetNotFound)
+        gate_start, gate_end = (datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=TZ_TAIPEI) for d in booking_gate)
+        # 人時不足只檢查年節大掃除期間；匯出期間其他日期只讓客人看到完整服務日期。
+        short_periods = [
+            (s.phase1_start.strftime("%Y-%m-%d"), s.phase2_end.strftime("%Y-%m-%d"))
+            for s in _load_deep_clean_pricing_settings(gate_start, gate_end.replace(hour=23, minute=59, second=59))
+        ]
+        gate, gate_rules = load_area_gate(gc, area_name, *booking_gate, worksheet_not_found=gspread.WorksheetNotFound,
+                                          short_periods=short_periods)
         log.info("[%s] 套用「%s」：%s", area_name, RULE_SHEET_NAME, "、".join(gate_rules))
     else:
         log.info("[%s] 未套用排程預約條件", area_name)

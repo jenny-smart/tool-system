@@ -70,7 +70,7 @@ def render(st, areas: list[str], start: date | None, end: date | None) -> dict |
         st.caption("不套用：排程不寫入這六欄，已寫入的會清空；批次成單照平常規則。")
         return {"enabled": False, "settings": {}}
 
-    st.caption(f"期間：{start} ～ {end}（跟著上方匯出起迄日）。預約條件依序判斷：人時不足 → 改加 → 已確認 → 可約 → 未回覆。")
+    st.caption(f"期間：{start} ～ {end}（跟著上方匯出起迄日）。預約條件依序判斷：人時不足 → 改加 → 已確認 → 可約 → 未回覆；人時只檢查年節大掃除期間的服務。")
     if st.button("重新讀取已儲存的設定", key="booking_gate_reload"):
         for area in areas:
             st.session_state.pop(f"booking_gate_settings_{area}", None)

@@ -221,6 +221,8 @@ def test_same_customer_same_day_events_keep_distinct_ids_and_times():
     assert [row["event_id"] for row in rows] == ["calendar:morning", "calendar:afternoon"]
     assert [row["start_str"] for row in rows] == ["09:00", "14:00"]
     assert [row["status"] for row in rows] == ["未安排", "暫停"]
+    # 暫停不計服務金額（空白）；未安排照常計入。
+    assert [row["amount"] for row in rows] == [1800, ""]
 
 
 def test_deep_clean_price_uses_vip_part_and_day_type_rates():
@@ -271,7 +273,7 @@ def test_lunar_holiday_event_is_paused_and_not_deducted():
     row = functions["_process_events"](events, "台北", "calendar", [setting])[0]
 
     assert row["status"] == "暫停"
-    assert row["amount"] == 0
+    assert row["amount"] == ""
 
 
 def test_schedule_builder_applies_booking_gate_only_when_requested_with_run_period():
@@ -282,6 +284,12 @@ def test_schedule_builder_applies_booking_gate_only_when_requested_with_run_peri
     client = SimpleNamespace(open_by_key=lambda _key: SimpleNamespace(worksheet=lambda _name: source))
     result = {"sheet": "台北202612", "count": 1, "differences": {}, "report": "差異", "booking_gate": {"stages": {}}}
     gate = object()
+    functions.update({
+        "TZ_TAIPEI": timezone.utc,
+        "_load_deep_clean_pricing_settings": lambda *_: [SimpleNamespace(
+            phase1_start=datetime(2026, 12, 15, tzinfo=timezone.utc),
+            phase2_end=datetime(2027, 2, 4, 23, 59, tzinfo=timezone.utc))],
+    })
     with patch("tools.service_management.vip_schedule_diff.sync_schedule", return_value=result) as writer, \
             patch("tools.service_management.booking_gate.load_area_gate", return_value=(gate, ["x"])) as loader:
         functions["_build_vip_schedule_sheet"](client, {"name": "台北", "target_spreadsheet_id": "t"}, "202612")
@@ -290,6 +298,7 @@ def test_schedule_builder_applies_booking_gate_only_when_requested_with_run_peri
         functions["_build_vip_schedule_sheet"](client, {"name": "台北", "target_spreadsheet_id": "t"}, "202612",
                                                booking_gate=("2026-12-01", "2027-02-28"))
     assert loader.call_args.args[1:] == ("台北", "2026-12-01", "2027-02-28")
+    assert loader.call_args.kwargs["short_periods"] == [("2026-12-15", "2027-02-04")]
     assert writer.call_args.kwargs["gate"] is gate
 
 
