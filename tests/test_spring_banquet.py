@@ -46,7 +46,8 @@ def test_parse_hours_both_layouts():
 def test_roster_rows_threshold_and_award_columns():
     rows = sb.roster_rows("台北", [["王小明", "'0912", "2020-01-01", "正常"]], {"王小明": [10] * 12}, 2, 2027)
     assert rows[0][:6] == ["台北", "王小明", "'0912", "2020-01-01", "正常", 10]
-    assert rows[0][20] == "=IF(T2>$Z$1,\"Y\",\"\")"
+    assert rows[0][20] == "=IF(T2>$AB$1,\"Y\",\"\")"
+    assert "未回覆" in rows[0][23] and "春酒獎項投票-" in rows[0][24]
     assert "=$B2" in rows[0][21] and "\"2025\"" in rows[0][21] and "\"2024\"" in rows[0][22]
 
 
@@ -56,11 +57,17 @@ def test_attend_order_puts_inner_last_without_duplicates():
     assert sb.attend_order(roster, inner) == ["王小明", "張齊恩", "沈宛茹"]
 
 
-def test_attend_row_formulas_payment_year():
-    left, right = sb.attend_row_formulas(2027, "2027春酒專員名冊")
-    assert len(left) == sb.ATTEND_ROWS - 1
-    assert right[0][0] == '=IF(AND(ISNUMBER($O2),$O2>=DATE(2027,1,1)),"Y","")'
-    assert "'2027春酒專員名冊'!$V:$V" in right[0][3]
+def test_stats_formulas_payment_year_and_top5():
+    person = sb.stats_person_formulas(2027)
+    assert person["A2"][0][0].startswith("={FILTER('2027春酒專員名冊'!A2:B")
+    assert person["L2"][0][0] == '=IF(IFERROR($D2>=DATE(2027,1,1),FALSE),"Y","")'
+    assert len(person["C2"]) == sb.STATS_ROWS - 1
+    summary = sb.stats_summary_formulas(2027)
+    assert summary["Q1"][1][9] == "2027到職本人付費"
+    assert ",5,2)" in summary["Q19"][1][1] and "春酒獎項投票-台北" in summary["Q19"][1][1]
+    assert "Q40" in summary                      # 第 4 區（台中）區塊
+    others = sb.other_formulas()
+    assert "'春酒統計表'!E2:E300=\"是\"" in others["'眷屬收費'!A2"][0][0]
 
 
 def test_attendance_title_and_description():
@@ -116,7 +123,7 @@ def test_run_spring_area_dry_run(monkeypatch):
     assert ("2026春酒參與統計表單-範本", "2027春酒參與統計表單") in names      # 回覆試算表取範本
     assert ("2025年度投票（台北）", "2026年度投票（台北）") in names
     assert ("2026春酒照片", "2027春酒照片") in names and ("遊覽車", "遊覽車") in names
-    assert ("春酒抽籤.docx", "春酒抽籤.docx") in names
+    assert ("春酒抽籤.docx", "春酒抽籤") in names                         # Word 轉 Google 文件
     assert ("專員個資-新竹", "找不到來源") in names
 
 
@@ -138,7 +145,7 @@ def test_one_form_failure_does_not_stop_other_regions(monkeypatch):
     monkeypatch.setattr(sb, "get_forms_service", lambda: object())
     updated = []
 
-    def fake_update(rollover, forms, form_id, form_name, names, excluded):
+    def fake_update(rollover, forms, form_id, form_name, names, excluded, area=""):
         if "台北" in form_name:
             raise RuntimeError("權限不足")
         updated.append(form_name)
@@ -217,7 +224,8 @@ def test_prepare_and_update_roster_with_fake_sheets():
     data = {
         "2026春酒專員名冊": {}, "2026春酒內勤名冊": cells([["地區", "姓名"], ["台北/台中內勤", "張齊恩"]]),
         "得獎人提詞": cells([["『家事達人獎』", "『最佳進步獎』"], ["台北/楊超顯", "台北/余世烽"], ["說明", "說明"]]),
-        "春酒參與統計": cells([["王小明", "", "", "", "", "", "", "1", "", "2"]], start_row=2, start_col=12),
+        "春酒參與統計": {},
+        "春酒統計表": cells([["王小明", "", "", "", "", "", "", "1", "", "2"]], start_row=2, start_col=1),
         "活動流程": {},
     }
     fake = FakeSheets(data)
@@ -231,7 +239,38 @@ def test_prepare_and_update_roster_with_fake_sheets():
     assert any(d["range"] == "'活動流程'!A3" and d["values"][0][0] == "日期：2027年03月13日(六)"
                for d in data_writes)
 
+    manual = sb.manual_snapshot(rollover, "resp")
     sb.update_roster(rollover, "resp", {"台北": [["王小明", "'0912", "2020-01-01", "正常"],
                                                ["張齊恩", "'0911", "2020-01-01", "正常"]]})
-    manual = next(d for d in fake.requests if isinstance(d, dict) and d.get("range") == "'春酒參與統計'!T2")
-    assert manual["values"] == [["1", "", "2"], ["", "", ""]]   # 王小明的眷屬人數保留；張齊恩列在內勤
+    fake.data["2027春酒專員名冊"] = cells([["台北", "王小明"], ["台北", "張齊恩"]], start_row=2)
+    sb.repair_formulas(rollover, "resp", manual)
+    kept = next(d for d in fake.requests if isinstance(d, dict) and d.get("range") == "'春酒統計表'!I2")
+    assert kept["values"] == [["1", "", "2"], ["", "", ""]]   # 王小明的眷屬人數保留；張齊恩列在內勤
+
+
+def test_response_formula_pulls_linked_tab():
+    assert sb.response_formula("參與回應", "A2:G") == \
+        "=IFERROR(FILTER('參與回應'!A2:G,'參與回應'!A2:A<>\"\"),\"\")"
+    assert sb.RESPONSE_TABS["春酒獎項投票-台北"] == ("投票回應-台北", "A2:H")
+
+
+def test_region_tag_and_response_tab_target():
+    form = {"items": [{"title": "問題2.請問您的姓名是？", "questionItem": {}},
+                      {"title": "問題3.『家事達人獎』", "questionItem": {}}]}
+    reqs = sb.region_tag_updates(form, "台北")
+    assert [r["updateItem"]["item"]["title"] for r in reqs] == ["問題2.請問您的姓名是？（台北）"]
+    assert sb.region_tag_updates({"items": [reqs[0]["updateItem"]["item"]]}, "台北") == []
+    assert sb.response_tab_target(["時間戳記", "問題2.請問您的姓名是？（新竹）", "『家事達人獎』"]) == "投票回應-新竹"
+    assert sb.response_tab_target(["時間戳記", "問題3.請問您的飲食習慣需求是？"]) == "參與回應"
+    assert sb.response_tab_target(["時間戳記", "『家事達人獎』"]) is None
+
+
+def test_link_response_tabs_renames_new_tabs():
+    data = {"春酒參與統計": {}, "春酒獎項投票-台北": {},
+            "表單回應 1": cells([["時間戳記", "問題1.請問您的中文全名是？", "問題3.請問您的飲食習慣需求是？"]]),
+            "表單回應 2": cells([["時間戳記", "問題2.姓名（台北）", "『家事達人獎』"]])}
+    fake = FakeSheets(data)
+    rollover = Rollover(None, fake, "x", 2027, dry_run=False, log=lambda m: None)
+    sb.link_response_tabs(rollover, "resp")
+    assert "參與回應" in fake.data and "投票回應-台北" in fake.data
+    assert any(isinstance(d, dict) and d.get("range") == "'春酒獎項投票-台北'!A2" for d in fake.requests)
