@@ -13,7 +13,7 @@ tools/annual_rollover/spring_banquet.py
    - 表單回覆與待填欄位清空並設黃底；標題、到職付費年度等文字改新年度
 3. 每次執行更新名冊（update_roster）：
    - 「{Y}春酒專員名冊」：A 地區 B 姓名 C 電話 D 到職日期 E 狀態，F～Q 1～12 月時數，
-     R 總時數 S 月份 T 平均時數 U 達門檻（Z1 時數門檻） V/W 去年／前年得獎
+     R 總時數 S 月份 T 平均時數 U 達門檻（AB1 時數門檻） V/W 去年／前年得獎 X/Y 參加／投票回覆
      名單＝檸檬後台專員個資狀態「正常」，排除姓名含檸檬人／高雄／台南；
      登入沿用月排程「儲值金結算」load_accounts()，匯出沿用日排程「專員個資」；
      時數取各地區檔案「{Y-1}排班統計表」
@@ -55,8 +55,9 @@ ROSTER_SHEET = "{Y}春酒專員名冊"
 INNER_SHEET = "{Y}春酒內勤名冊"
 ROSTER_SHEET_PATTERN = re.compile(r"^\d{4}春酒(專員|內勤)名冊$")
 ROSTER_HEADER = (["地區", "姓名", "電話", "到職日期", "狀態"] + [str(m) for m in range(1, 13)]
-                 + ["總時數", "月份", "平均時數", "達門檻", "去年得獎（{y1}）", "前年得獎（{y2}）"])
-THRESHOLD_LABEL_CELL, THRESHOLD_CELL, DEFAULT_THRESHOLD = "Y1", "Z1", 48
+                 + ["總時數", "月份", "平均時數", "達門檻", "去年得獎（{y1}）", "前年得獎（{y2}）",
+                    "參加回覆", "投票回覆"])
+THRESHOLD_LABEL_CELL, THRESHOLD_CELL, DEFAULT_THRESHOLD = "AA1", "AB1", 48
 ATTEND_SHEET = "春酒參與統計"
 GIFT_SHEET = "眷屬收費"
 WINNERS_SHEET = "歷年得獎人"
@@ -236,14 +237,19 @@ def award_formula(row: int, year: int) -> str:
 
 def roster_rows(area: str, staff: List[List[str]], hours: Dict[str, List[float]], start_row: int,
                 new_year: int) -> List[List[Any]]:
-    """專員名冊每列：A～E 個資、F～Q 月時數、R～U 公式、V/W 去年／前年得獎（投票年度 Y-2、Y-3）。"""
-    z = f"${THRESHOLD_CELL[0]}${THRESHOLD_CELL[1:]}"
+    """專員名冊每列：A～E 個資、F～Q 月時數、R～U 公式、V/W 去年／前年得獎（投票年度 Y-2、Y-3）、
+    X 參加回覆（春酒參與統計 G）、Y 投票回覆（該區春酒獎項投票 D 欄姓名）。"""
+    z = "$" + re.sub(r"(\d+)", r"$\1", THRESHOLD_CELL)
     rows = []
     for offset, (name, phone, onboard, status) in enumerate(staff):
         r = start_row + offset
         rows.append([area, name, phone, onboard, status, *hours.get(name, [0] * 12),
                      f"=SUM(F{r}:Q{r})", f"=COUNTIF(F{r}:Q{r},\"<>0\")", f"=IFERROR(R{r}/S{r},0)",
-                     f"=IF(T{r}>{z},\"Y\",\"\")", award_formula(r, new_year - 2), award_formula(r, new_year - 3)])
+                     f"=IF(T{r}>{z},\"Y\",\"\")", award_formula(r, new_year - 2), award_formula(r, new_year - 3),
+                     f"=IF($B{r}=\"\",\"\",IFERROR(XLOOKUP($B{r},'{ATTEND_SHEET}'!$B:$B,"
+                     f"'{ATTEND_SHEET}'!$G:$G),\"未回覆\"))",
+                     f"=IF($B{r}=\"\",\"\",IFERROR(IF(COUNTIF(INDIRECT(\"'春酒獎項投票-\"&$A{r}&\"'!D:D\"),"
+                     f"$B{r})>0,\"已投票\",\"未投票\"),\"\"))"])
     return rows
 
 
@@ -360,7 +366,7 @@ def update_roster(rollover, file_id: str, roster: Dict[str, List[List[str]]]) ->
             rows += roster_rows(area, staff, load_hours(rollover, area), len(rows) + 2, y)
     header = [h.format(y1=y - 2, y2=y - 3) for h in ROSTER_HEADER]
     values = rollover.sheets.spreadsheets().values()
-    values.batchClear(spreadsheetId=file_id, body={"ranges": [f"'{sheet}'!A1:Z1000"]}).execute()
+    values.batchClear(spreadsheetId=file_id, body={"ranges": [f"'{sheet}'!A1:AB1000"]}).execute()
     rollover._values_batch(file_id, [
         {"range": f"'{sheet}'!A1", "values": [header]},
         {"range": f"'{sheet}'!A2", "values": rows},

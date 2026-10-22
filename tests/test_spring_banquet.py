@@ -46,7 +46,8 @@ def test_parse_hours_both_layouts():
 def test_roster_rows_threshold_and_award_columns():
     rows = sb.roster_rows("台北", [["王小明", "'0912", "2020-01-01", "正常"]], {"王小明": [10] * 12}, 2, 2027)
     assert rows[0][:6] == ["台北", "王小明", "'0912", "2020-01-01", "正常", 10]
-    assert rows[0][20] == "=IF(T2>$Z$1,\"Y\",\"\")"
+    assert rows[0][20] == "=IF(T2>$AB$1,\"Y\",\"\")"
+    assert "未回覆" in rows[0][23] and "春酒獎項投票-" in rows[0][24]
     assert "=$B2" in rows[0][21] and "\"2025\"" in rows[0][21] and "\"2024\"" in rows[0][22]
 
 
