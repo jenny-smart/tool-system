@@ -235,3 +235,9 @@ def test_prepare_and_update_roster_with_fake_sheets():
                                                ["張齊恩", "'0911", "2020-01-01", "正常"]]})
     manual = next(d for d in fake.requests if isinstance(d, dict) and d.get("range") == "'春酒參與統計'!T2")
     assert manual["values"] == [["1", "", "2"], ["", "", ""]]   # 王小明的眷屬人數保留；張齊恩列在內勤
+
+
+def test_response_formula_pulls_linked_tab():
+    assert sb.response_formula("參與回應", "A2:G") == \
+        "=IFERROR(FILTER('參與回應'!A2:G,'參與回應'!A2:A<>\"\"),\"\")"
+    assert sb.RESPONSE_TABS["春酒獎項投票-台北"] == ("投票回應-台北", "A2:H")

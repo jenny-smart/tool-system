@@ -23,7 +23,8 @@ tools/annual_rollover/spring_banquet.py
    - 各區投票表單：姓名、得獎題目的選項換成名冊姓名；排除內勤，以及
      「歷年得獎人」中 G1 年內得過「同一獎項」的人
 
-表單回覆要連到哪個試算表，Forms API 無法設定，仍需在表單「回覆」頁手動連結。
+表單回覆要連到哪個試算表，Forms API 無法設定，仍需在表單「回覆」頁手動連結；
+連結後 Google 會新增工作表，請改名為 RESPONSE_TABS 的名稱（參與回應、投票回應-地區）。
 """
 
 from __future__ import annotations
@@ -73,10 +74,14 @@ YELLOW = {"red": 1, "green": 0.95, "blue": 0.6}         # 新年度要填的欄�
 ATTEND_MANUAL_COLS = "TUV"
 ATTEND_ROWS = 300
 
+# 表單連到試算表時 Google 一定會新增工作表；請把它改名為下列名稱，原工作表 A 欄起用公式帶入
+RESPONSE_TABS = {ATTEND_SHEET: ("參與回應", "A2:G"),
+                 **{f"春酒獎項投票-{a}": (f"投票回應-{a}", "A2:H") for a in ["台北", "台中", "桃園", "新竹"]}}
+
 # 新建回覆試算表時清空的範圍：(工作表, 範圍, 是否設黃底提醒填入)
 TEMPLATE_CLEAR: List[Tuple[str, str, bool]] = (
-    [(f"春酒獎項投票-{a}", "A2:H", False) for a in ROSTER_AREAS] + [
-        (ATTEND_SHEET, "A2:G", False), (ATTEND_SHEET, f"T2:V{ATTEND_ROWS}", True),
+    [(sheet, rng, False) for sheet, (_, rng) in RESPONSE_TABS.items()] + [
+        (ATTEND_SHEET, f"T2:V{ATTEND_ROWS}", True),
         (GIFT_SHEET, "G2:H300", True),
         ("活動流程", "A3:F3", True), ("活動流程", "G5:G24", True), ("活動流程", "J5:M24", True),
         ("主持人流程台詞", "A3:E3", True), ("主持人流程台詞", "E5:E25", True),
@@ -282,6 +287,10 @@ def archive_winners(rollover, file_id: str, vote_year: int) -> None:
             insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
 
 
+def response_formula(tab: str, rng: str) -> str:
+    return f"=IFERROR(FILTER('{tab}'!{rng},'{tab}'!A2:A<>\"\"),\"\")"
+
+
 def prepare_response_file(rollover, file_id: str, event: Dict[str, Any]) -> None:
     """新建的回覆試算表：名冊分頁改年度、記錄去年得獎人、清空待填欄位並設黃底、文字與公式改新年度。"""
     y = rollover.new_year
@@ -295,6 +304,8 @@ def prepare_response_file(rollover, file_id: str, event: Dict[str, Any]) -> None
                                                    "fields": "title"}})
     if WINNERS_SHEET not in ids:
         reqs.append({"addSheet": {"properties": {"title": WINNERS_SHEET}}})
+    # 去年連結表單產生的回應工作表（複製後已不再連結）刪掉，新年度連結後再改成同名
+    reqs += [{"deleteSheet": {"sheetId": ids[tab]}} for tab, _ in RESPONSE_TABS.values() if tab in ids]
     batch_update(rollover, file_id, reqs)
     ids = sheet_ids(rollover, file_id)
     if not read(rollover, file_id, f"'{WINNERS_SHEET}'!A1:G1"):
@@ -319,6 +330,8 @@ def prepare_response_file(rollover, file_id: str, event: Dict[str, Any]) -> None
             if cell.split("!")[0].strip("'") in ids]
     data += [{"range": f"'{s}'!A3", "values": [[c.format(d=when) for c in row]]}
              for s, row in DATE_LABEL_ROWS.items() if s in ids]
+    data += [{"range": f"'{s}'!A2", "values": [[response_formula(tab, rng)]]}
+             for s, (tab, rng) in RESPONSE_TABS.items() if s in ids]
     rollover._values_batch(file_id, data)
 
 
@@ -609,5 +622,6 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
         except Exception as exc:
             rollover.log(f"  ✗ 更新表單「{name}」失敗：{exc}")
             records.append({"kind": "表單", "old_name": name, "old_id": "", "new_name": "找不到來源", "new_id": ""})
-    rollover.log("  ⚠ 表單回覆連到「" + RESPONSE_FILE_NAME.format(Y=y) + "」需在各表單「回覆」頁手動設定")
+    rollover.log("  ⚠ 表單回覆連到「" + RESPONSE_FILE_NAME.format(Y=y) + "」需在各表單「回覆」頁手動設定，"
+                 "新增的工作表請改名為：" + "、".join(tab for tab, _ in RESPONSE_TABS.values()))
     return records
