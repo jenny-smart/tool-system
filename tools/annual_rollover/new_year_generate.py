@@ -194,8 +194,9 @@ SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列與第 2 �
 _LITERAL_FORMULA = re.compile(r"=[\d\s.+\-*/(),%]*")
 
 # 「春節禮品名單」分兩階段：
-#   第一階段（各地區資料統計）：根目錄「春節禮品」下建立新年度資料夾 {Y}，資料夾內各地區「儲值金」來源檔
-#     （訂單格式 xls/xlsx/csv，例：{Y}儲值金-台北.xls）轉檔後貼入「{Y}名單統整」的「{a}儲值金」工作表，
+#   第一階段（各地區資料統計）：根目錄「春節禮品」下建立新年度資料夾 {Y}，登入各區後台下載前一年度
+#     （付款日期）的儲值金訂單存成「{Y}儲值金-{a}」（同月排程上下半月訂單的儲值金匯出），
+#     轉檔後貼入「{Y}名單統整」的「{a}儲值金」工作表，
 #     每張建樞紐（M 客戶姓名、D 付款日期在前一年度、加總 AA 儲值金成本），並依金額區間統計人數
 #   第二階段（設定金額產生送禮名單）：畫面輸入的門檻金額寫入「設定」B1，「{Y}送禮名單」列出加總 ≥ 門檻
 #     的客戶，再貼進新年度「{Y}春節送禮名單」並在根目錄總表加分頁
@@ -532,7 +533,7 @@ def parse_rows_arg(text: str, last_row: int) -> List[int]:
 class Rollover:
     def __init__(self, drive, sheets, spreadsheet_id: str, new_year: int,
                  dry_run: bool = False, fresh: bool = False, tidy: bool = False, log=print,
-                 gift_threshold: Optional[float] = None):
+                 gift_threshold: Optional[float] = None, gift_downloader=None):
         self.drive = drive
         self.sheets = sheets
         self.spreadsheet_id = spreadsheet_id
@@ -543,6 +544,7 @@ class Rollover:
         self.tidy = tidy  # 行銷費用總管理／清潔用品：已存在的新年度檔不重建，直接再整理一次
         self.log = log
         self.gift_threshold = gift_threshold  # 春節送禮名單產生：畫面輸入的門檻金額
+        self.gift_downloader = gift_downloader  # 測試用：取代後台下載 (city, prev_year, log) -> (內容, 副檔名, 筆數)
         self.stamp = datetime.now(TZ).strftime("%Y%m%d%H%M")
 
     # ---------- Drive ----------
@@ -1197,6 +1199,10 @@ class Rollover:
         folder = self._gift_folder(create=True)
         records = [{"kind": "資料夾", "old_name": "", "old_id": "", "new_name": Y, "new_id": folder["id"]}]
 
+        if self.dry_run:
+            self.log(f"  （dry-run）會登入各區後台下載 {self.prev_year} 年儲值金訂單存成「{Y}{GIFT_SOURCE_KEYWORD}-地區」")
+        else:
+            self._gift_download(folder)
         listing = [] if folder["id"].startswith("(dry-run") else self.children(folder["id"])
         sources = self._gift_sources(listing)
         for area in GIFT_AREAS:
@@ -1205,7 +1211,7 @@ class Rollover:
             else:
                 self.log(f"  ⚠ {Y} 資料夾沒有{area}{GIFT_SOURCE_KEYWORD}來源檔，略過")
         if not sources:
-            self.log(f"  ⚠ 請先把各地區儲值金訂單匯出（例：{Y}{GIFT_SOURCE_KEYWORD}-台北.xls）放進「春節禮品/{Y}」再執行")
+            self.log(f"  ⚠ 後台下載都失敗，「春節禮品/{Y}」也沒有各地區儲值金訂單（例：{Y}{GIFT_SOURCE_KEYWORD}-台北.xls）")
             return records + [{"kind": "檔案", "old_name": f"{Y}{GIFT_SOURCE_KEYWORD}-地區", "old_id": "",
                                "new_name": "找不到來源", "new_id": ""}]
 
@@ -1288,6 +1294,33 @@ class Rollover:
             return []
         return self._gift_send_file(folder, listing, rows)
 
+    def _gift_download(self, folder: Dict[str, Any]) -> None:
+        """各地區登入後台下載前一年度儲值金訂單，上傳為「{Y}儲值金-{a}.xls(x)」（同名舊檔移到垃圾桶）；
+        單一地區失敗只警告，資料夾裡已有的檔案照用。"""
+        from googleapiclient.http import MediaInMemoryUpload
+
+        downloader = self.gift_downloader
+        if downloader is None:
+            from tools.annual_rollover.gift_download import download_gift_source as downloader
+        base_names = {area: f"{self.new_year}{GIFT_SOURCE_KEYWORD}-{area}" for area in GIFT_AREAS}
+        for area, base in base_names.items():
+            try:
+                content, ext, count = downloader(area, self.prev_year, self.log)
+            except Exception as exc:
+                self.log(f"  ⚠ {area} 後台下載失敗：{exc}（改用資料夾裡已有的檔案）")
+                continue
+            for old in self.children(folder["id"]):
+                if old["mimeType"] != SHEET_MIME and re.sub(r"\.(xlsx?|csv)$", "", old["name"], flags=re.I) == base:
+                    self.drive.files().update(fileId=old["id"], body={"trashed": True},
+                                              supportsAllDrives=True).execute()
+            mime = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if ext == "xlsx"
+                    else "application/vnd.ms-excel")
+            self.drive.files().create(
+                body={"name": f"{base}.{ext}", "mimeType": mime, "parents": [folder["id"]]},
+                media_body=MediaInMemoryUpload(content, mimetype=mime, resumable=False),
+                fields="id,name", supportsAllDrives=True).execute()
+            self.log(f"  {area}：後台下載 {self.prev_year} 年儲值金訂單 {count} 筆 → {base}.{ext}")
+
     def _gift_sources(self, listing: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """各地區來源檔：檔名含「儲值金」與地區（名單統整／送禮名單除外）；同地區有原始匯出檔
         （xls/xlsx/csv）時優先用它，其次才用已轉好的 Google 試算表。"""
@@ -1301,7 +1334,12 @@ class Rollover:
             if not (f["mimeType"] == SHEET_MIME or re.search(r"\.(xlsx?|csv)$", name, re.I)):
                 continue
             area = next((a for a in GIFT_AREAS if a in name), "")
-            if area and (area not in sources or sources[area]["mimeType"] == SHEET_MIME):
+            if not area:
+                continue
+            exact = re.sub(r"\.(xlsx?|csv)$", "", name, flags=re.I) == f"{self.new_year}{GIFT_SOURCE_KEYWORD}-{area}"
+            current = sources.get(area)
+            if (current is None or current["mimeType"] == SHEET_MIME and f["mimeType"] != SHEET_MIME
+                    or exact and f["mimeType"] != SHEET_MIME):
                 sources[area] = f
         return sources
 

@@ -110,7 +110,12 @@ def _setup(threshold=""):
     return drive, sheets
 
 
+def _no_download(city, prev_year, log):
+    raise RuntimeError("測試不連後台")
+
+
 def _roll(drive, sheets, logs=None, **kw):
+    kw.setdefault("gift_downloader", _no_download)
     return Rollover(drive, sheets, "master", 2027, log=(logs.append if logs is not None else lambda *_: None), **kw)
 
 
@@ -119,6 +124,28 @@ def test_gift_sources_prefer_raw_export_and_skip_others():
     roll = _roll(drive, sheets)
     sources = roll._gift_sources(roll.children("y27"))
     assert list(sources) == ["台北"] and sources["台北"]["id"] == "tp"
+
+
+def test_gift_download_replaces_area_file_and_falls_back():
+    drive, sheets = _setup()
+    calls = []
+
+    def downloader(city, prev_year, log):
+        calls.append((city, prev_year))
+        if city != "台北":
+            raise RuntimeError("沒有帳號")
+        return b"PK\x03\x04", "xlsx", 3
+
+    logs = []
+    roll = _roll(drive, sheets, logs, gift_downloader=downloader)
+    roll._gift_download(drive.items["y27"])
+    assert calls == [(a, 2026) for a in nyg.GIFT_AREAS]
+    assert drive.items["tp"].get("trashed") is True                     # 同名舊 xls 換掉
+    new = next(i for i in drive.items.values() if i["name"] == "2027儲值金-台北.xlsx")
+    assert new["parent"] == "y27"
+    assert not drive.items["tp_old"].get("trashed")                       # 已轉好的試算表不動
+    assert roll._gift_sources(roll.children("y27"))["台北"]["id"] == new["id"]
+    assert any("台中 後台下載失敗" in m for m in logs)
 
 
 def test_gift_stats_builds_summary_and_reports_bands():
@@ -284,3 +311,38 @@ def test_zipcode_names_unique_and_not_prefix_of_each_other():
     names = [n for _, n in TW_ZIPCODES]
     assert len(names) == len(set(names)) and all("臺" not in n for n in names)
     assert not [(a, b) for a in names for b in names if a != b and b.startswith(a)]
+
+
+def test_download_gift_source_uses_paid_dates_and_splits_hsinchu(monkeypatch):
+    from tools.annual_rollover import gift_download
+    from tools.scheduled_monthly import half_month_orders as hm
+
+    class Res:
+        content, headers, url = b"PK\x03\x04", {"Content-Type": "application/vnd.ms-excel"}, "x"
+
+        def raise_for_status(self):
+            pass
+
+    got = {}
+    monkeypatch.setattr(hm, "load_accounts", lambda: {c: {"email": "e", "password": "p"} for c in nyg.GIFT_AREAS})
+    monkeypatch.setattr(hm, "login", lambda *a: None)
+    monkeypatch.setattr(gift_download.requests.Session, "get",
+                        lambda self, url, params=None, **k: got.update(params) or Res())
+    monkeypatch.setattr(hm, "read_excel", lambda content: [1, 2])
+    content, ext, count = gift_download.download_gift_source("台北", 2026, log=lambda *_: None)
+    assert (ext, count) == ("xlsx", 2)
+    assert got["buy"] == "5" and got["paid_at_s"] == "2026-01-01" and got["paid_at_e"] == "2026-12-31"
+    assert got["clean_date_s"] == "" and got["purchase_status"] == "1"
+
+    orders = [{"order_no": "A", "name": "王"}, {"order_no": "B", "name": "李"}]
+    monkeypatch.setattr(hm, "purchase_records", lambda session, **f: orders)
+    monkeypatch.setattr(hm, "stored_value_customer_city", lambda s, o: "新竹" if o["name"] == "王" else "高雄")
+    monkeypatch.setattr(hm, "save_preserved_excel", lambda content, path: open(path, "wb").write(content))
+    kept = {}
+
+    def filt(src, out, selected):
+        kept["orders"] = selected
+        open(out, "wb").write(b"PKfiltered")
+    monkeypatch.setattr(hm, "filter_workbook_rows", filt)
+    content, _, _ = gift_download.download_gift_source("新竹", 2026, log=lambda *_: None)
+    assert kept["orders"] == {"A"} and content == b"PKfiltered"
