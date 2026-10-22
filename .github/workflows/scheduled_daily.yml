@@ -62,10 +62,6 @@ jobs:
       TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
       TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
       TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
-      TAOYUAN_EMAIL: ${{ secrets.TAOYUAN_EMAIL }}
-      TAOYUAN_PASSWORD: ${{ secrets.TAOYUAN_PASSWORD }}
-      HSINCHU_EMAIL: ${{ secrets.HSINCHU_EMAIL }}
-      HSINCHU_PASSWORD: ${{ secrets.HSINCHU_PASSWORD }}
 
       # 通知信箱
       NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}

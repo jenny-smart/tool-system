@@ -91,16 +91,6 @@ def load_accounts():
             get_secret(["accounts", "taichung", "email"], env_name="TAICHUNG_EMAIL"),
             get_secret(["accounts", "taichung", "password"], env_name="TAICHUNG_PASSWORD"),
         ),
-        (
-            "桃園",
-            get_secret(["accounts", "taoyuan", "email"], env_name="TAOYUAN_EMAIL"),
-            get_secret(["accounts", "taoyuan", "password"], env_name="TAOYUAN_PASSWORD"),
-        ),
-        (
-            "新竹",
-            get_secret(["accounts", "hsinchu", "email"], env_name="HSINCHU_EMAIL"),
-            get_secret(["accounts", "hsinchu", "password"], env_name="HSINCHU_PASSWORD"),
-        ),
     ]
 
 
