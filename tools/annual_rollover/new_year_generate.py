@@ -193,10 +193,12 @@ SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列與第 2 �
 # 不含儲存格參照的公式（例如 =87369、=1200+300）視同手打數字，清空時一併清除
 _LITERAL_FORMULA = re.compile(r"=[\d\s.+\-*/(),%]*")
 
-# 「春節禮品名單」：根目錄「春節禮品」下建立新年度資料夾 {Y}，資料夾內各地區「儲值金」來源檔
-# （訂單格式 xls/xlsx/csv，例：{Y}儲值金-台北.xls）轉檔後貼入「{Y}名單統整」的「{a}儲值金」工作表，
-# 每張建樞紐（M 客戶姓名、D 付款日期在前一年度、加總 AA 儲值金成本）；「設定」B1 填門檻金額後，
-# 「{Y}送禮名單」列出加總 ≥ 門檻的客戶，再貼進新年度「{Y}春節送禮名單」並在根目錄總表加分頁。
+# 「春節禮品名單」分兩階段：
+#   第一階段（各地區資料統計）：根目錄「春節禮品」下建立新年度資料夾 {Y}，資料夾內各地區「儲值金」來源檔
+#     （訂單格式 xls/xlsx/csv，例：{Y}儲值金-台北.xls）轉檔後貼入「{Y}名單統整」的「{a}儲值金」工作表，
+#     每張建樞紐（M 客戶姓名、D 付款日期在前一年度、加總 AA 儲值金成本），並依金額區間統計人數
+#   第二階段（設定金額產生送禮名單）：畫面輸入的門檻金額寫入「設定」B1，「{Y}送禮名單」列出加總 ≥ 門檻
+#     的客戶，再貼進新年度「{Y}春節送禮名單」並在根目錄總表加分頁
 GIFT_ROOT_FOLDER_ID = "1Vg6hg762A5fXkVVMVA_2sfYldTMoATz5"
 GIFT_ROOT_FILE = "春節送禮名單"               # 根目錄總表，每年一個分頁 IMPORTRANGE 當年度檔
 GIFT_ROOT_TAB = "{y}春節送禮名單"
@@ -220,9 +222,14 @@ GIFT_SEND_CLEAR_ROW = 18
 GIFT_SEND_PASTE_ROW = 21
 GIFT_SEND_COLUMNS = ["A", "B", "C", "D", "E", "G", "H"]
 GIFT_SEND_CHECKBOX_COL = "F"
+GIFT_STAT_FUNCTION = "春節禮品名單統計"         # 第一階段
+GIFT_LIST_FUNCTION = "春節送禮名單產生"         # 第二階段
+# 第一階段依加總金額分區間統計人數：<5萬、5～8萬、8～10萬、10～12萬、≥12萬（下限含、上限不含）
+GIFT_STAT_BANDS = [50000, 80000, 100000, 120000]
+GIFT_STAT_SHEET = "區間統計"
 _IMPORTRANGE = re.compile(r'(?i)importrange\(\s*"([^"]+)"\s*,\s*"([^"!]+)!([^"]+)"\s*\)')
 
-EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春節禮品名單"}   # 不依「生成新年度」列的功能
+EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品", GIFT_STAT_FUNCTION, GIFT_LIST_FUNCTION}   # 不依「生成新年度」列的功能
 
 # 「生成新年度」A 欄名稱 → 功能名稱
 ROW_FUNCTIONS = {"財務報表": "財務報表", "內勤表單": "內勤表單", "專員名冊/薪資檔": "專員表單",
@@ -288,6 +295,43 @@ def gift_pivot(sheet_id: int, rows: int, cols: int, prev_year: int, date_header:
             "condition": {"type": "CUSTOM_FORMULA", "values": [
                 {"userEnteredValue": f"=YEAR('{date_header}')={prev_year}"}]}}}],
     }
+
+
+def _wan(amount: int) -> str:
+    return f"{amount / 10000:g}萬"
+
+
+def gift_band_labels(bands: List[int] = GIFT_STAT_BANDS) -> List[str]:
+    """[5萬, 8萬, 10萬, 12萬] → ["5萬以下", "5萬～8萬", "8萬～10萬", "10萬～12萬", "12萬以上"]。"""
+    return ([f"{_wan(bands[0])}以下"] + [f"{_wan(a)}～{_wan(b)}" for a, b in zip(bands, bands[1:])]
+            + [f"{_wan(bands[-1])}以上"])
+
+
+def gift_band_counts(amounts: List[float], bands: List[int] = GIFT_STAT_BANDS) -> List[int]:
+    """各區間人數（下限含、上限不含），順序同 gift_band_labels。"""
+    edges = [float("-inf")] + list(bands) + [float("inf")]
+    return [sum(lo <= a < hi for a in amounts) for lo, hi in zip(edges, edges[1:])]
+
+
+def gift_stats_table(blocks: List[Tuple[str, str, str, str]], bands: List[int] = GIFT_STAT_BANDS
+                     ) -> List[List[str]]:
+    """「區間統計」工作表內容：各地區一列，人數／加總／各區間人數都用公式（樞紐更新就跟著變）。"""
+    edges = [None] + list(bands) + [None]
+    rows = [["地區", "人數", "加總"] + gift_band_labels(bands)]
+    for i, (area, sheet, name_col, sum_col) in enumerate(blocks, start=2):
+        names, sums = f"'{sheet}'!{name_col}2:{name_col}", f"'{sheet}'!{sum_col}2:{sum_col}"
+        row = [area, f'=COUNTIFS({names},"<>",{sums},">0")', f"=SUM({sums})"]
+        for lo, hi in zip(edges, edges[1:]):
+            cond = [f'{sums},">0"'] if lo is None else [f'{sums},">={lo}"']
+            if hi is not None:
+                cond.append(f'{sums},"<{hi}"')
+            row.append(f"=COUNTIFS({names},\"<>\",{','.join(cond)})")
+        rows.append(row)
+    if len(rows) > 1:
+        last = len(rows)
+        rows.append(["全區"] + [f"=SUM({col_letters(c)}2:{col_letters(c)}{last})"
+                                for c in range(1, len(rows[0]))])
+    return rows
 
 
 def gift_list_formula(blocks: List[Tuple[str, str, str, str]], zip_rows: int) -> str:
@@ -487,7 +531,8 @@ def parse_rows_arg(text: str, last_row: int) -> List[int]:
 # ============================================================
 class Rollover:
     def __init__(self, drive, sheets, spreadsheet_id: str, new_year: int,
-                 dry_run: bool = False, fresh: bool = False, tidy: bool = False, log=print):
+                 dry_run: bool = False, fresh: bool = False, tidy: bool = False, log=print,
+                 gift_threshold: Optional[float] = None):
         self.drive = drive
         self.sheets = sheets
         self.spreadsheet_id = spreadsheet_id
@@ -497,6 +542,7 @@ class Rollover:
         self.fresh = fresh
         self.tidy = tidy  # 行銷費用總管理／清潔用品：已存在的新年度檔不重建，直接再整理一次
         self.log = log
+        self.gift_threshold = gift_threshold  # 春節送禮名單產生：畫面輸入的門檻金額
         self.stamp = datetime.now(TZ).strftime("%Y%m%d%H%M")
 
     # ---------- Drive ----------
@@ -1130,21 +1176,25 @@ class Rollover:
         return data
 
     # ---------- 春節禮品名單 ----------
-    def run_gift(self) -> List[Dict[str, str]]:
-        """1. 根目錄下建立 {Y} 資料夾（已存在就沿用，重新生成也不改名，來源檔放在裡面）
-        2. 建立「{Y}名單統整」，各地區儲值金來源檔轉檔貼入「{a}儲值金」並建樞紐、「{Y}送禮名單」公式
-        3. 「設定」B1 已填門檻：複製前一年度「{y}春節送禮名單」為新年度檔，清空後從第 21 列貼上送禮名單；
-           根目錄「春節送禮名單」複製「{y}春節送禮名單」分頁為新年度分頁，A1 IMPORTRANGE 改指新檔"""
+    def _gift_folder(self, create: bool) -> Optional[Dict[str, Any]]:
+        """根目錄下的 {Y} 資料夾（已存在就沿用，重新生成也不改名，來源檔放在裡面）。"""
         Y = str(self.new_year)
         folder = next((f for f in self.children(GIFT_ROOT_FOLDER_ID)
                        if f["mimeType"] == FOLDER_MIME and f["name"] == Y), None)
         if folder:
             self.log(f"  資料夾已存在，沿用：{Y}")
-        else:
+        elif create:
             self.log(f"  建立資料夾：{Y}")
             folder = ({"id": f"(dry-run:{Y})", "name": Y} if self.dry_run else self.drive.files().create(
                 body={"name": Y, "mimeType": FOLDER_MIME, "parents": [GIFT_ROOT_FOLDER_ID]},
                 fields="id,name", supportsAllDrives=True).execute())
+        return folder
+
+    def run_gift_stats(self) -> List[Dict[str, str]]:
+        """第一階段：建立 {Y} 資料夾與「{Y}名單統整」，各地區儲值金來源檔轉檔貼入「{a}儲值金」、建樞紐、
+        「{Y}送禮名單」公式，並回報各地區人數與各門檻金額的人數，供第二階段決定金額。"""
+        Y = str(self.new_year)
+        folder = self._gift_folder(create=True)
         records = [{"kind": "資料夾", "old_name": "", "old_id": "", "new_name": Y, "new_id": folder["id"]}]
 
         listing = [] if folder["id"].startswith("(dry-run") else self.children(folder["id"])
@@ -1163,20 +1213,80 @@ class Rollover:
         records.append({"kind": "檔案", "old_name": "", "old_id": "", "new_name": summary["name"],
                         "new_id": summary["id"], "created": created})
         if self.dry_run:
-            self.log(f"  （dry-run）會轉檔貼入 {'、'.join(GIFT_AREA_SHEET.format(a=a) for a in sources)}、建立樞紐與"
-                     f"「{self._fmt(GIFT_LIST_SHEET)}」；「{GIFT_SETTING_SHEET}」{GIFT_THRESHOLD_CELL} 填門檻後產生春節送禮名單")
+            self.log(f"  （dry-run）會轉檔貼入 {'、'.join(GIFT_AREA_SHEET.format(a=a) for a in sources)}、"
+                     f"建立樞紐與「{self._fmt(GIFT_LIST_SHEET)}」")
             return records
 
-        threshold = self._gift_build_summary(summary["id"], sources, created)
-        if threshold in ("", None):
-            self.log(f"  請在「{summary['name']}」的「{GIFT_SETTING_SHEET}」{GIFT_THRESHOLD_CELL} 填寫送禮門檻金額，"
-                     f"確認「{self._fmt(GIFT_LIST_SHEET)}」後再執行一次，就會產生 {Y}春節送禮名單")
-            return records
+        blocks = self._gift_build_summary(summary["id"], sources, created)
+        self._gift_report_stats(summary["id"], blocks)
+        self.log(f"  第一階段完成：決定門檻金額後，執行「{GIFT_LIST_FUNCTION}」並在畫面輸入金額")
+        return records
+
+    def _gift_report_stats(self, file_id: str, blocks: List[Tuple[str, str, str, str]]) -> None:
+        """「區間統計」工作表寫入各地區區間人數公式，並讀樞紐結果在執行紀錄列出各區間人數。"""
+        if not blocks:
+            return
+        table = gift_stats_table(blocks)
+        if GIFT_STAT_SHEET not in self._sheet_map(file_id):
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
+                {"addSheet": {"properties": {"title": GIFT_STAT_SHEET}}}]}).execute()
+        self.sheets.spreadsheets().values().batchClear(
+            spreadsheetId=file_id, body={"ranges": [f"'{GIFT_STAT_SHEET}'!A:Z"]}).execute()
+        self._values_batch(file_id, [{"range": f"'{GIFT_STAT_SHEET}'!A1", "values": table}])
+
+        res = self.sheets.spreadsheets().values().batchGet(
+            spreadsheetId=file_id, valueRenderOption="UNFORMATTED_VALUE",
+            ranges=[f"'{t}'!{n}2:{m}" for _, t, n, m in blocks]).execute()
+        labels = gift_band_labels()
+        totals: List[float] = []
+        for (area, _, _, _), vr in zip(blocks, res.get("valueRanges", [])):
+            amounts = []
+            for row in vr.get("values", []):
+                if len(row) > 1 and str(row[0]).strip():
+                    try:
+                        amount = float(row[1])
+                    except (TypeError, ValueError):
+                        continue
+                    if amount > 0:
+                        amounts.append(amount)
+            totals += amounts
+            self.log(f"  {area}：{self.prev_year} 年 {len(amounts)} 位，加總 {sum(amounts):,.0f}；"
+                     + "、".join(f"{lb} {n} 位" for lb, n in zip(labels, gift_band_counts(amounts))))
+        self.log(f"  全區：{len(totals)} 位；"
+                 + "、".join(f"{lb} {n} 位" for lb, n in zip(labels, gift_band_counts(totals)))
+                 + f"（明細見「{GIFT_STAT_SHEET}」工作表）")
+
+    def run_gift_list(self) -> List[Dict[str, str]]:
+        """第二階段：畫面輸入的門檻金額寫入「設定」B1，讀「{Y}送禮名單」；複製前一年度「{y}春節送禮名單」
+        為新年度檔，清空後從第 21 列貼上送禮名單；根目錄「春節送禮名單」複製分頁為新年度分頁，
+        A1 IMPORTRANGE 改指新檔。"""
+        threshold = self.gift_threshold
+        if threshold is None or threshold <= 0:
+            raise ValueError("請在畫面輸入送禮門檻金額（大於 0）")
+        threshold = int(threshold) if float(threshold).is_integer() else threshold
+        folder = self._gift_folder(create=False)
+        if not folder:
+            raise RuntimeError(f"找不到「春節禮品/{self.new_year}」資料夾，請先執行「{GIFT_STAT_FUNCTION}」")
+        listing = self.children(folder["id"])
+        summary_name = self._fmt(GIFT_SUMMARY_FILE)
+        summary = next((f for f in listing if f["mimeType"] == SHEET_MIME and f["name"] == summary_name), None)
+        if not summary:
+            raise RuntimeError(f"找不到「{summary_name}」，請先執行「{GIFT_STAT_FUNCTION}」")
+        if self.dry_run:
+            self.log(f"  （dry-run）會把門檻 {threshold:,} 寫入「{GIFT_SETTING_SHEET}」{GIFT_THRESHOLD_CELL}，"
+                     f"產生 {self.new_year}春節送禮名單並貼上名單")
+            return []
+        self.sheets.spreadsheets().values().update(
+            spreadsheetId=summary["id"], range=f"'{GIFT_SETTING_SHEET}'!{GIFT_THRESHOLD_CELL}",
+            valueInputOption="RAW", body={"values": [[threshold]]}).execute()
         rows = self.sheets.spreadsheets().values().get(
             spreadsheetId=summary["id"], range=f"'{self._fmt(GIFT_LIST_SHEET)}'!A2:G").execute().get("values", [])
         rows = [r + [""] * (len(GIFT_LIST_HEADERS) - len(r)) for r in rows if len(r) > 1 and str(r[1]).strip()]
-        self.log(f"  門檻 {threshold}：{self._fmt(GIFT_LIST_SHEET)} 共 {len(rows)} 位")
-        return records + self._gift_send_file(folder, listing, rows)
+        self.log(f"  門檻 {threshold:,}：{self._fmt(GIFT_LIST_SHEET)} 共 {len(rows)} 位")
+        if not rows:
+            self.log("  ⚠ 沒有客戶達到門檻，未產生春節送禮名單；請調低金額再執行")
+            return []
+        return self._gift_send_file(folder, listing, rows)
 
     def _gift_sources(self, listing: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """各地區來源檔：檔名含「儲值金」與地區（名單統整／送禮名單除外）；同地區有原始匯出檔
@@ -1231,8 +1341,10 @@ class Rollover:
                 self.drive.files().update(fileId=temp["id"], body={"trashed": True},
                                           supportsAllDrives=True).execute()
 
-    def _gift_build_summary(self, file_id: str, sources: Dict[str, Dict[str, Any]], created: bool) -> Any:
-        """名單統整：設定／郵遞區號／各地區儲值金（每次重貼、樞紐重建）／送禮名單公式；回傳門檻金額。"""
+    def _gift_build_summary(self, file_id: str, sources: Dict[str, Dict[str, Any]],
+                            created: bool) -> List[Tuple[str, str, str, str]]:
+        """名單統整：設定／郵遞區號／各地區儲值金（每次重貼、樞紐重建）／送禮名單公式；
+        回傳 [(地區, 工作表, 樞紐姓名欄, 樞紐加總欄)]。"""
         from tools.annual_rollover.tw_zipcodes import TW_ZIPCODES
 
         ids = self._sheet_map(file_id)
@@ -1253,10 +1365,9 @@ class Rollover:
                 self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
                     {"deleteSheet": {"sheetId": ids[t]}} for t in blank]}).execute()
 
-        setting = self.sheets.spreadsheets().values().get(
-            spreadsheetId=file_id, range=f"'{GIFT_SETTING_SHEET}'!A1:B2").execute().get("values", [])
         data = [{"range": f"'{GIFT_SETTING_SHEET}'!A1:A2", "values": [
-            ["送禮門檻金額"], [f"{self.prev_year} 年付款日期的儲值金成本加總 ≥ B1 的客戶列入「{list_title}」"]]}]
+            ["送禮門檻金額"], [f"{self.prev_year} 年付款日期的儲值金成本加總 ≥ B1 的客戶列入「{list_title}」"
+                         f"（B1 由「{GIFT_LIST_FUNCTION}」依畫面輸入的金額寫入，也可直接修改）"]]}]
         data.append({"range": f"'{GIFT_ZIP_SHEET}'!A1:B{len(TW_ZIPCODES) + 1}",
                      "values": [["郵遞區號", "行政區"]] + [list(z) for z in TW_ZIPCODES]})
         data.append({"range": f"'{list_title}'!A1:G1", "values": [GIFT_LIST_HEADERS]})
@@ -1292,7 +1403,7 @@ class Rollover:
             spreadsheetId=file_id, body={"ranges": [f"'{list_title}'!A2:G"]}).execute()
         self._values_batch(file_id, [{"range": f"'{list_title}'!A2",
                                       "values": [[gift_list_formula(blocks, len(TW_ZIPCODES))]]}])
-        return (setting[0][1] if setting and len(setting[0]) > 1 else "")
+        return blocks
 
     def _gift_send_file(self, folder: Dict[str, Any], listing: List[Dict[str, Any]],
                         rows: List[List[str]]) -> List[Dict[str, str]]:
@@ -1805,7 +1916,7 @@ class Rollover:
         funcs = {ROW_FUNCTIONS.get(n, n) for n in (names or [])}
         extra: List[Dict[str, str]] = []
         for func, job in (("行銷費用總管理", self.run_marketing), ("清潔用品", self.run_supply),
-                          ("春節禮品名單", self.run_gift)):
+                          (GIFT_STAT_FUNCTION, self.run_gift_stats), (GIFT_LIST_FUNCTION, self.run_gift_list)):
             if func not in funcs:
                 continue
             self.log(func)
@@ -1874,12 +1985,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="只列出會做的事，不建立、不回寫")
     parser.add_argument("--fresh", action="store_true", help="已存在的新年度同名項目改名為舊版後重新生成")
     parser.add_argument("--spreadsheet-id", default=MASTER_SPREADSHEET_ID)
+    parser.add_argument("--gift-threshold", type=float, default=None, help=f"{GIFT_LIST_FUNCTION}的送禮門檻金額")
     args = parser.parse_args(argv)
 
     from services.google_auth import get_drive_service, get_sheets_service
 
     rollover = Rollover(get_drive_service(), get_sheets_service(), args.spreadsheet_id,
-                        args.year, dry_run=args.dry_run, fresh=args.fresh)
+                        args.year, dry_run=args.dry_run, fresh=args.fresh, gift_threshold=args.gift_threshold)
     names = split_list(args.names) or None
     try:
         records = rollover.run(args.rows, names=names)

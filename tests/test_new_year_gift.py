@@ -1,8 +1,11 @@
 """生成新年度：春節禮品名單。"""
 from tests.test_new_year_generate import FakeDrive, _Req
 from tools.annual_rollover import new_year_generate as nyg
+import pytest
+
 from tools.annual_rollover.new_year_generate import (
-    FOLDER_MIME, SHEET_MIME, Rollover, gift_headers, gift_list_formula, gift_pivot,
+    FOLDER_MIME, SHEET_MIME, Rollover, gift_band_counts, gift_band_labels, gift_headers,
+    gift_list_formula, gift_pivot, gift_stats_table,
 )
 from tools.annual_rollover.tw_zipcodes import TW_ZIPCODES
 
@@ -47,6 +50,12 @@ class GiftSheets:
                                 "gridProperties": {"rowCount": 30, "columnCount": 20}}}
                 for n, (t, i) in enumerate(tabs.items())]})
         return _Req(lambda: {"values": self.reads.get((spreadsheetId, range), [])})
+
+    def batchGet(self, spreadsheetId, ranges, **_):
+        return _Req(lambda: {"valueRanges": [{"values": self.reads.get((spreadsheetId, r), [])} for r in ranges]})
+
+    def update(self, spreadsheetId, range, body, **_):
+        return _Req(lambda: self.writes.__setitem__((spreadsheetId, range), body["values"]))
 
     def batchClear(self, spreadsheetId, body):
         return _Req(lambda: self.cleared.extend((spreadsheetId, r) for r in body["ranges"]))
@@ -101,8 +110,8 @@ def _setup(threshold=""):
     return drive, sheets
 
 
-def _roll(drive, sheets, **kw):
-    return Rollover(drive, sheets, "master", 2027, log=lambda *_: None, **kw)
+def _roll(drive, sheets, logs=None, **kw):
+    return Rollover(drive, sheets, "master", 2027, log=(logs.append if logs is not None else lambda *_: None), **kw)
 
 
 def test_gift_sources_prefer_raw_export_and_skip_others():
@@ -112,9 +121,10 @@ def test_gift_sources_prefer_raw_export_and_skip_others():
     assert list(sources) == ["台北"] and sources["台北"]["id"] == "tp"
 
 
-def test_gift_first_run_builds_summary_and_waits_for_threshold():
+def test_gift_stats_builds_summary_and_reports_bands():
     drive, sheets = _setup()
-    roll = _roll(drive, sheets)
+    logs = []
+    roll = _roll(drive, sheets, logs)
     # 轉檔暫存：copy 出來的新檔第一個分頁內容
     orig_copy = drive.copy
 
@@ -132,12 +142,20 @@ def test_gift_first_run_builds_summary_and_waits_for_threshold():
         return _Req(run)
     drive.copy = copy
 
-    records = roll.run_gift()
+    pivot_range = f"'台北儲值金'!AC2:AD"
+    orig_batch_get = sheets.batchGet
+
+    def batch_get(spreadsheetId, ranges, **kw):
+        sheets.reads[(spreadsheetId, pivot_range)] = [["王小明", 50000], ["李大華", 130000], ["", 0]]
+        return orig_batch_get(spreadsheetId, ranges, **kw)
+    sheets.batchGet = batch_get
+
+    records = roll.run_gift_stats()
     summary = next(i for i in drive.items.values() if i["name"] == "2027名單統整")
     assert summary["parent"] == "y27" and summary["mimeType"] == SHEET_MIME
     assert any(r["new_name"] == "2027名單統整" and r["created"] for r in records)
     sid = summary["id"]
-    assert set(sheets.tabs[sid]) == {"設定", "郵遞區號", "2027送禮名單", "台北儲值金"}   # 預設分頁刪除
+    assert set(sheets.tabs[sid]) == {"設定", "郵遞區號", "2027送禮名單", "台北儲值金", "區間統計"}   # 預設分頁刪除
     # 轉檔暫存檔讀完移到垃圾桶
     temp = next(i for i in drive.items.values() if i["name"].endswith("_轉檔暫存"))
     assert temp.get("trashed") is True
@@ -148,15 +166,21 @@ def test_gift_first_run_builds_summary_and_waits_for_threshold():
     assert sheets.writes[(sid, "'郵遞區號'!A1:B375")][1] == ["100", "台北市中正區"]
     formula = sheets.writes[(sid, "'2027送禮名單'!A2")][0][0]
     assert "'台北儲值金'!AC2:AC" in formula and "'台北儲值金'!AD2:AD>=t" in formula
-    # 門檻空白：不產生送禮名單檔
+    table = sheets.writes[(sid, "'區間統計'!A1")]
+    assert table[0][3:] == ["5萬以下", "5萬～8萬", "8萬～10萬", "10萬～12萬", "12萬以上"]
+    assert table[1][0] == "台北" and table[-1][0] == "全區"
+    log = "\n".join(logs)
+    assert "台北：2026 年 2 位" in log and "5萬～8萬 1 位" in log and "12萬以上 1 位" in log
+    # 第一階段不產生送禮名單檔、不寫門檻
     assert not any(i["name"] == "2027春節送禮名單" for i in drive.items.values())
+    assert (sid, "'設定'!B1") not in sheets.writes
 
 
-def test_gift_second_run_fills_send_file_and_root_tab(monkeypatch):
+def _stage2(rows=None):
     drive, sheets = _setup()
-    roll = _roll(drive, sheets)
-    monkeypatch.setattr(roll, "_gift_build_summary", lambda *a: 30000)
-    gift_rows = [["台北", "王小明", "106", "台北市大安區", "台北市大安區仁愛路1號", "0912345678", "L1"]]
+    drive.items["sum27"] = {"id": "sum27", "name": "2027名單統整", "mimeType": SHEET_MIME, "parent": "y27"}
+    gift_rows = rows if rows is not None else [
+        ["台北", "王小明", "106", "台北市大安區", "台北市大安區仁愛路1號", "0912345678", "L1"]]
     orig_get = sheets.get
 
     def get(spreadsheetId, range=None, **kw):
@@ -166,8 +190,13 @@ def test_gift_second_run_fills_send_file_and_root_tab(monkeypatch):
             return _Req(lambda: {"values": [["2026春節送禮名單"]]})
         return orig_get(spreadsheetId, range, **kw)
     sheets.get = get
+    return drive, sheets
 
-    records = roll.run_gift()
+
+def test_gift_list_writes_threshold_and_fills_send_file_and_root_tab():
+    drive, sheets = _stage2()
+    records = _roll(drive, sheets, gift_threshold=100000.0).run_gift_list()
+    assert sheets.writes[("sum27", "'設定'!B1")] == [[100000]]
     send = next(i for i in drive.items.values() if i["name"] == "2027春節送禮名單")
     assert send["parent"] == "y27"
     sid = send["id"]
@@ -186,29 +215,37 @@ def test_gift_second_run_fills_send_file_and_root_tab(monkeypatch):
 
     # 重跑：送禮名單檔已存在就不再清空重貼；勾只整理才重貼
     sheets.cleared.clear()
-    _patched(drive, sheets, monkeypatch).run_gift()
-    assert not sheets.cleared
-    sheets.cleared.clear()
-    _patched(drive, sheets, monkeypatch, tidy=True).run_gift()
+    _roll(drive, sheets, gift_threshold=80000).run_gift_list()
+    assert not sheets.cleared and sheets.writes[("sum27", "'設定'!B1")] == [[80000]]
+    _roll(drive, sheets, gift_threshold=80000, tidy=True).run_gift_list()
     assert (sid, "'2025'!J2:L") in sheets.cleared
 
 
-def _patched(drive, sheets, monkeypatch, **kw):
-    roll = _roll(drive, sheets, **kw)
-    monkeypatch.setattr(roll, "_gift_build_summary", lambda *a: 30000)
-    return roll
+def test_gift_list_requires_threshold_and_stage1():
+    drive, sheets = _stage2()
+    with pytest.raises(ValueError):
+        _roll(drive, sheets).run_gift_list()
+    del drive.items["sum27"]
+    with pytest.raises(RuntimeError, match="春節禮品名單統計"):
+        _roll(drive, sheets, gift_threshold=50000).run_gift_list()
+
+
+def test_gift_list_no_match_creates_nothing():
+    drive, sheets = _stage2(rows=[["沒有符合門檻的客戶"]])
+    assert _roll(drive, sheets, gift_threshold=999999).run_gift_list() == []
+    assert not any(i["name"] == "2027春節送禮名單" for i in drive.items.values())
 
 
 def test_gift_no_sources_reports_missing():
     drive = GiftDrive([{"id": "y27", "name": "2027", "mimeType": FOLDER_MIME, "parent": ROOT}])
-    records = _roll(drive, GiftSheets({})).run_gift()
+    records = _roll(drive, GiftSheets({})).run_gift_stats()
     assert records[-1]["new_name"] == "找不到來源"
     assert not any(i["name"] == "2027名單統整" for i in drive.items.values())
 
 
 def test_gift_dry_run_creates_nothing():
     drive = GiftDrive([])
-    records = _roll(drive, GiftSheets({}), dry_run=True).run_gift()
+    records = _roll(drive, GiftSheets({}), dry_run=True).run_gift_stats()
     assert not drive.items and records[0]["new_id"] == "(dry-run:2027)"
 
 
@@ -222,6 +259,25 @@ def test_gift_helpers():
     f = gift_list_formula([("台北", "台北儲值金", "BM", "BN"), ("桃園", "桃園儲值金", "BM", "BN")], 374)
     assert f.startswith("=LET(t,'設定'!$B$1,") and f.count("FILTER(") == 3
     assert "'郵遞區號'!$B$2:$B$375" in f and 'MAP(n,LAMBDA(x,"桃園"))' in f
+
+
+def test_gift_bands():
+    assert gift_band_labels() == ["5萬以下", "5萬～8萬", "8萬～10萬", "10萬～12萬", "12萬以上"]
+    assert gift_band_counts([1000, 50000, 79999, 80000, 100000, 119999, 120000, 500000]) == [1, 2, 1, 2, 2]
+    table = gift_stats_table([("台北", "台北儲值金", "BM", "BN"), ("桃園", "桃園儲值金", "BM", "BN")])
+    assert len(table) == 4 and table[3] == ["全區"] + [f"=SUM({c}2:{c}3)" for c in "BCDEFGH"]
+    assert table[1][4] == ('=COUNTIFS(\'台北儲值金\'!BM2:BM,"<>",\'台北儲值金\'!BN2:BN,">=50000",'
+                           '\'台北儲值金\'!BN2:BN,"<80000")')
+
+
+def test_run_dispatches_gift_stages(monkeypatch):
+    roll = _roll(GiftDrive([]), GiftSheets({}))
+    called = []
+    monkeypatch.setattr(roll, "_run_rows", lambda *a, **k: called.append("rows") or [])
+    monkeypatch.setattr(roll, "run_gift_stats", lambda: called.append("stats") or [])
+    monkeypatch.setattr(roll, "run_gift_list", lambda: called.append("list") or [])
+    roll.run(names=["春節禮品名單統計"]); roll.run(names=["春節送禮名單產生"])
+    assert called == ["stats", "list"]
 
 
 def test_zipcode_names_unique_and_not_prefix_of_each_other():
