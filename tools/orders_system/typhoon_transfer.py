@@ -257,19 +257,35 @@ def transfer_typhoon_orders(env_name, backend_email, backend_password, typhoon_d
     return results
 
 
-RESULT_COPY_HEADERS = ["訂單編號", "姓名", "電話", "LINE@連結", "原日期", "原時段", "新日期", "新時段", "結果", "說明"]
+RESULT_COPY_HEADERS = [
+    "訂單編號", "姓名", "LINE@連結", "電話", "客戶地址", "原日期", "原時段", "服務時數",
+    "新日期", "新時段", "結果", "說明",
+]
+
+
+def service_hours(period):
+    """時段換算服務時數；7 小時以上扣 1 小時休息（09:00-18:00 → 8）。"""
+    bounds = qo._period_bounds_minutes(period)
+    if not bounds:
+        return ""
+    hours = (bounds[1] - bounds[0]) / 60
+    if hours >= 7:
+        hours -= 1
+    return str(int(hours)) if hours == int(hours) else str(hours)
 
 
 def result_copy_rows(results):
-    """移轉結果整理成原日期／時段與移轉後日期／時段。"""
+    """移轉結果整理成原日期／時段與移轉後日期／時段（欄位順序同 RESULT_COPY_HEADERS）。"""
     return [
         {
             "訂單編號": r.get("order_no", ""),
             "姓名": r.get("name", ""),
-            "電話": r.get("phone", ""),
             "LINE@連結": r.get("line_url", ""),
+            "電話": r.get("phone", ""),
+            "客戶地址": r.get("address", ""),
             "原日期": r.get("service_date_before", ""),
             "原時段": r.get("period", ""),
+            "服務時數": service_hours(r.get("period", "")),
             "新日期": r.get("new_date", "") if r.get("success") else "",
             "新時段": r.get("period", "") if r.get("success") else "",
             "結果": "成功" if r.get("success") else "失敗",
