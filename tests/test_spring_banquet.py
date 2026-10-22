@@ -366,7 +366,7 @@ def test_update_budget_copies_tabs_and_links(monkeypatch):
     assert fr["find"] == "'2026-1'!" and fr["replacement"] == "'2027-1'!"
     ranges = {d["range"]: d["values"][0][0] for d in calls["values"]}
     assert ranges["'2027-1'!A1"].endswith('"統計!A1:M20")')
-    assert "中獎/簽名表" in ranges["'2027'!AA2"]
+    assert "中獎/簽名表" in ranges["'2027'!AA2"] and "UNIQUE" in ranges["'2027'!AF2"]
 
 
 def test_ensure_columns_appends_when_narrow():
