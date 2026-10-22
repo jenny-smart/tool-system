@@ -3402,6 +3402,8 @@ NEW_YEAR_FUNCTION_ROWS = {
     "內勤薪資": ["內勤薪資"],
     "行銷費用總管理": ["行銷費用總管理"],
     "清潔用品": ["清潔用品"],
+    "春節禮品名單統計": ["春節禮品名單統計"],   # 第一階段：各地區資料統計
+    "春節送禮名單產生": ["春節送禮名單產生"],   # 第二階段：畫面設定金額後產生送禮名單
 }
 # 各功能的執行區域（依「生成新年度」F 欄地區、或檔名／子資料夾裡的地區）
 NEW_YEAR_FUNCTION_AREAS = {
@@ -3412,9 +3414,11 @@ NEW_YEAR_FUNCTION_AREAS = {
     "內勤薪資": ["全區", "台北", "桃園"],
     "行銷費用總管理": ["全區"],
     "清潔用品": ["全區"],
+    "春節禮品名單統計": ["全區"],
+    "春節送禮名單產生": ["全區"],
 }
 # 可「只整理已存在檔案」的功能（整理只是清空數字與改年度，重跑結果相同）
-NEW_YEAR_TIDY_FUNCTIONS = {"行銷費用總管理", "清潔用品"}
+NEW_YEAR_TIDY_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春節送禮名單產生"}
 
 
 # 「年度根目錄設定」的檢查與模式切換（三個系統共用同一張設定表）
@@ -3476,7 +3480,8 @@ def run_year_root_check(action, year, on_progress=None):
     raise ValueError(f"未知動作：{action}")
 
 
-def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=False, area="全區", on_progress=None):
+def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=False, area="全區",
+                          gift_threshold=None, on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
     import importlib
 
@@ -3495,7 +3500,7 @@ def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=Fal
     log = (lambda msg: on_progress(msg, "info")) if on_progress else print
     rollover = Rollover(
         get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
-        int(year_text), dry_run=dry_run, fresh=fresh, tidy=tidy, log=log,
+        int(year_text), dry_run=dry_run, fresh=fresh, tidy=tidy, log=log, gift_threshold=gift_threshold,
     )
     try:
         records = rollover.run("all", names=names, area=area or "全區")
@@ -5139,6 +5144,24 @@ with date_col:
             "依主控表「生成新年度」分頁，把前一年度資料夾與檔案複製成新年度，"
             "結果寫回該列 I 欄，新檔 ID、檔名、生成時間寫入「生成新年度Log」，並自動帶入「年度工作檔ID_GID總表」。先「預覽」確認，再「執行」。"
         )
+        if selected_function == "春節禮品名單統計":
+            st.caption(
+                "第一階段：先把各地區儲值金訂單匯出（例：2027儲值金-台北.xls）放進「春節禮品/新年度」資料夾再執行。"
+                "會建立「新年度名單統整」、各地區樞紐，並在執行紀錄與「區間統計」工作表列出各金額區間"
+                "（5萬以下、5～8萬、8～10萬、10～12萬、12萬以上）的人數，供決定送禮門檻金額。"
+            )
+        if selected_function == "春節送禮名單產生":
+            st.markdown('<div class="field-label">💰 送禮門檻金額（前一年度儲值金加總 ≥ 此金額）</div>',
+                        unsafe_allow_html=True)
+            st.number_input(
+                "送禮門檻金額", min_value=0, value=100000, step=10000,
+                label_visibility="collapsed", key="new_year_gift_threshold",
+            )
+            st.caption(
+                "第二階段：先跑完「春節禮品名單統計」，依區間人數決定金額後執行。金額會寫入名單統整「設定」B1，"
+                "產生新年度春節送禮名單（清空 J2:L 與第 18 列以下、第 21 列起貼上），並在根目錄春節送禮名單加新年度分頁。"
+                "已產生過要換金額重貼，請勾「只整理已存在檔案」。"
+            )
 
     elif system_type == "staff_payroll":
         st.markdown('<div class="field-label">📆 年月（YYYYMM）</div>', unsafe_allow_html=True)
@@ -6210,6 +6233,8 @@ if run_clicked:
             try:
                 result = run_new_year_generate(
                     period, selected_function, dry_run=dry_run, fresh=fresh, tidy=tidy, area=selected_area_value,
+                    gift_threshold=(st.session_state.get("new_year_gift_threshold")
+                                    if selected_function == "春節送禮名單產生" else None),
                     on_progress=lambda msg, level="info": add_log(msg, level),
                 )
                 add_log(result, "warning" if "找不到來源" in result else "success")
