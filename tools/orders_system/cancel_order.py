@@ -48,6 +48,10 @@ PURCHASE_FILTER_PARAMS_TEMPLATE = {
     "orderBy": "date_clean:asc",
 }
 
+# 不填手機號碼時最多翻的頁數（每頁 20 筆）。
+DATE_ONLY_MAX_PAGES = 150
+DEBUG_SHOW_LIMIT = 300
+
 CANCEL_STATUS_MAP = {
     "不需退款": "1",
     "待退款": "2",
@@ -259,9 +263,14 @@ def find_orders_for_cancel(
     payment_status: str = "已付款",
     max_pages: int = 30,
     return_debug: bool = False,
+    name_keyword: str = "",
 ):
     """
     Search backend orders by phone + service date range + payment status.
+
+    手機號碼可留空：改用服務日期區間查全部客人的訂單（後台只送日期篩選，
+    日期、付款狀態、姓名都在這裡自己比對）；訂單太多翻不完時直接報錯，
+    不回傳不完整的結果。
 
     v2026.08.15：新增 return_debug——True 時額外回傳這支電話底下每一張
     掃到的訂單卡片解析結果（不管有沒有通過篩選），以及被排除的原因。
@@ -271,8 +280,11 @@ def find_orders_for_cancel(
     狀態不符」，不用再截圖。
     """
     phone = re.sub(r"\D", "", str(phone or ""))
-    if not re.fullmatch(r"09\d{8}", phone):
-        raise ValueError("手機號碼需為 09 開頭共 10 碼")
+    if phone and not re.fullmatch(r"09\d{8}", phone):
+        raise ValueError("手機號碼需為 09 開頭共 10 碼；不填手機號碼則查詢日期區間內全部客人")
+    name_keyword = re.sub(r"\s+", "", str(name_keyword or ""))
+    if not phone:
+        max_pages = max(max_pages, DATE_ONLY_MAX_PAGES)
     if not clean_date_s or not clean_date_e:
         raise ValueError("請輸入完整服務日期區間")
     if clean_date_s > clean_date_e:
@@ -300,10 +312,11 @@ def find_orders_for_cancel(
     # 都不影響最終結果正確性。
     for page in range(1, max_pages + 1):
         params = dict(PURCHASE_FILTER_PARAMS_TEMPLATE)
-        params.update({
-            "phone": phone,
-            "page": str(page),
-        })
+        if phone:
+            params.update({"phone": phone, "page": str(page)})
+        else:
+            # 不填電話：後台只送服務日期區間（單一條件），其餘自己比對。
+            params.update({"clean_date_s": clean_date_s, "clean_date_e": clean_date_e, "page": str(page)})
         resp = session.get(purchase_url, params=params, headers=orders.HEADERS, allow_redirects=True)
         if resp.status_code != 200:
             raise RuntimeError(f"訂單搜尋失敗：HTTP {resp.status_code}")
@@ -324,8 +337,10 @@ def find_orders_for_cancel(
             if item["purchase_id"] in seen:
                 continue
             reason = ""
-            if item["phone"] and item["phone"] != phone:
+            if phone and item["phone"] and item["phone"] != phone:
                 reason = f"電話不符（解析到：{item['phone']}）"
+            elif name_keyword and name_keyword not in re.sub(r"\s+", "", str(item.get("name") or "")):
+                reason = f"姓名不含「{name_keyword}」"
             # v2026.08.15 修正：原本「解析不出服務日期就不篩選、直接放行」，
             # 導致像儲值金購買這種沒有服務時段（沒有 HH:MM-HH:MM 可定位）的
             # 訂單，不管查詢的服務日期區間是哪個月，都會被無條件列進結果
@@ -360,6 +375,9 @@ def find_orders_for_cancel(
         # _fetch_all_purchase_blocks_by_date_range）的作法一致。
         if len(blocks) < 20:
             break
+    else:
+        if not phone:
+            raise ValueError(f"此日期區間訂單超過 {max_pages * 20} 筆，請縮小日期區間或填手機號碼後再查")
 
     if return_debug:
         return found, debug_rows
@@ -499,7 +517,7 @@ def _date_value(value):
 
 def render_cancel_order(backend_email: str, backend_password: str, env_name: str):
     st.markdown("### 取消訂單")
-    st.caption("依手機號碼＋服務月份／日期區間＋付款狀態搜尋訂單；勾選後可批次取消。")
+    st.caption("依手機號碼（選填）＋服務月份／日期區間＋付款狀態搜尋訂單；勾選後可批次取消。")
 
     query_mode = st.radio(
         "服務日期查詢方式",
@@ -548,9 +566,11 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
             st.error("服務日期起日不可晚於迄日")
             return
 
-    c1, c2 = st.columns([1.4, 1])
+    c1, c2, c3 = st.columns([1.4, 1, 1])
     with c1:
-        phone = st.text_input("手機號碼", key="cancel_order_phone", placeholder="09xxxxxxxx")
+        phone = st.text_input("手機號碼（選填）", key="cancel_order_phone", placeholder="09xxxxxxxx；空白＝全部客人")
+    with c3:
+        name_keyword = st.text_input("姓名（選填）", key="cancel_order_name", placeholder="姓名包含")
     with c2:
         payment_status = st.selectbox(
             "付款狀態",
@@ -560,6 +580,8 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
         )
 
     st.caption(f"查詢範圍：{_date_value(start_date)} ～ {_date_value(end_date)}")
+    if not str(phone or "").strip():
+        st.info("未填手機號碼：會查詢此日期區間內全部客人的訂單，結果預設不勾選，請逐筆勾選要取消的訂單。")
 
     if st.button(
         f"🔎 搜尋{payment_status}訂單",
@@ -581,14 +603,17 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                         _date_value(end_date),
                         payment_status=payment_status,
                         return_debug=True,
+                        name_keyword=name_keyword,
                     )
                 st.session_state.cancel_order_results = rows
                 st.session_state.cancel_order_debug = debug_rows
-                st.session_state.cancel_order_selected = {r["purchase_id"]: True for r in rows}
+                # 有填電話沿用原本預設全勾；沒填電話（全部客人）預設不勾，避免誤取消。
+                default_checked = bool(str(phone or "").strip())
+                st.session_state.cancel_order_selected = {r["purchase_id"]: default_checked for r in rows}
                 st.session_state.cancel_order_search_status = payment_status
                 if not rows:
                     st.warning(
-                        f"查無符合『手機號碼＋{query_mode}＋{payment_status}』的訂單"
+                        f"查無符合『{'手機號碼＋' if str(phone or '').strip() else ''}{query_mode}＋{payment_status}』的訂單"
                     )
             except Exception as exc:
                 st.session_state.cancel_order_results = []
@@ -597,8 +622,10 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
 
     debug_rows = st.session_state.get("cancel_order_debug") or []
     if debug_rows:
-        with st.expander(f"🔍 查詢明細（此電話底下共掃到 {len(debug_rows)} 筆訂單，含被排除的）"):
-            for d in debug_rows:
+        with st.expander(f"🔍 查詢明細（共掃到 {len(debug_rows)} 筆訂單，含被排除的）"):
+            if len(debug_rows) > DEBUG_SHOW_LIMIT:
+                st.caption(f"筆數較多，只顯示前 {DEBUG_SHOW_LIMIT} 筆。")
+            for d in debug_rows[:DEBUG_SHOW_LIMIT]:
                 mark = "✅" if d.get("included") else "❌"
                 st.text(
                     f"{mark} {d.get('order_no') or '（無訂單編號）'}　"
@@ -627,7 +654,7 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
         )
         checked = st.checkbox(
             label,
-            value=st.session_state.get("cancel_order_selected", {}).get(row["purchase_id"], True),
+            value=st.session_state.get("cancel_order_selected", {}).get(row["purchase_id"], False),
             key=f"cancel_order_pick_{row['purchase_id']}_{i}",
         )
         if checked:
