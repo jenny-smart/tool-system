@@ -220,7 +220,7 @@ def cells(rows, start_row=1, start_col=0):
     return {(start_row + i, start_col + c): v for i, row in enumerate(rows) for c, v in enumerate(row)}
 
 
-def test_prepare_and_update_roster_with_fake_sheets():
+def test_prepare_and_update_roster_with_fake_sheets(monkeypatch):
     data = {
         "2026春酒專員名冊": {}, "2026春酒內勤名冊": cells([["地區", "姓名"], ["台北/台中內勤", "張齊恩"]]),
         "得獎人提詞": cells([["『家事達人獎』", "『最佳進步獎』"], ["台北/楊超顯", "台北/余世烽"], ["說明", "說明"]]),
@@ -230,7 +230,7 @@ def test_prepare_and_update_roster_with_fake_sheets():
     }
     fake = FakeSheets(data)
     rollover = Rollover(None, fake, "x", 2027, dry_run=False, log=lambda m: None)
-    rollover.find_file_by_name = lambda name: None
+    monkeypatch.setattr(sb, "find_sheet_loose", lambda rollover, name: None)
 
     sb.prepare_response_file(rollover, "resp", {"date": date(2027, 3, 13)})
     assert ["'2025", "台北", "家事達人獎", "楊超顯"] in fake.appended
@@ -301,3 +301,17 @@ def test_update_vote_form_text_name_question():
     reqs = sent[0]["requests"]
     assert len(reqs) == 2
     assert reqs[1]["updateItem"]["item"]["title"].endswith("（台北）")
+
+
+def test_find_sheet_loose_ignores_trailing_space():
+    files = [{"id": "x", "name": "2026桃園專員薪資(外場)-備份"}, {"id": "t", "name": "2026桃園專員薪資(外場) "}]
+
+    class Drive:
+        def files(self):
+            return self
+
+        def list(self, **kw):
+            return type("R", (), {"execute": lambda _: {"files": files}})()
+
+    rollover = type("Ro", (), {"drive": Drive()})()
+    assert sb.find_sheet_loose(rollover, "2026桃園專員薪資(外場)")["id"] == "t"

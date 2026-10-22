@@ -222,10 +222,20 @@ def parse_hours(values: List[List[str]]) -> Dict[str, List[float]]:
     return hours
 
 
+def find_sheet_loose(rollover, name: str) -> Optional[Dict[str, Any]]:
+    """依檔名找試算表，忽略頭尾空白（例：「2026桃園專員薪資(外場) 」尾端多空白）。"""
+    q = name.replace("\\", "\\\\").replace("'", "\\'")
+    res = rollover.drive.files().list(
+        q=f"name contains '{q}' and mimeType = '{SHEET_MIME}' and trashed = false",
+        fields="files(id,name)", pageSize=20, supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
+    return next((f for f in res.get("files", []) if f["name"].strip() == name), None)
+
+
 def load_hours(rollover, area: str) -> Dict[str, List[float]]:
     y = rollover.prev_year
     for pattern in HOURS_FILE_NAMES:
-        found = rollover.find_file_by_name(pattern.format(y=y, a=area))
+        found = find_sheet_loose(rollover, pattern.format(y=y, a=area))
         if found:
             sheet = HOURS_SHEET.format(y=y)
             try:
