@@ -5,7 +5,7 @@ import argparse
 import json
 import os
 import time
-from cloud_booking_progress import Progress
+from cloud_booking_progress import PAUSED_PHASE, Progress
 from collections import defaultdict
 from accounts import ACCOUNTS
 import batch_booking_optimized as batch_opt
@@ -122,6 +122,7 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                     sheet_name=sheet_name, start_row=min(rows), end_row=max(rows), selected_actions=actions,
                     logger=lambda msg: print(str(msg), flush=True), allow_auto_lemon_shift=allow_auto_lemon,
                     selected_rows=rows, progress_callback=report_group,
+                    should_stop=progress.pause_requested,
                 ) or {}
                 success = int(result.get("success_count", 0) or 0)
                 fail = int(result.get("fail_count", 0) or 0)
@@ -137,9 +138,16 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                 print(f"INTERRUPTED processed={processed + done} success={success_total + ok} fail={fail_total + bad} unconfirmed={len(rows) - done}", flush=True)
                 print(f"ERROR {region}: {exc}", flush=True)
                 return 2
+            if result.get("paused"):
+                processed += int(result.get("total_processed", 0) or 0)
+                return _finish_paused(progress, sheet_name, filter_mode, selected_region, allow_auto_lemon,
+                                      retry_failed, o_texts, processed, success_total, fail_total, target_total)
             processed += len(rows)
             progress.publish('成單中', processed, success_total, fail_total,
                              max(candidate_total - processed, 0), target_total)
+            if progress.pause_requested():
+                return _finish_paused(progress, sheet_name, filter_mode, selected_region, allow_auto_lemon,
+                                      retry_failed, o_texts, processed, success_total, fail_total, target_total)
         elapsed = max(time.monotonic() - started, .001)
         print(f"PROGRESS attempted={len(attempted)} success={success_total} fail={fail_total} rate={len(attempted)/elapsed*60:.1f}/min", flush=True)
         if pause_seconds:
@@ -149,6 +157,16 @@ def run(sheet_name: str, chunk_size=50, max_rows=0, pause_seconds=5, filter_mode
                      remaining, target_total or 0)
     print(f"FINISH attempted={len(attempted)} success={success_total} fail={fail_total} remaining={remaining} held={progress.held}", flush=True)
     return 0 if fail_total == 0 else 2
+
+
+def _finish_paused(progress, sheet_name, filter_mode, selected_region, allow_auto_lemon, retry_failed, o_texts,
+                   processed, success_total, fail_total, target_total) -> int:
+    """畫面按了暫停：已建立的都已回填，剩下的列下次按「開始雲端批次成單」再接著做。"""
+    remaining = len(load_pending(sheet_name, set(), filter_mode, selected_region, allow_auto_lemon, retry_failed, o_texts))
+    progress.publish(PAUSED_PHASE, processed, success_total, fail_total, remaining, target_total or 0)
+    print(f"PAUSED 已依畫面要求暫停；剩餘 {remaining} 列可再按開始雲端批次成單接著做", flush=True)
+    print(f"FINISH attempted={processed} success={success_total} fail={fail_total} remaining={remaining} held={progress.held}", flush=True)
+    return 0
 
 
 def _o_texts_from_env():

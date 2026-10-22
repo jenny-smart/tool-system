@@ -12,6 +12,7 @@ from batch_recovery_meta import install_patch as install_recovery_meta_patch
 from selected_row_status_guard import install_patch as install_selected_row_status_guard, render_o_text_filter, render_stage_filter
 from batch_booking_safety import install_streamlit_batch_hooks
 import dev_sheet_copy
+from cloud_booking_progress import PAUSED_PHASE
 
 install_selected_row_status_guard()
 install_recovery_meta_patch()
@@ -174,6 +175,25 @@ def _is_current_run(run):
     return st.session_state.get('optimized_cloud_current_run') == (run['id'], run.get('run_attempt', 1))
 
 
+def _render_pause_button(run):
+    """雲端執行中可暫停：寫入暫停要求，雲端做完目前這一組、回填後就停，不會停在建單一半。"""
+    from cloud_booking_progress import PAUSE, request_pause
+    key = f"cloud_live_{run['id']}_{run.get('run_attempt', 1)}"
+    requested = (st.session_state.get(key) or {}).get('control') == PAUSE
+    if requested:
+        st.warning("⏸ 已要求暫停：雲端做完目前這一組並回填後就會停止（不會停在建單一半）。")
+        return
+    if st.button("⏸ 暫停成單", key=f"optimized_cloud_pause_{run['id']}"):
+        try:
+            if request_pause(run['id'], run.get('run_attempt', 1)):
+                st.session_state.setdefault(key, {})['control'] = PAUSE
+                st.warning("⏸ 已要求暫停：雲端做完目前這一組並回填後就會停止（不會停在建單一半）。")
+            else:
+                st.info("雲端尚未開始成單，請稍後再按暫停。")
+        except Exception as exc:
+            st.error(f"暫停要求送出失敗：{exc}")
+
+
 @st.fragment(run_every="15s")
 def _render_cloud_status():
     st.markdown("#### 雲端成單進度")
@@ -215,6 +235,7 @@ def _render_cloud_status():
         if run.get("status") != "completed":
             if run.get("status") == "in_progress":
                 st.info("雲端批次執行中；每 15 秒更新狀態。")
+                _render_pause_button(run)
                 try:
                     _render_running_steps(run['id'], dev="(dev)" in str(run.get("display_title") or ""))
                 except Exception:
@@ -232,6 +253,12 @@ def _render_cloud_status():
                     st.session_state[cache_key] = summary
             except Exception:
                 st.caption("暫時無法取得筆數，請查看執行日誌。")
+        live = st.session_state.get(f"cloud_live_{run['id']}_{run.get('run_attempt', 1)}") or {}
+        if summary is not None and live.get('phase') == PAUSED_PHASE:
+            attempted, success, failed, remaining = summary
+            st.info(f"⏸ 已暫停：處理 {attempted} 列，成功 {success} 列，失敗 {failed} 列，尚待處理 {remaining} 列。"
+                    "要繼續，按上方「開始雲端批次成單」；已建立的訂單不會重做。")
+            return
         if summary is not None:
             attempted, success, failed, remaining = summary
             message = f"已執行完成：處理 {attempted} 列，成功 {success} 列，失敗 {failed} 列，尚待處理 {remaining} 列。"

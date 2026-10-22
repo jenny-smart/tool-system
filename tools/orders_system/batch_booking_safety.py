@@ -169,6 +169,7 @@ def _block_key(block):
         "period": str(service_period or "").replace(" ", ""),
         "address": _orders.normalize_addr_for_match(address),
         "joined_address": _orders.normalize_addr_for_match(joined),
+        "void": _orders.is_void_card(lines),
     }
 
 
@@ -318,6 +319,9 @@ def _recover_before_create(
         for parsed in blocks_by_phone[phone]:
             order_no = parsed.get("order_no")
             if not order_no or order_no in claimed_order_nos:
+                continue
+            # 已退款／取消訂單不算已成單，不能拿來補回工作表。
+            if parsed.get("void"):
                 continue
             if parsed.get("phone") and parsed.get("phone") != phone:
                 continue

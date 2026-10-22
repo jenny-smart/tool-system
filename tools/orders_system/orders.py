@@ -1840,6 +1840,23 @@ def extract_order_cards_from_purchase_html(html):
     return blocks
 
 
+# 付款狀態是這些的訂單已作廢：不能當成已成單（中斷復原、比對新單號都要排除）。
+VOID_PAYMENT_STATUS = ("已退款", "取消訂單")
+
+
+def card_payment_status(lines):
+    """訂單卡片的付款狀態（例如 已付款／待付款／已退款／取消訂單）；找不到回傳空字串。"""
+    m = re.search(r"付款狀態[：:]\s*([^\n]+)", "\n".join(str(x) for x in (lines or [])))
+    return m.group(1).strip() if m else ""
+
+
+def is_void_card(lines):
+    """已退款／取消訂單，或卡片上有取消時間（已被取消）。"""
+    status = card_payment_status(lines)
+    joined = "\n".join(str(x) for x in (lines or []))
+    return any(word in status for word in VOID_PAYMENT_STATUS) or bool(re.search(r"取消時間[：:]", joined))
+
+
 def match_order_from_purchase_page(html, target_date, target_period, phone="", exclude_order_nos=None):
     """
     v2026-07：比對日期＋時段，且若有提供 phone 則同時比對電話，避免只用
@@ -1853,6 +1870,8 @@ def match_order_from_purchase_page(html, target_date, target_period, phone="", e
     for block in extract_order_cards_from_purchase_html(html):
         order_no_candidate = block.get("order_no")
         if not order_no_candidate or order_no_candidate in exclude_order_nos:
+            continue
+        if is_void_card(block.get("lines")):
             continue
         joined = "\n".join(block["lines"])
         # 後台不同頁面可能顯示為「09:00-12:00」或「09:00 - 12:00」；

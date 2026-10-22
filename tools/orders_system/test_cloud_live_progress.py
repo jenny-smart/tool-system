@@ -45,6 +45,7 @@ def test_live_group_callback_reports_completed_rows_before_finish():
          patch.object(cloud, 'run_process_web_hybrid', side_effect=run_group), \
          patch.object(cloud, 'held_rows', return_value=[]), \
          patch.object(cloud, 'Progress') as reporter:
+        reporter.return_value.pause_requested.return_value = False
         assert cloud.run('sheet', pause_seconds=0) == 2
     calls = [call.args for call in reporter.return_value.publish.call_args_list]
     assert ('成單中', 1, 1, 0, 1, 2, '3') in calls
@@ -129,3 +130,86 @@ def test_cloud_main_runs_with_selected_stages():
          patch.object(cloud, 'run', side_effect=lambda *a, **k: seen.append(current_booking_stages()) or 0):
         assert cloud.main() == 0
     assert seen == [('改加',)] and current_booking_stages() == ('可約',)
+
+
+def test_pause_after_group_stops_cleanly_and_reports_remaining():
+    rows = [(2, '台北', ''), (3, '台北', ''), (4, '台北', '')]
+    done = set()
+
+    def pending(sheet, excluded, *args):
+        return [row for row in rows if row[0] not in excluded and row[0] not in done]
+
+    def run_group(**kwargs):
+        assert callable(kwargs['should_stop'])
+        done.add(2)
+        return {'success_count': 1, 'fail_count': 0, 'total_processed': 1, 'paused': True}
+
+    with patch.object(cloud, 'load_pending', side_effect=pending), \
+         patch.object(cloud, 'ACCOUNTS', {'台北': {'email': 'test', 'password': 'test'}}), \
+         patch.object(cloud, 'run_process_web_hybrid', side_effect=run_group) as runner, \
+         patch.object(cloud, 'held_rows', return_value=[]), \
+         patch.object(cloud, 'Progress') as reporter:
+        reporter.return_value.held = 0
+        assert cloud.run('sheet', chunk_size=2, pause_seconds=0) == 0
+    assert runner.call_count == 1
+    assert reporter.return_value.publish.call_args.args == ('已暫停', 1, 1, 0, 2, 3)
+
+
+def test_pause_request_is_read_from_control_column_and_throttled():
+    progress = Progress('sheet')
+    progress.key = '123:1'
+    progress.sheet = MagicMock()
+    progress.row = 5
+    progress.sheet.get.return_value = [['']]
+    with patch('cloud_booking_progress.time.monotonic', side_effect=[100, 105, 111]):
+        assert progress.pause_requested() is False
+        progress.sheet.get.return_value = [['暫停']]
+        assert progress.pause_requested() is False  # 10 秒內不重讀
+        assert progress.pause_requested() is True
+    progress.sheet.get.assert_called_with('L5')
+
+
+def test_request_pause_writes_control_cell_for_this_attempt():
+    import cloud_booking_progress as cbp
+    sheet = MagicMock()
+    sheet.col_values.return_value = ['執行識別', '9:1', '123:1', '123:2']
+    sheet.col_count = 12
+    with patch.object(cbp, '_progress_sheet', return_value=sheet):
+        assert cbp.request_pause(123, 2) is True
+        assert cbp.request_pause(999, 1) is False
+    sheet.update.assert_called_once_with(range_name='L4', values=[['暫停']], value_input_option='RAW')
+
+
+def test_hybrid_runner_stops_before_next_group_when_paused():
+    import pandas as pd
+    import hybrid_batch_runner as hybrid
+    rows = pd.DataFrame([
+        {"__sheet_row__": 2, "姓名": "甲", "服務人時": "2人", "開始時間": "9:00", "結束時間": "12:00", "電話": "0911111111", "地址": "台北市A", "訂單編號": ""},
+        {"__sheet_row__": 3, "姓名": "乙", "服務人時": "2人", "開始時間": "9:00", "結束時間": "12:00", "電話": "0922222222", "地址": "台北市B", "訂單編號": ""},
+        {"__sheet_row__": 4, "姓名": "丙", "服務人時": "2人", "開始時間": "9:00", "結束時間": "12:00", "電話": "0933333333", "地址": "台北市C", "訂單編號": ""},
+    ])
+    created = []
+    checks = iter([False, True])
+    with patch.object(hybrid._safety, '_configure_runtime'), \
+         patch.object(hybrid._safety, '_recover_before_create', return_value=(MagicMock(), [2, 3, 4], [], [], 3)), \
+         patch.object(hybrid._safety, '_checkpoint'), \
+         patch.object(hybrid._orders, 'load_worksheet', return_value=(MagicMock(), rows)), \
+         patch.object(hybrid, '_selected_work', return_value=rows), \
+         patch.object(hybrid, '_login_once'), \
+         patch.object(hybrid, '_run_one_direct', side_effect=lambda s, ws, row_no, *a: created.append(row_no) or {"結果": "成功", "訂單編號": f"T{row_no}"}), \
+         patch.object(hybrid, '_result_stats', return_value=(1, 0)):
+        result = hybrid.run_process_web_hybrid(
+            env_name='dev', region='台北', backend_email='e', backend_password='p', sheet_name='s',
+            start_row=2, end_row=4, selected_actions=['建單'], logger=lambda m: None,
+            selected_rows=[2, 3, 4], should_stop=lambda: next(checks))
+    assert created == [2]
+    assert result['paused'] is True and result['total_processed'] == 1
+
+
+def test_rows_with_different_people_are_not_grouped_together():
+    import hybrid_batch_runner as hybrid
+    base = {"電話": "0986838278", "地址": "台北市文山區試院路102-2號15樓", "開始時間": "14:00", "結束時間": "17:00"}
+    usual = hybrid._phone_address_group_key({**base, "服務人時": ""})
+    three = hybrid._phone_address_group_key({**base, "服務人時": "3人3小時"})
+    assert usual != three
+    assert usual == hybrid._phone_address_group_key({**base, "服務人時": "2人"})
