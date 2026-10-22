@@ -194,10 +194,10 @@ SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列與第 2 �
 _LITERAL_FORMULA = re.compile(r"=[\d\s.+\-*/(),%]*")
 
 # 「春節禮品名單」分兩階段：
-#   第一階段（各地區資料統計）：根目錄「春節禮品」下建立新年度資料夾 {Y}，登入各區後台下載前一年度
-#     （付款日期）的儲值金訂單存成「{Y}儲值金-{a}」（同月排程上下半月訂單的儲值金匯出），
-#     轉檔後貼入「{Y}名單統整」的「{a}儲值金」工作表，
-#     每張建樞紐（M 客戶姓名、D 付款日期在前一年度、加總 AA 儲值金成本），並依金額區間統計人數
+#   第一階段（各地區資料統計）：根目錄「春節禮品」下建立新年度資料夾 {Y}，登入各區後台下載「儲值金結算」
+#     （同月排程儲值金結算的會員匯出）存成「{Y}儲值金結算-{a}」，轉檔後貼入「{Y}名單統整」的「{a}儲值金」
+#     工作表（高雄沒有自己的結算，跟儲值金結算轉檔一樣從新竹拆出來），每張建樞紐（B 客戶姓名、
+#     G 購買日期在前一年度、加總 I 購買原價），並依金額區間統計人數
 #   第二階段（設定金額產生送禮名單）：畫面輸入的門檻金額寫入「設定」B1，「{Y}送禮名單」列出加總 ≥ 門檻
 #     的客戶，再貼進新年度「{Y}春節送禮名單」並在根目錄總表加分頁
 GIFT_ROOT_FOLDER_ID = "1Vg6hg762A5fXkVVMVA_2sfYldTMoATz5"
@@ -206,16 +206,21 @@ GIFT_ROOT_TAB = "{y}春節送禮名單"
 GIFT_SUMMARY_FILE = "{Y}名單統整"
 GIFT_SEND_FILE = "{y}春節送禮名單"            # 年度資料夾內的送禮名單檔
 GIFT_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
-GIFT_SOURCE_KEYWORD = "儲值金"
+GIFT_SOURCE_KEYWORD = "儲值金結算"
 GIFT_AREA_SHEET = "{a}儲值金"
 GIFT_SETTING_SHEET = "設定"
 GIFT_THRESHOLD_CELL = "B1"
 GIFT_ZIP_SHEET = "郵遞區號"
 GIFT_LIST_SHEET = "{Y}送禮名單"
 GIFT_LIST_HEADERS = ["地區", "姓名", "郵遞區號", "行政區", "地址", "電話", "LINE連結"]
-# 來源（訂單匯出）欄位
-GIFT_NAME_COL, GIFT_DATE_COL, GIFT_AMOUNT_COL = "M", "D", "AA"
-GIFT_ADDRESS_COL, GIFT_PHONE_COL, GIFT_LINE_COL = "N", "O", "Q"
+# 來源（儲值金結算會員匯出）欄位：B 客戶姓名、D 電話、E 地址、F LINE@、G 購買日期、H 購買項目、I 購買原價
+GIFT_NAME_COL, GIFT_DATE_COL, GIFT_AMOUNT_COL = "B", "G", "I"
+GIFT_ADDRESS_COL, GIFT_PHONE_COL, GIFT_LINE_COL = "E", "D", "F"
+GIFT_PLAN_COL = "H"
+# 只加總 H 購買項目是「儲值金…」的列：結算裡另有「轉換」（舊系統轉入的餘額）與「購物金」（贈送），不算消費
+GIFT_PLAN_PREFIX = "儲值金"
+GIFT_EXCLUDE_NAME_KEYWORD = "保留"             # 檸檬保留、檸檬保留單、代客保留等內部帳號不列入
+GIFT_SPLIT_FROM = {"高雄": "新竹"}                # 高雄從新竹的結算拆出來（新竹後台含高雄）
 GIFT_DISTRICT_CHARS = 6                       # 行政區＝地址前 6 個字
 # 送禮名單檔：清空 J2:L 與第 18 列以下，第 21 列起貼上；送禮名單 A～G → 這些欄（F 欄是勾選框）
 GIFT_SEND_CLEAR = "J2:L"
@@ -282,7 +287,8 @@ def gift_headers(header: List[str]) -> List[str]:
 
 
 def gift_pivot(sheet_id: int, rows: int, cols: int, prev_year: int, date_header: str) -> Dict[str, Any]:
-    """樞紐：列＝客戶姓名（依加總由大到小、不顯示總計），值＝加總儲值金成本，篩選付款日期在前一年度。"""
+    """樞紐：列＝客戶姓名（依加總由大到小、不顯示總計），值＝加總購買原價；篩選購買日期在前一年度、
+    購買項目是「儲值金…」（不含轉換、購物金）、姓名不含「保留」（內部帳號）。"""
     return {
         "source": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": rows,
                    "startColumnIndex": 0, "endColumnIndex": cols},
@@ -291,10 +297,19 @@ def gift_pivot(sheet_id: int, rows: int, cols: int, prev_year: int, date_header:
         "values": [{"sourceColumnOffset": col_index(GIFT_AMOUNT_COL), "summarizeFunction": "SUM",
                     "name": f"{prev_year}加總"}],
         # visibleByDefault 要設 true，否則條件會跟空的 visibleValues 取交集而什麼都不顯示
-        "filterSpecs": [{"columnOffsetIndex": col_index(GIFT_DATE_COL), "filterCriteria": {
-            "visibleByDefault": True,
-            "condition": {"type": "CUSTOM_FORMULA", "values": [
-                {"userEnteredValue": f"=YEAR('{date_header}')={prev_year}"}]}}}],
+        "filterSpecs": [
+            {"columnOffsetIndex": col_index(GIFT_DATE_COL), "filterCriteria": {
+                "visibleByDefault": True,
+                "condition": {"type": "CUSTOM_FORMULA", "values": [
+                    {"userEnteredValue": f"=YEAR('{date_header}')={prev_year}"}]}}},
+            {"columnOffsetIndex": col_index(GIFT_PLAN_COL), "filterCriteria": {
+                "visibleByDefault": True,
+                "condition": {"type": "TEXT_STARTS_WITH", "values": [{"userEnteredValue": GIFT_PLAN_PREFIX}]}}},
+            {"columnOffsetIndex": col_index(GIFT_NAME_COL), "filterCriteria": {
+                "visibleByDefault": True,
+                "condition": {"type": "TEXT_NOT_CONTAINS", "values": [
+                    {"userEnteredValue": GIFT_EXCLUDE_NAME_KEYWORD}]}}},
+        ],
     }
 
 
@@ -346,8 +361,9 @@ def gift_list_formula(blocks: List[Tuple[str, str, str, str]], zip_rows: int) ->
     for area, sheet, name_col, sum_col in blocks:
         s = f"'{sheet}'!"
 
-        def look(col: str) -> str:
-            return f"XLOOKUP(x,{s}${GIFT_NAME_COL}:${GIFT_NAME_COL},{s}${col}:${col},\"\")"
+        def look(col: str) -> str:  # 同名有多列時取第一個非空白值
+            return (f"IFERROR(INDEX(FILTER({s}${col}:${col},{s}${GIFT_NAME_COL}:${GIFT_NAME_COL}=x,"
+                    f"{s}${col}:${col}<>\"\"),1),\"\")")
 
         parts.append(
             f"IFERROR(LET(n,FILTER({s}{name_col}2:{name_col},{s}{sum_col}2:{sum_col}>=t,{s}{name_col}2:{name_col}<>\"\"),"
@@ -533,7 +549,7 @@ def parse_rows_arg(text: str, last_row: int) -> List[int]:
 class Rollover:
     def __init__(self, drive, sheets, spreadsheet_id: str, new_year: int,
                  dry_run: bool = False, fresh: bool = False, tidy: bool = False, log=print,
-                 gift_threshold: Optional[float] = None, gift_downloader=None):
+                 gift_threshold: Optional[float] = None, gift_downloader=None, gift_phone_lookup=None):
         self.drive = drive
         self.sheets = sheets
         self.spreadsheet_id = spreadsheet_id
@@ -545,6 +561,7 @@ class Rollover:
         self.log = log
         self.gift_threshold = gift_threshold  # 春節送禮名單產生：畫面輸入的門檻金額
         self.gift_downloader = gift_downloader  # 測試用：取代後台下載 (city, prev_year, log) -> (內容, 副檔名, 筆數)
+        self.gift_phone_lookup = gift_phone_lookup  # 測試用：取代手機查近期訂單 (phone) -> 新竹／高雄／""
         self.stamp = datetime.now(TZ).strftime("%Y%m%d%H%M")
 
     # ---------- Drive ----------
@@ -1193,25 +1210,29 @@ class Rollover:
         return folder
 
     def run_gift_stats(self) -> List[Dict[str, str]]:
-        """第一階段：建立 {Y} 資料夾與「{Y}名單統整」，各地區儲值金來源檔轉檔貼入「{a}儲值金」、建樞紐、
-        「{Y}送禮名單」公式，並回報各地區人數與各門檻金額的人數，供第二階段決定金額。"""
+        """第一階段：建立 {Y} 資料夾，各區後台下載儲值金結算，建立「{Y}名單統整」：轉檔貼入「{a}儲值金」
+        （高雄從新竹拆出）、建樞紐、「{Y}送禮名單」公式，並回報各金額區間的人數，供第二階段決定金額。"""
         Y = str(self.new_year)
         folder = self._gift_folder(create=True)
         records = [{"kind": "資料夾", "old_name": "", "old_id": "", "new_name": Y, "new_id": folder["id"]}]
 
         if self.dry_run:
-            self.log(f"  （dry-run）會登入各區後台下載 {self.prev_year} 年儲值金訂單存成「{Y}{GIFT_SOURCE_KEYWORD}-地區」")
+            self.log(f"  （dry-run）會登入各區後台下載儲值金結算存成「{Y}{GIFT_SOURCE_KEYWORD}-地區」")
         else:
             self._gift_download(folder)
         listing = [] if folder["id"].startswith("(dry-run") else self.children(folder["id"])
         sources = self._gift_sources(listing)
+        for area, parent in GIFT_SPLIT_FROM.items():
+            if area not in sources and parent in sources:
+                sources[area] = {**sources[parent], "split_from": parent}
         for area in GIFT_AREAS:
             if area in sources:
-                self.log(f"  {area}來源：{sources[area]['name']}")
+                split = sources[area].get("split_from")
+                self.log(f"  {area}來源：{sources[area]['name']}" + (f"（從{split}拆出）" if split else ""))
             else:
                 self.log(f"  ⚠ {Y} 資料夾沒有{area}{GIFT_SOURCE_KEYWORD}來源檔，略過")
         if not sources:
-            self.log(f"  ⚠ 後台下載都失敗，「春節禮品/{Y}」也沒有各地區儲值金訂單（例：{Y}{GIFT_SOURCE_KEYWORD}-台北.xls）")
+            self.log(f"  ⚠ 後台下載都失敗，「春節禮品/{Y}」也沒有各地區儲值金結算（例：{Y}{GIFT_SOURCE_KEYWORD}-台北.xls）")
             return records + [{"kind": "檔案", "old_name": f"{Y}{GIFT_SOURCE_KEYWORD}-地區", "old_id": "",
                                "new_name": "找不到來源", "new_id": ""}]
 
@@ -1295,15 +1316,15 @@ class Rollover:
         return self._gift_send_file(folder, listing, rows)
 
     def _gift_download(self, folder: Dict[str, Any]) -> None:
-        """各地區登入後台下載前一年度儲值金訂單，上傳為「{Y}儲值金-{a}.xls(x)」（同名舊檔移到垃圾桶）；
-        單一地區失敗只警告，資料夾裡已有的檔案照用。"""
+        """各區登入後台下載儲值金結算（月排程同一份會員匯出），上傳為「{Y}儲值金結算-{a}.xls(x)」
+        （同名舊檔移到垃圾桶）；高雄從新竹拆出，不另外下載。單一地區失敗只警告，資料夾裡已有的檔案照用。"""
         from googleapiclient.http import MediaInMemoryUpload
 
         downloader = self.gift_downloader
         if downloader is None:
-            from tools.annual_rollover.gift_download import download_gift_source as downloader
-        base_names = {area: f"{self.new_year}{GIFT_SOURCE_KEYWORD}-{area}" for area in GIFT_AREAS}
-        for area, base in base_names.items():
+            from tools.annual_rollover.gift_download import download_gift_settlement as downloader
+        for area in [a for a in GIFT_AREAS if a not in GIFT_SPLIT_FROM]:
+            base = f"{self.new_year}{GIFT_SOURCE_KEYWORD}-{area}"
             try:
                 content, ext, count = downloader(area, self.prev_year, self.log)
             except Exception as exc:
@@ -1319,7 +1340,50 @@ class Rollover:
                 body={"name": f"{base}.{ext}", "mimeType": mime, "parents": [folder["id"]]},
                 media_body=MediaInMemoryUpload(content, mimetype=mime, resumable=False),
                 fields="id,name", supportsAllDrives=True).execute()
-            self.log(f"  {area}：後台下載 {self.prev_year} 年儲值金訂單 {count} 筆 → {base}.{ext}")
+            self.log(f"  {area}：後台下載儲值金結算 {count} 筆 → {base}.{ext}")
+
+    def _gift_phone_area(self, phone: str) -> str:
+        """新竹／高雄分不出來時用手機查新竹後台近期訂單（同一支手機只查一次）；查不到或無法登入回傳空字串。"""
+        key = "".join(ch for ch in str(phone or "") if ch.isdigit())
+        cache = self.__dict__.setdefault("_gift_phone_cache", {})
+        if key in cache:
+            return cache[key]
+        if not key or self.__dict__.get("_gift_phone_error"):
+            return ""
+        try:
+            if self.gift_phone_lookup is None:
+                import requests
+                from tools.scheduled_monthly import half_month_orders as hm
+
+                acc = hm.load_accounts().get("新竹") or {}
+                session = requests.Session()
+                hm.login(session, acc.get("email", ""), acc.get("password", ""))
+                self.gift_phone_lookup = lambda p: hm.area_by_phone(session, p)
+            cache[key] = self.gift_phone_lookup(key) or ""
+        except Exception as exc:
+            self._gift_phone_error = str(exc)
+            self.log(f"  ⚠ 手機查訂單失敗，分不出新竹／高雄的列沿用原規則：{exc}")
+            return ""
+        return cache[key]
+
+    def _gift_split_kaohsiung(self, values: List[List[str]]) -> Tuple[List[List[str]], List[List[str]]]:
+        """新竹結算拆成 (新竹, 高雄)，規則同儲值金結算轉檔：方案名稱／地址判斷，分不出來用手機查近期訂單，
+        再不行沿用原規則（高雄方案或地址含高雄／台南才算高雄）。"""
+        from config.vip_config import KAOHSIUNG_ADDRESS_KEYWORDS, KAOHSIUNG_FILTER_VALUES
+        from services.vip_workflow import classify_hsinchu_row
+
+        hsinchu, kaohsiung = [values[0]], [values[0]]
+        plan_i, addr_i, phone_i = (col_index(GIFT_PLAN_COL), col_index(GIFT_ADDRESS_COL),
+                                   col_index(GIFT_PHONE_COL))
+        for row in values[1:]:
+            cell = lambda i: str(row[i]).strip() if len(row) > i else ""
+            plan, address = cell(plan_i), cell(addr_i)
+            area = classify_hsinchu_row(plan, address) or self._gift_phone_area(cell(phone_i))
+            if not area:
+                area = "高雄" if plan in KAOHSIUNG_FILTER_VALUES or any(
+                    k in address for k in KAOHSIUNG_ADDRESS_KEYWORDS) else "新竹"
+            (kaohsiung if area == "高雄" else hsinchu).append(row)
+        return hsinchu, kaohsiung
 
     def _gift_sources(self, listing: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """各地區來源檔：檔名含「儲值金」與地區（名單統整／送禮名單除外）；同地區有原始匯出檔
@@ -1404,7 +1468,7 @@ class Rollover:
                     {"deleteSheet": {"sheetId": ids[t]}} for t in blank]}).execute()
 
         data = [{"range": f"'{GIFT_SETTING_SHEET}'!A1:A2", "values": [
-            ["送禮門檻金額"], [f"{self.prev_year} 年付款日期的儲值金成本加總 ≥ B1 的客戶列入「{list_title}」"
+            ["送禮門檻金額"], [f"儲值金結算中 {self.prev_year} 年購買的儲值金（不含轉換、購物金）加總 ≥ B1 的客戶列入「{list_title}」"
                          f"（B1 由「{GIFT_LIST_FUNCTION}」依畫面輸入的金額寫入，也可直接修改）"]]}]
         data.append({"range": f"'{GIFT_ZIP_SHEET}'!A1:B{len(TW_ZIPCODES) + 1}",
                      "values": [["郵遞區號", "行政區"]] + [list(z) for z in TW_ZIPCODES]})
@@ -1413,9 +1477,20 @@ class Rollover:
             "valueInputOption": "RAW", "data": data}).execute()
 
         blocks, pivots = [], []
+        read_cache: Dict[str, List[List[str]]] = {}
+        split_cache: Dict[str, Tuple[List[List[str]], List[List[str]]]] = {}
         for area, source in sources.items():
             title = GIFT_AREA_SHEET.format(a=area)
-            values = self._gift_read_source(source)
+            if source["id"] not in read_cache:
+                read_cache[source["id"]] = self._gift_read_source(source)
+            values = read_cache[source["id"]]
+            # 新竹與從新竹拆出的高雄共用同一份結算，拆一次後各取一半
+            shared = [a for a, src in sources.items() if src["id"] == source["id"]]
+            if values and len(shared) > 1:
+                if source["id"] not in split_cache:
+                    split_cache[source["id"]] = self._gift_split_kaohsiung(values)
+                hsinchu, kaohsiung = split_cache[source["id"]]
+                values = kaohsiung if source.get("split_from") else hsinchu
             if not values:
                 self.log(f"  ⚠ {source['name']} 沒有資料")
                 continue
@@ -1433,8 +1508,8 @@ class Rollover:
                 "rows": [{"values": [{"pivotTable": gift_pivot(
                     sid, len(values), width, self.prev_year, header[col_index(GIFT_DATE_COL)])}]}]}})
             blocks.append((area, title, col_letters(width + 1), col_letters(width + 2)))
-            self.log(f"  {title}：貼入 {len(body)} 筆，樞紐在 {col_letters(width + 1)}1"
-                     f"（{GIFT_NAME_COL} 姓名／{GIFT_DATE_COL} 為 {self.prev_year} 年／加總 {GIFT_AMOUNT_COL}）")
+            self.log(f"  {title}：貼入 {len(body)} 筆，樞紐在 {col_letters(width + 1)}1（{GIFT_NAME_COL} 姓名／"
+                     f"{GIFT_DATE_COL} 購買日期為 {self.prev_year} 年／{GIFT_PLAN_COL} 為{GIFT_PLAN_PREFIX}／加總 {GIFT_AMOUNT_COL}）")
         if pivots:
             self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": pivots}).execute()
         self.sheets.spreadsheets().values().batchClear(
