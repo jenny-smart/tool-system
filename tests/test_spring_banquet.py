@@ -367,3 +367,23 @@ def test_update_budget_copies_tabs_and_links(monkeypatch):
     ranges = {d["range"]: d["values"][0][0] for d in calls["values"]}
     assert "'春酒統計表'!AO1:AT17" in ranges["'2027-1'!H1"]
     assert "中獎/簽名表" in ranges["'2027'!AA2"]
+
+
+def test_ensure_columns_appends_when_narrow():
+    sent = []
+
+    class Sheets:
+        def spreadsheets(self):
+            return self
+
+        def get(self, **kw):
+            props = {"title": "春酒統計表", "sheetId": 7, "gridProperties": {"columnCount": 39}}
+            return type("R", (), {"execute": lambda _: {"sheets": [{"properties": props}]}})()
+
+        def batchUpdate(self, spreadsheetId, body):
+            sent.extend(body["requests"])
+            return type("R", (), {"execute": lambda _: {}})()
+
+    rollover = type("Ro", (), {"sheets": Sheets()})()
+    sb.ensure_columns(rollover, "f", "春酒統計表", "AZ")
+    assert sent == [{"appendDimension": {"sheetId": 7, "dimension": "COLUMNS", "length": 52 - 39}}]
