@@ -51,5 +51,25 @@ class CancelOrderSearchTest(unittest.TestCase):
             _run([full, full, full], max_pages=1)
 
 
+class CancelOrdersProgressTest(unittest.TestCase):
+    def test_progress_callback_reports_each_order_including_failures(self):
+        posted = []
+
+        def post(url, **kw):
+            posted.append(url)
+            return SimpleNamespace(status_code=500 if url.endswith("/2") else 200)
+
+        session = SimpleNamespace(get=lambda *a, **k: SimpleNamespace(text=""), post=post)
+        rows = [{"purchase_id": str(i), "order_no": f"TT{i}"} for i in (1, 2, 3)]
+        seen = []
+        with patch.object(co, "_new_logged_in_session", return_value=(session, "https://x")), \
+                patch.object(co, "_csrf_from_html", return_value="tok"), \
+                patch.object(co, "_update_cancel_notes", return_value=(True, "")):
+            results = co.cancel_orders("dev", "e", "p", rows, "不需退款", "測試取消", "", "",
+                                       progress_callback=lambda done, total, row: seen.append((done, total, row["ok"])))
+        self.assertEqual(seen, [(1, 3, True), (2, 3, False), (3, 3, True)])
+        self.assertEqual([r["ok"] for r in results], [True, False, True])
+
+
 if __name__ == "__main__":
     unittest.main()

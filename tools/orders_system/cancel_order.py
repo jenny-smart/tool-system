@@ -460,7 +460,9 @@ def cancel_orders(
     customer_memo: str,
     charge_note: str,
     refund_note: str,
+    progress_callback=None,
 ):
+    """progress_callback(已處理筆數, 總筆數, 這一筆結果)：每處理完一筆呼叫一次。"""
     if cancel_status not in CANCEL_STATUS_MAP:
         raise ValueError("請選擇取消處理方式")
     if not orders_to_cancel:
@@ -507,6 +509,11 @@ def cancel_orders(
             })
         except Exception as exc:
             results.append({**item, "ok": False, "note_ok": False, "message": str(exc)})
+        if progress_callback:
+            try:
+                progress_callback(len(results), len(orders_to_cancel), results[-1])
+            except Exception:
+                pass
 
     return results
 
@@ -745,33 +752,55 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
 
         col_cancel, col_ok = st.columns(2)
         with col_cancel:
-            if st.button("取消", key="cancel_order_dialog_cancel", use_container_width=True):
-                st.session_state.cancel_order_dialog_open = False
-                st.rerun()
+            cancel_clicked = st.button("取消", key="cancel_order_dialog_cancel", use_container_width=True)
         with col_ok:
-            if st.button("確定取消訂單", key="cancel_order_dialog_confirm", type="primary", use_container_width=True):
-                if not status:
-                    st.error("請先選擇：不需退款／待退款／待收異動")
-                    return
-                try:
-                    with st.spinner("取消訂單並寫入備註中…"):
-                        result = cancel_orders(
-                            env_name,
-                            backend_email,
-                            backend_password,
-                            pending,
-                            status,
-                            memo,
-                            charge_note,
-                            refund_note,
-                        )
-                    st.session_state.cancel_order_last_result = result
-                    st.session_state.cancel_order_dialog_open = False
-                    st.session_state.cancel_order_results = []
-                    st.session_state.cancel_order_pending = []
-                    st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
+            confirm_clicked = st.button("確定取消訂單", key="cancel_order_dialog_confirm", type="primary", use_container_width=True)
+        # 取消進度顯示在按鈕下方：每處理完一筆更新一次。
+        progress_area = st.container()
+        if cancel_clicked:
+            st.session_state.cancel_order_dialog_open = False
+            st.rerun()
+        if confirm_clicked:
+            if not status:
+                st.error("請先選擇：不需退款／待退款／待收異動")
+                return
+            total = len(pending)
+            with progress_area:
+                bar = st.progress(0.0, text=f"準備取消 {total} 筆訂單…")
+                current = st.empty()
+                failed_box = st.empty()
+            failures = []
+
+            def show_progress(done, total, row):
+                label = row.get("order_no") or row.get("purchase_id")
+                if not row.get("ok"):
+                    failures.append(f"{label}：{row.get('message')}")
+                ok_count = done - len(failures)
+                bar.progress(done / max(total, 1), text=f"已處理 {done} / {total} 筆（成功 {ok_count}，失敗 {len(failures)}）")
+                current.caption(f"剛處理：{label}　{row.get('service_date', '')} {row.get('period', '')}　{row.get('message', '')}")
+                if failures:
+                    failed_box.warning("失敗：\n" + "\n".join(failures[-10:]))
+
+            try:
+                with st.spinner("取消訂單並寫入備註中…"):
+                    result = cancel_orders(
+                        env_name,
+                        backend_email,
+                        backend_password,
+                        pending,
+                        status,
+                        memo,
+                        charge_note,
+                        refund_note,
+                        progress_callback=show_progress,
+                    )
+                st.session_state.cancel_order_last_result = result
+                st.session_state.cancel_order_dialog_open = False
+                st.session_state.cancel_order_results = []
+                st.session_state.cancel_order_pending = []
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
 
     if hasattr(st, "dialog"):
         @st.dialog("確定要取消訂單？", width="large")
