@@ -379,8 +379,30 @@ def _address_city(address: Any) -> str:
     return "其他" if text else ""
 
 
+def _order_recency(item: dict[str, Any]) -> tuple[str, str, str]:
+    """訂單新舊排序用：服務日期、付款日期、建立日期（後台日期字串可直接比大小）。"""
+    return tuple(str(item.get(k) or "")[:19] for k in ("date_clean", "paid_at", "created_at"))
+
+
+def area_by_phone(session: requests.Session, phone: Any) -> str:
+    """用手機號碼查訂單，取最近一筆地址能分出新竹／高雄（含台南）的訂單決定歸屬；查不到回傳空字串。"""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == 9:
+        digits = "0" + digits
+    if len(digits) < 9:
+        return ""
+    items = [item for item in purchase_records(session, phone=digits, p_board="on")
+             if re.sub(r"\D", "", str(item.get("phone") or "")).endswith(digits[-9:])]
+    for item in sorted(items, key=_order_recency, reverse=True):
+        city = _address_city(item.get("address"))
+        if city in ("新竹", "高雄"):
+            return city
+    return ""
+
+
 def stored_value_customer_city(session: requests.Session, order: dict[str, Any]) -> str:
-    """姓名搜尋不帶期別／品項／付款限制，並核對會員或電話避免同名誤配。"""
+    """姓名搜尋不帶期別／品項／付款限制，並核對會員或電話避免同名誤配。
+    歷史地址分不出新竹或高雄（都沒有、或兩邊都有）時，改用手機號碼查近期訂單決定。"""
     name = str(order.get("name") or "").strip()
     if not name:
         raise RuntimeError(f"儲值金訂單 {order.get('order_no')} 缺少客戶姓名")
@@ -398,6 +420,12 @@ def stored_value_customer_city(session: requests.Session, order: dict[str, Any])
         city = _address_city(item.get("address"))
         if city:
             cities.add(city)
+    south = cities & {"新竹", "高雄"}
+    if len(south) != 1:
+        by_phone = area_by_phone(session, phone)
+        if by_phone:
+            log(f"📞 {name}（{order.get('order_no')}）地址分不出新竹／高雄 {sorted(cities)}，依手機近期訂單歸 {by_phone}")
+            return by_phone
     if len(cities) != 1:
         raise RuntimeError(f"儲值金訂單 {order.get('order_no')}（{name}）地址無法唯一分區：{sorted(cities)}")
     return cities.pop()
