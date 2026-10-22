@@ -60,6 +60,9 @@ ROSTER_HEADER = (["地區", "姓名", "電話", "到職日期", "狀態"] + [str
                  + ["總時數", "月份", "平均時數", "達門檻", "去年得獎（{y1}）", "前年得獎（{y2}）",
                     "參加回覆", "投票回覆"])
 THRESHOLD_LABEL_CELL, THRESHOLD_CELL, DEFAULT_THRESHOLD = "AA1", "AB1", 48
+EVENT_LABEL_CELL, EVENT_CELL = "AA2", "AB2"              # 春酒日期（抽獎資格：到職滿 3 個月的基準日）
+LOTTERY_MIN_MONTHS, LOTTERY_MAX_LEAVE = 3, 3             # 到職滿 3 個月、排班 0 小時（請假）不超過 3 個月
+INNER_LOTTERY_YES = ("Y", "是", "有", "V", "v", "y")       # 內勤名冊 C 欄「抽獎資格」視為有資格的值
 ATTEND_SHEET = "春酒參與統計"
 ATTEND_SRC = "參與回應"            # 公式直接讀表單回應工作表（A 時間 B 姓名 … G 是否參加）
 VOTE_SRC = "投票回應-{a}"          # 投票回應（D 姓名、E～H 各獎項）
@@ -80,6 +83,13 @@ STATS_SHEET = "春酒統計表"
 STATS_ROWS = 300
 STATS_MANUAL = "I2:K"                                   # 眷屬 6歲以下／7-12／13以上，依姓名保留
 SUMMARY_COL = "Q"
+# 春酒統計表右側：Q～AA 投票前 5 名、AB 空白、AC～AM 參與統計、AN 空白、AO～AT 抽獎統計
+VOTE_TOP_COL, ATTEND_STAT_COL, LOTTERY_STAT_COL = "Q", "AC", "AO"
+LOTTERY_CATEGORIES = (                                   # 順序＝預算表「{Y}-1」H2:H17（預算公式依位置引用）
+    [(f"{a}專員", "staff", a) for a in ("台北", "桃園", "新竹", "台中")]
+    + [(f"{a}內勤", "inner", a) for a in ("台北", "桃園", "新竹", "高雄")]
+    + [(f"{a}眷屬{k}", k, a) for a in ("台北", "桃園", "新竹", "台中") for k in ("半", "全")])
+BUDGET_FILE_NAME = "春酒預算編列new"
 TOP_N = 5
 VOTE_AWARD_COLS = [("家事達人獎", "E"), ("最佳進步獎", "F"), ("良師益友獎", "G"), ("最佳人緣獎", "H")]
 ERROR_MARKS = ("#REF!", "#VALUE!", "#NAME?", "#ERROR!", "#DIV/0!")
@@ -294,33 +304,55 @@ def stats_person_formulas(new_year: int) -> Dict[str, List[List[str]]]:
                      look("G"), look("D"), look("E"), look("F")])
         right.append([f'=IF(IFERROR($D{r}>=DATE({new_year},1,1),FALSE),"Y","")',
                       *[g(f'IFERROR(XLOOKUP($B{r},{rs}!$B:$B,{rs}!${c}:${c}),"")') for c in "UTV"]])
-    return {"A2": [[stack]], "C2": left, "L2": right}
+    return {"A2": [[stack]], "C2": left, "L2": right,
+            "P2": [[lottery_formula(r, new_year)] for r in range(2, STATS_ROWS + 1)]}
+
+
+def col_index(col: str) -> int:
+    n = 0
+    for ch in col:
+        n = n * 26 + ord(ch) - 64
+    return n
+
+
+def col_name(n: int) -> str:
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def shift(col: str, k: int) -> str:
+    return col_name(col_index(col) + k)
 
 
 def stats_summary_formulas(new_year: int) -> Dict[str, List[List[str]]]:
-    """春酒統計表 Q 欄起：參加人數（Q1～）與各區各獎項前 5 名（Q18～）。"""
+    """春酒統計表右側：Q 投票前 5 名、AC 參與統計、AO 抽獎統計。"""
     st, gift, rs = f"'{STATS_SHEET}'", f"'{GIFT_SHEET}'", f"'{ROSTER_SHEET.format(Y=new_year)}'"
+    c0 = ATTEND_STAT_COL
+    cs = [shift(c0, k) for k in range(11)]              # 類別、名單人數、參加…應收費用
     out: Dict[str, List[List[str]]] = {
-        "Q1": [["參加人數"],
-               ["類別", "名單人數", "參加", "不參加", "未回覆", "眷屬成人(13以上)", "眷屬小孩(7-12)",
-                "眷屬幼兒(6以下)", "素食", f"{new_year}到職本人付費", "應收費用"],
-               ["合計", *[f"=SUM({c}4:{c}15)" for c in "RSTUVWXYZ"], "=SUM(AA4:AA15)"]],
+        f"{c0}1": [["參加人數"],
+                   ["類別", "名單人數", "參加", "不參加", "未回覆", "眷屬成人(13以上)", "眷屬小孩(7-12)",
+                    "眷屬幼兒(6以下)", "素食", f"{new_year}到職本人付費", "應收費用"],
+                   ["合計", *[f"=SUM({c}4:{c}15)" for c in cs[1:]]]],
     }
     rows = []
     for r in range(4, 16):
-        a = f"$Q{r}"
+        a = f"${c0}{r}"
         g = lambda x: f'=IF({a}="","",{x})'
         cnt = lambda *cond: g(f"COUNTIFS({st}!$A$2:$A,{a}" + "".join(f",{st}!${c}$2:${c},\"{v}\"" for c, v in cond) + ")")
         sm = lambda col: g(f'SUMIFS({st}!${col}$2:${col},{st}!$A$2:$A,{a},{st}!$E$2:$E,"是")')
         rows.append([f"=UNIQUE(FILTER({st}!A2:A,{st}!A2:A<>\"\"))" if r == 4 else "",
-                     cnt(), cnt(("E", "是")), cnt(("E", "否")), g(f"R{r}-S{r}-T{r}"),
+                     cnt(), cnt(("E", "是")), cnt(("E", "否")), g(f"{cs[1]}{r}-{cs[2]}{r}-{cs[3]}{r}"),
                      sm("K"), sm("J"), sm("I"), cnt(("E", "是"), ("F", "素*")), cnt(("E", "是"), ("L", "Y")),
                      g(f"SUMIFS({gift}!$F:$F,{gift}!$A:$A,{a})")])
-    out["Q4"] = rows
-    out["Q16"] = [["總出席人數（含眷屬）", "=S3+V3+W3+X3"]]
-    out["Q18"] = [[f"投票前{TOP_N}名（勤奮獎依名冊總時數）"]]
+    out[f"{c0}4"] = rows
+    out[f"{c0}16"] = [["總出席人數（含眷屬）", f"={cs[2]}3+{cs[5]}3+{cs[6]}3+{cs[7]}3"]]
+    out[f"{VOTE_TOP_COL}1"] = [[f"投票前{TOP_N}名（勤奮獎依名冊總時數）"]]
     for i, area in enumerate(ROSTER_AREAS):
-        r = 19 + i * (TOP_N + 2)
+        r = 2 + i * (TOP_N + 2)
         vote = f"'{VOTE_SRC.format(a=area)}'"
         header, formulas = [area], [""]
         for award, c in VOTE_AWARD_COLS:
@@ -330,8 +362,44 @@ def stats_summary_formulas(new_year: int) -> Dict[str, List[List[str]]]:
         header += ["勤奮獎", "總時數"]
         formulas += [f"=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({{{rs}!B2:B,{rs}!R2:R}},{rs}!A2:A=\"{area}\"),2,FALSE),"
                      f"{TOP_N},2),\"\")", ""]
-        out[f"Q{r}"] = [header, formulas]
+        out[f"{VOTE_TOP_COL}{r}"] = [header, formulas]
+    out.update(lottery_stat_formulas())
     return out
+
+
+def lottery_stat_formulas() -> Dict[str, List[List[str]]]:
+    """抽獎統計（AO～AT，16 列固定順序，對應預算表「{Y}-1」H1:M17）：
+    參加、到職滿 3 月、均時達門檻、請假≤3 月、符合抽獎資格（P 欄＝Y）。"""
+    st = f"'{STATS_SHEET}'"
+    rows = [["類別", "參加", f"到職滿{LOTTERY_MIN_MONTHS}月", "均時達門檻", f"請假≤{LOTTERY_MAX_LEAVE}月", "符合抽獎資格"]]
+    for label, kind, area in LOTTERY_CATEGORIES:
+        if kind in ("半", "全"):
+            col = "J" if kind == "半" else "K"            # 半＝7-12 歲、全＝13 歲以上（6 歲以下不佔位）
+            rows.append([label, f'=SUMIFS({st}!${col}$2:${col},{st}!$A$2:$A,"{area}*",{st}!$E$2:$E,"是")',
+                         "", "", "", ""])
+            continue
+        key = f'"{area}"' if kind == "staff" else f'"*{area}*內勤*"'
+        base = f"{st}!$A$2:$A,{key},{st}!$E$2:$E,\"是\""
+        cnt = lambda extra="": f"=COUNTIFS({base}{extra})"
+        rows.append([label, cnt(), cnt(f',{st}!$P$2:$P,"<>*到職*"'), cnt(f',{st}!$P$2:$P,"<>*均時*"'),
+                     cnt(f',{st}!$P$2:$P,"<>*請假*"'), cnt(f',{st}!$P$2:$P,"Y"')])
+    return {f"{LOTTERY_STAT_COL}1": rows}
+
+
+def lottery_formula(r: int, new_year: int) -> str:
+    """春酒統計表 P 欄抽獎資格：Y，或列出不符合原因（到職未滿3月、請假N月、均時未達）。
+    內勤看內勤名冊 C 欄；專員看名冊到職日（春酒日期為基準）、前一年 0 小時月份（到職後）、U 欄達門檻。"""
+    rs, inn = f"'{ROSTER_SHEET.format(Y=new_year)}'", f"'{INNER_SHEET.format(Y=new_year)}'"
+    yes = "|".join(INNER_LOTTERY_YES)
+    ev = f"{rs}!${EVENT_CELL[:2]}${EVENT_CELL[2:]}"
+    return (f'=IF($B{r}="","",IF(COUNTIF({inn}!$B:$B,$B{r}),'
+            f'IF(REGEXMATCH(TRIM(TO_TEXT(XLOOKUP($B{r},{inn}!$B:$B,{inn}!$C:$C,""))),"^({yes})$"),"Y","內勤無抽獎資格"),'
+            f'IFERROR(LET(h,XLOOKUP($B{r},{rs}!$B:$B,{rs}!$F:$Q),d,--$D{r},'
+            f'e,IF(ISNUMBER({ev}),{ev},DATE({new_year},1,1)),'
+            f'z,SUMPRODUCT((h=0)*(DATE({new_year - 1},SEQUENCE(1,12),1)>=DATE(YEAR(d),MONTH(d),1))),'
+            f't,TEXTJOIN("、",TRUE,IF(EDATE(d,{LOTTERY_MIN_MONTHS})<=e,"","到職未滿{LOTTERY_MIN_MONTHS}月"),'
+            f'IF(z>{LOTTERY_MAX_LEAVE},"請假"&z&"月",""),'
+            f'IF(XLOOKUP($B{r},{rs}!$B:$B,{rs}!$U:$U,"")="Y","","均時未達")),IF(t="","Y",t)),"資料不足")))')
 
 
 def other_formulas() -> Dict[str, List[List[str]]]:
@@ -473,6 +541,9 @@ def update_roster(rollover, file_id: str, roster: Dict[str, List[List[str]]]) ->
         ids = sheet_ids(rollover, file_id)
     current = read(rollover, file_id, f"'{sheet}'!A2:E1000")
     threshold = (read(rollover, file_id, f"'{sheet}'!{THRESHOLD_CELL}") or [[DEFAULT_THRESHOLD]])[0][0]
+    event = (getattr(rollover, "spring_event", None) or {}).get("date")
+    event_value = f"{event:%Y/%m/%d}" if event else \
+        ((read(rollover, file_id, f"'{sheet}'!{EVENT_CELL}") or [[""]])[0] or [""])[0]
 
     rows: List[List[Any]] = []
     for area in ROSTER_AREAS:
@@ -489,9 +560,9 @@ def update_roster(rollover, file_id: str, roster: Dict[str, List[List[str]]]) ->
     rollover._values_batch(file_id, [
         {"range": f"'{sheet}'!A1", "values": [header]},
         {"range": f"'{sheet}'!A2", "values": rows},
-        {"range": f"'{sheet}'!{THRESHOLD_LABEL_CELL}", "values": [["時數門檻", threshold]]},
+        {"range": f"'{sheet}'!{THRESHOLD_LABEL_CELL}", "values": [["時數門檻", threshold], ["春酒日期", event_value]]},
     ])
-    batch_update(rollover, file_id, [yellow(ids[sheet], f"{THRESHOLD_CELL}:{THRESHOLD_CELL}")])
+    batch_update(rollover, file_id, [yellow(ids[sheet], f"{THRESHOLD_CELL}:{EVENT_CELL}")])
     rollover.log(f"  {sheet}：{len(rows)} 人")
 
 
@@ -520,18 +591,19 @@ def repair_formulas(rollover, file_id: str, manual: Optional[Dict[str, List[str]
         order = attend_order(roster, inner)
         values.batchClear(spreadsheetId=file_id, body={"ranges": [
             f"'{STATS_SHEET}'!A2:H{STATS_ROWS}", f"'{STATS_SHEET}'!{STATS_MANUAL}{STATS_ROWS}",
-            f"'{STATS_SHEET}'!L2:O{STATS_ROWS}", f"'{STATS_SHEET}'!{SUMMARY_COL}1:AA60"]}).execute()
+            f"'{STATS_SHEET}'!L2:P{STATS_ROWS}", f"'{STATS_SHEET}'!{SUMMARY_COL}1:AZ60"]}).execute()
         data += [{"range": f"'{STATS_SHEET}'!{cell}", "values": v} for cell, v in
                  {**stats_person_formulas(y), **stats_summary_formulas(y)}.items()]
         data.append({"range": f"'{STATS_SHEET}'!I2", "values": [manual.get(n, ["", "", ""]) for n in order]})
         data.append({"range": f"'{STATS_SHEET}'!A1", "values": [[
             "地區", "姓名", "回覆", "到職日", "參加否", "葷/素食", "攜伴否", "攜伴人數", "眷屬6歲以下",
-            "眷屬7-12歲", "眷屬13歲以上", f"{y}年到職（本人付費）", "達時數門檻", "平均時數", "去年得獎獎項"]]})
+            "眷屬7-12歲", "眷屬13歲以上", f"{y}年到職（本人付費）", "達時數門檻", "平均時數", "去年得獎獎項",
+            "抽獎資格"]]})
     rollover._values_batch(file_id, data)
     rollover.log(f"  公式檢查與修復：{STATS_SHEET}、{GIFT_SHEET}、抽獎籤、表單回應帶入公式已重寫")
 
     problems = []
-    for name, rng in [(STATS_SHEET, "A1:AA60"), (sheet, "A1:AB60"), (GIFT_SHEET, "A1:H60"), ("抽獎籤", "A1:K20")]:
+    for name, rng in [(STATS_SHEET, "A1:AT60"), (sheet, "A1:AB60"), (GIFT_SHEET, "A1:H60"), ("抽獎籤", "A1:K20")]:
         if name not in ids:
             continue
         for i, row in enumerate(read(rollover, file_id, f"'{name}'!{rng}"), start=1):
@@ -709,6 +781,57 @@ def update_vote_form(rollover, forms, form_id: str, form_name: str, names: List[
         forms.forms().batchUpdate(formId=form_id, body={"requests": reqs}).execute()
 
 
+# ---------- 春酒預算 ----------
+def budget_prize_formula(url: str) -> str:
+    """預算表 {Y}!AA2：中獎/簽名表四個區塊（獎項、金額、簽名＝姓名）合併 → 地區、姓名、獎項、金額。"""
+    return (f'=LET(s,IMPORTRANGE("{url}","\'中獎/簽名表\'!A3:L200"),'
+            "v,VSTACK(CHOOSECOLS(s,1,2,3),CHOOSECOLS(s,4,5,6),CHOOSECOLS(s,7,8,9),CHOOSECOLS(s,10,11,12)),"
+            'f,FILTER(v,INDEX(v,,3)<>"",INDEX(v,,1)<>""),'
+            f'st,IMPORTRANGE("{url}","\'{STATS_SHEET}\'!A2:B{STATS_ROWS}"),'
+            'HSTACK(IFNA(XLOOKUP(INDEX(f,,3),INDEX(st,,2),INDEX(st,,1)),""),INDEX(f,,3),INDEX(f,,1),INDEX(f,,2)))')
+
+
+def update_budget(rollover, response_id: str) -> None:
+    """「春酒預算編列new」：{Y-1}→{Y}、{Y-1}-1→{Y}-1 複製分頁（{Y} 內引用改指 {Y}-1），
+    {Y}-1 H1:M17 帶入抽獎統計（預算公式依位置引用）、O1 起帶入春酒統計表 Q 欄起全部統計，
+    {Y} AA:AD 帶入中獎名單；皆用 IMPORTRANGE 連動（第一次需在預算表按「允許存取」）。"""
+    y, py = rollover.new_year, rollover.new_year - 1
+    main, sub, pmain, psub = str(y), f"{y}-1", str(py), f"{py}-1"
+    found = find_sheet_loose(rollover, BUDGET_FILE_NAME)
+    if not found:
+        rollover.log(f"  ⚠ 找不到「{BUDGET_FILE_NAME}」，略過預算表")
+        return
+    fid = found["id"]
+    ids = sheet_ids(rollover, fid)
+    missing = [(new, old) for new, old in ((sub, psub), (main, pmain)) if new not in ids]
+    if any(old not in ids for _, old in missing):
+        rollover.log(f"  ⚠ {BUDGET_FILE_NAME} 找不到「{pmain}」或「{psub}」分頁，略過")
+        return
+    if rollover.dry_run:
+        rollover.log(f"  （預覽）{BUDGET_FILE_NAME}：會建立 {'、'.join(n for n, _ in missing) or '（分頁已存在）'}，"
+                     f"並帶入 {sub} 抽獎／參與統計、{main} 中獎名單")
+        return
+    batch_update(rollover, fid, [{"duplicateSheet": {"sourceSheetId": ids[old], "newSheetName": new}}
+                                 for new, old in missing])
+    ids = sheet_ids(rollover, fid)
+    if any(new == main for new, _ in missing):
+        batch_update(rollover, fid, [{"findReplace": {"find": f"'{psub}'!", "replacement": f"'{sub}'!",
+                                                      "includeFormulas": True, "sheetId": ids[main]}}])
+    for new, old in missing:
+        rollover.log(f"  {BUDGET_FILE_NAME}：複製分頁 {old} → {new}")
+    url = f"https://docs.google.com/spreadsheets/d/{response_id}"
+    st = f"\'{STATS_SHEET}\'"
+    rollover.sheets.spreadsheets().values().batchClear(spreadsheetId=fid, body={"ranges": [
+        f"'{sub}'!H1:M17", f"'{sub}'!O1:BZ80", f"'{main}'!AA2:AD300"]}).execute()
+    rollover._values_batch(fid, [
+        {"range": f"'{sub}'!H1", "values": [[f'=IMPORTRANGE("{url}","{st}!{LOTTERY_STAT_COL}1:{shift(LOTTERY_STAT_COL, 5)}17")']]},
+        {"range": f"'{sub}'!O1", "values": [[f'=IMPORTRANGE("{url}","{st}!{SUMMARY_COL}1:{shift(LOTTERY_STAT_COL, 5)}40")']]},
+        {"range": f"'{main}'!AA2", "values": [[budget_prize_formula(url)]]},
+    ])
+    rollover.log(f"  {BUDGET_FILE_NAME}：{sub} 抽獎／參與統計、{main} 中獎名單已連動"
+                 f"（第一次開啟請在 {sub}!H1 按「允許存取」）")
+
+
 # ---------- 主流程 ----------
 def export_roster(rollover, areas: List[str]) -> Tuple[Dict[str, List[List[str]]], List[Dict[str, str]]]:
     from tools.scheduled_monthly.stored_value_settlement import load_accounts
@@ -783,6 +906,10 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
                 repair_formulas(rollover, response["new_id"], manual)
             except Exception as exc:
                 rollover.log(f"  ✗ 公式檢查與修復失敗：{exc}")
+        try:
+            update_budget(rollover, response["new_id"])
+        except Exception as exc:
+            rollover.log(f"  ✗ 春酒預算表更新失敗：{exc}")
         try:
             excluded, inner = vote_exclusions(rollover, response["new_id"])
         except Exception as exc:
