@@ -45,7 +45,8 @@ VOTE_FORM_NAME = "{V}年度投票（{a}）"          # V = 投票年度（春酒
 RESPONSE_FILE_NAME = "{Y}春酒參與統計表單"      # 試算表，與表單同名
 # 回覆試算表來源（依序找第一個）：前一年度的試算表、範本、舊命名
 RESPONSE_SOURCES = ["{P}春酒參與統計表單", "{P}春酒參與統計表單-範本", "{P}春酒參與統計表單 (回覆)"]
-COPY_FILES = ["春酒抽籤.docx", "紅包袋模板.docx"]     # 每年沿用的檔案（檔名不含年份）
+COPY_FILES = ["春酒抽籤", "紅包袋模板"]     # 每年沿用的檔案（檔名不含年份；Word 檔複製時轉成 Google 文件）
+DOC_MIME = "application/vnd.google-apps.document"
 ROSTER_AREAS = ["台北", "台中", "桃園", "新竹"]
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 FORM_MIME = "application/vnd.google-apps.form"
@@ -552,9 +553,11 @@ def vote_exclusions(rollover, file_id: str) -> Tuple[Dict[str, Set[str]], Set[st
 
 # ---------- 複製前一年度的檔案與資料夾 ----------
 def copy_from_prev(rollover, prev_files: List[Dict[str, Any]], folder: Dict[str, Any],
-                   old_names: List[str], new_name: str, mime: str) -> Dict[str, str]:
-    """依序找 old_names 中第一個存在且類型相符的檔案，複製成 new_name（同名同類型已存在就沿用）。"""
+                   old_names: List[str], new_name: str, mime: str, target_mime: str = "") -> Dict[str, str]:
+    """依序找 old_names 中第一個存在且類型相符的檔案，複製成 new_name（同名同類型已存在就沿用）。
+    target_mime 有值時複製同時轉檔（例：Word → Google 文件）。"""
     source = next((f for n in old_names for f in prev_files if f["name"] == n and f["mimeType"] == mime), None)
+    mime = target_mime or mime
     if not source:
         rollover.log(f"  ✗ 前一年度找不到：{'／'.join(old_names)}")
         return {"kind": "檔案", "old_name": old_names[0], "old_id": "", "new_name": "找不到來源", "new_id": ""}
@@ -568,8 +571,9 @@ def copy_from_prev(rollover, prev_files: List[Dict[str, Any]], folder: Dict[str,
             rollover._retire(item)
         rollover.log(f"  複製檔案：{source['name']} → {new_name}")
         new = {"id": f"(dry-run:{new_name})", "name": new_name} if rollover.dry_run else \
-            rollover.drive.files().copy(fileId=source["id"], body={"name": new_name, "parents": [folder["id"]]},
-                                        fields="id,name", supportsAllDrives=True).execute()
+            rollover.drive.files().copy(fileId=source["id"], fields="id,name", supportsAllDrives=True,
+                                        body={"name": new_name, "parents": [folder["id"]],
+                                              **({"mimeType": target_mime} if target_mime else {})}).execute()
         created = True
     return {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
             "new_name": new["name"], "new_id": new["id"], "created": created}
@@ -577,7 +581,7 @@ def copy_from_prev(rollover, prev_files: List[Dict[str, Any]], folder: Dict[str,
 
 def copy_subfolders_and_files(rollover, prev_files: List[Dict[str, Any]], folder: Dict[str, Any]
                               ) -> List[Dict[str, str]]:
-    """前一年度的子資料夾照建（名稱年份換新，不複製內容），COPY_FILES 直接複製。"""
+    """前一年度的子資料夾照建（名稱年份換新，不複製內容），COPY_FILES 複製成 Google 文件。"""
     y, py = str(rollover.new_year), str(rollover.prev_year)
     records = []
     for f in prev_files:
@@ -586,9 +590,10 @@ def copy_subfolders_and_files(rollover, prev_files: List[Dict[str, Any]], folder
             records.append({"kind": "資料夾", "old_name": f["name"], "old_id": f["id"],
                             "new_name": sub["name"], "new_id": sub["id"]})
     for name in COPY_FILES:
-        source = next((f for f in prev_files if f["name"] == name), None)
+        source = next((f for f in prev_files if f["name"] in (name, f"{name}.docx")), None)
         if source:
-            records.append(copy_from_prev(rollover, prev_files, folder, [name], name, source["mimeType"]))
+            records.append(copy_from_prev(rollover, prev_files, folder, [source["name"]], name,
+                                          source["mimeType"], DOC_MIME))
     return records
 
 

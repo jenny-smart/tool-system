@@ -123,7 +123,7 @@ def test_run_spring_area_dry_run(monkeypatch):
     assert ("2026春酒參與統計表單-範本", "2027春酒參與統計表單") in names      # 回覆試算表取範本
     assert ("2025年度投票（台北）", "2026年度投票（台北）") in names
     assert ("2026春酒照片", "2027春酒照片") in names and ("遊覽車", "遊覽車") in names
-    assert ("春酒抽籤.docx", "春酒抽籤.docx") in names
+    assert ("春酒抽籤.docx", "春酒抽籤") in names                         # Word 轉 Google 文件
     assert ("專員個資-新竹", "找不到來源") in names
 
 
