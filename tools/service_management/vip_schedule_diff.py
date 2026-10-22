@@ -13,6 +13,8 @@ GATE_HEADERS = ["回覆確認", "確認備註", "改加標記", "已確認", "�
 LEGACY_GATE_HEADERS = {"確認狀態": "回覆確認"}
 TOPUP_HEADERS = ["需儲值"]  # 定期VIP匯出 V 欄：依日期累計超過儲值金餘額的那幾次
 EXTRA_HEADERS = GATE_HEADERS + TOPUP_HEADERS
+# 代客保留：打勾的列由 orders-system 用檸檬保留帳號建單。排程只建立標題與勾選框，從不寫入或清除值。
+PROXY_HEADER = "代客保留"
 COLORS = {
     "新增": {"red": 1, "green": .96, "blue": .72},
     "未成單異動": {"red": 1, "green": .96, "blue": .72},
@@ -250,6 +252,21 @@ def _column(index):
     return result
 
 
+def _proxy_checkboxes(ss, target, column, rows):
+    """代客保留欄設成勾選框；失敗不影響排程更新。"""
+    sheet_id = getattr(target, "id", None)
+    if sheet_id is None or rows < 2:
+        return
+    try:
+        ss.batch_update({"requests": [{"setDataValidation": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": rows,
+                      "startColumnIndex": column, "endColumnIndex": column + 1},
+            "rule": {"condition": {"type": "BOOLEAN"}, "showCustomUi": True},
+        }}]})
+    except Exception:
+        pass
+
+
 def _tracking_columns(header, rows, names=META_HEADERS):
     # Blank headers can still have user data underneath; append after all used cells.
     used = max([33] + [i + 1 for row in [header] + list(rows)
@@ -451,13 +468,21 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                                    target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != current_header):
             raise RuntimeError("排程在比對期間已有更新，未覆寫；請待成單完成後重新比對")
         required_rows = max([len(existing) + 1, 2] + [u["row"] for u in plan["updates"]])
-        required_cols = max(columns) + 1
+        proxy_column = next((i for i, v in enumerate(header) if i >= 10 and _text(v) == PROXY_HEADER), None)
+        new_proxy_column = proxy_column is None
+        if new_proxy_column:
+            proxy_column = max([max(columns) + 1] + [i + 1 for row in [header] + list(physical_rows)
+                                                     for i, value in enumerate(row) if _text(value)])
+        required_cols = max(max(columns), proxy_column) + 1
         if target is None:
             target = ss.add_worksheet(title=target_name, rows=max(required_rows + 10, 200), cols=required_cols)
         elif target.col_count < required_cols or target.row_count < required_rows:
             target.resize(rows=max(target.row_count, required_rows), cols=max(target.col_count, required_cols))
         if created:
             target.update(values=[list(headers[:30])], range_name="A1:AD1", value_input_option="RAW")
+        if new_proxy_column:
+            target.update(values=[[PROXY_HEADER]], range_name=f"{_column(proxy_column)}1", value_input_option="RAW")
+        _proxy_checkboxes(ss, target, proxy_column, max(required_rows, getattr(target, "row_count", 0) or 0))
         for column, name in zip(columns, META_HEADERS + [n for names, _, _ in extra_groups for n in names]):
             target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
         updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")

@@ -171,7 +171,7 @@ def test_writer_updates_booked_calendar_cells_preserving_k_ag_and_row_position()
     sync(book, [source])
     assert sheet.data[1][10:30] == row[10:30]
     assert all(u['range'] in ('A2:J2', 'D2', 'AH2', 'AI2', 'AJ2', 'AK2') for batch, _ in sheet.batches for u in batch)
-    assert sheet.formats[0]['range'] == 'A2:AK2'
+    assert sheet.formats[0]['range'] == 'A2:AL2'
     report = book.sheets['排程差異_台北202611']
     before = len(report.data)
     sync(book, [source])
@@ -234,7 +234,7 @@ def test_legacy_30_column_schedule_is_extended_without_overwriting_order():
         return original_get(range_name, **kwargs)
     sheet.get = get
     sync(Book([sheet]), [source_row(old_row(), **{'0': '2人'})])
-    assert sheet.col_count == 37
+    assert sheet.col_count == 38
     assert sheet.data[1][10:30] == row[10:30]
 
 
@@ -250,9 +250,9 @@ def test_custom_ae_ag_are_preserved_and_tracking_columns_reused():
     assert sheet.data[1][30:33] == custom
     assert sheet.data[0][33:36] == ['日曆事件ID', '日曆異動', '日曆異動內容']
     assert sheet.data[1][33] == 'event1'
-    assert sheet.col_count == 37
+    assert sheet.col_count == 38
     sync(book, [source])
-    assert sheet.col_count == 37
+    assert sheet.col_count == 38
     assert sheet.data[1][30:33] == custom
 
 
@@ -394,7 +394,7 @@ def test_same_day_customer_address_highlights_all_visits_including_paused():
     sync(Book([sheet]), [source_row(row) for row in (active, paused, other_day)])
     purple = {'red': .90, 'green': .85, 'blue': 1}
     marked = [item['range'] for item in sheet.formats if item['format']['backgroundColor'] == purple]
-    assert marked == ['A2:AK2', 'A3:AK3']
+    assert marked == ['A2:AL2', 'A3:AL3']
     assert [row[:30] for row in sheet.data[1:]] == [row[:30] for row in before[1:]]
 
 
@@ -703,3 +703,26 @@ def test_rows_no_longer_in_calendar_move_below_the_calendar_rows():
     assert sheet.data[3][12] == 'LC7'
     report = book.sheets['排程差異_台北202612'].data
     assert [line[2] for line in report[1:] if line[3] == '本次日曆未見'] == [4]
+
+
+def test_proxy_reserve_checkbox_column_is_added_once_and_never_written():
+    row = old_row(order='LC123')
+    sheet = Sheet('台北202611', [row])
+    sync(Book([sheet]), [source_row(row)])
+    column = sheet.data[0].index('代客保留')
+    assert column > 33
+    # 使用者勾選後再比對：沿用同一欄，值不被改寫。
+    sheet.data[1] += [''] * (column + 1 - len(sheet.data[1]))
+    sheet.data[1][column] = 'TRUE'
+    sync(Book([sheet]), [source_row(row, **{'0': '2人'})])
+    assert sheet.data[0].count('代客保留') == 1
+    assert sheet.data[1][column] == 'TRUE'
+
+
+def test_user_added_proxy_column_is_reused():
+    row = old_row()
+    sheet = Sheet('台北202611', [row])
+    sheet.data[0] += ['', '', '代客保留']
+    sheet.col_count = 36
+    sync(Book([sheet]), [source_row(row)])
+    assert sheet.data[0].count('代客保留') == 1 and sheet.data[0][35] == '代客保留'
