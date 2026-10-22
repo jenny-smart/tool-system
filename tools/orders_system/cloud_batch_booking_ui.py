@@ -134,7 +134,7 @@ def _render_live_progress(run):
         st.caption("以上為中止前最後回報的進度；未回報部分請核對工作表，勿視為零筆。")
 
 
-def _render_running_steps(run_id):
+def _render_running_steps(run_id, dev=False):
     jobs = _github_get(f"actions/runs/{run_id}/jobs").json().get("jobs", [])
     if not jobs:
         st.caption("正在等待雲端執行環境。")
@@ -151,7 +151,10 @@ def _render_running_steps(run_id):
         active = [step for step in job.get("steps", []) if step.get("status") == "in_progress"]
         for step in active:
             name = step.get("name", "")
-            st.write("目前步驟：" + labels.get(name, name))
+            label = labels.get(name, name)
+            if dev and name == "Run optimized cloud batch booking":
+                label = "批次成單、回填（測試機 dev 只建單）"
+            st.write("目前步驟：" + label)
         completed = sum(step.get("status") == "completed" for step in job.get("steps", []))
         total = len(job.get("steps", []))
         if total:
@@ -192,6 +195,11 @@ def _render_cloud_status():
                 return
             st.session_state['optimized_cloud_current_run'] = (run['id'], run.get('run_attempt', 1))
             del st.session_state['optimized_cloud_dispatch']
+        # 頁面上方的「執行中」提醒讀這個值；下一次整頁重繪時更新。
+        if run and run.get('status') != 'completed':
+            st.session_state['optimized_cloud_active'] = _run_label(run)
+        else:
+            st.session_state.pop('optimized_cloud_active', None)
         if not run:
             st.info("尚無雲端批次執行紀錄。")
             return
@@ -208,7 +216,7 @@ def _render_cloud_status():
             if run.get("status") == "in_progress":
                 st.info("雲端批次執行中；每 15 秒更新狀態。")
                 try:
-                    _render_running_steps(run['id'])
+                    _render_running_steps(run['id'], dev="(dev)" in str(run.get("display_title") or ""))
                 except Exception:
                     st.caption("暫時無法取得目前步驟，請查看日誌；執行狀態仍會每 15 秒更新。")
             else:
@@ -254,7 +262,9 @@ def render(env: str):
     if is_dev:
         st.warning("🧪 測試機 dev：雲端會連 backend-dev 建單，只執行「建單」，不寄確認信、不改 Google 日曆，並在工作表副本回填。")
 
-    status_panel = st.container()
+    active = st.session_state.get('optimized_cloud_active')
+    if active:
+        st.info(f"⏳ 雲端成單執行中（{active}），進度見頁面最下方「雲端成單進度」；同一環境一次只跑一個，新送出的會排隊。")
 
     st.markdown("#### 4　執行設定")
     c1, c2, c3 = st.columns(3)
@@ -344,5 +354,5 @@ def render(env: str):
         except Exception as exc:
             st.error(str(exc))
 
-    with status_panel:
-        _render_cloud_status()
+    st.markdown("<hr>", unsafe_allow_html=True)
+    _render_cloud_status()

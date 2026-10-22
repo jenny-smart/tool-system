@@ -810,6 +810,9 @@ def load_worksheet(sheet_name):
     rows = values[1:]
     df = pd.DataFrame(rows, columns=headers)
     df["__sheet_row__"] = range(2, len(df) + 2)
+    # 「代客保留」打勾列改用檸檬保留帳號建單（只改記憶體內的電話，不寫回工作表）。
+    import proxy_reserve
+    proxy_reserve.apply(df)
     return ws, df
 
 
@@ -2642,6 +2645,15 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
 
     base_data["address"] = selected_address
 
+    # 代客保留：客人備註與客服備註都寫「代客保留：客人姓名」，不沿用該地址原本的客服備註。
+    import proxy_reserve
+    proxy_customer = proxy_reserve.proxy_name(row0)
+    if proxy_customer:
+        proxy_memo = proxy_reserve.memo_for(proxy_customer)
+        base_data["memo"] = "；".join(x for x in (proxy_memo, str(base_data.get("memo") or "")) if x)
+        best_addr["notice"] = proxy_memo
+        logger(f"{group_label}代客保留：用檸檬保留帳號 {phone} 建單，備註「{proxy_memo}」")
+
     # 強制套用查詢地址後取得的區域/車馬費資料
     base_data["fare"] = first_nonzero(best_addr.get("fare"), base_data.get("fare"), default="0")
     base_data["notice"] = str(best_addr.get("notice") or base_data.get("notice") or "")
@@ -2667,6 +2679,8 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         if mapped["need_note"]:
             sms_time = mapped["original_slot"]
             customer_note = f"服務時間：{mapped['original_slot']}"
+            if proxy_customer:
+                customer_note = base_data.get("memo", "")
         return sms_time, customer_note
 
     def build_priced_payload_for_date(date_s, row_system_period):

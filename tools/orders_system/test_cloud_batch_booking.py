@@ -175,8 +175,20 @@ class CloudStatusTest(unittest.TestCase):
                 self.render()
                 summary.assert_not_called()
                 if status == 'in_progress':
-                    steps.assert_called_once_with(1)
+                    steps.assert_called_once_with(1, dev=False)
             self.assertIn('15 秒', self.st.info.call_args.args[0])
+            # 執行中時記下標籤，頁面上方顯示一行提醒。
+            self.assertIn('第 1 次執行', self.st.session_state['optimized_cloud_active'])
+
+    def test_completed_run_clears_top_reminder_and_dev_run_uses_dev_step_label(self):
+        self.st.session_state['optimized_cloud_active'] = 'old'
+        with patch.object(ui, '_run_summary', return_value=(1, 1, 0, 0)):
+            self.render()
+        self.assertNotIn('optimized_cloud_active', self.st.session_state)
+        self.run.update(status='in_progress', display_title='Optimized Cloud Batch Booking (dev) 台北')
+        with patch.object(ui, '_render_running_steps') as steps:
+            self.render()
+        steps.assert_called_once_with(1, dev=True)
 
     def test_pending_dispatch_does_not_show_previous_completion(self):
         self.st.session_state['optimized_cloud_dispatch'] = {'previous_run_id': 1, 'requested_at': '2026-10-04T00:00:00+00:00'}

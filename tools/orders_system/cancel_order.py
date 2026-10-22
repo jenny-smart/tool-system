@@ -242,6 +242,7 @@ def _order_from_block(block):
         "order_no": order_no,
         "name": name,
         "phone": phone,
+        "address": orders._calchk_address_from_lines(lines),
         "service_date": service_date,
         "period": period,
         "payment_status": payment_status,
