@@ -35,6 +35,17 @@ jobs:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      # 春節禮品名單統計：登入各區後台下載儲值金訂單
+      TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
+      TAIPEI_PASSWORD: ${{ secrets.TAIPEI_PASSWORD }}
+      TAICHUNG_EMAIL: ${{ secrets.TAICHUNG_EMAIL }}
+      TAICHUNG_PASSWORD: ${{ secrets.TAICHUNG_PASSWORD }}
+      TAOYUAN_EMAIL: ${{ secrets.TAOYUAN_EMAIL }}
+      TAOYUAN_PASSWORD: ${{ secrets.TAOYUAN_PASSWORD }}
+      HSINCHU_EMAIL: ${{ secrets.HSINCHU_EMAIL }}
+      HSINCHU_PASSWORD: ${{ secrets.HSINCHU_PASSWORD }}
+      KAOHSIUNG_EMAIL: ${{ secrets.KAOHSIUNG_EMAIL }}
+      KAOHSIUNG_PASSWORD: ${{ secrets.KAOHSIUNG_PASSWORD }}
 
     steps:
       - name: Checkout repository

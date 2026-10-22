@@ -230,6 +230,16 @@ def prelim_rows(existing: List[List[str]], roster: Dict[str, List[str]]) -> List
     return [[label, n] for label in order for n in groups[label]]
 
 
+def manual_by_name(existing: List[List[str]]) -> Dict[Tuple[str, str], List[str]]:
+    """初步統計人工填的 G～I（眷屬人數）與 L 欄，依（分組, 姓名）記住，名單重排後放回同一人。"""
+    out = {}
+    for r in existing:
+        if len(r) > 1 and r[1]:
+            r = r + [""] * (12 - len(r))
+            out[(r[0], r[1])] = [r[6], r[7], r[8], r[11]]
+    return out
+
+
 def prelim_formulas(rows: List[List[str]], roster_sheet: str) -> List[List[str]]:
     """初步統計 A～K 每列（G～I 眷屬人數留白給人填）。"""
     rs = f"'{roster_sheet}'"
@@ -355,13 +365,17 @@ def update_roster(rollover, file_id: str, roster: Dict[str, List[List[str]]]) ->
 
     if PRELIM_SHEET in ids:
         names = {a: [r[0] for r in staff] for a, staff in roster.items()}
-        prelim = prelim_rows(read(rollover, file_id, f"'{PRELIM_SHEET}'!A2:B300"), names)
-        values.batchClear(spreadsheetId=file_id, body={"ranges": [
-            f"'{PRELIM_SHEET}'!A2:F300", f"'{PRELIM_SHEET}'!J2:K300"]}).execute()
+        existing = read(rollover, file_id, f"'{PRELIM_SHEET}'!A2:L300")
+        prelim = prelim_rows([r[:2] for r in existing], names)
+        manual = manual_by_name(existing)
+        values.batchClear(spreadsheetId=file_id, body={"ranges": [f"'{PRELIM_SHEET}'!A2:L300"]}).execute()
         formulas = prelim_formulas(prelim, sheet)
+        kept = [manual.get((label, name), ["", "", "", ""]) for label, name in prelim]
         rollover._values_batch(file_id, [
             {"range": f"'{PRELIM_SHEET}'!A2", "values": [r[:6] for r in formulas]},
+            {"range": f"'{PRELIM_SHEET}'!G2", "values": [k[:3] for k in kept]},
             {"range": f"'{PRELIM_SHEET}'!J2", "values": [r[9:] for r in formulas]},
+            {"range": f"'{PRELIM_SHEET}'!L2", "values": [k[3:] for k in kept]},
         ])
         rollover.log(f"  {PRELIM_SHEET}：名單 {len(prelim)} 人（內勤保留）")
         if ATTEND_SHEET in ids:
@@ -494,6 +508,10 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
     if not areas:
         rollover.log(f"  春酒專區沒有「{area}」地區，略過")
         return []
+    if rollover.fresh and areas != ROSTER_AREAS:
+        # 重新生成會把整個「{Y}春酒」資料夾改名為舊版，只跑單一地區會讓其他地區的表單遺失
+        rollover.log("  ✗ 春酒專區「重新生成」只能選全區，已略過")
+        return []
     y, py = rollover.new_year, rollover.prev_year
     event = getattr(rollover, "spring_event", None) or {}
     folder = rollover.ensure_folder(SPRING_ROOT_FOLDER_ID, YEAR_FOLDER_NAME.format(Y=y))
@@ -537,16 +555,27 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
     if not event.get("date"):
         rollover.log("  未設定春酒日期，參與統計表單日期未更新")
     targets = [a for a, v in votes.items() if ready(v) and roster.get(a)]
-    if (event.get("date") and ready(attend)) or targets:
+    jobs = []  # (表單名稱, 更新函式)；每份表單各自處理，一份失敗不影響其他
+    if event.get("date") and ready(attend):
+        jobs.append((attend["new_name"], lambda forms: update_attendance_form(
+            rollover, forms, attend["new_id"], event["date"], event.get("period") or "中午")))
+    for a in targets:
+        names = [r[0] for r in roster[a] if r[0] not in inner]
+        jobs.append((votes[a]["new_name"], lambda forms, a=a, names=names: update_vote_form(
+            rollover, forms, votes[a]["new_id"], votes[a]["new_name"], names, excluded)))
+    forms = None
+    if jobs:
         try:
             forms = get_forms_service()
-            if event.get("date") and ready(attend):
-                update_attendance_form(rollover, forms, attend["new_id"], event["date"],
-                                       event.get("period") or "中午")
-            for a in targets:
-                names = [r[0] for r in roster[a] if r[0] not in inner]
-                update_vote_form(rollover, forms, votes[a]["new_id"], votes[a]["new_name"], names, excluded)
         except Exception as exc:
-            rollover.log(f"  ✗ 更新 Google 表單失敗（確認已啟用 Forms API、OAuth 含 forms.body）：{exc}")
+            rollover.log(f"  ✗ 無法連線 Google 表單（確認已啟用 Forms API、OAuth 含 forms.body）：{exc}")
+    for name, job in jobs:
+        try:
+            if forms is None:
+                raise RuntimeError("Google 表單服務無法使用")
+            job(forms)
+        except Exception as exc:
+            rollover.log(f"  ✗ 更新表單「{name}」失敗：{exc}")
+            records.append({"kind": "表單", "old_name": name, "old_id": "", "new_name": "找不到來源", "new_id": ""})
     rollover.log("  ⚠ 表單回覆連到「" + RESPONSE_FILE_NAME.format(Y=y) + "」需在各表單「回覆」頁手動設定")
     return records

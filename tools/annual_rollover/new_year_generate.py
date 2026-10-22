@@ -192,7 +192,50 @@ SUPPLY_STOCK_COLS = ("C", "AY")
 SUPPLY_STOCK_OPENING = "期初庫存"          # B 欄為此值的列與第 2 列清空 C:AY；A 欄年月標籤改為新年度
 # 不含儲存格參照的公式（例如 =87369、=1200+300）視同手打數字，清空時一併清除
 _LITERAL_FORMULA = re.compile(r"=[\d\s.+\-*/(),%]*")
-EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春酒專區"}   # 不依「生成新年度」列的功能
+
+# 「春節禮品名單」分兩階段：
+#   第一階段（各地區資料統計）：根目錄「春節禮品」下建立新年度資料夾 {Y}，登入各區後台下載「儲值金結算」
+#     （同月排程儲值金結算的會員匯出）存成「{Y}儲值金結算-{a}」，轉檔後貼入「{Y}名單統整」的「{a}儲值金」
+#     工作表（高雄沒有自己的結算，跟儲值金結算轉檔一樣從新竹拆出來），每張建樞紐（B 客戶姓名、
+#     G 購買日期在前一年度、加總 I 購買原價），並依金額區間統計人數
+#   第二階段（設定金額產生送禮名單）：畫面輸入的門檻金額寫入「設定」B1，「{Y}送禮名單」列出加總 ≥ 門檻
+#     的客戶，再貼進新年度「{Y}春節送禮名單」並在根目錄總表加分頁
+GIFT_ROOT_FOLDER_ID = "1Vg6hg762A5fXkVVMVA_2sfYldTMoATz5"
+GIFT_ROOT_FILE = "春節送禮名單"               # 根目錄總表，每年一個分頁 IMPORTRANGE 當年度檔
+GIFT_ROOT_TAB = "{y}春節送禮名單"
+GIFT_SUMMARY_FILE = "{Y}名單統整"
+GIFT_SEND_FILE = "{y}春節送禮名單"            # 年度資料夾內的送禮名單檔
+GIFT_AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
+GIFT_SOURCE_KEYWORD = "儲值金結算"
+GIFT_AREA_SHEET = "{a}儲值金"
+GIFT_SETTING_SHEET = "設定"
+GIFT_THRESHOLD_CELL = "B1"
+GIFT_ZIP_SHEET = "郵遞區號"
+GIFT_LIST_SHEET = "{Y}送禮名單"
+GIFT_LIST_HEADERS = ["地區", "姓名", "郵遞區號", "行政區", "地址", "電話", "LINE連結"]
+# 來源（儲值金結算會員匯出）欄位：B 客戶姓名、D 電話、E 地址、F LINE@、G 購買日期、H 購買項目、I 購買原價
+GIFT_NAME_COL, GIFT_DATE_COL, GIFT_AMOUNT_COL = "B", "G", "I"
+GIFT_ADDRESS_COL, GIFT_PHONE_COL, GIFT_LINE_COL = "E", "D", "F"
+GIFT_PLAN_COL = "H"
+# 只加總 H 購買項目是「儲值金…」的列：結算裡另有「轉換」（舊系統轉入的餘額）與「購物金」（贈送），不算消費
+GIFT_PLAN_PREFIX = "儲值金"
+GIFT_EXCLUDE_NAME_KEYWORD = "保留"             # 檸檬保留、檸檬保留單、代客保留等內部帳號不列入
+GIFT_SPLIT_FROM = {"高雄": "新竹"}                # 高雄從新竹的結算拆出來（新竹後台含高雄）
+GIFT_DISTRICT_CHARS = 6                       # 行政區＝地址前 6 個字
+# 送禮名單檔：清空 J2:L 與第 18 列以下，第 21 列起貼上；送禮名單 A～G → 這些欄（F 欄是勾選框）
+GIFT_SEND_CLEAR = "J2:L"
+GIFT_SEND_CLEAR_ROW = 18
+GIFT_SEND_PASTE_ROW = 21
+GIFT_SEND_COLUMNS = ["A", "B", "C", "D", "E", "G", "H"]
+GIFT_SEND_CHECKBOX_COL = "F"
+GIFT_STAT_FUNCTION = "春節禮品名單統計"         # 第一階段
+GIFT_LIST_FUNCTION = "春節送禮名單產生"         # 第二階段
+# 第一階段依加總金額分區間統計人數：<5萬、5～8萬、8～10萬、10～12萬、≥12萬（下限含、上限不含）
+GIFT_STAT_BANDS = [50000, 80000, 100000, 120000]
+GIFT_STAT_SHEET = "區間統計"
+_IMPORTRANGE = re.compile(r'(?i)importrange\(\s*"([^"]+)"\s*,\s*"([^"!]+)!([^"]+)"\s*\)')
+
+EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春酒專區", GIFT_STAT_FUNCTION, GIFT_LIST_FUNCTION}   # 不依「生成新年度」列的功能
 
 # 「生成新年度」A 欄名稱 → 功能名稱
 ROW_FUNCTIONS = {"財務報表": "財務報表", "內勤表單": "內勤表單", "專員名冊/薪資檔": "專員表單",
@@ -230,6 +273,110 @@ FINANCE_CLEAR_RANGES = {
 
 def finance_area(name: str) -> str:
     return next((area for area in FINANCE_AREAS if str(name).startswith(area)), "")
+
+
+def gift_cell(value: Any) -> Any:
+    """來源儲存格以 USER_ENTERED 寫入（日期、金額才會是日期與數字）；= 或 + 開頭的文字加 ' 保持原樣。"""
+    text = str(value)
+    return f"'{text}" if text[:1] in ("=", "+") else value
+
+
+def gift_headers(header: List[str]) -> List[str]:
+    """空白（含全形空白）標題改成「欄X」，樞紐篩選才不會因重複的空白標題對不到欄位。"""
+    return [h if str(h).strip(" 　") else f"欄{col_letters(i)}" for i, h in enumerate(header)]
+
+
+def gift_pivot(sheet_id: int, rows: int, cols: int, prev_year: int, date_header: str) -> Dict[str, Any]:
+    """樞紐：列＝客戶姓名（依加總由大到小、不顯示總計），值＝加總購買原價；篩選購買日期在前一年度、
+    購買項目是「儲值金…」（不含轉換、購物金）、姓名不含「保留」（內部帳號）。"""
+    return {
+        "source": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": rows,
+                   "startColumnIndex": 0, "endColumnIndex": cols},
+        "rows": [{"sourceColumnOffset": col_index(GIFT_NAME_COL), "showTotals": False,
+                  "sortOrder": "DESCENDING", "valueBucket": {"valuesIndex": 0}}],
+        "values": [{"sourceColumnOffset": col_index(GIFT_AMOUNT_COL), "summarizeFunction": "SUM",
+                    "name": f"{prev_year}加總"}],
+        # visibleByDefault 要設 true，否則條件會跟空的 visibleValues 取交集而什麼都不顯示
+        "filterSpecs": [
+            {"columnOffsetIndex": col_index(GIFT_DATE_COL), "filterCriteria": {
+                "visibleByDefault": True,
+                "condition": {"type": "CUSTOM_FORMULA", "values": [
+                    {"userEnteredValue": f"=YEAR('{date_header}')={prev_year}"}]}}},
+            {"columnOffsetIndex": col_index(GIFT_PLAN_COL), "filterCriteria": {
+                "visibleByDefault": True,
+                "condition": {"type": "TEXT_STARTS_WITH", "values": [{"userEnteredValue": GIFT_PLAN_PREFIX}]}}},
+            {"columnOffsetIndex": col_index(GIFT_NAME_COL), "filterCriteria": {
+                "visibleByDefault": True,
+                "condition": {"type": "TEXT_NOT_CONTAINS", "values": [
+                    {"userEnteredValue": GIFT_EXCLUDE_NAME_KEYWORD}]}}},
+        ],
+    }
+
+
+def _wan(amount: int) -> str:
+    return f"{amount / 10000:g}萬"
+
+
+def gift_band_labels(bands: List[int] = GIFT_STAT_BANDS) -> List[str]:
+    """[5萬, 8萬, 10萬, 12萬] → ["5萬以下", "5萬～8萬", "8萬～10萬", "10萬～12萬", "12萬以上"]。"""
+    return ([f"{_wan(bands[0])}以下"] + [f"{_wan(a)}～{_wan(b)}" for a, b in zip(bands, bands[1:])]
+            + [f"{_wan(bands[-1])}以上"])
+
+
+def gift_band_counts(amounts: List[float], bands: List[int] = GIFT_STAT_BANDS) -> List[int]:
+    """各區間人數（下限含、上限不含），順序同 gift_band_labels。"""
+    edges = [float("-inf")] + list(bands) + [float("inf")]
+    return [sum(lo <= a < hi for a in amounts) for lo, hi in zip(edges, edges[1:])]
+
+
+def gift_stats_table(blocks: List[Tuple[str, str, str, str]], bands: List[int] = GIFT_STAT_BANDS
+                     ) -> List[List[str]]:
+    """「區間統計」工作表內容：各地區一列，人數／加總／各區間人數都用公式（樞紐更新就跟著變）。"""
+    edges = [None] + list(bands) + [None]
+    rows = [["地區", "人數", "加總"] + gift_band_labels(bands)]
+    for i, (area, sheet, name_col, sum_col) in enumerate(blocks, start=2):
+        names, sums = f"'{sheet}'!{name_col}2:{name_col}", f"'{sheet}'!{sum_col}2:{sum_col}"
+        row = [area, f'=COUNTIFS({names},"<>",{sums},">0")', f"=SUM({sums})"]
+        for lo, hi in zip(edges, edges[1:]):
+            cond = [f'{sums},">0"'] if lo is None else [f'{sums},">={lo}"']
+            if hi is not None:
+                cond.append(f'{sums},"<{hi}"')
+            row.append(f"=COUNTIFS({names},\"<>\",{','.join(cond)})")
+        rows.append(row)
+    if len(rows) > 1:
+        last = len(rows)
+        rows.append(["全區"] + [f"=SUM({col_letters(c)}2:{col_letters(c)}{last})"
+                                for c in range(1, len(rows[0]))])
+    return rows
+
+
+def gift_list_formula(blocks: List[Tuple[str, str, str, str]], zip_rows: int) -> str:
+    """「{Y}送禮名單」A2 公式。blocks＝[(地區, 地區工作表, 樞紐姓名欄, 樞紐加總欄)]；
+    「設定」B1 門檻空白時顯示提示，其餘列出各地區加總 ≥ 門檻的客戶與地址／電話／LINE。"""
+    t = f"'{GIFT_SETTING_SHEET}'!${GIFT_THRESHOLD_CELL[0]}${GIFT_THRESHOLD_CELL[1:]}"
+    zb = f"'{GIFT_ZIP_SHEET}'!$B$2:$B${zip_rows + 1}"
+    za = f"'{GIFT_ZIP_SHEET}'!$A$2:$A${zip_rows + 1}"
+    empty = "{" + ",".join(['""'] * len(GIFT_LIST_HEADERS)) + "}"
+    parts = []
+    for area, sheet, name_col, sum_col in blocks:
+        s = f"'{sheet}'!"
+
+        def look(col: str) -> str:  # 同名有多列時取第一個非空白值
+            return (f"IFERROR(INDEX(FILTER({s}${col}:${col},{s}${GIFT_NAME_COL}:${GIFT_NAME_COL}=x,"
+                    f"{s}${col}:${col}<>\"\"),1),\"\")")
+
+        parts.append(
+            f"IFERROR(LET(n,FILTER({s}{name_col}2:{name_col},{s}{sum_col}2:{sum_col}>=t,{s}{name_col}2:{name_col}<>\"\"),"
+            f"a,MAP(n,LAMBDA(x,{look(GIFT_ADDRESS_COL)}&\"\")),"
+            f"HSTACK(MAP(n,LAMBDA(x,\"{area}\")),n,"
+            f"MAP(a,LAMBDA(v,LET(w,SUBSTITUTE(REGEXREPLACE(v,\"^[0-9\\s]+\",\"\"),\"臺\",\"台\"),"
+            f"IF(w=\"\",\"\",XLOOKUP(TRUE,ARRAYFORMULA(LEFT(w,LEN({zb}))={zb}),{za},\"\"))))),"
+            f"MAP(a,LAMBDA(v,LEFT(v,{GIFT_DISTRICT_CHARS}))),a,"
+            f"MAP(n,LAMBDA(x,LET(p,{look(GIFT_PHONE_COL)},IF(ISNUMBER(p),TEXT(p,\"0000000000\"),p)))),"
+            f"MAP(n,LAMBDA(x,{look(GIFT_LINE_COL)})))),{empty})")
+    body = f"LET(all,VSTACK({','.join(parts)}),FILTER(all,INDEX(all,,2)<>\"\"))" if parts else '""'
+    return (f"=LET(t,{t},IF(t=\"\",\"請先在「{GIFT_SETTING_SHEET}」{GIFT_THRESHOLD_CELL} 填寫送禮門檻金額\","
+            f"IFERROR({body},\"沒有符合門檻的客戶\")))")
 
 
 _CLEANUP = re.compile(r"移除(.+?)的([A-Z]+\d+):?([A-Z]*\d*)")
@@ -401,7 +548,8 @@ def parse_rows_arg(text: str, last_row: int) -> List[int]:
 # ============================================================
 class Rollover:
     def __init__(self, drive, sheets, spreadsheet_id: str, new_year: int,
-                 dry_run: bool = False, fresh: bool = False, tidy: bool = False, log=print):
+                 dry_run: bool = False, fresh: bool = False, tidy: bool = False, log=print,
+                 gift_threshold: Optional[float] = None, gift_downloader=None, gift_phone_lookup=None):
         self.drive = drive
         self.sheets = sheets
         self.spreadsheet_id = spreadsheet_id
@@ -411,6 +559,9 @@ class Rollover:
         self.fresh = fresh
         self.tidy = tidy  # 行銷費用總管理／清潔用品：已存在的新年度檔不重建，直接再整理一次
         self.log = log
+        self.gift_threshold = gift_threshold  # 春節送禮名單產生：畫面輸入的門檻金額
+        self.gift_downloader = gift_downloader  # 測試用：取代後台下載 (city, prev_year, log) -> (內容, 副檔名, 筆數)
+        self.gift_phone_lookup = gift_phone_lookup  # 測試用：取代手機查近期訂單 (phone) -> 新竹／高雄／""
         self.stamp = datetime.now(TZ).strftime("%Y%m%d%H%M")
 
     # ---------- Drive ----------
@@ -1043,6 +1194,428 @@ class Rollover:
             self.log(f"  {title}：A 欄 {len(data)} 個年月標籤改為新年度")
         return data
 
+    # ---------- 春節禮品名單 ----------
+    def _gift_folder(self, create: bool) -> Optional[Dict[str, Any]]:
+        """根目錄下的 {Y} 資料夾（已存在就沿用，重新生成也不改名，來源檔放在裡面）。"""
+        Y = str(self.new_year)
+        folder = next((f for f in self.children(GIFT_ROOT_FOLDER_ID)
+                       if f["mimeType"] == FOLDER_MIME and f["name"] == Y), None)
+        if folder:
+            self.log(f"  資料夾已存在，沿用：{Y}")
+        elif create:
+            self.log(f"  建立資料夾：{Y}")
+            folder = ({"id": f"(dry-run:{Y})", "name": Y} if self.dry_run else self.drive.files().create(
+                body={"name": Y, "mimeType": FOLDER_MIME, "parents": [GIFT_ROOT_FOLDER_ID]},
+                fields="id,name", supportsAllDrives=True).execute())
+        return folder
+
+    def run_gift_stats(self) -> List[Dict[str, str]]:
+        """第一階段：建立 {Y} 資料夾，各區後台下載儲值金結算，建立「{Y}名單統整」：轉檔貼入「{a}儲值金」
+        （高雄從新竹拆出）、建樞紐、「{Y}送禮名單」公式，並回報各金額區間的人數，供第二階段決定金額。"""
+        Y = str(self.new_year)
+        folder = self._gift_folder(create=True)
+        records = [{"kind": "資料夾", "old_name": "", "old_id": "", "new_name": Y, "new_id": folder["id"]}]
+
+        if self.dry_run:
+            self.log(f"  （dry-run）會登入各區後台下載儲值金結算存成「{Y}{GIFT_SOURCE_KEYWORD}-地區」")
+        else:
+            self._gift_download(folder)
+        listing = [] if folder["id"].startswith("(dry-run") else self.children(folder["id"])
+        sources = self._gift_sources(listing)
+        for area, parent in GIFT_SPLIT_FROM.items():
+            if area not in sources and parent in sources:
+                sources[area] = {**sources[parent], "split_from": parent}
+        for area in GIFT_AREAS:
+            if area in sources:
+                split = sources[area].get("split_from")
+                self.log(f"  {area}來源：{sources[area]['name']}" + (f"（從{split}拆出）" if split else ""))
+            else:
+                self.log(f"  ⚠ {Y} 資料夾沒有{area}{GIFT_SOURCE_KEYWORD}來源檔，略過")
+        if not sources:
+            self.log(f"  ⚠ 後台下載都失敗，「春節禮品/{Y}」也沒有各地區儲值金結算（例：{Y}{GIFT_SOURCE_KEYWORD}-台北.xls）")
+            return records + [{"kind": "檔案", "old_name": f"{Y}{GIFT_SOURCE_KEYWORD}-地區", "old_id": "",
+                               "new_name": "找不到來源", "new_id": ""}]
+
+        summary, created = self._ensure_spreadsheet(folder["id"], self._fmt(GIFT_SUMMARY_FILE), listing)
+        records.append({"kind": "檔案", "old_name": "", "old_id": "", "new_name": summary["name"],
+                        "new_id": summary["id"], "created": created})
+        if self.dry_run:
+            self.log(f"  （dry-run）會轉檔貼入 {'、'.join(GIFT_AREA_SHEET.format(a=a) for a in sources)}、"
+                     f"建立樞紐與「{self._fmt(GIFT_LIST_SHEET)}」")
+            return records
+
+        blocks = self._gift_build_summary(summary["id"], sources, created)
+        self._gift_report_stats(summary["id"], blocks)
+        self.log(f"  第一階段完成：決定門檻金額後，執行「{GIFT_LIST_FUNCTION}」並在畫面輸入金額")
+        return records
+
+    def _gift_report_stats(self, file_id: str, blocks: List[Tuple[str, str, str, str]]) -> None:
+        """「區間統計」工作表寫入各地區區間人數公式，並讀樞紐結果在執行紀錄列出各區間人數。"""
+        if not blocks:
+            return
+        table = gift_stats_table(blocks)
+        if GIFT_STAT_SHEET not in self._sheet_map(file_id):
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
+                {"addSheet": {"properties": {"title": GIFT_STAT_SHEET}}}]}).execute()
+        self.sheets.spreadsheets().values().batchClear(
+            spreadsheetId=file_id, body={"ranges": [f"'{GIFT_STAT_SHEET}'!A:Z"]}).execute()
+        self._values_batch(file_id, [{"range": f"'{GIFT_STAT_SHEET}'!A1", "values": table}])
+
+        res = self.sheets.spreadsheets().values().batchGet(
+            spreadsheetId=file_id, valueRenderOption="UNFORMATTED_VALUE",
+            ranges=[f"'{t}'!{n}2:{m}" for _, t, n, m in blocks]).execute()
+        labels = gift_band_labels()
+        totals: List[float] = []
+        for (area, _, _, _), vr in zip(blocks, res.get("valueRanges", [])):
+            amounts = []
+            for row in vr.get("values", []):
+                if len(row) > 1 and str(row[0]).strip():
+                    try:
+                        amount = float(row[1])
+                    except (TypeError, ValueError):
+                        continue
+                    if amount > 0:
+                        amounts.append(amount)
+            totals += amounts
+            self.log(f"  {area}：{self.prev_year} 年 {len(amounts)} 位，加總 {sum(amounts):,.0f}；"
+                     + "、".join(f"{lb} {n} 位" for lb, n in zip(labels, gift_band_counts(amounts))))
+        self.log(f"  全區：{len(totals)} 位；"
+                 + "、".join(f"{lb} {n} 位" for lb, n in zip(labels, gift_band_counts(totals)))
+                 + f"（明細見「{GIFT_STAT_SHEET}」工作表）")
+
+    def run_gift_list(self) -> List[Dict[str, str]]:
+        """第二階段：畫面輸入的門檻金額寫入「設定」B1，讀「{Y}送禮名單」；複製前一年度「{y}春節送禮名單」
+        為新年度檔，清空後從第 21 列貼上送禮名單；根目錄「春節送禮名單」複製分頁為新年度分頁，
+        A1 IMPORTRANGE 改指新檔。"""
+        threshold = self.gift_threshold
+        if threshold is None or threshold <= 0:
+            raise ValueError("請在畫面輸入送禮門檻金額（大於 0）")
+        threshold = int(threshold) if float(threshold).is_integer() else threshold
+        folder = self._gift_folder(create=False)
+        if not folder:
+            raise RuntimeError(f"找不到「春節禮品/{self.new_year}」資料夾，請先執行「{GIFT_STAT_FUNCTION}」")
+        listing = self.children(folder["id"])
+        summary_name = self._fmt(GIFT_SUMMARY_FILE)
+        summary = next((f for f in listing if f["mimeType"] == SHEET_MIME and f["name"] == summary_name), None)
+        if not summary:
+            raise RuntimeError(f"找不到「{summary_name}」，請先執行「{GIFT_STAT_FUNCTION}」")
+        if self.dry_run:
+            self.log(f"  （dry-run）會把門檻 {threshold:,} 寫入「{GIFT_SETTING_SHEET}」{GIFT_THRESHOLD_CELL}，"
+                     f"產生 {self.new_year}春節送禮名單並貼上名單")
+            return []
+        self.sheets.spreadsheets().values().update(
+            spreadsheetId=summary["id"], range=f"'{GIFT_SETTING_SHEET}'!{GIFT_THRESHOLD_CELL}",
+            valueInputOption="RAW", body={"values": [[threshold]]}).execute()
+        rows = self.sheets.spreadsheets().values().get(
+            spreadsheetId=summary["id"], range=f"'{self._fmt(GIFT_LIST_SHEET)}'!A2:G").execute().get("values", [])
+        rows = [r + [""] * (len(GIFT_LIST_HEADERS) - len(r)) for r in rows if len(r) > 1 and str(r[1]).strip()]
+        self.log(f"  門檻 {threshold:,}：{self._fmt(GIFT_LIST_SHEET)} 共 {len(rows)} 位")
+        if not rows:
+            self.log("  ⚠ 沒有客戶達到門檻，未產生春節送禮名單；請調低金額再執行")
+            return []
+        return self._gift_send_file(folder, listing, rows)
+
+    def _gift_download(self, folder: Dict[str, Any]) -> None:
+        """各區登入後台下載儲值金結算（月排程同一份會員匯出），上傳為「{Y}儲值金結算-{a}.xls(x)」
+        （同名舊檔移到垃圾桶）；高雄從新竹拆出，不另外下載。單一地區失敗只警告，資料夾裡已有的檔案照用。"""
+        from googleapiclient.http import MediaInMemoryUpload
+
+        downloader = self.gift_downloader
+        if downloader is None:
+            from tools.annual_rollover.gift_download import download_gift_settlement as downloader
+        for area in [a for a in GIFT_AREAS if a not in GIFT_SPLIT_FROM]:
+            base = f"{self.new_year}{GIFT_SOURCE_KEYWORD}-{area}"
+            try:
+                content, ext, count = downloader(area, self.prev_year, self.log)
+            except Exception as exc:
+                self.log(f"  ⚠ {area} 後台下載失敗：{exc}（改用資料夾裡已有的檔案）")
+                continue
+            for old in self.children(folder["id"]):
+                if old["mimeType"] != SHEET_MIME and re.sub(r"\.(xlsx?|csv)$", "", old["name"], flags=re.I) == base:
+                    self.drive.files().update(fileId=old["id"], body={"trashed": True},
+                                              supportsAllDrives=True).execute()
+            mime = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if ext == "xlsx"
+                    else "application/vnd.ms-excel")
+            self.drive.files().create(
+                body={"name": f"{base}.{ext}", "mimeType": mime, "parents": [folder["id"]]},
+                media_body=MediaInMemoryUpload(content, mimetype=mime, resumable=False),
+                fields="id,name", supportsAllDrives=True).execute()
+            self.log(f"  {area}：後台下載儲值金結算 {count} 筆 → {base}.{ext}")
+
+    def _gift_phone_area(self, phone: str) -> str:
+        """新竹／高雄分不出來時用手機查新竹後台近期訂單（同一支手機只查一次）；查不到或無法登入回傳空字串。"""
+        key = "".join(ch for ch in str(phone or "") if ch.isdigit())
+        cache = self.__dict__.setdefault("_gift_phone_cache", {})
+        if key in cache:
+            return cache[key]
+        if not key or self.__dict__.get("_gift_phone_error"):
+            return ""
+        try:
+            if self.gift_phone_lookup is None:
+                import requests
+                from tools.scheduled_monthly import half_month_orders as hm
+
+                acc = hm.load_accounts().get("新竹") or {}
+                session = requests.Session()
+                hm.login(session, acc.get("email", ""), acc.get("password", ""))
+                self.gift_phone_lookup = lambda p: hm.area_by_phone(session, p)
+            cache[key] = self.gift_phone_lookup(key) or ""
+        except Exception as exc:
+            self._gift_phone_error = str(exc)
+            self.log(f"  ⚠ 手機查訂單失敗，分不出新竹／高雄的列沿用原規則：{exc}")
+            return ""
+        return cache[key]
+
+    def _gift_split_kaohsiung(self, values: List[List[str]]) -> Tuple[List[List[str]], List[List[str]]]:
+        """新竹結算拆成 (新竹, 高雄)，規則同儲值金結算轉檔：方案名稱／地址判斷，分不出來用手機查近期訂單，
+        再不行沿用原規則（高雄方案或地址含高雄／台南才算高雄）。"""
+        from config.vip_config import KAOHSIUNG_ADDRESS_KEYWORDS, KAOHSIUNG_FILTER_VALUES
+        from services.vip_workflow import classify_hsinchu_row
+
+        hsinchu, kaohsiung = [values[0]], [values[0]]
+        plan_i, addr_i, phone_i = (col_index(GIFT_PLAN_COL), col_index(GIFT_ADDRESS_COL),
+                                   col_index(GIFT_PHONE_COL))
+        for row in values[1:]:
+            cell = lambda i: str(row[i]).strip() if len(row) > i else ""
+            plan, address = cell(plan_i), cell(addr_i)
+            area = classify_hsinchu_row(plan, address) or self._gift_phone_area(cell(phone_i))
+            if not area:
+                area = "高雄" if plan in KAOHSIUNG_FILTER_VALUES or any(
+                    k in address for k in KAOHSIUNG_ADDRESS_KEYWORDS) else "新竹"
+            (kaohsiung if area == "高雄" else hsinchu).append(row)
+        return hsinchu, kaohsiung
+
+    def _gift_sources(self, listing: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """各地區來源檔：檔名含「儲值金」與地區（名單統整／送禮名單除外）；同地區有原始匯出檔
+        （xls/xlsx/csv）時優先用它，其次才用已轉好的 Google 試算表。"""
+        skip = (self._fmt(GIFT_SUMMARY_FILE), "送禮名單")
+        sources: Dict[str, Dict[str, Any]] = {}
+        for f in listing:
+            name = f["name"]
+            if f["mimeType"] in (FOLDER_MIME, SHORTCUT_MIME) or GIFT_SOURCE_KEYWORD not in name \
+                    or any(s in name for s in skip):
+                continue
+            if not (f["mimeType"] == SHEET_MIME or re.search(r"\.(xlsx?|csv)$", name, re.I)):
+                continue
+            area = next((a for a in GIFT_AREAS if a in name), "")
+            if not area:
+                continue
+            exact = re.sub(r"\.(xlsx?|csv)$", "", name, flags=re.I) == f"{self.new_year}{GIFT_SOURCE_KEYWORD}-{area}"
+            current = sources.get(area)
+            if (current is None or current["mimeType"] == SHEET_MIME and f["mimeType"] != SHEET_MIME
+                    or exact and f["mimeType"] != SHEET_MIME):
+                sources[area] = f
+        return sources
+
+    def _ensure_spreadsheet(self, parent_id: str, name: str,
+                            listing: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], bool]:
+        existing = [f for f in listing if f["mimeType"] == SHEET_MIME and f["name"] == name]
+        if existing and not self.fresh:
+            self.log(f"  檔案已存在，沿用：{name}")
+            return existing[0], False
+        for item in existing:
+            self._retire(item)
+        self.log(f"  建立檔案：{name}")
+        if self.dry_run:
+            return {"id": f"(dry-run:{name})", "name": name}, True
+        return self.drive.files().create(
+            body={"name": name, "mimeType": SHEET_MIME, "parents": [parent_id]},
+            fields="id,name", supportsAllDrives=True).execute(), True
+
+    def _gift_read_source(self, source: Dict[str, Any]) -> List[List[str]]:
+        """讀來源檔第一個分頁；xls/xlsx/csv 先轉成暫存 Google 試算表，讀完移到垃圾桶。"""
+        temp = None
+        file_id = source["id"]
+        if source["mimeType"] != SHEET_MIME:
+            temp = self.drive.files().copy(
+                fileId=source["id"], fields="id",
+                body={"name": f"{re.sub(r'[.][^.]+$', '', source['name'])}_轉檔暫存", "mimeType": SHEET_MIME},
+                supportsAllDrives=True).execute()
+            file_id = temp["id"]
+        try:
+            meta = self.sheets.spreadsheets().get(
+                spreadsheetId=file_id, fields="sheets.properties.title").execute()
+            title = meta["sheets"][0]["properties"]["title"]
+            return self.sheets.spreadsheets().values().get(
+                spreadsheetId=file_id, range=f"'{title}'").execute().get("values", [])
+        finally:
+            if temp:
+                self.drive.files().update(fileId=temp["id"], body={"trashed": True},
+                                          supportsAllDrives=True).execute()
+
+    def _gift_build_summary(self, file_id: str, sources: Dict[str, Dict[str, Any]],
+                            created: bool) -> List[Tuple[str, str, str, str]]:
+        """名單統整：設定／郵遞區號／各地區儲值金（每次重貼、樞紐重建）／送禮名單公式；
+        回傳 [(地區, 工作表, 樞紐姓名欄, 樞紐加總欄)]。"""
+        from tools.annual_rollover.tw_zipcodes import TW_ZIPCODES
+
+        ids = self._sheet_map(file_id)
+        area_titles = [GIFT_AREA_SHEET.format(a=a) for a in sources]
+        list_title = self._fmt(GIFT_LIST_SHEET)
+        # 地區工作表整張重建（舊樞紐位置會隨欄數變動，直接刪掉重建最乾淨）
+        requests: List[Dict[str, Any]] = [{"deleteSheet": {"sheetId": ids[t]}} for t in area_titles if t in ids]
+        new_titles = [t for t in [GIFT_SETTING_SHEET, GIFT_ZIP_SHEET, list_title] if t not in ids] + area_titles
+        requests += [{"addSheet": {"properties": {"title": t}}} for t in new_titles]
+        res = self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": requests}).execute()
+        for reply in res.get("replies", []):
+            if "addSheet" in reply:
+                p = reply["addSheet"]["properties"]
+                ids[p["title"]] = p["sheetId"]
+        if created:  # 新檔預設的空白分頁刪掉
+            blank = [t for t in ids if t not in new_titles and t not in area_titles]
+            if blank:
+                self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
+                    {"deleteSheet": {"sheetId": ids[t]}} for t in blank]}).execute()
+
+        data = [{"range": f"'{GIFT_SETTING_SHEET}'!A1:A2", "values": [
+            ["送禮門檻金額"], [f"儲值金結算中 {self.prev_year} 年購買的儲值金（不含轉換、購物金）加總 ≥ B1 的客戶列入「{list_title}」"
+                         f"（B1 由「{GIFT_LIST_FUNCTION}」依畫面輸入的金額寫入，也可直接修改）"]]}]
+        data.append({"range": f"'{GIFT_ZIP_SHEET}'!A1:B{len(TW_ZIPCODES) + 1}",
+                     "values": [["郵遞區號", "行政區"]] + [list(z) for z in TW_ZIPCODES]})
+        data.append({"range": f"'{list_title}'!A1:G1", "values": [GIFT_LIST_HEADERS]})
+        self.sheets.spreadsheets().values().batchUpdate(spreadsheetId=file_id, body={
+            "valueInputOption": "RAW", "data": data}).execute()
+
+        blocks, pivots = [], []
+        read_cache: Dict[str, List[List[str]]] = {}
+        split_cache: Dict[str, Tuple[List[List[str]], List[List[str]]]] = {}
+        for area, source in sources.items():
+            title = GIFT_AREA_SHEET.format(a=area)
+            if source["id"] not in read_cache:
+                read_cache[source["id"]] = self._gift_read_source(source)
+            values = read_cache[source["id"]]
+            # 新竹與從新竹拆出的高雄共用同一份結算，拆一次後各取一半
+            shared = [a for a, src in sources.items() if src["id"] == source["id"]]
+            if values and len(shared) > 1:
+                if source["id"] not in split_cache:
+                    split_cache[source["id"]] = self._gift_split_kaohsiung(values)
+                hsinchu, kaohsiung = split_cache[source["id"]]
+                values = kaohsiung if source.get("split_from") else hsinchu
+            if not values:
+                self.log(f"  ⚠ {source['name']} 沒有資料")
+                continue
+            width = max(len(r) for r in values)
+            header = gift_headers(values[0] + [""] * (width - len(values[0])))
+            body = [[gift_cell(v) for v in r] + [""] * (width - len(r)) for r in values[1:]]
+            sid = ids[title]
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": [
+                {"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
+                    "rowCount": max(len(values) + 10, 1000), "columnCount": width + 4,
+                    "frozenRowCount": 1}}, "fields": "gridProperties"}}]}).execute()
+            self._values_batch(file_id, [{"range": f"'{title}'!A1", "values": [header] + body}])
+            pivots.append({"updateCells": {
+                "start": {"sheetId": sid, "rowIndex": 0, "columnIndex": width + 1}, "fields": "pivotTable",
+                "rows": [{"values": [{"pivotTable": gift_pivot(
+                    sid, len(values), width, self.prev_year, header[col_index(GIFT_DATE_COL)])}]}]}})
+            blocks.append((area, title, col_letters(width + 1), col_letters(width + 2)))
+            self.log(f"  {title}：貼入 {len(body)} 筆，樞紐在 {col_letters(width + 1)}1（{GIFT_NAME_COL} 姓名／"
+                     f"{GIFT_DATE_COL} 購買日期為 {self.prev_year} 年／{GIFT_PLAN_COL} 為{GIFT_PLAN_PREFIX}／加總 {GIFT_AMOUNT_COL}）")
+        if pivots:
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": pivots}).execute()
+        self.sheets.spreadsheets().values().batchClear(
+            spreadsheetId=file_id, body={"ranges": [f"'{list_title}'!A2:G"]}).execute()
+        self._values_batch(file_id, [{"range": f"'{list_title}'!A2",
+                                      "values": [[gift_list_formula(blocks, len(TW_ZIPCODES))]]}])
+        return blocks
+
+    def _gift_send_file(self, folder: Dict[str, Any], listing: List[Dict[str, Any]],
+                        rows: List[List[str]]) -> List[Dict[str, str]]:
+        """新年度「{Y}春節送禮名單」檔（新建立或勾「只整理」時才清空貼上）＋根目錄總表新年度分頁。"""
+        root_files = self.children(GIFT_ROOT_FOLDER_ID)
+        root = next((f for f in root_files if f["mimeType"] == SHEET_MIME and f["name"] == GIFT_ROOT_FILE), None)
+        if not root:
+            raise RuntimeError(f"春節禮品根目錄找不到「{GIFT_ROOT_FILE}」")
+        old_tab, new_tab = self._fmt(GIFT_ROOT_TAB), GIFT_ROOT_TAB.replace("{y}", str(self.new_year))
+        root_ids = self._sheet_map(root["id"])
+        if old_tab not in root_ids:
+            raise RuntimeError(f"「{GIFT_ROOT_FILE}」找不到「{old_tab}」分頁")
+        formula = (self.sheets.spreadsheets().values().get(
+            spreadsheetId=root["id"], range=f"'{old_tab}'!A1", valueRenderOption="FORMULA",
+        ).execute().get("values") or [[""]])[0][0]
+        match = _IMPORTRANGE.search(str(formula))
+        tab = match.group(2).strip("'") if match else ""
+
+        prev_folder = next((f for f in root_files if f["mimeType"] == FOLDER_MIME
+                            and f["name"] == str(self.prev_year)), None)
+        old_name, new_name = self._fmt(GIFT_SEND_FILE), GIFT_SEND_FILE.replace("{y}", str(self.new_year))
+        source = next((f for f in self.children(prev_folder["id"]) if f["mimeType"] == SHEET_MIME
+                       and f["name"] == old_name), None) if prev_folder else None
+        if not source:
+            raise RuntimeError(f"找不到前一年度「{self.prev_year}/{old_name}」")
+        send, created = self.ensure_copy(source, folder["id"], new_name)
+        records = [{"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
+                    "new_name": send["name"], "new_id": send["id"], "created": created}]
+        if created or self.tidy:
+            self._gift_fill_send(send["id"], tab, rows)
+        else:
+            self.log(f"  {new_name} 已存在，不重貼（要重新清空貼上請勾「只整理已存在檔案」）")
+
+        record = {"kind": "工作表", "old_name": old_tab, "old_id": root["id"],
+                  "new_name": new_tab, "new_id": root["id"], "created": False}
+        if new_tab in root_ids and self.fresh:
+            retired = f"{new_tab}_舊版{self.stamp}"
+            self.log(f"  --fresh：既有「{new_tab}」改名為「{retired}」")
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=root["id"], body={"requests": [
+                {"updateSheetProperties": {"properties": {"sheetId": root_ids.pop(new_tab), "title": retired},
+                                           "fields": "title"}}]}).execute()
+        if new_tab not in root_ids:
+            index = next(s["properties"]["index"] for s in self.sheets.spreadsheets().get(
+                spreadsheetId=root["id"], fields="sheets.properties(title,index)").execute()["sheets"]
+                if s["properties"]["title"] == old_tab)
+            self.log(f"  {GIFT_ROOT_FILE}：複製分頁 {old_tab} → {new_tab}")
+            self.sheets.spreadsheets().batchUpdate(spreadsheetId=root["id"], body={"requests": [
+                {"duplicateSheet": {"sourceSheetId": root_ids[old_tab], "newSheetName": new_tab,
+                                    "insertSheetIndex": index}}]}).execute()
+            record["created"] = True
+        if match:
+            new_formula = str(formula).replace(match.group(1), send["id"], 1)
+            self._values_batch(root["id"], [{"range": f"'{new_tab}'!A1", "values": [[new_formula]]}])
+            self.log(f"  {new_tab}!A1 → IMPORTRANGE {new_name}（第一次開啟若顯示 #REF! 請按「允許存取」）")
+        else:
+            self.log(f"  ⚠ {old_tab}!A1 不是 IMPORTRANGE，{new_tab} 未改公式")
+        return records + [record]
+
+    def _gift_fill_send(self, file_id: str, tab: str, rows: List[List[str]]) -> None:
+        """送禮名單檔：A1 年度改新年度；清空 J2:L 與第 18 列以下（F 欄勾選框重設為未勾選），
+        第 21 列起貼上送禮名單（A～E→A～E、電話→G、LINE→H）。"""
+        meta = self.sheets.spreadsheets().get(
+            spreadsheetId=file_id, fields="sheets.properties(sheetId,title,gridProperties)").execute()
+        props = {s["properties"]["title"]: s["properties"] for s in meta.get("sheets", [])}
+        tab = tab if tab in props else next(iter(props))
+        p = props[tab]
+        last_col = col_letters(p["gridProperties"].get("columnCount", 26) - 1)
+        row_count = p["gridProperties"].get("rowCount", 1000)
+        self.log(f"  {tab}：清空 {GIFT_SEND_CLEAR}、第 {GIFT_SEND_CLEAR_ROW} 列以下，"
+                 f"第 {GIFT_SEND_PASTE_ROW} 列起貼上 {len(rows)} 位")
+        self.sheets.spreadsheets().values().batchClear(spreadsheetId=file_id, body={"ranges": [
+            f"'{tab}'!{GIFT_SEND_CLEAR}", f"'{tab}'!A{GIFT_SEND_CLEAR_ROW}:{last_col}"]}).execute()
+        needed = GIFT_SEND_PASTE_ROW + len(rows)
+        requests: List[Dict[str, Any]] = []
+        if needed > row_count:
+            requests.append({"appendDimension": {"sheetId": p["sheetId"], "dimension": "ROWS",
+                                                 "length": needed - row_count}})
+            row_count = needed
+        col = col_index(GIFT_SEND_CHECKBOX_COL)
+        requests.append({"repeatCell": {
+            "range": {"sheetId": p["sheetId"], "startRowIndex": GIFT_SEND_CLEAR_ROW - 1, "endRowIndex": row_count,
+                      "startColumnIndex": col, "endColumnIndex": col + 1},
+            "cell": {"userEnteredValue": {"boolValue": False}}, "fields": "userEnteredValue"}})
+        self.sheets.spreadsheets().batchUpdate(spreadsheetId=file_id, body={"requests": requests}).execute()
+        title = (self.sheets.spreadsheets().values().get(
+            spreadsheetId=file_id, range=f"'{tab}'!A1").execute().get("values") or [[""]])[0][0]
+        data = []
+        if str(self.prev_year) in str(title):
+            data.append({"range": f"'{tab}'!A1", "values": [[str(title).replace(str(self.prev_year),
+                                                                                 str(self.new_year))]]})
+        end = GIFT_SEND_PASTE_ROW + len(rows) - 1
+        for i, target in enumerate(GIFT_SEND_COLUMNS):
+            if rows:
+                data.append({"range": f"'{tab}'!{target}{GIFT_SEND_PASTE_ROW}:{target}{end}",
+                             "values": [[r[i]] for r in rows]})
+        if data:  # RAW：電話保留開頭的 0
+            self.sheets.spreadsheets().values().batchUpdate(spreadsheetId=file_id, body={
+                "valueInputOption": "RAW", "data": data}).execute()
+
     # ---------- 分頁整理（規則表） ----------
     def _fmt(self, text: str, **extra: str) -> str:
         text = str(text).replace("{y}", str(self.prev_year)).replace("{Y}", str(self.new_year))
@@ -1455,7 +2028,8 @@ class Rollover:
         records = self._run_rows(rows_arg, row_names, area) if row_names or not names else []
         funcs = {ROW_FUNCTIONS.get(n, n) for n in (names or [])}
         extra: List[Dict[str, str]] = []
-        for func, job in (("行銷費用總管理", self.run_marketing), ("清潔用品", self.run_supply)):
+        for func, job in (("行銷費用總管理", self.run_marketing), ("清潔用品", self.run_supply),
+                          (GIFT_STAT_FUNCTION, self.run_gift_stats), (GIFT_LIST_FUNCTION, self.run_gift_list)):
             if func not in funcs:
                 continue
             self.log(func)
@@ -1532,12 +2106,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="只列出會做的事，不建立、不回寫")
     parser.add_argument("--fresh", action="store_true", help="已存在的新年度同名項目改名為舊版後重新生成")
     parser.add_argument("--spreadsheet-id", default=MASTER_SPREADSHEET_ID)
+    parser.add_argument("--gift-threshold", type=float, default=None, help=f"{GIFT_LIST_FUNCTION}的送禮門檻金額")
     args = parser.parse_args(argv)
 
     from services.google_auth import get_drive_service, get_sheets_service
 
     rollover = Rollover(get_drive_service(), get_sheets_service(), args.spreadsheet_id,
-                        args.year, dry_run=args.dry_run, fresh=args.fresh)
+                        args.year, dry_run=args.dry_run, fresh=args.fresh, gift_threshold=args.gift_threshold)
     names = split_list(args.names) or None
     try:
         records = rollover.run(args.rows, names=names)

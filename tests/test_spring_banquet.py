@@ -199,3 +199,46 @@ def test_prepare_and_update_roster_with_fake_sheets(monkeypatch):
                                                ["張齊恩", "'0911", "2020-01-01", "正常"]]})
     prelim = next(d for d in fake.requests if isinstance(d, dict) and d.get("range") == "'初步統計'!A2")
     assert [r[:2] for r in prelim["values"]] == [["台北專員", "王小明"], ["台北內勤", "張齊恩"]]
+
+
+def test_manual_columns_follow_person_after_reorder():
+    existing = [["台北專員", "舊人", "", "", "", "", "1", "", "2", "", "", "Y"],
+                ["台北內勤", "張齊恩", "", "", "", "", "", "3"]]
+    manual = sb.manual_by_name(existing)
+    assert manual[("台北專員", "舊人")] == ["1", "", "2", "Y"]
+    assert manual[("台北內勤", "張齊恩")] == ["", "3", "", ""]
+
+
+def test_fresh_single_area_is_rejected():
+    logs = []
+    rollover = Rollover(None, None, "x", 2027, dry_run=True, fresh=True, log=logs.append)
+    rollover.children = lambda folder_id: (_ for _ in ()).throw(AssertionError("不應動到資料夾"))
+    assert sb.run_spring_area(rollover, "台北") == []
+    assert any("只能選全區" in m for m in logs)
+
+
+def test_one_form_failure_does_not_stop_other_regions(monkeypatch):
+    FOLDER = "application/vnd.google-apps.folder"
+    prev_files = [{"id": f"v{a}", "name": f"2025年度投票（{a}）", "mimeType": FORM} for a in sb.ROSTER_AREAS]
+    tree = {sb.SPRING_ROOT_FOLDER_ID: [{"id": "prev", "name": "2026春酒", "mimeType": FOLDER},
+                                       {"id": "cur", "name": "2027春酒", "mimeType": FOLDER}],
+            "prev": prev_files,
+            "cur": [{"id": f"n{a}", "name": f"2026年度投票（{a}）", "mimeType": FORM} for a in sb.ROSTER_AREAS]}
+    monkeypatch.setattr(sb, "export_staff_frame",
+                        lambda area, acc: frame(row(f"{area}人", "0912", "2020-01-01", "正常")))
+    monkeypatch.setattr("tools.scheduled_monthly.stored_value_settlement.load_accounts", lambda: {})
+    monkeypatch.setattr(sb, "get_forms_service", lambda: object())
+    updated = []
+
+    def fake_update(rollover, forms, form_id, form_name, names, excluded):
+        if "台北" in form_name:
+            raise RuntimeError("權限不足")
+        updated.append(form_name)
+
+    monkeypatch.setattr(sb, "update_vote_form", fake_update)
+    rollover = Rollover(None, None, "x", 2027, dry_run=True, log=lambda m: None)
+    rollover.children = lambda folder_id: tree.get(folder_id, [])
+    records = sb.run_spring_area(rollover)
+    assert updated == ["2026年度投票（台中）", "2026年度投票（桃園）", "2026年度投票（新竹）"]
+    assert {"kind": "表單", "old_name": "2026年度投票（台北）", "old_id": "", "new_name": "找不到來源",
+            "new_id": ""} in records
