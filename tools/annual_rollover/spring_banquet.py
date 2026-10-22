@@ -148,6 +148,17 @@ def sheet_ids(rollover, file_id: str) -> Dict[str, int]:
     return {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta.get("sheets", [])}
 
 
+def ensure_columns(rollover, file_id: str, title: str, last_col: str) -> None:
+    """工作表欄數不足 last_col 時補欄（寫入超出範圍會被 API 拒絕）。"""
+    meta = rollover.sheets.spreadsheets().get(spreadsheetId=file_id, fields="sheets.properties").execute()
+    prop = next((s["properties"] for s in meta.get("sheets", []) if s["properties"]["title"] == title), None)
+    have = (prop or {}).get("gridProperties", {}).get("columnCount", 0)
+    need = col_index(last_col)
+    if prop and have < need:
+        batch_update(rollover, file_id, [{"appendDimension": {
+            "sheetId": prop["sheetId"], "dimension": "COLUMNS", "length": need - have}}])
+
+
 def read(rollover, file_id: str, a1: str) -> List[List[str]]:
     return rollover.sheets.spreadsheets().values().get(spreadsheetId=file_id, range=a1).execute().get("values", [])
 
@@ -589,6 +600,7 @@ def repair_formulas(rollover, file_id: str, manual: Optional[Dict[str, List[str]
         roster = read(rollover, file_id, f"'{sheet}'!A2:B1000") if sheet in ids else []
         inner = read(rollover, file_id, f"'{inner_sheet}'!A2:B200") if inner_sheet in ids else []
         order = attend_order(roster, inner)
+        ensure_columns(rollover, file_id, STATS_SHEET, "AZ")   # 右側統計寫到 AT、清除到 AZ
         values.batchClear(spreadsheetId=file_id, body={"ranges": [
             f"'{STATS_SHEET}'!A2:H{STATS_ROWS}", f"'{STATS_SHEET}'!{STATS_MANUAL}{STATS_ROWS}",
             f"'{STATS_SHEET}'!L2:P{STATS_ROWS}", f"'{STATS_SHEET}'!{SUMMARY_COL}1:AZ60"]}).execute()
@@ -821,6 +833,8 @@ def update_budget(rollover, response_id: str) -> None:
         rollover.log(f"  {BUDGET_FILE_NAME}：複製分頁 {old} → {new}")
     url = f"https://docs.google.com/spreadsheets/d/{response_id}"
     st = f"\'{STATS_SHEET}\'"
+    ensure_columns(rollover, fid, sub, "BZ")
+    ensure_columns(rollover, fid, main, "AD")
     rollover.sheets.spreadsheets().values().batchClear(spreadsheetId=fid, body={"ranges": [
         f"'{sub}'!H1:M17", f"'{sub}'!O1:BZ80", f"'{main}'!AA2:AD300"]}).execute()
     rollover._values_batch(fid, [
