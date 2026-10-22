@@ -63,9 +63,15 @@ def test_stats_formulas_payment_year_and_top5():
     assert person["L2"][0][0] == '=IF(IFERROR($D2>=DATE(2027,1,1),FALSE),"Y","")'
     assert len(person["C2"]) == sb.STATS_ROWS - 1
     summary = sb.stats_summary_formulas(2027)
-    assert summary["Q1"][1][9] == "2027到職本人付費"
-    assert ",5,2)" in summary["Q19"][1][1] and "投票回應-台北" in summary["Q19"][1][1]
-    assert "Q40" in summary                      # 第 4 區（台中）區塊
+    assert summary["AC1"][1][9] == "2027到職本人付費"
+    assert summary["AC1"][2][1] == "=SUM(AD4:AD15)" and summary["AC4"][0][4].endswith("AD4-AE4-AF4)")
+    assert ",5,2)" in summary["Q2"][1][1] and "投票回應-台北" in summary["Q2"][1][1]
+    assert "Q23" in summary                      # 第 4 區（台中）區塊，Q～AA
+    lottery = summary["AO1"]
+    assert len(lottery) == 17 and lottery[1][0] == "台北專員" and lottery[16][0] == "台中眷屬全"
+    assert lottery[1][5].endswith('$P$2:$P,"Y")') and "*台北*內勤*" in lottery[5][1]
+    p2 = person["P2"][0][0]
+    assert "'2027春酒專員名冊'!$AB$2" in p2 and "DATE(2026,SEQUENCE(1,12),1)" in p2 and "EDATE(d,3)" in p2
     others = sb.other_formulas()
     assert "'春酒統計表'!E2:E300=\"是\"" in others["'眷屬收費'!A2"][0][0]
 
@@ -315,3 +321,49 @@ def test_find_sheet_loose_ignores_trailing_space():
 
     rollover = type("Ro", (), {"drive": Drive()})()
     assert sb.find_sheet_loose(rollover, "2026桃園專員薪資(外場)")["id"] == "t"
+
+
+def test_update_budget_copies_tabs_and_links(monkeypatch):
+    calls = {"batch": [], "values": [], "clear": []}
+
+    class Exec:
+        def __init__(self, result=None):
+            self.result = result
+
+        def execute(self):
+            return self.result or {}
+
+    titles = {"2026": 1, "2026-1": 2}
+
+    class Sheets:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def get(self, **kw):
+            return Exec({"sheets": [{"properties": {"title": t, "sheetId": i}} for t, i in titles.items()]})
+
+        def batchUpdate(self, spreadsheetId, body):
+            calls["batch"] += body["requests"]
+            for r in body["requests"]:
+                if "duplicateSheet" in r:
+                    titles[r["duplicateSheet"]["newSheetName"]] = len(titles) + 1
+            return Exec()
+
+        def batchClear(self, spreadsheetId, body):
+            calls["clear"] += body["ranges"]
+            return Exec()
+
+    monkeypatch.setattr(sb, "find_sheet_loose", lambda rollover, name: {"id": "budget"})
+    rollover = Rollover(None, Sheets(), "x", 2027, dry_run=False, log=lambda m: None)
+    rollover._values_batch = lambda fid, data: calls["values"].extend(data)
+    sb.update_budget(rollover, "resp")
+    dups = [r["duplicateSheet"]["newSheetName"] for r in calls["batch"] if "duplicateSheet" in r]
+    assert sorted(dups) == ["2027", "2027-1"]
+    fr = next(r["findReplace"] for r in calls["batch"] if "findReplace" in r)
+    assert fr["find"] == "'2026-1'!" and fr["replacement"] == "'2027-1'!"
+    ranges = {d["range"]: d["values"][0][0] for d in calls["values"]}
+    assert "'春酒統計表'!AO1:AT17" in ranges["'2027-1'!H1"]
+    assert "中獎/簽名表" in ranges["'2027'!AA2"]
