@@ -197,6 +197,7 @@ def _update_sheet_rows_first_header(ws, row_results):
     headers = orders.ensure_columns_in_sheet(ws); header_index = {}
     for i, header in enumerate(headers, 1):
         if header and header not in header_index: header_index[header] = i
+    orders.add_header_aliases(header_index)
     updates = []
     for row_num, info in (row_results or {}).items():
         xyz = orders.finalize_xyz({"服務人員": info.get("服務人員", ""), "服務狀態": info.get("服務狀態", ""), "車馬費": info.get("車馬費", "")}, fallback_fare=info.get("車馬費", "0"))

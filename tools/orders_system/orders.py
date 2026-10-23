@@ -810,10 +810,25 @@ def load_worksheet(sheet_name):
     rows = values[1:]
     df = pd.DataFrame(rows, columns=headers)
     df["__sheet_row__"] = range(2, len(df) + 2)
+    for name, short in HEADER_ALIASES.items():
+        if name not in df.columns and short in df.columns:
+            df[name] = df[short]
     # 「代客保留」打勾列改用檸檬保留帳號建單（只改記憶體內的電話，不寫回工作表）。
     import proxy_reserve
     proxy_reserve.apply(df)
     return ws, df
+
+
+# 排程工作表（tool-system 建立）用較短的欄名；回填時寫進既有欄，不另外新增欄位。
+HEADER_ALIASES = {"沒班表日期": "沒班表日", "餘額不足未送": "餘額不足", "日曆改色原因": "日曆改色內容"}
+
+
+def add_header_aliases(header_index):
+    """長欄名找不到時，對應到排程既有的短欄名欄位。"""
+    for name, short in HEADER_ALIASES.items():
+        if name not in header_index and short in header_index:
+            header_index[name] = header_index[short]
+    return header_index
 
 
 def ensure_columns_in_sheet(ws):
@@ -840,7 +855,7 @@ def ensure_columns_in_sheet(ws):
 
     changed = False
     for col in required:
-        if col not in headers:
+        if col not in headers and HEADER_ALIASES.get(col) not in headers:
             headers.append(col)
             changed = True
 
@@ -913,7 +928,7 @@ def set_customer_notice_clip_style(ws, headers=None, row_numbers=None):
 
 def update_sheet_rows(ws, row_results):
     headers = ensure_columns_in_sheet(ws)
-    header_index = {h: i + 1 for i, h in enumerate(headers)}
+    header_index = add_header_aliases({h: i + 1 for i, h in enumerate(headers)})
     updates = []
 
     for row_num, info in row_results.items():
