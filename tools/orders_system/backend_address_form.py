@@ -1,6 +1,21 @@
 """Run the backend's own address button; never infer service areas locally."""
 import shutil
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
+
+
+def fill_missing_coordinates(post_data, address, geocode):
+    """後台頁面送出查詢地區時若經緯度空白（頁面地圖定位失敗），用伺服器端 geocode 補上。
+
+    其他欄位照頁面原樣送出，服務區域仍由後台判斷。回傳（新的 post_data, 補上的 (lat, lng) 或 None）。
+    """
+    data = parse_qs(post_data or "", keep_blank_values=True)
+    if (data.get("lat") or [""])[0].strip() and (data.get("lng") or [""])[0].strip():
+        return post_data, None
+    lat, lng = geocode(address)
+    if not lat or not lng:
+        return post_data, None
+    data["lat"], data["lng"] = [str(lat)], [str(lng)]
+    return urlencode(data, doseq=True), (str(lat), str(lng))
 
 
 def _address_result(response):
@@ -18,6 +33,14 @@ def _address_result(response):
         if sent.get(field):
             area[field] = sent[field][0]
     return {**payload, 'area': area}
+
+
+def orders_has_maps_key():
+    try:
+        import orders
+        return bool(orders.GOOGLE_MAPS_API_KEY)
+    except Exception:
+        return False
 
 
 def _native_form_result(page):
@@ -105,6 +128,24 @@ def query_native_address(
             context = browser.new_context()
             context.add_cookies(cookies)
             page = context.new_page()
+            console_errors = []
+            page.on('console', lambda msg: console_errors.append(msg.text) if msg.type in ('error', 'warning') else None)
+            filled = {}
+
+            def fill_coordinates(route, request):
+                # 頁面地圖定位沒拿到經緯度時，伺服器端補上再送給後台判斷服務區域。
+                try:
+                    import orders
+                    new_data, coords = fill_missing_coordinates(request.post_data, address, orders.geocode_address)
+                except Exception:
+                    new_data, coords = request.post_data, None
+                if coords:
+                    filled['coords'] = coords
+                    route.continue_(post_data=new_data)
+                else:
+                    route.continue_()
+
+            page.route('**/ajax/check_contain*', fill_coordinates)
             # Follow the backend page as-is. This helper only fills the form and
             # clicks 查詢地區; it never clicks 計算時數、查詢班表 or 送出.
             page.goto(origin + '/booking/single', wait_until='domcontentloaded')
@@ -169,11 +210,16 @@ def query_native_address(
                     timeout=30000,
                 )
                 result = _native_form_result(page)
+                if filled.get('coords'):
+                    result['area']['lat'], result['area']['lng'] = filled['coords']
             except BrowserTimeout as exc:
                 message = page.locator('.sweet-alert.visible h2').all_text_contents()
+                hint = '；頁面地圖訊息：' + '｜'.join(console_errors[:2]) if console_errors else ''
+                if not filled.get('coords') and not orders_has_maps_key():
+                    hint += '；伺服器端未設定 GOOGLE_MAPS_API_KEY，無法補經緯度'
                 raise RuntimeError(
                     '後台查詢地區未完成：' + ('；'.join(message) or '服務區域欄位未帶入，尚未查班表')
-                    + _form_state(page)
+                    + _form_state(page) + hint
                 ) from exc
             # Preserve the backend session's rotated cookies for subsequent requests.
             for cookie in context.cookies([origin]):
