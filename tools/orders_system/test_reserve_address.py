@@ -91,3 +91,27 @@ class ReserveAddressTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CancelPageCleanupTest(unittest.TestCase):
+    def test_only_reserve_account_orders_trigger_cleanup(self):
+        import cancel_order as co
+        from contextlib import nullcontext
+        area = nullcontext()
+        with patch.object(ra, "cleanup_after_cancel", return_value=[{"地址": "x", "結果": "已刪除"}]) as cleanup, \
+                patch.object(co.st, "spinner", return_value=nullcontext()):
+            self.assertEqual(co._cleanup_reserve_addresses("dev", "e", "p", [{"ok": True, "phone": "0912345678"}], area), [])
+            cleanup.assert_not_called()
+            result = [{"ok": True, "phone": "0939592628", "address": "新北市A路1號"}]
+            self.assertEqual(co._cleanup_reserve_addresses("dev", "e", "p", result, area), [{"地址": "x", "結果": "已刪除"}])
+            cleanup.assert_called_once()
+
+    def test_cleanup_after_cancel_accepts_reserve_phone_without_memo_keyword(self):
+        cancelled = [{"ok": True, "phone": "0939592628", "address": "新北市A路1號"},
+                     {"ok": True, "phone": "0912345678", "address": "新北市B路2號"}]
+        with patch.object(ra, "list_member_addresses", return_value=["新北市A路1號", "新北市B路2號"]), \
+                patch.object(ra, "active_order_counts", return_value=({}, True)), \
+                patch.object(ra, "delete_member_addresses",
+                             side_effect=lambda e, m, p, addrs, phone: [{"地址": a, "結果": "已刪除", "說明": ""} for a in addrs]) as deleter:
+            ra.cleanup_after_cancel("dev", "e", "p", cancelled)
+        self.assertEqual(deleter.call_args.args[3], ["新北市A路1號"])

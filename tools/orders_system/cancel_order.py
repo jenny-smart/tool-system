@@ -518,6 +518,20 @@ def cancel_orders(
     return results
 
 
+def _cleanup_reserve_addresses(env_name, backend_email, backend_password, result, area):
+    """取消到檸檬保留帳號（代客保留）的訂單時，同步刪除不再使用的客人地址；失敗不影響取消結果。"""
+    import reserve_address
+    if not any(r.get("ok") and re.sub(r"\D", "", str(r.get("phone") or "")) == reserve_address.RESERVE_PHONE
+               for r in result or []):
+        return []
+    try:
+        with area:
+            with st.spinner("取消完成，正在檢查並刪除檸檬保留不再使用的客人地址…"):
+                return reserve_address.cleanup_after_cancel(env_name, backend_email, backend_password, result)
+    except Exception as exc:
+        return [{"地址": "", "結果": "失敗", "說明": f"同步刪除地址失敗：{exc}"}]
+
+
 def _date_value(value):
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
@@ -615,6 +629,7 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                 st.session_state.cancel_order_results = rows
                 st.session_state.cancel_order_debug = debug_rows
                 st.session_state.cancel_order_last_result = []  # 新搜尋：清掉上一次的取消結果
+                st.session_state.cancel_order_address_cleanup = []
                 # 有填電話沿用原本預設全勾；沒填電話（全部客人）預設不勾，避免誤取消。
                 default_checked = bool(str(phone or "").strip())
                 st.session_state.cancel_order_selected = {r["purchase_id"]: default_checked for r in rows}
@@ -659,6 +674,13 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                 st.warning(f"⚠️ {item.get('order_no') or item.get('purchase_id')}：{item.get('message')}")
             else:
                 st.error(f"❌ {item.get('order_no') or item.get('purchase_id')}：{item.get('message')}")
+
+    cleanup = st.session_state.get("cancel_order_address_cleanup") or []
+    if last_result and cleanup:
+        st.markdown("#### 同步刪除檸檬保留地址")
+        for item in cleanup:
+            st.caption(f"{item.get('地址')}：{item.get('結果') or item.get('處理')}"
+                       + (f"（{item.get('說明') or item.get('原因')}）" if (item.get('說明') or item.get('原因')) else ""))
 
     rows = st.session_state.get("cancel_order_results") or []
     if not rows:
@@ -798,6 +820,8 @@ def render_cancel_order(backend_email: str, backend_password: str, env_name: str
                         progress_callback=show_progress,
                     )
                 st.session_state.cancel_order_last_result = result
+                st.session_state.cancel_order_address_cleanup = _cleanup_reserve_addresses(
+                    env_name, backend_email, backend_password, result, progress_area)
                 st.session_state.cancel_order_dialog_open = False
                 st.session_state.cancel_order_results = []
                 st.session_state.cancel_order_pending = []

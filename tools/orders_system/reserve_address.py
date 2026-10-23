@@ -88,12 +88,43 @@ def _today() -> str:
     return datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
 
 
+def _launch_browser(runtime):
+    executable = shutil.which("chromium") or shutil.which("chromium-browser")
+    return runtime.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
+
+
+def _open_member_page(page, member_url):
+    """開會員管理頁，等地址清單（垃圾桶圖示）出現；清單由頁面程式產生，不能一載入就讀。"""
+    page.goto(member_url, wait_until="domcontentloaded")
+    if "/login" in page.url:
+        raise RuntimeError("後台登入已失效")
+    try:
+        page.wait_for_selector("i.fa-trash-o", state="attached", timeout=15000)
+    except Exception:
+        pass  # 真的沒有可刪地址時不會出現垃圾桶
+
+
 def list_member_addresses(env_name, backend_email, backend_password, phone=RESERVE_PHONE) -> List[str]:
     session, base_url = co._new_logged_in_session(env_name, backend_email, backend_password)
     resp = session.get(f"{base_url}/member", params={"keyword": phone}, headers=orders.HEADERS, allow_redirects=True)
     if resp.status_code != 200:
         raise RuntimeError(f"讀取會員管理頁失敗：HTTP {resp.status_code}")
-    return parse_member_addresses(resp.text, phone)
+    found = parse_member_addresses(resp.text, phone)
+    if found:
+        return found
+    # 地址清單由頁面程式產生時，直接讀 HTML 讀不到；改用瀏覽器開頁面再讀。
+    from playwright.sync_api import sync_playwright
+    origin = base_url.rstrip("/")
+    with sync_playwright() as runtime:
+        browser = _launch_browser(runtime)
+        try:
+            context = browser.new_context()
+            context.add_cookies(_browser_cookies(session, origin))
+            page = context.new_page()
+            _open_member_page(page, f"{origin}/member?keyword={quote(phone)}")
+            return parse_member_addresses(page.content(), phone)
+        finally:
+            browser.close()
 
 
 def active_order_counts(env_name, backend_email, backend_password, phone=RESERVE_PHONE) -> Tuple[Dict[str, int], bool]:
@@ -177,8 +208,7 @@ def delete_member_addresses(env_name, backend_email, backend_password, addresses
     origin = base_url.rstrip("/")
     member_url = f"{origin}/member?keyword={quote(phone)}"
     with sync_playwright() as runtime:
-        executable = shutil.which("chromium") or shutil.which("chromium-browser")
-        browser = runtime.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
+        browser = _launch_browser(runtime)
         try:
             context = browser.new_context()
             context.add_cookies(_browser_cookies(session, origin))
@@ -186,9 +216,7 @@ def delete_member_addresses(env_name, backend_email, backend_password, addresses
             page.on("dialog", lambda dialog: dialog.accept())
             for address in targets:
                 try:
-                    page.goto(member_url, wait_until="domcontentloaded")
-                    if "/login" in page.url:
-                        raise RuntimeError("後台登入已失效")
+                    _open_member_page(page, member_url)
                     if not page.evaluate(_MARK_JS, {"phone": phone, "target": address}):
                         results.append({"地址": address, "結果": "未刪除", "說明": "頁面上找不到這個地址的垃圾桶（可能已刪除）"})
                         continue
@@ -207,7 +235,7 @@ def delete_member_addresses(env_name, backend_email, backend_password, addresses
                         page.wait_for_load_state("networkidle", timeout=15000)
                     except Exception:
                         pass
-                    page.goto(member_url, wait_until="domcontentloaded")
+                    _open_member_page(page, member_url)
                     still_there = page.evaluate(_MARK_JS, {"phone": phone, "target": address})
                     results.append({"地址": address, "結果": "失敗" if still_there else "已刪除",
                                     "說明": "按下垃圾桶後地址仍在，請到後台確認" if still_there else ""})
@@ -220,9 +248,11 @@ def delete_member_addresses(env_name, backend_email, backend_password, addresses
 
 def cleanup_after_cancel(env_name, backend_email, backend_password, cancelled_rows: Iterable[dict],
                          phone=RESERVE_PHONE) -> List[dict]:
-    """取消代客保留後：這些訂單的地址若已沒有今天以後未取消的訂單，就從檸檬保留刪除。"""
+    """取消檸檬保留帳號的訂單後（代客保留單取消頁或一般取消訂單頁）：
+    這些訂單的地址若已沒有今天以後未取消的訂單，就從檸檬保留刪除；固定地址一律不刪。"""
     keys = {address_key(r.get("address")) for r in cancelled_rows
-            if r.get("ok") and r.get("memo_keyword") and r.get("address")}
+            if r.get("ok") and r.get("address")
+            and (r.get("memo_keyword") or re.sub(r"\D", "", str(r.get("phone") or "")) == phone)}
     if not keys:
         return []
     addresses = [a for a in list_member_addresses(env_name, backend_email, backend_password, phone)

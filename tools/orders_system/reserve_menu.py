@@ -479,6 +479,8 @@ def render_reserve_address_cleanup(backend_email: str, backend_password: str, en
                 counts, complete = reserve_address.active_order_counts(env, backend_email.strip(), backend_password.strip(), phone.strip())
                 st.session_state.reserve_address_plan = reserve_address.plan_cleanup(addresses, counts, complete)
                 st.session_state.pop("reserve_address_result", None)
+                if not addresses:
+                    st.warning("會員管理頁上讀不到可刪除的地址（沒有垃圾桶圖示的地址）。")
             except Exception as exc:
                 st.session_state.reserve_address_plan = []
                 st.error(f"讀取失敗：{exc}")
