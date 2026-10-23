@@ -1,0 +1,33 @@
+2026-10-23 21:33:30 [INFO] === 客服排程系統 run_id=cb6bae69 step=3 台北時間=2026-10-24 05:33:30 ===
+2026-10-23 21:33:30 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-10-23 21:33:30 [INFO] file_cache is only supported with oauth2client<4.0.0
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-23 21:33:47 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-23 21:33:47 [INFO] 信件日期（台北時間）：2026-10-23
+2026-10-23 21:34:00 [INFO]   [mail] text/plain 為空，fallback 到 text/html（4446 字元）
+2026-10-23 21:34:06 [INFO]   近三日營業額-台北 → 選中 17:25:03（與17:25差3s）
+2026-10-23 21:34:06 [INFO]   [debug] 行78 repr='2026-10-21：152分'
+2026-10-23 21:34:06 [INFO]   [debug] 行79 repr='2026-10-22：115分'
+2026-10-23 21:34:06 [INFO]   [debug] 行80 repr='2026-10-23：131分'
+2026-10-23 21:34:06 [INFO]   [debug] 行81 repr='【家電清潔】日營業額'
+2026-10-23 21:34:06 [INFO]   [debug] 行82 repr='2026-10-21：0分'
+2026-10-23 21:34:06 [INFO]   [debug] 行83 repr='2026-10-22：0分'
+2026-10-23 21:34:06 [INFO]   [debug] 行84 repr='2026-10-23：0分'
+2026-10-23 21:34:06 [INFO]   [debug] 行85 repr='【儲值金】日營業額'
+2026-10-23 21:34:13 [INFO]   [mail] text/plain 為空，fallback 到 text/html（1070 字元）
+2026-10-23 21:34:17 [INFO]   近三日營業額-台中 → 選中 17:25:06（與17:25差6s）
+2026-10-23 21:34:17 [INFO]   [debug] 行24 repr='2026-10-21：0分'
+2026-10-23 21:34:17 [INFO]   [debug] 行25 repr='2026-10-22：17分'
+2026-10-23 21:34:17 [INFO]   [debug] 行26 repr='2026-10-23：0分'
+2026-10-23 21:34:17 [INFO]   [debug] 行27 repr='【家電清潔】日營業額'
+2026-10-23 21:34:17 [INFO]   [debug] 行28 repr='2026-10-21：0分'
+2026-10-23 21:34:17 [INFO]   [debug] 行29 repr='2026-10-22：0分'
+2026-10-23 21:34:17 [INFO]   [debug] 行30 repr='2026-10-23：0分'
+2026-10-23 21:34:17 [INFO]   [debug] 行31 repr='【儲值金】日營業額'
+2026-10-23 21:34:17 [INFO]   台北：{'daily_value': 131, 'total_count': 1583, 'total_amount': 3166850}
+2026-10-23 21:34:17 [INFO]   台中：{'daily_value': 0, 'total_count': 119, 'total_amount': 237200}
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-23 21:34:19 [INFO] Step 3 完成，row=2442（31.1s）
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-23 21:34:20 [INFO] === 全部完成 run_id=cb6bae69（32.0s）===
