@@ -22,6 +22,7 @@
   - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
+  - 已收款（含待收款已處理好要改已收款）R 欄付款方式空白 → 未備妥，不回寫（後台加收金流取自 R）。
   - 盤點時順手補 T（匯款金額）、Z（未稅金額）公式（只補空白格）。
 回寫完成後在 Jenny 行事曆建一筆紀錄事件（不跳提醒）。
 """
@@ -43,6 +44,7 @@ RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
 DONE_STATUSES = ("已退款", "VIP已退券", "已收款", "已扣儲值金", "已返儲值金", "已處理發票")
 REFUND_STATUSES = {"待退款", "VIP待退券"}
 MISSING_BANK = "缺退款銀行代碼／帳號（P／Q）"  # 只擋退款，不擋折讓單
+MISSING_CHARGE_PAYWAY = "缺付款方式（R），回寫加收金流需要"
 STORED_VALUE_STATUSES = {"待扣儲值金", "待返儲值金"}
 ATM_REFUND_REGIONS = {"台北", "台中"}
 # 只列出、不自動處理的狀態（已完成或不需處理）
@@ -134,11 +136,18 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         if not needs_sync(row):
             return None
         item["amount"] = _amount(_cell(row, "S") or _cell(row, "N"))
+        if status == "已收款" and not item["payway"]:
+            item["missing"].append(MISSING_CHARGE_PAYWAY)
+            return item
         item["actions"].append("sync")
         item["target_status"] = status
         return item
 
     target = ready_target(row)
+    if target == "已收款" and not item["payway"]:
+        item["amount"] = _amount(_cell(row, "N"))
+        item["missing"].append(MISSING_CHARGE_PAYWAY)
+        return item
     if target:
         item["amount"] = _amount(_cell(row, "S") or _cell(row, "N"))
         item["actions"].append("sync")

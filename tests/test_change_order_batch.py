@@ -27,7 +27,7 @@ def test_before_cutoff_and_synced_rows_are_skipped():
 
 def test_done_rows_need_sync_until_marker_matches():
     assert plan(B="已退款")["actions"] == ["sync"]
-    assert plan(B="已收款", AE="更新系統（B欄：待收款）")["actions"] == ["sync"]
+    assert plan(B="已收款", R="ATM", AE="更新系統（B欄：待收款）")["actions"] == ["sync"]
     assert plan(B="已處理發票", AE="建立異動")["actions"] == ["sync"]
 
 
@@ -60,7 +60,7 @@ def test_pending_charge_waits_for_payment_and_manual_invoice():
     assert plan(B="待收款", M="2026/09/20")["missing"] == ["缺收款金額（N）"]
     item = plan(B="待收款", M="2026/09/20", N="500")
     assert item["missing"] == [] and item["manual"] == [] and item["actions"] == ["invoice"]
-    assert plan(B="待收款", M="2026/09/20", N="500", O="AB1", AA="2026/10/19")["actions"] == ["sync"]
+    assert plan(B="待收款", M="2026/09/20", N="500", O="AB1", AA="2026/10/19", R="ATM")["actions"] == ["sync"]
     item = plan(B="待收款", M="2026/09/20", N="500", O="AB1")
     assert item["actions"] == [] and "AA" in item["manual"][0]
 
@@ -157,7 +157,7 @@ def test_sync_respects_selected_rows(monkeypatch):
 def test_already_processed_pending_rows_go_straight_to_sync():
     cases = [
         (dict(B="待退款", S="1000", AB="AL1", AC="2026/10/17"), "已退款"),
-        (dict(B="待收款", M="2026/10/17", N="500", O="AB12345678", AA="2026/10/19 10:00:00"), "已收款"),
+        (dict(B="待收款", M="2026/10/17", N="500", O="AB12345678", AA="2026/10/19 10:00:00", R="ATM"), "已收款"),
         (dict(B="待扣儲值金", N="500", M="2026/10/17"), "已扣儲值金"),
         (dict(B="待返儲值金", S="300", AC="2026/10/17"), "已返儲值金"),
         (dict(B="待處理發票", C="車馬費發票", O="AB1"), "已處理發票"),
@@ -169,7 +169,7 @@ def test_already_processed_pending_rows_go_straight_to_sync():
 
 
 def test_sync_region_sets_done_status_for_processed_pending_rows(monkeypatch):
-    values = [["h"], row(B="待收款", M="2026/10/17", N="500", O="AB1", AA="2026/10/19")]
+    values = [["h"], row(B="待收款", M="2026/10/17", N="500", O="AB1", AA="2026/10/19", R="ATM")]
     b_updates, synced, marked = [], [], []
 
     class WS:
@@ -305,3 +305,13 @@ def test_sync_region_logs_out_after_sync(monkeypatch):
     monkeypatch.setattr(batch, "_login_session", lambda region, ui_logger=None: Session())
     result = batch.sync_region("台北", log=lambda *_: None)
     assert result["failed"] and gets == ["https://backend.example/logout"]  # 失敗也登出
+
+
+def test_done_charge_without_payway_is_not_synced():
+    item = plan(B="已收款")
+    assert item["actions"] == [] and item["missing"] == ["缺付款方式（R），回寫加收金流需要"]
+    assert plan(B="已收款", R="ATM")["actions"] == ["sync"]
+    item = plan(B="待收款", M="2026/10/23", N="600", O="AB1", AA="2026/10/23")  # 已處理好但缺 R
+    assert item["actions"] == [] and "缺付款方式" in item["missing"][0]
+    assert plan(B="待收款", M="2026/10/23", N="600", O="AB1", AA="2026/10/23", R="ATM")["target_status"] == "已收款"
+    assert plan(B="已退款")["actions"] == ["sync"]  # 退款類不受影響
