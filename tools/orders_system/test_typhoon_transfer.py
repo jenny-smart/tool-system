@@ -112,6 +112,7 @@ class TransferTests(unittest.TestCase):
         result = tt.transfer_one_order(None, "", "dev", self.row, ["2027-02-27", "2027-03-01", "2027-03-02"])
         self.assertTrue(result["success"])
         self.assertEqual(result["new_date"], "2027-03-02")
+        self.assertRegex(result["transferred_at"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
         self.assertEqual(self.posted, [("2027-03-02", "08:30-12:30")])
         self.assertIn("2027-02-27 不在修改日期選單", result["attempts"])
         self.assertIn("2027-03-01 無 08:30-12:30 時段（可選：09:00-12:00）", result["attempts"])
@@ -141,26 +142,67 @@ class CopyResultsTests(unittest.TestCase):
         results = [
             {"order_no": "LC1", "name": "王小明", "phone": "0912345678", "service_date_before": "2026-10-23",
              "line_url": "https://chat.line.biz/Uabc/chat/U123", "address": "台北市大安區復興南路一段1號",
-             "period": "08:30-12:30", "success": True, "new_date": "2027-03-02", "message": "已移到"},
+             "period": "08:30-12:30", "success": True, "new_date": "2027-03-02", "message": "已移到",
+             "transferred_at": "2026-10-23 14:32"},
             {"order_no": "LC2", "name": "李\t大", "phone": "", "service_date_before": "2026-10-23",
              "period": "09:00-12:00", "success": False, "new_date": "", "message": "無法安排"},
         ]
         lines = tt.results_tsv(results).split("\n")
         self.assertEqual(lines[0].split("\t"), [
             "訂單編號", "姓名", "LINE@連結", "電話", "客戶地址", "原日期", "原時段", "服務時數",
-            "新日期", "新時段", "結果", "說明",
+            "新日期", "新時段", "結果", "說明", "移轉時間",
         ])
         self.assertEqual(lines[1].split("\t")[:11], [
             "LC1", "王小明", "https://chat.line.biz/Uabc/chat/U123", "0912345678", "台北市大安區復興南路一段1號",
             "2026-10-23", "08:30-12:30", "4", "2027-03-02", "08:30-12:30", "成功",
         ])
         self.assertEqual(lines[2].split("\t")[5:11], ["2026-10-23", "09:00-12:00", "3", "", "", "失敗"])
+        self.assertEqual(lines[1].split("\t")[-1], "2026-10-23 14:32")
+        self.assertEqual(lines[2].split("\t")[-1], "")
 
     def test_service_hours_deducts_break_for_full_day(self):
         self.assertEqual(
             [tt.service_hours(p) for p in ["09:00-11:00", "08:30-12:30", "09:00-16:00", "09:00-18:00"]],
             ["2", "4", "6", "8"],
         )
+
+
+class TrackingTests(unittest.TestCase):
+    SHEET = (
+        "訂單編號\t姓名\tLINE@連結\t電話\t客戶地址\t原日期\t原時段\t服務時數\t新日期\t新時段\t結果\t說明\n"
+        "LC00215208\t王璿瑋\thttps://chat.line.biz/x\t912021679\t台北市\t2026-10-23\t08:30-12:30\t4\t2027-03-03\t08:30-12:30\t成功\t已移到\n"
+        "LC00215959\t王騏三\t\t932003793\t台北市\t2026-10-23\t14:00-18:00\t4\t2027/3/3\t14:00-18:00\t成功\t已移到\n"
+        "LC00215208\t重複\t\t\t\t\t\t\t\t\t\t\n"
+    )
+
+    def test_parse_sheet_with_header(self):
+        items = tt.parse_tracking_input(self.SHEET)
+        self.assertEqual(items, [
+            {"order_no": "LC00215208", "name": "王璿瑋", "expected_date": "2027-03-03", "expected_period": "08:30-12:30"},
+            {"order_no": "LC00215959", "name": "王騏三", "expected_date": "2027-03-03", "expected_period": "14:00-18:00"},
+        ])
+
+    def test_parse_plain_order_numbers(self):
+        items = tt.parse_tracking_input("LC00215208\n 訂單 LC00215959 \n無單號")
+        self.assertEqual([i["order_no"] for i in items], ["LC00215208", "LC00215959"])
+        self.assertEqual(items[0]["expected_date"], "")
+
+    def test_track_flags_orders_changed_back(self):
+        current = {"LC00215208": ("2027-03-03", "08:30 - 12:30"), "LC00215959": ("2026-10-30", "14:00 - 18:00")}
+
+        def fetch(session, order_no):
+            if order_no not in current:
+                raise Exception(f"查無訂單：{order_no}")
+            return _block(order_no, *current[order_no])
+
+        items = tt.parse_tracking_input(self.SHEET) + [{"order_no": "LC1", "name": "", "expected_date": "", "expected_period": ""}]
+        with patch.object(tt, "_login", lambda *a: (None, "")), \
+                patch.object(tt.qo, "_fetch_purchase_block_for_order_no", fetch):
+            rows = tt.track_orders("dev", "a", "b", items)
+        self.assertEqual([r["狀態"] for r in rows[:2]], ["未變動", "已變動"])
+        self.assertEqual((rows[1]["目前日期"], rows[1]["目前時段"], rows[1]["付款狀態"]), ("2026-10-30", "14:00-18:00", "已付款"))
+        self.assertTrue(rows[2]["狀態"].startswith("查詢失敗"))
+        self.assertEqual(tt.tracking_tsv(rows).split("\n")[0].split("\t"), tt.TRACK_HEADERS)
 
 
 if __name__ == "__main__":

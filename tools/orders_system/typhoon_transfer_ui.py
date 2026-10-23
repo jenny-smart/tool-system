@@ -25,6 +25,71 @@ def _rows_to_frame(rows):
 
 
 def render(backend_email, backend_password, env, copy_button=None):
+    tab_transfer, tab_track = st.tabs(["🌀 移轉", "🔎 追蹤目前日期"])
+    with tab_transfer:
+        _render_transfer(backend_email, backend_password, env, copy_button)
+    with tab_track:
+        _render_tracking(backend_email, backend_password, env, copy_button)
+
+
+def _copy(copy_button, label, text, key):
+    if copy_button:
+        copy_button(label, text, key)
+    else:
+        st.caption(label)
+        st.code(text, language=None)
+
+
+def _render_tracking(backend_email, backend_password, env, copy_button=None):
+    st.caption(
+        "後台沒有訂單修改時間，這裡改查每筆訂單「目前」的服務日期／時段，"
+        "與表單上的新日期／新時段比對，找出移轉後又被改過的訂單。"
+    )
+    text = st.text_area(
+        "貼上表單內容（含標題列，整段複製貼上）或訂單編號（一行一筆）",
+        height=220, key="tt_track_input",
+        placeholder="訂單編號\t姓名\tLINE@連結\t電話\t客戶地址\t原日期\t原時段\t服務時數\t新日期\t新時段\t結果\t說明\n"
+                    "LC00215208\t王璿瑋\t…\t2027-03-03\t08:30-12:30\t成功\t…",
+    )
+    items = tt.parse_tracking_input(text)
+    if text.strip():
+        with_expected = sum(1 for item in items if item.get("expected_date"))
+        st.caption(f"讀到 {len(items)} 筆訂單，其中 {with_expected} 筆有表單新日期可比對")
+    if st.button("🔎 查詢目前日期", type="primary", use_container_width=True, key="tt_track_run", disabled=not items):
+        if not backend_email.strip() or not backend_password.strip():
+            st.error("請先在上方輸入後台帳號密碼")
+            return
+        bar = st.progress(0.0)
+        status = st.empty()
+
+        def _progress(index, total, item):
+            bar.progress((index - 1) / total)
+            status.write(f"查詢第 {index}/{total} 筆：{item['order_no']}")
+
+        try:
+            st.session_state.tt_track_rows = tt.track_orders(
+                env, backend_email.strip(), backend_password.strip(), items, progress=_progress,
+            )
+        except Exception as exc:
+            st.error(f"查詢失敗：{exc}")
+            return
+        bar.progress(1.0)
+        status.empty()
+
+    rows = st.session_state.get("tt_track_rows")
+    if not rows:
+        return
+    changed = [r for r in rows if r["狀態"] == "已變動"]
+    failed = [r for r in rows if str(r["狀態"]).startswith("查詢失敗")]
+    summary = f"共 {len(rows)} 筆：已變動 {len(changed)} 筆、查詢失敗 {len(failed)} 筆"
+    (st.warning if changed or failed else st.success)(summary)
+    only_changed = st.checkbox("只顯示已變動／查詢失敗", value=bool(changed or failed), key="tt_track_only_changed")
+    shown = changed + failed if only_changed else rows
+    st.dataframe(pd.DataFrame(shown, columns=tt.TRACK_HEADERS), hide_index=True, use_container_width=True)
+    _copy(copy_button, "複製追蹤結果（貼到 Google Sheets 會自動分欄）", tt.tracking_tsv(shown), "tt_copy_track")
+
+
+def _render_transfer(backend_email, backend_password, env, copy_button=None):
     st.caption(
         "依颱風假當天的時段，逐筆用後台「修改日期」移到移轉區間：先選日期、時段維持原時段。"
         "名單為後台「服務日期＋已付款」搜尋結果由上而下的順序，依序排入，第一天排不下才換下一天。"
@@ -135,9 +200,5 @@ def render(backend_email, backend_password, env, copy_button=None):
             for r, c in zip(results, copy_rows)
         ]), hide_index=True, use_container_width=True,
             column_config={"LINE@連結": st.column_config.LinkColumn("LINE@連結", display_text="開啟聊天")})
-        copy_label = "複製原日期時段／移轉後日期時段（貼到 Google Sheets 會自動分欄）"
-        if copy_button:
-            copy_button(copy_label, tt.results_tsv(results), "tt_copy_results")
-        else:
-            st.caption(copy_label)
-            st.code(tt.results_tsv(results), language=None)
+        _copy(copy_button, "複製原日期時段／移轉後日期時段（貼到 Google Sheets 會自動分欄）",
+              tt.results_tsv(results), "tt_copy_results")

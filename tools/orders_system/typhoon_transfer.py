@@ -13,6 +13,7 @@
 import json
 import re
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -75,6 +76,10 @@ def target_dates(start, end, day_type="不限", typhoon_date=None):
             days.append(current.strftime("%Y-%m-%d"))
         current += timedelta(days=1)
     return days
+
+
+def _now_text():
+    return datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
 
 
 def _login(env_name, backend_email, backend_password):
@@ -229,7 +234,10 @@ def transfer_one_order(session, base_url, env_name, row, dates):
             message = f"已移到 {day} {period}"
             if len(_staff_names(staff)) < int(row.get("person") or 0):
                 message += f"（專員：{staff or '無'}，人數不足，請到後台確認）"
-            return {"success": True, "new_date": day, "new_staff": staff, "message": message, "attempts": attempts}
+            return {
+                "success": True, "new_date": day, "new_staff": staff, "message": message,
+                "attempts": attempts, "transferred_at": _now_text(),
+            }
         if now_date != row["service_date_before"] or now_period != period:
             return {
                 "success": False, "new_date": now_date,
@@ -259,7 +267,7 @@ def transfer_typhoon_orders(env_name, backend_email, backend_password, typhoon_d
 
 RESULT_COPY_HEADERS = [
     "訂單編號", "姓名", "LINE@連結", "電話", "客戶地址", "原日期", "原時段", "服務時數",
-    "新日期", "新時段", "結果", "說明",
+    "新日期", "新時段", "結果", "說明", "移轉時間",
 ]
 
 
@@ -290,6 +298,7 @@ def result_copy_rows(results):
             "新時段": r.get("period", "") if r.get("success") else "",
             "結果": "成功" if r.get("success") else "失敗",
             "說明": r.get("message", ""),
+            "移轉時間": r.get("transferred_at", "") if r.get("success") else "",
         }
         for r in results
     ]
@@ -301,5 +310,111 @@ def results_tsv(results):
     for row in result_copy_rows(results):
         lines.append("\t".join(
             str(row.get(h, "") or "").replace("\t", " ").replace("\n", " ") for h in RESULT_COPY_HEADERS
+        ))
+    return "\n".join(lines)
+
+
+# =========================================================
+# 追蹤：查後台目前的服務日期／時段，與表單上的移轉結果比對
+# =========================================================
+
+TRACK_HEADERS = [
+    "訂單編號", "姓名", "表單新日期", "表單新時段", "目前日期", "目前時段", "付款狀態", "狀態", "查詢時間",
+]
+
+
+def parse_tracking_input(text):
+    """解析貼上的表單內容或訂單編號清單。
+
+    有標題列（含「訂單編號」）時，讀「新日期／新時段」欄當作預期值；
+    沒有標題列時，每行抓第一個訂單編號，只查目前日期。同一訂單只取第一次出現。
+    """
+    lines = [line for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return []
+    columns = {}
+    first = [cell.strip() for cell in lines[0].split("\t")]
+    if "訂單編號" in first:
+        columns = {name: idx for idx, name in enumerate(first)}
+        lines = lines[1:]
+    items, seen = [], set()
+    for line in lines:
+        cells = [cell.strip() for cell in line.split("\t")]
+        if columns:
+            order_no = cells[columns["訂單編號"]] if columns["訂單編號"] < len(cells) else ""
+        else:
+            match = re.search(orders.ORDER_NO_REGEX, line)
+            order_no = match.group(0) if match else ""
+        if not re.fullmatch(orders.ORDER_NO_REGEX, order_no) or order_no in seen:
+            continue
+        seen.add(order_no)
+
+        def cell(name):
+            idx = columns.get(name)
+            return cells[idx] if idx is not None and idx < len(cells) else ""
+
+        expected_date = ""
+        if cell("新日期"):
+            try:
+                expected_date = _parse_date(cell("新日期")).strftime("%Y-%m-%d")
+            except Exception:
+                expected_date = cell("新日期")
+        items.append({
+            "order_no": order_no,
+            "name": cell("姓名"),
+            "expected_date": expected_date,
+            "expected_period": _compact_period(cell("新時段")),
+        })
+    return items
+
+
+def _tracking_status(item, now_date, now_period):
+    if not item.get("expected_date"):
+        return "（表單無新日期，只查目前日期）"
+    if now_date == item["expected_date"] and (not item.get("expected_period") or now_period == item["expected_period"]):
+        return "未變動"
+    return "已變動"
+
+
+def track_orders(env_name, backend_email, backend_password, items, progress=None):
+    """逐筆查後台訂單目前的服務日期／時段。"""
+    session, base_url = _login(env_name, backend_email, backend_password)
+    rows = []
+    for index, item in enumerate(items, 1):
+        if progress:
+            progress(index, len(items), item)
+        row = {
+            "訂單編號": item["order_no"], "姓名": item.get("name", ""),
+            "表單新日期": item.get("expected_date", ""), "表單新時段": item.get("expected_period", ""),
+            "目前日期": "", "目前時段": "", "付款狀態": "", "狀態": "", "查詢時間": _now_text(),
+        }
+        try:
+            block = qo._fetch_purchase_block_for_order_no(session, item["order_no"])
+            lines = block.get("lines", [])
+            joined = "\n".join(lines)
+            now_date, now_period = qo._parse_service_date_time_loose(joined)
+            now_period = _compact_period(now_period)
+            status_match = re.search(r"付款狀態[：:]\s*([^\n]+)", joined)
+            row.update({
+                "目前日期": now_date, "目前時段": now_period,
+                "付款狀態": status_match.group(1).strip() if status_match else "",
+                "狀態": _tracking_status(item, now_date, now_period),
+            })
+            if not row["姓名"]:
+                for idx, line in enumerate(lines):
+                    if re.fullmatch(r"09\d{8}", str(line).strip()):
+                        row["姓名"] = str(lines[idx - 1]).strip() if idx else ""
+                        break
+        except Exception as exc:
+            row["狀態"] = f"查詢失敗：{exc}"
+        rows.append(row)
+    return rows
+
+
+def tracking_tsv(rows):
+    lines = ["\t".join(TRACK_HEADERS)]
+    for row in rows:
+        lines.append("\t".join(
+            str(row.get(h, "") or "").replace("\t", " ").replace("\n", " ") for h in TRACK_HEADERS
         ))
     return "\n".join(lines)
