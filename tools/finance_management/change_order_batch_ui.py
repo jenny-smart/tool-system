@@ -62,7 +62,7 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
             return
 
     runnable = [item for item in items if item["actions"]]
-    missing = [item for item in items if item["missing"]]
+    missing = [item for item in items if item["missing"] and not item["actions"]]
     manual = [item for item in items if not item["actions"] and not item["missing"]]
     if sync_only:
         st.markdown(f"共 **{len(items)}** 列可回寫系統。")
