@@ -22,6 +22,10 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual((start.isoformat(), end.isoformat()), ("2027-03-01", "2027-03-05"))
         with self.assertRaises(ValueError):
             tt.parse_date_range("2027/03/05-2027/03/01")
+        with self.assertRaises(ValueError):
+            tt.parse_date_range("2026/10/23")
+        start, end = tt.parse_date_range("2026/10/23", allow_single=True)
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-10-23", "2026-10-23"))
 
     def test_target_dates_weekdays_only(self):
         # 3/1 為補假但價格算平日，仍要排入
@@ -35,6 +39,18 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual((row["period"], row["person"], row["clean_type_id"]), ("08:30-12:30", 2, "1"))
         self.assertIsNone(tt._order_row_from_block(_block("LC2", "2026-10-23", "08:30 - 12:30", status="取消訂單"), "2026-10-23"))
         self.assertIsNone(tt._order_row_from_block(_block("LC3", "2026-10-24", "08:30 - 12:30"), "2026-10-23"))
+        ranged = tt._order_row_from_block(_block("LC4", "2026-10-24", "08:30 - 12:30"), "2026-10-23", "2026-10-24")
+        self.assertEqual(ranged["service_date"], "2026-10-24")
+
+    def test_candidate_dates_follow_each_typhoon_day_type(self):
+        # 10/23（五）排平日、10/24（六）排週末
+        by_day = tt.candidate_dates_by_day(
+            ["2026-10-23", "2026-10-24", "2026-10-23"], "2027-02-26", "2027-03-01", "與颱風假相同（平日／週末）",
+        )
+        self.assertEqual(by_day, {
+            "2026-10-23": ["2027-02-26", "2027-03-01"],
+            "2026-10-24": ["2027-02-27", "2027-02-28"],
+        })
 
     def test_parse_change_date_page_reads_embedded_list(self):
         html = """
@@ -70,11 +86,11 @@ class FindOrdersTests(unittest.TestCase):
 
         with patch.object(tt, "_login", lambda *a: (Session(), "https://x")), \
                 patch.object(tt.orders, "extract_order_cards_from_purchase_html", lambda html: blocks):
-            rows, _ = tt.find_typhoon_orders("dev", "a", "b", "2026/10/23")
+            rows, _ = tt.find_typhoon_orders("dev", "a", "b", "2026/10/23", "2026/10/24")
         self.assertEqual([r["order_no"] for r in rows], ["LC9", "LC3", "LC1"])
         self.assertEqual([r["line_url"] for r in rows], ["", "https://chat.line.biz/Uabc/chat/U3", ""])
         self.assertEqual(calls[0]["purchase_status"], "1")
-        self.assertEqual((calls[0]["clean_date_s"], calls[0]["clean_date_e"]), ("2026-10-23", "2026-10-23"))
+        self.assertEqual((calls[0]["clean_date_s"], calls[0]["clean_date_e"]), ("2026-10-23", "2026-10-24"))
 
 
 class TransferTests(unittest.TestCase):
@@ -135,6 +151,25 @@ class TransferTests(unittest.TestCase):
             result = tt.transfer_one_order(None, "", "dev", self.row, ["2027-03-01", "2027-03-02"])
         self.assertEqual(result["new_date"], "2027-03-02")
         self.assertEqual(len(self.posted), 2)
+
+
+class TransferManyTests(unittest.TestCase):
+    def test_each_order_uses_its_own_day_candidates(self):
+        seen = []
+
+        def fake_one(session, base_url, env, row, dates):
+            seen.append((row["order_no"], row["service_date_before"], dates))
+            return {"success": True, "new_date": dates[0], "message": "", "attempts": []}
+
+        rows = [
+            {"order_no": "LC1", "service_date": "2026-10-23", "period": "08:30-12:30", "phone": ""},
+            {"order_no": "LC2", "service_date": "2026-10-24", "period": "09:00-12:00", "phone": ""},
+        ]
+        by_day = {"2026-10-23": ["2027-03-01"], "2026-10-24": ["2027-03-06"]}
+        with patch.object(tt, "_login", lambda *a: (None, "")), patch.object(tt, "transfer_one_order", fake_one):
+            results = tt.transfer_typhoon_orders("dev", "a", "b", rows, by_day)
+        self.assertEqual(seen, [("LC1", "2026-10-23", ["2027-03-01"]), ("LC2", "2026-10-24", ["2027-03-06"])])
+        self.assertEqual([r["原日期"] for r in tt.result_copy_rows(results)], ["2026-10-23", "2026-10-24"])
 
 
 class CopyResultsTests(unittest.TestCase):

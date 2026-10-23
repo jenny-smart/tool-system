@@ -2,7 +2,8 @@
 """颱風假訂單移轉：把颱風假當天的訂單，依時段逐筆用後台「修改日期」移到移轉區間。
 
 流程（由上而下逐筆，各筆移到自己原本的時段）：
-1. 後台訂單以「服務日期起迄＝颱風假＋已付款」搜尋，依列表由上而下排序。
+1. 後台訂單以「服務日期起迄＝颱風假日期區間（可連放多天）＋已付款」搜尋，
+   依列表由上而下排序。
 2. 每筆訂單從移轉區間第一天開始試：讀後台「修改日期」頁內嵌的可選清單
    （就是日期／時間下拉選單的內容），日期選得到、時間也選得到「同一時段」，
    就送出修改日期（日期＋原時段，時段一定相同）；否則跳下一天。
@@ -47,14 +48,16 @@ def _parse_date(value):
     return datetime.strptime(str(value).strip().replace("/", "-"), "%Y-%m-%d").date()
 
 
-def parse_date_range(text):
-    """解析「2027/03/01-2027/03/05」或「2027-03-01~2027-03-05」。"""
+def parse_date_range(text, allow_single=False):
+    """解析「2027/03/01-2027/03/05」或「2027-03-01~2027-03-05」；allow_single 時可只輸入一天。"""
     found = re.findall(r"\d{4}[/-]\d{1,2}[/-]\d{1,2}", str(text or ""))
+    if allow_single and len(found) == 1:
+        found = found * 2
     if len(found) != 2:
-        raise ValueError("移轉日期區間格式請輸入：2027/03/01-2027/03/05")
+        raise ValueError("日期區間格式請輸入：2027/03/01-2027/03/05")
     start, end = (_parse_date(re.sub(r"/", "-", item)) for item in found)
     if start > end:
-        raise ValueError("移轉日期區間起日不可晚於迄日")
+        raise ValueError("日期區間起日不可晚於迄日")
     return start, end
 
 
@@ -90,11 +93,11 @@ def _login(env_name, backend_email, backend_password):
     return session, base_url
 
 
-def _order_row_from_block(block, typhoon_date):
+def _order_row_from_block(block, typhoon_start, typhoon_end=None):
     lines = block.get("lines", [])
     joined = "\n".join(lines)
     service_date, period_raw = qo._parse_service_date_time_loose(joined)
-    if service_date != typhoon_date:
+    if not service_date or not (typhoon_start <= service_date <= (typhoon_end or typhoon_start)):
         return None
     period = _compact_period(period_raw)
     if not period:
@@ -113,6 +116,7 @@ def _order_row_from_block(block, typhoon_date):
     person = len(_staff_names(staff)) or int(qo._extract_person_hour_line(joined)[0] or 2)
     return {
         "order_no": block.get("order_no", ""),
+        "service_date": service_date,
         "period": period,
         "name": name,
         "phone": phone,
@@ -125,16 +129,17 @@ def _order_row_from_block(block, typhoon_date):
     }
 
 
-def find_typhoon_orders(env_name, backend_email, backend_password, typhoon_date, max_pages=40):
-    """後台訂單以服務日期起迄＝颱風假、已付款搜尋，依後台列表由上而下的順序回傳。"""
-    typhoon_date = _parse_date(typhoon_date).strftime("%Y-%m-%d")
+def find_typhoon_orders(env_name, backend_email, backend_password, typhoon_start, typhoon_end=None, max_pages=40):
+    """後台訂單以服務日期起迄＝颱風假區間、已付款搜尋，依後台列表由上而下的順序回傳。"""
+    typhoon_start = _parse_date(typhoon_start).strftime("%Y-%m-%d")
+    typhoon_end = _parse_date(typhoon_end or typhoon_start).strftime("%Y-%m-%d")
     session, base_url = _login(env_name, backend_email, backend_password)
     found = {}
     hit_page_limit = True
     for page in range(1, max_pages + 1):
         params = dict(qo.PURCHASE_FILTER_PARAMS_TEMPLATE)
         params.update({
-            "clean_date_s": typhoon_date, "clean_date_e": typhoon_date,
+            "clean_date_s": typhoon_start, "clean_date_e": typhoon_end,
             "purchase_status": qo.PURCHASE_STATUS_PAID, "page": str(page),
         })
         resp = session.get(orders.PURCHASE_URL, params=params, headers=orders.HEADERS, allow_redirects=True)
@@ -143,7 +148,7 @@ def find_typhoon_orders(env_name, backend_email, backend_password, typhoon_date,
         blocks = orders.extract_order_cards_from_purchase_html(resp.text)
         line_urls = _line_urls_from_html(resp.text)
         for block in blocks:
-            row = _order_row_from_block(block, typhoon_date)
+            row = _order_row_from_block(block, typhoon_start, typhoon_end)
             if row and row["order_no"] and row["payment_status"] == "已付款":
                 row["line_url"] = line_urls.get(row["order_no"], "")
                 found.setdefault(row["order_no"], row)
@@ -248,17 +253,24 @@ def transfer_one_order(session, base_url, env_name, row, dates):
     return {"success": False, "new_date": "", "message": "移轉區間內都無法安排，訂單未修改", "attempts": attempts}
 
 
-def transfer_typhoon_orders(env_name, backend_email, backend_password, typhoon_date, rows, dates, progress=None):
-    """依 rows 的順序逐筆移轉；rows 每筆需有 order_no／period／phone。"""
-    typhoon_date = _parse_date(typhoon_date).strftime("%Y-%m-%d")
+def candidate_dates_by_day(service_dates, start, end, day_type):
+    """每個颱風假日期各自的候選移轉日期（「與颱風假相同」時依各日平日／週末不同）。"""
+    return {day: target_dates(start, end, day_type, day) for day in sorted(set(service_dates))}
+
+
+def transfer_typhoon_orders(env_name, backend_email, backend_password, rows, dates_by_day, progress=None):
+    """依 rows 的順序逐筆移轉；rows 每筆需有 order_no／service_date／period／phone。
+
+    dates_by_day：{颱風假日期: [候選移轉日期...]}，每筆依自己的原服務日期取候選日期。
+    """
     session, base_url = _login(env_name, backend_email, backend_password)
     results = []
     for index, row in enumerate(rows, 1):
-        row = {**row, "service_date_before": typhoon_date}
+        row = {**row, "service_date_before": row["service_date"]}
         if progress:
             progress(index, len(rows), row)
         try:
-            result = transfer_one_order(session, base_url, env_name, row, dates)
+            result = transfer_one_order(session, base_url, env_name, row, dates_by_day.get(row["service_date"], []))
         except Exception as exc:
             result = {"success": False, "new_date": "", "message": str(exc), "attempts": []}
         results.append({**row, **result})

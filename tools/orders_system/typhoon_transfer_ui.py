@@ -12,6 +12,7 @@ def _rows_to_frame(rows):
         {
             "移轉": True,
             "順序": idx,
+            "日期": row["service_date"],
             "時段": row["period"],
             "訂單編號": row["order_no"],
             "姓名": row["name"],
@@ -91,35 +92,39 @@ def _render_tracking(backend_email, backend_password, env, copy_button=None):
 
 def _render_transfer(backend_email, backend_password, env, copy_button=None):
     st.caption(
-        "依颱風假當天的時段，逐筆用後台「修改日期」移到移轉區間：先選日期、時段維持原時段。"
+        "依颱風假的時段，逐筆用後台「修改日期」移到移轉區間：先選日期、時段維持原時段。"
         "名單為後台「服務日期＋已付款」搜尋結果由上而下的順序，依序排入，第一天排不下才換下一天。"
+        "颱風假連放多天時輸入區間，例如 2026/10/22-2026/10/23。"
     )
     c1, c2 = st.columns(2)
     with c1:
-        typhoon_text = st.text_input("颱風假日期", value="", placeholder="2026/10/23", key="tt_typhoon_date")
+        typhoon_text = st.text_input("颱風假日期（一天或區間）", value="", placeholder="2026/10/23 或 2026/10/22-2026/10/23",
+                                     key="tt_typhoon_date")
     with c2:
         range_text = st.text_input("移轉日期區間", value="", placeholder="2027/03/01-2027/03/05", key="tt_range")
     day_type = st.selectbox("移轉日別", tt.DAY_TYPES, key="tt_day_type",
                             help="平日（週一～五，國定假日也算平日）與週末（週六、日）價格不同，預設只移到與颱風假相同日別的日期。")
 
-    if st.button("🔍 查詢颱風假當天訂單", type="primary", use_container_width=True, key="tt_search"):
+    if st.button("🔍 查詢颱風假訂單", type="primary", use_container_width=True, key="tt_search"):
         if not backend_email.strip() or not backend_password.strip():
             st.error("請先在上方輸入後台帳號密碼")
             return
         try:
-            typhoon_date = tt._parse_date(typhoon_text).strftime("%Y-%m-%d")
+            typhoon_start, typhoon_end = tt.parse_date_range(typhoon_text, allow_single=True)
         except Exception:
-            st.error("颱風假日期格式請輸入：2026/10/23")
+            st.error("颱風假日期格式請輸入：2026/10/23 或 2026/10/22-2026/10/23")
             return
         try:
             with st.spinner("登入後台並查詢訂單…"):
-                rows, debug = tt.find_typhoon_orders(env, backend_email.strip(), backend_password.strip(), typhoon_date)
+                rows, debug = tt.find_typhoon_orders(
+                    env, backend_email.strip(), backend_password.strip(), typhoon_start, typhoon_end,
+                )
         except Exception as exc:
             st.error(f"查詢失敗：{exc}")
             return
         st.session_state.tt_rows = rows
         st.session_state.tt_debug = debug
-        st.session_state.tt_loaded_date = typhoon_date
+        st.session_state.tt_loaded_range = (typhoon_start.strftime("%Y-%m-%d"), typhoon_end.strftime("%Y-%m-%d"))
         st.session_state.pop("tt_results", None)
         st.session_state.pop("tt_editor", None)
 
@@ -127,18 +132,19 @@ def _render_transfer(backend_email, backend_password, env, copy_button=None):
     if rows is None:
         return
     debug = st.session_state.get("tt_debug", {})
-    typhoon_date = st.session_state.get("tt_loaded_date", "")
-    st.caption(f"後台：{debug.get('base_url', '')}｜{typhoon_date} 共 {len(rows)} 筆已付款服務訂單")
+    typhoon_start, typhoon_end = st.session_state.get("tt_loaded_range", ("", ""))
+    typhoon_label = typhoon_start if typhoon_start == typhoon_end else f"{typhoon_start}～{typhoon_end}"
+    st.caption(f"後台：{debug.get('base_url', '')}｜{typhoon_label} 共 {len(rows)} 筆已付款服務訂單")
     if debug.get("hit_page_limit"):
         st.warning("查詢已達頁數上限，名單可能不完整，請到後台確認。")
     if not rows:
-        st.success("颱風假當天沒有已付款的服務訂單。")
+        st.success("颱風假期間沒有已付款的服務訂單。")
         return
 
     st.markdown("**移轉名單**（依後台列表由上而下；可取消勾選，或改「順序」調整先後）")
     edited = st.data_editor(
         _rows_to_frame(rows), hide_index=True, use_container_width=True, key="tt_editor",
-        disabled=["時段", "訂單編號", "姓名", "電話", "人數", "專員", "付款狀態"],
+        disabled=["日期", "時段", "訂單編號", "姓名", "電話", "人數", "專員", "付款狀態"],
         column_config={
             "移轉": st.column_config.CheckboxColumn("移轉"),
             "順序": st.column_config.NumberColumn("順序", min_value=1, step=1),
@@ -147,35 +153,37 @@ def _render_transfer(backend_email, backend_password, env, copy_button=None):
 
     try:
         start, end = tt.parse_date_range(range_text)
-        dates = tt.target_dates(start, end, day_type, typhoon_date)
+        dates_by_day = tt.candidate_dates_by_day([row["service_date"] for row in rows], start, end, day_type)
     except Exception as exc:
         st.info(f"請輸入移轉日期區間：{exc}" if range_text.strip() else "請輸入移轉日期區間，例如 2027/03/01-2027/03/05")
         return
-    if not dates:
+    if start.strftime("%Y-%m-%d") <= typhoon_end and typhoon_start <= end.strftime("%Y-%m-%d"):
+        st.error("移轉區間不可和颱風假日期重疊")
+        return
+    for day, dates in dates_by_day.items():
+        st.caption(f"{day} 的訂單候選日期（依序嘗試）：" + ("、".join(dates) or "無符合日別的日期"))
+    all_dates = sorted({d for dates in dates_by_day.values() for d in dates})
+    if not all_dates:
         st.error("移轉區間內沒有符合日別的日期")
         return
-    if typhoon_date in dates:
-        st.error("移轉區間不可包含颱風假當天")
-        return
-    st.caption("候選日期（依序嘗試）：" + "、".join(dates))
 
     by_order = {row["order_no"]: row for row in rows}
     selected = edited[edited["移轉"]].copy()
     selected = selected.sort_values("順序", kind="stable")
     plan = [by_order[no] for no in selected["訂單編號"]]
 
-    confirm = st.checkbox(f"確認要把 {len(plan)} 筆訂單的服務日期改到 {dates[0]}～{dates[-1]}（時段不變）", key="tt_confirm")
+    confirm = st.checkbox(f"確認要把 {len(plan)} 筆訂單的服務日期改到 {all_dates[0]}～{all_dates[-1]}（時段不變）", key="tt_confirm")
     if st.button("🌀 開始移轉", type="primary", use_container_width=True, disabled=not (confirm and plan), key="tt_run"):
         bar = st.progress(0.0)
         status = st.empty()
 
         def _progress(index, total, row):
             bar.progress((index - 1) / total)
-            status.write(f"處理第 {index}/{total} 筆：{row['period']} {row['name']}（{row['order_no']}）")
+            status.write(f"處理第 {index}/{total} 筆：{row['service_date']} {row['period']} {row['name']}（{row['order_no']}）")
 
         try:
             results = tt.transfer_typhoon_orders(
-                env, backend_email.strip(), backend_password.strip(), typhoon_date, plan, dates, progress=_progress,
+                env, backend_email.strip(), backend_password.strip(), plan, dates_by_day, progress=_progress,
             )
         except Exception as exc:
             st.error(f"移轉失敗：{exc}")
