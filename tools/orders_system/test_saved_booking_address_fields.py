@@ -60,6 +60,25 @@ class SavedAddressFieldsTest(unittest.TestCase):
         info = prepare.call_args.args[2]
         self.assertEqual((info['area_id'], info['company_id'], info['lat'], info['lng']), (25, 1, 25.02, 121.52))
 
+    def test_proxy_row_without_saved_address_uses_native_lookup(self):
+        """代客保留：檸檬保留帳號沒有客人地址 → 後台查詢地區取得區域（addressId 留空，送單時另建地址）。"""
+        import proxy_reserve
+        row = {'購買項目': '居家清潔', '電話': proxy_reserve.RESERVE_PHONE, '地址': '新北市中和區測試路1號',
+               '開始時間': '09:00', '結束時間': '12:00', '服務人時': '6', '姓名': '王亭雅',
+               proxy_reserve.FLAG_KEY: True, proxy_reserve.NAME_KEY: '王亭雅'}
+        native = {'area': {'area_id': 31, 'company_id': 1, 'lat': 25.0, 'lng': 121.5}}
+        with patch.object(orders, 'st', None), \
+             patch.object(orders, 'get_member', return_value=self.payload()), \
+             patch('backend_address_form.query_native_address', return_value=native) as query, \
+             patch.object(q, '_validate_area_not_known_bad'), patch.object(q, '_validate_address_before_submit'), \
+             patch.object(orders, 'prepare_base_order_data', side_effect=RuntimeError('stop before calculation')) as prepare:
+            with self.assertRaisesRegex(RuntimeError, 'stop before calculation'):
+                orders.process_one_group(object(), [(1, row)], 'token', None, '台北')
+        query.assert_called_once()
+        info = prepare.call_args.args[2]
+        self.assertEqual((info['area_id'], info['company_id']), (31, 1))
+        self.assertEqual(info.get('addressId', ''), '')
+
 
 if __name__ == '__main__':
     unittest.main()

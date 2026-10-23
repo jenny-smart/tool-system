@@ -62,3 +62,16 @@ def test_needs_native_address_only_for_proxy_rows():
     assert pr.needs_native_address(df.iloc[0]) is True
     assert pr.needs_native_address(df.iloc[1]) is False
     assert pr.needs_native_address({}) is False
+
+
+def test_proxy_rows_of_same_address_group_together_in_optimized_mode():
+    """批次優化／雲端：同客人同地址多日期同組（一次勾多時段）；不同地址分開。"""
+    import hybrid_batch_runner as hb
+    base = {"電話": "0912269511", "代客保留": "TRUE", "開始時間": "09:00", "結束時間": "12:00", "服務人時": "6"}
+    df = pd.DataFrame([dict(base, 姓名="王亭雅", 地址="新北市中和區測試路1號", 日期=d)
+                       for d in ("2026/12/14", "2027/01/11", "2027/02/15")]
+                      + [dict(base, 姓名="林小明", 電話="0922000000", 地址="台北市大安區測試路2號", 日期="2026/12/14")])
+    pr.apply(df)
+    keys = [hb._phone_address_group_key(r) for _, r in df.iterrows()]
+    assert keys[0] == keys[1] == keys[2] and keys[3] != keys[0]
+    assert keys[0][0] == pr.RESERVE_PHONE
