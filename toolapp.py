@@ -4992,10 +4992,10 @@ with date_col:
                     st.error("期別格式錯誤，請輸入 yyyyMM，多個用逗號分隔")
                     start_date_value = end_date_value = None
             else:
-                # 月份區間：起始月 1 日 ～ 結束月最後一天。
+                # 月份區間：本月起往後 6 個月可選；範圍為起始月 1 日 ～ 結束月最後一天。
                 _this_month = _today_date.year * 12 + _today_date.month - 1
-                _month_options = [(_m // 12, _m % 12 + 1) for _m in range(_this_month - 12, _this_month + 19)]
-                _this_index = _month_options.index((_today_date.year, _today_date.month))
+                _month_options = [(_m // 12, _m % 12 + 1) for _m in range(_this_month, _this_month + 7)]
+                _this_index = 0
                 _m1, _m2 = st.columns(2)
                 with _m1:
                     _start_month = st.selectbox("起始月份", _month_options, index=_this_index,
