@@ -171,7 +171,7 @@ def test_writer_updates_booked_calendar_cells_preserving_k_ag_and_row_position()
     sync(book, [source])
     assert sheet.data[1][10:30] == row[10:30]
     assert all(u['range'] in ('A2:J2', 'D2', 'AH2', 'AI2', 'AJ2', 'AK2') for batch, _ in sheet.batches for u in batch)
-    assert sheet.formats[0]['range'] == 'A2:AK2'
+    assert sheet.formats[0]['range'] == 'A2:AL2'
     report = book.sheets['排程差異_台北202611']
     before = len(report.data)
     sync(book, [source])
@@ -179,12 +179,17 @@ def test_writer_updates_booked_calendar_cells_preserving_k_ag_and_row_position()
     assert sheet.data[1][10:30] == row[10:30]
 
 
+def _lookup(row, sheet):
+    return (f"=IFNA(xlookup(E{row},'{sheet}'!E:E,'{sheet}'!J:J),"
+            f"xlookup(D{row},'{sheet}'!D:D,'{sheet}'!J:J))")
+
+
 @pytest.mark.parametrize('period,previous', [('202611', '202610'), ('202601', '202512')])
 def test_new_rows_get_previous_month_formula_and_phone_raw(period, previous):
     book = Book()
     sync(book, [source_row(old_row(date=period[:4] + '/' + period[4:] + '/10'))], name='台北' + period)
     sheet = book.sheets['台北' + period]
-    assert sheet.data[1][9] == f"=xlookup(E2,'台北{previous}'!E:E,'台北{previous}'!J:J)"
+    assert sheet.data[1][9] == _lookup(2, f'台北{previous}')
     assert sheet.batches[-1][1]['value_input_option'] == 'RAW'
     assert sheet.data[1][3] == '0912345678'
 
@@ -229,7 +234,7 @@ def test_legacy_30_column_schedule_is_extended_without_overwriting_order():
         return original_get(range_name, **kwargs)
     sheet.get = get
     sync(Book([sheet]), [source_row(old_row(), **{'0': '2人'})])
-    assert sheet.col_count == 37
+    assert sheet.col_count == 38
     assert sheet.data[1][10:30] == row[10:30]
 
 
@@ -245,9 +250,9 @@ def test_custom_ae_ag_are_preserved_and_tracking_columns_reused():
     assert sheet.data[1][30:33] == custom
     assert sheet.data[0][33:36] == ['日曆事件ID', '日曆異動', '日曆異動內容']
     assert sheet.data[1][33] == 'event1'
-    assert sheet.col_count == 37
+    assert sheet.col_count == 38
     sync(book, [source])
-    assert sheet.col_count == 37
+    assert sheet.col_count == 38
     assert sheet.data[1][30:33] == custom
 
 
@@ -363,7 +368,7 @@ def test_booked_address_change_refreshes_j_formula_and_preserves_all_k_ag():
     assert sheet.data[1][4] == '台北市新地址'
     assert sheet.data[1][5] == '2026/11/12'
     assert sheet.data[1][8] == '已安排'
-    assert sheet.data[1][9] == "=xlookup(E2,'台北202610'!E:E,'台北202610'!J:J)"
+    assert sheet.data[1][9] == _lookup(2, '台北202610')
     assert sheet.data[1][10:33] == original
     assert '台北市大安區 → 台北市新地址' in sheet.data[1][35]
     assert sheet.data[1][36]
@@ -389,7 +394,7 @@ def test_same_day_customer_address_highlights_all_visits_including_paused():
     sync(Book([sheet]), [source_row(row) for row in (active, paused, other_day)])
     purple = {'red': .90, 'green': .85, 'blue': 1}
     marked = [item['range'] for item in sheet.formats if item['format']['backgroundColor'] == purple]
-    assert marked == ['A2:AK2', 'A3:AK3']
+    assert marked == ['A2:AL2', 'A3:AL3']
     assert [row[:30] for row in sheet.data[1:]] == [row[:30] for row in before[1:]]
 
 
@@ -507,7 +512,7 @@ def test_recreated_sheet_has_no_new_colors_and_later_additions_are_marked():
 
 
 def _monthly(event, date, start='14:00', end='18:00', note='每月確認', status='待確認', order=''):
-    row = old_row(event=event, date=date, start=start, status=status, order=order)
+    row = old_row(event=event, date=date, start=start, status=status, order=order, service='2人4')
     row[1], row[7] = note, end
     return row
 
@@ -609,15 +614,15 @@ def test_combined_sheet_rows_look_up_month_before_range():
     sync_schedule(Book([sheet, previous]), '台北202612-202702',
                   [source_row(existing), source_row(other), source_row(new)], ['標題'] * 30, MissingSheet,
                   period_filter='')
-    assert sheet.data[1][9] == "=xlookup(E2,'台北202611'!E:E,'台北202611'!J:J)"
-    assert sheet.data[2][9] == "=xlookup(E3,'台北202611'!E:E,'台北202611'!J:J)"
-    assert sheet.data[3][9] == "=xlookup(E4,'台北202611'!E:E,'台北202611'!J:J)"
+    assert sheet.data[1][9] == _lookup(2, '台北202611')
+    assert sheet.data[2][9] == _lookup(3, '台北202611')
+    assert sheet.data[3][9] == _lookup(4, '台北202611')
 
 
 def test_single_month_sheet_keeps_previous_month_lookup():
     sheet = Sheet('台北202701', [])
     sync(Book([sheet]), [source_row(old_row(event='e1', date='2027/01/04'))], name='台北202701')
-    assert sheet.data[1][9] == "=xlookup(E2,'台北202612'!E:E,'台北202612'!J:J)"
+    assert sheet.data[1][9] == _lookup(2, '台北202612')
 
 
 class SortableSheet(Sheet):
@@ -698,3 +703,38 @@ def test_rows_no_longer_in_calendar_move_below_the_calendar_rows():
     assert sheet.data[3][12] == 'LC7'
     report = book.sheets['排程差異_台北202612'].data
     assert [line[2] for line in report[1:] if line[3] == '本次日曆未見'] == [4]
+
+
+def test_proxy_reserve_checkbox_column_is_added_once_and_never_written():
+    row = old_row(order='LC123')
+    sheet = Sheet('台北202611', [row])
+    sync(Book([sheet]), [source_row(row)])
+    column = sheet.data[0].index('代客保留')
+    assert column > 33
+    # 使用者勾選後再比對：沿用同一欄，值不被改寫。
+    sheet.data[1] += [''] * (column + 1 - len(sheet.data[1]))
+    sheet.data[1][column] = 'TRUE'
+    sync(Book([sheet]), [source_row(row, **{'0': '2人'})])
+    assert sheet.data[0].count('代客保留') == 1
+    assert sheet.data[1][column] == 'TRUE'
+
+
+def test_user_added_proxy_column_is_reused():
+    row = old_row()
+    sheet = Sheet('台北202611', [row])
+    sheet.data[0] += ['', '', '代客保留']
+    sheet.col_count = 36
+    sync(Book([sheet]), [source_row(row)])
+    assert sheet.data[0].count('代客保留') == 1 and sheet.data[0][35] == '代客保留'
+
+
+def test_unchanged_monthly_rows_get_phone_fallback_but_custom_formulas_stay():
+    legacy = old_row(event='e1', date='2026/11/04')
+    legacy[9] = "=xlookup(E2,'台北202610'!E:E,'台北202610'!J:J)"
+    custom = old_row(event='e2', date='2026/11/05')
+    custom[2:5] = ['李小華', '0922333444', '台北市信義區']
+    custom[9] = "=IFNA(xlookup(E3,'台北202610'!E:E,'台北202610'!J:J),\"居家清潔\")"
+    sheet = Sheet('台北202611', [legacy, custom])
+    sync(Book([sheet]), [source_row(legacy), source_row(custom, **{'0': '2人'})])
+    assert sheet.data[1][9] == _lookup(2, '台北202610')
+    assert sheet.data[2][9] == custom[9]

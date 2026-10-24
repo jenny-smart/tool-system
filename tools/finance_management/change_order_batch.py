@@ -4,8 +4,9 @@
   - 只處理登記日期（E 欄）2026/10/16 以後的列。
   - 每列分三類：未備妥（missing，缺資料還不能處理，例如缺匯款帳號、客人尚未付款）、
     可自動執行（actions）、需人工（manual，資料齊全但要到其他功能逐筆處理）。
-    未備妥的列不執行任何動作；每日檢查只提醒未備妥的列。
-  - 待退款：① 開折讓單（有 X 原發票、Z 未稅金額，AB 空白）
+    未備妥的列不執行任何動作；例外：ATM 只缺退款銀行代碼／帳號（P／Q）時仍先開折讓單，只是不退款。
+    每日檢查只提醒未備妥的列。
+  - 待退款：① 開折讓單（有 X 原發票、Z 未稅金額，AB 空白；ATM 不論有無 P／Q 銀行代碼帳號都可先開）
             ② 退款（AC 空白）：R＝ATM → 富邦 ATM 退款（台北／台中）；R＝信用卡 → 藍新退款；其他付款方式 → 需人工
   - VIP待退券：① 【檸檬後台】異動儲值金：依儲值金歷程頁餘額把儲值金及購物金都扣到 0
                  （退款金額 S 大於儲值金時先扣 S、再扣剩餘餘額）；第一筆 Agent 直接送出，
@@ -41,6 +42,7 @@ RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
 
 DONE_STATUSES = ("已退款", "VIP已退券", "已收款", "已扣儲值金", "已返儲值金", "已處理發票")
 REFUND_STATUSES = {"待退款", "VIP待退券"}
+MISSING_BANK = "缺退款銀行代碼／帳號（P／Q）"  # 只擋退款，不擋折讓單
 STORED_VALUE_STATUSES = {"待扣儲值金", "待返儲值金"}
 ATM_REFUND_REGIONS = {"台北", "台中"}
 # 只列出、不自動處理的狀態（已完成或不需處理）
@@ -177,7 +179,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
                 item["progress"].append("儲值金歸零及折讓單完成後才退款")
             elif "ATM" in payway:
                 if not re.sub(r"\D", "", _cell(row, "P")) or not re.sub(r"\D", "", _cell(row, "Q")):
-                    item["missing"].append("缺退款銀行代碼／帳號（P／Q）")
+                    item["missing"].append(MISSING_BANK)
                 elif region not in ATM_REFUND_REGIONS:
                     item["manual"].append(f"{region} ATM 退款需人工")
                 elif _amount(_cell(row, "S")):
@@ -187,8 +189,9 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
                     item["actions"].append("credit_refund")
             else:
                 item["manual"].append(f"付款方式「{item['payway']}」退款需人工")
-        if item["missing"]:
+        if any(m != MISSING_BANK for m in item["missing"]):
             item["actions"] = []  # 資料不齊的列先不執行，避免只做一半
+        # 只缺銀行代碼／帳號：退款本來就不會排入，折讓單（及 VIP 歸零）照常先做
         return item
 
     if status == "待收款":
@@ -341,6 +344,24 @@ def sync_region(region: str, log: Callable[[str], None] = print,
     if not targets:
         return result
     session = _login_session(region, ui_logger=log)
+    try:
+        _sync_targets(change_order, ws, region, targets, session, result, log)
+    finally:
+        _logout_session(change_order, session, region, log)
+    return result
+
+
+def _logout_session(change_order, session, region: str, log: Callable[[str], None]) -> None:
+    """回寫完一律登出這區檸檬後台（requests 連線，不影響 Chrome）；登出失敗只提醒。"""
+    try:
+        session.get(f"{change_order.BASE_URL}/logout", timeout=20)
+        log(f"【{region}】檸檬後台已登出")
+    except Exception as exc:
+        log(f"⚠️ 【{region}】檸檬後台登出失敗：{exc}")
+
+
+def _sync_targets(change_order, ws, region: str, targets: list, session, result: dict,
+                  log: Callable[[str], None]) -> None:
     for row_no, row, status in targets:
         # 已處理好但 B 欄仍是待處理的列：以完成狀態回填後台，成功後才把 B 欄改成完成狀態
         sync_item = {"sheet_row": row_no, "kind": "refund" if "退" in status or "返" in status else "charge",
@@ -354,7 +375,6 @@ def sync_region(region: str, log: Callable[[str], None] = print,
         except Exception as exc:
             result["failed"].append((row_no, str(exc)))
             log(f"❌ 【{region}】第 {row_no} 列 {sync_item['order_no']} 回寫失敗：{exc}")
-    return result
 
 
 def build_record_text(results: dict[str, dict], today: date) -> tuple[str, str]:

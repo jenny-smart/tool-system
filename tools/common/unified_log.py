@@ -84,3 +84,82 @@ def write(*, repo: str = REPO, service=None, spreadsheet_id: str = "", **fields:
             insertDataOption="INSERT_ROWS", body={"values": [build_row(**fields)]}).execute()
     except Exception as exc:  # Log 寫不進去不能影響主流程
         print(f"[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：{exc}", flush=True)
+
+
+# ── 網頁執行紀錄：按下按鈕寫「執行」，之後第一個成功／錯誤訊息寫「成功」／「失敗」 ──
+MAX_ERRORS_PER_CLICK = 3
+
+
+def _ctx(st) -> dict[str, Any]:
+    """目前功能存在各自的 session（多人同時使用不互相混到）。"""
+    state = st.session_state
+    if "_unified_log_ctx" not in state:
+        state["_unified_log_ctx"] = {}
+    return state["_unified_log_ctx"]
+
+
+def set_context(st, **fields: Any) -> None:
+    """更新目前功能的欄位（system／function／area／period／operator）。"""
+    try:
+        _ctx(st).update({k: v for k, v in fields.items() if v is not None})
+    except Exception:
+        pass
+
+
+def report(st, level: str, message: Any) -> None:
+    """按下按鈕後的結果：success → 成功（每次按鈕只記一筆），error → 失敗（最多 3 筆）。"""
+    try:
+        ctx = _ctx(st)
+        if not ctx.get("clicked"):
+            return
+        if level == "success" and not ctx.get("succeeded"):
+            ctx["succeeded"] = True
+            status = "成功"
+        elif level == "error" and ctx.get("errors", 0) < MAX_ERRORS_PER_CLICK:
+            ctx["errors"] = ctx.get("errors", 0) + 1
+            status = "失敗"
+        else:
+            return
+        write(repo=ctx.get("repo", REPO), system=ctx.get("system", ""),
+              function=f"{ctx.get('function', '')}／{ctx['clicked']}", run_type="手動", area=ctx.get("area", ""), period=ctx.get("period", ""), status=status,
+              message=message, operator=ctx.get("operator", ""))
+    except Exception:
+        pass
+
+
+def install_streamlit_hooks(st, *, repo: str = REPO, **fields: Any) -> None:
+    """每次頁面重跑呼叫一次：記下目前功能，並包裝 st.button／st.success／st.error（只包一次）。"""
+    try:
+        ctx = _ctx(st)
+        ctx.update(repo=repo, clicked="", succeeded=False, errors=0)
+        ctx.update({k: v for k, v in fields.items() if v is not None})
+    except Exception:
+        return
+    if getattr(st.button, "_unified_log", False):
+        return
+    original_button, original_success, original_error = st.button, st.success, st.error
+
+    def button(label, *args, **kwargs):
+        clicked = original_button(label, *args, **kwargs)
+        if clicked:
+            try:
+                ctx = _ctx(st)
+                ctx.update(clicked=str(label).strip(), succeeded=False, errors=0)
+                write(repo=ctx.get("repo", REPO), system=ctx.get("system", ""),
+                      function=f"{ctx.get('function', '')}／{ctx['clicked']}", run_type="手動",
+                      area=ctx.get("area", ""), period=ctx.get("period", ""), status="執行",
+                      operator=ctx.get("operator", ""))
+            except Exception:
+                pass
+        return clicked
+
+    def success(body, *args, **kwargs):
+        report(st, "success", body)
+        return original_success(body, *args, **kwargs)
+
+    def error(body, *args, **kwargs):
+        report(st, "error", body)
+        return original_error(body, *args, **kwargs)
+
+    button._unified_log = True
+    st.button, st.success, st.error = button, success, error

@@ -14,6 +14,7 @@ from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_ch
 from tools.lemon_backend.config import get_credentials
 from tools.lemon_backend.stored_value_filter import (
     build_note,
+    REMAINDER_SUFFIX,
     parse_balances,
     pending_stored_value_adjustments,
     zero_out_steps,
@@ -125,11 +126,27 @@ def _already_done(page: Page, order_no: str, amount: str, note: str) -> bool:
     return order_no in compact and compact_note in compact and amount in compact
 
 
-def _logout(page: Page) -> None:
-    links = page.locator('a[href*="logout"]')
-    href = links.first.get_attribute("href") if links.count() else ""
-    if href:
-        page.goto(href, wait_until="domcontentloaded")
+def _logout(page: Page, context=None) -> None:
+    """做完一律登出檸檬後台；頁面被關掉時另開分頁登出（登入狀態存在瀏覽器，不登出會留著）。
+    登出失敗只提醒，不蓋掉原本的結果或錯誤。"""
+    try:
+        if page.is_closed():
+            if context is None:
+                print("⚠️ 檸檬後台頁面已關閉，無法自動登出，請手動登出")
+                return
+            page = context.new_page()
+            href = ""
+        else:
+            links = page.locator('a[href*="logout"]')
+            href = links.first.get_attribute("href") if links.count() else ""
+        page.goto(urljoin(BASE_URL, href) if href else f"{BASE_URL}/logout", wait_until="domcontentloaded")
+        page.goto(f"{BASE_URL}/purchase", wait_until="domcontentloaded", timeout=60_000)
+        if "/login" in page.url:
+            print("檸檬後台已登出。")
+        else:
+            print(f"⚠️ 檸檬後台登出後仍在 {page.url}，請手動登出")
+    except Exception as exc:
+        print(f"⚠️ 檸檬後台自動登出失敗，請手動登出：{exc}")
 
 
 def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> None:
@@ -137,6 +154,9 @@ def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> No
     print(f"⏸ {order_no} 已填好扣款 NT$ {int(amount):,}／備註「{note}」，請確認後在異動視窗按「送出」")
     deadline = time.monotonic() + MANUAL_SUBMIT_TIMEOUT
     while time.monotonic() < deadline:
+        if page.is_closed():
+            raise RuntimeError(f"{order_no} 等候送出時頁面已關閉，NT$ {int(amount):,} 未扣；"
+                               "已送出的扣款不會重扣，請重新執行並在異動視窗按「送出」")
         try:
             if _already_done(page, order_no, amount, note):
                 print(f"已確認送出：{order_no}／NT$ {int(amount):,}")
@@ -219,7 +239,8 @@ def _balances(page: Page, order_no: str) -> tuple[int, int]:
 def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
     """VIP待退券：依頁面餘額把儲值金及購物金都扣到 0，扣款筆數見 zero_out_steps。
 
-    第一筆（退款金額或儲值金）由 Agent 直接送出；之後扣剩餘餘額的那一筆由 Agent 填表、等人工確認按送出。"""
+    扣退款金額或儲值金的那一筆由 Agent 直接送出；扣剩餘餘額的那一筆（含重跑時只剩購物金）
+    一律由 Agent 填表、等人工確認按送出。"""
     order_no = str(item["order_no"])
     stored, shopping = _balances(page, order_no)
     if stored < 0 or shopping < 0:
@@ -228,9 +249,9 @@ def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
     print(f"{order_no} 目前儲值金餘額 {stored:,}、購物金餘額 {shopping:,}、退款金額 {item.get('refund_amount') or '-'}，"
           f"扣款 {'＋'.join(f'{amount:,}' for _, amount in steps) or '0'}")
     created = False
-    for index, (suffix, amount) in enumerate(steps):
+    for suffix, amount in steps:
         step = {**item, "amount": str(amount), "suffix": suffix}
-        created = _submit_adjustment(page, step, date_text, manual_submit=index > 0) or created
+        created = _submit_adjustment(page, step, date_text, manual_submit=suffix == REMAINDER_SUFFIX) or created
     stored, shopping = _balances(page, order_no)
     if stored or shopping:
         raise RuntimeError(f"{order_no} 歸零後仍有儲值金 {stored:,}／購物金 {shopping:,}，請人工確認")
@@ -270,7 +291,7 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                     completed += 1
                     print(f"完成：{item['order_no']}／{date_text}{item['suffix']}")
         finally:
-            _logout(page)
+            _logout(page, context)
     print(f"檸檬後台儲值金異動完成：{completed}/{len(pending)} 筆（其餘為已存在而略過）")
     return 0
 

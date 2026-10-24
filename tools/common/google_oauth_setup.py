@@ -3,6 +3,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/forms.body",  # 生成新年度：更新春酒表單題目
 ]
 
 flow = InstalledAppFlow.from_client_secrets_file(

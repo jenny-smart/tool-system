@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from accounts import ACCOUNTS
+import dev_sheet_copy
 from hybrid_batch_runner import run_process_web_direct_single, run_process_web_hybrid
 
 
@@ -53,10 +54,9 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
     st.markdown("<hr>", unsafe_allow_html=True)
 
     batch_opt.step("3", "執行項目")
-    default_actions = ["建單", "寄確認信", "改 Google 日曆"] if env == "prod" else ["建單"]
     selected_actions = st.multiselect(
-        "執行項目", ["建單", "寄確認信", "改 Google 日曆"],
-        default=default_actions, key="batch_opt_actions_same_ui", label_visibility="collapsed",
+        "執行項目", dev_sheet_copy.action_options(env),
+        default=dev_sheet_copy.default_actions(env), key="batch_opt_actions_same_ui", label_visibility="collapsed",
     )
     st.markdown('<div class="hint-box">建單與回填優先；只有勾選改日曆且該筆已有訂單編號後，才初始化 Google Calendar。</div>', unsafe_allow_html=True)
     allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="batch_opt_allow_auto_lemon")
@@ -65,7 +65,8 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
     render_stage_filter(st, "batch_opt_booking_stages")
     auto_no_slot = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="batch_opt_auto_no_slot")
     auto_missing_o = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="batch_opt_auto_missing_o")
-    o_texts = render_o_text_filter(st, batch_opt, sheet_name, region, "batch_opt_o_texts") if auto_missing_o else []
+    o_texts = render_o_text_filter(st, batch_opt, dev_sheet_copy.read_sheet(st, env, sheet_name), region, "batch_opt_o_texts") if auto_missing_o else []
+    dev_sheet_copy.render_notice(st, env, sheet_name, "batch_opt")
 
     run_clicked = st.button("🚀  開始執行", use_container_width=True, key="batch_opt_same_ui_run")
     with st.expander("📄  執行過程", expanded=True):
@@ -80,6 +81,15 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
     if not selected_actions:
         st.error("請至少選擇一個執行項目。")
         return
+    if dev_sheet_copy.is_dev(env):
+        # 測試機：先複製分頁，後續篩選、建單、回填都改用副本。
+        source_sheet = sheet_name
+        try:
+            sheet_name = dev_sheet_copy.resolve_run_sheet(st, env, source_sheet)
+        except Exception as exc:
+            st.error(f"建立測試副本失敗：{exc}")
+            return
+        st.info(f"🧪 測試機 dev：本次使用測試副本「{sheet_name}」（原分頁「{source_sheet}」不受影響）。")
 
     logs = []
     def ui_log(msg):

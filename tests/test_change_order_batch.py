@@ -43,8 +43,13 @@ def test_pending_refund_atm_and_credit():
 
 
 def test_missing_data_is_not_ready_and_blocks_actions():
+    # ATM 缺 P／Q：仍先開折讓單，不退款（每日檢查照樣提醒缺帳號）
     item = plan(B="待退款", X="AB1", Z="952", S="1000", R="ATM")
-    assert item["missing"] == ["缺退款銀行代碼／帳號（P／Q）"] and item["actions"] == []
+    assert item["missing"] == ["缺退款銀行代碼／帳號（P／Q）"] and item["actions"] == ["allowance"]
+    item = plan(B="待退款", X="AB1", Z="952", R="ATM")  # 還缺 S：全部不做
+    assert item["actions"] == [] and "缺退款金額（S）" in item["missing"]
+    item = plan(B="待退款", AB="AL1", S="1000", R="ATM")  # 折讓單已開、只缺帳號：沒有可做的
+    assert item["actions"] == [] and item["missing"] == ["缺退款銀行代碼／帳號（P／Q）"]
     assert plan(B="待退款", S="1000", R="信用卡")["missing"] == ["缺原發票號碼（X）"]
     assert plan(B="待退款", X="AB1", R="信用卡")["missing"] == ["缺退款金額（S）", "缺未稅金額（Z）"]
     assert plan(B="待退款", X="AB1", Z="952", S="1000")["missing"] == ["缺付款方式（R）"]
@@ -264,3 +269,39 @@ def test_formula_fixes_include_vip_refund_coupon():
     updates = batch.formula_fixes([["header"], row(B="VIP待退券", S="1000")])
     assert [u["range"] for u in updates] == ["T2", "Z2"]
 
+
+
+def test_sync_region_logs_out_after_sync(monkeypatch):
+    values = [["h"], row(B="已退款")]
+    gets = []
+
+    class WS:
+        def get_all_values(self):
+            return values
+
+        def update_acell(self, cell, value):
+            pass
+
+    class Session:
+        def get(self, url, timeout=None):
+            gets.append(url)
+
+    class CO:
+        BASE_URL = "https://backend.example"
+
+        @staticmethod
+        def get_worksheet(region):
+            return WS()
+
+        @staticmethod
+        def sync_one_to_purchase_edit(item, session=None, ui_logger=None):
+            raise RuntimeError("找不到訂單")
+
+        @staticmethod
+        def mark_sheet_row_done(region, row_no, status, ui_logger=None):
+            pass
+
+    monkeypatch.setattr(batch, "_change_order", lambda: CO)
+    monkeypatch.setattr(batch, "_login_session", lambda region, ui_logger=None: Session())
+    result = batch.sync_region("台北", log=lambda *_: None)
+    assert result["failed"] and gets == ["https://backend.example/logout"]  # 失敗也登出

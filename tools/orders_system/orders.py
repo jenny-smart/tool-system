@@ -810,7 +810,25 @@ def load_worksheet(sheet_name):
     rows = values[1:]
     df = pd.DataFrame(rows, columns=headers)
     df["__sheet_row__"] = range(2, len(df) + 2)
+    for name, short in HEADER_ALIASES.items():
+        if name not in df.columns and short in df.columns:
+            df[name] = df[short]
+    # 「代客保留」打勾列改用檸檬保留帳號建單（只改記憶體內的電話，不寫回工作表）。
+    import proxy_reserve
+    proxy_reserve.apply(df)
     return ws, df
+
+
+# 排程工作表（tool-system 建立）用較短的欄名；回填時寫進既有欄，不另外新增欄位。
+HEADER_ALIASES = {"沒班表日期": "沒班表日", "餘額不足未送": "餘額不足", "日曆改色原因": "日曆改色內容"}
+
+
+def add_header_aliases(header_index):
+    """長欄名找不到時，對應到排程既有的短欄名欄位。"""
+    for name, short in HEADER_ALIASES.items():
+        if name not in header_index and short in header_index:
+            header_index[name] = header_index[short]
+    return header_index
 
 
 def ensure_columns_in_sheet(ws):
@@ -837,7 +855,7 @@ def ensure_columns_in_sheet(ws):
 
     changed = False
     for col in required:
-        if col not in headers:
+        if col not in headers and HEADER_ALIASES.get(col) not in headers:
             headers.append(col)
             changed = True
 
@@ -910,7 +928,7 @@ def set_customer_notice_clip_style(ws, headers=None, row_numbers=None):
 
 def update_sheet_rows(ws, row_results):
     headers = ensure_columns_in_sheet(ws)
-    header_index = {h: i + 1 for i, h in enumerate(headers)}
+    header_index = add_header_aliases({h: i + 1 for i, h in enumerate(headers)})
     updates = []
 
     for row_num, info in row_results.items():
@@ -1837,6 +1855,23 @@ def extract_order_cards_from_purchase_html(html):
     return blocks
 
 
+# 付款狀態是這些的訂單已作廢：不能當成已成單（中斷復原、比對新單號都要排除）。
+VOID_PAYMENT_STATUS = ("已退款", "取消訂單")
+
+
+def card_payment_status(lines):
+    """訂單卡片的付款狀態（例如 已付款／待付款／已退款／取消訂單）；找不到回傳空字串。"""
+    m = re.search(r"付款狀態[：:]\s*([^\n]+)", "\n".join(str(x) for x in (lines or [])))
+    return m.group(1).strip() if m else ""
+
+
+def is_void_card(lines):
+    """已退款／取消訂單，或卡片上有取消時間（已被取消）。"""
+    status = card_payment_status(lines)
+    joined = "\n".join(str(x) for x in (lines or []))
+    return any(word in status for word in VOID_PAYMENT_STATUS) or bool(re.search(r"取消時間[：:]", joined))
+
+
 def match_order_from_purchase_page(html, target_date, target_period, phone="", exclude_order_nos=None):
     """
     v2026-07：比對日期＋時段，且若有提供 phone 則同時比對電話，避免只用
@@ -1850,6 +1885,8 @@ def match_order_from_purchase_page(html, target_date, target_period, phone="", e
     for block in extract_order_cards_from_purchase_html(html):
         order_no_candidate = block.get("order_no")
         if not order_no_candidate or order_no_candidate in exclude_order_nos:
+            continue
+        if is_void_card(block.get("lines")):
             continue
         joined = "\n".join(block["lines"])
         # 後台不同頁面可能顯示為「09:00-12:00」或「09:00 - 12:00」；
@@ -2579,10 +2616,12 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
 
     target_address = str(row0["地址"]).strip().split(",")[0]
     # 批次維持既有地址下拉選單流程：使用匹配到的 addressId 與保存欄位。
+    # 代客保留列用檸檬保留帳號建單，帳號裡沒有客人地址時改用後台「查詢地區」取得服務區域。
+    import proxy_reserve
     from quick_order import resolve_backend_booking_address
     best_addr, address_parts, addr_check = resolve_backend_booking_address(
         session, member_payload, target_address, token, clean_type_id,
-        phone=phone, refresh_saved_address_via_native_form=False,
+        phone=phone, refresh_saved_address_via_native_form=proxy_reserve.needs_native_address(row0),
     )
     selected_address = str(best_addr.get("address") or target_address).strip()
     area_info = addr_check.get("area") if isinstance(addr_check.get("area"), dict) else {}
@@ -2642,6 +2681,15 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
 
     base_data["address"] = selected_address
 
+    # 代客保留：客人備註與客服備註都寫「代客保留：客人姓名」，不沿用該地址原本的客服備註。
+    import proxy_reserve
+    proxy_customer = proxy_reserve.proxy_name(row0)
+    if proxy_customer:
+        proxy_memo = proxy_reserve.memo_for(proxy_customer)
+        base_data["memo"] = "；".join(x for x in (proxy_memo, str(base_data.get("memo") or "")) if x)
+        best_addr["notice"] = proxy_memo
+        logger(f"{group_label}代客保留：用檸檬保留帳號 {phone} 建單，備註「{proxy_memo}」")
+
     # 強制套用查詢地址後取得的區域/車馬費資料
     base_data["fare"] = first_nonzero(best_addr.get("fare"), base_data.get("fare"), default="0")
     base_data["notice"] = str(best_addr.get("notice") or base_data.get("notice") or "")
@@ -2667,6 +2715,8 @@ def process_one_group(session, rows_with_idx, token, gcal_service, region, backe
         if mapped["need_note"]:
             sms_time = mapped["original_slot"]
             customer_note = f"服務時間：{mapped['original_slot']}"
+            if proxy_customer:
+                customer_note = base_data.get("memo", "")
         return sms_time, customer_note
 
     def build_priced_payload_for_date(date_s, row_system_period):

@@ -6,12 +6,13 @@
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
    （新人實境、新人實習從該人在「基本資料、協議規章」的建檔年度開始找，
    逐年讀「{年度}專員薪資相關-{地區}」加總到今年度；名冊沒有此人時，今年度找不到才找前一年度）
-2. 新訓退訓實境費用 A3 起：工具包押金退款 H > 2000 的 B 欄姓名，B 欄＝H − 2000；
+2. 新訓退訓實境費用：只往下補新人，表上已有的列（含手動加的）都保留；
+   工具包押金退款 H > 2000、且表上還沒有的人，接在 A3 起最後一筆之後填姓名，B 欄＝H − 2000；
    D 欄若 D3 是公式就把公式往下填滿（公式改成只回傳身分證，不再溢出到 E–F）；
    E–F 取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄生日、G 欄地址，
    找不到才沿用既有資料或工具包押金 M–N；生日是 4 位數西元年（2026 年起建檔都是）
    一律減 1911 轉成民國年（例如 1997/2/4 → 86/02/04），已是民國年的原樣帶入。
-3. C 欄：雲端資料夾（根目錄或 YYYY新訓退訓 底下）有該人姓名的資料夾、
+3. C 欄（新增的人，以及既有列尚未打勾的人）：雲端資料夾（根目錄或 YYYY新訓退訓 底下）有該人姓名的資料夾、
    且資料夾內有檔案（身分證）即打勾。
 """
 
@@ -112,12 +113,16 @@ def roster_start_years(values: list[list]) -> dict[str, int]:
 
 
 def field_fees(sheets: list[list[list]]) -> dict[str, Decimal]:
-    """新人實境／新人實習：A 欄空白的列，依 C 欄姓名加總 J×K。"""
+    """新人實境／新人實習：依 C 欄姓名加總 J×K。
+
+    A 欄空白（未付）或「YYYY/MM/DD已匯款」（隨押金退款一起匯）都算；
+    A 欄是期別（例如 202610-1，已隨薪資發放）的不算。
+    """
     totals: dict[str, Decimal] = {}
     for values in sheets:
         for row in values[1:]:
-            name = _cell(row, 2)
-            if not name or _cell(row, 0):
+            name, paid = _cell(row, 2), _cell(row, 0)
+            if not name or (paid and "已匯款" not in paid):
                 continue
             totals[name] = totals.get(name, Decimal(0)) + _num(_cell(row, 9)) * _num(_cell(row, 10))
     return totals
@@ -155,8 +160,16 @@ def compute_refund_updates(
         if name not in deposits:
             warnings.append(f"{name} 在「{DEPOSIT_SHEET}」找不到，未更新")
             continue
-        updates[rows[0]] = fees.get(name, Decimal(0)) + _num(_cell(deposits[name], 1))
+        updates[rows[0]] = fees.get(name, Decimal(0)) + deposit_amount(deposits[name])
     return updates, warnings
+
+
+def deposit_amount(row: list) -> Decimal:
+    """工具包押金 B 欄；會計已先退款（B 歸 0、G 欄「已匯款」）時以押金 2000 計。"""
+    amount = _num(_cell(row, 1))
+    if amount == 0 and "已匯款" in _cell(row, 6):
+        return DEPOSIT_BASE
+    return amount
 
 
 def build_fee_rows(
@@ -321,20 +334,40 @@ def sum_fees_by_year(
     }
 
 
-def _fill_down_d(service, spreadsheet_id: str, n: int) -> None:
-    """把新訓退訓實境費用 D3 的公式往下填到 D{2+n}。"""
-    meta = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id, fields="sheets.properties(sheetId,title)"
-    ).execute()
-    sheet_id = next(
-        s["properties"]["sheetId"] for s in meta["sheets"] if s["properties"]["title"] == FEE_SHEET
-    )
-    source = {"sheetId": sheet_id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 3, "endColumnIndex": 4}
-    dest = dict(source, startRowIndex=3, endRowIndex=2 + n)
-    service.spreadsheets().batchUpdate(
-        spreadsheetId=spreadsheet_id,
-        body={"requests": [{"copyPaste": {"source": source, "destination": dest, "pasteType": "PASTE_FORMULA"}}]},
-    ).execute()
+def d_formula_for_row(d3_formula: str, row: int) -> str:
+    """D3 公式改成第 row 列使用，且 VLOOKUP 只回傳身分證（不溢出到 E–F）。"""
+    return _ID_ONLY_RE.sub("2", re.sub(r"\bA3\b", f"A{row}", d3_formula))
+
+
+def plan_fee_append(
+    refund_values: list[list],
+    h_overrides: dict[int, Decimal],
+    fee_values: list[list],
+) -> dict[str, object]:
+    """新訓退訓實境費用只往下補新人：表上沒有、且 H > 2000 的人接在最後一筆之後。"""
+    existing: dict[str, int] = {}
+    last = 2
+    recheck_rows: dict[str, int] = {}
+    for r, row in enumerate(fee_values[2:], start=3):
+        name = _cell(row, 0)
+        if not name:
+            continue
+        last = r
+        existing.setdefault(name, r)
+        if _cell(row, 2).upper() != "TRUE":
+            recheck_rows.setdefault(name, r)
+    new_names: list[str] = []
+    for r, row in enumerate(refund_values[1:], start=2):
+        name = _cell(row, 1)
+        h = h_overrides.get(r, _num(_cell(row, 7)))
+        if name and h > DEPOSIT_BASE and name not in existing and name not in new_names:
+            new_names.append(name)
+    return {
+        "new_names": new_names,
+        "next_row": last + 1,
+        "recheck_rows": recheck_rows,
+        "recheck_names": list(recheck_rows),
+    }
 
 
 def _read(service, spreadsheet_id: str, title: str, cols: str = "A:Z") -> list[list]:
@@ -347,6 +380,27 @@ def _read(service, spreadsheet_id: str, title: str, cols: str = "A:Z") -> list[l
 
 
 def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
+    """執行並寫一筆到主控表「tool-system執行Log-年度」（成功、失敗都記）。"""
+    from tools.common import unified_log
+
+    log_fields = dict(system="外場排程系統", function="新訓退訓實境費用", run_type="手動",
+                      area=area, period=datetime.now(TW_TZ).strftime("%Y%m%d"), target=FEE_SHEET)
+    try:
+        result = _update_refund_and_fee_sheet(area)
+    except Exception as exc:
+        unified_log.write(status="失敗", message=str(exc), **log_fields)
+        raise
+    message = (
+        f"退款金額 H 欄更新 {result['h_updated']} 列；新增 {result['fee_rows']} 人；"
+        f"身分證打勾 {result['id_checked']} 人"
+    )
+    if result["warnings"]:
+        message += "；注意：" + "；".join(result["warnings"])
+    unified_log.write(status="成功", message=message, **log_fields)
+    return result
+
+
+def _update_refund_and_fee_sheet(area: str) -> dict[str, object]:
     service = get_sheets_service()
     spreadsheet_id, refund_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
 
@@ -380,10 +434,15 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
     warnings = update_warnings + warnings
     if earlier:
         warnings.append(f"以下人員實境費用含前年度：{'、'.join(earlier)}")
-    changed = {
-        r: v for r, v in updates.items()
-        if _num(_cell(refund_values[r - 1], 7)) != v or not _cell(refund_values[r - 1], 7)
-    }
+    # 只填 H 欄空白的列；已有金額（可能是人工調整）不覆蓋，不一致時提醒
+    changed = {r: v for r, v in updates.items() if not _cell(refund_values[r - 1], 7)}
+    for r, v in updates.items():
+        old = _cell(refund_values[r - 1], 7)
+        if old and _num(old) != v:
+            warnings.append(
+                f"第 {r} 列 {_cell(refund_values[r - 1], 1)} H 欄已有 {old}，試算為 {_fmt(v)}，未覆蓋請人工確認"
+            )
+    updates = changed
     if changed:
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=spreadsheet_id,
@@ -397,68 +456,188 @@ def update_refund_and_fee_sheet(area: str = "台北") -> dict[str, object]:
         ).execute()
 
     fee_values = _read(service, spreadsheet_id, FEE_SHEET, "A:F")
-    names = sorted({
-        _cell(row, 1)
-        for r, row in enumerate(refund_values[1:], start=2)
-        if _cell(row, 1) and updates.get(r, _num(_cell(row, 7))) > DEPOSIT_BASE
-    })
-    has_id = find_id_owners(names) if names else {}
+    plan = plan_fee_append(refund_values, updates, fee_values)
+    has_id = find_id_owners(plan["new_names"] + plan["recheck_names"]) if (
+        plan["new_names"] or plan["recheck_names"]
+    ) else {}
     roster = roster_info(roster_values)
-    fee_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, roster)
+    candidate_rows = build_fee_rows(refund_values, updates, fee_values, deposits, has_id, roster)
+    seen: set[str] = set()
+    new_rows = []
+    for row in candidate_rows:
+        if row[0] in plan["new_names"] and row[0] not in seen:
+            seen.add(row[0])
+            new_rows.append(row)
 
-    d3 = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{FEE_SHEET}'!D3",
-        valueRenderOption="FORMULA",
-    ).execute().get("values", [[""]])
-    d3_text = str(d3[0][0] if d3 and d3[0] else "")
-    d_formula = d3_text.startswith("=")
-    n = len(fee_rows)
-
-    if d_formula:
-        # 原公式 VLOOKUP(...,{2,3,5}) 會溢出到 E–F，改成只回傳身分證，E–F 由程式寫入
-        id_only = _ID_ONLY_RE.sub("2", d3_text)
-        if id_only != d3_text:
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{FEE_SHEET}'!D3",
-                valueInputOption="USER_ENTERED",
-                body={"values": [[id_only]]},
-            ).execute()
-
-    last_row = max(len(fee_values), 2 + n)
-    if last_row >= 3:
-        clear_ranges = [f"'{FEE_SHEET}'!A3:C{last_row}", f"'{FEE_SHEET}'!E3:F{last_row}"]
-        if not d_formula:
-            clear_ranges.append(f"'{FEE_SHEET}'!D3:D{last_row}")
-        service.spreadsheets().values().batchClear(
-            spreadsheetId=spreadsheet_id, body={"ranges": clear_ranges}
-        ).execute()
-        # 清空後 C 欄核取方塊會變空白，補回 FALSE 維持核取方塊顯示
-        service.spreadsheets().values().update(
+    data = []
+    start = plan["next_row"]
+    end = start + len(new_rows) - 1
+    if new_rows:
+        d3 = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"'{FEE_SHEET}'!C3:C{last_row}",
-            valueInputOption="RAW",
-            body={"values": [[False] for _ in range(last_row - 2)]},
-        ).execute()
-    if fee_rows:
-        if d_formula:
-            data = [
-                {"range": f"'{FEE_SHEET}'!A3:C{2 + n}", "values": [r[:3] for r in fee_rows]},
-                {"range": f"'{FEE_SHEET}'!E3:F{2 + n}", "values": [r[4:] for r in fee_rows]},
-            ]
+            range=f"'{FEE_SHEET}'!D3",
+            valueRenderOption="FORMULA",
+        ).execute().get("values", [[""]])
+        d3_text = str(d3[0][0] if d3 and d3[0] else "")
+        data.append({"range": f"'{FEE_SHEET}'!A{start}:C{end}", "values": [r[:3] for r in new_rows]})
+        data.append({"range": f"'{FEE_SHEET}'!E{start}:F{end}", "values": [r[4:] for r in new_rows]})
+        if d3_text.startswith("="):
+            # D 欄沿用 D3 公式（改成只回傳身分證，E–F 由程式寫入）
+            data.append({
+                "range": f"'{FEE_SHEET}'!D{start}:D{end}",
+                "values": [[d_formula_for_row(d3_text, start + i)] for i in range(len(new_rows))],
+            })
         else:
-            data = [{"range": f"'{FEE_SHEET}'!A3:F{2 + n}", "values": fee_rows}]
+            data.append({"range": f"'{FEE_SHEET}'!D{start}:D{end}", "values": [[r[3]] for r in new_rows]})
+    # 既有列 C 欄未勾、這次雲端找到身分證的補打勾
+    rechecked = [r for name, r in plan["recheck_rows"].items() if has_id.get(name)]
+    for r in rechecked:
+        data.append({"range": f"'{FEE_SHEET}'!C{r}", "values": [[True]]})
+    if data:
+        # 公式需 USER_ENTERED；其餘值（生日等）先用 RAW 寫入避免被轉成日期
+        formula_data = [d for d in data if str(d["values"][0][0]).startswith("=")]
+        value_data = [d for d in data if d not in formula_data]
+        for option, chunk in (("RAW", value_data), ("USER_ENTERED", formula_data)):
+            if chunk:
+                service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=spreadsheet_id,
+                    body={"valueInputOption": option, "data": chunk},
+                ).execute()
+
+    return {
+        "h_updated": len(changed),
+        "fee_rows": len(new_rows),
+        "id_checked": sum(1 for r in new_rows if r[2]) + len(rechecked),
+        "warnings": warnings,
+    }
+
+
+# ── 【新訓退款】新訓退訓實境費用已退款 ─────────────────────────────
+
+PAID_SUFFIX = "已匯款"  # 與既有資料（例如「2026/10/16已匯款」）及工具包押金財報的判斷一致
+
+
+def normalize_refund_date(text: str) -> str:
+    """I 欄退款日期統一成 YYYY/MM/DD（2026/1/9 → 2026/01/09）；不是日期回傳空字串。"""
+    match = re.match(r"^\s*(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", text)
+    if not match:
+        return ""
+    year, month, day = (int(g) for g in match.groups())
+    return f"{year:04d}/{month:02d}/{day:02d}"
+
+
+def plan_mark_refunded(
+    refund_values: list[list],
+    deposit_values: list[list],
+) -> tuple[list[dict[str, object]], list[str]]:
+    """找出 I 欄已填退款日期、但工具包押金 G 欄尚未註記的人。
+
+    回傳 ([{name, date, deposit_row, field_amount}], 提醒)；
+    field_amount＝H − 2000（實境／實習費用），大於 0 才需要註記新人實境／實習 A 欄。
+    """
+    deposit_rows: dict[str, int] = {}
+    deposit_marked: dict[str, bool] = {}
+    for r, row in enumerate(deposit_values[1:], start=2):
+        name = _cell(row, 0)
+        if name and name not in deposit_rows:
+            deposit_rows[name] = r
+            deposit_marked[name] = bool(_cell(row, 6))
+
+    items: list[dict[str, object]] = []
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for r, row in enumerate(refund_values[1:], start=2):
+        name, date_text = _cell(row, 1), _cell(row, 8)
+        if not name or not date_text or "略過" in _cell(row, 6) or name in seen:
+            continue
+        if name not in deposit_rows:
+            continue
+        if deposit_marked[name]:
+            continue
+        date = normalize_refund_date(date_text)
+        if not date:
+            warnings.append(f"第 {r} 列 {name} 退款日期「{date_text}」無法辨識，未處理")
+            continue
+        seen.add(name)
+        items.append({
+            "name": name,
+            "date": date,
+            "deposit_row": deposit_rows[name],
+            "field_amount": _num(_cell(row, 7)) - DEPOSIT_BASE,
+        })
+    return items, warnings
+
+
+def plan_field_marks(
+    sheets: dict[str, list[list]],
+    name: str,
+) -> tuple[list[tuple[str, int]], Decimal]:
+    """新人實境／實習中該人 A 欄空白的列：回傳 ([(分頁, 列號)], J×K 合計)。"""
+    cells: list[tuple[str, int]] = []
+    total = Decimal(0)
+    for title, values in sheets.items():
+        for r, row in enumerate(values[1:], start=2):
+            if _cell(row, 2) == name and not _cell(row, 0):
+                cells.append((title, r))
+                total += _num(_cell(row, 9)) * _num(_cell(row, 10))
+    return cells, total
+
+
+def mark_refunded(area: str = "台北") -> dict[str, object]:
+    """執行並寫一筆到主控表「tool-system執行Log-年度」（成功、失敗都記）。"""
+    from tools.common import unified_log
+
+    log_fields = dict(system="外場排程系統", function="新訓退訓實境費用已退款", run_type="手動",
+                      area=area, period=datetime.now(TW_TZ).strftime("%Y%m%d"), target=DEPOSIT_SHEET)
+    try:
+        result = _mark_refunded(area)
+    except Exception as exc:
+        unified_log.write(status="失敗", message=str(exc), **log_fields)
+        raise
+    message = f"工具包押金 G 欄註記 {result['deposit_marked']} 人；新人實境／實習 A 欄註記 {result['field_marked']} 列"
+    if result["names"]:
+        message += f"（{'、'.join(result['names'])}）"
+    if result["warnings"]:
+        message += "；注意：" + "；".join(result["warnings"])
+    unified_log.write(status="成功", message=message, **log_fields)
+    result["message"] = message
+    return result
+
+
+def _mark_refunded(area: str) -> dict[str, object]:
+    service = get_sheets_service()
+    spreadsheet_id, refund_title = resolve_report_location(DEPOSIT_REFUND_TYPE, area)
+    refund_values = _read(service, spreadsheet_id, refund_title)
+    deposit_values = _read(service, spreadsheet_id, DEPOSIT_SHEET, "A:G")
+    items, warnings = plan_mark_refunded(refund_values, deposit_values)
+
+    sheets = {t: _read(service, spreadsheet_id, t, "A:K") for t in FIELD_SHEETS} if items else {}
+    data = []
+    field_marked = 0
+    for item in items:
+        note = f"{item['date']}{PAID_SUFFIX}"
+        data.append({"range": f"'{DEPOSIT_SHEET}'!G{item['deposit_row']}", "values": [[note]]})
+        amount = item["field_amount"]
+        if amount <= 0:
+            continue
+        cells, total = plan_field_marks(sheets, str(item["name"]))
+        if not cells:
+            warnings.append(f"{item['name']} 實境費用 {_fmt(amount)}，但今年度新人實境／實習找不到 A 欄空白的列，請人工註記")
+            continue
+        if total != amount:
+            warnings.append(f"{item['name']} 實境費用 {_fmt(amount)}，A 欄空白列合計 {_fmt(total)}，請確認")
+        for title, r in cells:
+            data.append({"range": f"'{title}'!A{r}", "values": [[note]]})
+        field_marked += len(cells)
+
+    if data:
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=spreadsheet_id,
             body={"valueInputOption": "RAW", "data": data},
         ).execute()
-        if d_formula and n > 1:
-            _fill_down_d(service, spreadsheet_id, n)
-
     return {
-        "h_updated": len(changed),
-        "fee_rows": len(fee_rows),
-        "id_checked": sum(1 for r in fee_rows if r[2]),
+        "deposit_marked": len(items),
+        "field_marked": field_marked,
+        "names": [str(i["name"]) for i in items],
         "warnings": warnings,
     }

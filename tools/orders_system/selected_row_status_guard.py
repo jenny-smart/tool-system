@@ -162,7 +162,7 @@ def render_stage_filter(st, key):
         "本次預約對象（排程「預約條件」欄；空白的列一律照常判斷）", list(STAGES),
         default=list(DEFAULT_STAGES), key=key,
     )
-    st.caption("建議順序：可約 → 改加 → 已確認 → 未回覆。單一客人要例外處理，可直接改該列「預約條件」。")
+    st.caption("建議順序：可約 → 改加 → 人時不足 → 已確認 → 未回覆。單一客人要例外處理，可直接改該列「預約條件」。")
     set_booking_stages(stages)
     return stages
 
@@ -197,6 +197,7 @@ def _update_sheet_rows_first_header(ws, row_results):
     headers = orders.ensure_columns_in_sheet(ws); header_index = {}
     for i, header in enumerate(headers, 1):
         if header and header not in header_index: header_index[header] = i
+    orders.add_header_aliases(header_index)
     updates = []
     for row_num, info in (row_results or {}).items():
         xyz = orders.finalize_xyz({"服務人員": info.get("服務人員", ""), "服務狀態": info.get("服務狀態", ""), "車馬費": info.get("車馬費", "")}, fallback_fare=info.get("車馬費", "0"))

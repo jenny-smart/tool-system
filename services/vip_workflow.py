@@ -83,6 +83,85 @@ class StepResult:
             self.on_progress(msg, "error")
 
 
+def classify_hsinchu_row(plan: str, address: str) -> str:
+    """新竹儲值金結算的一列歸「高雄」或「新竹」；分不出來回傳空字串（之後用手機查近期訂單）。
+    - 地址含高雄／台南（且不含新竹）→ 高雄
+    - 地址含新竹（且不含高雄／台南），方案不是高雄方案 → 新竹
+    - 地址沒寫地區、方案是高雄方案 → 高雄
+    - 其他（地址沒寫地區又是共用方案、地址新竹卻是高雄方案、地址兩邊都有）→ 分不出來
+    """
+    address = str(address or "").replace("臺", "台")
+    addr_k = any(keyword in address for keyword in KAOHSIUNG_ADDRESS_KEYWORDS)
+    addr_h = "新竹" in address
+    plan_k = plan in KAOHSIUNG_PLAN_NAMES
+    if addr_k and not addr_h:
+        return "高雄"
+    if addr_h and not addr_k and not plan_k:
+        return "新竹"
+    if not addr_h and not addr_k and plan_k:
+        return "高雄"
+    return ""
+
+
+def _address_area(address: str) -> str:
+    address = str(address or "").replace("臺", "台")
+    addr_k = any(keyword in address for keyword in KAOHSIUNG_ADDRESS_KEYWORDS)
+    addr_h = "新竹" in address
+    return "高雄" if addr_k and not addr_h else ("新竹" if addr_h and not addr_k else "")
+
+
+def _phone_key(phone: str) -> str:
+    return "".join(ch for ch in str(phone or "") if ch.isdigit())
+
+
+def resolve_hsinchu_areas(
+    rows: List[List[str]],
+    phone_area: Callable[[str], str],
+    needs_lookup: Callable[[List[str]], bool] = lambda row: True,
+    log: Optional[Callable[[str], None]] = None,
+) -> List[str]:
+    """新竹儲值金結算每一列（不含標題）歸「高雄」或「新竹」。
+    1. classify_hsinchu_row（方案名稱／地址）
+    2. 分不出來：同一支手機其他列靠地址判斷得出來就用它
+    3. 還是分不出來且 needs_lookup(列) 為真：用手機查近期訂單（同一支手機只查一次）
+    4. 都不行：原規則（高雄方案或地址含高雄／台南才算高雄）
+    欄位：D(3) 電話、E(4) 地址、H(7) 方案。"""
+    def cell(row: List[str], i: int) -> str:
+        return str(row[i]).strip() if len(row) > i else ""
+
+    areas = [classify_hsinchu_row(cell(r, 7), cell(r, 4)) for r in rows]
+    by_phone: Dict[str, set] = {}
+    for r, definite in zip(rows, areas):  # 只看本身判斷得出來、且是靠地址判斷的列
+        area = _address_area(cell(r, 4)) if definite else ""
+        if area and _phone_key(cell(r, 3)):
+            by_phone.setdefault(_phone_key(cell(r, 3)), set()).add(area)
+    known = {k: next(iter(v)) for k, v in by_phone.items() if len(v) == 1}
+
+    pending: List[str] = []
+    for r, area in zip(rows, areas):
+        key = _phone_key(cell(r, 3))
+        if not area and key and key not in known and key not in pending and needs_lookup(r):
+            pending.append(key)
+    looked: Dict[str, str] = {}
+    if pending and log:
+        log(f"  新竹／高雄分不出來的客戶 {len(pending)} 位，用手機查近期訂單…")
+    for i, key in enumerate(pending, start=1):
+        looked[key] = phone_area(key) or ""
+        if log and (i % 10 == 0 or i == len(pending)):
+            log(f"  手機查訂單 {i}/{len(pending)}（判斷出 {sum(1 for v in looked.values() if v)} 位）")
+
+    result = []
+    for r, area in zip(rows, areas):
+        key = _phone_key(cell(r, 3))
+        area = area or known.get(key, "") or looked.get(key, "")
+        if not area:
+            plan, address = cell(r, 7), cell(r, 4)
+            area = "高雄" if plan in KAOHSIUNG_PLAN_NAMES or any(
+                k in address for k in KAOHSIUNG_ADDRESS_KEYWORDS) else "新竹"
+        result.append(area)
+    return result
+
+
 class VipStoredValueWorkflow:
     def __init__(
         self,
@@ -97,6 +176,11 @@ class VipStoredValueWorkflow:
         self.master_spreadsheet_id = master_spreadsheet_id
         self.root_folder_id = root_folder_id
         self.system_name = system_name
+        # 新竹／高雄分不出來時用手機查近期訂單：phone_area_lookup(phone) -> "新竹"／"高雄"／""，
+        # 預設第一次用到才登入新竹後台；測試可直接傳入
+        self.phone_area_lookup: Optional[Callable[[str], str]] = None
+        self._phone_area_cache: Dict[str, str] = {}
+        self._phone_lookup_error = ""
 
         self.master = sheets.open_by_id(master_spreadsheet_id)
         self.log = MasterLog(sheets, self.master, MASTER_MONTHLY_LOG_SHEET)
@@ -417,9 +501,15 @@ class VipStoredValueWorkflow:
                 f"但原始新竹筆數是 {original_count} 筆"
             )
 
+        phone_note = ""
+        if self._phone_area_cache:
+            found = sum(1 for v in self._phone_area_cache.values() if v)
+            phone_note = f"；分不出新竹／高雄的客戶用手機查近期訂單 {len(self._phone_area_cache)} 位（判斷出 {found} 位）"
+        if self._phone_lookup_error:
+            phone_note += f"；⚠️ 手機查訂單失敗，未判斷的列沿用原規則：{self._phone_lookup_error}"
         return (
             f"{duplicate_warning}新竹/高雄結算筆數核對正確：新竹 {hsinchu_count} 筆 + 高雄 "
-            f"{kaohsiung_count} 筆 = 原始新竹 {original_count} 筆"
+            f"{kaohsiung_count} 筆 = 原始新竹 {original_count} 筆{phone_note}"
         )
 
     # ============================================================
@@ -488,11 +578,36 @@ class VipStoredValueWorkflow:
                 last_error = exc
         raise RuntimeError(f"篩選失敗（已重試多次）：{last_error}") from last_error
 
+    def phone_area(self, phone: str) -> str:
+        """用手機號碼查新竹後台近期訂單判斷新竹／高雄（同一支手機只查一次）；查不到或無法登入回傳空字串。"""
+        key = "".join(ch for ch in str(phone or "") if ch.isdigit())
+        if key in self._phone_area_cache:  # 新竹、高雄兩次篩選要得到一樣的答案
+            return self._phone_area_cache[key]
+        if not key or self._phone_lookup_error:
+            return ""
+        if key not in self._phone_area_cache:
+            try:
+                if self.phone_area_lookup is None:
+                    import requests
+                    from tools.scheduled_monthly import half_month_orders as hm
+
+                    acc = hm.load_accounts().get("新竹") or {}
+                    session = requests.Session()
+                    hm.login(session, acc.get("email", ""), acc.get("password", ""))
+                    self.phone_area_lookup = lambda p: hm.area_by_phone(session, p)
+                self._phone_area_cache[key] = self.phone_area_lookup(key) or ""
+            except Exception as exc:  # 後台登入或查詢失敗：改回原本規則，不中斷轉檔
+                self._phone_lookup_error = str(exc)
+                return ""
+        return self._phone_area_cache[key]
+
     def filter_rows_by_h_column(self, spreadsheet_id: str, keep_matching: bool) -> Tuple[int, int]:
         """
         H 欄（第 8 欄，方案名稱）符合高雄方案名單，或是 E 欄（第 5 欄，地址）
         包含「高雄」「台南」關鍵字，都算高雄的列（像 儲值金50000 這種各地
         共用的方案名稱，就是靠地址才分得出來是不是高雄）。
+        分不出新竹或高雄的列（見 classify_hsinchu_row）改用 D 欄手機查近期訂單；
+        查不到時沿用原本規則（高雄方案或地址含高雄／台南才算高雄）。
         - keep_matching=False：移除符合高雄的列（新竹）
         - keep_matching=True：只保留符合高雄的列（高雄）
 
@@ -512,12 +627,9 @@ class VipStoredValueWorkflow:
         original_count = len(rows)
 
         filtered = []
-        for row in rows:
-            h_value = row[7].strip() if len(row) >= 8 else ""
-            e_value = row[4].strip() if len(row) >= 5 else ""
-            matched = h_value in KAOHSIUNG_PLAN_NAMES or any(
-                keyword in e_value for keyword in KAOHSIUNG_ADDRESS_KEYWORDS
-            )
+        areas = resolve_hsinchu_areas(rows, self.phone_area)
+        for row, area in zip(rows, areas):
+            matched = area == "高雄"
 
             if keep_matching and matched:
                 filtered.append(row)

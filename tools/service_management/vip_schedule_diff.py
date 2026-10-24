@@ -9,10 +9,12 @@ from datetime import datetime, timedelta, timezone
 
 FIELDS = ["服務人時", "備註", "姓名", "電話", "地址", "日期", "開始時間", "結束時間", "狀態"]
 META_HEADERS = ["日曆事件ID", "日曆異動", "日曆異動內容", "更新日期"]
-GATE_HEADERS = ["回覆確認", "確認備註", "改加標記", "已確認", "預約條件"]  # 排程預約條件，僅規則期間使用
+GATE_HEADERS = ["回覆確認", "確認備註", "改加標記", "已確認", "人時", "預約條件"]  # 排程預約條件，僅規則期間使用
 LEGACY_GATE_HEADERS = {"確認狀態": "回覆確認"}
 TOPUP_HEADERS = ["需儲值"]  # 定期VIP匯出 V 欄：依日期累計超過儲值金餘額的那幾次
 EXTRA_HEADERS = GATE_HEADERS + TOPUP_HEADERS
+# 代客保留：打勾的列由 orders-system 用檸檬保留帳號建單。排程只建立標題與勾選框，從不寫入或清除值。
+PROXY_HEADER = "代客保留"
 COLORS = {
     "新增": {"red": 1, "green": .96, "blue": .72},
     "未成單異動": {"red": 1, "green": .96, "blue": .72},
@@ -26,6 +28,12 @@ REPORT_HEADERS = ["比對時間", "工作表", "排程列號", "異動類型", "
 
 def _text(value):
     return str(value or "").strip()
+
+
+def _lookup_formula(row, sheet):
+    """購買項目：上月同地址；地址改了或上月沒有這個地址時，改查上月同電話。"""
+    return (f"=IFNA(xlookup(E{row},'{sheet}'!E:E,'{sheet}'!J:J),"
+            f"xlookup(D{row},'{sheet}'!D:D,'{sheet}'!J:J))")
 
 
 def _canonical(value, column):
@@ -244,6 +252,21 @@ def _column(index):
     return result
 
 
+def _proxy_checkboxes(ss, target, column, rows):
+    """代客保留欄設成勾選框；失敗不影響排程更新。"""
+    sheet_id = getattr(target, "id", None)
+    if sheet_id is None or rows < 2:
+        return
+    try:
+        ss.batch_update({"requests": [{"setDataValidation": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": rows,
+                      "startColumnIndex": column, "endColumnIndex": column + 1},
+            "rule": {"condition": {"type": "BOOLEAN"}, "showCustomUi": True},
+        }}]})
+    except Exception:
+        pass
+
+
 def _tracking_columns(header, rows, names=META_HEADERS):
     # Blank headers can still have user data underneath; append after all used cells.
     used = max([33] + [i + 1 for row in [header] + list(rows)
@@ -445,13 +468,21 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                                    target.get(header_range, value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING") != current_header):
             raise RuntimeError("排程在比對期間已有更新，未覆寫；請待成單完成後重新比對")
         required_rows = max([len(existing) + 1, 2] + [u["row"] for u in plan["updates"]])
-        required_cols = max(columns) + 1
+        proxy_column = next((i for i, v in enumerate(header) if i >= 10 and _text(v) == PROXY_HEADER), None)
+        new_proxy_column = proxy_column is None
+        if new_proxy_column:
+            proxy_column = max([max(columns) + 1] + [i + 1 for row in [header] + list(physical_rows)
+                                                     for i, value in enumerate(row) if _text(value)])
+        required_cols = max(max(columns), proxy_column) + 1
         if target is None:
             target = ss.add_worksheet(title=target_name, rows=max(required_rows + 10, 200), cols=required_cols)
         elif target.col_count < required_cols or target.row_count < required_rows:
             target.resize(rows=max(target.row_count, required_rows), cols=max(target.col_count, required_cols))
         if created:
             target.update(values=[list(headers[:30])], range_name="A1:AD1", value_input_option="RAW")
+        if new_proxy_column:
+            target.update(values=[[PROXY_HEADER]], range_name=f"{_column(proxy_column)}1", value_input_option="RAW")
+        _proxy_checkboxes(ss, target, proxy_column, max(required_rows, getattr(target, "row_count", 0) or 0))
         for column, name in zip(columns, META_HEADERS + [n for names, _, _ in extra_groups for n in names]):
             target.update(values=[[name]], range_name=f"{_column(column)}1", value_input_option="RAW")
         updated_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
@@ -466,11 +497,20 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             titles = {sheet.title for sheet in ss.worksheets()}
 
         def repaired_lookup(formula, row_num):
-            # Repair earlier #REF! lookups that pointed at a month sheet that does not exist.
-            ref = re.fullmatch(r"=xlookup\(E\d+,'([^']+)'!E:E,'[^']+'!J:J\)", _text(formula), re.I)
-            if base_sheet and ref and ref.group(1) != base_sheet and ref.group(1) not in titles:
-                return f"=xlookup(E{row_num},'{base_sheet}'!E:E,'{base_sheet}'!J:J)"
-            return ""
+            # Repair earlier #REF! lookups that pointed at a month sheet that does not exist,
+            # and upgrade address-only lookups to also fall back to the phone number.
+            # Only the exact formulas this tool writes are touched; hand-written ones stay.
+            text = _text(formula)
+            ref = (re.fullmatch(r"=xlookup\(E\d+,'([^']+)'!E:E,'\1'!J:J\)", text, re.I)
+                   or re.fullmatch(r"=IFNA\(xlookup\(E\d+,'([^']+)'!E:E,'\1'!J:J\),"
+                                   r"xlookup\(D\d+,'\1'!D:D,'\1'!J:J\)\)", text, re.I))
+            if not ref:
+                return ""
+            sheet = ref.group(1)
+            if base_sheet and sheet != base_sheet and sheet not in titles:
+                sheet = base_sheet
+            new = _lookup_formula(row_num, sheet)
+            return new if new != _text(formula) else ""
 
         for change in plan["updates"]:
             row, values, before = change["row"], change["values"], change["old"]
@@ -482,16 +522,16 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
             lookup_sheet = f"{area}{previous}"
             if before is None:
-                values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
+                values[9] = _lookup_formula(row, lookup_sheet)
                 updates.append({"range": f"A{row}:AD{row}", "values": [values[:30]]})
                 phones.append({"range": f"D{row}", "values": [[values[3]]]})
             else:
                 if values[:9] != before[:9]:
                     values[9] = repaired_lookup(values[9], row) or values[9]
                     if _canonical(values[4], 4) != _canonical(before[4], 4):
-                        values[9] = f"=xlookup(E{row},'{lookup_sheet}'!E:E,'{lookup_sheet}'!J:J)"
+                        values[9] = _lookup_formula(row, lookup_sheet)
                         if values[9] != before[9]:
-                            values[32] += f"；購買項目：{_text(before[9]) or '空白'} → 上月地址查詢公式"
+                            values[32] += f"；購買項目：{_text(before[9]) or '空白'} → 上月地址／電話查詢公式"
                             for item in plan["changes"]:
                                 if item["sheet"] == target_name and item["row"] == row:
                                     item["detail"] = values[32]
@@ -503,7 +543,8 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
                 updates.append({"range": f"{_column(columns[3])}{row}", "values": [[updated_at]]})
             if change["kind"]:
                 colors.append({"range": f"A{row}:{_column(max(target.col_count - 1, max(columns)))}{row}", "format": {"backgroundColor": COLORS[change["kind"]]}})
-        if combined_start and not created:
+        if not created:
+            # Every existing row, changed or not: old address-only lookups get the phone fallback.
             touched = {item["range"] for item in updates}
             for row_num, physical in enumerate(physical_rows, 2):
                 fixed = repaired_lookup(physical[9] if len(physical) > 9 else "", row_num)

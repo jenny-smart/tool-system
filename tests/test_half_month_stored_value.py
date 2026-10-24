@@ -29,13 +29,13 @@ def excel_bytes(frame):
 
 
 def functions():
-    names = {'build_export_url', 'period_to_dates', 'purchase_records', '_customer_key', '_address_city', 'stored_value_customer_city', 'export_stored_value', 'process_city'}
+    names = {'build_export_url', 'period_to_dates', 'purchase_records', '_customer_key', '_address_city', 'stored_value_customer_city', 'export_stored_value', 'process_city', 'area_by_phone', '_order_recency'}
     tree = ast.parse(SOURCE.read_text())
     nodes = [ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0)]
     nodes += [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     def request(method, url, params):
         return SimpleNamespace(prepare=lambda: SimpleNamespace(url=url + '?' + urlencode(params)))
-    ns = dict(export_south_sources=export_south_sources, filter_workbook_rows=filter_workbook_rows, merge_workbook_files=merge_workbook_files, save_preserved_excel=save_preserved_excel, download_export=lambda *a: excel_bytes(pd.DataFrame({'狀態':[''], '訂單編號':['LC1']})), read_excel=lambda *a: pd.DataFrame({'狀態':[''], '訂單編號':['LC1']}), re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, log=lambda *args: None)
+    ns = dict(export_south_sources=export_south_sources, filter_workbook_rows=filter_workbook_rows, merge_workbook_files=merge_workbook_files, save_preserved_excel=save_preserved_excel, download_export=lambda *a: excel_bytes(pd.DataFrame({'狀態':[''], '訂單編號':['LC1']})), read_excel=lambda *a: pd.DataFrame({'狀態':[''], '訂單編號':['LC1']}), re=re, json=json, calendar=calendar, unicodedata=unicodedata, pd=pd, requests=SimpleNamespace(Request=request), EXPORT_URL='https://backend.lemonclean.com.tw/purchase/export_order', HEADERS={}, PHONE_LOOKUP_MAX_PAGES=3, log=lambda *args: None)
     exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])), str(SOURCE), 'exec'), ns)
     return ns
 
@@ -68,10 +68,38 @@ class StoredValueTests(unittest.TestCase):
             fetch = Mock(return_value=[dict(order, member_id=99, address='台北市測試路1號'),dict(order,address=address)])
             ns['purchase_records'] = fetch
             self.assertEqual(ns['stored_value_customer_city'](object(), order), city)
-            self.assertEqual(fetch.call_args.kwargs, {'name':'客戶','p_board':'on'})
+            self.assertEqual(fetch.call_args_list[0].kwargs, {'name':'客戶','p_board':'on'})
         for items in [[], [dict(order,address=None)], [dict(order,address='新竹市測試路1號'),dict(order,address='高雄市測試路1號')]]:
-            ns['purchase_records'] = Mock(return_value=items)
+            # 手機也查不到能分區的訂單 → 仍然報錯
+            ns['purchase_records'] = Mock(side_effect=lambda session, **f: [] if 'phone' in f else items)
             with self.assertRaises(RuntimeError): ns['stored_value_customer_city'](object(), order)
+
+    def test_ambiguous_address_falls_back_to_recent_order_by_phone(self):
+        ns = functions()
+        order = {'order_no':'LC1','name':'客戶','member_id':12,'phone':'912345678'}
+        by_name = [dict(order,address='新竹市測試路1號'), dict(order,address='高雄市測試路1號')]
+        by_phone = [
+            {'order_no':'LC5','phone':'0912345678','address':'新竹縣竹北市測試路1號','date_clean':'2026-03-01'},
+            {'order_no':'LC6','phone':'0912345678','address':'臺南市東區測試路1號','date_clean':'2026-09-01'},
+            {'order_no':'LC7','phone':'0912345678','address':'','date_clean':'2026-10-01'},
+            {'order_no':'LC8','phone':'0999999999','address':'新竹市測試路1號','date_clean':'2026-12-01'},
+        ]
+        calls = []
+        def fetch(session, **f):
+            calls.append(f)
+            return by_phone if 'phone' in f else by_name
+        ns['purchase_records'] = fetch
+        self.assertEqual(ns['stored_value_customer_city'](object(), order), '高雄')   # 最近一筆可分區的是台南
+        self.assertEqual(calls[-1], {'max_pages':3,'phone':'0912345678','p_board':'on'})
+        # 姓名查不到任何地址也一樣改用手機
+        ns['purchase_records'] = lambda session, **f: by_phone[:1] if 'phone' in f else []
+        self.assertEqual(ns['stored_value_customer_city'](object(), order), '新竹')
+        # 地址能唯一分區就不查手機
+        calls.clear()
+        ns['purchase_records'] = fetch
+        by_name[1] = dict(order, address='新竹市測試路2號')
+        self.assertEqual(ns['stored_value_customer_city'](object(), order), '新竹')
+        self.assertFalse(any('phone' in c for c in calls))
 
     def test_export_filters_keeps_columns_and_caches_customer(self):
         for city, expected in [('新竹',['LC1','LC3']),('高雄',['LC2'])]:

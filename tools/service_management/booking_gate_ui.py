@@ -14,7 +14,7 @@ FIELDS_MAIN = [
 ]
 FIELDS_REPLY = [("確認欄", "回覆確認欄"), ("確認值", "確認值"), ("備註欄", "備註欄")]
 FIELDS_STAGE = [("排程排除欄", "改加：排程欄"), ("排除關鍵字", "改加關鍵字"),
-                ("已確認欄", "已確認：排程欄"), ("已確認關鍵字", "已確認關鍵字")]
+                ("已確認欄", "已確認：排程欄"), ("已確認關鍵字", "已確認關鍵字"), ("最低人時", "最低人時（人數×時數）")]
 FIELDS_MATCH = [("姓名欄", "姓名欄"), ("電話欄", "電話欄"), ("地址欄", "地址欄"), ("確認表排除欄", "確認表改加欄（選填）")]
 
 
@@ -63,14 +63,14 @@ def render(st, areas: list[str], start: date | None, end: date | None) -> dict |
     else:
         st.caption("此匯出範圍不在年節大掃除期間，預設不套用。")
     enabled = st.checkbox(
-        "套用預約條件：寫入回覆確認、確認備註、改加標記、已確認、預約條件五欄",
+        "套用預約條件：寫入回覆確認、確認備註、改加標記、已確認、人時、預約條件六欄",
         value=overlap is not None, key=f"booking_gate_on_{start}_{end}",
     )
     if not enabled:
-        st.caption("不套用：排程不寫入這五欄，已寫入的會清空；批次成單照平常規則。")
+        st.caption("不套用：排程不寫入這六欄，已寫入的會清空；批次成單照平常規則。")
         return {"enabled": False, "settings": {}}
 
-    st.caption(f"期間：{start} ～ {end}（跟著上方匯出起迄日）。預約條件依序判斷：改加 → 已確認 → 可約 → 未回覆。")
+    st.caption(f"期間：{start} ～ {end}（跟著上方匯出起迄日）。預約條件依序判斷：人時不足 → 改加 → 已確認 → 可約 → 未回覆；人時只檢查年節大掃除期間的服務。")
     if st.button("重新讀取已儲存的設定", key="booking_gate_reload"):
         for area in areas:
             st.session_state.pop(f"booking_gate_settings_{area}", None)
@@ -94,7 +94,7 @@ def render(st, areas: list[str], start: date | None, end: date | None) -> dict |
             field(col, name, label)
         for (name, label), col in zip(FIELDS_REPLY, st.columns(3)):
             field(col, name, label)
-        for (name, label), col in zip(FIELDS_STAGE, st.columns(4)):
+        for (name, label), col in zip(FIELDS_STAGE, st.columns(5)):
             field(col, name, label)
         with st.expander("進階：比對客人欄位", expanded=False):
             for (name, label), col in zip(FIELDS_MATCH, st.columns(4)):

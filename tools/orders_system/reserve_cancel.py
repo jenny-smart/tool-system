@@ -12,6 +12,24 @@ from reserve_sheet_log import append_log_rows
 
 SYSTEM_RESERVE_MEMO = "系統保留單"
 CANCELLED_RESERVE_MEMO = "取消系統保留單"
+# 代客保留：用檸檬保留帳號替客人先 booking，客人備註寫「代客保留：客人姓名」。
+PROXY_RESERVE_MEMO = "代客保留"
+PROXY_FILTER = "代客保留（客人備註含關鍵字）"
+CANCELLED_PREFIX = "取消"
+
+
+def _is_active_proxy_memo(memo: str, keyword: str) -> bool:
+    """客人備註含關鍵字（例如 代客保留：王小明），且還沒被取消（取消後備註前面加「取消」）。"""
+    memo = str(memo or "").strip()
+    return bool(keyword) and keyword in memo and not memo.startswith(CANCELLED_PREFIX)
+
+
+def proxy_keyword(value: str) -> str:
+    """關鍵字必須含「代客保留」，避免誤取消其他訂單。"""
+    keyword = re.sub(r"\s+", "", str(value or "")).replace(":", "：")
+    if PROXY_RESERVE_MEMO not in keyword:
+        raise ValueError(f"客人備註關鍵字必須包含「{PROXY_RESERVE_MEMO}」，例如：代客保留：王小明")
+    return keyword
 
 
 def _is_active_reserve_memo(memo: str) -> bool:
@@ -44,8 +62,10 @@ def mark_system_reserve_order(env_name: str, backend_email: str, backend_passwor
     return {"ok": bool(ok), "order_no": order_no, "message": msg or ("客人備註已註記系統保留單" if ok else "客人備註註記失敗")}
 
 
-def _memo_matches_filter(memo: str, memo_filter: str) -> bool:
+def _memo_matches_filter(memo: str, memo_filter: str, keyword: str = "") -> bool:
     memo = str(memo or "").strip()
+    if memo_filter == PROXY_FILTER:
+        return _is_active_proxy_memo(memo, keyword)
     if memo_filter == "僅系統保留單":
         return _is_active_reserve_memo(memo)
     if memo_filter == "僅空白":
@@ -137,9 +157,10 @@ def find_reserve_orders(
     env_name: str, backend_email: str, backend_password: str, phone: str,
     clean_date_s: str, clean_date_e: str,
     memo_filter: str = "系統保留單或空白", periods: Optional[List[str]] = None,
-    return_debug: bool = False,
+    return_debug: bool = False, memo_keyword: str = "",
 ):
     _assert_supported_env(env_name)
+    keyword = proxy_keyword(memo_keyword) if memo_filter == PROXY_FILTER else ""
     phone = re.sub(r"\D", "", str(phone or ""))
     if not re.fullmatch(r"09\d{8}", phone):
         raise ValueError("手機號碼需為 09 開頭共 10 碼")
@@ -182,11 +203,15 @@ def find_reserve_orders(
             continue
 
         memo = str(detail.get("memo") or "").strip()
-        if not _memo_matches_filter(memo, memo_filter):
+        if not _memo_matches_filter(memo, memo_filter, keyword):
             continue
         item = dict(row)
         item["customer_memo"] = memo
-        item["cancel_eligible"] = (memo == "" or _is_active_reserve_memo(memo))
+        if keyword:
+            item["memo_keyword"] = keyword
+            item["cancel_eligible"] = True
+        else:
+            item["cancel_eligible"] = (memo == "" or _is_active_reserve_memo(memo))
         for key in (
             "amount", "total_amount", "order_amount", "price", "fare", "car_fare",
             "traffic_fee", "trafficFee", "staff", "staff_names", "service_staff",
@@ -233,6 +258,16 @@ def cancel_reserve_orders(
         except Exception as exc:
             skipped.append({**row, "ok": False, "message": f"取消前讀取客人備註失敗，已跳過：{exc}"})
             continue
+        keyword = str(row.get("memo_keyword") or "")
+        if keyword:
+            if not _is_active_proxy_memo(current_memo, keyword):
+                skipped.append({
+                    **row, "ok": False, "customer_memo": current_memo,
+                    "message": f"客人備註已不含「{keyword}」或已取消過，已跳過。",
+                })
+                continue
+            safe_rows.append({**row, "cancel_memo": CANCELLED_PREFIX + current_memo})
+            continue
         if CANCELLED_RESERVE_MEMO in current_memo:
             skipped.append({
                 **row, "ok": False, "customer_memo": current_memo,
@@ -249,11 +284,16 @@ def cancel_reserve_orders(
 
     cancelled = []
     if safe_rows:
-        cancelled = co.cancel_orders(
-            env_name, backend_email, backend_password, safe_rows,
-            cancel_status="不需退款", customer_memo="取消系統保留單",
-            charge_note="", refund_note="",
-        )
+        # 系統保留單一律改成「取消系統保留單」；代客保留各張改成「取消」＋原客人備註。
+        by_memo = {}
+        for row in safe_rows:
+            by_memo.setdefault(row.get("cancel_memo") or CANCELLED_RESERVE_MEMO, []).append(row)
+        for memo, group in by_memo.items():
+            cancelled += co.cancel_orders(
+                env_name, backend_email, backend_password, group,
+                cancel_status="不需退款", customer_memo=memo,
+                charge_note="", refund_note="",
+            )
         source_by_order = {str(r.get("order_no") or ""): r for r in safe_rows}
         enriched = []
         for result in cancelled:

@@ -141,3 +141,16 @@ class NativeNewAddressFormTest(unittest.TestCase):
         self.assertIn('萬華區', filled)
         typed = [c.args[0] for c in page.locator.return_value.fill.call_args_list]
         self.assertEqual(typed, ['0912345678', '', '環河南路二段250巷'])
+
+
+def test_fill_missing_coordinates_only_when_page_left_them_blank():
+    from backend_address_form import fill_missing_coordinates
+    from urllib.parse import parse_qs
+    geocode = lambda address: ('24.99', '121.50')
+    data, coords = fill_missing_coordinates('memberId=1&address=x&lat=&lng=', '新北市中和區中山路二段457號20樓', geocode)
+    assert coords == ('24.99', '121.50')
+    assert parse_qs(data)['lat'] == ['24.99'] and parse_qs(data)['address'] == ['x']
+    same, coords = fill_missing_coordinates('lat=25.0&lng=121.5', 'a', geocode)
+    assert (same, coords) == ('lat=25.0&lng=121.5', None)
+    same, coords = fill_missing_coordinates('lat=&lng=', 'a', lambda a: (None, None))
+    assert coords is None

@@ -106,16 +106,22 @@ def parse_balances(text: str) -> tuple[int, int] | None:
     return values[0], values[1]
 
 
+REMAINDER_SUFFIX = "VIP退券剩餘餘額歸零"  # 扣剩餘餘額的那一筆一律人工確認送出
+
+
 def zero_out_steps(stored: int, shopping: int, refund_amount: str = "") -> list[tuple[str, int]]:
     """VIP待退券歸零要扣的每一筆（備註後綴, 金額），全部用「扣款／異動費」；第一筆 Agent 直接送出，第二筆（剩餘餘額）人工確認按送出。
 
     後台扣款先扣儲值金、不足再扣購物金：
       - 退款金額大於儲值金：第一筆扣退款金額，第二筆扣剩下的餘額（購物金）。
       - 其他：第一筆扣儲值金餘額，第二筆扣購物金餘額。
+      - 儲值金已是 0（例如上次已扣退款金額、剩餘餘額還沒送出）：只剩扣剩餘餘額那一筆。
     """
     total = stored + shopping
     if total <= 0:
         return []
+    if stored <= 0:
+        return [(REMAINDER_SUFFIX, total)]
     try:
         refund = int(float(refund_amount or 0))
     except ValueError:
@@ -127,5 +133,5 @@ def zero_out_steps(stored: int, shopping: int, refund_amount: str = "") -> list[
         first = stored
         steps = [("VIP退券儲值金歸零", first)] if first else []
     if total - first:
-        steps.append(("VIP退券剩餘餘額歸零", total - first))
+        steps.append((REMAINDER_SUFFIX, total - first))
     return steps

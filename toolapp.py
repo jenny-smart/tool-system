@@ -1196,6 +1196,10 @@ def _append_log_entry(message: str, level: str = "info") -> str:
 
 def add_log(message: str, level: str = "info") -> None:
     _append_log_entry(message, level)
+    if level in ("success", "error"):
+        from tools.common import unified_log
+
+        unified_log.report(st, level, message)
 
     # 執行按鈕按下後，後面可能會接著跑很久（例如套用公式要跑幾十秒到
     # 幾分鐘），這段期間畫面上的日誌框早就畫好了、不會自動更新。這裡
@@ -3254,6 +3258,14 @@ def run_deposit_report_mark_from_notes(*, month="", start_date=None, end_date=No
     return message
 
 
+def run_trainee_field_fee_mark_refunded(*, area="全區", **_):
+    from tools.finance_management.trainee_field_fee import mark_refunded
+
+    if area not in ("台北", "台中"):
+        raise ValueError("請選擇台北或台中")
+    return f"完成：{mark_refunded(area)['message']}"
+
+
 def run_trainee_field_fee_update(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.trainee_field_fee import update_refund_and_fee_sheet
 
@@ -3262,7 +3274,7 @@ def run_trainee_field_fee_update(*, month="", start_date=None, end_date=None, ar
     result = update_refund_and_fee_sheet(area)
     message = (
         f"完成：退款金額 H 欄更新 {result['h_updated']} 列；"
-        f"新訓退訓實境費用 {result['fee_rows']} 人，身分證已打勾 {result['id_checked']} 人"
+        f"新訓退訓實境費用新增 {result['fee_rows']} 人，身分證打勾 {result['id_checked']} 人"
     )
     if result["warnings"]:
         message += "；注意：" + "；".join(result["warnings"])
@@ -3390,6 +3402,9 @@ NEW_YEAR_FUNCTION_ROWS = {
     "內勤薪資": ["內勤薪資"],
     "行銷費用總管理": ["行銷費用總管理"],
     "清潔用品": ["清潔用品"],
+    "春酒專區": ["春酒專區"],
+    "春節禮品名單統計": ["春節禮品名單統計"],   # 第一階段：各地區資料統計
+    "春節送禮名單產生": ["春節送禮名單產生"],   # 第二階段：畫面設定金額後產生送禮名單
 }
 # 各功能的執行區域（依「生成新年度」F 欄地區、或檔名／子資料夾裡的地區）
 NEW_YEAR_FUNCTION_AREAS = {
@@ -3400,9 +3415,14 @@ NEW_YEAR_FUNCTION_AREAS = {
     "內勤薪資": ["全區", "台北", "桃園"],
     "行銷費用總管理": ["全區"],
     "清潔用品": ["全區"],
+    "春酒專區": ["全區", "台北", "台中", "桃園", "新竹"],
+    "春節禮品名單統計": ["全區"],
+    "春節送禮名單產生": ["全區"],
 }
+SPRING_EVENT_FUNCTION = "春酒專區"
+SPRING_EVENT_PERIODS = ["中午", "晚上", "下午", "早上"]
 # 可「只整理已存在檔案」的功能（整理只是清空數字與改年度，重跑結果相同）
-NEW_YEAR_TIDY_FUNCTIONS = {"行銷費用總管理", "清潔用品"}
+NEW_YEAR_TIDY_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春節送禮名單產生"}
 
 
 # 「年度根目錄設定」的檢查與模式切換（三個系統共用同一張設定表）
@@ -3464,7 +3484,8 @@ def run_year_root_check(action, year, on_progress=None):
     raise ValueError(f"未知動作：{action}")
 
 
-def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=False, area="全區", on_progress=None):
+def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=False, area="全區",
+                          spring_event=None, gift_threshold=None, on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
     import importlib
 
@@ -3483,8 +3504,9 @@ def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=Fal
     log = (lambda msg: on_progress(msg, "info")) if on_progress else print
     rollover = Rollover(
         get_drive_service(), get_sheets_service(), MASTER_SPREADSHEET_ID,
-        int(year_text), dry_run=dry_run, fresh=fresh, tidy=tidy, log=log,
+        int(year_text), dry_run=dry_run, fresh=fresh, tidy=tidy, log=log, gift_threshold=gift_threshold,
     )
+    rollover.spring_event = spring_event  # 春酒專區：{"date": date, "period": "中午"}
     try:
         records = rollover.run("all", names=names, area=area or "全區")
     except Exception as exc:
@@ -3804,6 +3826,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【新人排程】新人訓練",
         "【新人排程】新人入職",
         "【新訓退款】新訓退訓實境費用",
+        "【新訓退款】新訓退訓實境費用已退款",
         "【專員請款】請款資料審核",
     ],
     # ── ★ 新增：客服排程系統功能清單 ────────────────────────
@@ -3911,7 +3934,7 @@ FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】
 FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
 FIELD_CLAIM_BATCH = "【專員請款】請款資料審核"
 FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH,)
-FIELD_TRAINEE_FEE_FUNCTIONS = ("【新訓退款】新訓退訓實境費用",)
+FIELD_TRAINEE_FEE_FUNCTIONS = ("【新訓退款】新訓退訓實境費用", "【新訓退款】新訓退訓實境費用已退款")
 FIELD_EXTRA_FUNCTIONS = (
     FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS
     + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
@@ -3995,6 +4018,17 @@ if not system_names:
     st.error("目前角色沒有可執行的系統權限，請聯絡管理員。")
     st.stop()
 
+# 獨立頁面（業績報表、Drive 授權、Agent 離線處理、排程 Log）的按鈕也記入統一 Log；主畫面稍後會依選的功能更新
+from tools.common import unified_log as _unified_log
+
+_unified_log.install_streamlit_hooks(
+    st,
+    system={"report": "業績報表", "oauth": "Drive 授權設定", "agent_help": "Agent 離線處理",
+            "log": "排程 Log"}.get(str(st.session_state.view), "主畫面"),
+    function=str(st.session_state.view),
+    operator=str(st.session_state.get("username", "") or ""),
+)
+
 if st.session_state.view == "report":
     if not can_access_page("report"):
         st.error("你沒有權限查看業績報表")
@@ -4027,6 +4061,10 @@ if st.session_state.view == "log":
 selected_system_cfg = get_system_by_name(config, st.session_state.get("selected_system_name", ""))
 if selected_system_cfg.get("type") == "gmail_401":
     from tools.gmail_401.gmail_401 import run_gmail_401
+    from tools.common import unified_log as _unified_log_401
+
+    _unified_log_401.install_streamlit_hooks(st, system="Gmail401歸檔", function="掃描並歸檔401附件",
+                                             operator=str(st.session_state.get("username", "") or ""))
     run_gmail_401()
     st.stop()
 # ────────────────────────────────────────────────────────
@@ -4152,6 +4190,16 @@ with func_col:
             label_visibility="collapsed",
             key="selected_function",
         )
+
+# 網頁上按下的每個功能都記一筆到主控表「tool-system執行Log-年度」（執行／成功／失敗）
+from tools.common import unified_log as _unified_log
+
+_unified_log.install_streamlit_hooks(
+    st,
+    system=system_name,
+    function=selected_function or system_name,
+    operator=str(st.session_state.get("username", "") or ""),
+)
 
 if system_type == "finance_management" and selected_function == "【富邦銀行】內部請款整合執行":
     st.markdown("</div>", unsafe_allow_html=True)
@@ -4912,8 +4960,8 @@ with date_col:
         elif selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
             st.markdown('<div class="field-label">📆 匯出設定</div>', unsafe_allow_html=True)
             _crm_mode = st.radio(
-                "匯出方式", ["期別（月份）", "日期區間"],
-                horizontal=True, label_visibility="collapsed", key="crm_date_mode",
+                "匯出方式", ["期別（月份）", "月份區間"],
+                horizontal=True, label_visibility="collapsed", key="crm_date_mode_month_range",
             )
             import calendar as _calendar
             if _crm_mode == "期別（月份）":
@@ -4944,12 +4992,25 @@ with date_col:
                     st.error("期別格式錯誤，請輸入 yyyyMM，多個用逗號分隔")
                     start_date_value = end_date_value = None
             else:
-                _d1, _d2 = st.columns(2)
-                with _d1:
-                    start_date_value = st.date_input("起始日期", value=_today_date.replace(day=1), key="crm_start_date")
-                with _d2:
-                    end_date_value = st.date_input("結束日期", value=_today_date, key="crm_end_date")
-                st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
+                # 月份區間：起始月 1 日 ～ 結束月最後一天。
+                _this_month = _today_date.year * 12 + _today_date.month - 1
+                _month_options = [(_m // 12, _m % 12 + 1) for _m in range(_this_month - 12, _this_month + 19)]
+                _this_index = _month_options.index((_today_date.year, _today_date.month))
+                _m1, _m2 = st.columns(2)
+                with _m1:
+                    _start_month = st.selectbox("起始月份", _month_options, index=_this_index,
+                                                format_func=lambda ym: f"{ym[0]}/{ym[1]:02d}", key="crm_start_month")
+                with _m2:
+                    _end_month = st.selectbox("結束月份", _month_options, index=_this_index,
+                                              format_func=lambda ym: f"{ym[0]}/{ym[1]:02d}", key="crm_end_month")
+                if _end_month < _start_month:
+                    st.error("結束月份不可早於起始月份")
+                    start_date_value = end_date_value = None
+                else:
+                    start_date_value = datetime(_start_month[0], _start_month[1], 1, tzinfo=TW_TZ).date()
+                    end_date_value = datetime(_end_month[0], _end_month[1],
+                                              _calendar.monthrange(*_end_month)[1], tzinfo=TW_TZ).date()
+                    st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
 
             if selected_function in ("【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
                 st.checkbox(
@@ -4981,10 +5042,17 @@ with date_col:
     elif system_type == "field_daily_schedule" and selected_function in FIELD_EXTRA_FUNCTIONS:
         today_date = datetime.now(TW_TZ).date()
 
-        if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+        if selected_function == "【新訓退款】新訓退訓實境費用已退款":
+            st.info(
+                "工具包押金退款 I 欄已填退款日期、但工具包押金 G 欄還空白的人：G 欄填「退款日期已匯款」；"
+                "H−2000 大於 0 時，新人實境／新人實習該人 A 欄空白的列也填「退款日期已匯款」",
+                icon="🧾",
+            )
+
+        elif selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
             st.info(
                 "工具包押金退款 H 欄（I 欄退款日期空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總（從基本資料、協議規章建檔年度開始找）＋工具包押金 B 欄；"
-                "再重建新訓退訓實境費用 A3 起（H>2000，B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
+                "再把 H>2000 且表上還沒有的人接在新訓退訓實境費用最後一筆之後（B＝H−2000），雲端有身分證資料夾即在 C 欄打勾",
                 icon="🧾",
             )
 
@@ -5090,10 +5158,37 @@ with date_col:
                 "只整理已存在檔案（不重建、不改名，直接清空數字與改年度；已輸入的資料會被清掉）",
                 key="new_year_rollover_tidy",
             )
+        if selected_function == SPRING_EVENT_FUNCTION:
+            st.markdown('<div class="field-label">🍶 春酒日期與時段</div>', unsafe_allow_html=True)
+            s1, s2 = st.columns(2)
+            with s1:
+                st.date_input("春酒日期", value=None, key="spring_event_date")
+            with s2:
+                st.selectbox("時段", SPRING_EVENT_PERIODS, key="spring_event_period")
+            st.caption("會改「參與統計表單」出席題目的日期，例：方便於03/13(六)中午；未填日期則不改。")
         st.caption(
             "依主控表「生成新年度」分頁，把前一年度資料夾與檔案複製成新年度，"
             "結果寫回該列 I 欄，新檔 ID、檔名、生成時間寫入「生成新年度Log」，並自動帶入「年度工作檔ID_GID總表」。先「預覽」確認，再「執行」。"
         )
+        if selected_function == "春節禮品名單統計":
+            st.caption(
+                "第一階段：自動登入各區後台下載儲值金結算（同月排程儲值金結算），存成「春節禮品/新年度/新年度儲值金結算-地區」"
+                "後轉檔（高雄從新竹拆出）；樞紐只算前一年度購買的儲值金（不含轉換、購物金、保留帳號），"
+                "建立「新年度名單統整」，並在執行紀錄與「區間統計」工作表列出各金額區間"
+                "（5萬以下、5～8萬、8～10萬、10～12萬、12萬以上）的人數，供決定送禮門檻金額。"
+            )
+        if selected_function == "春節送禮名單產生":
+            st.markdown('<div class="field-label">💰 送禮門檻金額（前一年度儲值金加總 ≥ 此金額）</div>',
+                        unsafe_allow_html=True)
+            st.number_input(
+                "送禮門檻金額", min_value=0, value=100000, step=10000,
+                label_visibility="collapsed", key="new_year_gift_threshold",
+            )
+            st.caption(
+                "第二階段：先跑完「春節禮品名單統計」，依區間人數決定金額後執行。金額會寫入名單統整「設定」B1，"
+                "產生新年度春節送禮名單（清空 J2:L 與第 18 列以下、第 21 列起貼上），並在根目錄春節送禮名單加新年度分頁。"
+                "已產生過要換金額重貼，請勾「只整理已存在檔案」。"
+            )
 
     elif system_type == "staff_payroll":
         st.markdown('<div class="field-label">📆 年月（YYYYMM）</div>', unsafe_allow_html=True)
@@ -5212,6 +5307,7 @@ with area_col:
         label_visibility="collapsed",
         key=area_select_key,
     )
+    _unified_log.set_context(st, area=selected_area_value)
 
     selected_areas = [selected_area_value]
 
@@ -6079,7 +6175,10 @@ if run_clicked:
 
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
-                if selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
+                if selected_function == "【新訓退款】新訓退訓實境費用已退款":
+                    add_log(f"✅ {run_trainee_field_fee_mark_refunded(area=selected_area_value)}", "success")
+
+                elif selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
                     add_log(f"✅ {run_trainee_field_fee_update(area=selected_area_value)}", "success")
 
                 elif selected_function in FIELD_ROSTER_RAISE_FUNCTIONS:
@@ -6159,8 +6258,15 @@ if run_clicked:
                 f"{' / 重新生成' if fresh else ''}{' / 只整理已存在檔案' if tidy else ''}")
         with st.spinner(f"⏳ 執行中：{selected_function}，請稍候..."):
             try:
+                spring_event = None
+                if selected_function == SPRING_EVENT_FUNCTION and st.session_state.get("spring_event_date"):
+                    spring_event = {"date": st.session_state["spring_event_date"],
+                                    "period": st.session_state.get("spring_event_period", "中午")}
                 result = run_new_year_generate(
                     period, selected_function, dry_run=dry_run, fresh=fresh, tidy=tidy, area=selected_area_value,
+                    spring_event=spring_event,
+                    gift_threshold=(st.session_state.get("new_year_gift_threshold")
+                                    if selected_function == "春節送禮名單產生" else None),
                     on_progress=lambda msg, level="info": add_log(msg, level),
                 )
                 add_log(result, "warning" if "找不到來源" in result else "success")
@@ -6639,7 +6745,7 @@ if run_clicked:
                             _stages = (_diff_result.get("booking_gate") or {}).get("stages") or {}
                             if _stages:
                                 st.info("預約條件：" + "、".join(
-                                    f"{_name} {_stages[_name]} 列" for _name in ("可約", "改加", "已確認", "未回覆") if _name in _stages))
+                                    f"{_name} {_stages[_name]} 列" for _name in ("可約", "改加", "人時不足", "已確認", "未回覆") if _name in _stages))
                             if _diff_result.get("report_url"):
                                 st.markdown(f"[開啟排程差異表]({_diff_result['report_url']})")
                             st.caption(f"詳細差異請查看工作表「{_diff_result['report']}」。"

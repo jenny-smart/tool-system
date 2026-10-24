@@ -1647,8 +1647,9 @@ def resolve_backend_booking_address(
         country_id=address_parts.get("country_id", ""),
         address_id=best_addr.get("addressId", ""),
         phone=phone or member.get("phone") or member.get("mobile") or member.get("tel") or "",
-        # 已選縣市／鄉鎮市區時，空白欄位只填剩餘地址
-        address_detail=address_parts.get("detail", "") if address_parts.get("district") else "",
+        # 比照手動操作：選好縣市／鄉鎮市區後，地址欄仍填完整地址（只填路名會讓後台地圖定位失敗，
+        # 回覆「此地址尚未開放服務」）。
+        address_detail=selected_address,
         district=address_parts.get("district", ""),
     )
     area_info = addr_check.get("area") if isinstance(addr_check, dict) else {}

@@ -71,6 +71,7 @@ TZ = timezone(timedelta(hours=8))
 GDRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 KAOHSIUNG_MERGE_REGIONS = ["台南", "高雄"]
 STORED_VALUE_MERGE_CITIES = {"新竹", "高雄"}
+PHONE_LOOKUP_MAX_PAGES = 3
 AREA_FOLDER_NAMES = {
     "台北": "01.台北專員", "台中": "02.台中專員", "桃園": "03.桃園專員",
     "新竹": "04.新竹專員", "高雄": "05.高雄專員",
@@ -345,10 +346,10 @@ def export_original(session: requests.Session, city: str, start: str, end: str) 
     return read_excel(download_export(session, start, end, keyword))
 
 
-def purchase_records(session: requests.Session, **filters) -> list[dict[str, Any]]:
+def purchase_records(session: requests.Session, max_pages: int = 1000, **filters) -> list[dict[str, Any]]:
     """讀取訂單搜尋的全部分頁；登入失效或資料格式異常時停止。"""
     records = []
-    for page in range(1, 1001):
+    for page in range(1, max_pages + 1):
         res = session.get(
             EXPORT_URL.rsplit("/", 1)[0], params={**filters, "page": page},
             headers=HEADERS, allow_redirects=True, timeout=60,
@@ -363,7 +364,7 @@ def purchase_records(session: requests.Session, **filters) -> list[dict[str, Any
         records.extend(payload["data"])
         if page >= int(payload.get("last_page", 1)):
             return records
-    raise RuntimeError("訂單搜尋超過 1000 頁，停止避免漏資料")
+    raise RuntimeError(f"訂單搜尋超過 {max_pages} 頁，停止避免漏資料")
 
 
 def _customer_key(value: Any) -> str:
@@ -379,8 +380,37 @@ def _address_city(address: Any) -> str:
     return "其他" if text else ""
 
 
+def _order_recency(item: dict[str, Any]) -> tuple[str, str, str]:
+    """訂單新舊排序用：服務日期、付款日期、建立日期（後台日期字串可直接比大小）。"""
+    return tuple(str(item.get(k) or "")[:19] for k in ("date_clean", "paid_at", "created_at"))
+
+
+def area_by_phone(session: requests.Session, phone: Any) -> str:
+    """用手機號碼查訂單，取最近一筆地址能分出新竹／高雄（含台南）的訂單決定歸屬；查不到回傳空字串。"""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == 9:
+        digits = "0" + digits
+    if len(digits) < 9:
+        return ""
+    try:  # 一支手機的訂單不會超過幾頁；超過代表搜尋沒套用手機條件，直接放棄避免翻遍全部訂單
+        records = purchase_records(session, max_pages=PHONE_LOOKUP_MAX_PAGES, phone=digits, p_board="on")
+    except RuntimeError as exc:
+        if "超過" in str(exc):
+            log(f"⚠️ 手機 {digits} 查詢超過 {PHONE_LOOKUP_MAX_PAGES} 頁，略過")
+            return ""
+        raise
+    items = [item for item in records
+             if re.sub(r"\D", "", str(item.get("phone") or "")).endswith(digits[-9:])]
+    for item in sorted(items, key=_order_recency, reverse=True):
+        city = _address_city(item.get("address"))
+        if city in ("新竹", "高雄"):
+            return city
+    return ""
+
+
 def stored_value_customer_city(session: requests.Session, order: dict[str, Any]) -> str:
-    """姓名搜尋不帶期別／品項／付款限制，並核對會員或電話避免同名誤配。"""
+    """姓名搜尋不帶期別／品項／付款限制，並核對會員或電話避免同名誤配。
+    歷史地址分不出新竹或高雄（都沒有、或兩邊都有）時，改用手機號碼查近期訂單決定。"""
     name = str(order.get("name") or "").strip()
     if not name:
         raise RuntimeError(f"儲值金訂單 {order.get('order_no')} 缺少客戶姓名")
@@ -398,6 +428,12 @@ def stored_value_customer_city(session: requests.Session, order: dict[str, Any])
         city = _address_city(item.get("address"))
         if city:
             cities.add(city)
+    south = cities & {"新竹", "高雄"}
+    if len(south) != 1:
+        by_phone = area_by_phone(session, phone)
+        if by_phone:
+            log(f"📞 {name}（{order.get('order_no')}）地址分不出新竹／高雄 {sorted(cities)}，依手機近期訂單歸 {by_phone}")
+            return by_phone
     if len(cities) != 1:
         raise RuntimeError(f"儲值金訂單 {order.get('order_no')}（{name}）地址無法唯一分區：{sorted(cities)}")
     return cities.pop()

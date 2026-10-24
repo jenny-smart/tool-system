@@ -4,12 +4,15 @@
 期間跟著畫面的匯出起迄日。確認檔案、工作表與各欄位也在畫面設定，存在主控試算表
 「排程預約條件」工作表（每個地區一列），下次自動帶入。
 
-套用時，匯出範圍內的未成單排程列，在 AG 右側寫五欄：
+套用時，匯出範圍內的未成單排程列，在 AG 右側寫六欄：
   回覆確認：確認表「確認欄」的值（例如 V 欄 TRUE／FALSE）；找不到客人寫「查無」
   確認備註：確認表「備註欄」的值（例如 W 欄）
   改加標記：「排程排除欄」（例如 A 欄）或「確認表排除欄」含的排除關鍵字（例如 改、加）
   已確認：「已確認欄」（例如排程 B 欄＝日曆備註）含「已確認關鍵字」
-  預約條件：依序判斷 改加 → 已確認 → 可約（回覆確認在確認值內）→ 未回覆
+  人時：人數 × 時數（人數取 A 欄「N人」，沒寫時 2 人）
+  預約條件：依序判斷 人時不足（未滿最低人時）→ 改加 → 已確認 → 可約（回覆確認在確認值內）→ 未回覆
+人時不足只檢查年節大掃除期間（PART 1 起日～PART 2 迄日）的服務；匯出期間其他日期（例如 12/1～2/28
+讓客人看到完整四個月的服務）不檢查人時。
 狀態欄不改；orders-system 批次成單依畫面勾選的「本次預約對象」決定約哪些階段。
 """
 from __future__ import annotations
@@ -23,13 +26,13 @@ from typing import Any, Callable
 RULE_SHEET_NAME = "排程預約條件"
 RULE_HEADERS = [
     "地區", "確認檔案ID", "確認工作表", "姓名欄", "電話欄", "地址欄", "確認欄", "確認值", "備註欄",
-    "排程排除欄", "排除關鍵字", "確認表排除欄", "已確認欄", "已確認關鍵字", "更新時間",
+    "排程排除欄", "排除關鍵字", "確認表排除欄", "已確認欄", "已確認關鍵字", "最低人時", "更新時間",
 ]
 # 畫面第一次開啟時的預設值；之後一律以工作表內容為準。
 DEFAULT_SETTINGS = {
     "確認檔案ID": "", "確認工作表": "", "姓名欄": "C", "電話欄": "D", "地址欄": "F",
     "確認欄": "V", "確認值": "TRUE", "備註欄": "W", "排程排除欄": "A", "排除關鍵字": "改,加",
-    "確認表排除欄": "", "已確認欄": "B", "已確認關鍵字": "已確認",
+    "確認表排除欄": "", "已確認欄": "B", "已確認關鍵字": "已確認", "最低人時": "6",
 }
 AREA_DEFAULTS = {
     "台北": {"確認檔案ID": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44", "確認工作表": "2026大掃除"},
@@ -50,11 +53,14 @@ HEADER_NOTES = {
     "確認表排除欄": "選填。確認表中也要檢查排除關鍵字的欄位字母；空白＝不檢查。",
     "已確認欄": "排程工作表中判斷「原本每月確認、改成已確認」的欄位字母，例如 B（日曆標題 <> 備註）。空白＝不檢查。",
     "已確認關鍵字": "已確認欄含這些字，預約條件＝已確認，可填多個，用逗號分隔，例如 已確認。",
+    "最低人時": "人數 × 時數未滿此數，預約條件＝人時不足（最先判斷，例如 6：1人4小時、2人2小時先不約）。"
+               "只檢查年節大掃除期間（PART 1 起日～PART 2 迄日）的服務。"
+               "人數取 A 欄「2人」等寫法，沒寫時為 2 人；時數為開始到結束時間。空白＝不檢查。",
     "更新時間": "最後一次從執行畫面儲存的時間（台北時間）。",
 }
 # 預約條件的階段，依判斷順序；批次成單畫面勾選本次要約哪幾個階段。
-STAGE_CHANGE, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY = "改加", "已確認", "可約", "未回覆"
-STAGES = (STAGE_CHANGE, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY)
+STAGE_CHANGE, STAGE_SHORT, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY = "改加", "人時不足", "已確認", "可約", "未回覆"
+STAGES = (STAGE_SHORT, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_READY, STAGE_NO_REPLY)
 NOT_FOUND = "查無"
 
 
@@ -109,8 +115,40 @@ def _address(value: Any) -> str:
     return re.sub(r"[－–—]", "-", text).replace("臺", "台")
 
 
-def parse_rule(record: dict[str, Any], start: Any = "", end: Any = "") -> dict[str, Any]:
-    """設定列＋本次匯出起迄日 → 規則；起迄日空白代表該側不限制。"""
+def _number(value: Any) -> float | None:
+    text = _text(value)
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        raise ValueError(f"最低人時格式錯誤：{text}（請填數字，例如 6）")
+
+
+def _clock(value: Any) -> float | None:
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::\d{2})?", _text(value))
+    return int(match.group(1)) + int(match.group(2)) / 60 if match else None
+
+
+def person_hours(values: list[Any]) -> float | None:
+    """人數 × 時數：人數取 A 欄「N人」（沒寫時 2 人，與匯出計價相同），時數取開始到結束時間。"""
+    start, end = _clock(values[6] if len(values) > 6 else ""), _clock(values[7] if len(values) > 7 else "")
+    if start is None or end is None or end <= start:
+        return None
+    people = re.search(r"(\d+)\s*人", _text(values[0]))
+    return (int(people.group(1)) if people else 2) * (end - start)
+
+
+def _hours_text(value: float | None) -> str:
+    return "" if value is None else (str(int(value)) if value == int(value) else f"{value:g}")
+
+
+def parse_rule(record: dict[str, Any], start: Any = "", end: Any = "",
+               short_periods: list[tuple[Any, Any]] | None = None) -> dict[str, Any]:
+    """設定列＋本次匯出起迄日 → 規則；起迄日空白代表該側不限制。
+
+    short_periods＝要檢查人時的（起日, 迄日）清單，即年節大掃除期間；None＝整個期間都檢查。
+    """
     rule = {header: _text(record.get(header)) for header in RULE_HEADERS}
     start, end = _date(start), _date(end)
     if start and end and start > end:
@@ -138,11 +176,14 @@ def parse_rule(record: dict[str, Any], start: Any = "", end: Any = "") -> dict[s
         # 舊版規則表沒有這兩欄時，預設看排程 B 欄（日曆備註）是否含「已確認」。
         "confirmed_col": column_index(rule["已確認欄"] if "已確認欄" in record else "B"),
         "confirmed_words": _words(rule["已確認關鍵字"] if "已確認關鍵字" in record else "已確認"),
+        # 舊版規則表沒有最低人時時預設 6；明確留空＝不檢查。
+        "min_person_hours": _number(rule["最低人時"] if "最低人時" in record else "6"),
+        "short_periods": None if short_periods is None else [(_date(s), _date(e)) for s, e in short_periods],
     }
 
 
 def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[list[Any]], Any]:
-    """回傳 gate(排程列) →（回覆確認, 確認備註, 改加標記, 已確認, 預約條件）；None 代表期間外。"""
+    """回傳 gate(排程列) →（回覆確認, 確認備註, 改加標記, 已確認, 人時, 預約條件）；None 代表期間外。"""
     def cell(row, index):
         return _text(row[index]) if index is not None and index < len(row) else ""
 
@@ -192,9 +233,15 @@ def build_gate(rule: dict[str, Any], source_rows: list[list[Any]]) -> Callable[[
         confirmed_text = cell(values, rule["confirmed_col"])
         confirmed_note = "、".join(w for w in rule["confirmed_words"] if w in confirmed_text)
         replied = bool(matched) and all(e["confirmed"] for e in matched)
-        stage = (STAGE_CHANGE if mark else STAGE_CONFIRMED if confirmed_note
+        hours = person_hours(values)
+        periods = rule.get("short_periods")
+        in_deep_clean = periods is None or any(s <= service_date <= e for s, e in periods)
+        short = (in_deep_clean and rule["min_person_hours"] is not None and hours is not None
+                 and hours < rule["min_person_hours"] - 1e-9)
+        # 人時不足最先判斷；最低人時留空（不檢查）時才依改加、已確認、可約、未回覆判斷。
+        stage = (STAGE_SHORT if short else STAGE_CHANGE if mark else STAGE_CONFIRMED if confirmed_note
                  else STAGE_READY if replied else STAGE_NO_REPLY)
-        return confirm, note, mark, confirmed_note, stage
+        return confirm, note, mark, confirmed_note, _hours_text(hours), stage
 
     return gate
 
@@ -214,9 +261,9 @@ def combine_gates(gates: list[Callable[[list[Any]], Any]]) -> Callable[[list[Any
             return None
         join = lambda items: "、".join(dict.fromkeys(item for item in items if item))
         # Several rules: the strictest stage wins; 可約 only when every rule says so.
-        stage = next(s for s in (STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY, STAGE_READY)
-                     if any(r[4] == s for r in results))
-        return tuple(join(r[i] for r in results) for i in range(4)) + (stage,)
+        stage = next(s for s in (STAGE_SHORT, STAGE_CHANGE, STAGE_CONFIRMED, STAGE_NO_REPLY, STAGE_READY)
+                     if any(r[-1] == s for r in results))
+        return tuple(join(r[i] for r in results) for i in range(5)) + (stage,)
 
     return gate
 
@@ -294,9 +341,13 @@ def _open_source(gc, spreadsheet_id: str):
 
 
 def load_area_gate(gc, area_name: str, start: Any = "", end: Any = "",
-                   worksheet_not_found=Exception) -> tuple[Callable | None, list[str]]:
-    """依該地區設定與本次匯出起迄日建立判斷；確認表讀取失敗時直接報錯，避免誤約。"""
-    rule = parse_rule(load_settings(gc, area_name, worksheet_not_found), start, end)
+                   worksheet_not_found=Exception,
+                   short_periods: list[tuple[Any, Any]] | None = None) -> tuple[Callable | None, list[str]]:
+    """依該地區設定與本次匯出起迄日建立判斷；確認表讀取失敗時直接報錯，避免誤約。
+
+    short_periods＝年節大掃除期間，只有這些日期檢查人時；None＝整個期間都檢查。
+    """
+    rule = parse_rule(load_settings(gc, area_name, worksheet_not_found), start, end, short_periods)
     try:
         source = _open_source(gc, rule["spreadsheet_id"]).worksheet(rule["sheet"])
         rows = source.get_all_values()[1:]
