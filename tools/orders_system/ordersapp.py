@@ -893,8 +893,9 @@ FUNCTION_OPTIONS = [
     ("颱風假訂單移轉／比對：颱風假（可連放多天）訂單依時段逐筆用「修改日期」移到指定日期區間，"
      "時段不變；並可比對移轉後訂單目前日期，找出又被改過的訂單。",
      "orders", "颱風假訂單移轉"),
-    ("訂單批次調班：查執行日期區間的已付款訂單，逐筆移到返回日期區間的同時段並配回原本的專員，執行前後都可複製名單。",
-     "orders", "訂單批次調班"),
+    ("訂單班表記錄與返回：先記錄執行日期區間的訂單班表（日期／時段／專員），人員或日期被調整後可返回記錄的班表，"
+     "執行前後都可複製名單。",
+     "orders", "訂單班表記錄與返回"),
     ("訂單客服備註：舊客回購備註回填、新成單提醒建立、客服備忘錄整理。",
      "memo", "訂單客服備註"),
     ("儲值獎金備註：搜尋購買項目儲值金、客服備註空白的訂單，依姓名把獎金專員名字加進客服備註。",
@@ -1024,10 +1025,10 @@ if mode == "檸檬保留刪除地址":
     reserve_menu.render_reserve_address_cleanup(backend_email, backend_password, env)
     st.stop()
 
-if mode == "訂單批次調班":
+if mode == "訂單班表記錄與返回":
     import reschedule_ui
 
-    step("3", "訂單批次調班")
+    step("3", "訂單班表記錄與返回")
     reschedule_ui.render(backend_email, backend_password, env, copy_button=copy_button)
     st.stop()
 
