@@ -18,6 +18,7 @@ def _rows_to_frame(rows):
             "時段": row["period"],
             "訂單編號": row["order_no"],
             "姓名": row["name"],
+            "LINE": row.get("line_url", ""),
             "電話": row["phone"],
             "人數": row["person"],
             "專員": row["staff"],
@@ -410,10 +411,11 @@ def _render_transfer(backend_email, backend_password, env, copy_button=None):
                 st.caption(f"⚠️ {row['order_no']} {row['name']}｜{row['service_date']} {row['period']}｜{notes[row['order_no']]}")
     edited = st.data_editor(
         _rows_to_frame(rows), hide_index=True, use_container_width=True, key="tt_editor",
-        disabled=["注意", "日期", "時段", "訂單編號", "姓名", "電話", "人數", "專員", "付款狀態"],
+        disabled=["注意", "日期", "時段", "訂單編號", "姓名", "LINE", "電話", "人數", "專員", "付款狀態"],
         column_config={
             "移轉": st.column_config.CheckboxColumn("移轉"),
             "順序": st.column_config.NumberColumn("順序", min_value=1, step=1),
+            "LINE": st.column_config.LinkColumn("LINE", display_text="開啟聊天"),
         },
     )
 
