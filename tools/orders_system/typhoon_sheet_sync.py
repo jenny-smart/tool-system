@@ -271,4 +271,38 @@ def apply_sheet_updates(settings, rows, client=None):
         results.append({**row, "status": done, "change_date": new_values[0], "change_period": new_values[1]})
     if updates:
         worksheet.batch_update(updates, value_input_option="USER_ENTERED")
+        results = _verify_written(worksheet, results, date_idx, period_idx)
     return results
+
+
+def _target_label(worksheet):
+    try:
+        book_title = worksheet.spreadsheet.title
+    except Exception:
+        book_title = ""
+    return f"{book_title}／{worksheet.title}" if book_title else worksheet.title
+
+
+def _verify_written(worksheet, results, date_idx, period_idx):
+    """寫入後重讀工作表，確認異動欄真的變成要寫的值；不符就標示出來，不假裝成功。"""
+    values = worksheet.get_all_values()
+    label = _target_label(worksheet)
+    url = getattr(worksheet, "url", "")
+    checked = []
+    for row in results:
+        if row["status"] not in ("已填異動", "已清除異動欄"):
+            checked.append(row)
+            continue
+        current = values[row["row"] - 1] if row["row"] - 1 < len(values) else []
+        got_date, got_period = _cell(current, date_idx), _cell(current, period_idx)
+        ok = _same_date(got_date, row["change_date"]) and tt._compact_period(got_period) == tt._compact_period(row["change_period"])
+        if not row["change_date"] and not row["change_period"]:
+            ok = not got_date and not got_period
+        if ok:
+            checked.append({**row, "written_to": label, "sheet_url": url})
+        else:
+            checked.append({
+                **row, "written_to": label, "sheet_url": url,
+                "status": f"寫入後讀回不符（讀到：{got_date} {got_period}）",
+            })
+    return checked

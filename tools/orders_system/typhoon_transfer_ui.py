@@ -88,10 +88,13 @@ def _render_sheet_sync(backend_email, backend_password, env):
         st.text_input("Google 試算表 ID（或貼整個網址）", key="tt_sheet_spreadsheet_id")
     with c2:
         st.text_input("工作表名稱", key="tt_sheet_worksheet")
-    field_keys = ["order_col", "orig_date_col", "orig_period_col", "new_date_col", "new_period_col",
-                  "change_date_col", "change_period_col", "start_row"]
-    for row_keys in (field_keys[:4], field_keys[4:]):
-        for col, key in zip(st.columns(4), row_keys):
+    # 第一列：訂單編號欄＋起始列；第二列：日期／時段欄（原、新、異動）
+    layout = [
+        ["order_col", "start_row"],
+        ["orig_date_col", "orig_period_col", "new_date_col", "new_period_col", "change_date_col", "change_period_col"],
+    ]
+    for row_keys in layout:
+        for col, key in zip(st.columns(6), row_keys):
             with col:
                 st.text_input(_SHEET_FIELD_LABELS[key], key=f"tt_sheet_{key}")
     st.caption("新日期／新時段只用來比對、不會修改；有異動的訂單把目前日期／時段填進異動欄，沒有異動的維持空白。")
@@ -177,9 +180,16 @@ def _render_sheet_sync(backend_email, backend_password, env):
     if applied is not None:
         filled = sum(1 for r in applied if r["status"] == "已填異動")
         cleared = sum(1 for r in applied if r["status"] == "已清除異動欄")
-        st.success(f"已填入 {filled} 筆異動、清除 {cleared} 筆")
+        written = next((r for r in applied if r.get("written_to")), None)
+        where = ""
+        if written:
+            col_d, col_p = compared.get("change_date_col", ""), compared.get("change_period_col", "")
+            where = f"（已讀回確認：{written['written_to']} 的 {col_d}／{col_p} 欄）"
+        st.success(f"已填入 {filled} 筆異動、清除 {cleared} 筆{where}")
+        if written and written.get("sheet_url"):
+            st.link_button("開啟寫入的工作表", written["sheet_url"])
         for r in applied:
-            if r["status"].startswith("已跳過"):
+            if r["status"] not in ("已填異動", "已清除異動欄"):
                 st.warning(f"第 {r['row']} 列 {r['order_no']}：{r['status']}")
 
 
@@ -249,6 +259,24 @@ def _render_transfer(backend_email, backend_password, env, copy_button=None):
     day_type = st.selectbox("移轉日別", tt.DAY_TYPES, key="tt_day_type",
                             help="平日（週一～五，國定假日也算平日）與週末（週六、日）價格不同，預設只移到與颱風假相同日別的日期。")
 
+    st.markdown("**檸檬人排班**（執行時先勾檸檬人排班，再做訂單移轉）")
+    do_shift = st.checkbox("移轉前先勾檸檬人排班", value=True, key="tt_shift_enabled")
+    if do_shift:
+        shift_names_text = st.text_input("檸檬人名單（逗號分隔）", value=tt.DEFAULT_LEMON_NAMES, key="tt_shift_names")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            from memo_system import shift as _shift
+            shift_types = st.multiselect(
+                "排班班別", [k for k in _shift.TYPE_MAP if k != _shift.CLEAR_TYPE],
+                default=tt.DEFAULT_LEMON_SHIFT_TYPES, key="tt_shift_types",
+            )
+        with sc2:
+            shift_day_mode = st.selectbox(
+                "排班日期", tt.SHIFT_DAY_MODES, key="tt_shift_day_mode",
+                help="預設和移轉候選日期相同（依上方移轉日別）；也可改成移轉區間內僅平日／僅週末／平日＋週末。",
+            )
+        st.caption("注意：排班日期內檸檬人原本勾選的全日／上午／下午／晚上班別，會先清掉再套用這次選的班別。")
+
     if st.button("🔍 查詢颱風假訂單", type="primary", use_container_width=True, key="tt_search"):
         if not backend_email.strip() or not backend_password.strip():
             st.error("請先在上方輸入後台帳號密碼")
@@ -316,8 +344,48 @@ def _render_transfer(backend_email, backend_password, env, copy_button=None):
     selected = selected.sort_values("順序", kind="stable")
     plan = [by_order[no] for no in selected["訂單編號"]]
 
-    confirm = st.checkbox(f"確認要把 {len(plan)} 筆訂單的服務日期改到 {all_dates[0]}～{all_dates[-1]}（時段不變）", key="tt_confirm")
+    shift_names, shift_day_list = [], []
+    if do_shift:
+        shift_names = tt.parse_lemon_names(shift_names_text)
+        shift_day_list = tt.shift_dates(start, end, shift_day_mode, all_dates)
+        st.caption(
+            f"檸檬人排班：{len(shift_names)} 人 × {'＋'.join(shift_types) or '（未選班別）'}，"
+            f"日期：{'、'.join(shift_day_list) or '無'}"
+        )
+        if not shift_names or not shift_types or not shift_day_list:
+            st.error("檸檬人排班需要名單、班別與排班日期；不需要排班請取消勾選「移轉前先勾檸檬人排班」。")
+            return
+
+    confirm_text = f"確認要把 {len(plan)} 筆訂單的服務日期改到 {all_dates[0]}～{all_dates[-1]}（時段不變）"
+    if do_shift:
+        confirm_text = f"確認先替 {len(shift_names)} 位檸檬人勾班，再" + confirm_text[3:]
+    confirm = st.checkbox(confirm_text, key="tt_confirm")
     if st.button("🌀 開始移轉", type="primary", use_container_width=True, disabled=not (confirm and plan), key="tt_run"):
+        st.session_state.pop("tt_shift_result", None)
+        st.session_state.pop("tt_results", None)
+        if do_shift:
+            shift_log = st.empty()
+            shift_lines = []
+
+            def _shift_logger(msg):
+                shift_lines.append(str(msg))
+                shift_log.text("\n".join(shift_lines[-12:]))
+
+            try:
+                with st.spinner("先勾檸檬人排班…"):
+                    shift_result = tt.assign_lemon_shifts(
+                        env, backend_email.strip(), backend_password.strip(),
+                        shift_names, shift_types, shift_day_list, logger=_shift_logger,
+                    )
+            except Exception as exc:
+                st.error(f"檸檬人排班失敗，未進行訂單移轉：{exc}")
+                return
+            shift_log.empty()
+            st.session_state.tt_shift_result = shift_result
+            if shift_result.get("errors"):
+                st.error("檸檬人排班有錯誤，未進行訂單移轉；請確認後再執行（或取消勾選排班）。")
+                return
+
         bar = st.progress(0.0)
         status = st.empty()
 
@@ -335,6 +403,21 @@ def _render_transfer(backend_email, backend_password, env, copy_button=None):
         bar.progress(1.0)
         status.empty()
         st.session_state.tt_results = results
+
+    shift_result = st.session_state.get("tt_shift_result")
+    if shift_result:
+        errors = shift_result.get("errors") or []
+        (st.error if errors else st.success)(
+            f"檸檬人排班：處理 {shift_result.get('processed_people', 0)} 人、"
+            f"儲存 {shift_result.get('saved', 0)} 個人／月份、錯誤 {len(errors)} 筆"
+        )
+        for err in errors:
+            st.error(err)
+        warnings = shift_result.get("warnings") or []
+        if warnings:
+            with st.expander(f"排班提醒（{len(warnings)} 筆）", expanded=True):
+                for w in warnings:
+                    st.caption(w)
 
     results = st.session_state.get("tt_results")
     if results:

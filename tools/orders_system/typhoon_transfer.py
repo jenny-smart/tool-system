@@ -81,6 +81,42 @@ def target_dates(start, end, day_type="不限", typhoon_date=None):
     return days
 
 
+# ---------------------------------------------------------
+# 移轉前先勾檸檬人排班
+# ---------------------------------------------------------
+
+DEFAULT_LEMON_NAMES = ",".join(f"檸檬人{i}" for i in range(1, 13))
+DEFAULT_LEMON_SHIFT_TYPES = ["全8", "上4"]
+SHIFT_DAY_MODES = ["與移轉日期相同（依移轉日別）", "僅平日", "僅週末", "平日＋週末"]
+
+
+def parse_lemon_names(text):
+    return [name.strip() for name in re.split(r"[,，、\s]+", str(text or "")) if name.strip()]
+
+
+def shift_dates(start, end, mode, transfer_dates=()):
+    """排班日期：預設和移轉候選日期相同；也可選區間內僅平日／僅週末／平日＋週末。"""
+    if mode == SHIFT_DAY_MODES[0]:
+        return sorted(set(transfer_dates))
+    day_type = {"僅平日": "只排平日", "僅週末": "只排週末", "平日＋週末": "不限"}[mode]
+    return target_dates(start, end, day_type)
+
+
+def assign_lemon_shifts(env_name, backend_email, backend_password, names, shift_types, dates, logger=None):
+    """用排班管理的勾班功能，替檸檬人在指定日期勾班（該日原有勾選會先清掉再套用）。"""
+    from memo_system import memo, shift
+
+    if not dates:
+        raise ValueError("沒有要排班的日期")
+    memo.set_env(env_name)
+    memo.set_runtime_credentials(backend_email, backend_password)
+    session = memo.login(ui_logger=logger)
+    return shift.assign_person_shift_range(
+        session=session, names=names, date_start=min(dates), date_end=max(dates),
+        type_values=shift_types, ui_logger=logger, only_dates=dates,
+    )
+
+
 def _now_text():
     return datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M")
 

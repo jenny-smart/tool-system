@@ -259,5 +259,36 @@ class TrackingTests(unittest.TestCase):
         self.assertEqual(tt.tracking_tsv(rows).split("\n")[0].split("\t"), tt.TRACK_HEADERS)
 
 
+class LemonShiftTests(unittest.TestCase):
+    def test_defaults(self):
+        self.assertEqual(tt.parse_lemon_names(tt.DEFAULT_LEMON_NAMES), [f"檸檬人{i}" for i in range(1, 13)])
+        self.assertEqual(tt.DEFAULT_LEMON_SHIFT_TYPES, ["全8", "上4"])
+        self.assertEqual(tt.parse_lemon_names("檸檬人1，檸檬人2、 檸檬人3"), ["檸檬人1", "檸檬人2", "檸檬人3"])
+
+    def test_shift_dates_modes(self):
+        transfer_dates = ["2027-03-01", "2027-03-02"]
+        args = ("2027-02-26", "2027-03-02")
+        self.assertEqual(tt.shift_dates(*args, "與移轉日期相同（依移轉日別）", transfer_dates), transfer_dates)
+        self.assertEqual(tt.shift_dates(*args, "僅平日"), ["2027-02-26", "2027-03-01", "2027-03-02"])
+        self.assertEqual(tt.shift_dates(*args, "僅週末"), ["2027-02-27", "2027-02-28"])
+        self.assertEqual(len(tt.shift_dates(*args, "平日＋週末")), 5)
+
+    def test_assign_uses_shift_tool_with_only_dates(self):
+        from memo_system import memo, shift
+        calls = {}
+
+        def fake_assign(**kwargs):
+            calls.update(kwargs)
+            return {"errors": [], "saved": 1}
+
+        with patch.object(memo, "login", lambda ui_logger=None: "SESSION"), \
+                patch.object(shift, "assign_person_shift_range", fake_assign):
+            tt.assign_lemon_shifts("dev", "a@x", "pw", ["檸檬人1"], ["全8", "上4"], ["2027-03-02", "2027-03-01"])
+        self.assertEqual(memo.BASE_URL.endswith("dev.lemonclean.com.tw"), True)
+        self.assertEqual((calls["session"], calls["date_start"], calls["date_end"]), ("SESSION", "2027-03-01", "2027-03-02"))
+        self.assertEqual(calls["only_dates"], ["2027-03-02", "2027-03-01"])
+        self.assertEqual(calls["type_values"], ["全8", "上4"])
+
+
 if __name__ == "__main__":
     unittest.main()

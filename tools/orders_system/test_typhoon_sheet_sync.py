@@ -1,3 +1,4 @@
+import re
 import unittest
 from unittest.mock import patch
 
@@ -7,7 +8,7 @@ from test_typhoon_transfer import _block
 
 class _Worksheet:
     def __init__(self, values):
-        self.values = values
+        self.values = [list(r) for r in values]
         self.batches = []
         self.updates = []
         self.appended = []
@@ -15,8 +16,22 @@ class _Worksheet:
     def get_all_values(self):
         return [list(r) for r in self.values]
 
+    title = "颱風"
+    url = "https://docs.google.com/spreadsheets/d/abc123/edit#gid=1"
+    drop_writes = False
+
     def batch_update(self, data, value_input_option=None):
         self.batches.append((data, value_input_option))
+        if self.drop_writes:
+            return
+        for item in data:
+            m = re.fullmatch(r"([A-Z]+)(\d+)", item["range"])
+            col, row = tss.column_index(m.group(1)), int(m.group(2))
+            while len(self.values) < row:
+                self.values.append([])
+            line = self.values[row - 1]
+            line.extend([""] * (col + 1 - len(line)))
+            line[col] = item["values"][0][0]
 
     def update(self, range_name=None, values=None):
         self.updates.append((range_name, values))
@@ -149,6 +164,21 @@ class CompareAndApplyTests(unittest.TestCase):
         self.assertEqual((loaded["start_row"], loaded["change_date_col"], loaded["change_period_col"]), ("2", "L", "M"))
         tss.save_settings("a@x", loaded, client=_Client(ws))
         self.assertEqual(ws.updates[0][1][0], tss.SETTINGS_HEADERS)
+
+class VerifyTests(CompareAndApplyTests):
+    def test_written_values_are_read_back(self):
+        rows = tss.compare_sheet_orders("dev", "a", "b", SETTINGS, client=self.client)
+        results = tss.apply_sheet_updates(SETTINGS, rows, client=self.client)
+        self.assertEqual([r["status"] for r in results], ["已填異動", "已清除異動欄"])
+        self.assertEqual(self.ws.values[1][11:13], ["2026-11-06", "14:00-18:00"])
+        self.assertEqual(results[0]["written_to"], "颱風")
+
+    def test_write_that_does_not_land_is_reported(self):
+        self.ws.drop_writes = True
+        rows = tss.compare_sheet_orders("dev", "a", "b", SETTINGS, client=self.client)
+        results = tss.apply_sheet_updates(SETTINGS, rows, client=self.client)
+        self.assertTrue(results[0]["status"].startswith("寫入後讀回不符"))
+
 
 if __name__ == "__main__":
     unittest.main()
