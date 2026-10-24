@@ -46,6 +46,138 @@ def _render_tracking(backend_email, backend_password, env, copy_button=None):
         "後台沒有訂單修改時間，這裡改查每筆訂單「目前」的服務日期／時段，"
         "與表單上的新日期／新時段比對，找出移轉後又被改過的訂單。"
     )
+    _render_sheet_sync(backend_email, backend_password, env)
+    with st.expander("改用貼上內容比對（不寫回表單）", expanded=False):
+        _render_paste_tracking(backend_email, backend_password, env, copy_button)
+
+
+_SHEET_FIELD_LABELS = {
+    "order_col": "訂單編號欄", "orig_date_col": "原日期欄", "orig_period_col": "原時段欄",
+    "new_date_col": "新日期欄", "new_period_col": "新時段欄", "start_row": "起始列",
+}
+
+
+def _render_sheet_sync(backend_email, backend_password, env):
+    import typhoon_sheet_sync as tss
+
+    account = backend_email.strip()
+    if not account:
+        st.info("請先在上方輸入後台帳號密碼，才能讀取暫存的表單設定。")
+        return
+    if st.session_state.get("tt_sheet_settings_account") != account:
+        try:
+            saved = tss.load_settings(account)
+        except Exception as exc:
+            saved = dict(tss.DEFAULT_SETTINGS)
+            st.warning(f"讀取暫存設定失敗，先使用預設值：{exc}")
+        for key, value in saved.items():
+            st.session_state[f"tt_sheet_{key}"] = str(value)
+        st.session_state.tt_sheet_settings_account = account
+
+    st.markdown("**Google 表單設定**（會依後台帳號暫存，下次自動帶入）")
+    try:
+        import orders as _orders
+        _sa_email = _orders.get_service_account_info().get("client_email", "")
+    except Exception:
+        _sa_email = ""
+    if _sa_email:
+        st.caption(f"表單需共用給 {_sa_email}（編輯者），程式才能讀取與寫入。")
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.text_input("Google 試算表 ID（或貼整個網址）", key="tt_sheet_spreadsheet_id")
+    with c2:
+        st.text_input("工作表名稱", key="tt_sheet_worksheet")
+    cols = st.columns(6)
+    for col, key in zip(cols, ["order_col", "orig_date_col", "orig_period_col", "new_date_col", "new_period_col", "start_row"]):
+        with col:
+            st.text_input(_SHEET_FIELD_LABELS[key], key=f"tt_sheet_{key}")
+    settings = {key: st.session_state.get(f"tt_sheet_{key}", "") for key in tss.DEFAULT_SETTINGS}
+
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("💾 暫存設定", use_container_width=True, key="tt_sheet_save"):
+            try:
+                tss.save_settings(account, settings)
+                st.success("已暫存設定")
+            except Exception as exc:
+                st.error(f"暫存失敗：{exc}")
+    with b2:
+        compare = st.button("🔎 比對表單與後台目前日期", type="primary", use_container_width=True, key="tt_sheet_compare")
+
+    if compare:
+        if not backend_password.strip():
+            st.error("請先在上方輸入後台帳號密碼")
+            return
+        bar = st.progress(0.0)
+        status = st.empty()
+
+        def _progress(index, total, item):
+            bar.progress((index - 1) / max(total, 1))
+            status.write(f"查詢第 {index}/{total} 筆：第 {item['row']} 列 {item['order_no']}")
+
+        try:
+            st.session_state.tt_sheet_rows = tss.compare_sheet_orders(
+                env, account, backend_password.strip(), settings, progress=_progress,
+            )
+            st.session_state.tt_sheet_compared_settings = tss.validate_settings(settings)
+            st.session_state.pop("tt_sheet_applied", None)
+        except Exception as exc:
+            st.error(f"比對失敗：{exc}")
+            return
+        bar.progress(1.0)
+        status.empty()
+
+    rows = st.session_state.get("tt_sheet_rows")
+    if rows is None:
+        return
+    pending = [r for r in rows if r["status"] == "待更新"]
+    failed = [r for r in rows if r["status"].startswith("查詢失敗")]
+    updated = [r for r in rows if r["status"] == "已更新"]
+    unchanged = [r for r in rows if r["status"] == "未變動"]
+    summary = (
+        f"共 {len(rows)} 筆：待更新 {len(pending)} 筆、已更新 {len(updated)} 筆、未變動 {len(unchanged)} 筆、"
+        f"查詢失敗 {len(failed)} 筆"
+    )
+    (st.warning if pending or failed else st.success)(summary)
+    only_changed = st.checkbox("不顯示未變動", value=bool(pending or failed or updated), key="tt_sheet_only_changed")
+    shown = [r for r in rows if r["status"] != "未變動"] if only_changed else rows
+    st.dataframe(pd.DataFrame([
+        {
+            "列": r["row"], "訂單編號": r["order_no"], "姓名": r["name"],
+            "原日期": r["orig_date"], "原時段": r["orig_period"],
+            "表單新日期": r["sheet_date"], "表單新時段": r["sheet_period"],
+            "目前日期": r["now_date"], "目前時段": r["now_period"],
+            "付款狀態": r["payment_status"], "狀態": r["status"],
+        }
+        for r in shown
+    ]), hide_index=True, use_container_width=True)
+
+    compared = st.session_state.get("tt_sheet_compared_settings", {})
+    if pending:
+        target = f"{compared.get('worksheet', '')} 的 {compared.get('new_date_col', '')}／{compared.get('new_period_col', '')} 欄"
+        if st.button(f"✍️ 把 {len(pending)} 筆目前日期／時段寫入 {target}", type="primary",
+                     use_container_width=True, key="tt_sheet_apply"):
+            try:
+                applied = tss.apply_sheet_updates(compared, rows)
+            except Exception as exc:
+                st.error(f"寫入失敗：{exc}")
+            else:
+                result_by_row = {r["row"]: r["status"] for r in applied}
+                st.session_state.tt_sheet_rows = [
+                    {**r, "status": result_by_row.get(r["row"], r["status"])} for r in rows
+                ]
+                st.session_state.tt_sheet_applied = applied
+                st.rerun()
+    applied = st.session_state.get("tt_sheet_applied")
+    if applied is not None:
+        done = sum(1 for r in applied if r["status"] == "已更新")
+        skipped = [r for r in applied if r["status"] != "已更新"]
+        st.success(f"已寫入 {done} 筆")
+        for r in skipped:
+            st.warning(f"第 {r['row']} 列 {r['order_no']}：{r['status']}")
+
+
+def _render_paste_tracking(backend_email, backend_password, env, copy_button=None):
     text = st.text_area(
         "貼上表單內容（含標題列，整段複製貼上）或訂單編號（一行一筆）",
         height=220, key="tt_track_input",
@@ -56,6 +188,12 @@ def _render_tracking(backend_email, backend_password, env, copy_button=None):
     if text.strip():
         with_expected = sum(1 for item in items if item.get("expected_date"))
         st.caption(f"讀到 {len(items)} 筆訂單，其中 {with_expected} 筆有表單新日期可比對")
+        if items and with_expected < len(items):
+            st.warning(
+                f"有 {len(items) - with_expected} 筆讀不到新日期，只會查目前日期、不會比對。"
+                "請連同標題列（含「訂單編號」「新日期」「新時段」）一起貼上，"
+                "或每行只貼：訂單編號、姓名、新日期、新時段。"
+            )
     if st.button("🔎 查詢目前日期", type="primary", use_container_width=True, key="tt_track_run", disabled=not items):
         if not backend_email.strip() or not backend_password.strip():
             st.error("請先在上方輸入後台帳號密碼")
