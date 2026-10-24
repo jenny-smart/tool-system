@@ -271,6 +271,12 @@ class RestoreTests(unittest.TestCase):
             ("staff", "LC2", "2026-10-23", ("吳奐",)),
         ])
         self.assertEqual([r["status"] for r in results], ["已返回原班表", "已返回原班表"])
+        lines = tss.restore_tsv(results).split("\n")
+        self.assertEqual(lines[0].split("\t"), tss.RESTORE_COPY_HEADERS)
+        cells = lines[1].split("\t")
+        self.assertEqual(cells[:9], ["LC1", "", "2026-10-23", "09:00-12:00", "宋芳儀、陳佩琪",
+                                     "2026-10-23", "09:00-12:00", "宋芳儀、陳佩琪", "已返回原班表"])
+        self.assertRegex(cells[9], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 
     def test_date_not_selectable_is_retried_after_others(self):
         rows = tss.plan_restore("dev", "a", "b", RESTORE_SETTINGS, client=self.client)

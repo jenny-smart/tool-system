@@ -53,10 +53,10 @@ def _render_tracking(backend_email, backend_password, env, copy_button=None):
     with st.expander("改用貼上內容比對（不寫回表單）", expanded=False):
         _render_paste_tracking(backend_email, backend_password, env, copy_button)
     st.divider()
-    _render_restore(backend_email, backend_password, env)
+    _render_restore(backend_email, backend_password, env, copy_button)
 
 
-def _render_restore(backend_email, backend_password, env):
+def _render_restore(backend_email, backend_password, env, copy_button=None):
     import typhoon_sheet_sync as tss
 
     st.markdown("**↩️ 返回原班表**（誤傳颱風假時使用）")
@@ -113,6 +113,9 @@ def _render_restore(backend_email, backend_password, env):
         done = sum(r["status"] == "已返回原班表" for r in results)
         (st.success if done == len(results) else st.warning)(f"返回完成：{done}／{len(results)} 筆已返回原班表，其餘請看狀態")
     st.dataframe(pd.DataFrame([_fmt(r) for r in shown]), hide_index=True, use_container_width=True)
+    _copy(copy_button, "複製返回結果（含標題列，貼到 Google Sheets 會自動分欄）" if results is not None
+          else "複製檢查結果（含標題列，貼到 Google Sheets 會自動分欄）",
+          tss.restore_tsv(shown), "tt_copy_restore")
 
     if results is None and pending:
         confirm = st.checkbox(

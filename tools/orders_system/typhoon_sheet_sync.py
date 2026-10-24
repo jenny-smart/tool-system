@@ -478,6 +478,7 @@ def execute_restore(env_name, backend_email, backend_password, rows, progress=No
         result["now_staff"] = now_staff
         if outcome["all_original"] and sorted(now_staff) == sorted(row["orig_staff"]):
             result["status"] = "已返回原班表"
+            result["restored_at"] = _now_text()
             return True
         if outcome["all_original"]:
             result["status"] = f"已改回原日期，但專員是 {'、'.join(now_staff) or '無'}，請到後台確認"
@@ -552,3 +553,21 @@ def execute_restore(env_name, backend_email, backend_password, rows, progress=No
             break
 
     return [results[r["order_no"]] for r in pending]
+
+
+RESTORE_COPY_HEADERS = [
+    "訂單編號", "姓名", "原日期", "原時段", "原專員", "目前日期", "目前時段", "目前專員", "狀態", "返回時間",
+]
+
+
+def restore_tsv(rows):
+    """返回結果（或檢查結果）複製用，含標題列，Tab 分隔。"""
+    lines = ["\t".join(RESTORE_COPY_HEADERS)]
+    for r in rows:
+        values = [
+            r.get("order_no", ""), r.get("name", ""), r.get("orig_date", ""), r.get("orig_period", ""),
+            "、".join(r.get("orig_staff") or []), r.get("now_date", ""), r.get("now_period", ""),
+            "、".join(r.get("now_staff") or []), r.get("status", ""), r.get("restored_at", ""),
+        ]
+        lines.append("\t".join(str(v or "").replace("\t", " ").replace("\n", " ") for v in values))
+    return "\n".join(lines)
