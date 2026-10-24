@@ -31,6 +31,7 @@ SETTING_FIELDS = [
     ("order_col", "訂單編號欄"),
     ("orig_date_col", "原日期欄"),
     ("orig_period_col", "原時段欄"),
+    ("orig_staff_col", "原專員欄"),
     ("new_date_col", "新日期欄"),
     ("new_period_col", "新時段欄"),
     ("change_date_col", "異動日期欄"),
@@ -40,9 +41,9 @@ SETTING_FIELDS = [
 SETTINGS_HEADERS = ["後台帳號"] + [label for _key, label in SETTING_FIELDS] + ["更新時間"]
 DEFAULT_SETTINGS = {
     "spreadsheet_id": "", "worksheet": "", "order_col": "A",
-    "orig_date_col": "F", "orig_period_col": "G",
-    "new_date_col": "I", "new_period_col": "J",
-    "change_date_col": "L", "change_period_col": "M", "start_row": "2",
+    "orig_date_col": "F", "orig_period_col": "G", "orig_staff_col": "I",
+    "new_date_col": "J", "new_period_col": "K",
+    "change_date_col": "O", "change_period_col": "P", "start_row": "2",
 }
 
 
@@ -78,16 +79,18 @@ def validate_settings(settings):
     required = ("order_col", "new_date_col", "new_period_col", "change_date_col", "change_period_col")
     for key in required:
         column_index(settings[key])
-    for key in ("orig_date_col", "orig_period_col"):
+    for key in ("orig_date_col", "orig_period_col", "orig_staff_col"):
         if str(settings[key]).strip():
             column_index(settings[key])
     used = [str(settings[k]).strip().upper() for k in required]
+    if str(settings["orig_staff_col"]).strip():
+        used.append(str(settings["orig_staff_col"]).strip().upper())
     if len(set(used)) != len(used):
-        raise ValueError("訂單編號欄、新日期欄、新時段欄、異動日期欄、異動時段欄不可重複")
-    protected = {str(settings[k]).strip().upper() for k in ("order_col", "orig_date_col", "orig_period_col", "new_date_col", "new_period_col") if str(settings[k]).strip()}
+        raise ValueError("訂單編號欄、原專員欄、新日期欄、新時段欄、異動日期欄、異動時段欄不可重複")
+    protected = {str(settings[k]).strip().upper() for k in ("order_col", "orig_date_col", "orig_period_col", "orig_staff_col", "new_date_col", "new_period_col") if str(settings[k]).strip()}
     for key in ("change_date_col", "change_period_col"):
         if str(settings[key]).strip().upper() in protected:
-            raise ValueError("異動日期欄／異動時段欄不可和訂單編號、原日期時段、新日期時段同一欄")
+            raise ValueError("異動日期欄／異動時段欄不可和訂單編號、原日期時段、原專員、新日期時段同一欄")
     try:
         start_row = int(settings["start_row"])
     except Exception:
@@ -117,7 +120,11 @@ def _row_to_settings(headers, row):
     """依標題名稱讀值，舊版設定（少了新欄位）也讀得到。"""
     by_header = {h: (row[i] if i < len(row) else "") for i, h in enumerate(headers)}
     saved = {key: by_header.get(label, "") for key, label in SETTING_FIELDS}
-    return {**DEFAULT_SETTINGS, **{k: v for k, v in saved.items() if str(v).strip() != ""}}
+    settings = {**DEFAULT_SETTINGS, **{k: v for k, v in saved.items() if str(v).strip() != ""}}
+    if any(h for h in headers) and "原專員欄" not in headers:
+        # 舊版設定沒有原專員欄：留空，避免預設的 I 和既有新日期欄撞欄
+        settings["orig_staff_col"] = ""
+    return settings
 
 
 def load_settings(account, client=None):
@@ -171,8 +178,8 @@ def read_sheet_orders(values, settings):
     """從工作表全部值取出要比對的列。"""
     start_row = int(settings["start_row"])
     idx = {key: column_index(settings[key]) if str(settings.get(key, "")).strip() else None
-           for key in ("order_col", "orig_date_col", "orig_period_col", "new_date_col", "new_period_col",
-                       "change_date_col", "change_period_col")}
+           for key in ("order_col", "orig_date_col", "orig_period_col", "orig_staff_col", "new_date_col",
+                       "new_period_col", "change_date_col", "change_period_col")}
     items, seen = [], set()
     for row_no in range(start_row, len(values) + 1):
         row = values[row_no - 1]
@@ -185,6 +192,7 @@ def read_sheet_orders(values, settings):
             "order_no": order_no,
             "orig_date": _cell(row, idx["orig_date_col"]),
             "orig_period": _cell(row, idx["orig_period_col"]),
+            "orig_staff": _cell(row, idx["orig_staff_col"]),
             "sheet_date": _cell(row, idx["new_date_col"]),
             "sheet_period": _cell(row, idx["new_period_col"]),
             "change_date": _cell(row, idx["change_date_col"]),
@@ -306,3 +314,147 @@ def _verify_written(worksheet, results, date_idx, period_idx):
                 "status": f"寫入後讀回不符（讀到：{got_date} {got_period}）",
             })
     return checked
+
+
+# ---------------------------------------------------------
+# 誤傳颱風假：把已移轉訂單改回原日期／原時段並配回原專員
+# ---------------------------------------------------------
+
+def _order_now(session, order_no):
+    block = qo._fetch_purchase_block_for_order_no(session, order_no)
+    lines = block.get("lines", [])
+    now_date, now_period = qo._parse_service_date_time_loose("\n".join(lines))
+    staff = tt.parse_staff_text(tt.staff_text(orders._extract_staff_line(lines) or ""))
+    name = ""
+    for i, line in enumerate(lines):
+        if re.fullmatch(r"09\d{8}", str(line).strip()):
+            name = str(lines[i - 1]).strip() if i else ""
+            break
+    return now_date, tt._compact_period(now_period), staff, name
+
+
+def plan_restore(env_name, backend_email, backend_password, settings, client=None, progress=None):
+    """讀表單的原日期／原時段／原專員，查後台目前狀態，列出要返回的訂單；不修改後台。"""
+    settings = validate_settings(settings)
+    for key, label in (("orig_date_col", "原日期欄"), ("orig_period_col", "原時段欄"), ("orig_staff_col", "原專員欄")):
+        if not str(settings.get(key, "")).strip():
+            raise ValueError(f"返回原班表需要設定{label}")
+    worksheet = _open_target(settings, client)
+    items = read_sheet_orders(worksheet.get_all_values(), settings)
+    session, _base_url = tt._login(env_name, backend_email, backend_password)
+    rows = []
+    for index, item in enumerate(items, 1):
+        if progress:
+            progress(index, len(items), item)
+        row = {
+            "row": item["row"], "order_no": item["order_no"], "name": "",
+            "orig_date": tt._normalize_date_text(item["orig_date"]) if item["orig_date"] else "",
+            "orig_period": tt._compact_period(item["orig_period"]),
+            "orig_staff": tt.parse_staff_text(item["orig_staff"]),
+            "now_date": "", "now_period": "", "now_staff": [], "status": "",
+        }
+        if not row["orig_date"] or not row["orig_period"]:
+            row["status"] = "表單缺原日期／原時段"
+        elif not row["orig_staff"]:
+            row["status"] = "表單缺原專員"
+        else:
+            try:
+                row["now_date"], row["now_period"], row["now_staff"], row["name"] = _order_now(session, item["order_no"])
+                at_orig = row["now_date"] == row["orig_date"] and row["now_period"] == row["orig_period"]
+                same_staff = sorted(row["now_staff"]) == sorted(row["orig_staff"])
+                if at_orig and same_staff:
+                    row["status"] = "已在原班表"
+                elif at_orig:
+                    row["status"] = "待配回原專員"
+                else:
+                    row["status"] = "待返回"
+            except Exception as exc:
+                row["status"] = f"查詢失敗：{exc}"
+        rows.append(row)
+    return rows
+
+
+RESTORE_PENDING = ("待返回", "待配回原專員")
+
+
+def _assign_original_staff(session, base_url, order_no, service_date, period, wanted):
+    """在排班修改頁把訂單專員換回原專員；原專員已被其他訂單占用或不在可選名單就不送出。"""
+    purchase_id = qo._fetch_order_edit_id(session, order_no)
+    if not purchase_id:
+        return False, f"找不到訂單 {order_no} 的後台 ID"
+    csrf, origin_ids, slots = qo._get_schedule_edit_info(session, base_url, service_date, purchase_id)
+    if not slots or not origin_ids:
+        return False, "無法開啟排班修改頁"
+    if len(wanted) != len(origin_ids):
+        return False, f"原專員 {len(wanted)} 位，但訂單目前需要 {len(origin_ids)} 位，請手動處理"
+    occupied = qo._get_occupied_staff_for_period(
+        session, base_url, service_date, period, exclude_purchase_id=purchase_id,
+    )
+    busy = [name for name in wanted if name in occupied]
+    if busy:
+        return False, f"原專員已被同時段其他訂單安排：{'、'.join(busy)}，請手動處理"
+    choices, used = [], set()
+    for slot_map in slots[:len(wanted)]:
+        options = {qo._staff_name_key(label): sid for label, sid in slot_map.items()}
+        pick = next((name for name in wanted if name not in used and name in options), None)
+        if not pick:
+            missing = [name for name in wanted if name not in used]
+            return False, f"排班修改頁選不到原專員：{'、'.join(missing)}（可能當天沒排班），請手動處理"
+        used.add(pick)
+        choices.append(options[pick])
+    fields = [("_token", csrf), ("_method", "PUT")]
+    for oid in origin_ids:
+        fields.append(("originShiftId[]", oid))
+    for j, sid in enumerate(choices):
+        fields.append((f"shiftId[{j}]", sid))
+    resp = session.post(
+        f"{base_url}/schedule/edit", params={"date": service_date, "purchase_id": purchase_id},
+        data=fields, headers=orders.HEADERS, allow_redirects=True,
+    )
+    if resp.status_code not in (200, 302):
+        return False, f"排班送出失敗（HTTP {resp.status_code}）"
+    return True, ""
+
+
+def execute_restore(env_name, backend_email, backend_password, rows, progress=None):
+    """逐筆返回：先用修改日期改回原日期／原時段，再配回原專員；每步都回查確認。"""
+    session, base_url = tt._login(env_name, backend_email, backend_password)
+    results = []
+    pending = [r for r in rows if r.get("status") in RESTORE_PENDING]
+    for index, row in enumerate(pending, 1):
+        if progress:
+            progress(index, len(pending), row)
+        result = dict(row)
+        try:
+            now_date, now_period, _staff, _name = _order_now(session, row["order_no"])
+            if (now_date, now_period) != (row["now_date"], row["now_period"]):
+                result["status"] = f"已跳過：比對後訂單日期已變動（目前 {now_date} {now_period}）"
+                results.append(result)
+                continue
+            if (now_date, now_period) != (row["orig_date"], row["orig_period"]):
+                options = tt._change_date_options(session, base_url, row["order_no"])
+                if row["orig_period"] not in options.get(row["orig_date"], {}):
+                    result["status"] = f"返回失敗：修改日期選不到 {row['orig_date']} {row['orig_period']}，請手動處理"
+                    results.append(result)
+                    continue
+                qo._update_order_service_date(session, base_url, row["order_no"], row["orig_date"], row["orig_period"])
+                now_date, now_period, _staff, _name = _order_now(session, row["order_no"])
+                if (now_date, now_period) != (row["orig_date"], row["orig_period"]):
+                    result["status"] = f"返回失敗：送出後訂單是 {now_date} {now_period}，請到後台確認"
+                    results.append(result)
+                    continue
+            ok, msg = _assign_original_staff(
+                session, base_url, row["order_no"], row["orig_date"], row["orig_period"], row["orig_staff"],
+            )
+            _d, _p, now_staff, _n = _order_now(session, row["order_no"])
+            result.update({"now_date": now_date, "now_period": now_period, "now_staff": now_staff})
+            if ok and sorted(now_staff) == sorted(row["orig_staff"]):
+                result["status"] = "已返回原班表"
+            elif ok:
+                result["status"] = f"已改回原日期，但專員是 {'、'.join(now_staff) or '無'}，請到後台確認"
+            else:
+                result["status"] = f"已改回原日期，專員未配回：{msg}"
+        except Exception as exc:
+            result["status"] = f"返回失敗：{exc}"
+        results.append(result)
+    return results
