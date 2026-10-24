@@ -61,8 +61,9 @@ def _render_restore(backend_email, backend_password, env):
 
     st.markdown("**↩️ 返回原班表**（誤傳颱風假時使用）")
     st.caption(
-        "依上方 Google 表單設定，讀每列的原日期／原時段／原專員：先用「修改日期」改回原日期與原時段，"
-        "再到「排班修改」選回原專員。原專員已被同時段其他訂單排走、或排班修改頁選不到時不送出，改列出請手動處理。"
+        "依上方 Google 表單設定，讀每列的原日期／原時段／原專員，一筆一筆處理：用「修改日期」改回原日期與原時段後，"
+        "馬上到「排班修改」選回原專員並確認專員姓名，才做下一筆。配不回原專員的位置會改配不影響其他訂單的人，"
+        "避免一筆錯其他筆跟著錯；全部跑完後再補試還沒完成的訂單，仍無法完成的列出請手動處理。"
     )
     account = backend_email.strip()
     if not account:
@@ -425,7 +426,7 @@ def _render_transfer(backend_email, backend_password, env, copy_button=None):
     plan = [by_order[no] for no in selected["訂單編號"]]
 
     st.markdown("**先通知客人**（移轉前可先複製名單，用 LINE 或電話通知客人）")
-    _copy(copy_button, f"複製 {len(plan)} 筆通知名單（訂單編號～原專員，不含標題列）",
+    _copy(copy_button, f"複製 {len(plan)} 筆通知名單（訂單編號～原專員，含標題列）",
           tt.notice_tsv(plan), "tt_copy_notice")
 
     try:

@@ -255,10 +255,10 @@ class RestoreTests(unittest.TestCase):
             self.state[order_no][0:2] = [day, period]
             return True, "HTTP 200"
 
-        def assign(session, base_url, order_no, day, period, wanted):
+        def assign(session, base_url, order_no, day, period, wanted, reserved=()):
             calls.append(("staff", order_no, day, tuple(wanted)))
             self.state[order_no][2] = list(wanted)
-            return True, ""
+            return {"all_original": True, "missing": [], "message": ""}
 
         with patch.object(tss.tt, "_change_date_options",
                           lambda *a, **k: {"2026-10-23": {"09:00-12:00": [], "14:00-17:00": []}}), \
@@ -272,11 +272,35 @@ class RestoreTests(unittest.TestCase):
         ])
         self.assertEqual([r["status"] for r in results], ["已返回原班表", "已返回原班表"])
 
+    def test_date_not_selectable_is_retried_after_others(self):
+        rows = tss.plan_restore("dev", "a", "b", RESTORE_SETTINGS, client=self.client)
+        calls = {"n": 0}
+
+        def options(*a, **k):
+            calls["n"] += 1
+            # 第一次查 LC1 時選不到（被其他單占著），之後就選得到
+            return {} if calls["n"] == 1 else {"2026-10-23": {"09:00-12:00": [], "14:00-17:00": []}}
+
+        def change_date(session, base_url, order_no, day, period, phone=""):
+            self.state[order_no][0:2] = [day, period]
+            return True, ""
+
+        def assign(session, base_url, order_no, day, period, wanted, reserved=()):
+            self.state[order_no][2] = list(wanted)
+            return {"all_original": True, "missing": [], "message": ""}
+
+        with patch.object(tss.tt, "_change_date_options", options), \
+                patch.object(tss.qo, "_update_order_service_date", change_date), \
+                patch.object(tss, "_assign_original_staff", assign):
+            results = tss.execute_restore("dev", "a", "b", rows)
+        self.assertEqual([(r["order_no"], r["status"]) for r in results],
+                         [("LC1", "已返回原班表"), ("LC2", "已返回原班表")])
+
     def test_execute_stops_when_original_date_not_selectable(self):
         rows = tss.plan_restore("dev", "a", "b", RESTORE_SETTINGS, client=self.client)
         with patch.object(tss.tt, "_change_date_options", lambda *a, **k: {}), \
                 patch.object(tss.qo, "_update_order_service_date", lambda *a, **k: self.fail("不應送出")), \
-                patch.object(tss, "_assign_original_staff", lambda *a, **k: (True, "")):
+                patch.object(tss, "_assign_original_staff", lambda *a, **k: {"all_original": True, "missing": [], "message": ""}):
             results = tss.execute_restore("dev", "a", "b", rows[:1])
         self.assertTrue(results[0]["status"].startswith("返回失敗：修改日期選不到"))
 
@@ -285,21 +309,95 @@ class RestoreTests(unittest.TestCase):
         with patch.object(tss.qo, "_fetch_order_edit_id", lambda s, no: "999"), \
                 patch.object(tss.qo, "_get_schedule_edit_info", lambda *a: ("tok", ["o1", "o2"], slots)), \
                 patch.object(tss.qo, "_get_occupied_staff_for_period", lambda *a, **k: set()):
-            ok, msg = tss._assign_original_staff(self.session, "https://x", "LC1", "2026-10-23", "09:00-12:00",
-                                                 ["宋芳儀", "陳佩琪"])
-        self.assertTrue(ok, msg)
+            out = tss._assign_original_staff(self.session, "https://x", "LC1", "2026-10-23", "09:00-12:00",
+                                             ["宋芳儀", "陳佩琪"])
+        self.assertTrue(out["all_original"], out)
         data = self.session.posts[0][2]
         self.assertIn(("shiftId[0]", "11"), data)
         self.assertIn(("shiftId[1]", "21"), data)
 
-    def test_assign_original_staff_refuses_when_busy(self):
+    def test_busy_original_gets_non_reserved_fallback(self):
+        # 吳奐被別張單占用；目前位置上的人（張志豪）是其他待返回訂單的原專員，要換掉
+        slots = [{"吳奐 (1)": "31", "張志豪 (2)": "32", "李佩蓉 (4)": "33"}]
         with patch.object(tss.qo, "_fetch_order_edit_id", lambda s, no: "999"), \
-                patch.object(tss.qo, "_get_schedule_edit_info", lambda *a: ("tok", ["o1"], [{"吳奐 (1)": "31"}])), \
+                patch.object(tss.qo, "_get_schedule_edit_info", lambda *a: ("tok", ["32"], slots)), \
                 patch.object(tss.qo, "_get_occupied_staff_for_period", lambda *a, **k: {"吳奐"}):
-            ok, msg = tss._assign_original_staff(self.session, "https://x", "LC2", "2026-10-23", "14:00-17:00", ["吳奐"])
-        self.assertFalse(ok)
-        self.assertIn("已被同時段其他訂單安排", msg)
-        self.assertEqual(self.session.posts, [])
+            out = tss._assign_original_staff(self.session, "https://x", "LC2", "2026-10-23", "14:00-17:00",
+                                             ["吳奐"], reserved={"張志豪"})
+        self.assertFalse(out["all_original"])
+        self.assertEqual(out["missing"], ["吳奐"])
+        self.assertIn("已被同時段其他訂單安排", out["message"])
+        self.assertIn(("shiftId[0]", "33"), self.session.posts[0][2])  # 改配李佩蓉，不占張志豪
+
+
+class CascadeSimulationTests(unittest.TestCase):
+    """模擬後台：改回原日期時後台會自動配人，可能配到其他待返回訂單的原專員。"""
+
+    ROSTER = {"甲1": "1", "甲2": "2", "乙1": "3", "乙2": "4", "空1": "5", "空2": "6", "外1": "7"}
+
+    def setUp(self):
+        self.orders = {
+            # A 先處理：改回時後台自動配到 B 的原專員乙1、乙2
+            "LCA": {"date": "2027-04-12", "period": "09:00-12:00", "staff": ["檸1", "檸2"], "auto": ["乙1", "乙2"]},
+            "LCB": {"date": "2027-04-12", "period": "09:00-12:00", "staff": ["檸3", "檸4"], "auto": ["空1", "空2"]},
+            # 不在這次返回名單的外部訂單，占用 A 的原專員甲2
+            "LCX": {"date": "2026-10-29", "period": "09:00-12:00", "staff": ["甲2"], "auto": []},
+        }
+        self.session = self
+
+    # 假 session.post：依 shiftId 改專員
+    def post(self, url, params=None, data=None, **kwargs):
+        by_id = {v: k for k, v in self.ROSTER.items()}
+        order_no = self._pid_to_no[params["purchase_id"]]
+        self.orders[order_no]["staff"] = [by_id[sid] if sid in by_id else self.orders[order_no]["staff"][i]
+                                          for i, (k, sid) in enumerate([x for x in data if x[0].startswith("shiftId")])]
+        return _Resp()
+
+    def _occupied(self, order_no):
+        me = self.orders[order_no]
+        return {n for no, o in self.orders.items() if no != order_no and o["date"] == me["date"] for n in o["staff"]}
+
+    def test_failure_does_not_cascade(self):
+        self._pid_to_no = {"A": "LCA", "B": "LCB"}
+        rows = [
+            {"row": 2, "order_no": "LCA", "name": "", "orig_date": "2026-10-29", "orig_period": "09:00-12:00",
+             "orig_staff": ["甲1", "甲2"], "now_date": "2027-04-12", "now_period": "09:00-12:00", "now_staff": [], "status": "待返回"},
+            {"row": 3, "order_no": "LCB", "name": "", "orig_date": "2026-10-29", "orig_period": "09:00-12:00",
+             "orig_staff": ["乙1", "乙2"], "now_date": "2027-04-12", "now_period": "09:00-12:00", "now_staff": [], "status": "待返回"},
+        ]
+
+        def order_now(session, no):
+            o = self.orders[no]
+            return o["date"], o["period"], list(o["staff"]), ""
+
+        def change_date(session, base_url, no, day, period, phone=""):
+            o = self.orders[no]
+            o["date"], o["period"], o["staff"] = day, period, list(o["auto"])
+            return True, ""
+
+        def edit_info(session, base_url, day, pid):
+            no = self._pid_to_no[pid]
+            current = [self.ROSTER[n] for n in self.orders[no]["staff"]]
+            slot = {f"{n} (1)": sid for n, sid in self.ROSTER.items()}
+            return "tok", current, [slot for _ in current]
+
+        with patch.object(tss.tt, "_login", lambda *a: (self, "https://x")), \
+                patch.object(tss, "_order_now", order_now), \
+                patch.object(tss.tt, "_change_date_options", lambda *a, **k: {"2026-10-29": {"09:00-12:00": []}}), \
+                patch.object(tss.qo, "_update_order_service_date", change_date), \
+                patch.object(tss.qo, "_fetch_order_edit_id", lambda s, no: {"LCA": "A", "LCB": "B"}[no]), \
+                patch.object(tss.qo, "_get_schedule_edit_info", edit_info), \
+                patch.object(tss.qo, "_get_occupied_staff_for_period",
+                             lambda s, b, d, p, exclude_purchase_id=None: self._occupied(self._pid_to_no[exclude_purchase_id])):
+            results = tss.execute_restore("dev", "a", "b", rows)
+        statuses = {r["order_no"]: r["status"] for r in results}
+        # A 的甲2 被外部訂單占用 → A 只能部分配回，但不能占著 B 的原專員
+        self.assertTrue(statuses["LCA"].startswith("已改回原日期，專員未全部配回"), statuses["LCA"])
+        self.assertNotIn("乙1", self.orders["LCA"]["staff"])
+        self.assertNotIn("乙2", self.orders["LCA"]["staff"])
+        # B 不受 A 影響，完整返回
+        self.assertEqual(statuses["LCB"], "已返回原班表")
+        self.assertEqual(sorted(self.orders["LCB"]["staff"]), ["乙1", "乙2"])
 
 
 if __name__ == "__main__":

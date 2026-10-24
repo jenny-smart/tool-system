@@ -377,31 +377,50 @@ def plan_restore(env_name, backend_email, backend_password, settings, client=Non
 RESTORE_PENDING = ("待返回", "待配回原專員")
 
 
-def _assign_original_staff(session, base_url, order_no, service_date, period, wanted):
-    """在排班修改頁把訂單專員換回原專員；原專員已被其他訂單占用或不在可選名單就不送出。"""
+def _assign_original_staff(session, base_url, order_no, service_date, period, wanted, reserved=()):
+    """在排班修改頁把訂單專員換回原專員（每個配班位置選名字）。
+
+    - 原專員可選（不被同時段其他訂單占用）就選原專員；
+    - 選不到的位置不留著後台自動配的人（可能正好是其他待返回訂單的原專員），
+      改選一位不在 reserved（其他待返回訂單的原專員）裡、也沒被占用的人；
+      都沒有就維持目前的人。
+    回傳 dict：all_original（全部配回原專員）、missing（沒配回的原專員）、message。
+    """
     purchase_id = qo._fetch_order_edit_id(session, order_no)
     if not purchase_id:
-        return False, f"找不到訂單 {order_no} 的後台 ID"
+        return {"all_original": False, "missing": list(wanted), "message": f"找不到訂單 {order_no} 的後台 ID"}
     csrf, origin_ids, slots = qo._get_schedule_edit_info(session, base_url, service_date, purchase_id)
     if not slots or not origin_ids:
-        return False, "無法開啟排班修改頁"
+        return {"all_original": False, "missing": list(wanted), "message": "無法開啟排班修改頁"}
     if len(wanted) != len(origin_ids):
-        return False, f"原專員 {len(wanted)} 位，但訂單目前需要 {len(origin_ids)} 位，請手動處理"
+        return {"all_original": False, "missing": list(wanted),
+                "message": f"原專員 {len(wanted)} 位，但訂單目前需要 {len(origin_ids)} 位，請手動處理"}
     occupied = qo._get_occupied_staff_for_period(
         session, base_url, service_date, period, exclude_purchase_id=purchase_id,
     )
-    busy = [name for name in wanted if name in occupied]
-    if busy:
-        return False, f"原專員已被同時段其他訂單安排：{'、'.join(busy)}，請手動處理"
-    choices, used = [], set()
-    for slot_map in slots[:len(wanted)]:
-        options = {qo._staff_name_key(label): sid for label, sid in slot_map.items()}
-        pick = next((name for name in wanted if name not in used and name in options), None)
-        if not pick:
-            missing = [name for name in wanted if name not in used]
-            return False, f"排班修改頁選不到原專員：{'、'.join(missing)}（可能當天沒排班），請手動處理"
-        used.add(pick)
-        choices.append(options[pick])
+    reserved = {name for name in reserved if name not in wanted}
+    slot_options = [{qo._staff_name_key(label): sid for label, sid in slot_map.items()} for slot_map in slots[:len(wanted)]]
+    choices = [None] * len(slot_options)
+    used = set()
+    # 第一輪：每個位置先選原專員
+    for i, options in enumerate(slot_options):
+        pick = next((n for n in wanted if n not in used and n in options and n not in occupied), None)
+        if pick:
+            choices[i] = options[pick]
+            used.add(pick)
+    missing = [n for n in wanted if n not in used]
+    # 第二輪：沒選到原專員的位置，改選不會擋到其他待返回訂單的人
+    fallback_names = []
+    for i, options in enumerate(slot_options):
+        if choices[i] is not None:
+            continue
+        pick = next((n for n in options if n not in used and n not in occupied and n not in reserved), None)
+        if pick:
+            choices[i] = options[pick]
+            used.add(pick)
+            fallback_names.append(pick)
+        else:
+            choices[i] = origin_ids[i]  # 沒有可替換的人：維持目前
     fields = [("_token", csrf), ("_method", "PUT")]
     for oid in origin_ids:
         fields.append(("originShiftId[]", oid))
@@ -412,49 +431,124 @@ def _assign_original_staff(session, base_url, order_no, service_date, period, wa
         data=fields, headers=orders.HEADERS, allow_redirects=True,
     )
     if resp.status_code not in (200, 302):
-        return False, f"排班送出失敗（HTTP {resp.status_code}）"
-    return True, ""
+        return {"all_original": False, "missing": list(wanted), "message": f"排班送出失敗（HTTP {resp.status_code}）"}
+    message = ""
+    if missing:
+        busy = [n for n in missing if n in occupied]
+        unseen = [n for n in missing if n not in occupied]
+        parts = []
+        if busy:
+            parts.append(f"{'、'.join(busy)} 已被同時段其他訂單安排")
+        if unseen:
+            parts.append(f"排班修改頁選不到 {'、'.join(unseen)}（可能勾班時段不同或當天沒排班）")
+        if fallback_names:
+            parts.append(f"暫配 {'、'.join(fallback_names)}")
+        message = "；".join(parts)
+    return {"all_original": not missing, "missing": missing, "message": message}
 
 
-def execute_restore(env_name, backend_email, backend_password, rows, progress=None):
-    """逐筆返回：先用修改日期改回原日期／原時段，再配回原專員；每步都回查確認。"""
+def execute_restore(env_name, backend_email, backend_password, rows, progress=None, retry_rounds=2):
+    """逐筆返回：每一筆先用修改日期改回原日期／原時段，馬上到排班修改配回原專員，才做下一筆。
+
+    配不回原專員的位置不留著後台自動配的人（避免占到後面訂單的原專員造成連鎖錯誤）；
+    全部跑完後，對還沒配回原專員的訂單再補試（retry_rounds 輪）。每步都回查確認。
+    """
     session, base_url = tt._login(env_name, backend_email, backend_password)
-    results = []
     pending = [r for r in rows if r.get("status") in RESTORE_PENDING]
+    results = {}
+    unfinished = []  # 已改回原日期但專員未全部配回的訂單
+
+    def reserved_for(row):
+        names = set()
+        for other in pending:
+            if other["order_no"] == row["order_no"]:
+                continue
+            done = results.get(other["order_no"])
+            if done is not None and done["status"] == "已返回原班表":
+                continue
+            names.update(other["orig_staff"])
+        return names
+
+    def assign_and_record(row, result):
+        outcome = _assign_original_staff(
+            session, base_url, row["order_no"], row["orig_date"], row["orig_period"], row["orig_staff"],
+            reserved=reserved_for(row),
+        )
+        _d, _p, now_staff, _n = _order_now(session, row["order_no"])
+        result["now_staff"] = now_staff
+        if outcome["all_original"] and sorted(now_staff) == sorted(row["orig_staff"]):
+            result["status"] = "已返回原班表"
+            return True
+        if outcome["all_original"]:
+            result["status"] = f"已改回原日期，但專員是 {'、'.join(now_staff) or '無'}，請到後台確認"
+        else:
+            result["status"] = f"已改回原日期，專員未全部配回：{outcome['message']}，請手動處理"
+        return False
+
+    date_failed = []  # 修改日期選不到原日期時段，等其他訂單處理完再試
+
+    def move_back(row, result):
+        """改回原日期並配回原專員；回傳 'done'／'unfinished'／'date_failed'／'stop'。"""
+        now_date, now_period, _staff, _name = _order_now(session, row["order_no"])
+        if (now_date, now_period) not in ((row["now_date"], row["now_period"]), (row["orig_date"], row["orig_period"])):
+            result["status"] = f"已跳過：比對後訂單日期已變動（目前 {now_date} {now_period}）"
+            return "stop"
+        if (now_date, now_period) != (row["orig_date"], row["orig_period"]):
+            options = tt._change_date_options(session, base_url, row["order_no"])
+            if row["orig_period"] not in options.get(row["orig_date"], {}):
+                result["status"] = f"返回失敗：修改日期選不到 {row['orig_date']} {row['orig_period']}，請手動處理"
+                return "date_failed"
+            qo._update_order_service_date(session, base_url, row["order_no"], row["orig_date"], row["orig_period"])
+            now_date, now_period, _staff, _name = _order_now(session, row["order_no"])
+            if (now_date, now_period) != (row["orig_date"], row["orig_period"]):
+                result["status"] = f"返回失敗：送出後訂單是 {now_date} {now_period}，請到後台確認"
+                return "stop"
+        result.update({"now_date": now_date, "now_period": now_period})
+        return "done" if assign_and_record(row, result) else "unfinished"
+
     for index, row in enumerate(pending, 1):
         if progress:
             progress(index, len(pending), row)
         result = dict(row)
+        results[row["order_no"]] = result
         try:
-            now_date, now_period, _staff, _name = _order_now(session, row["order_no"])
-            if (now_date, now_period) != (row["now_date"], row["now_period"]):
-                result["status"] = f"已跳過：比對後訂單日期已變動（目前 {now_date} {now_period}）"
-                results.append(result)
-                continue
-            if (now_date, now_period) != (row["orig_date"], row["orig_period"]):
-                options = tt._change_date_options(session, base_url, row["order_no"])
-                if row["orig_period"] not in options.get(row["orig_date"], {}):
-                    result["status"] = f"返回失敗：修改日期選不到 {row['orig_date']} {row['orig_period']}，請手動處理"
-                    results.append(result)
-                    continue
-                qo._update_order_service_date(session, base_url, row["order_no"], row["orig_date"], row["orig_period"])
-                now_date, now_period, _staff, _name = _order_now(session, row["order_no"])
-                if (now_date, now_period) != (row["orig_date"], row["orig_period"]):
-                    result["status"] = f"返回失敗：送出後訂單是 {now_date} {now_period}，請到後台確認"
-                    results.append(result)
-                    continue
-            ok, msg = _assign_original_staff(
-                session, base_url, row["order_no"], row["orig_date"], row["orig_period"], row["orig_staff"],
-            )
-            _d, _p, now_staff, _n = _order_now(session, row["order_no"])
-            result.update({"now_date": now_date, "now_period": now_period, "now_staff": now_staff})
-            if ok and sorted(now_staff) == sorted(row["orig_staff"]):
-                result["status"] = "已返回原班表"
-            elif ok:
-                result["status"] = f"已改回原日期，但專員是 {'、'.join(now_staff) or '無'}，請到後台確認"
-            else:
-                result["status"] = f"已改回原日期，專員未配回：{msg}"
+            outcome = move_back(row, result)
         except Exception as exc:
             result["status"] = f"返回失敗：{exc}"
-        results.append(result)
-    return results
+            continue
+        if outcome == "unfinished":
+            unfinished.append(row)
+        elif outcome == "date_failed":
+            date_failed.append(row)
+
+    for _round in range(retry_rounds):
+        if not unfinished and not date_failed:
+            break
+        progressed = False
+        still_unfinished, still_date_failed = [], []
+        for row in date_failed:
+            try:
+                outcome = move_back(row, results[row["order_no"]])
+            except Exception as exc:
+                results[row["order_no"]]["status"] = f"返回失敗：{exc}"
+                continue
+            if outcome == "date_failed":
+                still_date_failed.append(row)
+            else:
+                progressed = True
+                if outcome == "unfinished":
+                    still_unfinished.append(row)
+        for row in unfinished:
+            try:
+                if assign_and_record(row, results[row["order_no"]]):
+                    progressed = True
+                else:
+                    still_unfinished.append(row)
+            except Exception as exc:
+                results[row["order_no"]]["status"] = f"已改回原日期，補配專員失敗：{exc}"
+                still_unfinished.append(row)
+        unfinished, date_failed = still_unfinished, still_date_failed
+        if not progressed:
+            break
+
+    return [results[r["order_no"]] for r in pending]

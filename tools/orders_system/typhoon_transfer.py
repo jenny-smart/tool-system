@@ -394,12 +394,14 @@ NOTICE_COPY_HEADERS = RESULT_COPY_HEADERS[:RESULT_COPY_HEADERS.index("原專員"
 
 
 def notice_tsv(rows):
-    """移轉前通知客人用：訂單編號～原專員（同移轉結果前 9 欄），不含標題列，Tab 分隔。"""
+    """移轉前通知客人用：訂單編號～原專員（同移轉結果前 9 欄），含標題列，Tab 分隔。"""
     copy_rows = result_copy_rows([{**row, "service_date_before": row.get("service_date", "")} for row in rows])
-    return "\n".join(
+    lines = ["\t".join(NOTICE_COPY_HEADERS)]
+    lines += [
         "\t".join(str(r.get(h, "") or "").replace("\t", " ").replace("\n", " ") for h in NOTICE_COPY_HEADERS)
         for r in copy_rows
-    )
+    ]
+    return "\n".join(lines)
 
 
 def results_tsv(results):
