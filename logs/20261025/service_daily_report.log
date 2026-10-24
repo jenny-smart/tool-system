@@ -1,0 +1,22 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+2026-10-24 21:32:36 [INFO] === 客服排程系統 run_id=bdcbbdc2 step=2 台北時間=2026-10-25 05:32:36 ===
+2026-10-24 21:32:36 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-10-24 21:32:36 [INFO] file_cache is only supported with oauth2client<4.0.0
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-24 21:32:46 [INFO] --- Step2_更新每日回報 ---
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-24 21:32:48 [INFO] 每日回報：Q5:S5 → 【空班】居家清潔(每日回報)!K2444:M2444
+2026-10-24 21:32:48 [INFO] 每日回報：CN5:CP5 → 【空班】居家清潔(每日回報)!CW2444:CY2444
+2026-10-24 21:32:48 [INFO] 每日回報：AF5:AH5 → 【空班】居家清潔(每日回報)!O2444:Q2444
+2026-10-24 21:32:48 [INFO] 每日回報：DC5:DE5 → 【空班】居家清潔(每日回報)!DA2444:DC2444
+2026-10-24 21:32:49 [INFO] 每日回報：AU3:AW3 → 【空班】居家清潔(每日回報)!S2444:U2444
+2026-10-24 21:32:49 [INFO] 每日回報：DR3:DT3 → 【空班】居家清潔(每日回報)!DE2444:DG2444
+2026-10-24 21:32:49 [INFO] 每日回報：BJ3:BL3 → 【空班】居家清潔(每日回報)!W2444:Y2444
+2026-10-24 21:32:49 [INFO] 每日回報：EG3:EI3 → 【空班】居家清潔(每日回報)!DI2444:DK2444
+2026-10-24 21:32:49 [INFO] 每日回報：BY3:CA3 → 【空班】居家清潔(每日回報)!AA2444:AC2444
+2026-10-24 21:32:49 [INFO] 每日回報：EV3:EX3 → 【空班】居家清潔(每日回報)!DM2444:DO2444
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-24 21:32:51 [INFO] Step 2 完成，row=2444（4.2s）
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-24 21:32:52 [INFO] === 全部完成 run_id=bdcbbdc2（5.0s）===
