@@ -41,11 +41,48 @@ def test_only_newest_same_day_download_runs(monkeypatch):
     assert updates == [(2, "cancelled")]
 
 
-def test_queries_last_week(monkeypatch):
-    assert fsq.query_range(datetime(2026, 10, 24, 8, 0, tzinfo=TZ)) == ("2026-10-18", "2026-10-24")
+def test_fubon_start_date_comes_from_report_sheet(monkeypatch):
     created = []
     monkeypatch.setattr(fsq, "should_queue", lambda now: True)
     monkeypatch.setattr(fsq, "create_task", lambda action, params, **kw: created.append(params) or {"task_id": "t"})
     fsq.main()
     assert [p["area"] for p in created] == ["台北", "台中"]
-    assert all(p["start_date"] < p["end_date"] for p in created)
+    assert all(p["start_from"] == "sheet" and "start_date" not in p for p in created)
+
+    from tools.local_agent import build_fubon_download, build_yuanta_download
+
+    cmd = build_fubon_download(created[0])
+    assert "--start-from-sheet" in cmd and "--start" not in cmd
+    assert "--start" in build_fubon_download({"area": "台北", "start_date": "2026-10-01", "end_date": "2026-10-24"})
+    assert "--start-from-sheet" in build_yuanta_download({"area": "台北", "start_from": "sheet", "end_date": "2026-10-25"})
+
+
+def test_last_report_date_reads_bottom_row():
+    from datetime import date as d
+
+    from tools.bank_statement.sheet_filter import last_report_date
+
+    assert last_report_date([["2026/10/20 09:00:00"], ["2026/10/22 15:30:01"], [], [""]]) == d(2026, 10, 22)
+    assert last_report_date([["交易時間"], []]) is None
+
+
+def test_yuanta_runs_on_25th_or_previous_workday(monkeypatch):
+    from tools.scheduled_daily import yuanta_statement_queue as ysq
+
+    holidays = {date(2026, 10, 10)}
+    monkeypatch.setattr("tools.common.tw_holidays.is_workday",
+                        lambda day, **kw: day.weekday() < 5 and day not in holidays)
+    assert ysq.run_day(2026, 11) == date(2026, 11, 25)   # 週三
+    assert ysq.run_day(2026, 10) == date(2026, 10, 23)     # 25 日週日 → 週五
+    assert ysq.run_day(2026, 7) == date(2026, 7, 24)       # 25 日週六 → 週五
+
+    created = []
+    monkeypatch.setattr(ysq, "create_task", lambda action, params, **kw: created.append((action, params)) or {"task_id": "t"})
+    for day, expected in ((date(2026, 10, 25), 0), (date(2026, 10, 23), 2)):
+        monkeypatch.setattr(ysq, "datetime", type("D", (datetime,), {"now": classmethod(
+            lambda cls, tz=None, day=day: datetime(day.year, day.month, day.day, 11, 0, tzinfo=TZ))}))
+        created.clear()
+        ysq.main()
+        assert len(created) == expected
+    assert created[0] == ("yuanta.download", {"start_from": "sheet", "end_date": "2026-10-23", "area": "台北",
+                                              "cdp_url": "http://127.0.0.1:9222"})

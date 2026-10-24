@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -193,6 +193,34 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     # 富邦財報 B 欄是帳務日期、C 欄是完整交易時間。
     existing_rows = [["", row[0]] for row in worksheet.get("C2:C") if row]
     return filter_existing_rows(table, existing_rows)
+
+
+# 財報最後一列的交易時間欄：富邦 C 欄、元大 B 欄
+REPORT_TIME_COLUMN = {"fubon": "C", "yuanta": "B"}
+
+
+def last_report_date(values: list[list[str]]) -> date | None:
+    """財報交易時間欄由下往上找第一個可解析的日期。"""
+    for row in reversed(values):
+        if row and (key := _accounting_date_key(str(row[0]))):
+            try:
+                return datetime.strptime(key, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+    return None
+
+
+def query_start_from_report(area: str, bank: str, end: date) -> date:
+    """明細查詢開始日＝要貼入的財報最後一列日期（含當天，已登記的會被比對濾掉）。
+    財報還沒有資料（例如年初新檔）就從當年 1/1 開始。"""
+    target = load_sheet_target(area, bank)
+    credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
+    worksheet = gspread.authorize(credentials).open_by_key(target.spreadsheet_id).worksheet(target.worksheet_title)
+    column = REPORT_TIME_COLUMN[bank]
+    last = last_report_date(worksheet.get(f"{column}2:{column}"))
+    start = min(last, end) if last else date(end.year, 1, 1)
+    print(f"財報「{target.worksheet_title}」最後一列日期：{last or '（無資料）'}；查詢 {start}～{end}")
+    return start
 
 
 def _report_amount(value: str) -> int | float | str:

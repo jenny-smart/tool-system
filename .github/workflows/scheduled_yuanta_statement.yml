@@ -1,0 +1,49 @@
+name: Scheduled Yuanta Statement Download
+
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
+on:
+  schedule:
+    # UTC 時間；台北時間需加 8 小時。每月 18～25 日 台北 11:00 = UTC 03:00；
+    # 只有「25 日，遇例假日提前到前一個工作日」那天才排任務（由 yuanta_statement_queue 判斷）
+    - cron: "0 3 18-25 * *"
+  workflow_dispatch:
+    inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  queue-yuanta-download:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Queue 台北／台中 元大明細下載任務
+        run: python -u -m tools.scheduled_daily.yuanta_statement_queue

@@ -462,9 +462,13 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
     end_date = str(params.get("end_date") or "").strip()
     if not area or area == "全區":
         raise ValueError("富邦明細下載請選擇單一區域")
-    if not start_date or not end_date:
+    from_sheet = params.get("start_from") == "sheet"
+    if not end_date or not (start_date or from_sheet):
         raise ValueError("富邦明細下載缺少開始日期或結束日期")
-    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
+    if from_sheet:
+        # 開始日由 Agent 執行時讀財報最後一列決定
+        start_date = ""
+    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date or "財報起"}_{end_date}.csv"
     return [
         sys.executable,
         "-m",
@@ -472,15 +476,13 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
         "download",
         "--area",
         area,
-        "--start",
-        start_date,
         "--end",
         end_date,
         "--cdp-url",
         cdp_url,
         "--output",
         str(output),
-    ]
+    ] + (["--start", start_date] if start_date else ["--start-from-sheet"])
 
 
 def build_fubon_atm_refund(params: dict[str, Any]) -> list[str]:
@@ -680,14 +682,18 @@ def build_yuanta_download(params: dict[str, Any]) -> list[str]:
     end_date = str(params.get("end_date") or "").strip()
     if not area or area == "全區":
         raise ValueError("元大明細查詢請選擇單一區域")
-    if not start_date or not end_date:
+    from_sheet = params.get("start_from") == "sheet"
+    if not end_date or not (start_date or from_sheet):
         raise ValueError("元大明細查詢缺少開始日期或結束日期")
-    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_date}_{end_date}.csv"
+    if from_sheet:
+        # 開始日由 Agent 執行時讀財報最後一列決定
+        start_date = ""
+    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_date or "財報起"}_{end_date}.csv"
     return [
         sys.executable, "-m", "tools.bank_statement.yuanta_agent", "download",
-        "--area", area, "--start", start_date, "--end", end_date,
+        "--area", area, "--end", end_date,
         "--output", str(output),
-    ]
+    ] + (["--start", start_date] if start_date else ["--start-from-sheet"])
 
 
 def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
@@ -852,6 +858,7 @@ ACTION_LABELS = {
     "fubon.payment_request": "【富邦銀行】請款記錄",
     "fubon.deposit_refund": "【富邦銀行】工具包押金退款",
     "fubon.supply_purchase": "【富邦銀行】清潔用品採購",
+    "fubon.internal_payment": "【富邦銀行】內部請款整合執行",
     "fubon.fixed_expense_transfer": "【財報】各區固定費用匯款",
     "fubon.captcha": "【富邦銀行】擷取驗證碼",
     "fubon.verify": "【富邦銀行】送出驗證碼",
