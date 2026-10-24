@@ -21,7 +21,7 @@ from playwright.sync_api import sync_playwright
 
 from services.google_auth import get_drive_service
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, run_download
+from tools.bank_statement.fubon_agent import ensure_login, run_download, report_query_start
 from tools.bank_statement.fubon_agent import logout_quietly as fubon_logout_quietly
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
@@ -358,8 +358,8 @@ def transfer_total_from_fubon(
         )
         try:
             today = datetime.now().date()
-            print(f"富邦轉帳完成，開始同步 {area} 今日明細。", flush=True)
-            run_download(context, page, account, today, today)
+            print(f"富邦轉帳完成，開始同步 {area} 富邦明細（財報最後一列日期～今天）。", flush=True)
+            run_download(context, page, account, report_query_start(account, today), today)
             print(f"{area} 富邦明細更新完成。", flush=True)
         except Exception as exc:
             raise RuntimeError(

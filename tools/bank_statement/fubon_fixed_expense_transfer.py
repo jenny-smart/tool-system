@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
     choose_saved_destination,
@@ -107,7 +107,7 @@ def run(
         try:
             print(f"開始同步 {bank_area} 富邦明細。")
             today = datetime.now(TW_TZ).date()
-            run_download(context, page, account, today, today)
+            run_download(context, page, account, report_query_start(account, today), today)
             print(f"{bank_area} 富邦更新同步完成，開始寫入原訂固定費用分錄。")
             result = transfer_fixed_expenses(
                 period,

@@ -281,6 +281,16 @@ def logout_and_close(context: BrowserContext, page: Page) -> None:
         print("富邦視窗已關閉。")
 
 
+def report_query_start(account: BankAccount, end):
+    """轉帳後查明細的開始日：財報「富邦更新」最後一列的日期（跟排程共用）。
+    轉帳已經做完，讀財報失敗也不能中斷，退回只查當天。"""
+    try:
+        return query_start_from_report(account.area, "fubon", end)
+    except Exception as exc:
+        print(f"⚠️ 讀取財報最後一列日期失敗，改查當天明細：{exc}")
+        return end
+
+
 def run_download(
     context: BrowserContext,
     page: Page,

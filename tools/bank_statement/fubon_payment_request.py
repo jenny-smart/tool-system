@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
 from tools.bank_statement.fubon_payment_request_filter import merge_by_payee, pending_payment_requests
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
@@ -128,9 +128,9 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: boo
         page = ensure_login(context, account)
         cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
         page = pay(context, page, area, account, prepared)
-        print("開始下載今日富邦明細。")
+        print("開始下載富邦明細（財報最後一列日期～今天）。")
         today = datetime.now(ZoneInfo("Asia/Taipei")).date()
-        run_download(context, page, account, today, today)
+        run_download(context, page, account, report_query_start(account, today), today)
     return 0
 
 

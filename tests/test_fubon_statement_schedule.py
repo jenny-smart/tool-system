@@ -107,3 +107,15 @@ def test_captcha_written_back_before_task_finishes(monkeypatch):
     first = updates[0]
     assert "status" not in first and json.loads(first["result_json"])["image_base64"] == "aW1n"
     assert updates[-1]["status"] == "completed"
+
+
+def test_transfer_download_start_shared_with_report(monkeypatch):
+    from datetime import date as d
+
+    from tools.bank_statement import fubon_agent
+
+    account = type("A", (), {"area": "台北"})()
+    monkeypatch.setattr(fubon_agent, "query_start_from_report", lambda area, bank, end: d(2026, 10, 20))
+    assert fubon_agent.report_query_start(account, d(2026, 10, 24)) == d(2026, 10, 20)
+    monkeypatch.setattr(fubon_agent, "query_start_from_report", lambda *a: (_ for _ in ()).throw(OSError("403")))
+    assert fubon_agent.report_query_start(account, d(2026, 10, 24)) == d(2026, 10, 24)  # 讀表失敗退回當天

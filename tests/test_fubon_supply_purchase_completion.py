@@ -70,7 +70,7 @@ def run_purchase(*, completion_error=False, write_error=False):
     if completion_error:
         wait.side_effect = RuntimeError('not completed')
     item = dict(sheet_row=2, rows=[2, 5], supplier='supplier', bank_code='012', account_number='123', amount='300')
-    ns = dict(Path=Path, datetime=datetime, ZoneInfo=ZoneInfo, Page=object, ExitStack=ExitStack, logout_quietly=MagicMock(), run_download=MagicMock(), SUPPLY_PURCHASE_TYPE='清潔用品採購',
+    ns = dict(report_query_start=lambda account, end: end, Path=Path, datetime=datetime, ZoneInfo=ZoneInfo, Page=object, ExitStack=ExitStack, logout_quietly=MagicMock(), run_download=MagicMock(), SUPPLY_PURCHASE_TYPE='清潔用品採購',
               read_report_values=MagicMock(return_value=[]),
               pending_supply_purchases=MagicMock(return_value=[item]),
               resolve_report_location=MagicMock(return_value=('sheet-id', '進貨明細表-台北')),

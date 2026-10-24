@@ -1,4 +1,4 @@
-"""【富邦銀行】內部請款整合執行：同一地區登入一次，轉帳全部做完後才下載今日明細。
+"""【富邦銀行】內部請款整合執行：同一地區登入一次，轉帳全部做完後才下載明細（財報最後一列日期～今天）。
 
 依序：請款記錄 → 工具包押金退款 → 清潔用品採購（依月份），最後下載一次富邦明細、登出。
 進銀行前先把每一類的報表讀好、驗證好；某一類讀取失敗只跳過那一類（其他照做），
@@ -17,7 +17,7 @@ from playwright.sync_api import sync_playwright
 
 from tools.bank_statement import fubon_deposit_refund, fubon_payment_request, fubon_supply_purchase
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
 
@@ -69,9 +69,9 @@ def run(
         for label, module, prepared in ready:
             print(f"── 【{area}】{label}：{len(prepared['selected'])} 筆 ──")
             page = module.pay(context, page, area, account, prepared)
-        print(f"【{area}】轉帳全部完成，開始下載今日富邦明細。")
+        print(f"【{area}】轉帳全部完成，開始下載富邦明細（財報最後一列日期～今天）。")
         today = datetime.now(ZoneInfo("Asia/Taipei")).date()
-        run_download(context, page, account, today, today)
+        run_download(context, page, account, report_query_start(account, today), today)
     return 1 if errors else 0
 
 
