@@ -53,7 +53,8 @@ def _render_tracking(backend_email, backend_password, env, copy_button=None):
 
 _SHEET_FIELD_LABELS = {
     "order_col": "訂單編號欄", "orig_date_col": "原日期欄", "orig_period_col": "原時段欄",
-    "new_date_col": "新日期欄", "new_period_col": "新時段欄", "start_row": "起始列",
+    "new_date_col": "新日期欄", "new_period_col": "新時段欄",
+    "change_date_col": "異動日期欄", "change_period_col": "異動時段欄", "start_row": "起始列",
 }
 
 
@@ -87,10 +88,13 @@ def _render_sheet_sync(backend_email, backend_password, env):
         st.text_input("Google 試算表 ID（或貼整個網址）", key="tt_sheet_spreadsheet_id")
     with c2:
         st.text_input("工作表名稱", key="tt_sheet_worksheet")
-    cols = st.columns(6)
-    for col, key in zip(cols, ["order_col", "orig_date_col", "orig_period_col", "new_date_col", "new_period_col", "start_row"]):
-        with col:
-            st.text_input(_SHEET_FIELD_LABELS[key], key=f"tt_sheet_{key}")
+    field_keys = ["order_col", "orig_date_col", "orig_period_col", "new_date_col", "new_period_col",
+                  "change_date_col", "change_period_col", "start_row"]
+    for row_keys in (field_keys[:4], field_keys[4:]):
+        for col, key in zip(st.columns(4), row_keys):
+            with col:
+                st.text_input(_SHEET_FIELD_LABELS[key], key=f"tt_sheet_{key}")
+    st.caption("新日期／新時段只用來比對、不會修改；有異動的訂單把目前日期／時段填進異動欄，沒有異動的維持空白。")
     settings = {key: st.session_state.get(f"tt_sheet_{key}", "") for key in tss.DEFAULT_SETTINGS}
 
     b1, b2 = st.columns(2)
@@ -130,23 +134,26 @@ def _render_sheet_sync(backend_email, backend_password, env):
     rows = st.session_state.get("tt_sheet_rows")
     if rows is None:
         return
-    pending = [r for r in rows if r["status"] == "待更新"]
+    def _count(status):
+        return sum(1 for r in rows if r["status"] == status)
+
+    pending = [r for r in rows if r["status"] in tss.PENDING_STATUSES]
     failed = [r for r in rows if r["status"].startswith("查詢失敗")]
-    updated = [r for r in rows if r["status"] == "已更新"]
-    unchanged = [r for r in rows if r["status"] == "未變動"]
     summary = (
-        f"共 {len(rows)} 筆：待更新 {len(pending)} 筆、已更新 {len(updated)} 筆、未變動 {len(unchanged)} 筆、"
+        f"共 {len(rows)} 筆：待填異動 {_count('待填異動')} 筆、待清除異動欄 {_count('待清除異動欄')} 筆、"
+        f"已填異動 {_count('已填異動')} 筆、已清除 {_count('已清除異動欄')} 筆、未變動 {_count('未變動')} 筆、"
         f"查詢失敗 {len(failed)} 筆"
     )
     (st.warning if pending or failed else st.success)(summary)
-    only_changed = st.checkbox("不顯示未變動", value=bool(pending or failed or updated), key="tt_sheet_only_changed")
-    shown = [r for r in rows if r["status"] != "未變動"] if only_changed else rows
+    only_changed = st.checkbox("不顯示未變動", value=True, key="tt_sheet_only_changed")
+    shown = [r for r in rows if r["status"] not in ("未變動", "已清除異動欄")] if only_changed else rows
     st.dataframe(pd.DataFrame([
         {
             "列": r["row"], "訂單編號": r["order_no"], "姓名": r["name"],
             "原日期": r["orig_date"], "原時段": r["orig_period"],
-            "表單新日期": r["sheet_date"], "表單新時段": r["sheet_period"],
+            "新日期": r["sheet_date"], "新時段": r["sheet_period"],
             "目前日期": r["now_date"], "目前時段": r["now_period"],
+            "異動欄（表單）": f"{r.get('change_date', '')} {r.get('change_period', '')}".strip(),
             "付款狀態": r["payment_status"], "狀態": r["status"],
         }
         for r in shown
@@ -154,27 +161,26 @@ def _render_sheet_sync(backend_email, backend_password, env):
 
     compared = st.session_state.get("tt_sheet_compared_settings", {})
     if pending:
-        target = f"{compared.get('worksheet', '')} 的 {compared.get('new_date_col', '')}／{compared.get('new_period_col', '')} 欄"
-        if st.button(f"✍️ 把 {len(pending)} 筆目前日期／時段寫入 {target}", type="primary",
+        target = f"{compared.get('worksheet', '')} 的 {compared.get('change_date_col', '')}／{compared.get('change_period_col', '')} 欄"
+        if st.button(f"✍️ 更新 {len(pending)} 筆異動到 {target}", type="primary",
                      use_container_width=True, key="tt_sheet_apply"):
             try:
                 applied = tss.apply_sheet_updates(compared, rows)
             except Exception as exc:
                 st.error(f"寫入失敗：{exc}")
             else:
-                result_by_row = {r["row"]: r["status"] for r in applied}
-                st.session_state.tt_sheet_rows = [
-                    {**r, "status": result_by_row.get(r["row"], r["status"])} for r in rows
-                ]
+                result_by_row = {r["row"]: r for r in applied}
+                st.session_state.tt_sheet_rows = [result_by_row.get(r["row"], r) for r in rows]
                 st.session_state.tt_sheet_applied = applied
                 st.rerun()
     applied = st.session_state.get("tt_sheet_applied")
     if applied is not None:
-        done = sum(1 for r in applied if r["status"] == "已更新")
-        skipped = [r for r in applied if r["status"] != "已更新"]
-        st.success(f"已寫入 {done} 筆")
-        for r in skipped:
-            st.warning(f"第 {r['row']} 列 {r['order_no']}：{r['status']}")
+        filled = sum(1 for r in applied if r["status"] == "已填異動")
+        cleared = sum(1 for r in applied if r["status"] == "已清除異動欄")
+        st.success(f"已填入 {filled} 筆異動、清除 {cleared} 筆")
+        for r in applied:
+            if r["status"].startswith("已跳過"):
+                st.warning(f"第 {r['row']} 列 {r['order_no']}：{r['status']}")
 
 
 def _render_paste_tracking(backend_email, backend_password, env, copy_button=None):
