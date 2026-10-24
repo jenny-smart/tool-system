@@ -39,3 +39,13 @@ def test_only_newest_same_day_download_runs(monkeypatch):
     kept = queue._skip_superseded_downloads(pending, service=None, spreadsheet_id="")
     assert [t["task_id"] for t in kept] == ["b", "c", "d", "e"]
     assert updates == [(2, "cancelled")]
+
+
+def test_queries_last_week(monkeypatch):
+    assert fsq.query_range(datetime(2026, 10, 24, 8, 0, tzinfo=TZ)) == ("2026-10-18", "2026-10-24")
+    created = []
+    monkeypatch.setattr(fsq, "should_queue", lambda now: True)
+    monkeypatch.setattr(fsq, "create_task", lambda action, params, **kw: created.append(params) or {"task_id": "t"})
+    fsq.main()
+    assert [p["area"] for p in created] == ["台北", "台中"]
+    assert all(p["start_date"] < p["end_date"] for p in created)

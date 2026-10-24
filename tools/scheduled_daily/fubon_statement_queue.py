@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from tools.local_agent_queue import create_task
@@ -9,6 +9,8 @@ TZ = ZoneInfo("Asia/Taipei")
 AREAS = ["台北", "台中"]
 # 排程：每天 08:00；11:00、16:30 只在工作日（例假日只跑 08:00）
 MORNING_CUTOFF_HOUR = 10
+# 查詢近一週（含今天共 7 天）：Mac 沒開機或某天漏跑也能補到；已登記的明細會被比對濾掉，不會重複寫入
+LOOKBACK_DAYS = 7
 
 
 def should_queue(now: datetime) -> bool:
@@ -20,25 +22,30 @@ def should_queue(now: datetime) -> bool:
     return is_workday(now.date(), warn=lambda message: print(message, flush=True))
 
 
+def query_range(now: datetime) -> tuple[str, str]:
+    start = now.date() - timedelta(days=LOOKBACK_DAYS - 1)
+    return start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
+
+
 def main() -> None:
     now = datetime.now(TZ)
     if not should_queue(now):
         print(f"{now:%Y-%m-%d %H:%M} 為例假日，例假日只在 08:00 下載富邦明細；本次不排任務", flush=True)
         return
-    today = now.strftime("%Y-%m-%d")
+    start_date, end_date = query_range(now)
     for area in AREAS:
         task = create_task(
             "fubon.download",
             {
-                "start_date": today,
-                "end_date": today,
+                "start_date": start_date,
+                "end_date": end_date,
                 "area": area,
                 "resume": "download",
                 "cdp_url": "http://127.0.0.1:9222",
             },
             created_by="排程系統",
         )
-        print(f"{area}：已建立富邦明細下載任務 task_id={task['task_id']}（等待本機 Agent 執行）", flush=True)
+        print(f"{area}：已建立富邦明細下載任務（{start_date}～{end_date}）task_id={task['task_id']}（等待本機 Agent 執行）", flush=True)
 
 
 if __name__ == "__main__":
