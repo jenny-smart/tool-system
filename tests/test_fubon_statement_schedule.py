@@ -86,3 +86,24 @@ def test_yuanta_runs_on_25th_or_previous_workday(monkeypatch):
         assert len(created) == expected
     assert created[0] == ("yuanta.download", {"start_from": "sheet", "end_date": "2026-10-23", "area": "台北",
                                               "cdp_url": "http://127.0.0.1:9222"})
+
+
+def test_captcha_written_back_before_task_finishes(monkeypatch):
+    import sys
+
+    from tools import local_agent
+
+    script = ("import json,time;print('CAPTCHA_RESULT:'+json.dumps({'image_base64':'aW1n','session_token':'t'}),"
+              "flush=True);time.sleep(0.3)")
+    updates = []
+    monkeypatch.setattr(local_agent, "command_for", lambda task: [sys.executable, "-c", script])
+    monkeypatch.setattr(local_agent, "update_task", lambda row, fields, **kw: updates.append(dict(fields)))
+    monkeypatch.setattr(local_agent, "append_task_log", lambda *a, **kw: 1)
+    monkeypatch.setattr(local_agent, "get_sheets_service", lambda: None)
+    monkeypatch.setattr(local_agent, "read_task_status", lambda *a, **kw: "running")
+    monkeypatch.setattr(local_agent, "_unified_task_log", lambda *a, **kw: None)
+    task = {"_row": "2", "task_id": "x", "action": "fubon.captcha", "params_json": "{}"}
+    assert local_agent.run_task(task, service=None, spreadsheet_id="") == 0
+    first = updates[0]
+    assert "status" not in first and json.loads(first["result_json"])["image_base64"] == "aW1n"
+    assert updates[-1]["status"] == "completed"

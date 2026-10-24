@@ -3002,7 +3002,8 @@ def render_agent_task_progress(relevant_prefixes: tuple[str, ...]):
 @st.fragment(run_every="2s")
 def render_fubon_mobile_verification():
     try:
-        captcha_tasks = list_local_agent_tasks(limit=40)
+        # 不走 5 秒快取：驗證碼有時效，Agent 一寫回就要顯示
+        captcha_tasks = _list_local_agent_tasks_raw(limit=40)
         verified_tokens = set()
         for item in captcha_tasks:
             if item.get("action") == "fubon.verify":
@@ -3012,7 +3013,8 @@ def render_fubon_mobile_verification():
                     pass
         captcha_payload = None
         for item in captcha_tasks:
-            if item.get("action") != "fubon.captcha" or item.get("status") != "completed":
+            # Agent 擷取到驗證碼就先寫回 result_json，任務還在 running 也要顯示
+            if item.get("action") != "fubon.captcha" or item.get("status") not in {"running", "completed"}:
                 continue
             try:
                 payload = json.loads(item.get("result_json") or "{}")

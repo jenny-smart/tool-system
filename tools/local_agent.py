@@ -990,6 +990,19 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
             line = raw_line.rstrip("\r\n")
             if line.startswith("CAPTCHA_RESULT:"):
                 special_result.update(json.loads(line.split(":", 1)[1]))
+                if special_result.get("image_base64"):
+                    # 驗證碼一擷取到就先寫回，網頁不用等子程式結束（斷開 Chrome、寫 Log）才看到圖片
+                    update_task(
+                        row_number,
+                        {
+                            "message": "驗證碼圖片已擷取，請在手機輸入驗證碼",
+                            "result_json": json.dumps(
+                                {"log_sheet": LOG_SHEET_NAME, **special_result}, ensure_ascii=False
+                            ),
+                        },
+                        service=service,
+                        spreadsheet_id=spreadsheet_id,
+                    )
                 continue
             print(line, flush=True)
             record(line)
