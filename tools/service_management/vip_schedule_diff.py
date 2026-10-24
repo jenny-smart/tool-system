@@ -136,22 +136,28 @@ def plan_schedule(existing, sources, sheet_name, foreign_events=None, coverage=N
     def in_coverage(values):
         return not coverage or coverage[0] <= _canonical(values[5], 5) <= coverage[1]
 
-    left, right = defaultdict(list), defaultdict(list)
-    for row in unmatched_old:
-        if in_coverage(old[row]):
-            left[(_key(old[row], (2, 3, 4)), _canonical(old[row][8], 8) == "暫停")].append(row)
-    for index in unmatched_new:
-        if incoming[index][30] not in foreign_events:
-            right[(_key(incoming[index], (2, 3, 4)), _canonical(incoming[index][8], 8) == "暫停")].append(index)
-    for key in left.keys() & right.keys():
-        customer_rows = [row for row in old if _key(old[row], (2, 3, 4)) == key[0]]
-        if any(_text(old[row][12]) for row in customer_rows):
-            continue
-        for row, index in zip(sorted(left[key], key=lambda r: slot(old[r])),
-                              sorted(right[key], key=lambda i: slot(incoming[i]))):
-            pairs[index] = row
-            unmatched_old.remove(row)
-            unmatched_new.remove(index)
+    def pair_in_date_order(group):
+        left, right = defaultdict(list), defaultdict(list)
+        for row in unmatched_old:
+            if in_coverage(old[row]):
+                left[group(old[row])].append(row)
+        for index in unmatched_new:
+            if incoming[index][30] not in foreign_events:
+                right[group(incoming[index])].append(index)
+        for key in left.keys() & right.keys():
+            customer_rows = [row for row in old if _key(old[row], (2, 3, 4)) == key[0]]
+            if any(_text(old[row][12]) for row in customer_rows):
+                continue
+            for row, index in zip(sorted(left[key], key=lambda r: slot(old[r])),
+                                  sorted(right[key], key=lambda i: slot(incoming[i]))):
+                pairs[index] = row
+                unmatched_old.remove(row)
+                unmatched_new.remove(index)
+
+    # Same pause status first; then leftovers across it, e.g. a 農曆年暫停 row (2/09)
+    # whose event was moved after the holiday (2/11) and is no longer paused.
+    pair_in_date_order(lambda v: (_key(v, (2, 3, 4)), _canonical(v[8], 8) == "暫停"))
+    pair_in_date_order(lambda v: (_key(v, (2, 3, 4)),))
 
     updates, changes = [], []
 

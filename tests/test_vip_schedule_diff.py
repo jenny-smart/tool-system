@@ -738,3 +738,25 @@ def test_unchanged_monthly_rows_get_phone_fallback_but_custom_formulas_stay():
     sync(Book([sheet]), [source_row(legacy), source_row(custom, **{'0': '2人'})])
     assert sheet.data[1][9] == _lookup(2, '台北202610')
     assert sheet.data[2][9] == custom[9]
+
+
+def test_lunar_paused_row_moved_after_holiday_updates_in_place():
+    rows = [_monthly('o1', '2026/12/08', '9:00', '12:00', note='已確認', status='未安排'),
+            _monthly('o2', '2027/02/09', '9:00', '12:00', status='暫停')]
+    sources = [source_row(_monthly('o1', '2026/12/08', '9:00', '12:00', note='已確認', status='未安排')),
+               source_row(_monthly('n2', '2027/02/11', '9:00', '12:00', note='已確認', status='未安排'))]
+    plan = plan_schedule(rows, sources, '台北202612-202702')
+    by_row = {u['row']: u['values'] for u in plan['updates']}
+    assert by_row[3][5] == '2027/02/11' and by_row[3][8] == '未安排' and by_row[3][1] == '已確認'
+    assert by_row[3][32] == '備註：每月確認 → 已確認；日期：2027/02/09 → 2027/02/11；狀態：暫停 → 未安排'
+    assert [c['kind'] for c in plan['changes']] == ['未成單異動']
+
+
+def test_same_day_paused_event_still_pairs_with_paused_row_first():
+    active = _monthly('a', '2027/01/14', '9:00', '12:00', status='未安排')
+    paused = _monthly('p', '2027/01/14', '8:30', '12:30', status='暫停')
+    sources = [source_row(_monthly('a2', '2027/01/21', '9:00', '12:00', status='未安排')),
+               source_row(_monthly('p2', '2027/01/21', '8:30', '12:30', status='暫停'))]
+    plan = plan_schedule([active, paused], sources, '台北202701')
+    by_row = {u['row']: u['values'] for u in plan['updates']}
+    assert by_row[2][8] == '未安排' and by_row[3][8] == '暫停'
