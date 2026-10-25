@@ -1,0 +1,59 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+開始執行：專員個資
+⚠️ 一鍵日排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 一鍵日排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_daily/staff_info.py
+[2026-10-26 01:31:22] ====================================================
+[2026-10-26 01:31:22] staff_info.py 開始執行
+[2026-10-26 01:31:22] GITHUB_ACTIONS = true
+[2026-10-26 01:31:22] PWD = /home/runner/work/tool-system/tool-system
+[2026-10-26 01:31:22] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員個資
+[2026-10-26 01:31:22] LOCAL_OUTPUT_DIR exists = False
+[2026-10-26 01:31:22] can_use_local_output_dir = False
+[2026-10-26 01:31:22] root folder_id = 11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc
+[2026-10-26 01:31:22] ====================================================
+[2026-10-26 01:31:22] Google Drive 初始化成功
+[2026-10-26 01:31:22] 📁 使用既有資料夾：專員個資
+[2026-10-26 01:31:22] today_stamp = 20261026
+[2026-10-26 01:31:22] 專員個資 folder_id = 1v1Er8oC3BEAWHbBrDq3SUpjEDwHIuK0f
+[2026-10-26 01:31:22] 帳號數量 = 2
+[2026-10-26 01:31:22] 
+[2026-10-26 01:31:22] === 開始處理 台北 ===
+[2026-10-26 01:31:22] 開始登入：jenny@lemonclean.com.tw
+[2026-10-26 01:31:24] 登入成功：jenny@lemonclean.com.tw
+[2026-10-26 01:31:24] 開始下載：city=台北 / filename=20261026專員個資-台北.xlsx
+[2026-10-26 01:31:26] ✅ 已下載到暫存：/tmp/tmpn5zabj6p/20261026專員個資-台北.xlsx
+[2026-10-26 01:31:26] 📦 檔案大小：230400 bytes
+[2026-10-26 01:31:26] 📂 暫存目錄存在：True
+[2026-10-26 01:31:26] 📄 暫存檔案存在：True
+[2026-10-26 01:31:26] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-10-26 01:31:26] Google Drive 初始化成功
+[2026-10-26 01:31:26] 準備上傳到 Google Drive：20261026專員個資-台北.xlsx
+[2026-10-26 01:31:27] ☁️ 已上傳新檔：20261026專員個資-台北.xlsx (file_id=1QMcOFdEDZugQ0-_rcofUJBR4sHrO-s-T) https://docs.google.com/spreadsheets/d/1QMcOFdEDZugQ0-_rcofUJBR4sHrO-s-T/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-10-26 01:31:27] ✅ 完成處理：20261026專員個資-台北.xlsx
+[2026-10-26 01:31:27] ✅ 台北 全部完成
+[2026-10-26 01:31:27] 
+[2026-10-26 01:31:27] === 開始處理 台中 ===
+[2026-10-26 01:31:27] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-10-26 01:31:29] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-10-26 01:31:29] 開始下載：city=台中 / filename=20261026專員個資-台中.xlsx
+[2026-10-26 01:31:29] ✅ 已下載到暫存：/tmp/tmph_5oyt1n/20261026專員個資-台中.xlsx
+[2026-10-26 01:31:29] 📦 檔案大小：59904 bytes
+[2026-10-26 01:31:29] 📂 暫存目錄存在：True
+[2026-10-26 01:31:29] 📄 暫存檔案存在：True
+[2026-10-26 01:31:29] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-10-26 01:31:29] Google Drive 初始化成功
+[2026-10-26 01:31:29] 準備上傳到 Google Drive：20261026專員個資-台中.xlsx
+[2026-10-26 01:31:31] ☁️ 已上傳新檔：20261026專員個資-台中.xlsx (file_id=1fLFsL9j9hIFLplj3FxLNPE3M34kmKlqQ) https://docs.google.com/spreadsheets/d/1fLFsL9j9hIFLplj3FxLNPE3M34kmKlqQ/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-10-26 01:31:31] ✅ 完成處理：20261026專員個資-台中.xlsx
+[2026-10-26 01:31:31] ✅ 台中 全部完成
+[2026-10-26 01:31:31] 🎉 staff_info.py 全部完成
+
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+
+完成執行：專員個資
+scheduled_daily scheduler 全部完成
