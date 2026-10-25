@@ -887,6 +887,8 @@ FUNCTION_OPTIONS = [
      "orders", "檸檬保留單取消"),
     ("檸檬保留刪除地址：只留信義路、館前路兩個地址，其他不再使用的客人地址一次刪除。",
      "orders", "檸檬保留刪除地址"),
+    ("檸檬人換正式專員：搜尋含檸檬人占位的訂單，依交通與配班規範推薦正式專員。",
+     "orders", "檸檬人換正式專員"),
     ("VIP 訂單／Google 日曆同步：同時查詢後台訂單與 Google 日曆，支援異動日期／時段、"
      "取消／暫停、新增或修改日曆事件。",
      "orders", "VIP 訂單／Google 日曆同步"),
@@ -1023,6 +1025,12 @@ if mode == "檸檬保留單取消":
 
 if mode == "檸檬保留刪除地址":
     reserve_menu.render_reserve_address_cleanup(backend_email, backend_password, env)
+    st.stop()
+
+if mode == "檸檬人換正式專員":
+    import lemon_staff_replacement
+
+    lemon_staff_replacement.render(backend_email, backend_password, env)
     st.stop()
 
 if mode == "訂單班表記錄與返回":

@@ -168,7 +168,7 @@ def _score(ctx: AssignmentContext, staff: Sequence[StaffCandidate]):
         if common:
             score -= 12
             reasons.append("夥伴性質較相近")
-        else:
+        elif any(s.similarity_tags for s in staff):  # 沒有性質資料時不判定互補
             score += 10
             reasons.append("夥伴組合較互補")
     if any(s.observation for s in staff):

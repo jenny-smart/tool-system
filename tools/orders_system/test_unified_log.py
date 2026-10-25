@@ -32,3 +32,22 @@ def test_write_never_raises():
     client = MagicMock()
     client.open_by_key.side_effect = RuntimeError("no access")
     unified_log.write(client=client, function="測試")
+
+
+def test_write_runs_in_background_thread_without_blocking():
+    from unittest.mock import patch
+    import unified_log
+
+    started = []
+
+    class FakeThread:
+        def __init__(self, target, args, name, daemon):
+            started.append((target, args, daemon))
+
+        def start(self):
+            pass
+
+    with patch.object(unified_log.threading, "Thread", FakeThread):
+        unified_log.write(function="按鈕", status="執行")
+    assert len(started) == 1 and started[0][2] is False  # 非 daemon：命令列結束前會寫完
+    assert started[0][1][1][2] == "按鈕"  # 時間與內容在呼叫當下就組好

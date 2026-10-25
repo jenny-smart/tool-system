@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -51,18 +52,38 @@ def _worksheet(spreadsheet):
     return ws
 
 
-def write(client=None, **fields: Any) -> None:
-    """寫一筆統一 Log；欄位見 build_row。絕不拋出例外。"""
+def _append(client, row: list) -> None:
     try:
         if client is None:
             from orders import build_gsheet_client
 
             client = build_gsheet_client()
         spreadsheet = client.open_by_key(os.getenv("MASTER_SPREADSHEET_ID", "").strip() or MASTER_SPREADSHEET_ID)
-        _worksheet(spreadsheet).append_row(build_row(**fields), value_input_option="RAW",
-                                            insert_data_option="INSERT_ROWS")
+        _worksheet(spreadsheet).append_row(row, value_input_option="RAW", insert_data_option="INSERT_ROWS")
     except Exception as exc:  # Log 寫不進去不能影響主流程
         print(f"[unified_log] 寫入統一執行 Log 失敗（不影響主流程）: {exc}")
+
+
+def write(client=None, background: bool | None = None, **fields: Any) -> None:
+    """寫一筆統一 Log；欄位見 build_row。絕不拋出例外。
+
+    預設在背景執行緒寫入（時間在呼叫當下就決定），不讓按鈕、成功訊息等畫面等 Google Sheets；
+    背景執行緒不是 daemon，命令列程式結束前會等它寫完。傳入 client 時（測試）同步寫入。
+    """
+    try:
+        row = build_row(**fields)
+    except Exception as exc:
+        print(f"[unified_log] 組 Log 內容失敗（不影響主流程）: {exc}")
+        return
+    if background is None:
+        background = client is None
+    if not background:
+        _append(client, row)
+        return
+    try:
+        threading.Thread(target=_append, args=(None, row), name="unified-log", daemon=False).start()
+    except Exception:
+        _append(None, row)
 
 
 MAX_ERRORS_PER_CLICK = 3
