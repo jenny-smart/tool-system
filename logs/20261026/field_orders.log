@@ -1,0 +1,20 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.17/x64/bin/python -u -m tools.field_management.orders --date 20261026 --system-name 外場排程系統 --run-type 排程
+[2026-10-26 05:04:33] 開始處理訂單資料：20261026訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1vOJoRv3sLDFT9cB4vHwNg6yT0Kin5KkUB3_YTvWNYsk
+🗑️ 已刪除來源暫存 Google Sheet：1vOJoRv3sLDFT9cB4vHwNg6yT0Kin5KkUB3_YTvWNYsk
+[2026-10-26 05:04:48] 完成：20261026訂單-台北.xls → 訂單資料!A:ZZ / rows=1139
+[2026-10-26 05:04:52] 開始處理訂單資料：20261026訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1u21TT_NL3R0cGby6JLC-m09gXQojy0d5onD9Z7065kY
+🗑️ 已刪除來源暫存 Google Sheet：1u21TT_NL3R0cGby6JLC-m09gXQojy0d5onD9Z7065kY
+[2026-10-26 05:05:04] 完成：20261026訂單-台中.xls → 訂單資料!A:ZZ / rows=96
+[2026-10-26 05:05:05] orders.py 全部完成
+
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+
+📝 外場排程打卡：外場訂單 / success
+field_management scheduler 全部完成

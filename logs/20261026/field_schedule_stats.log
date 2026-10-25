@@ -1,0 +1,52 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.17/x64/bin/python -u -m tools.field_management.schedule_stats --date 20261026 --system-name 外場排程系統 --run-type 排程
+[2026-10-26 05:01:21] 開始處理排班統計表：20261026排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1eqQpBrpIyisb7edyA3Qw92WGGESB453YIhS8uE_E2qk
+🗑️ 已刪除來源暫存 Google Sheet：1eqQpBrpIyisb7edyA3Qw92WGGESB453YIhS8uE_E2qk
+[2026-10-26 05:01:33] 完成：20261026排班統計表-台北.xlsx → 2026排班統計表!DV4 / rows=87
+[2026-10-26 05:01:43] 開始處理排班統計表：20261126排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1JfZu63Qyt5tOGIKBuIvVFKuYOJIF4H-jJKUiWVfAxIA
+🗑️ 已刪除來源暫存 Google Sheet：1JfZu63Qyt5tOGIKBuIvVFKuYOJIF4H-jJKUiWVfAxIA
+[2026-10-26 05:01:52] 完成：20261126排班統計表-台北.xlsx → 2026排班統計表!EH4 / rows=58
+[2026-10-26 05:01:54] 開始處理排班統計表：20261226排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Z1JxoBZexnx0zBncmPWvmodtp_z2LDKVfBi5v8_m8NU
+🗑️ 已刪除來源暫存 Google Sheet：1Z1JxoBZexnx0zBncmPWvmodtp_z2LDKVfBi5v8_m8NU
+[2026-10-26 05:02:02] 完成：20261226排班統計表-台北.xlsx → 2026排班統計表!ET4 / rows=45
+[2026-10-26 05:02:03] 開始處理排班統計表：20270126排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Qju5Exm4bqfzOxyKpPp1owMRuYZ-MHUxM6M387u56LI
+🗑️ 已刪除來源暫存 Google Sheet：1Qju5Exm4bqfzOxyKpPp1owMRuYZ-MHUxM6M387u56LI
+[2026-10-26 05:02:12] 完成：20270126排班統計表-台北.xlsx → 2026排班統計表!FF4 / rows=39
+[2026-10-26 05:02:13] 開始處理排班統計表：20270226排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Sgg6veTGarfNtkbLRmu_ofrL7agzulXDLh74yrVcDeo
+🗑️ 已刪除來源暫存 Google Sheet：1Sgg6veTGarfNtkbLRmu_ofrL7agzulXDLh74yrVcDeo
+[2026-10-26 05:02:20] 完成：20270226排班統計表-台北.xlsx → 2026排班統計表!FR4 / rows=36
+[2026-10-26 05:02:22] 開始處理排班統計表：20261026排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1-J0Y-oSKGjNLdYRi8TF1n39zqvw5Eek25J3Chi65opk
+🗑️ 已刪除來源暫存 Google Sheet：1-J0Y-oSKGjNLdYRi8TF1n39zqvw5Eek25J3Chi65opk
+[2026-10-26 05:02:31] 完成：20261026排班統計表-台中.xlsx → 2026排班統計表!DV4 / rows=13
+[2026-10-26 05:02:33] 開始處理排班統計表：20261126排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：13XkxlXV7MAMOY5PRwxpcCXB4ZppLD357y5-4CgikNB8
+🗑️ 已刪除來源暫存 Google Sheet：13XkxlXV7MAMOY5PRwxpcCXB4ZppLD357y5-4CgikNB8
+[2026-10-26 05:02:40] 完成：20261126排班統計表-台中.xlsx → 2026排班統計表!EH4 / rows=11
+[2026-10-26 05:02:42] 開始處理排班統計表：20261226排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1EDFad_uvz7OJNV_WKQoSGAZAx0-ek_erAHh6b8HleJs
+🗑️ 已刪除來源暫存 Google Sheet：1EDFad_uvz7OJNV_WKQoSGAZAx0-ek_erAHh6b8HleJs
+[2026-10-26 05:02:51] 完成：20261226排班統計表-台中.xlsx → 2026排班統計表!ET4 / rows=7
+[2026-10-26 05:02:52] 開始處理排班統計表：20270126排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1KjIx4XWA6rwAN7VKdC1B8NpGvw0O8G1x3bTT6N-H99E
+🗑️ 已刪除來源暫存 Google Sheet：1KjIx4XWA6rwAN7VKdC1B8NpGvw0O8G1x3bTT6N-H99E
+[2026-10-26 05:03:02] 完成：20270126排班統計表-台中.xlsx → 2026排班統計表!FF4 / rows=7
+[2026-10-26 05:03:04] 開始處理排班統計表：20270226排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1VRWCuHQt-0sbRUcAMVKfPV4_dYp8Nmx-uBR2diboK10
+🗑️ 已刪除來源暫存 Google Sheet：1VRWCuHQt-0sbRUcAMVKfPV4_dYp8Nmx-uBR2diboK10
+[2026-10-26 05:03:12] 完成：20270226排班統計表-台中.xlsx → 2026排班統計表!FR4 / rows=7
+[2026-10-26 05:03:13] schedule_stats.py 全部完成
+
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成

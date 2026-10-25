@@ -1,0 +1,29 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場專員個資 / running
+Command: /opt/hostedtoolcache/Python/3.11.17/x64/bin/python -u -m tools.field_management.staff_profile --date 20261026 --system-name 外場排程系統 --run-type 排程
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[2026-10-26 05:05:19] 開始處理專員個資：20261026專員個資-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：10sLIqV5f3q5EF50vLGlswtrIoldQoC888PRwLqHP8SU
+🗑️ 已刪除來源暫存 Google Sheet：10sLIqV5f3q5EF50vLGlswtrIoldQoC888PRwLqHP8SU
+[2026-10-26 05:05:27] 完成專員個資：20261026專員個資-台北.xlsx → 專員個人資料!A4:C / rows=93
+[2026-10-26 05:05:28] 開始處理訂單截取：20261026訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1GKTAtHJpU-53JEfDXyUgQTNdI6G7kOqu4zIcg6RpVqw
+🗑️ 已刪除來源暫存 Google Sheet：1GKTAtHJpU-53JEfDXyUgQTNdI6G7kOqu4zIcg6RpVqw
+[2026-10-26 05:05:40] 完成訂單截取：20261026訂單-台北.xls → 專員個人資料!G1:N / rows=1139
+[2026-10-26 05:05:42] 開始處理專員個資：20261026專員個資-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1_EEmcLedud2cj5xLIx601WqO0SCs0fji3iFEyp-OvNU
+🗑️ 已刪除來源暫存 Google Sheet：1_EEmcLedud2cj5xLIx601WqO0SCs0fji3iFEyp-OvNU
+[2026-10-26 05:05:51] 完成專員個資：20261026專員個資-台中.xlsx → 專員個人資料!A4:C / rows=16
+[2026-10-26 05:05:53] 開始處理訂單截取：20261026訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Ol9soGss9Wd3rpd7DSJwrwbrpWyW9szFBKk_Od6NhtQ
+🗑️ 已刪除來源暫存 Google Sheet：1Ol9soGss9Wd3rpd7DSJwrwbrpWyW9szFBKk_Od6NhtQ
+[2026-10-26 05:05:59] 完成訂單截取：20261026訂單-台中.xls → 專員個人資料!G1:N / rows=96
+[2026-10-26 05:06:00] staff_profile.py 全部完成
+
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+
+📝 外場排程打卡：外場專員個資 / success
+field_management scheduler 全部完成
