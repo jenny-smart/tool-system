@@ -1,0 +1,38 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場專員班表 / running
+Command: /opt/hostedtoolcache/Python/3.11.17/x64/bin/python -u -m tools.field_management.staff_schedule --date 20261027 --system-name 外場排程系統 --run-type 排程
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[2026-10-27 05:03:10] 開始處理專員班表：20261027專員班表-台北
+⚠️ Google API 暫時限流/忙碌，等待 5.7 秒後重試 (1/6)
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1fLtlEItixX_MmZ4VZWNVaJtyzEtWyYyFha0gieNasE4
+🗑️ 已刪除來源暫存 Google Sheet：1fLtlEItixX_MmZ4VZWNVaJtyzEtWyYyFha0gieNasE4
+[2026-10-27 05:03:39] 更新專員班表分頁名稱：專員班表查詢本月_1026 → 專員班表查詢本月_1027
+[2026-10-27 05:03:39] 專員班表分頁名稱更新完成：專員班表查詢本月_1027
+[2026-10-27 05:03:40] 完成：20261027專員班表-台北.xls → '專員班表查詢本月_1027'!A:G / rows=1571
+[2026-10-27 05:03:43] 開始處理專員班表：20261127專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1mnZvIg1BRxrGJcpcdGcTkhC4cmWX0pzLWXB_64KxANo
+🗑️ 已刪除來源暫存 Google Sheet：1mnZvIg1BRxrGJcpcdGcTkhC4cmWX0pzLWXB_64KxANo
+[2026-10-27 05:03:48] 更新專員班表分頁名稱：專員班表查詢次月_1026 → 專員班表查詢次月_1027
+[2026-10-27 05:03:48] 專員班表分頁名稱更新完成：專員班表查詢次月_1027
+[2026-10-27 05:03:49] 完成：20261127專員班表-台北.xls → '專員班表查詢次月_1027'!A:G / rows=1178
+[2026-10-27 05:03:51] 開始處理專員班表：20261027專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1VIRiBPRplyizpN-Vgy8tgZ8PVJ3JeHoGpAPBZnujkFI
+🗑️ 已刪除來源暫存 Google Sheet：1VIRiBPRplyizpN-Vgy8tgZ8PVJ3JeHoGpAPBZnujkFI
+[2026-10-27 05:04:04] 更新專員班表分頁名稱：專員班表查詢本月_1026 → 專員班表查詢本月_1027
+[2026-10-27 05:04:04] 專員班表分頁名稱更新完成：專員班表查詢本月_1027
+[2026-10-27 05:04:04] 完成：20261027專員班表-台中.xls → '專員班表查詢本月_1027'!A:G / rows=222
+[2026-10-27 05:04:07] 開始處理專員班表：20261127專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1ljp9keqc1qruT4KGS_6mmAP6fOFIGwrdi6luGk2Iq8k
+🗑️ 已刪除來源暫存 Google Sheet：1ljp9keqc1qruT4KGS_6mmAP6fOFIGwrdi6luGk2Iq8k
+[2026-10-27 05:04:13] 更新專員班表分頁名稱：專員班表查詢次月_1026 → 專員班表查詢次月_1027
+[2026-10-27 05:04:13] 專員班表分頁名稱更新完成：專員班表查詢次月_1027
+[2026-10-27 05:04:13] 完成：20261127專員班表-台中.xls → '專員班表查詢次月_1027'!A:G / rows=206
+[2026-10-27 05:04:15] staff_schedule.py 全部完成
+
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+
+📝 外場排程打卡：外場專員班表 / success
+field_management scheduler 全部完成
