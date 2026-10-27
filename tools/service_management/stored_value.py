@@ -135,6 +135,10 @@ def _get_credentials() -> Credentials:
     return Credentials.from_service_account_info(info, scopes=SCOPES)
 
 def _gc() -> gspread.Client:
+    # This module runs in a separate Python subprocess.  The retry patch that
+    # toolapp installs in the Streamlit process is not inherited by this one.
+    from services.google_api_retry import install_gspread_retry
+    install_gspread_retry()
     return gspread.authorize(_get_credentials())
 
 def _calendar_service():
@@ -933,10 +937,7 @@ def _write_topup_list(ss: Any, sheet_name: str, rows: list[dict]) -> str:
             return ""
         sh = ss.add_worksheet(title=sheet_name, rows=max(len(list_rows) + 20, 100), cols=len(TOPUP_LIST_HEADERS))
     sh.clear()
-    sh.update(values=[TOPUP_LIST_HEADERS] + list_rows, range_name="A1", value_input_option="USER_ENTERED")
-    if list_rows:
-        sh.update(values=[[normalize_phone(row[1])] for row in list_rows],
-                  range_name=f"B2:B{len(list_rows) + 1}", value_input_option="RAW")
+    sh.update(values=[TOPUP_LIST_HEADERS] + list_rows, range_name="A1", value_input_option="RAW")
     sh.freeze(rows=1)
     log.info("需儲值名單更新完成：%s（%d 位）", sheet_name, len(list_rows))
     return sheet_name
@@ -997,7 +998,7 @@ def _write_vip_sheet(
             shown_customer_months.add(customer_month)
 
         out.append([
-            r["service"], r["note"], r["name"], r["phone"], r["address"],
+            r["service"], r["note"], r["name"], normalize_phone(r["phone"]), r["address"],
             r["date_str"], r["start_str"], r["end_str"], r["status"], "",
             r["weekday"], r["price"], r["person_hrs"], r["amount"],
             r["subtotal"] if is_first else "",
@@ -1008,10 +1009,11 @@ def _write_vip_sheet(
         ])
 
     log.info("[%s] 寫入定期VIP工作表中：%d 筆 → %s", area_name, len(rows), sheet_name)
-    sh.update(values=out, range_name="A1", value_input_option="USER_ENTERED")
+    # These are snapshot values, not formulas. RAW avoids locale/formula parsing,
+    # preserves leading-zero phone numbers, and removes a second write request.
+    sh.update(values=out, range_name="A1", value_input_option="RAW")
+    log.info("[%s] 定期VIP主資料寫入完成，套用格式中…", area_name)
     if rows:
-        phones = [[normalize_phone(r["phone"])] for r in rows]
-        sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
         # Rows already sorted above; keep their positions for duplicate highlighting.
         from tools.service_management.vip_schedule_diff import _same_day_rows
         formats = [{"range": f"A2:S{len(rows) + 1}",
@@ -1020,6 +1022,7 @@ def _write_vip_sheet(
             formats.append({"range": row_range,
                             "format": {"backgroundColor": {"red": .90, "green": .85, "blue": 1}}})
         sh.batch_format(formats)
+        log.info("[%s] 定期VIP格式套用完成", area_name)
     sh.update(
         values=[["匯出開始日期", "匯出結束日期"],
                 [start_dt.strftime("%Y-%m-%d"), (end_dt or start_dt).strftime("%Y-%m-%d")]],
