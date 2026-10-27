@@ -649,6 +649,7 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: 
                 f"找不到 {area_name}儲值金結算_YYYYMMDD 工作表"
             )
         sh = max(candidates, key=lambda worksheet: worksheet.title)
+        log.info("[%s] 讀取儲值金餘額中：%s", area_name, sh.title)
         records = sh.get_all_records()
     except Exception as e:
         log.warning("[%s] 讀取儲值金資料失敗（非致命）：%s", area_name, e)
@@ -672,7 +673,25 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: 
         if not name_map[name_key]["email"] and email_val:
             name_map[name_key]["email"] = str(email_val).strip()
 
+    log.info("[%s] 儲值金餘額讀取完成：%d 位", area_name, len(name_map))
     return name_map
+
+
+def _contiguous_row_ranges(row_numbers: list[int], start_col: str = "A", end_col: str = "S") -> list[str]:
+    """Compress row numbers so one formatting request covers each consecutive run."""
+    numbers = sorted(set(row_numbers))
+    if not numbers:
+        return []
+    ranges = []
+    start = previous = numbers[0]
+    for row_number in numbers[1:]:
+        if row_number == previous + 1:
+            previous = row_number
+            continue
+        ranges.append(f"{start_col}{start}:{end_col}{previous}")
+        start = previous = row_number
+    ranges.append(f"{start_col}{start}:{end_col}{previous}")
+    return ranges
 
 
 def _fetch_calendar_events(
@@ -988,16 +1007,17 @@ def _write_vip_sheet(
             r.get("event_id", ""),
         ])
 
+    log.info("[%s] 寫入定期VIP工作表中：%d 筆 → %s", area_name, len(rows), sheet_name)
     sh.update(values=out, range_name="A1", value_input_option="USER_ENTERED")
     if rows:
         phones = [[normalize_phone(r["phone"])] for r in rows]
         sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
         # Rows already sorted above; keep their positions for duplicate highlighting.
         from tools.service_management.vip_schedule_diff import _same_day_rows
-        formats = [{"range": f"A2:S{max(getattr(sh, 'row_count', 200), len(rows) + 1)}",
+        formats = [{"range": f"A2:S{len(rows) + 1}",
                     "format": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}}]
-        for row_num in _same_day_rows(out[1:], []):
-            formats.append({"range": f"A{row_num}:S{row_num}",
+        for row_range in _contiguous_row_ranges(_same_day_rows(out[1:], [])):
+            formats.append({"range": row_range,
                             "format": {"backgroundColor": {"red": .90, "green": .85, "blue": 1}}})
         sh.batch_format(formats)
     sh.update(
@@ -1041,6 +1061,7 @@ def step2_export_vip_calendar(
             rows   = _process_events(
                 events, area_name, calendar_id, deep_clean_settings,
             )
+            log.info("[%s] 行事曆整理完成：%d 筆符合VIP格式", area_name, len(rows))
 
             if not rows:
                 log.warning("[%s] 指定日期範圍內無符合行程，仍更新空白日曆快照", area_name)

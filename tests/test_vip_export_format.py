@@ -92,7 +92,8 @@ def test_schedule_customer_key_uses_name_phone_and_address():
 
 def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
     functions = _load_functions(
-        "normalize_text", "normalize_name_for_compare", "normalize_address", "normalize_phone", "_write_vip_sheet"
+        "normalize_text", "normalize_name_for_compare", "normalize_address", "normalize_phone",
+        "_contiguous_row_ranges", "_write_vip_sheet"
     )
     functions["_write_topup_list"] = lambda *args: ""
 
@@ -139,7 +140,7 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
         "range_name": "D2:D3",
         "value_input_option": "RAW",
     }
-    assert sheet.formats[0]["range"] == "A2:S200"
+    assert sheet.formats[0]["range"] == "A2:S3"
     assert [row[18] for row in sheet.updates[0]["values"][1:]] == ["event-wang", "event-li"]
     assert sheet.updates[2]["range_name"] == "T1:U2"
     # Export itself also highlights both active and paused same-day visits.
@@ -147,7 +148,7 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
     rows[0]["address"] = "台北市"
     sheet.updates.clear()
     functions["_write_vip_sheet"](client, "台北", rows + [duplicate], datetime(2026, 10, 1), area_target_id="sheet-id")
-    assert [item["range"] for item in sheet.formats[1:]] == ["A2:S2", "A3:S3"]
+    assert [item["range"] for item in sheet.formats[1:]] == ["A2:S3"]
     assert sheet.updates[0]["values"][2][8] == "暫停"
 
 
@@ -399,7 +400,7 @@ def test_topup_list_is_not_created_when_nobody_needs_topup():
 
 def test_export_sorts_by_base_name_then_address_then_date():
     functions = _load_functions("normalize_text", "normalize_name_for_compare", "normalize_address",
-                                "normalize_phone", "_write_vip_sheet")
+                                "normalize_phone", "_contiguous_row_ranges", "_write_vip_sheet")
     functions["_write_topup_list"] = lambda *args: ""
     writes = []
 
