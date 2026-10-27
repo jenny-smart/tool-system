@@ -35,14 +35,23 @@ def test_normalize_phone_adds_leading_zero_and_keeps_ten_digits():
     assert normalize_phone("0912-345-678") == "0912345678"
 
 
-def test_gc_installs_gspread_retry_inside_subprocess():
+def test_gc_installs_google_retries_inside_subprocess():
     from unittest.mock import patch
     functions = _load_functions("_gc")
     functions["_get_credentials"] = lambda: "credentials"
     functions["gspread"] = SimpleNamespace(authorize=lambda credentials: credentials)
-    with patch("services.google_api_retry.install_gspread_retry") as install:
+    with patch("services.google_api_retry.install_gspread_retry") as install_gspread, \
+            patch("services.google_api_retry.install_googleapiclient_retry") as install_google_api:
         assert functions["_gc"]() == "credentials"
-    install.assert_called_once_with()
+    install_gspread.assert_called_once_with()
+    install_google_api.assert_called_once_with()
+
+
+def test_deep_clean_candidate_years_skip_unrelated_drive_folders():
+    candidate_years = _load_functions("_deep_clean_candidate_years")["_deep_clean_candidate_years"]
+    assert candidate_years(datetime(2026, 10, 1), datetime(2026, 10, 31)) == [2026]
+    assert candidate_years(datetime(2026, 12, 1), datetime(2027, 2, 28)) == [2026]
+    assert candidate_years(datetime(2027, 1, 1), datetime(2027, 2, 28)) == [2026]
 
 
 def test_schedule_builder_passes_compare_only_to_safe_writer():
