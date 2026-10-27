@@ -1186,8 +1186,10 @@ if mode == "批次建單（Google Sheet）":
     batch_allow_auto_lemon = st.checkbox("查無班表時自動補檸檬人（不動其他客人已配班專員）", value=False, key="batch_allow_auto_lemon")
     st.caption("指定範圍及自動篩選可包含失敗列；調整後可直接重試，不必清空 N 欄結果。")
     st.caption("三種批次共用建單條件：訂單編號空白＋狀態未安排＋「預約條件」空白或在本次預約對象內；其他列會略過並在執行過程註明原因。")
-    from selected_row_status_guard import render_stage_filter
+    from selected_row_status_guard import (filter_row_numbers_by_service_date, render_service_date_filter,
+                                           render_stage_filter, validate_service_date_range)
     render_stage_filter(st, "batch_booking_stages")
+    service_start, service_end = render_service_date_filter(st, "batch_service_date")
     auto_no_slot_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋無班表", value=False, key="auto_no_slot_rows")
     auto_missing_o_rows = st.checkbox("自動篩選：狀態未安排＋訂單編號空白＋O欄找不到訂單編號", value=False, key="auto_missing_o_rows")
     from selected_row_status_guard import render_o_text_filter
@@ -1208,6 +1210,10 @@ if mode == "批次建單（Google Sheet）":
             st.error("請輸入工作表名稱"); st.stop()
         if not selected_actions:
             st.error("請至少選擇一個執行項目"); st.stop()
+        try:
+            validate_service_date_range(service_start, service_end)
+        except ValueError as e:
+            st.error(str(e)); st.stop()
         if dev_sheet_copy.is_dev(env):
             # 測試機：先複製分頁，後續篩選、建單、回填都改用副本。
             _source_sheet = sheet_name.strip()
@@ -1235,7 +1241,8 @@ if mode == "批次建單（Google Sheet）":
                     from selected_row_status_guard import _held_for_request
                     modes = [m for m, on in (("no_schedule", auto_no_slot_rows), ("missing_order", auto_missing_o_rows)) if on]
                     held_only = _held_for_request(batch_booking_optimized, sheet_name.strip(), region, modes=modes,
-                                                  mode_scope=candidate_rows or None, o_texts=o_texts)
+                                                  mode_scope=candidate_rows or None, o_texts=o_texts,
+                                                  service_start=service_start, service_end=service_end)
                 except Exception:
                     held_only = []
                 if held_only:
@@ -1247,6 +1254,13 @@ if mode == "批次建單（Google Sheet）":
                 target_rows = parse_row_input(row_input)
             except Exception as e:
                 st.error(f"列號格式錯誤：{e}"); st.stop()
+        try:
+            target_rows, date_excluded_rows = filter_row_numbers_by_service_date(
+                batch_booking_optimized, sheet_name.strip(), target_rows, service_start, service_end)
+        except Exception as e:
+            st.error(f"服務日期篩選失敗：{e}"); st.stop()
+        if not target_rows:
+            st.info("指定範圍內沒有符合服務起迄日的列。"); st.stop()
         logs = []
         def ui_log(msg):
             logs.append(format_log_message(msg))
@@ -1260,15 +1274,19 @@ if mode == "批次建單（Google Sheet）":
             if auto_no_slot_rows or auto_missing_o_rows:
                 modes = [m for m, on in (("no_schedule", auto_no_slot_rows), ("missing_order", auto_missing_o_rows)) if on]
                 held_rows = _held_for_request(batch_booking_optimized, sheet_name.strip(), region, modes=modes,
-                                              mode_scope=candidate_rows or None, o_texts=o_texts)
+                                              mode_scope=candidate_rows or None, o_texts=o_texts,
+                                              service_start=service_start, service_end=service_end)
             else:
-                held_rows = _held_for_request(batch_booking_optimized, sheet_name.strip(), region, target_rows)
+                held_rows = _held_for_request(batch_booking_optimized, sheet_name.strip(), region, target_rows,
+                                              service_start=service_start, service_end=service_end)
         except Exception as e:
             held_rows = []
             ui_log(f"⚠️ 無法計算未選對象略過列數：{e}")
         if held_rows:
             from selected_row_status_guard import held_message
             ui_log(f"⏭️ {held_message(batch_booking_optimized, sheet_name.strip(), held_rows)}：" + "、".join(map(str, held_rows)))
+        if date_excluded_rows:
+            ui_log("⏭️ 略過不在服務起迄日內的列：" + "、".join(map(str, date_excluded_rows)))
         with st.spinner("執行中，請稍候…"):
             row_label = "、".join(map(str, target_rows))
             ui_log(f"▶ 指定列 {row_label}，依列號逐筆單筆成單，不分組…")
