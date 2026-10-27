@@ -468,7 +468,8 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
     if from_sheet:
         # 開始日由 Agent 執行時讀財報最後一列決定
         start_date = ""
-    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date or "財報起"}_{end_date}.csv"
+    start_label = start_date or "財報起"
+    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_label}_{end_date}.csv"
     return [
         sys.executable,
         "-m",
@@ -692,7 +693,8 @@ def build_yuanta_download(params: dict[str, Any]) -> list[str]:
     if from_sheet:
         # 開始日由 Agent 執行時讀財報最後一列決定
         start_date = ""
-    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_date or "財報起"}_{end_date}.csv"
+    start_label = start_date or "財報起"
+    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_label}_{end_date}.csv"
     return [
         sys.executable, "-m", "tools.bank_statement.yuanta_agent", "download",
         "--area", area, "--end", end_date,
