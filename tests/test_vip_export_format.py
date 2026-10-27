@@ -35,6 +35,16 @@ def test_normalize_phone_adds_leading_zero_and_keeps_ten_digits():
     assert normalize_phone("0912-345-678") == "0912345678"
 
 
+def test_gc_installs_gspread_retry_inside_subprocess():
+    from unittest.mock import patch
+    functions = _load_functions("_gc")
+    functions["_get_credentials"] = lambda: "credentials"
+    functions["gspread"] = SimpleNamespace(authorize=lambda credentials: credentials)
+    with patch("services.google_api_retry.install_gspread_retry") as install:
+        assert functions["_gc"]() == "credentials"
+    install.assert_called_once_with()
+
+
 def test_schedule_builder_passes_compare_only_to_safe_writer():
     from unittest.mock import patch
     functions = _load_functions("_build_vip_schedule_sheet")
@@ -135,14 +145,11 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
 
     # 姓氏總筆劃：王（4）在李（7）前面。
     assert [row[2] for row in sheet.updates[0]["values"][1:]] == ["王小明", "李小華"]
-    assert sheet.updates[1] == {
-        "values": [["0912345678"], ["0987654321"]],
-        "range_name": "D2:D3",
-        "value_input_option": "RAW",
-    }
+    assert sheet.updates[0]["value_input_option"] == "RAW"
+    assert [row[3] for row in sheet.updates[0]["values"][1:]] == ["0912345678", "0987654321"]
     assert sheet.formats[0]["range"] == "A2:S3"
     assert [row[18] for row in sheet.updates[0]["values"][1:]] == ["event-wang", "event-li"]
-    assert sheet.updates[2]["range_name"] == "T1:U2"
+    assert sheet.updates[1]["range_name"] == "T1:U2"
     # Export itself also highlights both active and paused same-day visits.
     duplicate = {**rows[0], "address": "台北市", "event_id": "event-wang-paused", "status": "暫停"}
     rows[0]["address"] = "台北市"
