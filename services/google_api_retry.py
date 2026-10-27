@@ -19,6 +19,7 @@ from functools import wraps
 from typing import Any, Callable
 
 import gspread
+import httplib2
 import requests
 
 
@@ -28,7 +29,7 @@ log = logging.getLogger(__name__)
 
 
 def is_retryable_error(error: Exception) -> bool:
-    if isinstance(error, (requests.Timeout, requests.ConnectionError)):
+    if isinstance(error, (requests.Timeout, requests.ConnectionError, httplib2.HttpLib2Error, TimeoutError)):
         return True
 
     text = str(error)
@@ -136,9 +137,15 @@ def install_googleapiclient_retry() -> None:
 
     @wraps(original_execute)
     def execute_with_retry(self, *args, **kwargs):
+        # googleapiclient uses httplib2, whose default timeout is also None.
+        # Set it on the underlying transport so Drive/Calendar calls cannot hang forever.
+        http = kwargs.get("http") or getattr(self, "http", None)
+        transport = getattr(http, "http", http)
+        if transport is not None and getattr(transport, "timeout", None) is None:
+            transport.timeout = DEFAULT_HTTP_TIMEOUT[1]
         return retry_call(
             lambda: original_execute(self, *args, **kwargs),
-            retries=6,
+            retries=4,
         )
 
     execute_with_retry._retry_installed = True

@@ -137,8 +137,9 @@ def _get_credentials() -> Credentials:
 def _gc() -> gspread.Client:
     # This module runs in a separate Python subprocess.  The retry patch that
     # toolapp installs in the Streamlit process is not inherited by this one.
-    from services.google_api_retry import install_gspread_retry
+    from services.google_api_retry import install_googleapiclient_retry, install_gspread_retry
     install_gspread_retry()
+    install_googleapiclient_retry()
     return gspread.authorize(_get_credentials())
 
 def _calendar_service():
@@ -556,6 +557,17 @@ def get_price_by_date(dt: datetime, deep_clean_setting: Any = None) -> float:
     return 600 + (float(surcharge) / 2)
 
 
+def _deep_clean_candidate_years(start_dt: datetime, end_dt: datetime) -> list[int]:
+    # A season named 2026 covers the end of 2026 and early 2027.  Do not scan
+    # unrelated old/future Drive folders for an October-only export.
+    candidate_years = set(range(start_dt.year, end_dt.year + 1))
+    if start_dt.month <= 3:
+        candidate_years.add(start_dt.year - 1)
+    if end_dt.month < 10:
+        candidate_years.discard(end_dt.year)
+    return sorted(candidate_years)
+
+
 def _load_deep_clean_pricing_settings(start_dt: datetime, end_dt: datetime) -> list[Any]:
     """Load every annual deep-clean setting that could overlap an export range."""
     from tools.service_management.deep_clean_notice import (
@@ -565,8 +577,8 @@ def _load_deep_clean_pricing_settings(start_dt: datetime, end_dt: datetime) -> l
     )
 
     settings = []
-    candidate_years = range(start_dt.year - 1, end_dt.year + 1)
-    for season_year in candidate_years:
+    for season_year in _deep_clean_candidate_years(start_dt, end_dt):
+        log.info("讀取 %d 年度大掃除計價設定中…", season_year)
         try:
             settings_sheet_id, _ = resolve_deep_clean_sheet_ids(
                 season_year, DEFAULT_MASTER_SPREADSHEET_ID,
@@ -580,6 +592,7 @@ def _load_deep_clean_pricing_settings(start_dt: datetime, end_dt: datetime) -> l
                 f"讀取 {season_year} 年度大掃除設定失敗；為避免儲值金扣抵錯誤，已停止匯出：{exc}"
             ) from exc
         settings.append(setting)
+        log.info("%d 年度大掃除計價設定讀取完成", season_year)
     return settings
 
 def parse_service_people(service_text: str) -> int:
