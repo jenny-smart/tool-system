@@ -4799,6 +4799,11 @@ with date_col:
             label_visibility="collapsed",
             key="period",
         )
+        if system_type == "monthly_scheduler" and selected_function in {"預收", "儲值金預收"}:
+            st.caption(
+                "服務日期固定為期別次月起 4 個完整月份；例如 202610＝"
+                "2026/11/01～2027/02/28，202611＝2026/12/01～2027/03/31。"
+            )
 
     # ── ★ 客服排程系統 ──────────────────────────────────────
     elif system_type == "service_schedule":

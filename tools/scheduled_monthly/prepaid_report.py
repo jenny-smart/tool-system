@@ -16,8 +16,9 @@ from __future__ import annotations
 
 存取期間說明：
 - 預設不帶 --period / --start / --end：以今天所在月份的「上個月」為作業月份。
-  例如今天是 2026-07-04，預設期別為 202606-2，預收/服務日期為 2026-07-01 ~ 2026-10-30。
-- 帶 --period 202606-2：預收/服務日期為 2026-07-01 ~ 2026-10-30，存入 202606-2。
+  例如今天是 2026-07-04，預設期別為 202606-2，付款日期為 2026-06-01 ~ 2026-06-30，
+  服務日期為 2026-07-01 ~ 2026-10-31（次月起四個完整月份）。
+- 帶 --period 202606-2：使用相同日期規則，存入 202606-2。
 - 帶 --start / --end：預收/服務日期使用指定區間，期別以 --period 為主。
 """
 
@@ -508,7 +509,9 @@ def resolve_prepaid_ranges(args: RunArgs) -> dict[str, str]:
     clean_year, clean_month = add_months(year, month, 1)
     clean_start = f"{clean_year}-{clean_month:02d}-01"
 
-    end_year, end_month = add_months(clean_year, clean_month, 4)
+    # 服務區間固定為「期別次月起四個完整月份」。
+    # 例如 202610 -> 2026-11-01 ~ 2027-02-28，而不是多抓到 3 月。
+    end_year, end_month = add_months(clean_year, clean_month, 3)
     clean_end = f"{end_year}-{end_month:02d}-{calendar.monthrange(end_year, end_month)[1]:02d}"
 
     return {
