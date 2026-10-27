@@ -14,16 +14,23 @@ from __future__ import annotations
 
 import random
 import time
+import logging
 from functools import wraps
 from typing import Any, Callable
 
 import gspread
+import requests
 
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+DEFAULT_HTTP_TIMEOUT = (10.0, 45.0)
+log = logging.getLogger(__name__)
 
 
 def is_retryable_error(error: Exception) -> bool:
+    if isinstance(error, (requests.Timeout, requests.ConnectionError)):
+        return True
+
     text = str(error)
 
     if "429" in text:
@@ -68,6 +75,7 @@ def retry_call(fn: Callable[..., Any], *args: Any, retries: int = 6, **kwargs: A
             last_error = error
             if not is_retryable_error(error):
                 raise
+            log.warning("Google API 暫時失敗，準備重試（%d/%d）：%s", attempt + 1, retries, error)
             sleep_backoff(attempt)
 
     if last_error:
@@ -90,9 +98,13 @@ def install_gspread_retry() -> None:
 
     @wraps(original_request)
     def request_with_retry(self, *args, **kwargs):
+        # gspread 6.x defaults to timeout=None.  A stalled Google connection can
+        # therefore block a Streamlit subprocess forever without another log line.
+        if getattr(self, "timeout", None) is None:
+            self.timeout = DEFAULT_HTTP_TIMEOUT
         return retry_call(
             lambda: original_request(self, *args, **kwargs),
-            retries=6,
+            retries=4,
         )
 
     request_with_retry._retry_installed = True
