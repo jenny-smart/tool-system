@@ -30,10 +30,20 @@ def _text(value):
     return str(value or "").strip()
 
 
-def _lookup_formula(row, sheet):
-    """購買項目：上月同地址；地址改了或上月沒有這個地址時，改查上月同電話。"""
-    return (f"=IFNA(xlookup(E{row},'{sheet}'!E:E,'{sheet}'!J:J),"
-            f"xlookup(D{row},'{sheet}'!D:D,'{sheet}'!J:J))")
+def _lookup_formula(row, sheet, fallback=None):
+    """購買項目：上月同地址；地址改了或上月沒有這個地址時，改查上月同電話。
+
+    fallback（上月都查不到時，檸檬後台同地址最近一次服務的購買項目）有值時，
+    兩層都查不到改顯示它；後台也查不到時為空字串，不顯示 #N/A。
+    """
+    lookup = (f"IFNA(xlookup(E{row},'{sheet}'!E:E,'{sheet}'!J:J),"
+              f"xlookup(D{row},'{sheet}'!D:D,'{sheet}'!J:J))")
+    if fallback is None:
+        return f"={lookup}"
+    return f'=IFERROR({lookup},"{_text(fallback).replace(chr(34), "")}")'
+
+
+_FALLBACK_FORMULA = re.compile(r'=IFERROR\(IFNA\(xlookup\(E\d+,\'([^\']+)\'!E:E,.*\),"([^"]*)"\)$', re.I)
 
 
 def _canonical(value, column):
@@ -387,7 +397,7 @@ def _balance_attention_rows(existing, updates, sources):
 
 
 def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, compare_only=False,
-                  coverage=None, period_filter=None, gate=None, sort_rows=False):
+                  coverage=None, period_filter=None, gate=None, sort_rows=False, purchase_item_lookup=None):
     """Update calendar A:J; preserve existing K:AG and never clear a schedule.
 
     sort_rows：更新後整列依 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序，與定期VIP匯出相同；
@@ -502,6 +512,44 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             base_sheet = f"{area}{year - 1}12" if month == 1 else f"{area}{year}{month - 1:02d}"
             titles = {sheet.title for sheet in ss.worksheets()}
 
+        # 上月排程的購買項目（顯示值），用來判斷公式是否查得到；查不到才問檸檬後台。
+        previous_items = {}
+
+        def previous_item(sheet, values):
+            if sheet not in previous_items:
+                try:
+                    rows = ss.worksheet(sheet).get("D2:J")
+                except Exception:
+                    rows = []
+                by_address, by_phone = {}, {}
+                for line in rows:
+                    line = list(line) + [""] * 7
+                    item = _text(line[6])
+                    if item and not item.startswith("#"):
+                        by_address.setdefault(_canonical(line[1], 4), item)
+                        by_phone.setdefault(_canonical(line[0], 3), item)
+                previous_items[sheet] = (by_address, by_phone)
+            by_address, by_phone = previous_items[sheet]
+            return by_address.get(_canonical(values[4], 4)) or by_phone.get(_canonical(values[3], 3)) or ""
+
+        def lookup_with_fallback(row_num, sheet, values):
+            """上月查得到用原公式；查不到時帶入檸檬後台同地址最近一次的購買項目。"""
+            if purchase_item_lookup is None or previous_item(sheet, values):
+                return _lookup_formula(row_num, sheet)
+            try:
+                fallback = purchase_item_lookup(values[3], values[4]) or ""
+            except Exception:
+                fallback = ""
+            return _lookup_formula(row_num, sheet, fallback)
+
+        def lookup_sheet_for(values):
+            service_date = _canonical(values[5], 5)
+            if combined_start:
+                year, month = int(combined_start.group(1)[:4]), int(combined_start.group(1)[4:])
+            else:
+                year, month = (int(service_date[:4]), int(service_date[5:7])) if service_date else (int(period[:4]), int(period[4:]))
+            return f"{area}{year - 1}12" if month == 1 else f"{area}{year}{month - 1:02d}"
+
         def repaired_lookup(formula, row_num):
             # Repair earlier #REF! lookups that pointed at a month sheet that does not exist,
             # and upgrade address-only lookups to also fall back to the phone number.
@@ -520,22 +568,16 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
 
         for change in plan["updates"]:
             row, values, before = change["row"], change["values"], change["old"]
-            service_date = _canonical(values[5], 5)
-            if combined_start:
-                year, month = int(combined_start.group(1)[:4]), int(combined_start.group(1)[4:])
-            else:
-                year, month = (int(service_date[:4]), int(service_date[5:7])) if service_date else (int(period[:4]), int(period[4:]))
-            previous = f"{year - 1}12" if month == 1 else f"{year}{month - 1:02d}"
-            lookup_sheet = f"{area}{previous}"
+            lookup_sheet = lookup_sheet_for(values)
             if before is None:
-                values[9] = _lookup_formula(row, lookup_sheet)
+                values[9] = lookup_with_fallback(row, lookup_sheet, values)
                 updates.append({"range": f"A{row}:AD{row}", "values": [values[:30]]})
                 phones.append({"range": f"D{row}", "values": [[values[3]]]})
             else:
                 if values[:9] != before[:9]:
                     values[9] = repaired_lookup(values[9], row) or values[9]
                     if _canonical(values[4], 4) != _canonical(before[4], 4):
-                        values[9] = _lookup_formula(row, lookup_sheet)
+                        values[9] = lookup_with_fallback(row, lookup_sheet, values)
                         if values[9] != before[9]:
                             values[32] += f"；購買項目：{_text(before[9]) or '空白'} → 上月地址／電話查詢公式"
                             for item in plan["changes"]:
@@ -553,8 +595,24 @@ def sync_schedule(ss, target_name, source_rows, headers, worksheet_not_found, co
             # Every existing row, changed or not: old address-only lookups get the phone fallback.
             touched = {item["range"] for item in updates}
             for row_num, physical in enumerate(physical_rows, 2):
-                fixed = repaired_lookup(physical[9] if len(physical) > 9 else "", row_num)
-                if fixed and f"A{row_num}:J{row_num}" not in touched and f"A{row_num}:AD{row_num}" not in touched:
+                if f"A{row_num}:J{row_num}" in touched or f"A{row_num}:AD{row_num}" in touched:
+                    continue
+                current = physical[9] if len(physical) > 9 else ""
+                fixed = repaired_lookup(current, row_num)
+                values = final_rows.get(row_num) or []
+                # Unbooked rows whose lookup finds nothing in last month (shown as #N/A),
+                # or whose J is blank, get the backend's latest purchase item as fallback.
+                if purchase_item_lookup is not None and len(values) > 12 and _text(values[2]) and not _text(values[12]):
+                    sheet = lookup_sheet_for(values)
+                    formula = fixed or _text(current)
+                    earlier = _FALLBACK_FORMULA.match(formula)
+                    # Only blank J or formulas this tool writes; an earlier empty fallback is retried.
+                    ours = not formula or formula == _lookup_formula(row_num, sheet) or (earlier and not earlier.group(2))
+                    if ours and not previous_item(sheet, values):
+                        fixed = lookup_with_fallback(row_num, sheet, values)
+                        if fixed == _text(current):
+                            fixed = ""
+                if fixed:
                     updates.append({"range": f"J{row_num}", "values": [[fixed]]})
         if not created and read_columns[:3] != columns[:3]:
             for row_num, values in enumerate(existing, 2):

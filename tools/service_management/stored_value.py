@@ -1124,6 +1124,36 @@ def _month_keys(start_dt: datetime, end_dt: datetime) -> list[str]:
     return result
 
 
+def _purchase_item_lookup(area_name: str):
+    """上月排程查不到購買項目時：檸檬後台依電話查訂單，取同地址最近一次服務的購買項目。"""
+    cache: dict[str, list] = {}
+    state: dict[str, Any] = {"client": None, "failed": False}
+
+    def lookup(phone: Any, address: Any) -> str:
+        from tools.lemon_backend.memo import parse_date, same_address
+        key = normalize_phone(phone)
+        if not key or state["failed"]:
+            return ""
+        if key not in cache:
+            try:
+                if state["client"] is None:
+                    from tools.lemon_backend.client import BackendClient
+                    state["client"] = BackendClient(area_name)
+                cache[key] = state["client"].search_orders_by_phone(key)
+            except Exception as exc:
+                # 帳密或連線有問題時不再逐列重試，購買項目留空待人工補。
+                log.warning("[%s] 檸檬後台查購買項目失敗：%s", area_name, exc)
+                state["failed"] = True
+                return ""
+        served = [order for order in cache[key]
+                  if order.service_date and order.items and "儲值" not in order.items[0]
+                  and same_address(order.address, str(address or ""))]
+        latest = max(served, key=lambda order: parse_date(order.service_date) or datetime.min, default=None)
+        return latest.items[0] if latest else ""
+
+    return lookup
+
+
 def _build_vip_schedule_sheet(
     gc: gspread.Client,
     area: dict,
@@ -1170,6 +1200,7 @@ def _build_vip_schedule_sheet(
         period_filter="" if is_cross_month else start_period,
         gate=gate,
         sort_rows=sort_rows,
+        purchase_item_lookup=None if compare_only else _purchase_item_lookup(area_name),
     )
     if gate_rules:
         result.setdefault("booking_gate", {})["rules"] = gate_rules
