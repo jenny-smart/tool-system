@@ -462,9 +462,13 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
     end_date = str(params.get("end_date") or "").strip()
     if not area or area == "全區":
         raise ValueError("富邦明細下載請選擇單一區域")
-    if not start_date or not end_date:
+    from_sheet = params.get("start_from") == "sheet"
+    if not end_date or not (start_date or from_sheet):
         raise ValueError("富邦明細下載缺少開始日期或結束日期")
-    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
+    if from_sheet:
+        # 開始日由 Agent 執行時讀財報最後一列決定
+        start_date = ""
+    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date or "財報起"}_{end_date}.csv"
     return [
         sys.executable,
         "-m",
@@ -472,15 +476,13 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
         "download",
         "--area",
         area,
-        "--start",
-        start_date,
         "--end",
         end_date,
         "--cdp-url",
         cdp_url,
         "--output",
         str(output),
-    ]
+    ] + (["--start", start_date] if start_date else ["--start-from-sheet"])
 
 
 def build_fubon_atm_refund(params: dict[str, Any]) -> list[str]:
@@ -572,6 +574,33 @@ def build_fubon_supply_purchase(params: dict[str, Any]) -> list[str]:
     ]
 
 
+def build_fubon_internal_payment(params: dict[str, Any]) -> list[str]:
+    area = str(params.get("area") or "").strip()
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    payment_rows = params.get("payment_rows") or []
+    deposit_rows = params.get("deposit_rows") or []
+    supply = {str(month): [int(row) for row in rows] for month, rows in (params.get("supply") or {}).items() if rows}
+    if area not in ("台北", "台中"):
+        raise ValueError("富邦內部請款目前只支援台北、台中")
+    if not (payment_rows or deposit_rows or supply):
+        raise ValueError("請先勾選要處理的內部請款資料")
+    return [
+        sys.executable,
+        "-m",
+        "tools.bank_statement.fubon_internal_payment",
+        "--area",
+        area,
+        "--cdp-url",
+        cdp_url,
+        "--payment-rows",
+        ",".join(str(int(row)) for row in payment_rows),
+        "--deposit-rows",
+        ",".join(str(int(row)) for row in deposit_rows),
+        "--supply",
+        json.dumps(supply, ensure_ascii=False),
+    ] + (["--merge"] if params.get("merge") else [])
+
+
 def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     month = str(params.get("month") or "").strip()
@@ -599,6 +628,18 @@ def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def _fubon_mobile_download_args(area: str, params: dict[str, Any], *, required: bool) -> list[str]:
+    """手機驗證後接續下載：start_from=sheet 時開始日由 Agent 讀財報最後一列決定。"""
+    from_sheet = params.get("start_from") == "sheet"
+    start_date = "" if from_sheet else str(params.get("start_date") or "").strip()
+    end_date = str(params.get("end_date") or "").strip()
+    if required and (not end_date or not (start_date or from_sheet)):
+        raise ValueError("富邦明細下載缺少日期")
+    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date or '財報起'}_{end_date}.csv"
+    start_args = ["--start-from-sheet"] if from_sheet else ["--start", start_date]
+    return [*start_args, "--end", end_date, "--output", str(output)]
+
+
 def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     resume = str(params.get("resume") or "login").strip()
@@ -610,12 +651,7 @@ def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
         "--area", area, "--resume", resume, "--cdp-url", cdp_url,
     ]
     if resume == "download":
-        start_date = str(params.get("start_date") or "").strip()
-        end_date = str(params.get("end_date") or "").strip()
-        if not start_date or not end_date:
-            raise ValueError("富邦明細下載缺少日期")
-        output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
-        command.extend(["--start", start_date, "--end", end_date, "--output", str(output)])
+        command.extend(_fubon_mobile_download_args(area, params, required=True))
     return command
 
 
@@ -633,10 +669,7 @@ def build_fubon_verify(params: dict[str, Any]) -> list[str]:
         "--captcha", captcha, "--cdp-url", cdp_url,
     ]
     if resume == "download":
-        start_date = str(params.get("start_date") or "").strip()
-        end_date = str(params.get("end_date") or "").strip()
-        output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
-        command.extend(["--start", start_date, "--end", end_date, "--output", str(output)])
+        command.extend(_fubon_mobile_download_args(area, params, required=False))
     return command
 
 
@@ -653,14 +686,18 @@ def build_yuanta_download(params: dict[str, Any]) -> list[str]:
     end_date = str(params.get("end_date") or "").strip()
     if not area or area == "全區":
         raise ValueError("元大明細查詢請選擇單一區域")
-    if not start_date or not end_date:
+    from_sheet = params.get("start_from") == "sheet"
+    if not end_date or not (start_date or from_sheet):
         raise ValueError("元大明細查詢缺少開始日期或結束日期")
-    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_date}_{end_date}.csv"
+    if from_sheet:
+        # 開始日由 Agent 執行時讀財報最後一列決定
+        start_date = ""
+    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_date or "財報起"}_{end_date}.csv"
     return [
         sys.executable, "-m", "tools.bank_statement.yuanta_agent", "download",
-        "--area", area, "--start", start_date, "--end", end_date,
+        "--area", area, "--end", end_date,
         "--output", str(output),
-    ]
+    ] + (["--start", start_date] if start_date else ["--start-from-sheet"])
 
 
 def build_yuanta_salary_status(params: dict[str, Any]) -> list[str]:
@@ -763,6 +800,7 @@ register_action("fubon.atm_refund", build_fubon_atm_refund)
 register_action("fubon.payment_request", build_fubon_payment_request)
 register_action("fubon.deposit_refund", build_fubon_deposit_refund)
 register_action("fubon.supply_purchase", build_fubon_supply_purchase)
+register_action("fubon.internal_payment", build_fubon_internal_payment)
 register_action("fubon.fixed_expense_transfer", build_fubon_fixed_expense_transfer)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
@@ -824,6 +862,7 @@ ACTION_LABELS = {
     "fubon.payment_request": "【富邦銀行】請款記錄",
     "fubon.deposit_refund": "【富邦銀行】工具包押金退款",
     "fubon.supply_purchase": "【富邦銀行】清潔用品採購",
+    "fubon.internal_payment": "【富邦銀行】內部請款整合執行",
     "fubon.fixed_expense_transfer": "【財報】各區固定費用匯款",
     "fubon.captcha": "【富邦銀行】擷取驗證碼",
     "fubon.verify": "【富邦銀行】送出驗證碼",
@@ -955,6 +994,19 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
             line = raw_line.rstrip("\r\n")
             if line.startswith("CAPTCHA_RESULT:"):
                 special_result.update(json.loads(line.split(":", 1)[1]))
+                if special_result.get("image_base64"):
+                    # 驗證碼一擷取到就先寫回，網頁不用等子程式結束（斷開 Chrome、寫 Log）才看到圖片
+                    update_task(
+                        row_number,
+                        {
+                            "message": "驗證碼圖片已擷取，請在手機輸入驗證碼",
+                            "result_json": json.dumps(
+                                {"log_sheet": LOG_SHEET_NAME, **special_result}, ensure_ascii=False
+                            ),
+                        },
+                        service=service,
+                        spreadsheet_id=spreadsheet_id,
+                    )
                 continue
             print(line, flush=True)
             record(line)

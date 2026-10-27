@@ -62,7 +62,7 @@ def test_supply_purchase_falls_back_to_report_account_when_same_name_is_missing(
 
 def run_purchase(*, completion_error=False, write_error=False):
     tree = ast.parse(SOURCE.read_text())
-    run = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'run')
+    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('prepare', 'pay', 'run')]
     service = MagicMock()
     if write_error:
         service.spreadsheets().values().batchUpdate().execute.side_effect = OSError('failed')
@@ -70,7 +70,7 @@ def run_purchase(*, completion_error=False, write_error=False):
     if completion_error:
         wait.side_effect = RuntimeError('not completed')
     item = dict(sheet_row=2, rows=[2, 5], supplier='supplier', bank_code='012', account_number='123', amount='300')
-    ns = dict(Path=Path, datetime=datetime, ZoneInfo=ZoneInfo, ExitStack=ExitStack, logout_quietly=MagicMock(), run_download=MagicMock(), SUPPLY_PURCHASE_TYPE='清潔用品採購',
+    ns = dict(report_query_start=lambda account, end: end, Path=Path, datetime=datetime, ZoneInfo=ZoneInfo, Page=object, ExitStack=ExitStack, logout_quietly=MagicMock(), run_download=MagicMock(), SUPPLY_PURCHASE_TYPE='清潔用品採購',
               read_report_values=MagicMock(return_value=[]),
               pending_supply_purchases=MagicMock(return_value=[item]),
               resolve_report_location=MagicMock(return_value=('sheet-id', '進貨明細表-台北')),
@@ -79,7 +79,7 @@ def run_purchase(*, completion_error=False, write_error=False):
               sync_playwright=MagicMock(), connect_existing_chrome=MagicMock(return_value=(None, MagicMock())),
               ensure_login=MagicMock(), fill_supply_purchase=MagicMock(),
               wait_user_completed_transfer=wait, current_fubon_page=MagicMock())
-    exec(compile(ast.Module(body=[run], type_ignores=[]), str(SOURCE), 'exec'), ns)
+    exec(compile(ast.Module(body=funcs, type_ignores=[]), str(SOURCE), 'exec'), ns)
     return ns, service
 
 

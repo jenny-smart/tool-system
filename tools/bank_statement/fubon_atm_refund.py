@@ -11,7 +11,7 @@ from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.finance_management.refund_guard import ready_for_refund, ready_items, refunded_status
-from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
 from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
@@ -120,10 +120,10 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
                     f"AC={completed_at}／B={done_status}"
                 )
                 page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已完成退款；開始下載今日富邦明細。")
+            print("全部勾選資料均已完成退款；開始下載富邦明細（財報最後一列日期～今天）。")
             today = datetime.now(ZoneInfo("Asia/Taipei")).date()
-            page = run_download(context, page, account, today, today)
-            print("富邦 ATM 退款及今日明細下載全部完成。")
+            page = run_download(context, page, account, report_query_start(account, today), today)
+            print("富邦 ATM 退款及明細下載全部完成。")
         except Exception:
             # 錯誤照常往外拋；登出由上面的 cleanup 負責。
             raise

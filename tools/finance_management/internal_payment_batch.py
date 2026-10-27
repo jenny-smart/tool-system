@@ -4,7 +4,7 @@
   - 請款記錄（財報「請款記錄」A＝待付款）            → 【富邦銀行】請款記錄
   - 工具包押金退款（H 押金＞0、S 空白）               → 【富邦銀行】工具包押金退款
   - 清潔用品採購（進貨明細表，Q 匯款日期與 S 請款日期都空白，依月份） → 【富邦銀行】清潔用品採購
-勾選後依序排入本機 Agent（富邦轉帳仍需手機核准）；最後排一筆「留紀錄」，
+勾選後每個地區排一筆本機 Agent：登入一次、轉帳全部做完才下載明細（財報最後一列日期～今天）（富邦轉帳仍需手機核准）；最後排一筆「留紀錄」，
 重新盤點勾選的列，已付款的列寫進 Jenny 行事曆（jenny@lemonclean.com.tw，不跳提醒）。
 每週二、五 10:00 的富邦待辦通知也用這裡的 scan() 列出待處理筆數。
 """
@@ -28,6 +28,8 @@ KINDS = {
     "deposit": ("工具包押金退款", "fubon.deposit_refund"),
     "supply": ("清潔用品採購", "fubon.supply_purchase"),
 }
+# 同一地區三種一起做：登入一次、轉帳全部完成後才下載明細
+BATCH_ACTION = "fubon.internal_payment"
 
 
 def _supply_months(values: list[list[str]]) -> list[str]:
@@ -93,26 +95,29 @@ def _key(item: dict) -> tuple:
 
 def queue_actions(items: list[dict], create_task: Callable, created_by: str = "內部請款整合執行",
                   log: Callable[[str], None] = print, merge_payments: bool = False) -> list[dict]:
-    """每區每種（清潔用品再依月份）排一筆本機 Agent 任務，最後排一筆「留紀錄」。
+    """每區排一筆本機 Agent 任務：登入一次、轉帳全部做完才下載明細；最後排一筆「留紀錄」。
 
     merge_payments：請款記錄同一收款對象合併成一筆轉帳。要合併與不合併的請分兩次執行。"""
     tasks = []
-    groups: dict[tuple, list[int]] = {}
-    for item in items:
-        groups.setdefault((item["kind"], item["area"], item.get("month", "")), []).append(int(item["row"]))
-    for kind in KINDS:
-        for area in AREAS:
-            for (k, a, month), rows in groups.items():
-                if (k, a) != (kind, area):
-                    continue
-                params = {"area": area, "selected_rows": sorted(rows), "cdp_url": "http://127.0.0.1:9222"}
-                if month:
-                    params["month"] = month
-                if kind == "payment" and merge_payments:
-                    params["merge"] = True
-                task = create_task(KINDS[kind][1], params, created_by=created_by)
-                tasks.append(task)
-                log(f"已排入：{area} {KINDS[kind][0]}{f'（{month}）' if month else ''} {len(rows)} 筆 → {task.get('task_id', '')}")
+    for area in AREAS:
+        hit = [i for i in items if i["area"] == area]
+        if not hit:
+            continue
+        rows: dict[str, list[int]] = {"payment": [], "deposit": []}
+        supply: dict[str, list[int]] = {}
+        for i in hit:
+            target = supply.setdefault(i.get("month", ""), []) if i["kind"] == "supply" else rows[i["kind"]]
+            target.append(int(i["row"]))
+        params = {"area": area, "payment_rows": sorted(rows["payment"]), "deposit_rows": sorted(rows["deposit"]),
+                  "supply": {month: sorted(r) for month, r in sorted(supply.items())},
+                  "cdp_url": "http://127.0.0.1:9222"}
+        if merge_payments and params["payment_rows"]:
+            params["merge"] = True
+        task = create_task(BATCH_ACTION, params, created_by=created_by)
+        tasks.append(task)
+        counts = "、".join(f"{label} {sum(1 for i in hit if i['kind'] == kind)} 筆"
+                          for kind, (label, _action) in KINDS.items() if any(i["kind"] == kind for i in hit))
+        log(f"已排入：{area} {counts}（轉完才下載明細）→ {task.get('task_id', '')}")
     if items:
         selected = [{"kind": i["kind"], "area": i["area"], "row": int(i["row"]), "month": i.get("month", ""),
                      "payee": i.get("payee", ""), "amount": i.get("amount", "")} for i in items]

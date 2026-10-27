@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
 from tools.bank_statement.fubon_payment_request_filter import merge_by_payee, pending_payment_requests
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
@@ -78,7 +78,8 @@ def fill_payment_request(
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
 
 
-def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: bool = False) -> int:
+def prepare(area: str, rows: set[int], merge: bool = False) -> dict:
+    """進銀行前先讀報表、挑出勾選的待付款列（失敗就不登入富邦）。"""
     values = read_report_values(PAYMENT_REQUEST_TYPE, area)
     candidates = pending_payment_requests(values)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
@@ -90,39 +91,46 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: boo
         for item in selected:
             if len(item["rows"]) > 1:
                 print(f"合併：{item['name']} {item['memo']}，合計 NT$ {item['amount']}")
-
-    account = load_account("fubon", area, accounts_file.expanduser())
     spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, area)
-    service = get_sheets_service()
+    return {"selected": selected, "spreadsheet_id": spreadsheet_id, "sheet_title": sheet_title,
+            "service": get_sheets_service()}
+
+
+def pay(context, page: Page, area: str, account, prepared: dict) -> Page:
+    """在已登入的富邦頁面逐筆轉帳並回填 A/B 欄（不下載明細、不登出）。"""
+    service = prepared["service"]
+    for item in prepared["selected"]:
+        print(f"準備第 {item['sheet_row']} 列：{item['name']}／NT$ {item['amount']}")
+        fill_payment_request(page, area, account.bank_account, item)
+        # 每一筆都要等人工按「確認」真的送出後才回填，最後一筆也不
+        # 例外——不然腳本沒等最後一筆完成就結束，A/B 欄就不會回填。
+        wait_user_completed_transfer(page)
+        payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
+        paid_rows = [int(row) for row in item.get("rows") or [item["sheet_row"]]]
+        for row in paid_rows:
+            service.spreadsheets().values().update(
+                spreadsheetId=prepared["spreadsheet_id"],
+                range=f"'{prepared['sheet_title']}'!A{row}:B{row}",
+                valueInputOption="USER_ENTERED",
+                body={"values": [["已付款", payment_date]]},
+            ).execute()
+        print(f"已回填第 {'、'.join(map(str, paid_rows))} 列：已付款／{payment_date}")
+        page = current_fubon_page(context, page) or page
+    print("全部勾選的請款記錄均已完成付款並回填 A/B 欄。")
+    return page
+
+
+def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: bool = False) -> int:
+    prepared = prepare(area, rows, merge)
+    account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
         cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
-        try:
-            for item in selected:
-                print(f"準備第 {item['sheet_row']} 列：{item['name']}／NT$ {item['amount']}")
-                fill_payment_request(page, area, account.bank_account, item)
-                # 每一筆都要等人工按「確認」真的送出後才回填，最後一筆也不
-                # 例外——不然腳本沒等最後一筆完成就結束，A/B 欄就不會回填。
-                wait_user_completed_transfer(page)
-                payment_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
-                paid_rows = [int(row) for row in item.get("rows") or [item["sheet_row"]]]
-                for row in paid_rows:
-                    service.spreadsheets().values().update(
-                        spreadsheetId=spreadsheet_id,
-                        range=f"'{sheet_title}'!A{row}:B{row}",
-                        valueInputOption="USER_ENTERED",
-                        body={"values": [["已付款", payment_date]]},
-                    ).execute()
-                print(f"已回填第 {'、'.join(map(str, paid_rows))} 列：已付款／{payment_date}")
-                page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已完成付款並回填 A/B 欄。")
-            print("開始下載今日富邦明細。")
-            today = datetime.now(ZoneInfo("Asia/Taipei")).date()
-            page = run_download(context, page, account, today, today)
-        except Exception:
-            # 錯誤照常往外拋；登出由上面的 cleanup 負責。
-            raise
+        page = pay(context, page, area, account, prepared)
+        print("開始下載富邦明細（財報最後一列日期～今天）。")
+        today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+        run_download(context, page, account, report_query_start(account, today), today)
     return 0
 
 

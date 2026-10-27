@@ -40,6 +40,8 @@ def plan(when):
         add('scheduled_fubon_statement')  # 11:00、16:30 例假日由 fubon_statement_queue 略過
     if hm == '10:00':
         add('scheduled_change_order_check')
+    if hm == '11:00' and 18 <= when.day <= 25:
+        add('scheduled_yuanta_statement')  # 25 日、遇例假日提前；實際日期由 yuanta_statement_queue 判斷
     if hm == '10:00' and when.weekday() in {1, 4}:
         add('scheduled_fubon_pending_check')
     if hm == '00:00' and when.day == 20:

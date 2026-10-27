@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download
+from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
 from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
@@ -86,66 +86,74 @@ def fill_supply_purchase(
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
 
 
-def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
+def prepare(area: str, month: str, rows: set[int]) -> dict:
+    """進銀行前先讀報表、挑出該月份勾選的待付款（失敗就不登入富邦）。"""
     values = read_report_values(SUPPLY_PURCHASE_TYPE, area)
     candidates = pending_supply_purchases(values, month)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
     if not selected:
         raise ValueError("勾選列中沒有符合採購月份、且 N/O 欄皆非空白的資料")
-
     spreadsheet_id, sheet_title = resolve_report_location(SUPPLY_PURCHASE_TYPE, area)
-    service = get_sheets_service()
+    return {"selected": selected, "month": month, "spreadsheet_id": spreadsheet_id,
+            "sheet_title": sheet_title, "service": get_sheets_service()}
+
+
+def pay(context, page: Page, area: str, account, prepared: dict) -> Page:
+    """在已登入的富邦頁面逐筆付款並回填 Q 欄（不下載明細、不登出）。"""
+    month = prepared["month"]
+    escaped_title = prepared["sheet_title"].replace("'", "''")
+    for item in prepared["selected"]:
+        rows_desc = "、".join(str(r) for r in item["rows"])
+        print(
+            f"準備第 {rows_desc} 列（{item['supplier']}）／"
+            f"{item['bank_code']}／{item['account_number']}／NT$ {item['amount']}"
+        )
+        fill_supply_purchase(page, area, account.bank_account, month, item)
+        completed_at = wait_user_completed_transfer(
+            page,
+            require_completed_at=True,
+            expected_amount=str(item["amount"]),
+            expected_account=str(item["account_number"]),
+        )
+        payment_date = datetime.strptime(
+            completed_at[:10], "%Y-%m-%d"
+        ).strftime("%Y/%m/%d")
+        try:
+            prepared["service"].spreadsheets().values().batchUpdate(
+                spreadsheetId=prepared["spreadsheet_id"],
+                body={
+                    "valueInputOption": "USER_ENTERED",
+                    "data": [
+                        {
+                            "range": f"'{escaped_title}'!Q{row}",
+                            "values": [[payment_date]],
+                        }
+                        for row in item["rows"]
+                    ],
+                },
+            ).execute()
+        except Exception as exc:
+            raise RuntimeError(
+                f"第 {rows_desc} 列付款已完成，但 Q 欄日期回填失敗；"
+                "已停止，請人工確認，勿重複付款。"
+            ) from exc
+        print(f"已回填第 {rows_desc} 列 Q 欄：{payment_date}")
+        page = current_fubon_page(context, page) or page
+    print(f"全部勾選的 {month} 清潔用品採購均已完成付款並回填 Q 欄。")
+    return page
+
+
+def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
+    prepared = prepare(area, month, rows)
     account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
         page = ensure_login(context, account)
         cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
-        try:
-            for item in selected:
-                rows_desc = "、".join(str(r) for r in item["rows"])
-                print(
-                    f"準備第 {rows_desc} 列（{item['supplier']}）／"
-                    f"{item['bank_code']}／{item['account_number']}／NT$ {item['amount']}"
-                )
-                fill_supply_purchase(page, area, account.bank_account, month, item)
-                completed_at = wait_user_completed_transfer(
-                    page,
-                    require_completed_at=True,
-                    expected_amount=str(item["amount"]),
-                    expected_account=str(item["account_number"]),
-                )
-                payment_date = datetime.strptime(
-                    completed_at[:10], "%Y-%m-%d"
-                ).strftime("%Y/%m/%d")
-                escaped_title = sheet_title.replace("'", "''")
-                try:
-                    service.spreadsheets().values().batchUpdate(
-                        spreadsheetId=spreadsheet_id,
-                        body={
-                            "valueInputOption": "USER_ENTERED",
-                            "data": [
-                                {
-                                    "range": f"'{escaped_title}'!Q{row}",
-                                    "values": [[payment_date]],
-                                }
-                                for row in item["rows"]
-                            ],
-                        },
-                    ).execute()
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"第 {rows_desc} 列付款已完成，但 Q 欄日期回填失敗；"
-                        "已停止，請人工確認，勿重複付款。"
-                    ) from exc
-                print(f"已回填第 {rows_desc} 列 Q 欄：{payment_date}")
-                page = current_fubon_page(context, page) or page
-            print("全部勾選資料均已完成付款並回填 Q 欄。")
-            print("開始下載今日富邦明細。")
-            today = datetime.now(ZoneInfo("Asia/Taipei")).date()
-            page = run_download(context, page, account, today, today)
-        except Exception:
-            # 錯誤照常往外拋；登出由上面的 cleanup 負責。
-            raise
+        page = pay(context, page, area, account, prepared)
+        print("開始下載富邦明細（財報最後一列日期～今天）。")
+        today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+        run_download(context, page, account, report_query_start(account, today), today)
     return 0
 
 

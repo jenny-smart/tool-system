@@ -72,7 +72,7 @@ def test_stops_when_login_is_not_this_area(monkeypatch):
 def test_every_transfer_logs_out_when_done():
     root = Path(__file__).resolve().parents[1] / "tools" / "bank_statement"
     for name in ("fubon_atm_refund", "fubon_payment_request", "fubon_deposit_refund",
-                 "fubon_supply_purchase", "fubon_fixed_expense_transfer"):
+                 "fubon_supply_purchase", "fubon_fixed_expense_transfer", "fubon_internal_payment"):
         assert "cleanup.callback(logout_quietly, context, page)" in (root / f"{name}.py").read_text(encoding="utf-8"), name
 
 

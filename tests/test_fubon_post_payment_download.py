@@ -30,7 +30,7 @@ def test_download_only_after_all_payments(kind, completed):
             raise RuntimeError('not completed')
         events.append('paid')
         return '2026-09-14 10:20:30'
-    ns = dict(datetime=datetime, ZoneInfo=ZoneInfo, ExitStack=ExitStack, logout_quietly=MagicMock(),
+    ns = dict(Page=object, report_query_start=lambda account, end: 'sheet-start', datetime=datetime, ZoneInfo=ZoneInfo, ExitStack=ExitStack, logout_quietly=MagicMock(),
         PAYMENT_REQUEST_TYPE='request', DEPOSIT_REFUND_TYPE='deposit',
         read_report_values=MagicMock(), pending_payment_requests=lambda _: [item, item],
         pending_deposit_refunds=lambda _: [item, item], load_account=MagicMock(),
@@ -41,12 +41,14 @@ def test_download_only_after_all_payments(kind, completed):
         read_destination_name=MagicMock(), verify_writeback_access=MagicMock(),
         write_payment_date=lambda *_: events.append('write'),
         run_download=MagicMock(side_effect=lambda *_: events.append('download')))
+    for name in ('prepare', 'pay'):
+        load_function('fubon_' + kind + '.py', name, ns)
     run = load_function('fubon_' + kind + '.py', 'run', ns)
     if completed:
         assert run('台北', {2}, Path('.'), 'cdp') == 0
         assert events == ['paid', 'write', 'paid', 'write', 'download']
         args = ns['run_download'].call_args.args
-        assert args[-2:] == (datetime.now(ZoneInfo('Asia/Taipei')).date(),) * 2
+        assert args[-2:] == ('sheet-start', datetime.now(ZoneInfo('Asia/Taipei')).date())  # 開始日＝財報最後一列
     else:
         with pytest.raises(RuntimeError, match='not completed'):
             run('台北', {2}, Path('.'), 'cdp')

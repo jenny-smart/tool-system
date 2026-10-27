@@ -37,6 +37,12 @@ class ScheduleTests(unittest.TestCase):
         self.assertIn(('scheduled_fubon_pending_check.yml',{}),self.jobs('2026-09-29T10:00'))
         self.assertNotIn(('scheduled_fubon_pending_check.yml',{}),self.jobs('2026-09-30T10:00'))
 
+    def test_yuanta_statement_slots(self):
+        self.assertIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-23T11:00'))
+        self.assertIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-25T11:00'))
+        self.assertNotIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-26T11:00'))
+        self.assertNotIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-25T10:00'))
+
     def test_change_order_check_only_at_10(self):
         self.assertIn(('scheduled_change_order_check.yml',{}),self.jobs('2026-10-17T10:00'))
         for hm in ['12:00','14:00']:

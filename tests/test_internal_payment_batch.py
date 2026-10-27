@@ -17,23 +17,24 @@ def test_payment_items_from_real_filter():
     assert [(i["row"], i["payee"], i["amount"]) for i in items] == [(2, "李", "500")]
 
 
-def test_queue_groups_by_kind_area_month_and_records_last():
+def test_queue_one_task_per_area_and_records_last():
     items = [
         {"kind": "supply", "area": "台北", "row": 8, "month": "202610", "payee": "A", "amount": "100"},
         {"kind": "payment", "area": "台中", "row": 3, "month": "", "payee": "B", "amount": "50"},
         {"kind": "payment", "area": "台北", "row": 5, "month": "", "payee": "C", "amount": "60"},
         {"kind": "supply", "area": "台北", "row": 4, "month": "202609", "payee": "D", "amount": "70"},
+        {"kind": "deposit", "area": "台北", "row": 9, "month": "", "payee": "", "amount": "2000"},
     ]
     created = []
     batch.queue_actions(items, lambda a, p, created_by="": created.append((a, p)) or {"task_id": "t"},
                         log=lambda *_: None)
-    assert [(a, p.get("area"), p.get("selected_rows"), p.get("month")) for a, p in created[:-1]] == [
-        ("fubon.payment_request", "台北", [5], None),
-        ("fubon.payment_request", "台中", [3], None),
-        ("fubon.supply_purchase", "台北", [8], "202610"),
-        ("fubon.supply_purchase", "台北", [4], "202609"),
-    ]
-    assert created[-1][0] == "internal_payment.record" and len(created[-1][1]["items"]) == 4
+    assert [a for a, _ in created] == ["fubon.internal_payment"] * 2 + ["internal_payment.record"]
+    taipei, taichung = created[0][1], created[1][1]
+    assert (taipei["area"], taipei["payment_rows"], taipei["deposit_rows"], taipei["supply"]) == (
+        "台北", [5], [9], {"202609": [4], "202610": [8]})
+    assert (taichung["area"], taichung["payment_rows"], taichung["deposit_rows"], taichung["supply"]) == (
+        "台中", [3], [], {})
+    assert len(created[-1][1]["items"]) == 5
 
 
 def test_record_lists_done_and_pending(monkeypatch):
@@ -83,16 +84,18 @@ def test_merge_by_payee_sums_same_payee_and_account():
     assert "合併 2 筆" in merged[0]["memo"]
 
 
-def test_queue_passes_merge_only_for_payment_requests():
+def test_queue_passes_merge_only_with_payment_requests():
     from tools.finance_management import internal_payment_batch as batch
 
     created = []
     items = [{"kind": "payment", "area": "台北", "row": 5}, {"kind": "deposit", "area": "台北", "row": 8}]
     batch.queue_actions(items, lambda action, params, created_by="": created.append((action, params)) or {},
                         log=lambda *_: None, merge_payments=True)
-    params = dict(created)
-    assert params["fubon.payment_request"]["merge"] is True
-    assert "merge" not in params["fubon.deposit_refund"]
+    assert created[0][1]["merge"] is True
+    created.clear()
+    batch.queue_actions([items[1]], lambda action, params, created_by="": created.append((action, params)) or {},
+                        log=lambda *_: None, merge_payments=True)
+    assert "merge" not in created[0][1]  # 沒有請款記錄就不帶合併
 
 
 def test_agent_command_adds_merge_flag():
@@ -101,3 +104,68 @@ def test_agent_command_adds_merge_flag():
     base = {"area": "台北", "selected_rows": [2, 3]}
     assert "--merge" not in build_fubon_payment_request(base)
     assert build_fubon_payment_request({**base, "merge": True})[-1] == "--merge"
+
+
+def test_agent_command_for_area_batch():
+    from tools.local_agent import build_fubon_internal_payment
+
+    cmd = build_fubon_internal_payment({"area": "台北", "payment_rows": [91], "deposit_rows": [107, 108],
+                                        "supply": {"202610": [4], "202609": []}, "merge": True})
+    assert cmd[2] == "tools.bank_statement.fubon_internal_payment"
+    assert cmd[cmd.index("--payment-rows") + 1] == "91"
+    assert cmd[cmd.index("--deposit-rows") + 1] == "107,108"
+    assert cmd[cmd.index("--supply") + 1] == '{"202610": [4]}'
+    assert cmd[-1] == "--merge"
+
+
+def _area_run(monkeypatch, fail_prepare=()):
+    from contextlib import nullcontext
+    from unittest.mock import MagicMock
+
+    from tools.bank_statement import fubon_internal_payment as combined
+
+    events = []
+    for name in ("fubon_payment_request", "fubon_deposit_refund", "fubon_supply_purchase"):
+        module = getattr(combined, name)
+
+        def prepare(*args, name=name):
+            if name in fail_prepare:
+                raise ValueError("bad sheet")
+            events.append(("prepare", name, args[-1] if name == "fubon_payment_request" else args[1:]))
+            return {"selected": [1]}
+
+        monkeypatch.setattr(module, "prepare", prepare)
+        monkeypatch.setattr(module, "pay", lambda c, page, *a, name=name: events.append(("pay", name)) or page)
+    monkeypatch.setattr(combined, "sync_playwright", lambda: nullcontext())
+    monkeypatch.setattr(combined, "connect_existing_chrome", lambda *a: (None, MagicMock()))
+    monkeypatch.setattr(combined, "load_account", MagicMock())
+    monkeypatch.setattr(combined, "ensure_login", lambda *a: events.append(("login",)) or MagicMock())
+    monkeypatch.setattr(combined, "logout_quietly", lambda *a: events.append(("logout",)))
+    monkeypatch.setattr(combined, "run_download", lambda *a: events.append(("download",)))
+    return combined, events
+
+
+def test_area_batch_logs_in_once_and_downloads_after_all_transfers(monkeypatch):
+    from pathlib import Path
+
+    combined, events = _area_run(monkeypatch)
+    assert combined.run("台北", {91}, {107, 108}, {"202610": {4}, "202609": {2}}, Path("."), "cdp", merge=True) == 0
+    assert [e for e in events if e[0] != "prepare"] == [
+        ("login",), ("pay", "fubon_payment_request"), ("pay", "fubon_deposit_refund"),
+        ("pay", "fubon_supply_purchase"), ("pay", "fubon_supply_purchase"), ("download",), ("logout",)]
+    assert events[0] == ("prepare", "fubon_payment_request", True)
+    assert [e[2] for e in events if e[:2] == ("prepare", "fubon_supply_purchase")] == [("202609", {2}), ("202610", {4})]
+
+
+def test_area_batch_skips_kind_that_fails_before_login(monkeypatch):
+    import pytest
+    from pathlib import Path
+
+    combined, events = _area_run(monkeypatch, fail_prepare=("fubon_deposit_refund",))
+    assert combined.run("台北", {91}, {107}, {}, Path("."), "cdp") == 1
+    assert ("pay", "fubon_deposit_refund") not in events and ("download",) in events
+
+    combined, events = _area_run(monkeypatch, fail_prepare=("fubon_payment_request", "fubon_deposit_refund"))
+    with pytest.raises(ValueError, match="沒有可轉帳的資料"):
+        combined.run("台北", {91}, {107}, {}, Path("."), "cdp")
+    assert ("login",) not in events

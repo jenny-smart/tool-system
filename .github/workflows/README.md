@@ -24,16 +24,22 @@
 | **Scheduled Change Order Daily Check**（`scheduled_change_order_check.yml`） | 每日 10:00 | GitHub | 清潔異動每日檢查：有未備妥的列時在 jenny@lemonclean.com.tw 行事曆建提醒。 |
 | **Scheduled Fubon Pending Check**（`scheduled_fubon_pending_check.yml`） | 每週二、五 10:00 | GitHub | 富邦待辦通知：盤點台北／台中待付款的請款記錄、工具包押金退款、清潔用品採購，在行事曆提醒。 |
 | **Scheduled Fubon Statement Download**（`scheduled_fubon_statement.yml`） | 每日 08:00；工作日另加 11:00、16:30（週六日與國定假日只跑 08:00） | **本機 Agent（Mac）** | 見下方說明。 |
+| **Scheduled Yuanta Statement Download**（`scheduled_yuanta_statement.yml`） | 每月 25 日 11:00；遇例假日提前到前一個工作日 | **本機 Agent（Mac）** | 見下方說明。 |
 | **Scheduled Monthly Jobs**（`scheduled_monthly.yml`） | 15 日 17:00 上半月訂單；月底 17:00 下半月訂單、18:00 已退款；1 日 00:00 預收、00:30 儲值金結算、00:40 儲值金預收 | GitHub | 月排程。手動可選 target 與期別。 |
 | **Scheduled Gmail 401 Archive**（`Scheduled_gmail_401.yml`） | 每月 20 日 00:00 | GitHub | 把 Gmail 主旨含「401」信件的 401 PDF 附件，依檔名關鍵字存到各區雲端資料夾的西元年子資料夾（設定在 `systems.yaml` 的 `gmail_401`），處理過的信加上「401已歸檔」標籤。 |
 | **New Year Generate**（`new_year_generate.yml`） | 只能手動 | GitHub | 年度切換：依主控表「生成新年度」產生新年度資料夾／檔案。參數：年度、列、`dry_run`（預設只預覽）、`fresh`。 |
 
 ## 富邦明細下載（唯一經過 Mac 的排程）
 
-- GitHub **不會登入富邦**，只在主控表「本機Agent任務」新增兩筆 `fubon.download`（台北、台中，日期為當天）。
-- 由 Mac 上的本機 Agent 執行：接續或登入富邦網銀 → 下載當天明細 → 登出。需要驗證碼／手機核准時會停在那一步等人工。
+- GitHub **不會登入富邦**，只在主控表「本機Agent任務」新增兩筆 `fubon.download`（台北、台中；查詢開始日＝財報「富邦更新」最後一列的日期，Agent 執行時才讀，結束日＝今天）。
+- 由 Mac 上的本機 Agent 執行：接續或登入富邦網銀 → 下載「財報最後一列日期～今天」的明細 → 登出。已登記過的明細會比對濾掉，只新增還沒登記的，所以重疊的日期不會重複寫入。需要驗證碼／手機核准時會停在那一步等人工。
 - 11:00、16:30 這兩次在例假日（週六日、國定假日，依 `tools/common/tw_holidays.py` 的政府行事曆）不排任務。
 - **Mac 沒開機時**：任務會排隊，開機後 Agent 依序執行；同一地區、同一天累積多筆時只做最新一筆，較舊的標成「已略過（有較新的同日任務）」。不同日期的任務仍會補跑。
+
+## 元大明細下載
+
+- 每月 25 日 11:00，遇例假日（週六日、國定假日）提前到前一個工作日（`scheduled_yuanta_statement.yml`，每月 18～25 日 11:00 叫起來，由 `tools/scheduled_daily/yuanta_statement_queue.py` 判斷是不是本月執行日）。
+- 一樣只在主控表新增 `yuanta.download`（台北、台中），由 Mac 上的本機 Agent 執行；查詢開始日＝財報「元大更新」最後一列的日期，結束日＝今天。已登記的明細會比對濾掉。
 
 ## 共通
 

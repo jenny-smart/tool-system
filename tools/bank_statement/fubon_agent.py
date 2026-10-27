@@ -23,6 +23,7 @@ from tools.bank_statement.open_login import (
     wait_fubon_login,
 )
 from tools.bank_statement.sheet_filter import (
+    query_start_from_report,
     read_and_filter,
     sync_financial_report,
     sync_fubon_master_sheet,
@@ -280,6 +281,16 @@ def logout_and_close(context: BrowserContext, page: Page) -> None:
         print("富邦視窗已關閉。")
 
 
+def report_query_start(account: BankAccount, end):
+    """轉帳後查明細的開始日：財報「富邦更新」最後一列的日期（跟排程共用）。
+    轉帳已經做完，讀財報失敗也不能中斷，退回只查當天。"""
+    try:
+        return query_start_from_report(account.area, "fubon", end)
+    except Exception as exc:
+        print(f"⚠️ 讀取財報最後一列日期失敗，改查當天明細：{exc}")
+        return end
+
+
 def run_download(
     context: BrowserContext,
     page: Page,
@@ -317,6 +328,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--area", required=True, choices=("台北", "台中", "桃園", "新竹", "高雄"))
     parser.add_argument("--start", type=parse_date)
     parser.add_argument("--end", type=parse_date)
+    parser.add_argument("--start-from-sheet", action="store_true",
+                        help="開始日改用財報「富邦更新」最後一列的日期")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     parser.add_argument("--output", type=Path)
@@ -326,6 +339,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     account = load_account("fubon", args.area, args.accounts_file.expanduser())
+    if args.mode == "download" and args.start_from_sheet and args.end:
+        args.start = query_start_from_report(args.area, "fubon", args.end)
     if args.mode == "download" and (not args.start or not args.end):
         raise ValueError("富邦明細下載缺少開始日期或結束日期")
     with sync_playwright() as playwright:
