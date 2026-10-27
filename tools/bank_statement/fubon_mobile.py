@@ -10,7 +10,13 @@ from pathlib import Path
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
-from tools.bank_statement.fubon_agent import existing_page, logout_and_close, run_download, verify_logged_in_account
+from tools.bank_statement.fubon_agent import (
+    existing_page,
+    logout_and_close,
+    report_query_start,
+    run_download,
+    verify_logged_in_account,
+)
 from tools.bank_statement.open_login import LOGIN_URLS, fill_fubon, is_fubon_logged_in, wait_fubon_login
 from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_chrome
 
@@ -75,6 +81,14 @@ def submit_captcha(context: BrowserContext, session_token: str, code: str) -> Pa
     return wait_fubon_login(context, page, timeout_ms=300_000)
 
 
+def _resolve_start(args: argparse.Namespace, account) -> None:
+    """下載前才決定開始日：--start-from-sheet 時用財報「富邦更新」最後一列的日期。"""
+    if args.start_from_sheet and args.end:
+        args.start = report_query_start(account, args.end)
+    if not args.start or not args.end:
+        raise ValueError("富邦明細下載缺少日期")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="富邦手機圖形驗證碼流程")
     parser.add_argument("mode", choices=("capture", "verify"))
@@ -82,6 +96,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", choices=("login", "download"), default="login")
     parser.add_argument("--start", type=parse_date)
     parser.add_argument("--end", type=parse_date)
+    parser.add_argument("--start-from-sheet", action="store_true",
+                        help="開始日改用財報「富邦更新」最後一列的日期（下載前才讀）")
     parser.add_argument("--session-token", default="")
     parser.add_argument("--captcha", default="")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
@@ -106,8 +122,7 @@ def main() -> int:
                     page = context.new_page()
             if is_fubon_logged_in(page):
                 if args.resume == "download":
-                    if not args.start or not args.end:
-                        raise ValueError("富邦明細下載缺少日期")
+                    _resolve_start(args, account)
                     try:
                         page = run_download(context, page, account, args.start, args.end, args.output)
                     finally:
@@ -127,6 +142,7 @@ def main() -> int:
                 "area": args.area,
                 "start_date": args.start.isoformat() if args.start else "",
                 "end_date": args.end.isoformat() if args.end else "",
+                "start_from": "sheet" if args.start_from_sheet else "",
             }
             print("CAPTCHA_RESULT:" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             return 0
@@ -140,8 +156,7 @@ def main() -> int:
         if args.resume == "login":
             print(f"富邦／{args.area} 登入完成；沿用同一 Chrome Session。")
             return 0
-        if not args.start or not args.end:
-            raise ValueError("富邦明細下載缺少日期")
+        _resolve_start(args, account)
         try:
             page = run_download(context, page, account, args.start, args.end, args.output)
         finally:

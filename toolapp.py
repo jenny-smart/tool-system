@@ -2751,8 +2751,9 @@ def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全�
     task = create_local_agent_task(
         "fubon.captcha" if mobile else "fubon.download",
         {
-            "start_date": start_date.isoformat() if start_date else "",
-            "end_date": end_date.isoformat() if end_date else "",
+            # 開始日＝財報「富邦更新」最後一列的日期（Agent 執行時讀取），跟排程共用
+            "start_from": "sheet",
+            "end_date": (end_date or datetime.now(TW_TZ).date()).isoformat(),
             "area": area,
             "resume": "download",
             "cdp_url": "http://127.0.0.1:9222",
@@ -3040,6 +3041,7 @@ def render_fubon_mobile_verification():
                     "resume": captcha_payload.get("resume", "login"),
                     "start_date": captcha_payload.get("start_date", ""),
                     "end_date": captcha_payload.get("end_date", ""),
+                    "start_from": captcha_payload.get("start_from", ""),
                     "session_token": captcha_payload.get("session_token", ""),
                     "captcha": captcha_code.strip(),
                     "cdp_url": "http://127.0.0.1:9222",
@@ -4389,19 +4391,9 @@ with date_col:
             st.info("備註日期使用今天（台北時間）", icon="📅")
         elif selected_function == "【富邦銀行】富邦明細下載":
             st.markdown('<div class="field-label">📆 日期區間</div>', unsafe_allow_html=True)
-            d1, d2 = st.columns(2)
-            with d1:
-                start_date_value = st.date_input(
-                    "開始日期",
-                    value=today_date - timedelta(days=1),
-                    key="finance_fubon_start_date",
-                )
-            with d2:
-                end_date_value = st.date_input(
-                    "結束日期",
-                    value=today_date,
-                    key="finance_fubon_end_date",
-                )
+            # 跟排程、請款／退款轉帳後的明細下載共用：從財報「富邦更新」最後一列的日期查到今天
+            end_date_value = today_date
+            st.info("開始日期：財報「富邦更新」最後一列的日期（本機 Agent 執行時讀取）；結束日期：今天", icon="📅")
             st.radio(
                 "驗證碼輸入方式",
                 ["Mac 人工輸入驗證碼", "手機輸入驗證碼"],
@@ -6087,6 +6079,8 @@ if run_clicked:
             date_display = period
         elif start_date_value and end_date_value:
             date_display = f"{start_date_value.strftime('%Y-%m-%d')} ~ {end_date_value.strftime('%Y-%m-%d')}"
+        elif selected_function == "【富邦銀行】富邦明細下載" and end_date_value:
+            date_display = f"財報最後一列日期 ~ {end_date_value.strftime('%Y-%m-%d')}"
         else:
             date_display = "（未輸入期別／日期）"
         add_log(f"開始執行：{system_name} / {selected_function} / 執行日期：{date_display} / 執行地區：{selected_area_value}")

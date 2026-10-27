@@ -628,6 +628,18 @@ def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def _fubon_mobile_download_args(area: str, params: dict[str, Any], *, required: bool) -> list[str]:
+    """手機驗證後接續下載：start_from=sheet 時開始日由 Agent 讀財報最後一列決定。"""
+    from_sheet = params.get("start_from") == "sheet"
+    start_date = "" if from_sheet else str(params.get("start_date") or "").strip()
+    end_date = str(params.get("end_date") or "").strip()
+    if required and (not end_date or not (start_date or from_sheet)):
+        raise ValueError("富邦明細下載缺少日期")
+    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date or '財報起'}_{end_date}.csv"
+    start_args = ["--start-from-sheet"] if from_sheet else ["--start", start_date]
+    return [*start_args, "--end", end_date, "--output", str(output)]
+
+
 def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     resume = str(params.get("resume") or "login").strip()
@@ -639,12 +651,7 @@ def build_fubon_captcha(params: dict[str, Any]) -> list[str]:
         "--area", area, "--resume", resume, "--cdp-url", cdp_url,
     ]
     if resume == "download":
-        start_date = str(params.get("start_date") or "").strip()
-        end_date = str(params.get("end_date") or "").strip()
-        if not start_date or not end_date:
-            raise ValueError("富邦明細下載缺少日期")
-        output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
-        command.extend(["--start", start_date, "--end", end_date, "--output", str(output)])
+        command.extend(_fubon_mobile_download_args(area, params, required=True))
     return command
 
 
@@ -662,10 +669,7 @@ def build_fubon_verify(params: dict[str, Any]) -> list[str]:
         "--captcha", captcha, "--cdp-url", cdp_url,
     ]
     if resume == "download":
-        start_date = str(params.get("start_date") or "").strip()
-        end_date = str(params.get("end_date") or "").strip()
-        output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date}_{end_date}.csv"
-        command.extend(["--start", start_date, "--end", end_date, "--output", str(output)])
+        command.extend(_fubon_mobile_download_args(area, params, required=False))
     return command
 
 

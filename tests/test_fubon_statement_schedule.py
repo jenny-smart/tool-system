@@ -119,3 +119,31 @@ def test_transfer_download_start_shared_with_report(monkeypatch):
     assert fubon_agent.report_query_start(account, d(2026, 10, 24)) == d(2026, 10, 20)
     monkeypatch.setattr(fubon_agent, "query_start_from_report", lambda *a: (_ for _ in ()).throw(OSError("403")))
     assert fubon_agent.report_query_start(account, d(2026, 10, 24)) == d(2026, 10, 24)  # 讀表失敗退回當天
+
+
+def test_mobile_download_uses_report_start():
+    from tools.local_agent import build_fubon_captcha, build_fubon_verify
+
+    params = {"area": "台北", "resume": "download", "start_from": "sheet", "end_date": "2026-10-27"}
+    cmd = build_fubon_captcha(params)
+    assert "--start-from-sheet" in cmd and "--start" not in cmd and cmd[cmd.index("--end") + 1] == "2026-10-27"
+    cmd = build_fubon_verify({**params, "session_token": "t", "captcha": "1234"})
+    assert "--start-from-sheet" in cmd and "--start" not in cmd
+    assert "--start" in build_fubon_captcha({"area": "台北", "resume": "download",
+                                             "start_date": "2026-10-01", "end_date": "2026-10-27"})
+
+
+def test_mobile_resolves_start_from_report(monkeypatch):
+    import argparse
+    from datetime import date as d
+
+    import pytest
+
+    from tools.bank_statement import fubon_mobile
+
+    monkeypatch.setattr(fubon_mobile, "report_query_start", lambda account, end: d(2026, 10, 23))
+    args = argparse.Namespace(start=None, end=d(2026, 10, 27), start_from_sheet=True)
+    fubon_mobile._resolve_start(args, object())
+    assert args.start == d(2026, 10, 23)
+    with pytest.raises(ValueError):
+        fubon_mobile._resolve_start(argparse.Namespace(start=None, end=d(2026, 10, 27), start_from_sheet=False), object())
