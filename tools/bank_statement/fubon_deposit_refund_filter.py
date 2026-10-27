@@ -8,14 +8,24 @@ def _cell(row: list[str], column: int) -> str:
     return str(row[column] if len(row) > column else "").strip()
 
 
+# I 欄要是日期（例如 2026/10/20、2026-10-20、10/20）才算可以退款
+DATE_PATTERN = re.compile(r"\d{1,4}\s*[/.\-年]\s*\d{1,2}(\s*[/.\-月]\s*\d{1,2})?")
+
+
+def has_date(text: str) -> bool:
+    return bool(DATE_PATTERN.search(text))
+
+
 def pending_deposit_refunds(values: list[list[str]]) -> list[dict[str, object]]:
-    """Return 工具包押金退款 rows where H>0 and S is blank.
+    """Return 工具包押金退款 rows where H>0, I has a date and S is blank.
 
     轉帳金額為 R 欄；Q 欄同時作為給自己／給對方的留言。
     """
     result: list[dict[str, object]] = []
     for sheet_row, row in enumerate(values[1:], start=2):
         if _cell(row, 18):  # S 欄已有值，代表已處理過
+            continue
+        if not has_date(_cell(row, 8)):  # I 欄沒有日期，還不能退款
             continue
         deposit_text = re.sub(r"[^0-9.\-]", "", _cell(row, 7))
         if not deposit_text:

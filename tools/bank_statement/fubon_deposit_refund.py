@@ -123,7 +123,7 @@ def prepare(area: str, rows: set[int]) -> dict:
     candidates = pending_deposit_refunds(values)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
     if not selected:
-        raise ValueError("勾選列中沒有符合 H>0 且 S 欄空白的資料")
+        raise ValueError("勾選列中沒有符合 H>0、I 欄有日期且 S 欄空白的資料")
 
     # 保持工作表原列順序，支援一次勾選多筆並逐筆完成。
     selected.sort(key=lambda item: int(item["sheet_row"]))
