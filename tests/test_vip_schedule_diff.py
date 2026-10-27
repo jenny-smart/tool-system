@@ -760,3 +760,68 @@ def test_same_day_paused_event_still_pairs_with_paused_row_first():
     plan = plan_schedule([active, paused], sources, '台北202701')
     by_row = {u['row']: u['values'] for u in plan['updates']}
     assert by_row[2][8] == '未安排' and by_row[3][8] == '暫停'
+
+
+class PreviousMonth:
+    """只回傳 D:J（電話～購買項目）的上月排程。"""
+    col_count = 10  # 沒有日曆事件ID欄，不會被當成跨月比對對象
+
+    def __init__(self, title, rows):
+        self.title, self.rows = title, rows
+
+    def get(self, range_name, **kwargs):
+        return [[phone, address, '', '', '', '', item] for phone, address, item in self.rows]
+
+
+def _j_formula(sheet, row_num):
+    return sheet.data[row_num - 1][9]
+
+
+def test_new_row_missing_from_last_month_gets_backend_purchase_item():
+    calls = []
+
+    def lookup(phone, address):
+        calls.append((phone, address))
+        return '辦公室清潔'
+    known, unknown = old_row(event='k', date='2026/12/05'), old_row(event='u', date='2026/12/12')
+    unknown[2], unknown[3], unknown[4] = '王鼎元', '0912025772', '新北市中和區錦和路113號3樓'
+    previous = PreviousMonth('台北202611', [('0912345678', '台北市大安區', '居家清潔')])
+    sheet = Sheet('台北202612', [])
+    sync_schedule(Book([sheet, previous]), '台北202612', [source_row(known), source_row(unknown)],
+                  ['標題'] * 30, MissingSheet, purchase_item_lookup=lookup)
+    assert calls == [('0912025772', '新北市中和區錦和路113號3樓')]
+    assert _j_formula(sheet, 2) == ("=IFNA(xlookup(E2,'台北202611'!E:E,'台北202611'!J:J),"
+                                    "xlookup(D2,'台北202611'!D:D,'台北202611'!J:J))")
+    assert _j_formula(sheet, 3) == ("=IFERROR(IFNA(xlookup(E3,'台北202611'!E:E,'台北202611'!J:J),"
+                                    "xlookup(D3,'台北202611'!D:D,'台北202611'!J:J)),\"辦公室清潔\")")
+
+
+def test_existing_na_rows_get_fallback_but_booked_manual_and_resolved_rows_stay():
+    from tools.service_management.vip_schedule_diff import _lookup_formula
+    lookup_calls = []
+
+    def lookup(phone, address):
+        lookup_calls.append(phone)
+        return '居家清潔'
+    missing = old_row(event='m', date='2026/12/12')
+    missing[2], missing[3], missing[4] = '王鼎元', '0912025772', '新北市中和區錦和路113號3樓'
+    missing[9], missing[12] = _lookup_formula(2, '台北202611'), ''
+    booked = old_row(event='b', date='2026/12/13', order='LC1')
+    booked[2], booked[3], booked[4], booked[9] = '王鼎元', '0912025772', '新北市中和區錦和路113號3樓', _lookup_formula(3, '台北202611')
+    manual = old_row(event='h', date='2026/12/14')
+    manual[2], manual[3], manual[4], manual[9] = '林佩盈', '0919545367', '台北市士林區', '辦公室清潔'
+    found = old_row(event='f', date='2026/12/15')
+    found[9] = _lookup_formula(5, '台北202611')
+    previous = PreviousMonth('台北202611', [('0912345678', '台北市大安區', '居家清潔')])
+    sheet = Sheet('台北202612', [missing, booked, manual, found])
+    sync_schedule(Book([sheet, previous]), '台北202612', [source_row(r) for r in (missing, booked, manual, found)],
+                  ['標題'] * 30, MissingSheet, purchase_item_lookup=lookup)
+    assert _j_formula(sheet, 2).endswith(',"居家清潔")')
+    assert _j_formula(sheet, 3) == _lookup_formula(3, '台北202611')
+    assert _j_formula(sheet, 4) == '辦公室清潔'
+    assert _j_formula(sheet, 5) == _lookup_formula(5, '台北202611')
+    assert lookup_calls == ['0912025772']
+    # A filled fallback is not looked up again on the next update.
+    sync_schedule(Book([sheet, previous]), '台北202612', [source_row(r) for r in (missing, booked, manual, found)],
+                  ['標題'] * 30, MissingSheet, purchase_item_lookup=lookup)
+    assert lookup_calls == ['0912025772']

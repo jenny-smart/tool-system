@@ -61,6 +61,7 @@ def test_schedule_builder_uses_combined_cross_month_source_and_target():
         "json": __import__("json"),
         "re": re,
     })
+    functions["_purchase_item_lookup"] = lambda area: None
     source = SimpleNamespace(
         title="定期VIP_台北_202612-202702", col_count=21,
         get=lambda cell_range: [["2026-12-01", "2027-02-28"]] if cell_range == "T2:U2" else [["data"]],
@@ -280,6 +281,7 @@ def test_schedule_builder_applies_booking_gate_only_when_requested_with_run_peri
     from unittest.mock import patch
     functions = _load_functions("_build_vip_schedule_sheet")
     functions.update({"VIP_SCHEDULE_FALLBACK_HEADERS": [""] * 30, "json": __import__("json")})
+    functions["_purchase_item_lookup"] = lambda area: None
     source = SimpleNamespace(get=lambda _range: [["data"]])
     client = SimpleNamespace(open_by_key=lambda _key: SimpleNamespace(worksheet=lambda _name: source))
     result = {"sheet": "台北202612", "count": 1, "differences": {}, "report": "差異", "booking_gate": {"stages": {}}}
@@ -430,3 +432,26 @@ def test_name_sort_key_orders_surnames_by_taiwan_stroke_count():
     names = ["黃秀玲", "王小明", "黃煦芬", "劉冠亨", "何雅芳", "李曉微", "台灣大幸", "Amy", "陳靜萱"]
     assert sorted(names, key=name_sort_key) == [
         "王小明", "台灣大幸", "何雅芳", "李曉微", "陳靜萱", "黃煦芬", "黃秀玲", "劉冠亨", "Amy"]
+
+
+def test_purchase_item_lookup_uses_latest_served_order_at_same_address():
+    from types import SimpleNamespace as NS
+    from unittest.mock import patch
+    import tools.service_management.stored_value as sv
+    orders = [
+        NS(service_date="2026/09/10", items=["居家清潔"], address="新北市中和區錦和路113號3樓"),
+        NS(service_date="2026/10/08", items=["辦公室清潔"], address="新北市中和區錦和路113號3樓"),
+        NS(service_date="", items=["儲值金"], address="新北市中和區錦和路113號3樓"),
+        NS(service_date="2026/10/20", items=["居家清潔"], address="台北市別的地址"),
+    ]
+    client = NS(search_orders_by_phone=lambda phone: orders)
+    with patch("tools.lemon_backend.client.BackendClient", return_value=client):
+        lookup = sv._purchase_item_lookup("台北")
+        assert lookup("912025772", "新北市中和區錦和路113號3樓") == "辦公室清潔"
+        assert lookup("0912025772", "台北市沒去過") == ""
+
+    def broken(area):
+        raise RuntimeError("帳密未設定")
+    with patch("tools.lemon_backend.client.BackendClient", side_effect=broken):
+        lookup = sv._purchase_item_lookup("台北")
+        assert lookup("0912025772", "x") == "" and lookup("0911111111", "y") == ""
