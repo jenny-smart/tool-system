@@ -1323,9 +1323,9 @@ def flag_cancelled_pending_orders(region: str, session, ui_logger=None) -> Dict:
         purchase = find_purchase_by_order_no(session, order_no)
         raw_status = purchase.get("purchase_status") if purchase else None
         status_code = "" if raw_status is None else str(raw_status).strip()
-        if status_code == "2" and memo.safe_cell(row, COL_STATUS_NOTE) != "檢查訂單狀態":
-            updates.append({"range": f"M{row_num}", "values": [["檢查訂單狀態"]]})
-            log(f"⚠️ {region} 第{row_num}列 {order_no} 已取消，M欄已註記")
+        if status_code == "2" and memo.safe_cell(row, COL_STATUS_NOTE) != "取消訂單":
+            updates.append({"range": f"M{row_num}", "values": [["取消訂單"]]})
+            log(f"⚠️ {region} 第{row_num}列 {order_no} 已取消，M欄已標註「取消訂單」")
 
     if updates:
         memo.with_retry(ws.batch_update, updates, value_input_option="RAW")
