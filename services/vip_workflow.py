@@ -646,6 +646,45 @@ class VipStoredValueWorkflow:
         return len(filtered), original_count
 
     # ============================================================
+    # 代客保留：客人備註／客服備註寫「代客保留：姓名」時，
+    # 搬運進「XX儲值金預收」頁籤後，M 欄（客戶姓名）改標客人實際姓名
+    # （原始值通常是檸檬保留帳號自己的姓名），BL 欄既有公式會自動重新
+    # 帶入姓名＋地址，不用改公式；BK 欄標註「代客保留」方便稽核。
+    # ============================================================
+    _PROXY_RESERVE_PREFIXES = ("代客保留：", "代客保留:")
+
+    def _extract_proxy_reserve_name(self, note: Any) -> str:
+        # 用 startswith 而非 contains：代客保留訂單一旦取消，
+        # 備註會被改成「取消」＋原備註（例如「取消代客保留：王小明」，
+        # 見 tools/orders_system/reserve_cancel.py），不能再比對到。
+        text = str(note or "").strip()
+        for prefix in self._PROXY_RESERVE_PREFIXES:
+            if text.startswith(prefix):
+                name = text[len(prefix):].splitlines()[0].strip()
+                if name:
+                    return name
+        return ""
+
+    def _apply_proxy_reserve_names(self, target_ws, data: List[List[Any]]) -> int:
+        col_note_a = col_to_num("BA") - 1  # 客人備註
+        col_note_b = col_to_num("BB") - 1  # 客服備註
+        col_name = col_to_num("M")         # 客戶姓名
+        col_mark = col_to_num("BK")        # 標註欄
+        marked = 0
+        for i, row in enumerate(data):
+            note = row[col_note_a] if len(row) > col_note_a else ""
+            if not str(note).strip() and len(row) > col_note_b:
+                note = row[col_note_b]
+            name = self._extract_proxy_reserve_name(note)
+            if not name:
+                continue
+            row_num = 2 + i
+            self.sheets.write_values(target_ws, row_num, col_name, [[name]])
+            self.sheets.write_values(target_ws, row_num, col_mark, [["代客保留"]])
+            marked += 1
+        return marked
+
+    # ============================================================
     # 3. 搬運
     # ============================================================
     def move_files(
@@ -727,6 +766,12 @@ class VipStoredValueWorkflow:
 
                 if data:
                     self.sheets.write_values(target_ws, 2, 1, data)
+                    if typ == "儲值金預收":
+                        proxy_count = self._apply_proxy_reserve_names(target_ws, data)
+                        if proxy_count:
+                            result.add_message(
+                                f"{target_sheet_name}：{proxy_count} 筆代客保留訂單已改標客人姓名"
+                            )
 
                 self.log.stamp_count_time(period, file_area, typ, "搬運", len(data))
                 result.add_message(f"{target_sheet_name} 搬運完成：{len(data)} 筆")
