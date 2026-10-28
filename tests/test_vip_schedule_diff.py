@@ -641,8 +641,12 @@ class SortableSheet(Sheet):
 
 
 class SortableBook(Book):
+    borders = None
+
     def batch_update(self, body):
         for request in body['requests']:
+            if 'updateBorders' in request:
+                self.borders = (self.borders or []) + [request['updateBorders']]
             sheet = next(s for s in self.sheets.values() if getattr(s, 'id', None) == 99)
             if 'sortRange' in request:
                 spec = request['sortRange']
@@ -688,7 +692,7 @@ def test_sync_sorts_whole_rows_and_report_uses_sorted_row_numbers():
     assert [line[2] for line in report[1:] if line[3] == '新增'] == [4]
 
 
-def test_rows_no_longer_in_calendar_move_below_the_calendar_rows():
+def test_rows_no_longer_in_calendar_stay_with_the_same_customer():
     gone = old_row(event='gone', date='2026/12/03', order='LC7', status='已安排')
     gone[2] = '王小明'
     kept = old_row(event='kept', date='2026/12/10')
@@ -698,11 +702,45 @@ def test_rows_no_longer_in_calendar_move_below_the_calendar_rows():
     book = SortableBook([sheet])
     sync_schedule(book, '台北202612', [source_row(kept), source_row(other)], ['標題'] * 30, MissingSheet,
                   sort_rows=True)
+    # 對不到日曆的列不再集中到最下方，而是接在同一客人、同一地址的列後面。
     assert [(r[2], r[5]) for r in sheet.data[1:4]] == [
-        ('王小明', '2026/12/10'), ('李曉微', '2026/12/05'), ('王小明', '2026/12/03')]
-    assert sheet.data[3][12] == 'LC7'
+        ('王小明', '2026/12/10'), ('王小明', '2026/12/03'), ('李曉微', '2026/12/05')]
+    assert sheet.data[2][12] == 'LC7'
     report = book.sheets['排程差異_台北202612'].data
-    assert [line[2] for line in report[1:] if line[3] == '本次日曆未見'] == [4]
+    assert [line[2] for line in report[1:] if line[3] == '本次日曆未見'] == [3]
+    # 客人之間畫分隔線：先清掉 2～4 列舊橫線，再在李曉微第一列（第 4 列）上方畫線。
+    clear, line = book.borders
+    assert (clear['range']['startRowIndex'], clear['range']['endRowIndex']) == (1, 4)
+    assert clear['innerHorizontal'] == {'style': 'NONE'}
+    assert (line['range']['startRowIndex'], line['range']['endRowIndex']) == (3, 4)
+    assert line['top']['style'] == 'SOLID_MEDIUM' and 'backgroundColor' not in str(book.borders)
+
+
+def test_customer_starts_group_by_base_name_and_stop_at_blank_rows():
+    from tools.service_management.vip_schedule_diff import _customer_starts
+
+    def row(name):
+        values = [''] * 33
+        values[2], values[5] = name, '2026/12/01'
+        return values
+    rows = {2: row('劉家熙-4樓'), 3: row('王小明'), 4: row('劉家熙-6樓'), 5: [''] * 33, 6: row('李曉微')}
+    new_row = {3: 2, 6: 3, 2: 4, 4: 5, 5: 6}
+    # 王小明｜李曉微｜劉家熙（-4樓、-6樓同一人）
+    assert _customer_starts(rows, new_row) == [3, 4]
+
+
+def test_sort_schedule_sheet_only_reorders_existing_rows():
+    from tools.service_management.vip_schedule_diff import sort_schedule_sheet
+    li = old_row(event='l', date='2026/12/14')
+    li[2], li[4] = '李曉微', '台北市大安區師大路'
+    wang = old_row(event='w', date='2026/12/05')
+    sheet = SortableSheet('台北202612', [li, wang])
+    book = SortableBook([sheet])
+    before = [list(r) for r in sheet.data[1:3]]
+    assert sort_schedule_sheet(book, '台北202612') == 2
+    assert [r[2] for r in sheet.data[1:3]] == ['王小明', '李曉微']
+    assert sorted(r[:33] for r in sheet.data[1:3]) == sorted(r[:33] for r in before)
+    assert '排程差異_台北202612' not in book.sheets
 
 
 def test_proxy_reserve_checkbox_column_is_added_once_and_never_written():
@@ -825,3 +863,15 @@ def test_existing_na_rows_get_fallback_but_booked_manual_and_resolved_rows_stay(
     sync_schedule(Book([sheet, previous]), '台北202612', [source_row(r) for r in (missing, booked, manual, found)],
                   ['標題'] * 30, MissingSheet, purchase_item_lookup=lookup)
     assert lookup_calls == ['0912025772']
+
+
+def test_step5_sorts_each_area_schedule_for_the_period(monkeypatch):
+    from datetime import datetime
+    from tools.service_management import stored_value, vip_schedule_diff
+    calls = []
+    monkeypatch.setattr(vip_schedule_diff, 'sort_schedule_sheet', lambda ss, name: calls.append((ss, name)) or 5)
+    gc = type('GC', (), {'open_by_key': lambda self, key: f'book-{key}'})()
+    areas = [{'name': '台北', 'target_spreadsheet_id': 'T'}, {'name': '台中', 'target_spreadsheet_id': 'C'}]
+    result = stored_value.step5_sort_schedule_sheets(gc, areas, datetime(2026, 12, 1), datetime(2027, 2, 28))
+    assert calls == [('book-T', '台北202612-202702'), ('book-C', '台中202612-202702')]
+    assert result == {'台北202612-202702': 5, '台中202612-202702': 5}
