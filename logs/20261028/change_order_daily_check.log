@@ -1,0 +1,16 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+【台北】已補 T／Z 公式 2 格
+【台北】未備妥 3 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【桃園】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已建立 11:00 提醒（jenny@lemonclean.com.tw）
+{'todo': [{'region': '台北', 'row': 332, 'status': '待退款', 'detail': '專員回報減時', 'order_no': 'LC00217169', 'customer': '馬華鄖', 'payway': 'ATM', 'amount': '1185', 'progress': [], 'actions': ['allowance'], 'missing': ['缺退款銀行代碼／帳號（P／Q）'], 'manual': [], 'note': '2026/10/27 LC00217169 專員回報減時--專員回報減時2人1小時，待退服務費$1200'}, {'region': '台北', 'row': 338, 'status': '待收款', 'detail': '異動服務收款', 'order_no': 'LC00217684', 'customer': '高雅鈴', 'payway': '', 'amount': '600', 'progress': [], 'actions': [], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/10/27 LC00217684 異動服務收款--10/27(二)異動，順延至10/28(三)處理：異動平日轉週末2人3小時，待收服務費$600'}, {'region': '台北', 'row': 339, 'status': '待退款', 'detail': '異動服務退款', 'order_no': 'LC00217656', 'customer': '羅鈞允', 'payway': 'ATM', 'amount': '585', 'progress': [], 'actions': ['allowance'], 'missing': ['缺退款銀行代碼／帳號（P／Q）'], 'manual': [], 'note': '2026/10/28 LC00217656 異動服務退款--異動週末至平日2人3小時服務，退週末加價 $ 600'}], 'failed': []}
