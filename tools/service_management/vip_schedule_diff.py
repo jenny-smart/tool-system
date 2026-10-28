@@ -322,27 +322,67 @@ def _base_name(value):
 UNSEEN_KINDS = ("本次日曆未見", "需人工核對")
 
 
+def _customer_key(values):
+    from tools.common.stroke_order import name_sort_key
+    return name_sort_key(_base_name(values[2]))
+
+
 def _sort_order(rows):
     """排程列依 姓氏總筆劃 → 姓名（去後綴）→ 地址 → 日期 → 開始時間 排序，與定期VIP匯出相同；
-    日曆已對應不到的列（本次日曆未見／需人工核對）不刪除，集中放在下方；空白列放最後。
+    日曆已對應不到的列（本次日曆未見／需人工核對）不刪除，留在同一客人同一地址的最後面；空白列放最後。
     回傳 {原列號: 新列號}。"""
-    from tools.common.stroke_order import name_sort_key
-
     def key(row):
         values = rows[row]
         blank = not any(_text(v) for v in values[:9])
         unseen = _text(values[31]) in UNSEEN_KINDS
-        return (blank, unseen, name_sort_key(_base_name(values[2])), _canonical(values[4], 4), _canonical(values[5], 5),
+        return (blank, _customer_key(values), _canonical(values[4], 4), unseen, _canonical(values[5], 5),
                 _canonical(values[6], 6), row)
     return {row: index for index, row in enumerate(sorted(rows, key=key), 2)}
 
 
+SEPARATOR_COLOR = {"red": .45, "green": .45, "blue": .45}
+
+
+def _customer_starts(rows, new_row):
+    """排序後每位客人（姓名去後綴）第一列的列號，第一位客人除外；空白列不算。"""
+    ordered = sorted((new_row[row], rows[row]) for row in rows)
+    starts, previous = [], None
+    for row_num, values in ordered:
+        if not any(_text(v) for v in values[:9]):
+            break
+        key = _customer_key(values)
+        if previous is not None and key != previous:
+            starts.append(row_num)
+        previous = key
+    return starts
+
+
+def _mark_customers(ss, target, rows, new_row):
+    """客人之間加一條灰色分隔線（只改框線，不動底色，異動顏色照常顯示）；先清掉舊的橫線再重畫。"""
+    last = max(new_row.values(), default=1)
+    if last < 2:
+        return
+    width = target.col_count
+    clear = {"style": "NONE"}
+    line = {"style": "SOLID_MEDIUM", "color": SEPARATOR_COLOR}
+    requests = [{"updateBorders": {"range": {"sheetId": target.id, "startRowIndex": 1, "endRowIndex": last,
+                                             "startColumnIndex": 0, "endColumnIndex": width},
+                                   "top": clear, "bottom": clear, "innerHorizontal": clear}}]
+    for row_num in _customer_starts(rows, new_row):
+        requests.append({"updateBorders": {"range": {"sheetId": target.id, "startRowIndex": row_num - 1,
+                                                     "endRowIndex": row_num, "startColumnIndex": 0,
+                                                     "endColumnIndex": width}, "top": line}})
+    ss.batch_update({"requests": requests})
+
+
 def _sort_sheet(ss, target, final_rows):
-    """以暫時輔助欄寫入新列號後整列排序（K:AG、底色與同列公式一起移動），再刪除輔助欄。"""
+    """以暫時輔助欄寫入新列號後整列排序（K:AG、底色與同列公式一起移動），再刪除輔助欄；
+    最後在客人之間畫分隔線。"""
     last = max(final_rows, default=1)
     rows = {row: final_rows.get(row, [""] * 33) for row in range(2, last + 1)}
     new_row = _sort_order(rows)
     if all(old == new for old, new in new_row.items()):
+        _mark_customers(ss, target, rows, new_row)
         return new_row
     helper = target.col_count
     target.resize(rows=target.row_count, cols=helper + 1)
@@ -355,7 +395,22 @@ def _sort_sheet(ss, target, final_rows):
         {"deleteDimension": {"range": {"sheetId": target.id, "dimension": "COLUMNS",
                                        "startIndex": helper, "endIndex": helper + 1}}},
     ]})
+    _mark_customers(ss, target, rows, new_row)
     return new_row
+
+
+def sort_schedule_sheet(ss, target_name):
+    """只重新排序既有排程工作表（不比對日曆、不改內容）；回傳排序的列數。"""
+    target = ss.worksheet(target_name)
+    last_column = _column(target.col_count - 1)
+    physical_rows = target.get(f"A2:{last_column}", value_render_option="FORMULA",
+                               date_time_render_option="FORMATTED_STRING")
+    header = target.get(f"A1:{last_column}1", value_render_option="FORMULA", date_time_render_option="FORMATTED_STRING")
+    header = header[0] if header else []
+    columns = _tracking_columns(header, physical_rows, META_HEADERS + EXTRA_HEADERS)
+    existing = _internal_rows(physical_rows, _read_tracking_columns(header, columns))
+    _sort_sheet(ss, target, {i + 2: row for i, row in enumerate(existing)})
+    return sum(1 for row in existing if any(_text(v) for v in row[:9]))
 
 
 def _same_day_rows(existing, updates):

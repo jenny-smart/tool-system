@@ -1281,6 +1281,30 @@ def step3_build_vip_schedule_sheets(
     return results
 
 
+def step5_sort_schedule_sheets(gc: gspread.Client, areas: list[dict], start_dt: datetime, end_dt: datetime) -> dict:
+    """只重新排序既有排程工作表（姓名→地址→日期→開始時間，客人之間畫分隔線）；不匯出日曆、不改內容。"""
+    from tools.service_management.vip_schedule_diff import sort_schedule_sheet
+    periods = _month_keys(start_dt, end_dt)
+    suffix = f"{periods[0]}-{periods[-1]}" if len(periods) > 1 else periods[0]
+    results, errors = {}, []
+    for area in areas:
+        name = f"{area['name']}{suffix}"
+        try:
+            target_id = area.get("target_spreadsheet_id", "") or _load_target_file_id()
+            count = sort_schedule_sheet(gc.open_by_key(target_id), name)
+            log.info("[%s] 排程工作表已重新排序：%d 列", name, count)
+            results[name] = count
+        except gspread.WorksheetNotFound:
+            errors.append(f"{name}: 找不到排程工作表")
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+    for error in errors:
+        log.error("重新排序失敗：%s", error)
+    if errors:
+        raise RuntimeError("部分排程工作表重新排序失敗：\n" + "\n".join(errors))
+    return results
+
+
 def _load_target_file_id() -> str:
     val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
     if val:
@@ -1303,8 +1327,9 @@ def _load_target_file_id() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
-    parser.add_argument("--step",  type=int, choices=[0, 1, 2, 3, 4], default=0,
-                        help="0=抓儲值金＋匯出VIP, 1=只抓儲值金, 2=只匯出VIP日曆, 3=建立VIP排程工作表, 4=抓儲值金＋匯出VIP＋建立排程工作表（預設：0）")
+    parser.add_argument("--step",  type=int, choices=[0, 1, 2, 3, 4, 5], default=0,
+                        help="0=抓儲值金＋匯出VIP, 1=只抓儲值金, 2=只匯出VIP日曆, 3=建立VIP排程工作表, "
+                             "4=抓儲值金＋匯出VIP＋建立排程工作表, 5=只重新排序排程工作表（預設：0）")
     parser.add_argument(
         "--area",
         type=str,
@@ -1324,7 +1349,7 @@ def main() -> None:
                         help="Step 3 只產生差異工作表，不更新排程內容或底色")
     args = parser.parse_args()
 
-    if args.step in (0, 2, 3, 4) and not (_load_target_file_id()):
+    if args.step in (0, 2, 3, 4, 5) and not (_load_target_file_id()):
         sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     today = now_tp()
@@ -1364,6 +1389,7 @@ def main() -> None:
         2: "【CRM】產生 CRM",
         3: "【儲值】建立VIP排程工作表",
         4: "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）",
+        5: "【儲值】重新排序排程工作表",
     }[args.step]
 
     if not areas:
@@ -1411,6 +1437,14 @@ def main() -> None:
             except Exception as e:
                 errors.append(str(e))
                 log.error("Step 3 失敗：%s", e)
+
+        if args.step == 5:
+            log.info("--- 只重新排序排程工作表 ---")
+            try:
+                step5_sort_schedule_sheets(gc, areas, start_dt, end_dt)
+            except Exception as e:
+                errors.append(str(e))
+                log.error("重新排序失敗：%s", e)
 
     finally:
         elapsed_total = (now_tp() - t_total).total_seconds()
