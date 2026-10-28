@@ -492,9 +492,15 @@ def process_atm_rows(
                 raise ValueError(f"訂單 {order_no} 付款方式不是 ATM（後台 payway={payway or '空白'}）")
             raw_status = purchase.get("purchase_status")
             status_code = "" if raw_status is None else str(raw_status).strip()
-            if status_code in {"2", "3"}:
-                status_name = "取消訂單" if status_code == "2" else "已退款"
-                raise ValueError(f"訂單 {order_no} 後台狀態為「{status_name}」，禁止歸入對帳或重新標記已付款")
+            if status_code == "2":
+                if memo.safe_cell(row, COL_STATUS_NOTE) != "取消訂單":
+                    _clear_data_validation(ws, r, COL_STATUS_NOTE, COL_STATUS_NOTE)
+                    memo.with_retry(ws.update_cell, r, COL_STATUS_NOTE, "取消訂單")
+                log(f"⏭ 第{r}列（{order_no}）：後台狀態為「取消訂單」，不執行對帳動作，M欄已標註「取消訂單」")
+                result["skipped"] += 1
+                continue
+            if status_code == "3":
+                raise ValueError(f"訂單 {order_no} 後台狀態為「已退款」，禁止歸入對帳或重新標記已付款")
             if status_code not in {"0", "1"}:
                 raise ValueError(f"訂單 {order_no} 後台付款狀態無法確認，已停止對帳")
             log(f"找到 purchase_id={purchase_id}")
