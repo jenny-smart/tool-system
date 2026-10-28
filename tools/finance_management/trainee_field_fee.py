@@ -1,7 +1,8 @@
 """工具包押金退款金額（H 欄）＋新訓退訓實境費用。
 
 步驟（同一份試算表，依登記表「工具包押金退款／地區」找到）：
-1. 工具包押金退款 H 欄（只處理 I 欄退款日期空白＝尚未匯款的列）：
+1. 工具包押金退款 H 欄（只處理 I 欄退款日期空白＝尚未匯款、且 H 欄空白的列；
+   填入時整列套用上一列格式，J/M/N/O/P/Q/R 欄沿用上一列公式）：
    = 新人實境＋新人實習 中 C 欄＝本列 B 欄姓名、且 A 欄空白的列 J×K 加總
    ＋ 工具包押金 A 欄＝本列 B 欄姓名的 B 欄金額
    （新人實境、新人實習從該人在「基本資料、協議規章」的建檔年度開始找，
@@ -339,6 +340,72 @@ def d_formula_for_row(d3_formula: str, row: int) -> str:
     return _ID_ONLY_RE.sub("2", re.sub(r"\bA3\b", f"A{row}", d3_formula))
 
 
+REFUND_FORMULA_COLS = "JMNOPQR"  # 工具包押金退款填 H 欄時，這些欄沿用上一列公式
+
+
+def _col_index(letter: str) -> int:
+    return ord(letter) - ord("A")
+
+
+def plan_formula_copies(
+    formula_values: list[list],
+    rows: list[int],
+) -> tuple[list[tuple[int, int, int]], list[str]]:
+    """formula_values 為 A 欄起的 FORMULA 內容；回傳 ([(欄索引, 來源列, 目標列)], 提醒)。
+
+    目標儲存格已有公式就不動；來源取目標列往上最近一個有公式的列（通常就是上一列）。
+    """
+    copies: list[tuple[int, int, int]] = []
+    warnings: list[str] = []
+    for row in rows:
+        for letter in REFUND_FORMULA_COLS:
+            col = _col_index(letter)
+            if _cell(formula_values[row - 1] if row - 1 < len(formula_values) else [], col).startswith("="):
+                continue
+            source = next(
+                (r for r in range(row - 1, 1, -1)
+                 if r - 1 < len(formula_values) and _cell(formula_values[r - 1], col).startswith("=")),
+                0,
+            )
+            if source:
+                copies.append((col, source, row))
+            else:
+                warnings.append(f"第 {row} 列 {letter} 欄往上找不到公式可複製，請人工補")
+    return copies, warnings
+
+
+def copy_prev_row_format_and_formulas(service, spreadsheet_id: str, title: str, rows: list[int]) -> list[str]:
+    """新填 H 欄的列：整列套用上一列格式，J/M/N/O/P/Q/R 欄沿用上一列公式。"""
+    if not rows:
+        return []
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id, fields="sheets.properties(sheetId,title)"
+    ).execute()
+    sheet_id = next(s["properties"]["sheetId"] for s in meta["sheets"] if s["properties"]["title"] == title)
+    formula_values = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{title}'!A:R", valueRenderOption="FORMULA",
+    ).execute().get("values", [])
+    copies, warnings = plan_formula_copies(formula_values, rows)
+
+    def grid(row: int, col: int | None = None) -> dict:
+        rng = {"sheetId": sheet_id, "startRowIndex": row - 1, "endRowIndex": row}
+        if col is not None:
+            rng.update(startColumnIndex=col, endColumnIndex=col + 1)
+        return rng
+
+    requests = [
+        {"copyPaste": {"source": grid(r - 1), "destination": grid(r), "pasteType": "PASTE_FORMAT"}}
+        for r in rows if r > 2
+    ]
+    requests += [
+        {"copyPaste": {"source": grid(src, col), "destination": grid(dst, col), "pasteType": "PASTE_FORMULA"}}
+        for col, src, dst in copies
+    ]
+    if requests:
+        service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}).execute()
+    return warnings
+
+
 def plan_fee_append(
     refund_values: list[list],
     h_overrides: dict[int, Decimal],
@@ -454,6 +521,8 @@ def _update_refund_and_fee_sheet(area: str) -> dict[str, object]:
                 ],
             },
         ).execute()
+
+        warnings += copy_prev_row_format_and_formulas(service, spreadsheet_id, refund_title, sorted(changed))
 
     fee_values = _read(service, spreadsheet_id, FEE_SHEET, "A:F")
     plan = plan_fee_append(refund_values, updates, fee_values)
