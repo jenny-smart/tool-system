@@ -16,8 +16,9 @@ from __future__ import annotations
 
 存取期間說明：
 - 預設不帶 --period / --start / --end：以今天所在月份的「上個月」為作業月份。
-  例如今天是 2026-07-04，預設期別為 202606，預收/服務日期為 2026-07-01 ~ 2026-10-30。
-- 帶 --period 202606：預收/服務日期為 2026-07-01 ~ 2026-10-30，存入 202606。
+  例如今天是 2026-07-04，預設期別為 202606，服務日期為
+  2026-07-01 ~ 2026-10-31（次月起四個完整月份）。
+- 帶 --period 202606：使用相同日期規則，存入 202606。
 - 帶 --start / --end：預收/服務日期使用指定區間，期別以 --period 為主。
 """
 
@@ -472,8 +473,10 @@ def resolve_ranges(args: RunArgs) -> dict[str, str]:
     service_year, service_month = add_months(year, month, 1)
     default_start = f"{service_year}-{service_month:02d}-01"
 
-    end_year, end_month = add_months(year, month, 4)
-    default_end = f"{end_year}-{end_month:02d}-30"
+    # 服務區間固定為「期別次月起四個完整月份」，迄日使用實際月底，
+    # 避免 2 月 30 日或漏掉 31 日。
+    end_year, end_month = add_months(service_year, service_month, 3)
+    default_end = f"{end_year}-{end_month:02d}-{calendar.monthrange(end_year, end_month)[1]:02d}"
 
     clean_start = args.start or default_start
     clean_end = args.end or default_end
