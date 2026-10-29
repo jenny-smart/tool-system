@@ -338,10 +338,17 @@ def _wait_for_manual_save(
     page: Any,
     order_no: str,
     timeout_ms: int = MANUAL_SAVE_TIMEOUT_MS,
+    *,
+    new_order: bool = False,
 ) -> str:
+    """new_order＝呼叫端已確認貼入前這張訂單在鯨躍沒有發票：此時頁面上只要出現同訂單發票，
+    就是剛儲存的那張（例如 Google API 重試期間人工已按完儲存、否），直接採用，不再等。"""
     _install_save_click_marker(page)
     page.bring_to_front()
     initial_invoice_no = _extract_invoice_no_for_order(page, order_no)
+    if new_order and initial_invoice_no:
+        print(f"[鯨躍] 監控前已儲存完成，已取得發票號碼：{initial_invoice_no}", flush=True)
+        return initial_invoice_no
     print(
         f"[鯨躍] 已切到 Agent 監控分頁：{str(page.url or '未知')}；"
         "等待人工按『下一步』及『儲存』，再於是否繼續開下一張按『否』",
@@ -576,7 +583,7 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
             _clear_dialog_handlers(page)
             _paste_one(page, payload_json)
             update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存")
-            invoice_no = _wait_for_manual_save(page, order_no)
+            invoice_no = _wait_for_manual_save(page, order_no, new_order=True)
             write_invoice_result(area, source_row, order_no, invoice_no)
             update_payload_status(row_no, "completed", f"已回填 O/AA：{invoice_no}")
             completed += 1
