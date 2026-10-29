@@ -48,8 +48,8 @@ def test_missing_data_is_not_ready_and_blocks_actions():
     assert item["missing"] == ["缺退款銀行代碼／帳號（P／Q）"] and item["actions"] == ["allowance"]
     item = plan(B="待退款", X="AB1", Z="952", R="ATM")  # 還缺 S：全部不做
     assert item["actions"] == [] and "缺退款金額（S）" in item["missing"]
-    item = plan(B="待退款", AB="AL1", S="1000", R="ATM")  # 折讓單已開、只缺帳號：沒有可做的
-    assert item["actions"] == [] and item["missing"] == ["缺退款銀行代碼／帳號（P／Q）"]
+    item = plan(B="待退款", AB="AL1", S="1000", R="ATM")  # 折讓單已開、只缺帳號：先回寫折讓單
+    assert item["actions"] == ["sync"] and item["missing"] == ["缺退款銀行代碼／帳號（P／Q）"]
     assert plan(B="待退款", S="1000", R="信用卡")["missing"] == ["缺原發票號碼（X）"]
     assert plan(B="待退款", X="AB1", R="信用卡")["missing"] == ["缺退款金額（S）", "缺未稅金額（Z）"]
     assert plan(B="待退款", X="AB1", Z="952", S="1000")["missing"] == ["缺付款方式（R）"]
@@ -62,12 +62,12 @@ def test_pending_charge_invoice_does_not_wait_for_payment():
     item = plan(B="待收款", M="2026/09/20")
     assert item["missing"] == ["缺收款金額（N）"] and item["actions"] == ["invoice"]
     item = plan(B="待收款", O="AB1", AA="2026/10/29")
-    assert item["actions"] == [] and item["missing"] == ["客人尚未付款（M 收款時間空白）"] and item["manual"] == []
+    assert item["actions"] == ["sync"] and item["missing"] == ["客人尚未付款（M 收款時間空白）"] and item["manual"] == []
     item = plan(B="待收款", M="2026/09/20", N="500")
     assert item["missing"] == [] and item["manual"] == [] and item["actions"] == ["invoice"]
     assert plan(B="待收款", M="2026/09/20", N="500", O="AB1", AA="2026/10/19")["actions"] == ["sync"]
     item = plan(B="待收款", M="2026/09/20", N="500", O="AB1")
-    assert item["actions"] == [] and "AA" in item["manual"][0]
+    assert item["actions"] == ["sync"] and "AA" in item["manual"][0]
 
 
 def test_stored_value_and_invoice_rows():
@@ -166,7 +166,7 @@ def test_already_processed_pending_rows_go_straight_to_sync():
     for cells, target in cases:
         item = plan(**cells)
         assert item["actions"] == ["sync"] and item["target_status"] == target and item["missing"] == []
-    assert plan(B="待退款", S="1000", AB="AL1", R="信用卡")["actions"] == ["credit_refund"]
+    assert plan(B="待退款", S="1000", AB="AL1", R="信用卡")["actions"] == ["credit_refund", "sync"]
 
 
 def test_sync_region_sets_done_status_for_processed_pending_rows(monkeypatch):
@@ -283,9 +283,11 @@ def test_vip_refund_coupon_flow():
     assert item["actions"] == ["allowance"]
     # ② 已歸零（M）、折讓單完成：信用卡走藍新
     item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", R="信用卡")
-    assert item["actions"] == ["credit_refund"] and item["manual"] == []
+    assert item["actions"] == ["credit_refund", "sync"] and item["manual"] == []
     # ③ 信用卡：各區都由 Agent 走藍新；ATM：台北／台中富邦，桃園／新竹／高雄由財務處理
-    cells = dict(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", T="985", R="ATM", P="012", Q="1")
+    # （AE 已是目前狀態的回寫標記，只看退款分流）
+    cells = dict(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", T="985", R="ATM", P="012", Q="1",
+                 AE="更新系統（B欄：VIP待退券）")
     for region in batch.REGIONS:
         assert plan(region, **{**cells, "R": "信用卡"})["actions"] == ["credit_refund"]
     for region in ("台北", "台中"):
@@ -341,3 +343,50 @@ def test_sync_region_logs_out_after_sync(monkeypatch):
     monkeypatch.setattr(batch, "_login_session", lambda region, ui_logger=None: Session())
     result = batch.sync_region("台北", log=lambda *_: None)
     assert result["failed"] and gets == ["https://backend.example/logout"]  # 失敗也登出
+
+
+def test_partial_progress_is_synced_once_with_current_status():
+    # 新竹第 15 列：待收款、已開發票、客人未付款 → 先回寫，B 欄不變
+    item = plan("新竹", B="待收款", O="FP1", AA="2026/10/29")
+    assert item["actions"] == ["sync"] and item["target_status"] == "待收款"
+    # 已用目前狀態回寫過就不再列出；完成（已收款）時再回寫
+    assert plan("新竹", B="待收款", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）") is not None
+    assert plan("新竹", B="待收款", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）")["actions"] == []
+    item = plan(B="待收款", M="2026/10/30", N="1200", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）")
+    assert item["actions"] == ["sync"] and item["target_status"] == "已收款"
+    # 沒有任何進度的列不回寫；待扣儲值金回寫會改成完成狀態，不做部分回寫
+    assert "sync" not in plan(B="待退款", X="AB1", Z="952", S="1000", R="信用卡")["actions"]
+    assert "sync" not in plan(B="待扣儲值金", N="500")["actions"]
+    # 待退款已開折讓單、還在等退款：退款與回寫都排入
+    assert plan(B="待退款", AB="AL1", S="1000", R="信用卡")["actions"] == ["credit_refund", "sync"]
+
+
+def test_sync_region_writes_partial_rows_without_changing_status(monkeypatch):
+    values = [["h"], row(B="待收款", O="FP1", AA="2026/10/29"), row(B="待退款", AB="AL1", S="10", R="ATM")]
+    b_updates, marked = [], []
+
+    class WS:
+        def get_all_values(self):
+            return values
+
+        def update_acell(self, cell, value):
+            b_updates.append((cell, value))
+
+    class CO:
+        @staticmethod
+        def get_worksheet(region):
+            return WS()
+
+        @staticmethod
+        def sync_one_to_purchase_edit(item, session=None, ui_logger=None):
+            pass
+
+        @staticmethod
+        def mark_sheet_row_done(region, row_no, status, ui_logger=None):
+            marked.append((row_no, status))
+
+    monkeypatch.setattr(batch, "_change_order", lambda: CO)
+    monkeypatch.setattr(batch, "_login_session", lambda region, ui_logger=None: "session")
+    monkeypatch.setattr(batch, "_logout_session", lambda *a: None)
+    assert batch.sync_region("新竹", log=lambda *_: None)["done"] == [2, 3]
+    assert marked == [(2, "待收款"), (3, "待退款")] and b_updates == []
