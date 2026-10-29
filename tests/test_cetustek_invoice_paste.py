@@ -155,6 +155,25 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             )
         page.bring_to_front.assert_called_once()
 
+    def test_wait_for_save_accepts_invoice_already_saved_before_monitoring(self) -> None:
+        # 貼入後 Google API 重試期間人工已按完儲存、否：監控開始時查詢頁已有這張訂單的發票
+        page = MagicMock()
+        with patch.object(paste, "_extract_invoice_no_for_order", return_value="FP68064063"):
+            self.assertEqual(
+                paste._wait_for_manual_save(page, "LC00217870", timeout_ms=1000, new_order=True),
+                "FP68064063",
+            )
+
+    def test_wait_for_save_ignores_preexisting_invoice_unless_new_order(self) -> None:
+        # 二聯改三聯等流程：頁面上原本就有的同訂單發票不能當成新開的
+        page = MagicMock()
+        page.evaluate.return_value = False
+        page.wait_for_timeout.side_effect = lambda ms: None
+        with patch.object(paste, "_extract_invoice_no_for_order", return_value="FP68064063"), \
+                patch.object(paste.time, "monotonic", side_effect=[0.0, 0.0, 2.0]):
+            with self.assertRaisesRegex(TimeoutError, "未偵測到儲存結果"):
+                paste._wait_for_manual_save(page, "LC00217870", timeout_ms=1000)
+
     def test_existing_query_result_is_recovered_without_opening_new_invoice(self) -> None:
         page = MagicMock()
         item = {
