@@ -1639,7 +1639,7 @@ elif mode == "週末服務 LINE 提醒":
                 column_config={
                     "選取": st.column_config.CheckboxColumn("儲存", help="只儲存勾選訂單，不會發送 LINE"),
                     "資料狀態": st.column_config.TextColumn(
-                        "資料狀態", help="新增＝Google Sheet 尚無此訂單編號；已存在＝將更新原列，不會重複新增。",
+                        "資料狀態", help="新增＝Google Sheet 尚無此訂單編號＋服務日期（改期後的新日期也算新增）；已存在＝將更新原列，不會重複新增。",
                     ),
                     "LINE": st.column_config.LinkColumn("LINE", display_text="開啟聊天"),
                     "LINE ID": st.column_config.TextColumn("LINE ID", help="由 LINE 聊天網址／客人回覆自動記錄"),
@@ -1684,7 +1684,8 @@ elif mode == "週末服務 LINE 提醒":
                         ]
                         st.success(
                             f"已儲存 {len(_selected)} 筆：新增 {_new_count} 筆、"
-                            f"更新 {_updated_count} 筆；同訂單編號不會重複。"
+                            f"更新 {_updated_count} 筆；同訂單編號＋服務日期不會重複，"
+                            "新增列已先插入內勤工作表單「週末提醒」。"
                         )
                     except Exception as e:
                         st.error(f"儲存失敗：{e}")
