@@ -55,9 +55,14 @@ def test_missing_data_is_not_ready_and_blocks_actions():
     assert plan(B="待退款", X="AB1", Z="952", S="1000")["missing"] == ["缺付款方式（R）"]
 
 
-def test_pending_charge_waits_for_payment_and_manual_invoice():
-    assert plan(B="待收款")["missing"] == ["客人尚未付款（M 收款時間空白）"]
-    assert plan(B="待收款", M="2026/09/20")["missing"] == ["缺收款金額（N）"]
+def test_pending_charge_invoice_does_not_wait_for_payment():
+    # 客人還沒付款也先開發票，但每日檢查仍要提醒收款
+    item = plan(B="待收款")
+    assert item["missing"] == ["客人尚未付款（M 收款時間空白）"] and item["actions"] == ["invoice"]
+    item = plan(B="待收款", M="2026/09/20")
+    assert item["missing"] == ["缺收款金額（N）"] and item["actions"] == ["invoice"]
+    item = plan(B="待收款", O="AB1", AA="2026/10/29")
+    assert item["actions"] == [] and item["missing"] == ["客人尚未付款（M 收款時間空白）"] and item["manual"] == []
     item = plan(B="待收款", M="2026/09/20", N="500")
     assert item["missing"] == [] and item["manual"] == [] and item["actions"] == ["invoice"]
     assert plan(B="待收款", M="2026/09/20", N="500", O="AB1", AA="2026/10/19")["actions"] == ["sync"]
