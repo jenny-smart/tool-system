@@ -15,8 +15,9 @@
               ③ 退款（M 已歸零、AB 折讓單已開才退）：R＝信用卡 → 藍新退款（各區皆同）；
                  R＝ATM → 台北／台中富邦 ATM 退款；桃園／新竹／高雄 Agent 不處理，由財務退款後填 AC
               ④ M／AB／AC 都有值 → 回寫檸檬後台，B 欄改為 VIP已退券
-  - 待收款：M 收款時間空白 → 未備妥；M、N 有值、O 發票空白 → 開立發票（同【鯨躍發票】開立發票：
-            沿用訂單發票設定、Agent 填表、人工按下一步及儲存，回填 O／AA）
+  - 待收款：O 發票空白 → 開立發票（同【鯨躍發票】開立發票：沿用訂單發票設定、Agent 填表、
+            人工按下一步及儲存，回填 O／AA）；M 收款時間空白也先開（2026-10-29 Jenny 確認），
+            但仍列為未備妥讓每日檢查提醒收款
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
   - 待處理發票（車馬費發票／異動發票／二聯改三聯）→ 需到鯨躍發票功能逐筆確認
   - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
@@ -201,15 +202,17 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
 
     if status == "待收款":
         item["amount"] = _amount(_cell(row, "N"))
+        # 發票金額取自後台訂單，不需 M／N：客人還沒付款也先開發票，缺的部分照樣提醒
         if not _cell(row, "M"):
             item["missing"].append("客人尚未付款（M 收款時間空白）")
         elif not item["amount"]:
             item["missing"].append("缺收款金額（N）")
-        elif not _cell(row, "O"):
+        if not _cell(row, "O"):
             item["actions"].append("invoice")
         else:
             item["progress"].append("發票 ✓")
-            item["manual"].append("AA 發票開立時間空白，請確認發票後補上")
+            if not _cell(row, "AA"):
+                item["manual"].append("AA 發票開立時間空白，請確認發票後補上")
         return item
 
     if status in STORED_VALUE_STATUSES:
