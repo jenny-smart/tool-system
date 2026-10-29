@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """批次建單共用防呆：欄位去重、候選條件、回填欄位定位、無班表補檸檬人重試。"""
 from __future__ import annotations
+from datetime import date, datetime
 import types
 import pandas as pd
 import orders
@@ -42,7 +43,56 @@ def _should_create_order(row):
     return can_create_order(row)
 
 
-def _safe_load_candidates(batch_opt, sheet_name, allow_failed=False):
+def _service_date(value, batch_opt=None):
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = batch_opt._date_text(value) if batch_opt is not None else str(value).strip().replace("/", "-")
+    try:
+        return date.fromisoformat(str(text)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def validate_service_date_range(service_start=None, service_end=None):
+    start = _service_date(service_start)
+    end = _service_date(service_end)
+    if service_start not in (None, "") and start is None:
+        raise ValueError("服務起日格式錯誤。")
+    if service_end not in (None, "") and end is None:
+        raise ValueError("服務迄日格式錯誤。")
+    if start and end and end < start:
+        raise ValueError("服務迄日不可早於服務起日。")
+    return start, end
+
+
+def _filter_service_dates(batch_opt, work, service_start=None, service_end=None):
+    start, end = validate_service_date_range(service_start, service_end)
+    if not start and not end:
+        return work.copy()
+    dates = work.get("日期", pd.Series("", index=work.index)).map(lambda value: _service_date(value, batch_opt))
+    mask = dates.notna()
+    if start:
+        mask &= dates.map(lambda value: value is not None and value >= start)
+    if end:
+        mask &= dates.map(lambda value: value is not None and value <= end)
+    return work[mask].copy()
+
+
+def filter_row_numbers_by_service_date(batch_opt, sheet_name, rows, service_start=None, service_end=None):
+    rows = [int(row) for row in rows]
+    if service_start in (None, "") and service_end in (None, ""):
+        return rows, []
+    _, df = _load_worksheet_unique(sheet_name)
+    selected = df[df["__sheet_row__"].astype(int).isin(set(rows))].copy()
+    allowed = set(_filter_service_dates(batch_opt, selected, service_start, service_end)["__sheet_row__"].astype(int).tolist())
+    return [row for row in rows if row in allowed], [row for row in rows if row not in allowed]
+
+
+def _safe_load_candidates(batch_opt, sheet_name, allow_failed=False, service_start=None, service_end=None):
     try: _, df = _load_worksheet_unique(sheet_name)
     except Exception as exc:
         if type(exc).__name__ == "WorksheetNotFound": raise ValueError(f"找不到工作表分頁「{sheet_name}」") from exc
@@ -50,21 +100,23 @@ def _safe_load_candidates(batch_opt, sheet_name, allow_failed=False):
     work = pd.DataFrame(index=df.index); work["__sheet_row__"] = _first_series(df, "__sheet_row__")
     for col in batch_opt.REQUIRED_COLUMNS: work[col] = _first_series(df, col).map(batch_opt._text)
     work["__o_col__"] = df.iloc[:, 14].map(batch_opt._text) if df.shape[1] > 14 else ""
-    for col in ("結果", "原因", "沒班表日期", HOLD_COLUMN): work[col] = _first_series(df, col).map(batch_opt._text) if col in df.columns else ""
+    for col in ("結果", "原因", "沒班表日期", "餘額不足未送", HOLD_COLUMN): work[col] = _first_series(df, col).map(batch_opt._text) if col in df.columns else ""
     required_ok = work["姓名"].ne("") & work["電話"].ne("") & work["地址"].ne("") & work["日期"].ne("") & work["開始時間"].ne("") & work["結束時間"].ne("")
     # 雲端預設排除失敗列；本機入口或雲端明確確認重試時傳入 allow_failed=True。
     create_ok = (work.apply(can_create_order, axis=1).astype(bool)
                  & (allow_failed | work["結果"].map(normalize_status).ne("失敗")))
     work = work[required_ok & (create_ok | work["訂單編號"].ne(""))].copy().reset_index(drop=True)
+    if service_start not in (None, "") or service_end not in (None, ""):
+        work = _filter_service_dates(batch_opt, work, service_start, service_end).reset_index(drop=True)
     work["日期顯示"] = work["日期"].map(batch_opt._date_text)
     work["時段顯示"] = work.apply(lambda r: f"{batch_opt._time_text(r['開始時間'])}-{batch_opt._time_text(r['結束時間'])}", axis=1)
     work["群組鍵"] = work.apply(lambda r: (batch_opt._text(r["姓名"]), batch_opt._text(r["電話"]), batch_opt._text(r["地址"])), axis=1)
     return work
 
 
-# 「O欄找不到訂單編號」：O 欄沒有單號；可再依 O 欄目前的文字勾選（都不選＝全部）。
-O_BLANK_OPTION = "（O欄空白）"
-_ORDER_NO_PATTERN = r"(?:LC|TT|KK)\d+"
+# 「儲值金不足未成單」：建單時因儲值金不足沒有產生訂單，客人儲值後可篩出重新成單。
+STORED_VALUE_REASONS = ("系統未產生新訂單編號", "餘額不足")
+FILTER_MODES = ("all", "no_schedule", "stored_value", "both")
 
 
 def _creatable(batch_opt, work, region=None):
@@ -74,64 +126,64 @@ def _creatable(batch_opt, work, region=None):
     return work
 
 
-def _auto_filter_rows(batch_opt, sheet_name, mode, region=None, allow_failed=False, candidates=None, o_texts=None):
-    work = candidates if candidates is not None else _safe_load_candidates(batch_opt, sheet_name, allow_failed=allow_failed)
+def _auto_filter_rows(batch_opt, sheet_name, mode, region=None, allow_failed=False, candidates=None,
+                      service_start=None, service_end=None):
+    work = candidates if candidates is not None else _safe_load_candidates(
+        batch_opt, sheet_name, allow_failed=allow_failed, service_start=service_start, service_end=service_end)
     work = _creatable(batch_opt, work, region)
     if not len(work): return []
-    mask = _mode_mask(batch_opt, work, mode, o_texts)
+    mask = _mode_mask(batch_opt, work, mode)
     return sorted(work.loc[mask, "__sheet_row__"].astype(int).tolist())
 
 
-def _o_label(text):
-    return text or O_BLANK_OPTION
-
-
-def _o_text_options(batch_opt, sheet_name, region=None, allow_failed=True):
-    """目前可建單、O 欄沒有單號的列，其 O 欄文字與列數，供畫面勾選。"""
-    work = _creatable(batch_opt, _safe_load_candidates(batch_opt, sheet_name, allow_failed=allow_failed), region)
-    if not len(work): return []
-    o_col = work["__o_col__"].map(batch_opt._text)
-    o_col = o_col[~o_col.str.contains(_ORDER_NO_PATTERN, regex=True, na=False)]
-    counts = o_col.map(_o_label).value_counts()
-    return sorted(counts.items(), key=lambda item: (item[0] != O_BLANK_OPTION, -item[1], item[0]))
-
-
-def _mode_mask(batch_opt, work, mode, o_texts=None):
-    reason = work.get("原因", pd.Series("", index=work.index)).map(batch_opt._text)
-    no_schedule_date = work.get("沒班表日期", pd.Series("", index=work.index)).map(batch_opt._text)
-    no_schedule = reason.str.contains("無班表|沒班表", regex=True, na=False) | no_schedule_date.ne("")
-    o_col = work.get("__o_col__", pd.Series("", index=work.index)).map(batch_opt._text)
-    missing_order = ~o_col.str.contains(_ORDER_NO_PATTERN, regex=True, na=False)
-    if o_texts:
-        missing_order &= o_col.map(_o_label).isin(set(o_texts))
+def _mode_mask(batch_opt, work, mode):
+    def column(name):
+        return work.get(name, pd.Series("", index=work.index)).map(batch_opt._text)
+    reason = column("原因") + "｜" + column("__o_col__")
+    no_schedule = reason.str.contains("無班表|沒班表", regex=True, na=False) | column("沒班表日期").ne("")
+    # 工作表 O 欄寫「系統未產生新訂單編號」或「餘額不足」，或 Q 欄「餘額不足」有日期。
+    stored_value = (reason.str.contains("|".join(STORED_VALUE_REASONS), regex=True, na=False)
+                    | column("餘額不足未送").ne(""))
     if mode == "all": return pd.Series(True, index=work.index)
     if mode == "no_schedule": return no_schedule
-    if mode == "missing_order": return missing_order
-    if mode == "both": return no_schedule | missing_order
+    if mode == "stored_value": return stored_value
+    if mode == "both": return no_schedule | stored_value
     return pd.Series(False, index=work.index)
 
 
-def _held_for_request(batch_opt, sheet_name, region, rows=(), modes=(), mode_scope=None, allow_failed=True, o_texts=None):
+def _held_for_request(batch_opt, sheet_name, region, rows=(), modes=(), mode_scope=None, allow_failed=True,
+                      service_start=None, service_end=None):
     """指定列號＋自動篩選中，因預約條件不在本次預約對象而略過的列；三種批次共用。"""
-    held = set(_held_rows(batch_opt, sheet_name, "all", region, allow_failed, rows=rows)) if rows else set()
+    held = set(_held_rows(batch_opt, sheet_name, "all", region, allow_failed, rows=rows,
+                          service_start=service_start, service_end=service_end)) if rows else set()
     for mode in modes:
-        held.update(_held_rows(batch_opt, sheet_name, mode, region, allow_failed, rows=mode_scope, o_texts=o_texts))
+        held.update(_held_rows(batch_opt, sheet_name, mode, region, allow_failed, rows=mode_scope,
+                               service_start=service_start, service_end=service_end))
     return sorted(held)
 
 
-def _held_rows(batch_opt, sheet_name, mode="all", region=None, allow_failed=False, rows=None, o_texts=None):
+def _held_rows(batch_opt, sheet_name, mode="all", region=None, allow_failed=False, rows=None,
+               service_start=None, service_end=None):
     """若預約條件在本次預約對象內就會成為建單候選的列號；三種批次用來顯示略過筆數。"""
     _, df = _load_worksheet_unique(sheet_name)
     if df.empty: return []
     work = df.copy()
     work["__o_col__"] = df.iloc[:, 14].map(batch_opt._text) if df.shape[1] > 14 else ""
     if rows is not None: work = work[work["__sheet_row__"].astype(int).isin({int(x) for x in rows})]
+    # 與實際候選列使用相同的必要資料門檻，避免把資料不完整、原本就不會
+    # 進批次的列算成「未選對象」，造成待成單數＋略過數大於畫面總數。
+    required = ("姓名", "電話", "地址", "日期", "開始時間", "結束時間")
+    required_ok = pd.Series(True, index=work.index)
+    for column in required:
+        required_ok &= work.get(column, pd.Series("", index=work.index)).map(batch_opt._text).ne("")
+    work = work[required_ok].copy()
+    work = _filter_service_dates(batch_opt, work, service_start, service_end)
     held = work.apply(lambda row: bool(hold_reason(row)) and can_create_order({**row.to_dict(), HOLD_COLUMN: ""}), axis=1) if len(work) else pd.Series(dtype=bool)
     work = work[held.astype(bool)] if len(work) else work
     if not allow_failed and "結果" in work.columns: work = work[work["結果"].map(normalize_status).ne("失敗")]
     if region: work = work[work.apply(lambda row: batch_opt.get_region_by_address(batch_opt._text(row.get("地址")), __import__("accounts").ACCOUNTS) == region, axis=1).astype(bool)] if len(work) else work
     if not len(work): return []
-    return sorted(work.loc[_mode_mask(batch_opt, work, mode, o_texts), "__sheet_row__"].astype(int).tolist())
+    return sorted(work.loc[_mode_mask(batch_opt, work, mode), "__sheet_row__"].astype(int).tolist())
 
 
 def _held_stage_text(batch_opt, sheet_name, rows):
@@ -159,38 +211,50 @@ def held_message(batch_opt, sheet_name, rows):
 def render_stage_filter(st, key):
     """三種批次共用：勾選本次要約排程「預約條件」的哪些階段（預設只有可約）。"""
     stages = st.multiselect(
-        "本次預約對象（排程「預約條件」欄；空白的列一律照常判斷）", list(STAGES),
-        default=list(DEFAULT_STAGES), key=key,
+        "本次預約對象（排程「預約條件」欄）", list(STAGES), default=list(DEFAULT_STAGES), key=key,
+        help="預約條件空白的列一律照常成單。建議順序：可約 → 改加 → 人時不足 → 已確認 → 未回覆；"
+             "單一客人要例外處理，可直接改該列「預約條件」。",
     )
-    st.caption("建議順序：可約 → 改加 → 人時不足 → 已確認 → 未回覆。單一客人要例外處理，可直接改該列「預約條件」。")
     set_booking_stages(stages)
     return stages
 
 
-def render_o_text_filter(st, batch_opt, sheet_name, region, key, allow_failed=True):
-    """三種批次共用：列出 O 欄目前文字讓使用者單選／多選／不選；回傳所選文字。"""
-    if not sheet_name:
-        st.caption("輸入工作表名稱後，會列出 O 欄目前的內容可勾選。")
-        return []
-    cache_key, scope = f"{key}_options", (sheet_name, region, allow_failed)
-    if st.button("重新讀取 O 欄內容", key=f"{key}_reload") or st.session_state.get(f"{cache_key}_scope") != scope:
-        try:
-            st.session_state[cache_key] = _o_text_options(batch_opt, sheet_name, region, allow_failed)
-            st.session_state[f"{cache_key}_scope"] = scope
-        except Exception as exc:
-            st.warning(f"無法讀取 O 欄內容：{exc}")
-            return []
-    options = st.session_state.get(cache_key) or []
-    counts = dict(options)
-    if not options:
-        st.caption("目前沒有 O 欄無單號的可建單列。")
-        return []
-    selected = st.multiselect(
-        "O 欄內容（可單選、多選；都不選＝全部沒有單號的列）", [text for text, _ in options],
-        format_func=lambda text: f"{text[:60]}{'…' if len(text) > 60 else ''}（{counts.get(text, 0)} 列）",
-        key=f"{key}_selected",
-    )
-    return [text for text in selected if text in counts]
+def filter_mode(no_schedule: bool, stored_value: bool) -> str:
+    if no_schedule and stored_value: return "both"
+    return "no_schedule" if no_schedule else ("stored_value" if stored_value else "all")
+
+
+def filter_modes(mode: str) -> list:
+    return {"no_schedule": ["no_schedule"], "stored_value": ["stored_value"], "both": ["no_schedule", "stored_value"]}.get(mode, [])
+
+
+def render_target_section(st, key):
+    """三種批次共用「要約哪些列」：本次預約對象、服務起迄日（F欄）、自動篩選。"""
+    c1, c2, c3 = st.columns([2, 1, 1])
+    stages = render_stage_filter(c1, f"{key}_booking_stages")
+    service_start = c2.date_input("服務起日（F欄）", value=None, key=f"{key}_service_date_start", help="空白＝不限")
+    service_end = c3.date_input("服務迄日（F欄）", value=None, key=f"{key}_service_date_end",
+                                help="空白＝不限；只填迄日時，迄日以前（含當日）皆可成單。")
+    c1, c2 = st.columns(2)
+    no_schedule = c1.checkbox("自動篩選：O欄「無班表」", value=False, key=f"{key}_auto_no_slot")
+    stored_value = c2.checkbox("自動篩選：O欄「系統未產生新訂單編號」", value=False, key=f"{key}_auto_stored_value",
+                               help="多半是儲值金不足沒成單；客人儲值完成後，勾這個篩出來重新成單。")
+    st.caption("只建「狀態未安排＋訂單編號空白」且預約條件在本次對象內的列；兩個自動篩選可複選，都不勾＝依列號。")
+    return {"stages": stages, "service_start": service_start, "service_end": service_end,
+            "filter_mode": filter_mode(no_schedule, stored_value)}
+
+
+def render_run_options(st, key, retry_option=False):
+    """三種批次共用的執行選項：補檸檬人；雲端另有重試失敗列（本機一律包含 N 欄失敗列）。"""
+    c1, c2 = st.columns(2)
+    auto_lemon = c1.checkbox("查無班表時自動補檸檬人", value=False, key=f"{key}_auto_lemon",
+                             help="只補「無班表」的列，不動其他客人已配班專員。")
+    retry_failed = True
+    if retry_option:
+        retry_failed = c2.checkbox("重試 N 欄「失敗」的列", value=False, key=f"{key}_retry_failed",
+                                   help="雲端預設略過 N 欄「失敗」的列；已補班或要補檸檬人時勾選，不必清空 N 欄。"
+                                        "「系統未產生新訂單編號」篩選不受此限。")
+    return {"auto_lemon": auto_lemon, "retry_failed": retry_failed}
 
 
 def _update_sheet_rows_first_header(ws, row_results):

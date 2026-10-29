@@ -35,6 +35,25 @@ def test_normalize_phone_adds_leading_zero_and_keeps_ten_digits():
     assert normalize_phone("0912-345-678") == "0912345678"
 
 
+def test_gc_installs_google_retries_inside_subprocess():
+    from unittest.mock import patch
+    functions = _load_functions("_gc")
+    functions["_get_credentials"] = lambda: "credentials"
+    functions["gspread"] = SimpleNamespace(authorize=lambda credentials: credentials)
+    with patch("services.google_api_retry.install_gspread_retry") as install_gspread, \
+            patch("services.google_api_retry.install_googleapiclient_retry") as install_google_api:
+        assert functions["_gc"]() == "credentials"
+    install_gspread.assert_called_once_with()
+    install_google_api.assert_called_once_with()
+
+
+def test_deep_clean_candidate_years_skip_unrelated_drive_folders():
+    candidate_years = _load_functions("_deep_clean_candidate_years")["_deep_clean_candidate_years"]
+    assert candidate_years(datetime(2026, 10, 1), datetime(2026, 10, 31)) == [2026]
+    assert candidate_years(datetime(2026, 12, 1), datetime(2027, 2, 28)) == [2026]
+    assert candidate_years(datetime(2027, 1, 1), datetime(2027, 2, 28)) == [2026]
+
+
 def test_schedule_builder_passes_compare_only_to_safe_writer():
     from unittest.mock import patch
     functions = _load_functions("_build_vip_schedule_sheet")
@@ -61,6 +80,7 @@ def test_schedule_builder_uses_combined_cross_month_source_and_target():
         "json": __import__("json"),
         "re": re,
     })
+    functions["_purchase_item_lookup"] = lambda area: None
     source = SimpleNamespace(
         title="定期VIP_台北_202612-202702", col_count=21,
         get=lambda cell_range: [["2026-12-01", "2027-02-28"]] if cell_range == "T2:U2" else [["data"]],
@@ -91,7 +111,8 @@ def test_schedule_customer_key_uses_name_phone_and_address():
 
 def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
     functions = _load_functions(
-        "normalize_text", "normalize_name_for_compare", "normalize_address", "normalize_phone", "_write_vip_sheet"
+        "normalize_text", "normalize_name_for_compare", "normalize_address", "normalize_phone",
+        "_contiguous_row_ranges", "_write_vip_sheet"
     )
     functions["_write_topup_list"] = lambda *args: ""
 
@@ -133,20 +154,17 @@ def test_vip_writer_sorts_by_column_c_and_writes_phone_as_raw_text():
 
     # 姓氏總筆劃：王（4）在李（7）前面。
     assert [row[2] for row in sheet.updates[0]["values"][1:]] == ["王小明", "李小華"]
-    assert sheet.updates[1] == {
-        "values": [["0912345678"], ["0987654321"]],
-        "range_name": "D2:D3",
-        "value_input_option": "RAW",
-    }
-    assert sheet.formats[0]["range"] == "A2:S200"
+    assert sheet.updates[0]["value_input_option"] == "RAW"
+    assert [row[3] for row in sheet.updates[0]["values"][1:]] == ["0912345678", "0987654321"]
+    assert sheet.formats[0]["range"] == "A2:S3"
     assert [row[18] for row in sheet.updates[0]["values"][1:]] == ["event-wang", "event-li"]
-    assert sheet.updates[2]["range_name"] == "T1:U2"
+    assert sheet.updates[1]["range_name"] == "T1:U2"
     # Export itself also highlights both active and paused same-day visits.
     duplicate = {**rows[0], "address": "台北市", "event_id": "event-wang-paused", "status": "暫停"}
     rows[0]["address"] = "台北市"
     sheet.updates.clear()
     functions["_write_vip_sheet"](client, "台北", rows + [duplicate], datetime(2026, 10, 1), area_target_id="sheet-id")
-    assert [item["range"] for item in sheet.formats[1:]] == ["A2:S2", "A3:S3"]
+    assert [item["range"] for item in sheet.formats[1:]] == ["A2:S3"]
     assert sheet.updates[0]["values"][2][8] == "暫停"
 
 
@@ -280,6 +298,7 @@ def test_schedule_builder_applies_booking_gate_only_when_requested_with_run_peri
     from unittest.mock import patch
     functions = _load_functions("_build_vip_schedule_sheet")
     functions.update({"VIP_SCHEDULE_FALLBACK_HEADERS": [""] * 30, "json": __import__("json")})
+    functions["_purchase_item_lookup"] = lambda area: None
     source = SimpleNamespace(get=lambda _range: [["data"]])
     client = SimpleNamespace(open_by_key=lambda _key: SimpleNamespace(worksheet=lambda _name: source))
     result = {"sheet": "台北202612", "count": 1, "differences": {}, "report": "差異", "booking_gate": {"stages": {}}}
@@ -397,7 +416,7 @@ def test_topup_list_is_not_created_when_nobody_needs_topup():
 
 def test_export_sorts_by_base_name_then_address_then_date():
     functions = _load_functions("normalize_text", "normalize_name_for_compare", "normalize_address",
-                                "normalize_phone", "_write_vip_sheet")
+                                "normalize_phone", "_contiguous_row_ranges", "_write_vip_sheet")
     functions["_write_topup_list"] = lambda *args: ""
     writes = []
 
@@ -430,3 +449,26 @@ def test_name_sort_key_orders_surnames_by_taiwan_stroke_count():
     names = ["黃秀玲", "王小明", "黃煦芬", "劉冠亨", "何雅芳", "李曉微", "台灣大幸", "Amy", "陳靜萱"]
     assert sorted(names, key=name_sort_key) == [
         "王小明", "台灣大幸", "何雅芳", "李曉微", "陳靜萱", "黃煦芬", "黃秀玲", "劉冠亨", "Amy"]
+
+
+def test_purchase_item_lookup_uses_latest_served_order_at_same_address():
+    from types import SimpleNamespace as NS
+    from unittest.mock import patch
+    import tools.service_management.stored_value as sv
+    orders = [
+        NS(service_date="2026/09/10", items=["居家清潔"], address="新北市中和區錦和路113號3樓"),
+        NS(service_date="2026/10/08", items=["辦公室清潔"], address="新北市中和區錦和路113號3樓"),
+        NS(service_date="", items=["儲值金"], address="新北市中和區錦和路113號3樓"),
+        NS(service_date="2026/10/20", items=["居家清潔"], address="台北市別的地址"),
+    ]
+    client = NS(search_orders_by_phone=lambda phone: orders)
+    with patch("tools.lemon_backend.client.BackendClient", return_value=client):
+        lookup = sv._purchase_item_lookup("台北")
+        assert lookup("912025772", "新北市中和區錦和路113號3樓") == "辦公室清潔"
+        assert lookup("0912025772", "台北市沒去過") == ""
+
+    def broken(area):
+        raise RuntimeError("帳密未設定")
+    with patch("tools.lemon_backend.client.BackendClient", side_effect=broken):
+        lookup = sv._purchase_item_lookup("台北")
+        assert lookup("0912025772", "x") == "" and lookup("0911111111", "y") == ""

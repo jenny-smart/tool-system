@@ -3850,6 +3850,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【儲值】建立VIP排程工作表",
         "【儲值】全跑（抓儲值金＋匯出VIP）",
         "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）",
+        "【儲值】重新排序排程工作表",
         # 年節大掃除 VIP 通知／Email 合併清單
         "【大掃除】年度設定",
         "【大掃除】更新VIP通知清單",
@@ -3959,6 +3960,7 @@ SERVICE_STORED_VALUE_MAP = {
     "【儲值】建立VIP排程工作表":         "3",
     "【儲值】全跑（抓儲值金＋匯出VIP）":  "0",
     "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）": "4",
+    "【儲值】重新排序排程工作表":       "5",
 }
 
 # ── ★ CRM：功能 → crm.py --step 對應表 ───────────────────────
@@ -4799,6 +4801,11 @@ with date_col:
             label_visibility="collapsed",
             key="period",
         )
+        if system_type == "monthly_scheduler" and selected_function in {"預收", "儲值金預收"}:
+            st.caption(
+                "服務日期固定為期別次月起 4 個完整月份；例如 202610＝"
+                "2026/11/01～2027/02/28，202611＝2026/12/01～2027/03/31。"
+            )
 
     # ── ★ 客服排程系統 ──────────────────────────────────────
     elif system_type == "service_schedule":
@@ -4951,7 +4958,8 @@ with date_col:
                 )
             start_date_value = end_date_value = None
 
-        elif selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
+        elif selected_function in ("【儲值】匯出VIP日曆", "【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP）", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）",
+                                   "【儲值】重新排序排程工作表"):
             st.markdown('<div class="field-label">📆 匯出設定</div>', unsafe_allow_html=True)
             _crm_mode = st.radio(
                 "匯出方式", ["期別（月份）", "月份區間"],
@@ -5006,6 +5014,9 @@ with date_col:
                                               _calendar.monthrange(*_end_month)[1], tzinfo=TW_TZ).date()
                     st.caption(f"匯出範圍：{start_date_value} ～ {end_date_value}")
 
+            if selected_function == "【儲值】重新排序排程工作表":
+                st.caption("只把上面期間的排程工作表重新排序（姓名 → 地址 → 日期 → 開始時間），客人之間畫分隔線；"
+                           "不匯出日曆、不改內容，整列一起移動。請勿在批次成單執行中排序。")
             if selected_function in ("【儲值】建立VIP排程工作表", "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）"):
                 st.checkbox(
                     "更新後依匯出日曆順序排序（姓名 → 地址 → 日期 → 開始時間）",

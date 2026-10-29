@@ -135,6 +135,11 @@ def _get_credentials() -> Credentials:
     return Credentials.from_service_account_info(info, scopes=SCOPES)
 
 def _gc() -> gspread.Client:
+    # This module runs in a separate Python subprocess.  The retry patch that
+    # toolapp installs in the Streamlit process is not inherited by this one.
+    from services.google_api_retry import install_googleapiclient_retry, install_gspread_retry
+    install_gspread_retry()
+    install_googleapiclient_retry()
     return gspread.authorize(_get_credentials())
 
 def _calendar_service():
@@ -552,6 +557,17 @@ def get_price_by_date(dt: datetime, deep_clean_setting: Any = None) -> float:
     return 600 + (float(surcharge) / 2)
 
 
+def _deep_clean_candidate_years(start_dt: datetime, end_dt: datetime) -> list[int]:
+    # A season named 2026 covers the end of 2026 and early 2027.  Do not scan
+    # unrelated old/future Drive folders for an October-only export.
+    candidate_years = set(range(start_dt.year, end_dt.year + 1))
+    if start_dt.month <= 3:
+        candidate_years.add(start_dt.year - 1)
+    if end_dt.month < 10:
+        candidate_years.discard(end_dt.year)
+    return sorted(candidate_years)
+
+
 def _load_deep_clean_pricing_settings(start_dt: datetime, end_dt: datetime) -> list[Any]:
     """Load every annual deep-clean setting that could overlap an export range."""
     from tools.service_management.deep_clean_notice import (
@@ -561,8 +577,8 @@ def _load_deep_clean_pricing_settings(start_dt: datetime, end_dt: datetime) -> l
     )
 
     settings = []
-    candidate_years = range(start_dt.year - 1, end_dt.year + 1)
-    for season_year in candidate_years:
+    for season_year in _deep_clean_candidate_years(start_dt, end_dt):
+        log.info("讀取 %d 年度大掃除計價設定中…", season_year)
         try:
             settings_sheet_id, _ = resolve_deep_clean_sheet_ids(
                 season_year, DEFAULT_MASTER_SPREADSHEET_ID,
@@ -576,6 +592,7 @@ def _load_deep_clean_pricing_settings(start_dt: datetime, end_dt: datetime) -> l
                 f"讀取 {season_year} 年度大掃除設定失敗；為避免儲值金扣抵錯誤，已停止匯出：{exc}"
             ) from exc
         settings.append(setting)
+        log.info("%d 年度大掃除計價設定讀取完成", season_year)
     return settings
 
 def parse_service_people(service_text: str) -> int:
@@ -649,6 +666,7 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: 
                 f"找不到 {area_name}儲值金結算_YYYYMMDD 工作表"
             )
         sh = max(candidates, key=lambda worksheet: worksheet.title)
+        log.info("[%s] 讀取儲值金餘額中：%s", area_name, sh.title)
         records = sh.get_all_records()
     except Exception as e:
         log.warning("[%s] 讀取儲值金資料失敗（非致命）：%s", area_name, e)
@@ -672,7 +690,25 @@ def _load_stored_value_info(gc: gspread.Client, area_name: str, area_target_id: 
         if not name_map[name_key]["email"] and email_val:
             name_map[name_key]["email"] = str(email_val).strip()
 
+    log.info("[%s] 儲值金餘額讀取完成：%d 位", area_name, len(name_map))
     return name_map
+
+
+def _contiguous_row_ranges(row_numbers: list[int], start_col: str = "A", end_col: str = "S") -> list[str]:
+    """Compress row numbers so one formatting request covers each consecutive run."""
+    numbers = sorted(set(row_numbers))
+    if not numbers:
+        return []
+    ranges = []
+    start = previous = numbers[0]
+    for row_number in numbers[1:]:
+        if row_number == previous + 1:
+            previous = row_number
+            continue
+        ranges.append(f"{start_col}{start}:{end_col}{previous}")
+        start = previous = row_number
+    ranges.append(f"{start_col}{start}:{end_col}{previous}")
+    return ranges
 
 
 def _fetch_calendar_events(
@@ -914,10 +950,7 @@ def _write_topup_list(ss: Any, sheet_name: str, rows: list[dict]) -> str:
             return ""
         sh = ss.add_worksheet(title=sheet_name, rows=max(len(list_rows) + 20, 100), cols=len(TOPUP_LIST_HEADERS))
     sh.clear()
-    sh.update(values=[TOPUP_LIST_HEADERS] + list_rows, range_name="A1", value_input_option="USER_ENTERED")
-    if list_rows:
-        sh.update(values=[[normalize_phone(row[1])] for row in list_rows],
-                  range_name=f"B2:B{len(list_rows) + 1}", value_input_option="RAW")
+    sh.update(values=[TOPUP_LIST_HEADERS] + list_rows, range_name="A1", value_input_option="RAW")
     sh.freeze(rows=1)
     log.info("需儲值名單更新完成：%s（%d 位）", sheet_name, len(list_rows))
     return sheet_name
@@ -978,7 +1011,7 @@ def _write_vip_sheet(
             shown_customer_months.add(customer_month)
 
         out.append([
-            r["service"], r["note"], r["name"], r["phone"], r["address"],
+            r["service"], r["note"], r["name"], normalize_phone(r["phone"]), r["address"],
             r["date_str"], r["start_str"], r["end_str"], r["status"], "",
             r["weekday"], r["price"], r["person_hrs"], r["amount"],
             r["subtotal"] if is_first else "",
@@ -988,18 +1021,21 @@ def _write_vip_sheet(
             r.get("event_id", ""),
         ])
 
-    sh.update(values=out, range_name="A1", value_input_option="USER_ENTERED")
+    log.info("[%s] 寫入定期VIP工作表中：%d 筆 → %s", area_name, len(rows), sheet_name)
+    # These are snapshot values, not formulas. RAW avoids locale/formula parsing,
+    # preserves leading-zero phone numbers, and removes a second write request.
+    sh.update(values=out, range_name="A1", value_input_option="RAW")
+    log.info("[%s] 定期VIP主資料寫入完成，套用格式中…", area_name)
     if rows:
-        phones = [[normalize_phone(r["phone"])] for r in rows]
-        sh.update(values=phones, range_name=f"D2:D{len(rows) + 1}", value_input_option="RAW")
         # Rows already sorted above; keep their positions for duplicate highlighting.
         from tools.service_management.vip_schedule_diff import _same_day_rows
-        formats = [{"range": f"A2:S{max(getattr(sh, 'row_count', 200), len(rows) + 1)}",
+        formats = [{"range": f"A2:S{len(rows) + 1}",
                     "format": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}}]
-        for row_num in _same_day_rows(out[1:], []):
-            formats.append({"range": f"A{row_num}:S{row_num}",
+        for row_range in _contiguous_row_ranges(_same_day_rows(out[1:], [])):
+            formats.append({"range": row_range,
                             "format": {"backgroundColor": {"red": .90, "green": .85, "blue": 1}}})
         sh.batch_format(formats)
+        log.info("[%s] 定期VIP格式套用完成", area_name)
     sh.update(
         values=[["匯出開始日期", "匯出結束日期"],
                 [start_dt.strftime("%Y-%m-%d"), (end_dt or start_dt).strftime("%Y-%m-%d")]],
@@ -1041,6 +1077,7 @@ def step2_export_vip_calendar(
             rows   = _process_events(
                 events, area_name, calendar_id, deep_clean_settings,
             )
+            log.info("[%s] 行事曆整理完成：%d 筆符合VIP格式", area_name, len(rows))
 
             if not rows:
                 log.warning("[%s] 指定日期範圍內無符合行程，仍更新空白日曆快照", area_name)
@@ -1124,6 +1161,36 @@ def _month_keys(start_dt: datetime, end_dt: datetime) -> list[str]:
     return result
 
 
+def _purchase_item_lookup(area_name: str):
+    """上月排程查不到購買項目時：檸檬後台依電話查訂單，取同地址最近一次服務的購買項目。"""
+    cache: dict[str, list] = {}
+    state: dict[str, Any] = {"client": None, "failed": False}
+
+    def lookup(phone: Any, address: Any) -> str:
+        from tools.lemon_backend.memo import parse_date, same_address
+        key = normalize_phone(phone)
+        if not key or state["failed"]:
+            return ""
+        if key not in cache:
+            try:
+                if state["client"] is None:
+                    from tools.lemon_backend.client import BackendClient
+                    state["client"] = BackendClient(area_name)
+                cache[key] = state["client"].search_orders_by_phone(key)
+            except Exception as exc:
+                # 帳密或連線有問題時不再逐列重試，購買項目留空待人工補。
+                log.warning("[%s] 檸檬後台查購買項目失敗：%s", area_name, exc)
+                state["failed"] = True
+                return ""
+        served = [order for order in cache[key]
+                  if order.service_date and order.items and "儲值" not in order.items[0]
+                  and same_address(order.address, str(address or ""))]
+        latest = max(served, key=lambda order: parse_date(order.service_date) or datetime.min, default=None)
+        return latest.items[0] if latest else ""
+
+    return lookup
+
+
 def _build_vip_schedule_sheet(
     gc: gspread.Client,
     area: dict,
@@ -1170,6 +1237,7 @@ def _build_vip_schedule_sheet(
         period_filter="" if is_cross_month else start_period,
         gate=gate,
         sort_rows=sort_rows,
+        purchase_item_lookup=None if compare_only else _purchase_item_lookup(area_name),
     )
     if gate_rules:
         result.setdefault("booking_gate", {})["rules"] = gate_rules
@@ -1213,6 +1281,30 @@ def step3_build_vip_schedule_sheets(
     return results
 
 
+def step5_sort_schedule_sheets(gc: gspread.Client, areas: list[dict], start_dt: datetime, end_dt: datetime) -> dict:
+    """只重新排序既有排程工作表（姓名→地址→日期→開始時間，客人之間畫分隔線）；不匯出日曆、不改內容。"""
+    from tools.service_management.vip_schedule_diff import sort_schedule_sheet
+    periods = _month_keys(start_dt, end_dt)
+    suffix = f"{periods[0]}-{periods[-1]}" if len(periods) > 1 else periods[0]
+    results, errors = {}, []
+    for area in areas:
+        name = f"{area['name']}{suffix}"
+        try:
+            target_id = area.get("target_spreadsheet_id", "") or _load_target_file_id()
+            count = sort_schedule_sheet(gc.open_by_key(target_id), name)
+            log.info("[%s] 排程工作表已重新排序：%d 列", name, count)
+            results[name] = count
+        except gspread.WorksheetNotFound:
+            errors.append(f"{name}: 找不到排程工作表")
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+    for error in errors:
+        log.error("重新排序失敗：%s", error)
+    if errors:
+        raise RuntimeError("部分排程工作表重新排序失敗：\n" + "\n".join(errors))
+    return results
+
+
 def _load_target_file_id() -> str:
     val = os.environ.get("SERVICE_TARGET_SPREADSHEET_ID", "").strip()
     if val:
@@ -1235,8 +1327,9 @@ def _load_target_file_id() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="檸檬家事 CRM 客服系統")
-    parser.add_argument("--step",  type=int, choices=[0, 1, 2, 3, 4], default=0,
-                        help="0=抓儲值金＋匯出VIP, 1=只抓儲值金, 2=只匯出VIP日曆, 3=建立VIP排程工作表, 4=抓儲值金＋匯出VIP＋建立排程工作表（預設：0）")
+    parser.add_argument("--step",  type=int, choices=[0, 1, 2, 3, 4, 5], default=0,
+                        help="0=抓儲值金＋匯出VIP, 1=只抓儲值金, 2=只匯出VIP日曆, 3=建立VIP排程工作表, "
+                             "4=抓儲值金＋匯出VIP＋建立排程工作表, 5=只重新排序排程工作表（預設：0）")
     parser.add_argument(
         "--area",
         type=str,
@@ -1256,7 +1349,7 @@ def main() -> None:
                         help="Step 3 只產生差異工作表，不更新排程內容或底色")
     args = parser.parse_args()
 
-    if args.step in (0, 2, 3, 4) and not (_load_target_file_id()):
+    if args.step in (0, 2, 3, 4, 5) and not (_load_target_file_id()):
         sys.exit("❌ 請在主控試算表「系統設定」填入客服排程系統的共用雲端資料夾ID，或設定 Secret SERVICE_TARGET_SPREADSHEET_ID")
 
     today = now_tp()
@@ -1296,6 +1389,7 @@ def main() -> None:
         2: "【CRM】產生 CRM",
         3: "【儲值】建立VIP排程工作表",
         4: "【儲值】全跑（抓儲值金＋匯出VIP＋建立排程工作表）",
+        5: "【儲值】重新排序排程工作表",
     }[args.step]
 
     if not areas:
@@ -1343,6 +1437,14 @@ def main() -> None:
             except Exception as e:
                 errors.append(str(e))
                 log.error("Step 3 失敗：%s", e)
+
+        if args.step == 5:
+            log.info("--- 只重新排序排程工作表 ---")
+            try:
+                step5_sort_schedule_sheets(gc, areas, start_dt, end_dt)
+            except Exception as e:
+                errors.append(str(e))
+                log.error("重新排序失敗：%s", e)
 
     finally:
         elapsed_total = (now_tp() - t_total).total_seconds()

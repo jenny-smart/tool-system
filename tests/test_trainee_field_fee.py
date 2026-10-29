@@ -213,3 +213,22 @@ def test_mark_refunded_plan():
                          _field_row("", "林怡君", "200", "2"), _field_row("", "林怡君", "200", "2")]}
     cells, total = plan_field_marks(sheets, "林怡君")
     assert cells == [("新人實境", 2), ("新人實境", 4), ("新人實境", 5)] and total == Decimal(1200)
+
+
+def test_plan_formula_copies_from_nearest_formula_row():
+    from tools.finance_management.trainee_field_fee import plan_formula_copies
+
+    def row(j="", m=""):
+        r = [""] * 18
+        r[9], r[12] = j, m
+        for c in (13, 14, 15, 16, 17):
+            r[c] = "=X"
+        return r
+
+    values = [["h"] * 18, row("=J", "=M"), row("=J", ""), row("", ""), row("", "=M")]
+    copies, warnings = plan_formula_copies(values, [4, 5])
+    # 第 4 列：J 取第 3 列、M 往上找到第 2 列；N–R 已有公式不動
+    assert (9, 3, 4) in copies and (12, 2, 4) in copies
+    # 第 5 列：J 取第 3 列；M 已有公式不動
+    assert (9, 3, 5) in copies and all(not (c == 12 and d == 5) for c, _, d in copies)
+    assert all(c in (9, 12) for c, _, _ in copies) and warnings == []

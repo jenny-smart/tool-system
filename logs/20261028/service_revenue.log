@@ -1,0 +1,35 @@
+/opt/hostedtoolcache/Python/3.11.17/x64/lib/python3.11/site-packages/google/api_core/_python_version_support.py:254: FutureWarning: You are using a Python version (3.11.17) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2027-10-24). Please upgrade to the latest Python version, or at least Python 3.12, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+2026-10-27 21:33:13 [INFO] === 客服排程系統 run_id=2ec810ad step=3 台北時間=2026-10-28 05:33:13 ===
+2026-10-27 21:33:13 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-10-27 21:33:13 [INFO] file_cache is only supported with oauth2client<4.0.0
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-27 21:33:21 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-27 21:33:22 [INFO] 信件日期（台北時間）：2026-10-27
+2026-10-27 21:33:37 [INFO]   [mail] text/plain 為空，fallback 到 text/html（2908 字元）
+2026-10-27 21:33:40 [INFO]   近三日營業額-台北 → 選中 17:25:04（與17:25差4s）
+2026-10-27 21:33:40 [INFO]   [debug] 行53 repr='2026-10-25：5分'
+2026-10-27 21:33:40 [INFO]   [debug] 行54 repr='2026-10-26：67分'
+2026-10-27 21:33:40 [INFO]   [debug] 行55 repr='2026-10-27：181分'
+2026-10-27 21:33:40 [INFO]   [debug] 行56 repr='【家電清潔】日營業額'
+2026-10-27 21:33:40 [INFO]   [debug] 行57 repr='2026-10-25：0分'
+2026-10-27 21:33:40 [INFO]   [debug] 行58 repr='2026-10-26：0分'
+2026-10-27 21:33:40 [INFO]   [debug] 行59 repr='2026-10-27：0分'
+2026-10-27 21:33:40 [INFO]   [debug] 行60 repr='【儲值金】日營業額'
+2026-10-27 21:33:49 [INFO]   [mail] text/plain 為空，fallback 到 text/html（1205 字元）
+2026-10-27 21:33:50 [INFO]   近三日營業額-台中 → 選中 17:25:07（與17:25差7s）
+2026-10-27 21:33:50 [INFO]   [debug] 行26 repr='2026-10-25：0分'
+2026-10-27 21:33:50 [INFO]   [debug] 行27 repr='2026-10-26：0分'
+2026-10-27 21:33:50 [INFO]   [debug] 行28 repr='2026-10-27：8分'
+2026-10-27 21:33:50 [INFO]   [debug] 行29 repr='【家電清潔】日營業額'
+2026-10-27 21:33:50 [INFO]   [debug] 行30 repr='2026-10-25：0分'
+2026-10-27 21:33:50 [INFO]   [debug] 行31 repr='2026-10-26：0分'
+2026-10-27 21:33:50 [INFO]   [debug] 行32 repr='2026-10-27：0分'
+2026-10-27 21:33:50 [INFO]   [debug] 行33 repr='【儲值金】日營業額'
+2026-10-27 21:33:50 [INFO]   台北：{'daily_value': 181, 'total_count': 1874, 'total_amount': 3747850}
+2026-10-27 21:33:50 [INFO]   台中：{'daily_value': 8, 'total_count': 126, 'total_amount': 252200}
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-27 21:33:51 [INFO] Step 3 完成，row=2446（29.0s）
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：找不到 GOOGLE_SERVICE_ACCOUNT 設定
+2026-10-27 21:33:52 [INFO] === 全部完成 run_id=2ec810ad（29.9s）===
