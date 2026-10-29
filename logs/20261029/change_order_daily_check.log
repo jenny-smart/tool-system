@@ -1,0 +1,14 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+【台北】未備妥 2 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【桃園】已補 T／Z 公式 1 格
+【桃園】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已建立 11:00 提醒（jenny@lemonclean.com.tw）
+{'todo': [{'region': '台北', 'row': 338, 'status': '待退款', 'detail': '異動服務退款', 'order_no': 'LC00217656', 'customer': '羅鈞允', 'payway': 'ATM', 'amount': '585', 'progress': ['折讓單 ✓'], 'actions': [], 'missing': ['缺退款銀行代碼／帳號（P／Q）'], 'manual': [], 'note': '2026/10/28 LC00217656 異動服務退款--異動週末至平日2人3小時服務，退週末加價 $ 600'}, {'region': '台北', 'row': 339, 'status': '待扣儲值金', 'detail': '異動服務收款', 'order_no': 'LC00216380', 'customer': '鄭慕尼', 'payway': '', 'amount': '', 'progress': [], 'actions': [], 'missing': ['缺儲值金金額（N）'], 'manual': [], 'note': '2026/10/28 LC00216380 異動服務收款--服務前一日通知取消2人6服務，待扣儲值金 $ 1800'}, {'region': '桃園', 'row': 84, 'status': '待收款', 'detail': '異動服務收款', 'order_no': 'LC00217870', 'customer': '謝均柚', 'payway': 'ATM', 'amount': '600', 'progress': [], 'actions': [], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/10/29 LC00217870 異動服務收款--原服務2026-11-26 (四) 09:00-12:00 , 改至2026-11-21 (六)14:00 - 17:00 , 須補足價差600元'}, {'region': '新竹', 'row': 15, 'status': '待收款', 'detail': '專員回報加時', 'order_no': 'LC002175281', 'customer': '孫櫻芳', 'payway': '', 'amount': '1200', 'progress': [], 'actions': [], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/10/28  LC002175281 專員回報加時--現場加時2人1小時(林宜鋒、姜淑婷)'}], 'failed': []}
