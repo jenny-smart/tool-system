@@ -434,6 +434,24 @@ def _skip_superseded_downloads(pending: list[dict[str, str]], *, service: Any, s
     return kept
 
 
+BUSY_GUARD_HOURS = 2
+
+
+def busy_task(tasks: list[dict[str, str]], agent_id: str, now: datetime | None = None) -> dict[str, str] | None:
+    """這台 Agent 還在執行中的任務（開始不到 BUSY_GUARD_HOURS 小時；更久的視為殘留，不擋）。"""
+    now = now or datetime.now(TZ).replace(tzinfo=None)
+    for task in tasks:
+        if task.get("status") not in ACTIVE_TASK_STATUSES or task.get("agent_id") != agent_id:
+            continue
+        try:
+            started = datetime.strptime(task.get("started_at", ""), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        if (now - started).total_seconds() < BUSY_GUARD_HOURS * 3600:
+            return task
+    return None
+
+
 def claim_next_task(
     *,
     agent_id: str = "",
@@ -442,11 +460,11 @@ def claim_next_task(
 ) -> dict[str, str] | None:
     service, spreadsheet_id = ensure_task_sheet(service, spreadsheet_id)
     agent_id = agent_id or default_agent_id()
-    pending = [
-        task
-        for task in reversed(list_tasks(limit=500, service=service, spreadsheet_id=spreadsheet_id))
-        if task["status"] in {"pending", "queued"}
-    ]
+    tasks = list_tasks(limit=500, service=service, spreadsheet_id=spreadsheet_id)
+    if busy_task(tasks, agent_id):
+        # 同一台 Agent 共用一個 Chrome：前一筆還在跑就不接新任務（避免重複啟動的 Agent 同時操作網頁）
+        return None
+    pending = [task for task in reversed(tasks) if task["status"] in {"pending", "queued"}]
     pending = _skip_superseded_downloads(pending, service=service, spreadsheet_id=spreadsheet_id)
     if not pending:
         return None

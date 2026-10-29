@@ -416,6 +416,15 @@ def build_change_order_sync(params: dict[str, Any]) -> list[str]:
     return command
 
 
+def build_change_order_batch_run(params: dict[str, Any]) -> list[str]:
+    plan = params.get("plan")
+    if not isinstance(plan, list) or not plan:
+        raise ValueError("清潔異動整合執行缺少執行計畫")
+    _area, cdp_url = _common_invoice_args(params)
+    return [sys.executable, "-m", "tools.finance_management.change_order_batch", "run",
+            "--plan", json.dumps(plan, ensure_ascii=False), "--cdp-url", cdp_url]
+
+
 def build_internal_payment_record(params: dict[str, Any]) -> list[str]:
     items = params.get("items") or []
     if not items:
@@ -810,6 +819,7 @@ register_action("newebpay.invoice_amounts", build_newebpay_invoice_amounts)
 register_action("newebpay.refund_pending", build_newebpay_refund_pending)
 register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjustment)
 register_action("change_order.sync", build_change_order_sync)
+register_action("change_order.batch_run", build_change_order_batch_run)
 register_action("internal_payment.record", build_internal_payment_record)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
@@ -872,6 +882,7 @@ ACTION_LABELS = {
     "newebpay.refund_pending": "【藍新金流】藍新信用卡待退款",
     "lemon.stored_value_adjustment": "【檸檬後台】異動儲值金",
     "change_order.sync": "【清潔異動】回寫系統",
+    "change_order.batch_run": "【清潔異動】整合執行（逐區依序）",
     "internal_payment.record": "【富邦銀行】內部請款留紀錄",
     "fubon.login": "【富邦銀行】富邦登入",
     "fubon.download": "【富邦銀行】富邦明細下載",

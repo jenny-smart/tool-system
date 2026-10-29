@@ -197,7 +197,7 @@ def install(ui) -> None:
             })
         return prepared
 
-    def _dispatch(prepared: list[dict[str, Any]], area_label: str) -> dict:
+    def _enqueue(prepared: list[dict[str, Any]], area_label: str) -> None:
         if not prepared:
             raise ValueError("沒有可送出的 Payload")
         created_by = st.session_state.get("username", "Tool System")
@@ -209,6 +209,10 @@ def install(ui) -> None:
                 created_by=created_by,
                 source_row=item["source_row"],
             )
+
+    def _dispatch(prepared: list[dict[str, Any]], area_label: str) -> dict:
+        _enqueue(prepared, area_label)
+        created_by = st.session_state.get("username", "Tool System")
         task = create_task(
             "cetustek.login",
             {"area": area_label, "cdp_url": "http://127.0.0.1:9222"},
@@ -217,17 +221,28 @@ def install(ui) -> None:
         st.session_state["invoice_cetustek_task_id"] = task.get("task_id", "")
         return task
 
-    def queue_pending_invoices(area_label: str, rows: list[int]) -> dict:
-        """清潔異動整合執行用：指定列以訂單原發票設定（不變更）組資料並排入鯨躍填表。"""
+    def prepare_pending_invoices(area_label: str, rows: list[int]) -> None:
+        """清潔異動整合執行用：指定列以訂單原發票設定（不變更）組資料並排入 Payload；
+        不另排鯨躍任務，由整合執行的 Agent 任務在該區鯨躍步驟開立。"""
+        _enqueue(_prepare(_pending_candidates(area_label, rows), _area_key(area_label)), area_label)
+
+    def _area_key(area_label: str) -> str:
         key_by_label = {display: key for key, display in ui.get_area_options()}
         if area_label not in key_by_label:
             raise ValueError(f"鯨躍發票沒有「{area_label}」的設定")
+        return key_by_label[area_label]
+
+    def _pending_candidates(area_label: str, rows: list[int]) -> list[dict[str, Any]]:
         wanted = {int(row) for row in rows}
         candidates = [row for row in get_pending_invoice_candidates(area_label) if int(row["列號"]) in wanted]
         missing = wanted - {int(row["列號"]) for row in candidates}
         if missing:
             raise ValueError(f"{area_label} 第 {'、'.join(map(str, sorted(missing)))} 列已不是待開立發票（O 已有發票或狀態已變）")
-        return _dispatch(_prepare(candidates, key_by_label[area_label]), area_label)
+        return candidates
+
+    def queue_pending_invoices(area_label: str, rows: list[int]) -> dict:
+        """指定列以訂單原發票設定（不變更）組資料並排入鯨躍填表。"""
+        return _dispatch(_prepare(_pending_candidates(area_label, rows), _area_key(area_label)), area_label)
 
     def _find_invoice_task(area_label: str) -> dict[str, str] | None:
         task_id = str(st.session_state.get("invoice_cetustek_task_id") or "")
@@ -370,3 +385,4 @@ def install(ui) -> None:
 
     ui.render_invoice_create = render_invoice_create
     ui.queue_pending_invoices = queue_pending_invoices
+    ui.prepare_pending_invoices = prepare_pending_invoices
