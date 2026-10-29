@@ -23,6 +23,8 @@
   - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
+  - 未完全完成也先回寫（2026-10-29 Jenny 確認）：待收款已開發票（O）、待退款／VIP待退券已開折讓單或已退款（AB／AC），且 AE 還不是「更新系統（B欄：同狀態）」→ 以目前狀態回寫已完成的欄位，
+    B 欄不變；之後完成時再回寫一次。待扣／待返儲值金回寫會直接改成完成狀態，不做部分回寫。
   - 盤點時順手補 T（匯款金額）、Z（未稅金額）公式（只補空白格）。
 執行（2026-10-29 與 Jenny 確認）：整批只排一筆本機 Agent 任務（change_order.batch_run），
   依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 退款（信用卡登入藍新、ATM 登入富邦）
@@ -52,6 +54,8 @@ STORED_VALUE_STATUSES = {"待扣儲值金", "待返儲值金"}
 ATM_REFUND_REGIONS = {"台北", "台中"}
 # 只列出、不自動處理的狀態（已完成或不需處理）
 IGNORED_STATUSES = {"異動不處理", ""}
+# 未完全完成也可先回寫目前進度的狀態（回寫後 B 欄不變）
+PARTIAL_SYNC_STATUSES = {"待收款", "待退款", "VIP待退券"}
 
 # 動作 → (顯示名稱, 本機 Agent action)
 ACTIONS = {
@@ -121,6 +125,28 @@ def ready_target(row: list) -> Optional[str]:
     if status == "待處理發票" and _cell(row, "O"):
         return "已處理發票"
     return None
+
+
+def partial_sync_due(row: list) -> bool:
+    """還沒完成、但已有進度且尚未以目前狀態回寫過的列 → 先回寫目前進度。"""
+    status = _cell(row, "B")
+    if status not in PARTIAL_SYNC_STATUSES or _cell(row, "AE") == synced_marker(status):
+        return False
+    if status == "待收款":
+        return bool(_cell(row, "O"))
+    # 退款類回寫只寫折讓單／退款欄位（VIP 的 M 歸零時間不會寫入後台），有 AB／AC 才回寫
+    return bool(_cell(row, "AB") or _cell(row, "AC"))
+
+
+def _add_partial_sync(item: dict, row: list) -> None:
+    """B 欄還沒完成的列一律留在盤點清單；已先回寫過的標示出來，完成後要再回寫，避免漏掉。"""
+    if partial_sync_due(row):
+        item["actions"].append("sync")
+        item["target_status"] = item["status"]
+        item["progress"].append("先回寫目前進度，完成後再回寫一次")
+    elif _cell(row, "AE") == synced_marker(item["status"]):
+        when = _cell(row, "AD")
+        item["progress"].append(f"已先回寫目前進度{f'（{when}）' if when else ''}，B 欄完成後需再回寫")
 
 
 def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
@@ -198,6 +224,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         if any(m != MISSING_BANK for m in item["missing"]):
             item["actions"] = []  # 資料不齊的列先不執行，避免只做一半
         # 只缺銀行代碼／帳號：退款本來就不會排入，折讓單（及 VIP 歸零）照常先做
+        _add_partial_sync(item, row)
         return item
 
     if status == "待收款":
@@ -213,6 +240,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             item["progress"].append("發票 ✓")
             if not _cell(row, "AA"):
                 item["manual"].append("AA 發票開立時間空白，請確認發票後補上")
+        _add_partial_sync(item, row)
         return item
 
     if status in STORED_VALUE_STATUSES:
