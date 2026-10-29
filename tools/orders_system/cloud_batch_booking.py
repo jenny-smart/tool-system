@@ -14,7 +14,7 @@ from batch_recovery_meta import install_patch as install_recovery_meta_patch
 from selected_row_status_guard import (install_patch as install_selected_row_status_guard, FILTER_MODES, _auto_filter_rows,
                                        _held_rows, _safe_load_candidates, filter_modes, held_message)
 from hybrid_batch_runner import run_process_web_hybrid
-from booking_eligibility import DEFAULT_STAGES, STAGES, booking_stages, normalize_status
+from booking_eligibility import DEFAULT_STAGES, STAGES, booking_stages
 
 install_selected_row_status_guard()
 install_recovery_meta_patch()
@@ -28,18 +28,18 @@ def _bool_text(value) -> bool:
 
 def load_pending(sheet_name: str, excluded=None, filter_mode: str = "all", selected_region: str = "", allow_auto_lemon=False,
                  retry_failed=False, service_start=None, service_end=None):
-    """待成單列。N 欄「失敗」的列預設略過（retry_failed 才重試）；儲值金篩選本來就是重試失敗列，不受此限。"""
+    """待成單列。不勾自動篩選時，N 欄「失敗」的列預設略過（retry_failed 才重試）；
+    自動篩選（無班表／系統未產生新訂單編號）篩的本來就是失敗列，一律包含。"""
     excluded = excluded or set()
     modes = filter_modes(filter_mode)
-    candidates = _safe_load_candidates(batch_opt, sheet_name, allow_failed=retry_failed or "stored_value" in modes,
+    candidates = _safe_load_candidates(batch_opt, sheet_name, allow_failed=retry_failed or bool(modes),
                                        service_start=service_start, service_end=service_end)
     allowed_rows = None
     if modes:
-        failed = set(candidates.loc[candidates["結果"].map(normalize_status).eq("失敗"), "__sheet_row__"].astype(int))
         allowed_rows = set()
         for mode in modes:
-            rows = _auto_filter_rows(batch_opt, sheet_name, mode, region=selected_region or None, allow_failed=True, candidates=candidates)
-            allowed_rows.update(row for row in rows if mode == "stored_value" or retry_failed or row not in failed)
+            allowed_rows.update(_auto_filter_rows(batch_opt, sheet_name, mode, region=selected_region or None,
+                                                  allow_failed=True, candidates=candidates))
     result = []
     for _, row in candidates.sort_values("__sheet_row__").iterrows():
         row_no = int(row["__sheet_row__"])
@@ -60,7 +60,7 @@ def held_rows(sheet_name: str, filter_mode: str = "all", selected_region: str = 
     """未選入本次預約對象而略過的列；顯示用，失敗時不影響成單。"""
     try:
         return _held_rows(batch_opt, sheet_name, filter_mode, selected_region or None,
-                          allow_failed=retry_failed or "stored_value" in filter_modes(filter_mode),
+                          allow_failed=retry_failed or bool(filter_modes(filter_mode)),
                           service_start=service_start, service_end=service_end)
     except Exception as exc:
         print(f"HELD_UNAVAILABLE: 無法計算未選對象略過列數：{exc}", flush=True)
