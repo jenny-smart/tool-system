@@ -139,10 +139,14 @@ def partial_sync_due(row: list) -> bool:
 
 
 def _add_partial_sync(item: dict, row: list) -> None:
+    """B 欄還沒完成的列一律留在盤點清單；已先回寫過的標示出來，完成後要再回寫，避免漏掉。"""
     if partial_sync_due(row):
         item["actions"].append("sync")
         item["target_status"] = item["status"]
         item["progress"].append("先回寫目前進度，完成後再回寫一次")
+    elif _cell(row, "AE") == synced_marker(item["status"]):
+        when = _cell(row, "AD")
+        item["progress"].append(f"已先回寫目前進度{f'（{when}）' if when else ''}，B 欄完成後需再回寫")
 
 
 def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:

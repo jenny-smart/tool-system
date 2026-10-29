@@ -351,7 +351,9 @@ def test_partial_progress_is_synced_once_with_current_status():
     assert item["actions"] == ["sync"] and item["target_status"] == "待收款"
     # 已用目前狀態回寫過就不再列出；完成（已收款）時再回寫
     assert plan("新竹", B="待收款", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）") is not None
-    assert plan("新竹", B="待收款", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）")["actions"] == []
+    item = plan("新竹", B="待收款", O="FP1", AA="2026/10/29", AD="2026-10-29 18:20:00", AE="更新系統（B欄：待收款）")
+    # 已先回寫過：沒有要做的動作，但仍留在盤點清單並標示完成後要再回寫
+    assert item["actions"] == [] and "已先回寫目前進度（2026-10-29 18:20:00），B 欄完成後需再回寫" in item["progress"]
     item = plan(B="待收款", M="2026/10/30", N="1200", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）")
     assert item["actions"] == ["sync"] and item["target_status"] == "已收款"
     # 沒有任何進度的列不回寫；待扣儲值金回寫會改成完成狀態，不做部分回寫
