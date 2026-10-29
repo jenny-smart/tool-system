@@ -1,0 +1,20 @@
+name: Python 3.9 Syntax Check
+
+# Mac 本機 Agent 使用 Python 3.9；3.12 才支援的語法（如 f-string 內用同種引號）會讓 Agent 啟動失敗。
+on:
+  push:
+    branches: [main]
+    paths: ["**.py"]
+  pull_request:
+    paths: ["**.py"]
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python -m tools.syntax_check

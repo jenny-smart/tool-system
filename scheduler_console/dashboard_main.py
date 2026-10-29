@@ -816,11 +816,12 @@ def render_halfmonth_page():
 
     if cmd:
         city_txt = city if city != "全部" else "全部城市"
+        city_html = f" <span class='cmd-city'>{city}</span>" if city != "全部" else ""
         st.markdown(
             f'<div class="cmd-preview">'
             f'<span class="cmd-hl">python3</span> "上下半月訂單.py" '
             f'<span class="cmd-arg">{period_arg}</span>'
-            f'{" <span class=\'cmd-city\'>" + city + "</span>" if city != "全部" else ""}'
+            f'{city_html}'
             f'<br><span style="color:#64748b;font-size:11px">→ 跑 {city_txt} &nbsp; {s_disp} ～ {e_disp}</span>'
             f'</div>',
             unsafe_allow_html=True

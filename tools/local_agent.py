@@ -468,7 +468,8 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
     if from_sheet:
         # 開始日由 Agent 執行時讀財報最後一列決定
         start_date = ""
-    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_date or "財報起"}_{end_date}.csv"
+    start_label = start_date or "財報起"
+    output = PROJECT_ROOT / "outputs" / f"fubon_{area}_{start_label}_{end_date}.csv"
     return [
         sys.executable,
         "-m",
@@ -692,7 +693,8 @@ def build_yuanta_download(params: dict[str, Any]) -> list[str]:
     if from_sheet:
         # 開始日由 Agent 執行時讀財報最後一列決定
         start_date = ""
-    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_date or "財報起"}_{end_date}.csv"
+    start_label = start_date or "財報起"
+    output = PROJECT_ROOT / "outputs" / f"yuanta_{area}_{start_label}_{end_date}.csv"
     return [
         sys.executable, "-m", "tools.bank_statement.yuanta_agent", "download",
         "--area", area, "--end", end_date,
@@ -740,19 +742,34 @@ def build_yuanta_salary_upload(params: dict[str, Any]) -> list[str]:
     return command
 
 
-# 更新一律拉 origin/main；本機不在 main 時直接失敗並印出分支，避免「Already up to date」卻一直跑舊程式
+# 更新一律拉 origin/main；本機不在 main 時直接失敗並印出分支，避免「Already up to date」卻一直跑舊程式。
+# 本機有 main 沒有的 commit 時改用合併（衝突就還原）；更新後用 Agent 自己的 Python 檢查語法，
+# 有錯就退回更新前的版本且不重啟，避免 Agent 啟動即 SyntaxError。
 GIT_PULL_SCRIPT = (
     'branch="$(git rev-parse --abbrev-ref HEAD)"; '
     'echo "目前分支：$branch（$(git rev-parse --short HEAD)）"; '
     'if [ "$branch" != "main" ]; then '
     'echo "❌ 本機不在 main 分支，不會更新到最新程式。請在 Mac 終端機執行：git -C \"$PWD\" checkout main"; exit 1; fi; '
-    'git pull --ff-only origin main && echo "更新後：$(git rev-parse --short HEAD)"'
+    'before="$(git rev-parse HEAD)"; '
+    'git fetch origin main || exit 1; '
+    'if ! git merge --ff-only FETCH_HEAD; then '
+    'echo "⚠️ 本機有 main 沒有的 commit，改用合併方式更新"; '
+    'if ! git merge --no-edit FETCH_HEAD; then '
+    'git merge --abort 2>/dev/null; '
+    'echo "❌ 合併失敗，已維持原本版本；請在 Mac 終端機執行 git status 確認"; exit 1; fi; fi; '
+    'if ! "$AGENT_PYTHON" -m tools.syntax_check; then '
+    'git reset --keep "$before"; '
+    'echo "❌ 新版程式在本機 Python 有語法錯誤，已退回 $(git rev-parse --short HEAD)，不會重啟 Agent"; exit 1; fi; '
+    'echo "更新後：$(git rev-parse --short HEAD)"'
 )
 
 
 def build_git_pull(_params: dict[str, Any]) -> list[str]:
     """Update this checkout from origin/main without rewriting local commits or modifications."""
-    return ["/bin/sh", "-c", f'cd "{PROJECT_ROOT}" && {GIT_PULL_SCRIPT}']
+    return [
+        "/usr/bin/env", f"AGENT_PYTHON={sys.executable}",
+        "/bin/sh", "-c", f'cd "{PROJECT_ROOT}" && {GIT_PULL_SCRIPT}',
+    ]
 
 
 def build_agent_status(_params: dict[str, Any]) -> list[str]:
