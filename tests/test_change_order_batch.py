@@ -82,28 +82,24 @@ def test_formula_fixes_only_fill_blank_cells():
     ]
 
 
-def test_queue_actions_order_and_sync_last():
+def test_queue_actions_one_task_with_per_region_plan():
     items = [
         {"region": "台中", "row": 5, "actions": ["allowance", "atm_refund"]},
         {"region": "台北", "row": 7, "actions": ["credit_refund"]},
         {"region": "台北", "row": 3, "actions": ["allowance"], "selected": ["allowance"]},
-        {"region": "台北", "row": 9, "actions": ["atm_refund"], "selected": []},
+        {"region": "台北", "row": 9, "actions": ["stored_value"], "selected": []},
     ]
     created = []
 
     def create(action, params, created_by=""):
-        created.append((action, params.get("area"), params.get("selected_rows") or params.get("regions")))
-        if action == "change_order.sync":
-            assert params["rows"] == {"台北": [3, 7, 9], "台中": [5]}
-        return {"task_id": str(len(created))}
+        created.append((action, params["plan"]))
+        return {"task_id": "1"}
 
     batch.queue_actions(items, True, create, log=lambda *_: None)
-    assert created == [
-        ("cetustek.allowance", "台中", [5]), ("cetustek.allowance", "台北", [3]),
-        ("fubon.atm_refund", "台中", [5]),
-        ("newebpay.refund_pending", "台北", [7]),
-        ("change_order.sync", None, ["台北", "台中"]),
-    ]
+    assert created == [("change_order.batch_run", [
+        {"region": "台北", "steps": {"allowance": [3], "credit_refund": [7]}, "sync_rows": [3, 7, 9]},
+        {"region": "台中", "steps": {"allowance": [5], "atm_refund": [5]}, "sync_rows": [5]},
+    ])]
 
 
 def test_record_text_lists_rows_by_region():
@@ -206,28 +202,24 @@ def test_refund_amount_shows_what_will_actually_be_refunded():
     assert plan(B="待退款", X="AB1", Z="952", S="1000", R="ATM", P="700", Q="1")["amount"] == "1000"
 
 
-def test_queue_actions_invoice_first_via_ui_queue():
+def test_queue_actions_prepares_invoice_payloads_without_extra_tasks():
     items = [
         {"region": "台北", "row": 4, "actions": ["allowance"]},
         {"region": "台北", "row": 320, "actions": ["invoice"]},
         {"region": "台中", "row": 8, "actions": ["invoice"]},
     ]
-    order = []
+    created, prepared = [], []
 
-    def create(action, params, created_by=""):
-        order.append((action, params.get("area") or tuple(params.get("regions", []))))
-        return {"task_id": str(len(order))}
+    def prepare(region, rows):
+        prepared.append((region, rows))
+        if region == "台中":
+            raise ValueError("已不是待開立發票")
 
-    def queue_invoices(region, rows):
-        order.append(("invoice", region, rows))
-        return {"task_id": "inv"}
-
-    batch.queue_actions(items, True, create, log=lambda *_: None, queue_invoices=queue_invoices)
-    assert order == [
-        ("invoice", "台北", [320]), ("invoice", "台中", [8]),
-        ("cetustek.allowance", "台北"),
-        ("change_order.sync", ("台北", "台中")),
-    ]
+    batch.queue_actions(items, False, lambda action, params, created_by="": created.append(params["plan"]) or {},
+                        log=lambda *_: None, prepare_invoices=prepare)
+    assert prepared == [("台北", [320]), ("台中", [8])]
+    # 台中發票排不進去 → 台中沒有其他步驟，整區略過
+    assert created == [[{"region": "台北", "steps": {"allowance": [4], "invoice": [320]}, "sync_rows": []}]]
 
 
 def test_queue_actions_without_invoice_queue_skips_invoice():
@@ -235,6 +227,45 @@ def test_queue_actions_without_invoice_queue_skips_invoice():
     batch.queue_actions([{"region": "台北", "row": 320, "actions": ["invoice"]}], False,
                         lambda action, params, created_by="": created.append(action) or {}, log=logs.append)
     assert created == [] and "開立發票未排入" in logs[0]
+
+
+def test_run_plan_goes_region_by_region_in_order(monkeypatch):
+    calls = []
+    monkeypatch.setattr(batch, "sync_region", lambda region, log, rows: calls.append(("sync", region, sorted(rows)))
+                        or {"done": sorted(rows), "failed": []})
+    monkeypatch.setattr(batch, "record_to_calendar", lambda results, log=None: calls.append(("calendar",)))
+    plan = [
+        {"region": "台北", "steps": {"stored_value": [9], "credit_refund": [7], "invoice": [6], "allowance": [7]},
+         "sync_rows": [6, 7, 9]},
+        {"region": "桃園", "steps": {"atm_refund": [2], "allowance": [2]}, "sync_rows": [2]},
+    ]
+    code = batch.run_plan(plan, log=lambda *_: None,
+                          run_step=lambda action, region, rows, cdp: calls.append((action, region)) or 0)
+    assert code == 0
+    assert calls == [
+        ("allowance", "台北"), ("invoice", "台北"), ("credit_refund", "台北"), ("stored_value", "台北"),
+        ("sync", "台北", [6, 7, 9]),
+        ("allowance", "桃園"), ("atm_refund", "桃園"), ("sync", "桃園", [2]),
+        ("calendar",),
+    ]
+
+
+def test_run_plan_failed_step_stops_rest_of_region_but_still_syncs(monkeypatch):
+    calls = []
+    monkeypatch.setattr(batch, "sync_region", lambda region, log, rows: calls.append(("sync", region))
+                        or {"done": [], "failed": []})
+    monkeypatch.setattr(batch, "record_to_calendar", lambda *a, **k: None)
+    plan = [
+        {"region": "台北", "steps": {"allowance": [7], "credit_refund": [7], "stored_value": [9]}, "sync_rows": [7, 9]},
+        {"region": "台中", "steps": {"stored_value": [3]}, "sync_rows": [3]},
+    ]
+
+    def run_step(action, region, rows, cdp):
+        calls.append((action, region))
+        return 1 if action == "allowance" else 0
+
+    assert batch.run_plan(plan, log=lambda *_: None, run_step=run_step) == 1
+    assert calls == [("allowance", "台北"), ("sync", "台北"), ("stored_value", "台中"), ("sync", "台中")]
 
 
 def test_vip_refund_coupon_flow():

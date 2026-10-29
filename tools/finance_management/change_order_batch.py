@@ -23,6 +23,9 @@
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
   - 盤點時順手補 T（匯款金額）、Z（未稅金額）公式（只補空白格）。
+執行（2026-10-29 與 Jenny 確認）：整批只排一筆本機 Agent 任務（change_order.batch_run），
+  依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 退款（信用卡登入藍新、ATM 登入富邦）
+  ③ 儲值金 → 回寫系統。前一步失敗就不做該區後面的步驟（回寫仍只回寫已完成的列），避免順序錯亂。
 回寫完成後在 Jenny 行事曆建一筆紀錄事件（不跳提醒）。
 """
 from __future__ import annotations
@@ -30,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import date, datetime
 from typing import Any, Callable, Optional
@@ -57,8 +61,9 @@ ACTIONS = {
     "stored_value": ("異動儲值金", "lemon.stored_value_adjustment"),
     "sync": ("回寫系統", ""),
 }
-# 本機 Agent 依建立順序執行：同一個網站排在一起，只登入一次
-ACTION_ORDER = ("invoice", "allowance", "atm_refund", "credit_refund", "stored_value")
+# 每區依序執行：鯨躍（折讓單＋發票）→ 退款（藍新信用卡、富邦 ATM）→ 儲值金，最後回寫系統
+ACTION_ORDER = ("allowance", "invoice", "credit_refund", "atm_refund", "stored_value")
+BATCH_ACTION = "change_order.batch_run"
 
 COL = {name: index for index, name in enumerate(
     "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA AB AC AD AE".split())}
@@ -274,38 +279,51 @@ def scan(regions=None, fix_formulas: bool = True, log: Callable[[str], None] = p
     return items
 
 
+def build_plan(items: list[dict], do_sync: bool) -> list[dict[str, Any]]:
+    """勾選的列 → 逐區執行計畫：[{"region", "steps": {動作: [列號]}, "sync_rows": [列號]}]（地區依 REGIONS 順序）。"""
+    plan = []
+    for region, rows in selected_rows_by_region(items).items():
+        region_items = [item for item in items if item["region"] == region]
+        steps = {}
+        for action in ACTION_ORDER:
+            action_rows = sorted(int(item["row"]) for item in region_items
+                                 if action in item.get("selected", item["actions"]))
+            if action_rows:
+                steps[action] = action_rows
+        if steps or do_sync:
+            plan.append({"region": region, "steps": steps, "sync_rows": rows if do_sync else []})
+    return plan
+
+
 def queue_actions(items: list[dict], do_sync: bool, create_task: Callable, created_by: str = "清潔異動整合執行",
                   log: Callable[[str], None] = print,
-                  queue_invoices: Optional[Callable[[str, list[int]], dict]] = None) -> list[dict]:
-    """依 ACTION_ORDER 建立本機 Agent 任務（每區每種動作一筆）；勾選回寫時最後再排一筆回寫。
+                  prepare_invoices: Optional[Callable[[str, list[int]], Any]] = None) -> Optional[dict]:
+    """整批只排一筆本機 Agent 任務（逐區依序執行，見 run_plan），不再每種動作各排一筆讓 Agent 同時跑。
 
-    開立發票要先在網頁端組好發票資料（同【鯨躍發票】開立發票），由 queue_invoices(地區, 列號) 排入。"""
-    tasks = []
-    for action in ACTION_ORDER:
-        agent_action = ACTIONS[action][1]
-        by_region: dict[str, list[int]] = {}
-        for item in items:
-            if action in item.get("selected", item["actions"]):
-                by_region.setdefault(item["region"], []).append(int(item["row"]))
-        for region, rows in by_region.items():
-            if action == "invoice":
-                if queue_invoices is None:
-                    log(f"⚠️ {region} 開立發票未排入（{len(rows)} 筆）：請到【鯨躍發票】開立發票")
-                    continue
-                task = queue_invoices(region, sorted(rows))
-                tasks.append(task)
-                log(f"已排入：{region} 開立發票（{len(rows)} 筆）→ {task.get('task_id', '')}")
-                continue
-            task = create_task(agent_action, {"area": region, "selected_rows": sorted(rows),
-                                              "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
-            tasks.append(task)
-            log(f"已排入：{region} {ACTIONS[action][0]}（{len(rows)} 筆）→ {task.get('task_id', '')}")
-    if do_sync:
-        rows = selected_rows_by_region(items)
-        task = create_task("change_order.sync", {"regions": list(rows), "rows": rows}, created_by=created_by)
-        tasks.append(task)
-        log(f"已排入：回寫系統（{'、'.join(rows)}）→ {task.get('task_id', '')}")
-    return tasks
+    開立發票要先在網頁端組好發票資料（同【鯨躍發票】開立發票），由 prepare_invoices(地區, 列號) 排入 Payload。"""
+    plan = build_plan(items, do_sync)
+    for entry in plan:
+        rows = entry["steps"].get("invoice")
+        if not rows:
+            continue
+        try:
+            if prepare_invoices is None:
+                raise RuntimeError("請到【鯨躍發票】開立發票")
+            prepare_invoices(entry["region"], rows)
+        except Exception as exc:
+            entry["steps"].pop("invoice")
+            log(f"⚠️ {entry['region']} 開立發票未排入（{len(rows)} 筆）：{exc}")
+    plan = [entry for entry in plan if entry["steps"] or entry["sync_rows"]]
+    if not plan:
+        log("沒有可執行的動作")
+        return None
+    task = create_task(BATCH_ACTION, {"plan": plan, "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
+    for entry in plan:
+        steps = "→".join(f"{ACTIONS[a][0]} {len(r)} 筆" for a, r in entry["steps"].items())
+        steps = "→".join(filter(None, [steps, "回寫系統" if entry["sync_rows"] else ""]))
+        log(f"已排入：{entry['region']} {steps}")
+    log(f"本機 Agent 任務：{task.get('task_id', '')}（逐區依序執行）")
+    return task
 
 
 def selected_rows_by_region(items: list[dict]) -> dict[str, list[int]]:
@@ -425,12 +443,66 @@ def sync(regions=None, log: Callable[[str], None] = print,
     return results
 
 
+def _step_command(action: str, region: str, rows: list[int], cdp_url: str) -> list[str]:
+    from tools.local_agent import ACTION_HANDLERS
+
+    return ACTION_HANDLERS[ACTIONS[action][1]]({"area": region, "selected_rows": rows, "cdp_url": cdp_url})
+
+
+def _run_step(action: str, region: str, rows: list[int], cdp_url: str) -> int:
+    """在同一個 Agent 任務內依序執行各步驟子程式；輸出直接接到本任務 Log。"""
+    sys.stdout.flush()
+    return subprocess.run(_step_command(action, region, rows, cdp_url)).returncode
+
+
+def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str = "http://127.0.0.1:9222",
+             run_step: Callable[[str, str, list[int], str], int] = _run_step) -> int:
+    """逐區依序：鯨躍（折讓單→發票）→ 藍新／富邦退款 → 儲值金 → 回寫系統。
+    某一步失敗就不做該區後面的步驟，但仍回寫該區已完成的列；最後留一筆行事曆紀錄。"""
+    failed = False
+    results: dict[str, dict] = {}
+    for entry in plan:
+        region = entry["region"]
+        for action in ACTION_ORDER:
+            rows = entry["steps"].get(action)
+            if not rows:
+                continue
+            log(f"===== 【{region}】{ACTIONS[action][0]}：第 {'、'.join(map(str, rows))} 列 =====")
+            try:
+                code = run_step(action, region, rows, cdp_url)
+            except Exception as exc:
+                log(f"❌ 【{region}】{ACTIONS[action][0]}無法執行：{exc}")
+                code = 1
+            if code != 0:
+                failed = True
+                log(f"❌ 【{region}】{ACTIONS[action][0]}失敗（exit {code}），本區後面的步驟先不做")
+                break
+        if entry.get("sync_rows"):
+            log(f"===== 【{region}】回寫系統 =====")
+            try:
+                results[region] = sync_region(region, log, set(int(r) for r in entry["sync_rows"]))
+            except Exception as exc:
+                results[region] = {"done": [], "failed": [(0, str(exc))]}
+            log(f"【{region}】回寫 {len(results[region]['done'])} 筆，失敗 {len(results[region]['failed'])} 筆")
+            failed = failed or bool(results[region]["failed"])
+    try:
+        record_to_calendar(results, log=log)
+    except Exception as exc:
+        log(f"⚠️ 行事曆紀錄建立失敗：{exc}")
+    return 1 if failed else 0
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="清潔異動整合執行：回寫系統")
-    parser.add_argument("command", choices=["sync"])
+    parser = argparse.ArgumentParser(description="清潔異動整合執行：逐區依序執行／回寫系統")
+    parser.add_argument("command", choices=["sync", "run"])
     parser.add_argument("--regions", default=",".join(REGIONS))
     parser.add_argument("--rows", default="", help='JSON：{"台北": [238, 389]}，只回寫這些列')
+    parser.add_argument("--plan", default="", help="run 用：build_plan 產生的 JSON")
+    parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     args = parser.parse_args(argv)
+    if args.command == "run":
+        log = lambda text: print(text, flush=True)  # noqa: E731
+        return run_plan(json.loads(args.plan), log=log, cdp_url=args.cdp_url)
     regions = [r for r in args.regions.split(",") if r]
     rows = json.loads(args.rows) if args.rows else None
     results = sync(regions, rows=rows)
