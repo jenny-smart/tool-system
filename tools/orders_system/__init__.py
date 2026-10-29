@@ -66,6 +66,14 @@ def _patch_orders_credentials() -> None:
         _orders.get_service_account_info = _with_host_service_account(current)
 
 
+# 新版 year_roots 自帶憑證解析（_get_service_account_info），不再經過 orders.py：一樣補上後備
+try:
+    _plain_year_roots_sa = getattr(_year_roots, "_get_service_account_info", None)
+    if _plain_year_roots_sa and not getattr(_plain_year_roots_sa, "_host_fallback", False):
+        _year_roots._get_service_account_info = _with_host_service_account(_plain_year_roots_sa)
+except Exception:
+    pass
+
 try:
     _plain_get_year_roots = _year_roots.get_year_roots
 

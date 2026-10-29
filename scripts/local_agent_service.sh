@@ -34,6 +34,13 @@ ERR_FILE="$LOG_DIR/local_agent.launchd.err.log"
 child_pid=""
 stopping=0
 
+# 只允許一個 supervisor：已有另一個在跑就直接結束，避免重複啟動多個 Agent 同時搶任務
+if [[ -f "\$PID_FILE" ]]; then
+  other="\$(cat "\$PID_FILE" 2>/dev/null)"
+  if [[ -n "\$other" && "\$other" != "\$\$" ]] && kill -0 "\$other" 2>/dev/null; then
+    exit 0
+  fi
+fi
 echo \$\$ > "\$PID_FILE"
 
 cleanup() {
@@ -42,7 +49,8 @@ cleanup() {
     kill "\$child_pid" 2>/dev/null || true
     wait "\$child_pid" 2>/dev/null || true
   fi
-  rm -f "\$PID_FILE"
+  # 只刪自己的 PID 檔，不要讓別的 supervisor 結束時把正在跑的那個標成離線
+  [[ "\$(cat "\$PID_FILE" 2>/dev/null)" == "\$\$" ]] && rm -f "\$PID_FILE"
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -69,6 +77,10 @@ LOGIN_COMMAND="$LOGIN_COMMAND"
 if [[ -f "\$PID_FILE" ]] && kill -0 "\$(cat "\$PID_FILE")" 2>/dev/null; then
   exit 0
 fi
+# PID 檔不見但 supervisor 其實還在跑：不要再開一個
+if /usr/bin/pgrep -f "start-local-agent.sh" >/dev/null; then
+  exit 0
+fi
 rm -f "\$PID_FILE"
 /usr/bin/open -g -a Terminal "\$LOGIN_COMMAND"
 EOF
@@ -80,6 +92,10 @@ start_agent() {
   write_launcher
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     echo "already running: pid $(cat "$PID_FILE")"
+    return
+  fi
+  if pgrep -f "start-local-agent.sh" >/dev/null; then
+    echo "already running: $(pgrep -f "start-local-agent.sh" | tr '\n' ' ')（PID 檔遺失；要重整請執行 restart）"
     return
   fi
   rm -f "$PID_FILE"
@@ -125,15 +141,16 @@ PY
 }
 
 stop_agent() {
-  if [[ -f "$PID_FILE" ]]; then
-    pid="$(cat "$PID_FILE")"
-    kill "$pid" 2>/dev/null || true
-    for _ in {1..20}; do
-      kill -0 "$pid" 2>/dev/null || break
-      sleep 0.1
-    done
-    rm -f "$PID_FILE"
-  fi
+  # 所有 supervisor 及 Agent 一起停（含 PID 檔沒記到、重複啟動的），避免重啟後舊版還在接任務
+  pkill -f "start-local-agent.sh" 2>/dev/null || true
+  pkill -f "tools.local_agent --poll-seconds" 2>/dev/null || true
+  for _ in {1..50}; do
+    pgrep -f "start-local-agent.sh|tools.local_agent --poll-seconds" >/dev/null || break
+    sleep 0.2
+  done
+  pkill -9 -f "start-local-agent.sh" 2>/dev/null || true
+  pkill -9 -f "tools.local_agent --poll-seconds" 2>/dev/null || true
+  rm -f "$PID_FILE"
 }
 
 case "${1:-status}" in
