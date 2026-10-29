@@ -89,7 +89,7 @@ start_agent() {
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     echo "started in background: pid $(cat "$PID_FILE")"
   else
-    echo "Local Agent 啟動失敗；請執行 $0 logs" >&2
+    echo "Local Agent 啟動失敗；請執行 $SCRIPT_DIR/local_agent_service.sh logs" >&2
     exit 1
   fi
 }
