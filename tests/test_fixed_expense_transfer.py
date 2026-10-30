@@ -28,6 +28,12 @@ def _values():
 
 
 class FixedExpenseTransferTest(unittest.TestCase):
+    def test_two_digit_months_are_not_read_as_january(self):
+        self.assertEqual(
+            [transfer._normalize_month(v) for v in ("2026.09", "2026.10", "2026.11", "2026.12", "202610", "2026/1/5")],
+            ["202609", "202610", "202611", "202612", "202610", "202601"],
+        )
+
     def test_builds_taipei_area_and_request_rows(self):
         plan = transfer._build_plan(_values(), "202608", "台中")
 
