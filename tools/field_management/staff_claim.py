@@ -56,6 +56,26 @@ CLAIM_HEADERS = {
     "remark": "請款備註",        # AN
 }
 
+# GAS 送出時會算、但可能漏算的欄位：空白時由這裡補（已有值不動）
+AUTO_FILL_HEADERS = {
+    "staff_name": "專員姓名",          # C
+    "start_area": "跨區開始區域",      # I
+    "end_area": "跨區結束區域",        # J
+    "transport": "交通方式",           # K
+    "distance": "距離站數",            # L
+    "metro": "捷運起迄站",             # M
+    "cancel_time": "客戶取消時間",     # R
+    "cancel_hours": "取消時數",        # S
+    "redo_hours": "補做時數",          # T
+    "sup_cancel_time": "主管取消時間",  # Y
+    "sup_cancel_hours": "主管取消時數", # Z
+    "check1": "檢查跨區1",             # AH
+    "check2": "檢查跨區2",             # AI
+    "staff_dup": "專員姓名_重複",      # AK
+    "item_display": "請款項目_顯示",   # AL
+    "subsidy": "規範補貼",             # AM
+}
+
 STAFF_HEADERS = {
     "date": "服務日期",
     "customer": "客戶姓名",
@@ -173,6 +193,63 @@ def build_map_link(trip_type: str, staff_addr: str, addr1: str, addr2: str) -> s
     return f"https://www.google.com/maps/dir/{quote(start, safe=safe)}/{quote(end, safe=safe)}"
 
 
+def build_check_zone1(start_area: Any, end_area: Any) -> str:
+    """AH 檢查跨區1：跨區開始區域-跨區結束區域。"""
+    start_area, end_area = _clean(start_area), _clean(end_area)
+    return f"{start_area}-{end_area}" if start_area and end_area else ""
+
+
+def build_check_zone2(transport: Any, distance: Any, metro: Any) -> str:
+    """AI 檢查跨區2：騎車-距離；捷運-站數-起迄站。"""
+    transport, distance, metro = _clean(transport), _clean(distance), _clean(metro)
+    if not transport or not distance:
+        return ""
+    if transport == "騎車":
+        return f"騎車-{distance}"
+    if transport == "捷運":
+        return f"捷運-{distance}-{metro}" if metro else f"捷運-{distance}"
+    return ""
+
+
+def claim_item_display(claim_type: Any, sub_item: Any) -> str:
+    """AL 請款項目_顯示：主管專用時用子項目。"""
+    claim_type, sub_item = _clean(claim_type), _clean(sub_item)
+    return sub_item if claim_type == "主管專用" and sub_item else claim_type
+
+
+def standard_subsidy(claim_type: Any, sub_item: Any, cancel_time: Any, cancel_hours: Any, redo_hours: Any) -> Any:
+    """AM 規範補貼，與 GAS calculateStandardSubsidy 相同；無規則時回傳空字串。"""
+    item = claim_item_display(claim_type, sub_item)
+    if item in ("取消車馬費", "客戶取消車馬費"):
+        if _clean(cancel_time) == "前一天":
+            return 100
+        try:
+            hours = float(_clean(cancel_hours) or 0)
+        except ValueError:
+            hours = 0
+        amount = 200 * hours
+        return int(amount) if amount == int(amount) else amount
+    if item == "跨區車馬費":  # 台北
+        return 200
+    if item in ("車馬費", "現場收取車馬費", "大型器材車馬費"):  # 台中「車馬費」100
+        return 100
+    if item in ("病假代班費", "延長服務代班費", "延長代班費"):
+        return 300
+    if item in ("客訴補做", "補做"):
+        try:
+            hours = float(_clean(redo_hours) or 0)
+        except ValueError:
+            hours = 0
+        if hours > 0:
+            return f"時薪 × {int(hours) if hours == int(hours) else hours}小時"
+        return "時薪計算"
+    if item == "工具組運費":
+        return 150
+    if item == "推薦獎金":
+        return "依公司規定"
+    return ""
+
+
 def build_claim_remark(service_date: Any, customer: str, claim_type: str,
                        sub_item: str = "", trip_type: str = "", customer2: str = "") -> str:
     """AN 請款備註：MM/DD + 顧客姓名 + 請款項目 + "-"。
@@ -210,7 +287,16 @@ class AddressBook:
         self.exact: dict[tuple[str, str, str], str] = {}
         self.by_name: dict[tuple[str, str], str] = {}
         self.by_phone: dict[tuple[str, str], str] = {}
+        self.staff_addresses: dict[str, str] = {}
         self.count = 0
+        cleaned = [_clean(h) for h in headers]
+        if "專員姓名" in cleaned and "地址" in cleaned:
+            ni, ai = cleaned.index("專員姓名"), cleaned.index("地址")
+            for row in rows[1:]:
+                name = _clean(row[ni]) if ni < len(row) else ""
+                addr = _clean(row[ai]) if ai < len(row) else ""
+                if name and addr:
+                    self.staff_addresses.setdefault(name, addr)
         for row in rows[1:]:
             def cell(key: str) -> str:
                 i = idx[key]
@@ -279,10 +365,15 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
     回傳 {"updates": [(A1, value)], "missing_addr1": [...], "missing_addr2": [...], "rows": n}
     """
     idx = {key: _header_index(claim_header, name, CLAIM_SHEET_TITLE) for key, name in CLAIM_HEADERS.items()}
+    cleaned_header = [_clean(h) for h in claim_header]
+    for key, name in AUTO_FILL_HEADERS.items():
+        if name in cleaned_header:  # 舊表少欄位就略過，不報錯
+            idx[key] = cleaned_header.index(name)
     updates: list[tuple[str, str]] = []
     missing_addr1: list[int] = []
     missing_addr2: list[int] = []
-    counts = {"addr1": 0, "addr2": 0, "area_pair": 0, "map_link": 0, "period": 0, "remark": 0}
+    counts = {"addr1": 0, "addr2": 0, "area_pair": 0, "map_link": 0, "period": 0, "remark": 0,
+              "staff_addr": 0, "check1": 0, "check2": 0, "staff_dup": 0, "item_display": 0, "subsidy": 0}
     issues: list[dict[str, Any]] = []
     data_rows: list[int] = []
     map_links: dict[int, str] = {}
@@ -291,8 +382,14 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
         row_no = start_row + offset
 
         def get(key: str) -> str:
-            i = idx[key]
-            return _clean(row[i]) if i < len(row) else ""
+            i = idx.get(key)
+            return _clean(row[i]) if i is not None and i < len(row) else ""
+
+        def fill_blank(key: str, value: Any) -> None:
+            """GAS 漏算的欄位：原本空白才補。"""
+            if key in idx and not get(key) and value not in ("", None):
+                updates.append((f"{column_letter(idx[key])}{row_no}", value))
+                counts[key] += 1
 
         def put(key: str, value: str) -> None:
             if value != get(key):
@@ -317,6 +414,24 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
         # AJ 給付期別：範圍內每列都寫
         put("period", period)
 
+        # AH/AI/AK/AL/AM：GAS 送出時應該算好，漏算（空白）才補
+        fill_blank("check1", build_check_zone1(get("start_area"), get("end_area")))
+        fill_blank("check2", build_check_zone2(get("transport"), get("distance"), get("metro")))
+        fill_blank("staff_dup", get("staff_name"))
+        fill_blank("item_display", claim_item_display(get("claim_type"), get("sub_item")))
+        fill_blank("subsidy", standard_subsidy(
+            get("claim_type"), get("sub_item"),
+            get("cancel_time") or get("sup_cancel_time"),
+            get("cancel_hours") or get("sup_cancel_hours"),
+            get("redo_hours"),
+        ))
+
+        # AC 專員地址：空白時用「專員個人資料」專員姓名 → 地址
+        staff_addr = get("staff_addr")
+        if not staff_addr:
+            staff_addr = address_book.staff_addresses.get(get("staff_name"), "")
+            fill_blank("staff_addr", staff_addr)
+
         # AD 顧客地址1
         addr1 = address_book.lookup(get("date"), get("customer"), get("phone"))
         if addr1:
@@ -339,7 +454,6 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
 
         # AF / AG：有跨區類型才處理
         trip_type = get("trip_type")
-        staff_addr = get("staff_addr")
         if trip_type:
             put("area_pair", build_area_pair(trip_type, staff_addr, addr1, addr2))
             map_link = build_map_link(trip_type, staff_addr, addr1, addr2)
@@ -591,6 +705,10 @@ def format_batch_result(result: dict[str, Any]) -> str:
         f"AJ 給付期別 {result['period']}：{counts['period']} 格｜AD：{counts['addr1']}｜AE：{counts['addr2']}｜"
         f"AF：{counts['area_pair']}｜AG：{counts['map_link']}｜AN：{counts['remark']}",
     ]
+    filled = {"AC": counts["staff_addr"], "AH": counts["check1"], "AI": counts["check2"],
+              "AK": counts["staff_dup"], "AL": counts["item_display"], "AM": counts["subsidy"]}
+    if any(filled.values()):
+        lines.append("🧩 補上空白欄位（GAS 漏算）：" + "｜".join(f"{k}：{v}" for k, v in filled.items() if v))
     if result["missing_addr1"]:
         lines.append(f"⚠️ AD 查無顧客地址（保留原值）：第 {'、'.join(map(str, result['missing_addr1']))} 列")
     issue_counts: dict[str, int] = {}

@@ -333,6 +333,48 @@ class RunClaimBatchTests(unittest.TestCase):
         uri = links[0]["cell"]["userEnteredFormat"]["textFormat"]["link"]["uri"]
         self.assertTrue(uri.startswith("https://www.google.com/maps/dir/"))
 
+    def test_blank_gas_fields_are_filled(self):
+        row = claim_row(
+            專員姓名="黃麗玲", 服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638",
+            請款項目="跨區車馬費", 跨區開始區域="大安區", 跨區結束區域="新莊區", 交通方式="騎車", 距離站數="16",
+            跨區類型="案場到家",
+        )
+        staff = [r[:] for r in STAFF_ROWS]
+        staff.append(["黃麗玲", "A221118420", "新北市新莊區四維路200號12樓"] + [""] * 11)
+        sheets = {"專員請款": [CLAIM_HEADER, row], "專員個人資料": staff}
+        self.service = _Service(sheets)
+        result = staff_claim.run_claim_batch("台北", 2, 2, "202610-2", service=self.service)
+        written = {item["range"].split("!")[1]: item["values"][0][0]
+                   for body in self.service.values_api.batch_bodies for item in body["data"]}
+        self.assertEqual(written["AC2"], "新北市新莊區四維路200號12樓")
+        self.assertEqual(written["AH2"], "大安區-新莊區")
+        self.assertEqual(written["AI2"], "騎車-16")
+        self.assertEqual(written["AK2"], "黃麗玲")
+        self.assertEqual(written["AL2"], "跨區車馬費")
+        self.assertEqual(written["AM2"], 200)
+        self.assertTrue(written["AG2"].startswith("https://"))  # 補了 AC 才產得出地圖連結
+        self.assertIn("補上空白欄位", staff_claim.format_batch_result(dict(result, area="台北")))
+
+    def test_existing_gas_fields_not_overwritten(self):
+        row = claim_row(
+            專員姓名="黃麗玲", 服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638",
+            請款項目="跨區車馬費", 跨區開始區域="大安區", 跨區結束區域="新莊區",
+            檢查跨區1="手動", 專員姓名_重複="別名", 規範補貼="150",
+        )
+        _, written = self._run([row])
+        self.assertNotIn("AH2", written)
+        self.assertNotIn("AK2", written)
+        self.assertNotIn("AM2", written)
+
+    def test_subsidy_rules(self):
+        f = staff_claim.standard_subsidy
+        self.assertEqual(f("車馬費", "", "", "", ""), 100)
+        self.assertEqual(f("客戶取消車馬費", "", "前一天", "3", ""), 100)
+        self.assertEqual(f("客戶取消車馬費", "", "當天", "3", ""), 600)
+        self.assertEqual(f("主管專用", "病假代班費", "", "", ""), 300)
+        self.assertEqual(f("客訴補做", "", "", "", "2"), "時薪 × 2小時")
+        self.assertEqual(f("其他", "", "", "", ""), "")
+
     def test_period_is_required(self):
         with self.assertRaises(ValueError):
             staff_claim.run_claim_batch("台北", 2, 3, "", service=_Service({}))
