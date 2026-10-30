@@ -2763,6 +2763,13 @@ def queue_fubon_download(*, month="", start_date=None, end_date=None, area="全�
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def fresh_module(name: str):
+    """重新載入模組：合併新版後不必重開 App，畫面與篩選就會用到最新程式（避免沿用快取的舊模組）。"""
+    import importlib
+
+    return importlib.reload(importlib.import_module(name))
+
+
 def queue_fubon_atm_refund(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None,
                            merge_rows=None):
     if not selected_rows:
@@ -4233,7 +4240,8 @@ _unified_log.install_streamlit_hooks(
 
 if system_type == "finance_management" and selected_function == "【富邦銀行】內部請款整合執行":
     st.markdown("</div>", unsafe_allow_html=True)
-    from tools.finance_management.internal_payment_batch_ui import render as render_internal_payment_batch
+    fresh_module("tools.finance_management.internal_payment_batch")
+    render_internal_payment_batch = fresh_module("tools.finance_management.internal_payment_batch_ui").render
 
     render_internal_payment_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
     LOG_PLACEHOLDER = st.empty()
@@ -5564,9 +5572,10 @@ fubon_refund_selected_rows = []
 fubon_refund_merge_rows = []
 if system_type == "finance_management" and selected_function == "【富邦銀行】異動 ATM 退款":
     try:
-        from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
         from tools.memo_system.change_order import get_worksheet
 
+        _fubon_refund_filter = fresh_module("tools.bank_statement.fubon_refund_filter")
+        pending_atm_refunds, merge_by_account = _fubon_refund_filter.pending_atm_refunds, _fubon_refund_filter.merge_by_account
         _fubon_refund_candidates = pending_atm_refunds(
             get_worksheet(selected_area_value).get_all_values()
         )
@@ -5610,8 +5619,6 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             f"待退款＋ATM：{len(_fubon_refund_candidates)} 筆；"
             f"已勾選：{len(fubon_refund_selected_rows)} 筆"
         )
-        from tools.bank_statement.fubon_refund_filter import merge_by_account
-
         for item in merge_by_account([
             item for item in _fubon_refund_candidates if int(item["sheet_row"]) in fubon_refund_merge_rows
         ]):
@@ -5625,7 +5632,10 @@ fubon_payment_request_selected_rows = []
 fubon_payment_request_merge_rows = []
 if system_type == "finance_management" and selected_function == "【富邦銀行】請款記錄":
     try:
-        from tools.bank_statement.fubon_payment_request_filter import pending_payment_requests
+        _payment_request_filter = fresh_module("tools.bank_statement.fubon_payment_request_filter")
+        pending_payment_requests, merge_by_payee = (
+            _payment_request_filter.pending_payment_requests, _payment_request_filter.merge_by_payee
+        )
         from tools.bank_statement.internal_payment_registry import (
             PAYMENT_REQUEST_TYPE,
             read_report_values,
@@ -5673,8 +5683,6 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             for _, row in _payment_request_editor.iterrows()
             if bool(row["執行"]) and bool(row["合併"])
         ]
-        from tools.bank_statement.fubon_payment_request_filter import merge_by_payee
-
         for item in merge_by_payee([
             item for item in _payment_request_candidates
             if int(item["sheet_row"]) in fubon_payment_request_merge_rows
@@ -5728,7 +5736,7 @@ fubon_supply_purchase_selected_rows = []
 fubon_supply_purchase_split_rows = []
 if system_type == "finance_management" and selected_function == "【富邦銀行】清潔用品採購":
     try:
-        from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
+        pending_supply_purchases = fresh_module("tools.bank_statement.fubon_supply_purchase_filter").pending_supply_purchases
         from tools.bank_statement.internal_payment_registry import (
             SUPPLY_PURCHASE_TYPE,
             read_report_values,
