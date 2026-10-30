@@ -33,4 +33,4 @@ def test_taichung_pays_current_and_next_month_rent_and_electricity():
         ("電費", "2026.11-電費", 43),
         ("電費", "2026.12-電費", 44),
     ]
-    assert {r[7] for r in rows} == {"館前路租金管理費"}
+    assert {(r[7], r[8]) for r in rows} == {("館前路租金管理費", "013-0000234035010972")}

@@ -21,6 +21,7 @@ AREA = "台中"
 TOOL_NAME = "台中固定費用請款"
 MONTHLY_RENT = 18000  # 館前路租金＋管理費，每月
 RENT_PAYEE = "館前路租金管理費"
+RENT_ACCOUNT = "013-0000234035010972"  # 國泰世華
 
 
 def _label(period: str) -> str:
@@ -46,7 +47,7 @@ def build_taichung_rows(period: str, electricity: int | None, existing: set[str]
         if _already_submitted(existing, memo):
             items.append({"label": memo, "amount": None, "status": "略過（本期已新增過）"})
             continue
-        rows.append(["待付款", "", now, category, memo, amount, "", RENT_PAYEE, ""])
+        rows.append(["待付款", "", now, category, memo, amount, "", RENT_PAYEE, RENT_ACCOUNT])
         items.append({"label": memo, "amount": amount, "status": "成功"})
     if not electricity:
         items.append({"label": f"{current}-電費", "amount": None, "status": "略過（未輸入電費金額）"})
