@@ -62,3 +62,20 @@ def test_request_date_in_s_means_paid_and_na_account_is_skipped():
 
     result = pending_supply_purchases(values, "202610")
     assert [item["rows"] for item in result] == [[4]]
+
+
+def test_split_groups_only_splits_unmerged_groups():
+    from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases, split_groups
+
+    def row(month, amount, bank, account):
+        r = [""] * 19
+        r[1], r[5], r[10], r[13], r[14] = month, "廠商", amount, bank, account
+        return r
+
+    values = [["header"], row("2026/10", "100", "807", "11"), row("2026/10", "200", "807", "11"),
+              row("2026/10", "50", "812", "22"), row("2026/10", "70", "812", "22")]
+    groups = pending_supply_purchases(values, "202610")
+    assert [(g["rows"], g["amount"]) for g in groups] == [([2, 3], "300"), ([4, 5], "120")]
+    split = split_groups(values, "202610", groups, {2})
+    assert [(g["rows"], g["amount"]) for g in split] == [([2], "100"), ([3], "200"), ([4, 5], "120")]
+    assert split_groups(values, "202610", groups, set()) is groups

@@ -11,7 +11,7 @@ from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
-from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases
+from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases, split_groups
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
     choose_immediate_date,
@@ -86,13 +86,16 @@ def fill_supply_purchase(
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
 
 
-def prepare(area: str, month: str, rows: set[int]) -> dict:
-    """進銀行前先讀報表、挑出該月份勾選的待付款（失敗就不登入富邦）。"""
+def prepare(area: str, month: str, rows: set[int], split_rows: set[int] = frozenset()) -> dict:
+    """進銀行前先讀報表、挑出該月份勾選的待付款（失敗就不登入富邦）。
+
+    split_rows：取消「合併」的筆（以第一列列號表示），同帳號的各列改成各自轉帳。"""
     values = read_report_values(SUPPLY_PURCHASE_TYPE, area)
     candidates = pending_supply_purchases(values, month)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
     if not selected:
         raise ValueError("勾選列中沒有符合採購月份、且 N/O 欄皆非空白的資料")
+    selected = split_groups(values, month, selected, split_rows)
     spreadsheet_id, sheet_title = resolve_report_location(SUPPLY_PURCHASE_TYPE, area)
     return {"selected": selected, "month": month, "spreadsheet_id": spreadsheet_id,
             "sheet_title": sheet_title, "service": get_sheets_service()}
@@ -143,8 +146,9 @@ def pay(context, page: Page, area: str, account, prepared: dict) -> Page:
     return page
 
 
-def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
-    prepared = prepare(area, month, rows)
+def run(area: str, month: str, rows: set[int], accounts_file: Path, cdp_url: str,
+        split_rows: set[int] = frozenset()) -> int:
+    prepared = prepare(area, month, rows, split_rows)
     account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
@@ -162,13 +166,15 @@ def main() -> int:
     parser.add_argument("--area", required=True, choices=("台北", "台中"))
     parser.add_argument("--month", required=True, help="採購月份，例如 2026/08")
     parser.add_argument("--rows", required=True, help="勾選的工作表列號，以逗號分隔")
+    parser.add_argument("--split-rows", default="", help="取消「合併」的列號（同帳號改成各自轉帳），以逗號分隔")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     args = parser.parse_args()
     rows = {int(value) for value in args.rows.split(",") if value.strip().isdigit()}
     if not rows:
         raise ValueError("沒有勾選清潔用品採購資料")
-    return run(args.area, args.month, rows, args.accounts_file, args.cdp_url)
+    split_rows = {int(value) for value in args.split_rows.split(",") if value.strip().isdigit()}
+    return run(args.area, args.month, rows, args.accounts_file, args.cdp_url, split_rows)
 
 
 if __name__ == "__main__":
