@@ -1,0 +1,13 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+【台北】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【桃園】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已建立 11:00 提醒（jenny@lemonclean.com.tw）
+{'todo': [{'region': '新竹', 'row': 15, 'status': '待收款', 'detail': '專員回報加時', 'order_no': 'LC002175281', 'customer': '孫櫻芳', 'payway': '', 'amount': '1200', 'progress': ['發票 ✓', '已先回寫目前進度（2026-10-29 19:31:46），B 欄完成後需再回寫'], 'actions': [], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/10/28  LC002175281 專員回報加時--現場加時2人1小時(林宜鋒、姜淑婷)'}], 'failed': []}
