@@ -3160,6 +3160,17 @@ def run_taipei_fixed_expense_billing(*, month="", start_date=None, end_date=None
     return summary
 
 
+def run_taichung_fixed_expense_billing(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, electricity=None):
+    from tools.finance_management.taichung_fixed_expense import submit_taichung_fixed_expenses
+
+    result = submit_taichung_fixed_expenses((month or "").strip(), electricity)
+    detail = "、".join(
+        f"{item['label']}={item['amount'] if item['amount'] is not None else '略過'}"
+        for item in result["items"]
+    )
+    return f"完成：執行期別 {result['period_label']} 已新增 {result['rows_added']} 筆請款記錄｜{detail}"
+
+
 def run_fixed_expense_transfer(
     *,
     month="",
@@ -3767,6 +3778,7 @@ FINANCE_TASKS = [
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
     {"name": "【藍新金流】藍新快速收款查帳", "handler": queue_newebpay_express_payment_check, "enabled": True},
     {"name": "【財報】台北固定費用請款", "handler": run_taipei_fixed_expense_billing, "enabled": True},
+    {"name": "【財報】台中固定費用請款", "handler": run_taichung_fixed_expense_billing, "enabled": True},
     {"name": "【財報】各區固定費用匯款", "handler": run_fixed_expense_transfer, "enabled": True},
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
     {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
@@ -4270,6 +4282,7 @@ yuanta_salary_include_internal = False
 yuanta_salary_transfer_fubon = True
 yuanta_salary_expected_files = []
 fixed_expense_execute_fubon = False
+taichung_fixed_expense_electricity = 0
 fixed_expense_selected_rows = None
 end_date_value = None
 monthly_date_mode = "期別"
@@ -4637,6 +4650,28 @@ with date_col:
             st.caption(
                 "格式：YYYYMM；新增 AWS／震旦行／眾點（查信）＋辦公室租金／管理費（固定金額）"
                 "共 5 筆請款記錄到「請款記錄／台北」"
+            )
+        elif selected_function == "【財報】台中固定費用請款":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "期別",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202611",
+                label_visibility="collapsed",
+                key="finance_taichung_fixed_expense_period",
+            )
+            st.markdown('<div class="field-label">💡 電費金額（當月＋隔月）</div>', unsafe_allow_html=True)
+            taichung_fixed_expense_electricity = st.number_input(
+                "電費金額",
+                min_value=0,
+                step=1,
+                value=0,
+                label_visibility="collapsed",
+                key="finance_taichung_fixed_expense_electricity",
+            )
+            st.caption(
+                "格式：YYYYMM，只能選單月；新增當月＋隔月辦公室租金（各 18,000）"
+                "＋電費（填 0 就不新增）到「請款記錄／台中」"
             )
         elif selected_function == "【財報】各區固定費用匯款":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
@@ -5273,6 +5308,8 @@ with area_col:
     if selected_function == "【財報】台北固定費用請款":
         # 台北固定費用請款只會寫進請款記錄／台北，區域固定台北，不用選。
         area_select_options = ["台北"]
+    if selected_function == "【財報】台中固定費用請款":
+        area_select_options = ["台中"]
     if selected_function == "【財報】各區固定費用匯款":
         area_select_options = ["全區", "台中", "桃園", "新竹", "高雄"]
     if selected_function in (
@@ -6138,6 +6175,8 @@ if run_clicked:
                 finance_kwargs["include_internal"] = yuanta_salary_include_internal
                 finance_kwargs["transfer_fubon"] = yuanta_salary_transfer_fubon
                 finance_kwargs["expected_files"] = yuanta_salary_expected_files
+            if selected_function == "【財報】台中固定費用請款":
+                finance_kwargs["electricity"] = int(taichung_fixed_expense_electricity or 0) or None
             if selected_function == "【財報】各區固定費用匯款":
                 finance_kwargs["execute_fubon_transfer"] = fixed_expense_execute_fubon
                 finance_kwargs["selected_rows"] = fixed_expense_selected_rows
