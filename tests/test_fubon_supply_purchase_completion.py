@@ -73,6 +73,7 @@ def run_purchase(*, completion_error=False, write_error=False):
     ns = dict(report_query_start=lambda account, end: end, Path=Path, datetime=datetime, ZoneInfo=ZoneInfo, Page=object, ExitStack=ExitStack, logout_quietly=MagicMock(), run_download=MagicMock(), SUPPLY_PURCHASE_TYPE='清潔用品採購',
               read_report_values=MagicMock(return_value=[]),
               pending_supply_purchases=MagicMock(return_value=[item]),
+              split_groups=lambda values, month, groups, split_rows: groups,
               resolve_report_location=MagicMock(return_value=('sheet-id', '進貨明細表-台北')),
               get_sheets_service=lambda: service,
               load_account=MagicMock(return_value=SimpleNamespace(bank_account='source')),

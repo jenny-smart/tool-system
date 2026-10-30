@@ -112,10 +112,11 @@ def merge_preview(items: list[dict], merge_rows) -> list[dict]:
 
 
 def queue_actions(items: list[dict], create_task: Callable, created_by: str = "內部請款整合執行",
-                  log: Callable[[str], None] = print, merge_rows=()) -> list[dict]:
+                  log: Callable[[str], None] = print, merge_rows=(), split_supply=()) -> list[dict]:
     """每區排一筆本機 Agent 任務：登入一次、轉帳全部做完才下載明細；最後排一筆「留紀錄」。
 
-    merge_rows：勾了「合併」的請款記錄 {(地區, 列號)}；其中同一收款對象的列合併成一筆轉帳，沒勾的照單筆轉。"""
+    merge_rows：勾了「合併」的請款記錄 {(地區, 列號)}；其中同一收款對象的列合併成一筆轉帳，沒勾的照單筆轉。
+    split_supply：取消「合併」的清潔用品採購 {(地區, 月份, 列號)}；同帳號的各列改成各自轉帳。"""
     tasks = []
     for area in AREAS:
         hit = [i for i in items if i["area"] == area]
@@ -132,6 +133,10 @@ def queue_actions(items: list[dict], create_task: Callable, created_by: str = "�
         merge = sorted(r for r in params["payment_rows"] if (area, r) in merge_rows)
         if merge:
             params["merge_rows"] = merge
+        split = {month: sorted(r for r in rows if (area, month, r) in split_supply)
+                 for month, rows in params["supply"].items()}
+        if any(split.values()):
+            params["supply_split"] = {month: rows for month, rows in split.items() if rows}
         task = create_task(BATCH_ACTION, params, created_by=created_by)
         tasks.append(task)
         counts = "、".join(f"{label} {sum(1 for i in hit if i['kind'] == kind)} 筆"

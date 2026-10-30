@@ -177,7 +177,8 @@ def test_area_batch_logs_in_once_and_downloads_after_all_transfers(monkeypatch):
         ("login",), ("pay", "fubon_payment_request"), ("pay", "fubon_deposit_refund"),
         ("pay", "fubon_supply_purchase"), ("pay", "fubon_supply_purchase"), ("download",), ("logout",)]
     assert events[0] == ("prepare", "fubon_payment_request", True)
-    assert [e[2] for e in events if e[:2] == ("prepare", "fubon_supply_purchase")] == [("202609", {2}), ("202610", {4})]
+    assert [e[2] for e in events if e[:2] == ("prepare", "fubon_supply_purchase")] == [
+        ("202609", {2}, set()), ("202610", {4}, set())]
 
 
 def test_area_batch_skips_kind_that_fails_before_login(monkeypatch):
@@ -192,3 +193,26 @@ def test_area_batch_skips_kind_that_fails_before_login(monkeypatch):
     with pytest.raises(ValueError, match="沒有可轉帳的資料"):
         combined.run("台北", {91}, {107}, {}, Path("."), "cdp")
     assert ("login",) not in events
+
+
+def test_queue_passes_supply_split_per_month():
+    from tools.finance_management import internal_payment_batch as batch
+
+    created = []
+    items = [{"kind": "supply", "area": "台北", "row": 4, "month": "202610"},
+             {"kind": "supply", "area": "台北", "row": 9, "month": "202610"}]
+    batch.queue_actions(items, lambda action, params, created_by="": created.append((action, params)) or {},
+                        log=lambda *_: None, split_supply={("台北", "202610", 9)})
+    assert created[0][1]["supply_split"] == {"202610": [9]}
+
+
+def test_agent_commands_pass_merge_and_split_rows():
+    from tools.local_agent import build_fubon_atm_refund, build_fubon_internal_payment, build_fubon_supply_purchase
+
+    assert build_fubon_atm_refund({"area": "台北", "selected_rows": [2, 3], "merge_rows": [2, 3]})[-2:] == \
+        ["--merge-rows", "2,3"]
+    assert "--merge-rows" not in build_fubon_atm_refund({"area": "台北", "selected_rows": [2]})
+    assert build_fubon_supply_purchase({"area": "台北", "month": "202610", "selected_rows": [4],
+                                        "split_rows": [4]})[-2:] == ["--split-rows", "4"]
+    cmd = build_fubon_internal_payment({"area": "台北", "supply": {"202610": [4]}, "supply_split": {"202610": [4]}})
+    assert cmd[-2:] == ["--supply-split", '{"202610": [4]}']

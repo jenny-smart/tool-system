@@ -29,13 +29,14 @@ def is_paid(row: list[str]) -> bool:
     return bool(_cell(row, 16) or _cell(row, 18))
 
 
-def pending_supply_purchases(values: list[list[str]], month: str) -> list[dict[str, object]]:
+def pending_supply_purchases(values: list[list[str]], month: str, merge: bool = True) -> list[dict[str, object]]:
     """Return 清潔用品採購 rows for the given 採購月份 (B 欄), grouped by 匯款銀行＋帳號（N／O 欄）.
 
     篩選 B 欄符合指定月份、Q 欄（匯款日期）與 S 欄（請款日期）都空白、
     且 N／O 欄皆有實際內容（不是空白或 #N/A）的列；N／O 欄相同的未匯款列
     會合併成一筆轉帳，金額為這些列 K 欄（進貨總金額）加總。
     Q 或 S 欄已有日期的列視為已付款，一律不再放入匯款名單。
+    merge=False 時不合併，每一列各自一筆。
     """
     target_month = _normalize_month(month)
     if not target_month:
@@ -64,7 +65,7 @@ def pending_supply_purchases(values: list[list[str]], month: str) -> list[dict[s
         if amount <= 0:
             continue
 
-        key = (bank_text, account_text)
+        key = (bank_text, account_text) if merge else (bank_text, account_text, sheet_row)
         if key not in groups:
             groups[key] = {
                 "sheet_row": sheet_row,
@@ -98,3 +99,19 @@ def pending_supply_purchases(values: list[list[str]], month: str) -> list[dict[s
             }
         )
     return result
+
+
+def split_groups(values: list[list[str]], month: str, groups: list[dict[str, object]],
+                 split_rows) -> list[dict[str, object]]:
+    """把 sheet_row 在 split_rows 裡的合併筆拆回每一列各自轉帳（取消勾選「合併」）；其他維持原樣。"""
+    split_rows = {int(r) for r in split_rows}
+    if not split_rows:
+        return groups
+    singles = {int(item["sheet_row"]): item for item in pending_supply_purchases(values, month, merge=False)}
+    result: list[dict[str, object]] = []
+    for group in groups:
+        if int(group["sheet_row"]) in split_rows:
+            result.extend(singles[int(r)] for r in group["rows"] if int(r) in singles)
+        else:
+            result.append(group)
+    return sorted(result, key=lambda m: int(m["sheet_row"]))

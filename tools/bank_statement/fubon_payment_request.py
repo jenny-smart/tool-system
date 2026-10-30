@@ -125,7 +125,7 @@ def pay(context, page: Page, area: str, account, prepared: dict) -> Page:
     return page
 
 
-def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: bool = False) -> int:
+def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: bool | set[int] = False) -> int:
     prepared = prepare(area, rows, merge)
     account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright, ExitStack() as cleanup:
@@ -145,12 +145,14 @@ def main() -> int:
     parser.add_argument("--rows", required=True, help="勾選的工作表列號，以逗號分隔")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
-    parser.add_argument("--merge", action="store_true", help="同一收款對象合併成一筆轉帳")
+    parser.add_argument("--merge", action="store_true", help="同一收款對象合併成一筆轉帳（全部勾選列）")
+    parser.add_argument("--merge-rows", default="", help="只有這些列號參與合併，以逗號分隔；其他照單筆轉")
     args = parser.parse_args()
     rows = {int(value) for value in args.rows.split(",") if value.strip().isdigit()}
     if not rows:
         raise ValueError("沒有勾選請款記錄資料")
-    return run(args.area, rows, args.accounts_file, args.cdp_url, merge=args.merge)
+    merge_rows = {int(value) for value in args.merge_rows.split(",") if value.strip().isdigit()}
+    return run(args.area, rows, args.accounts_file, args.cdp_url, merge=args.merge or merge_rows)
 
 
 if __name__ == "__main__":

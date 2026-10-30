@@ -12,7 +12,7 @@ from playwright.sync_api import Page, sync_playwright
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.finance_management.refund_guard import ready_for_refund, ready_items, refunded_status
 from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
-from tools.bank_statement.fubon_refund_filter import pending_atm_refunds
+from tools.bank_statement.fubon_refund_filter import merge_by_account, pending_atm_refunds
 from tools.bank_statement.fubon_transfer_common import (
     choose_immediate_date,
     choose_manual_destination,
@@ -63,7 +63,7 @@ def fill_refund(
     wait_confirmation(page)
 
 
-def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
+def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge_rows: set[int] = frozenset()) -> int:
     worksheet = get_worksheet(area)
     values = worksheet.get_all_values()
     candidates = pending_atm_refunds(values)
@@ -84,6 +84,15 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
     if not selected:
         print("沒有可退款的列（缺折讓單或 VIP 尚未歸零），不登入富邦。")
         return 0
+    # 勾了「合併」且轉入帳號相同的列合併成一筆轉帳（金額加總），轉完每一列都回寫
+    selected = sorted(
+        merge_by_account([item for item in selected if int(item["sheet_row"]) in merge_rows])
+        + [item for item in selected if int(item["sheet_row"]) not in merge_rows],
+        key=lambda m: int(m["sheet_row"]),
+    )
+    for item in selected:
+        if item.get("members"):
+            print(f"合併：第 {'、'.join(map(str, item['rows']))} 列（{item['customer']}），合計 NT$ {item['amount']}")
 
     account = load_account("fubon", area, accounts_file.expanduser())
     with sync_playwright() as playwright, ExitStack() as cleanup:
@@ -92,10 +101,11 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
         cleanup.callback(logout_quietly, context, page)  # 轉帳／下載做完（成功或失敗）一律登出
         try:
             for item in selected:
-                if not ready_for_refund(worksheet, int(item["sheet_row"])):
-                    continue  # 有原發票但折讓單未開成功／未回填：不退款
+                members = item.get("members") or [item]
+                if not all([ready_for_refund(worksheet, int(m["sheet_row"])) for m in members]):
+                    continue  # 有原發票但折讓單未開成功／未回填：不退款（合併的任一列不行就整筆不退）
                 print(
-                    f"準備第 {item['sheet_row']} 列：{item['customer']}／"
+                    f"準備第 {'、'.join(str(m['sheet_row']) for m in members)} 列：{item['customer']}／"
                     f"P={item['bank_code']}／Q={item['account_number']}／NT$ {item['amount']}"
                 )
                 fill_refund(page, area, account.bank_account, item)
@@ -107,18 +117,19 @@ def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str) -> int:
                     expected_amount=str(item["amount"]),
                     expected_account=str(item["account_number"]),
                 )
-                done_status = refunded_status(str(item.get("status", "")))
-                worksheet.batch_update(
-                    [
-                        {"range": f"AC{item['sheet_row']}", "values": [[completed_at]]},
-                        {"range": f"B{item['sheet_row']}", "values": [[done_status]]},
-                    ],
-                    value_input_option="USER_ENTERED",
-                )
-                print(
-                    f"已回寫第 {item['sheet_row']} 列："
-                    f"AC={completed_at}／B={done_status}"
-                )
+                for member in members:
+                    done_status = refunded_status(str(member.get("status", "")))
+                    worksheet.batch_update(
+                        [
+                            {"range": f"AC{member['sheet_row']}", "values": [[completed_at]]},
+                            {"range": f"B{member['sheet_row']}", "values": [[done_status]]},
+                        ],
+                        value_input_option="USER_ENTERED",
+                    )
+                    print(
+                        f"已回寫第 {member['sheet_row']} 列："
+                        f"AC={completed_at}／B={done_status}"
+                    )
                 page = current_fubon_page(context, page) or page
             print("全部勾選資料均已完成退款；開始下載富邦明細（財報最後一列日期～今天）。")
             today = datetime.now(ZoneInfo("Asia/Taipei")).date()
@@ -134,13 +145,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="依清潔異動工作表準備富邦 ATM 退款")
     parser.add_argument("--area", required=True, choices=("台北", "台中"))
     parser.add_argument("--rows", required=True, help="勾選的工作表列號，以逗號分隔")
+    parser.add_argument("--merge-rows", default="", help="勾了「合併」的列號（同一轉入帳號合併成一筆轉帳），以逗號分隔")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     args = parser.parse_args()
     rows = {int(value) for value in args.rows.split(",") if value.strip().isdigit()}
     if not rows:
         raise ValueError("沒有勾選 ATM 退款資料")
-    return run(args.area, rows, args.accounts_file, args.cdp_url)
+    merge_rows = {int(value) for value in args.merge_rows.split(",") if value.strip().isdigit()}
+    return run(args.area, rows, args.accounts_file, args.cdp_url, merge_rows)
 
 
 if __name__ == "__main__":
