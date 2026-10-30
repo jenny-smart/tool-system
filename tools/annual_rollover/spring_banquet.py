@@ -38,7 +38,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import pandas as pd
 import requests
 
-SPRING_ROOT_FOLDER_ID = "1q5IeRNtI4a6tUwWCglmzPHj3Ff7hBCxq"  # 尾牙春酒專用區
+SPRING_ROOT_FOLDER_ID = "1q5IeRNtI4a6tUwWCglmzPHj3Ff7hBCxq"  # 尾牙春酒專用區（預設值；實際讀年度根目錄設定「春酒專區」）
+
+
+def spring_root_folder_id() -> str:
+    from tools.common.year_roots import master_root_id
+
+    return master_root_id("春酒專區", SPRING_ROOT_FOLDER_ID)
 YEAR_FOLDER_NAME = "{Y}春酒"
 ATTEND_FORM_NAME = "{Y}春酒參與統計表單"
 VOTE_FORM_NAME = "{V}年度投票（{a}）"          # V = 投票年度（春酒前一年）
@@ -955,11 +961,11 @@ def run_spring_area(rollover, area: str = "全區") -> List[Dict[str, str]]:
         return []
     y, py = rollover.new_year, rollover.prev_year
     event = getattr(rollover, "spring_event", None) or {}
-    folder = rollover.ensure_folder(SPRING_ROOT_FOLDER_ID, YEAR_FOLDER_NAME.format(Y=y))
+    folder = rollover.ensure_folder(spring_root_folder_id(), YEAR_FOLDER_NAME.format(Y=y))
     records: List[Dict[str, str]] = [{"kind": "資料夾", "old_name": YEAR_FOLDER_NAME.format(Y=py), "old_id": "",
                                       "new_name": folder["name"], "new_id": folder["id"]}]
 
-    prev = next((f for f in rollover.children(SPRING_ROOT_FOLDER_ID)
+    prev = next((f for f in rollover.children(spring_root_folder_id())
                  if f["name"] == YEAR_FOLDER_NAME.format(Y=py)), None)
     prev_files = rollover.children(prev["id"]) if prev else []
     if not prev:

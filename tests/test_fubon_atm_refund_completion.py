@@ -47,6 +47,21 @@ def test_atm_refund_updates_after_completion_then_downloads_statement() -> None:
     download_index = source.index("page = run_download(")
 
     assert wait_index < update_index < download_index
-    assert 'f"AC{item[\'sheet_row\']}"' in source
+    assert 'f"AC{member[\'sheet_row\']}"' in source
     assert '"values": [[done_status]]' in source
-    assert 'done_status = refunded_status(str(item.get("status", "")))' in source
+    assert 'done_status = refunded_status(str(member.get("status", "")))' in source
+
+
+def test_merge_by_account_sums_same_bank_and_account() -> None:
+    from tools.bank_statement.fubon_refund_filter import merge_by_account
+
+    items = [
+        {"sheet_row": 5, "status": "待退款", "customer": "王", "bank_code": "812", "account_number": "1", "amount": "100"},
+        {"sheet_row": 3, "status": "VIP待退券", "customer": "王", "bank_code": "812", "account_number": "1", "amount": "50"},
+        {"sheet_row": 4, "status": "待退款", "customer": "陳", "bank_code": "812", "account_number": "2", "amount": "30"},
+    ]
+    merged = merge_by_account(items)
+    assert [(m["sheet_row"], m.get("rows"), m["amount"], m["customer"]) for m in merged] == [
+        (3, [3, 5], "150", "王"), (4, None, "30", "陳"),
+    ]
+    assert [m["status"] for m in merged[0]["members"]] == ["VIP待退券", "待退款"]

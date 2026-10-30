@@ -495,6 +495,10 @@ def build_fubon_download(params: dict[str, Any]) -> list[str]:
     ] + (["--start", start_date] if start_date else ["--start-from-sheet"])
 
 
+def _rows_flag(flag: str, rows) -> list[str]:
+    return [flag, ",".join(str(int(row)) for row in rows)] if rows else []
+
+
 def build_fubon_atm_refund(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
@@ -513,7 +517,7 @@ def build_fubon_atm_refund(params: dict[str, Any]) -> list[str]:
         cdp_url,
         "--rows",
         ",".join(str(int(row)) for row in selected_rows),
-    ]
+    ] + _rows_flag("--merge-rows", params.get("merge_rows"))
 
 
 def build_fubon_payment_request(params: dict[str, Any]) -> list[str]:
@@ -534,7 +538,7 @@ def build_fubon_payment_request(params: dict[str, Any]) -> list[str]:
         cdp_url,
         "--rows",
         ",".join(str(int(row)) for row in selected_rows),
-    ] + (["--merge"] if params.get("merge") else [])
+    ] + (["--merge"] if params.get("merge") else []) + _rows_flag("--merge-rows", params.get("merge_rows"))
 
 
 def build_fubon_deposit_refund(params: dict[str, Any]) -> list[str]:
@@ -581,7 +585,7 @@ def build_fubon_supply_purchase(params: dict[str, Any]) -> list[str]:
         cdp_url,
         "--rows",
         ",".join(str(int(row)) for row in selected_rows),
-    ]
+    ] + _rows_flag("--split-rows", params.get("split_rows"))
 
 
 def build_fubon_internal_payment(params: dict[str, Any]) -> list[str]:
@@ -590,6 +594,8 @@ def build_fubon_internal_payment(params: dict[str, Any]) -> list[str]:
     payment_rows = params.get("payment_rows") or []
     deposit_rows = params.get("deposit_rows") or []
     supply = {str(month): [int(row) for row in rows] for month, rows in (params.get("supply") or {}).items() if rows}
+    supply_split = {str(month): [int(row) for row in rows]
+                    for month, rows in (params.get("supply_split") or {}).items() if rows}
     if area not in ("台北", "台中"):
         raise ValueError("富邦內部請款目前只支援台北、台中")
     if not (payment_rows or deposit_rows or supply):
@@ -608,7 +614,9 @@ def build_fubon_internal_payment(params: dict[str, Any]) -> list[str]:
         ",".join(str(int(row)) for row in deposit_rows),
         "--supply",
         json.dumps(supply, ensure_ascii=False),
-    ] + (["--merge"] if params.get("merge") else [])
+    ] + (["--merge"] if params.get("merge") else []) + _rows_flag("--merge-rows", params.get("merge_rows")) + (
+        ["--supply-split", json.dumps(supply_split, ensure_ascii=False)] if supply_split else []
+    )
 
 
 def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:

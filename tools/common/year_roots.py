@@ -420,3 +420,14 @@ def set_modes(sheets, spreadsheet_id: str, roots: YearRoots, mode: str,
         global _LOADED_AT
         _LOADED_AT = 0.0  # 下次呼叫重讀設定
     return changed
+
+
+def master_root_id(category: str, default: str = "", area: str = "共用") -> str:
+    """主控表「年度根目錄設定」該類別的根目錄 ID（C 欄）；讀不到設定或沒有這一列時用 default。"""
+    try:
+        roots = get_year_roots()
+        rule = find_rule(roots.rules, category, area) if roots else None
+    except Exception as exc:  # 讀不到主控表時沿用程式內預設值
+        print(f"⚠ 讀取「{ROOT_SHEET}」{category} 根目錄失敗，沿用預設值：{exc}", flush=True)
+        return default
+    return (rule.root_id if rule and rule.root_id else "") or default
