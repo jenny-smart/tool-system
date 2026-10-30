@@ -159,7 +159,7 @@ FINANCE_YEAR_FOLDERS = [
     {"label": "儲值金", "area": "", "folder_id": "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv", "files": {}},
 ]
 # 「行銷費用總管理」：同一個檔，每年複製「{y}廣告」「{y}總表」成新年度工作表後清空實際數字
-MARKETING_FILE_ID = "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4"
+MARKETING_FILE_ID = "18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4"  # 預設值；實際讀年度根目錄設定「行銷費用總管理」
 MARKETING_AD_SHEET = "{y}廣告"
 MARKETING_TOTAL_SHEET = "{y}總表"
 # 「{Y}廣告」A～E 欄（項目名稱在 E 欄）是這些項目的列，清空各月實際欄位
@@ -182,7 +182,7 @@ MARKETING_AD_COLUMNS = ["F", "I", "L", "O", "R", "U", "X", "AA", "AD", "AG", "AJ
 MARKETING_TOTAL_CLEAR = ["C24:CH29", "C47:CH64", "C74:CH85"]
 
 # 「清潔用品」：根目錄下「{y}清潔用品訂購記錄-四店共用new」複製成新年度後清空
-SUPPLY_FOLDER_ID = "1GGD6fjEgvepKM3QWMe4A5MYBmSNXB39v"
+SUPPLY_FOLDER_ID = "1GGD6fjEgvepKM3QWMe4A5MYBmSNXB39v"  # 預設值；實際讀年度根目錄設定「清潔用品」
 SUPPLY_FILE_NAME = "{y}清潔用品訂購記錄-四店共用new"
 SUPPLY_PURCHASE_PREFIX = "進貨明細表-"
 SUPPLY_PURCHASE_CLEAR = ["A3:A", "C3:C", "E3:E", "F3:F", "G3:K", "M3:M", "O3:T"]
@@ -200,7 +200,7 @@ _LITERAL_FORMULA = re.compile(r"=[\d\s.+\-*/(),%]*")
 #     G 購買日期在前一年度、加總 I 購買原價），並依金額區間統計人數
 #   第二階段（設定金額產生送禮名單）：畫面輸入的門檻金額寫入「設定」B1，「{Y}送禮名單」列出加總 ≥ 門檻
 #     的客戶，再貼進新年度「{Y}春節送禮名單」並在根目錄總表加分頁
-GIFT_ROOT_FOLDER_ID = "1Vg6hg762A5fXkVVMVA_2sfYldTMoATz5"
+GIFT_ROOT_FOLDER_ID = "1Vg6hg762A5fXkVVMVA_2sfYldTMoATz5"  # 預設值；實際讀年度根目錄設定「春節禮品」
 GIFT_ROOT_FILE = "春節送禮名單"               # 根目錄總表，每年一個分頁 IMPORTRANGE 當年度檔
 GIFT_ROOT_TAB = "{y}春節送禮名單"
 GIFT_SUMMARY_FILE = "{Y}名單統整"
@@ -234,6 +234,25 @@ GIFT_LIST_FUNCTION = "春節送禮名單產生"         # 第二階段
 GIFT_STAT_BANDS = [50000, 80000, 100000, 120000]
 GIFT_STAT_SHEET = "區間統計"
 _IMPORTRANGE = re.compile(r'(?i)importrange\(\s*"([^"]+)"\s*,\s*"([^"!]+)!([^"]+)"\s*\)')
+
+def _master_root(category: str, default: str, area: str = "共用") -> str:
+    """根目錄／固定檔 ID 以主控表「年度根目錄設定」為準，讀不到時用程式內預設值。"""
+    from tools.common.year_roots import master_root_id
+
+    return master_root_id(category, default, area)
+
+
+def marketing_file_id() -> str:
+    return _master_root("行銷費用總管理", MARKETING_FILE_ID)
+
+
+def supply_folder_id() -> str:
+    return _master_root("清潔用品", SUPPLY_FOLDER_ID, "台北")
+
+
+def gift_root_folder_id() -> str:
+    return _master_root("春節禮品", GIFT_ROOT_FOLDER_ID)
+
 
 EXTRA_FUNCTIONS = {"行銷費用總管理", "清潔用品", "春酒專區", GIFT_STAT_FUNCTION, GIFT_LIST_FUNCTION}   # 不依「生成新年度」列的功能
 
@@ -1023,7 +1042,7 @@ class Rollover:
     # ---------- 行銷費用總管理 ----------
     def run_marketing(self) -> List[Dict[str, str]]:
         """同一個檔：複製「{y}廣告」「{y}總表」為新年度工作表（已存在就略過），清空實際數字。"""
-        file_id = MARKETING_FILE_ID
+        file_id = marketing_file_id()
         ids = self._sheet_map(file_id) if not self.dry_run else {}
         records: List[Dict[str, str]] = []
         renames = {}
@@ -1124,12 +1143,12 @@ class Rollover:
         """根目錄下的「{y}清潔用品訂購記錄-四店共用new」複製成新年度並清空（只在新建立時清空；已存在要重做請勾重新生成）。"""
         old_name = self._fmt(SUPPLY_FILE_NAME)
         new_name = SUPPLY_FILE_NAME.replace("{y}", str(self.new_year))
-        source = next((f for f in self.children(SUPPLY_FOLDER_ID)
+        source = next((f for f in self.children(supply_folder_id())
                        if f["mimeType"] == SHEET_MIME and dash_area(f["name"]) == dash_area(old_name)), None)
         if not source:
             self.log(f"  ⚠ 找不到檔案：{old_name}")
             return [{"kind": "檔案", "old_name": old_name, "old_id": "", "new_name": "找不到來源", "new_id": ""}]
-        copied, created = self.ensure_copy(source, SUPPLY_FOLDER_ID, new_name)
+        copied, created = self.ensure_copy(source, supply_folder_id(), new_name)
         record = {"kind": "檔案", "old_name": source["name"], "old_id": source["id"],
                   "new_name": copied["name"], "new_id": copied["id"], "created": created}
         if not created and self.tidy:
@@ -1198,14 +1217,14 @@ class Rollover:
     def _gift_folder(self, create: bool) -> Optional[Dict[str, Any]]:
         """根目錄下的 {Y} 資料夾（已存在就沿用，重新生成也不改名，來源檔放在裡面）。"""
         Y = str(self.new_year)
-        folder = next((f for f in self.children(GIFT_ROOT_FOLDER_ID)
+        folder = next((f for f in self.children(gift_root_folder_id())
                        if f["mimeType"] == FOLDER_MIME and f["name"] == Y), None)
         if folder:
             self.log(f"  資料夾已存在，沿用：{Y}")
         elif create:
             self.log(f"  建立資料夾：{Y}")
             folder = ({"id": f"(dry-run:{Y})", "name": Y} if self.dry_run else self.drive.files().create(
-                body={"name": Y, "mimeType": FOLDER_MIME, "parents": [GIFT_ROOT_FOLDER_ID]},
+                body={"name": Y, "mimeType": FOLDER_MIME, "parents": [gift_root_folder_id()]},
                 fields="id,name", supportsAllDrives=True).execute())
         return folder
 
@@ -1521,7 +1540,7 @@ class Rollover:
     def _gift_send_file(self, folder: Dict[str, Any], listing: List[Dict[str, Any]],
                         rows: List[List[str]]) -> List[Dict[str, str]]:
         """新年度「{Y}春節送禮名單」檔（新建立或勾「只整理」時才清空貼上）＋根目錄總表新年度分頁。"""
-        root_files = self.children(GIFT_ROOT_FOLDER_ID)
+        root_files = self.children(gift_root_folder_id())
         root = next((f for f in root_files if f["mimeType"] == SHEET_MIME and f["name"] == GIFT_ROOT_FILE), None)
         if not root:
             raise RuntimeError(f"春節禮品根目錄找不到「{GIFT_ROOT_FILE}」")
