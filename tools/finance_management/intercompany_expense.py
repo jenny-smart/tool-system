@@ -78,7 +78,7 @@ def _normalize_source_key(value: object) -> str:
 
 def _normalize_month(value: object) -> str | None:
     text = str(value or "").strip()
-    match = re.search(r"(20\d{2})[./-]?(0?[1-9]|1[0-2])(?:月)?", text)
+    match = re.search(r"(20\d{2})[./-]?(1[0-2]|0?[1-9])(?!\d)(?:月)?", text)
     if not match:
         return None
     return f"{match.group(1)}{int(match.group(2)):02d}"
