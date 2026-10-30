@@ -4660,7 +4660,7 @@ with date_col:
                 label_visibility="collapsed",
                 key="finance_taichung_fixed_expense_period",
             )
-            st.markdown('<div class="field-label">💡 電費金額（當月＋隔月）</div>', unsafe_allow_html=True)
+            st.markdown('<div class="field-label">💡 電費金額（前 2 個月）</div>', unsafe_allow_html=True)
             taichung_fixed_expense_electricity = st.number_input(
                 "電費金額",
                 min_value=0,
@@ -4672,7 +4672,7 @@ with date_col:
             )
             st.caption(
                 "格式：YYYYMM，只能選單月；新增當月＋隔月館前路租金管理費（各 18,000）"
-                "＋電費（必填，輸入的金額除以 2，拆成當月／隔月兩筆）到「請款記錄／台中」"
+                "＋前 2 個月電費（必填，輸入的金額除以 2 拆成兩筆）到「請款記錄／台中」"
             )
         elif selected_function == "【財報】各區固定費用匯款":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)

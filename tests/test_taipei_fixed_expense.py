@@ -30,7 +30,14 @@ def test_taichung_pays_current_and_next_month_rent_and_electricity():
     rows, _ = build_taichung_rows("202611", 87, {"2026.11-辦公室租金管理費"}, "now")
     assert [(r[3], r[4], r[5]) for r in rows] == [
         ("辦公室租金", "2026.12-辦公室租金管理費", 18000),
-        ("電費", "2026.11-電費", 43),
-        ("電費", "2026.12-電費", 44),
+        ("電費", "2026.09-電費", 43),
+        ("電費", "2026.10-電費", 44),
     ]
     assert {(r[7], r[8]) for r in rows} == {("館前路租金管理費", "013-0000234035010972")}
+
+
+def test_taichung_electricity_months_cross_year():
+    from tools.finance_management.taichung_fixed_expense import build_taichung_rows
+
+    rows, _ = build_taichung_rows("202701", 100, set(), "now")
+    assert [r[4] for r in rows if r[3] == "電費"] == ["2026.11-電費", "2026.12-電費"]
