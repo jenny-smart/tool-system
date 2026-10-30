@@ -2837,9 +2837,17 @@ _AGENT_TASK_STATUS_LEVELS = {
 }
 
 
+_ZERO_FAILURES_RE = re.compile(r"失敗\s*0\s*筆")
+
+
 def _classify_agent_log_line(line: str) -> str:
+    # 「回寫 1 筆，失敗 0 筆」之類的統計不是錯誤：先拿掉「失敗 0 筆」再判斷
+    has_zero_failures = bool(_ZERO_FAILURES_RE.search(line))
+    line = _ZERO_FAILURES_RE.sub("", line)
     if "[ERROR]" in line or "❌" in line or "失敗" in line:
         return "error"
+    if has_zero_failures:
+        return "success"
     if "[WARNING]" in line or "⚠" in line:
         return "warning"
     if "✅" in line or "完成" in line:
