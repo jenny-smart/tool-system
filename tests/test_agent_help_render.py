@@ -90,3 +90,25 @@ def test_control_results_rerun_page_when_task_finishes_or_running_job_ends():
     tasks[1]['status'] = 'cancelled'
     render(actions, ('job',))
     st.rerun.assert_called_once_with(scope='app')  # 執行中的工作結束：按鈕要解鎖
+
+
+@pytest.mark.parametrize('status,locked', [('running', True), ('cancel_requested', False)])
+def test_update_buttons_unlock_once_cancel_is_requested(status, locked):
+    tree = ast.parse(Path('toolapp.py').read_text())
+    st = MagicMock()
+    st.session_state = {}
+    st.columns.side_effect = lambda widths: [MagicMock() for _ in range(widths if isinstance(widths, int) else len(widths))]
+    st.button.return_value = False
+    namespace = {
+        'st': st,
+        'list_local_agent_status': lambda **kw: [{'agent_id': 'mac', 'online': True,
+                                                  'actions': 'system.agent_restart,system.git_pull_restart'}],
+        'list_local_agent_tasks': lambda **kw: [{'task_id': '1', 'agent_id': 'mac', 'status': status}],
+    }
+    exec(compile(ast.Module(body=_agent_help_nodes(tree), type_ignores=[]), '<agent-help>', 'exec'), namespace)
+    namespace['render_agent_help']()
+    buttons = {call.args[0]: call.kwargs for call in st.button.call_args_list}
+    assert bool(buttons['⬇️ 更新程式＋重啟 Agent']['disabled']) == locked
+    assert bool(buttons['🔄 重啟 Agent']['disabled']) == locked
+    assert bool(buttons['⬇️ Git Pull 更新程式']['disabled']) == locked
+    assert buttons['⏹️ 中止目前工作']['disabled'] == (not locked)  # 已送出中止就不能再按

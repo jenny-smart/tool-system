@@ -2246,6 +2246,9 @@ def render_agent_help() -> None:
         running_tasks = []
         tasks_read_ok = False
         st.warning(f"無法讀取目前工作：{exc}")
+    # 已按中止（cancel_requested）的工作不再擋更新／重啟：Agent 一次只做一筆，
+    # 送出的更新／重啟會等這筆停下後優先執行，不會中斷執行中的工作。
+    blocking_tasks = [task for task in running_tasks if task.get("status") != "cancel_requested"]
 
     st.markdown("**中止目前工作：**")
     if running_tasks:
@@ -2299,7 +2302,7 @@ def render_agent_help() -> None:
         st.caption("目前沒有執行中的工作。" if tasks_read_ok else "無法讀取目前工作，請重新檢查心跳後再試。")
 
     st.markdown("**更新程式：**")
-    pull_disabled = not online_agents or bool(running_tasks) or not tasks_read_ok
+    pull_disabled = not online_agents or bool(blocking_tasks) or not tasks_read_ok
     if st.button(
         "⬇️ Git Pull 更新程式",
         use_container_width=True,
@@ -2316,8 +2319,10 @@ def render_agent_help() -> None:
         else:
             st.error(message)
         st.rerun()
-    if running_tasks:
-        st.caption("Agent 有執行中或正在中止的工作，完成後才能更新程式。")
+    if blocking_tasks:
+        st.caption("Agent 有執行中的工作，完成或按「中止目前工作」後才能更新程式。")
+    elif running_tasks:
+        st.caption("已送出中止。現在按更新／重啟會排在最前面，工作一停下就執行。")
     elif not tasks_read_ok:
         st.caption("無法確認 Agent 是否閒置，暫停更新以確保安全。")
 
@@ -2338,7 +2343,7 @@ def render_agent_help() -> None:
         if st.button(
             "🔄 重啟 Agent",
             use_container_width=True,
-            disabled=bool(running_tasks) or "system.agent_restart" not in supported_actions,
+            disabled=bool(blocking_tasks) or "system.agent_restart" not in supported_actions,
             key="agent_restart_button",
         ):
             task = create_local_agent_task(
@@ -2383,7 +2388,7 @@ def render_agent_help() -> None:
     if st.button(
         "⬇️ 更新程式＋重啟 Agent",
         use_container_width=True,
-        disabled=bool(running_tasks) or "system.git_pull_restart" not in supported_actions,
+        disabled=bool(blocking_tasks) or "system.git_pull_restart" not in supported_actions,
         key="agent_git_pull_restart_button",
     ):
         task = create_local_agent_task(
