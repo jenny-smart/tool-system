@@ -19,8 +19,8 @@ from tools.finance_management.taipei_fixed_expense import (
 
 AREA = "台中"
 TOOL_NAME = "台中固定費用請款"
-MONTHLY_RENT = 18000
-RENT_PAYEE = ""
+MONTHLY_RENT = 18000  # 館前路租金＋管理費，每月
+RENT_PAYEE = "館前路租金管理費"
 
 
 def _label(period: str) -> str:
@@ -32,11 +32,11 @@ def build_taichung_rows(period: str, electricity: int | None, existing: set[str]
     next_period = _next_period(period)
     current, following = _label(period), _label(next_period)
     planned = [
-        (f"{current}-辦公室租金", "辦公室租金", MONTHLY_RENT),
-        (f"{following}-辦公室租金", "辦公室租金", MONTHLY_RENT),
+        (f"{current}-辦公室租金管理費", "辦公室租金", MONTHLY_RENT),
+        (f"{following}-辦公室租金管理費", "辦公室租金", MONTHLY_RENT),
     ]
     if electricity:
-        # 電費跟租金一樣拆兩個月；除不盡時多的 1 元算隔月（例：87 → 43＋44）
+        # 電費每次給一筆金額，除以 2 拆成當月／隔月；除不盡時多的 1 元算隔月（例：87 → 43＋44）
         half = electricity // 2
         planned.append((f"{current}-電費", "電費", half))
         planned.append((f"{following}-電費", "電費", electricity - half))

@@ -4670,8 +4670,8 @@ with date_col:
                 key="finance_taichung_fixed_expense_electricity",
             )
             st.caption(
-                "格式：YYYYMM，只能選單月；新增當月＋隔月辦公室租金（各 18,000）"
-                "＋電費（輸入兩個月合計，自動拆成當月／隔月兩筆；填 0 就不新增）到「請款記錄／台中」"
+                "格式：YYYYMM，只能選單月；新增當月＋隔月館前路租金管理費（各 18,000）"
+                "＋電費（輸入的金額除以 2，拆成當月／隔月兩筆；填 0 就不新增）到「請款記錄／台中」"
             )
         elif selected_function == "【財報】各區固定費用匯款":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
