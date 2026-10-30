@@ -28,7 +28,7 @@ def _label(period: str) -> str:
 
 
 def build_taichung_rows(period: str, electricity: int | None, existing: set[str], now: str):
-    """回傳 (要新增的列, 每項結果)；租金當月＋隔月各一筆，電費一筆標兩個月。"""
+    """回傳 (要新增的列, 每項結果)；租金、電費都是當月＋隔月各一筆。"""
     next_period = _next_period(period)
     current, following = _label(period), _label(next_period)
     planned = [
@@ -36,7 +36,10 @@ def build_taichung_rows(period: str, electricity: int | None, existing: set[str]
         (f"{following}-辦公室租金", "辦公室租金", MONTHLY_RENT),
     ]
     if electricity:
-        planned.append((f"{current}-電費（{period[4:6]}-{next_period[4:6]}月）", "電費", electricity))
+        # 電費跟租金一樣拆兩個月；除不盡時多的 1 元算隔月（例：87 → 43＋44）
+        half = electricity // 2
+        planned.append((f"{current}-電費", "電費", half))
+        planned.append((f"{following}-電費", "電費", electricity - half))
     rows: list[list[Any]] = []
     items: list[dict[str, Any]] = []
     for memo, category, amount in planned:

@@ -27,8 +27,9 @@ def test_invoice_mail_is_searched_in_following_month_and_existing_memo_is_skippe
 def test_taichung_pays_current_and_next_month_rent_and_electricity():
     from tools.finance_management.taichung_fixed_expense import build_taichung_rows
 
-    rows, _ = build_taichung_rows("202611", 186, {"2026.11-辦公室租金"}, "now")
+    rows, _ = build_taichung_rows("202611", 87, {"2026.11-辦公室租金"}, "now")
     assert [(r[3], r[4], r[5]) for r in rows] == [
         ("辦公室租金", "2026.12-辦公室租金", 18000),
-        ("電費", "2026.11-電費（11-12月）", 186),
+        ("電費", "2026.11-電費", 43),
+        ("電費", "2026.12-電費", 44),
     ]
