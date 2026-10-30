@@ -60,7 +60,9 @@ def submit_taichung_fixed_expenses(period: str, electricity: int | None = None, 
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202611")
     if int(period[4:6]) % 2 == 0:
         raise ValueError(f"台中固定費用只在單月請款（一次付當月＋隔月），{period} 是雙月")
-    if electricity is not None and electricity < 0:
+    if electricity is None:
+        raise ValueError("請輸入電費金額（當月＋隔月合計，會除以 2 拆成兩筆）")
+    if electricity < 0:
         raise ValueError("電費金額不能是負數")
     now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
     spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, AREA)
@@ -82,7 +84,7 @@ def submit_taichung_fixed_expenses(period: str, electricity: int | None = None, 
 def main() -> None:
     parser = argparse.ArgumentParser(description="新增『台中固定費用請款』")
     parser.add_argument("--period", required=True)
-    parser.add_argument("--electricity", type=int, default=None)
+    parser.add_argument("--electricity", type=int, required=True)
     parser.add_argument("--run-type", default="手動")
     args = parser.parse_args()
     print(submit_taichung_fixed_expenses(args.period, args.electricity, args.run_type))

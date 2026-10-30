@@ -4282,7 +4282,7 @@ yuanta_salary_include_internal = False
 yuanta_salary_transfer_fubon = True
 yuanta_salary_expected_files = []
 fixed_expense_execute_fubon = False
-taichung_fixed_expense_electricity = 0
+taichung_fixed_expense_electricity = None
 fixed_expense_selected_rows = None
 end_date_value = None
 monthly_date_mode = "期別"
@@ -4665,13 +4665,14 @@ with date_col:
                 "電費金額",
                 min_value=0,
                 step=1,
-                value=0,
+                value=None,
+                placeholder="必填，例如：186",
                 label_visibility="collapsed",
                 key="finance_taichung_fixed_expense_electricity",
             )
             st.caption(
                 "格式：YYYYMM，只能選單月；新增當月＋隔月館前路租金管理費（各 18,000）"
-                "＋電費（輸入的金額除以 2，拆成當月／隔月兩筆；填 0 就不新增）到「請款記錄／台中」"
+                "＋電費（必填，輸入的金額除以 2，拆成當月／隔月兩筆）到「請款記錄／台中」"
             )
         elif selected_function == "【財報】各區固定費用匯款":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
@@ -6176,7 +6177,9 @@ if run_clicked:
                 finance_kwargs["transfer_fubon"] = yuanta_salary_transfer_fubon
                 finance_kwargs["expected_files"] = yuanta_salary_expected_files
             if selected_function == "【財報】台中固定費用請款":
-                finance_kwargs["electricity"] = int(taichung_fixed_expense_electricity or 0) or None
+                finance_kwargs["electricity"] = (
+                    None if taichung_fixed_expense_electricity is None else int(taichung_fixed_expense_electricity)
+                )
             if selected_function == "【財報】各區固定費用匯款":
                 finance_kwargs["execute_fubon_transfer"] = fixed_expense_execute_fubon
                 finance_kwargs["selected_rows"] = fixed_expense_selected_rows
