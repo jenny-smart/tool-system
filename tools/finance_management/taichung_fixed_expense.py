@@ -28,8 +28,13 @@ def _label(period: str) -> str:
     return f"{period[:4]}.{period[4:6]}"
 
 
+def _prev_period(period: str, months: int) -> str:
+    index = int(period[:4]) * 12 + int(period[4:6]) - 1 - months
+    return f"{index // 12:04d}{index % 12 + 1:02d}"
+
+
 def build_taichung_rows(period: str, electricity: int | None, existing: set[str], now: str):
-    """回傳 (要新增的列, 每項結果)；租金、電費都是當月＋隔月各一筆。"""
+    """回傳 (要新增的列, 每項結果)；租金是當月＋隔月，電費是前 2 個月，各一筆。"""
     next_period = _next_period(period)
     current, following = _label(period), _label(next_period)
     planned = [
@@ -37,10 +42,10 @@ def build_taichung_rows(period: str, electricity: int | None, existing: set[str]
         (f"{following}-辦公室租金管理費", "辦公室租金", MONTHLY_RENT),
     ]
     if electricity:
-        # 電費每次給一筆金額，除以 2 拆成當月／隔月；除不盡時多的 1 元算隔月（例：87 → 43＋44）
+        # 電費是前 2 個月的帳單，除以 2 拆兩筆；除不盡時多的 1 元算後面那個月（例：87 → 43＋44）
         half = electricity // 2
-        planned.append((f"{current}-電費", "電費", half))
-        planned.append((f"{following}-電費", "電費", electricity - half))
+        planned.append((f"{_label(_prev_period(period, 2))}-電費", "電費", half))
+        planned.append((f"{_label(_prev_period(period, 1))}-電費", "電費", electricity - half))
     rows: list[list[Any]] = []
     items: list[dict[str, Any]] = []
     for memo, category, amount in planned:
@@ -50,7 +55,7 @@ def build_taichung_rows(period: str, electricity: int | None, existing: set[str]
         rows.append(["待付款", "", now, category, memo, amount, "", RENT_PAYEE, RENT_ACCOUNT])
         items.append({"label": memo, "amount": amount, "status": "成功"})
     if not electricity:
-        items.append({"label": f"{current}-電費", "amount": None, "status": "略過（未輸入電費金額）"})
+        items.append({"label": "電費", "amount": None, "status": "略過（未輸入電費金額）"})
     return rows, items
 
 
@@ -61,7 +66,7 @@ def submit_taichung_fixed_expenses(period: str, electricity: int | None = None, 
     if int(period[4:6]) % 2 == 0:
         raise ValueError(f"台中固定費用只在單月請款（一次付當月＋隔月），{period} 是雙月")
     if electricity is None:
-        raise ValueError("請輸入電費金額（當月＋隔月合計，會除以 2 拆成兩筆）")
+        raise ValueError("請輸入電費金額（前 2 個月合計，會除以 2 拆成兩筆）")
     if electricity < 0:
         raise ValueError("電費金額不能是負數")
     now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")

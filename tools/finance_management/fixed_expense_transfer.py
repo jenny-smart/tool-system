@@ -38,7 +38,7 @@ def _amount(value: object) -> int:
 
 
 def _normalize_month(value: object) -> str | None:
-    match = re.search(r"(20\d{2})[./-]?(0?[1-9]|1[0-2])", str(value or "").strip())
+    match = re.search(r"(20\d{2})[./-]?(1[0-2]|0?[1-9])(?!\d)", str(value or "").strip())
     return f"{match.group(1)}{int(match.group(2)):02d}" if match else None
 
 

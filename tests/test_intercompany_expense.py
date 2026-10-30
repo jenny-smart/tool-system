@@ -88,6 +88,12 @@ def _marketing_values(control=125):
 
 
 class IntercompanyExpenseTest(unittest.TestCase):
+    def test_two_digit_months_are_not_read_as_january(self):
+        self.assertEqual(
+            [expense._normalize_month(v) for v in ("2026.09", "2026.10", "2026.11", "2026.12", "202610", "2026/1/5")],
+            ["202609", "202610", "202611", "202612", "202610", "202601"],
+        )
+
     def test_finds_region_under_merged_month_header(self):
         values = [
             ["", "", "2026.04", "", "", "2026.05", ""],
