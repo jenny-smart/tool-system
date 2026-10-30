@@ -33,3 +33,18 @@ def test_batch_run_command():
     command = local_agent.ACTION_HANDLERS["change_order.batch_run"]({"plan": plan})
     assert command[1:4] == ["-m", "tools.finance_management.change_order_batch", "run"]
     assert json.loads(command[command.index("--plan") + 1]) == plan
+
+
+def test_update_restart_runs_before_earlier_queued_tasks(monkeypatch):
+    # list_tasks 由新到舊：先排的留紀錄在後面，後排的更新＋重啟在前面
+    tasks = [
+        {"task_id": "restart", "action": "system.git_pull_restart", "status": "pending", "_row": "4"},
+        {"task_id": "record", "action": "internal_payment.record", "status": "pending", "_row": "3"},
+        {"task_id": "pay", "action": "fubon.internal_payment", "status": "cancelled", "_row": "2"},
+    ]
+    monkeypatch.setattr(queue, "ensure_task_sheet", lambda service, spreadsheet_id: (None, "sid"))
+    monkeypatch.setattr(queue, "list_tasks", lambda **_: tasks)
+    monkeypatch.setattr(queue, "busy_task", lambda items, agent_id: None)
+    monkeypatch.setattr(queue, "_skip_superseded_downloads", lambda pending, **_: pending)
+    monkeypatch.setattr(queue, "update_task", lambda *a, **k: None)
+    assert queue.claim_next_task(agent_id="mac")["task_id"] == "restart"

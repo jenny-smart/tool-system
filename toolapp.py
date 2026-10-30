@@ -2085,6 +2085,85 @@ def _remember_agent_control_task(task) -> None:
         st.session_state.setdefault("agent_control_task_ids", []).append(task_id)
 
 
+AGENT_CONTROL_LABELS = {
+    "system.agent_status": "Agent 狀態",
+    "system.agent_logs": "Agent Log",
+    "system.agent_restart": "重啟 Agent",
+    "system.git_pull_restart": "更新＋重啟 Agent",
+}
+_AGENT_CONTROL_DONE = {"completed", "failed", "cancelled"}
+
+
+@st.fragment(run_every="3s")
+def render_agent_control_results(actions: tuple[str, ...], running_ids: tuple[str, ...] = ()) -> None:
+    """本頁送出的更新／控制任務結果，每 3 秒自動刷新（同執行日誌），不必再按重新檢查心跳。
+
+    控制任務完成、或原本執行中的工作結束時整頁重跑一次，讓上方按鈕（更新／重啟）與心跳也跟著更新。"""
+    session_control_ids = set(st.session_state.get("agent_control_task_ids", []))
+    if not session_control_ids and not running_ids:
+        return
+    try:
+        agent_tasks = list_local_agent_tasks(limit=5000)  # 與主畫面同一份快取，判斷才一致
+    except Exception as exc:
+        st.warning(f"本機 Agent 任務讀取失敗：{exc}")
+        return
+    seen = st.session_state.setdefault("agent_control_seen_status", {})
+    finished = False
+    for task in agent_tasks:
+        task_id = task.get("task_id", "")
+        if task_id in session_control_ids and task.get("action") in actions:
+            status = task.get("status", "")
+            if seen.get(task_id) not in (None, status) and status in _AGENT_CONTROL_DONE:
+                finished = True
+            seen[task_id] = status
+    still_running = {task.get("task_id", "") for task in agent_tasks
+                     if task.get("status") in {"running", "cancel_requested"}}
+    if finished or any(task_id not in still_running for task_id in running_ids):
+        st.rerun(scope="app")
+
+    if "system.git_pull" in actions:
+        latest_pull = next(
+            (task for task in agent_tasks
+             if task.get("action") == "system.git_pull" and task.get("task_id") in session_control_ids),
+            None,
+        )
+        if latest_pull:
+            pull_status = latest_pull.get("status", "")
+            if pull_status in {"pending", "queued", "running"}:
+                st.info(f"Git Pull：{latest_pull.get('message') or '等待 Local Agent 執行'}")
+            elif pull_status == "completed":
+                st.success("Git Pull 更新成功。需要重啟 Agent 才會載入新版。")
+            elif pull_status == "failed":
+                st.error("Git Pull 更新失敗；本機 repository 未被自動覆寫。")
+            if pull_status in {"completed", "failed"}:
+                try:
+                    pull_log = read_local_agent_task_log(latest_pull.get("task_id", ""))
+                except Exception as exc:
+                    pull_log = f"無法讀取完整 Log：{exc}\n\n{latest_pull.get('log', '')}"
+                st.code(
+                    pull_log
+                    or latest_pull.get("log")
+                    or latest_pull.get("message")
+                    or "無輸出",
+                    language="text",
+                )
+
+    for action, label in AGENT_CONTROL_LABELS.items():
+        if action not in actions:
+            continue
+        latest_control = next((task for task in agent_tasks
+                               if task.get("action") == action and task.get("task_id") in session_control_ids), None)
+        if latest_control:
+            with st.expander(f"{label}｜{latest_control.get('status', '')}", expanded=True):
+                st.write(latest_control.get("message") or "等待 Agent 執行；結果會自動更新。")
+                try:
+                    control_log = read_local_agent_task_log(latest_control.get("task_id", ""))
+                except Exception as exc:
+                    control_log = f"無法讀取 Log：{exc}"
+                if control_log:
+                    st.code(control_log, language="text")
+
+
 def render_agent_help() -> None:
     st.markdown("## 🖥️ Agent 狀態與重啟")
 
@@ -2167,6 +2246,9 @@ def render_agent_help() -> None:
         running_tasks = []
         tasks_read_ok = False
         st.warning(f"無法讀取目前工作：{exc}")
+    # 已按中止（cancel_requested）的工作不再擋更新／重啟：Agent 一次只做一筆，
+    # 送出的更新／重啟會等這筆停下後優先執行，不會中斷執行中的工作。
+    blocking_tasks = [task for task in running_tasks if task.get("status") != "cancel_requested"]
 
     st.markdown("**中止目前工作：**")
     if running_tasks:
@@ -2220,7 +2302,7 @@ def render_agent_help() -> None:
         st.caption("目前沒有執行中的工作。" if tasks_read_ok else "無法讀取目前工作，請重新檢查心跳後再試。")
 
     st.markdown("**更新程式：**")
-    pull_disabled = not online_agents or bool(running_tasks) or not tasks_read_ok
+    pull_disabled = not online_agents or bool(blocking_tasks) or not tasks_read_ok
     if st.button(
         "⬇️ Git Pull 更新程式",
         use_container_width=True,
@@ -2237,38 +2319,15 @@ def render_agent_help() -> None:
         else:
             st.error(message)
         st.rerun()
-    if running_tasks:
-        st.caption("Agent 有執行中或正在中止的工作，完成後才能更新程式。")
+    if blocking_tasks:
+        st.caption("Agent 有執行中的工作，完成或按「中止目前工作」後才能更新程式。")
+    elif running_tasks:
+        st.caption("已送出中止。現在按更新／重啟會排在最前面，工作一停下就執行。")
     elif not tasks_read_ok:
         st.caption("無法確認 Agent 是否閒置，暫停更新以確保安全。")
 
     # 只顯示這次在本頁按下的更新／控制結果，舊紀錄不顯示，避免誤判目前的更新狀態
-    session_control_ids = set(st.session_state.get("agent_control_task_ids", []))
-    latest_pull = next(
-        (task for task in agent_tasks
-         if task.get("action") == "system.git_pull" and task.get("task_id") in session_control_ids),
-        None,
-    )
-    if latest_pull:
-        pull_status = latest_pull.get("status", "")
-        if pull_status in {"pending", "queued", "running"}:
-            st.info(f"Git Pull：{latest_pull.get('message') or '等待 Local Agent 執行'}")
-        elif pull_status == "completed":
-            st.success("Git Pull 更新成功。需要重啟 Agent 才會載入新版。")
-        elif pull_status == "failed":
-            st.error("Git Pull 更新失敗；本機 repository 未被自動覆寫。")
-        if pull_status in {"completed", "failed"}:
-            try:
-                pull_log = read_local_agent_task_log(latest_pull.get("task_id", ""))
-            except Exception as exc:
-                pull_log = f"無法讀取完整 Log：{exc}\n\n{latest_pull.get('log', '')}"
-            st.code(
-                pull_log
-                or latest_pull.get("log")
-                or latest_pull.get("message")
-                or "無輸出",
-                language="text",
-            )
+    render_agent_control_results(("system.git_pull",))
 
     supported_actions = set()
     if online_agents:
@@ -2284,7 +2343,7 @@ def render_agent_help() -> None:
         if st.button(
             "🔄 重啟 Agent",
             use_container_width=True,
-            disabled=bool(running_tasks) or "system.agent_restart" not in supported_actions,
+            disabled=bool(blocking_tasks) or "system.agent_restart" not in supported_actions,
             key="agent_restart_button",
         ):
             task = create_local_agent_task(
@@ -2329,7 +2388,7 @@ def render_agent_help() -> None:
     if st.button(
         "⬇️ 更新程式＋重啟 Agent",
         use_container_width=True,
-        disabled=bool(running_tasks) or "system.git_pull_restart" not in supported_actions,
+        disabled=bool(blocking_tasks) or "system.git_pull_restart" not in supported_actions,
         key="agent_git_pull_restart_button",
     ):
         task = create_local_agent_task(
@@ -2347,23 +2406,8 @@ def render_agent_help() -> None:
             "新版 Agent 載入後，之後重啟、狀態、Log、更新＋重啟都可直接按按鈕。"
         )
 
-    for action, label in (
-        ("system.agent_status", "Agent 狀態"),
-        ("system.agent_logs", "Agent Log"),
-        ("system.agent_restart", "重啟 Agent"),
-        ("system.git_pull_restart", "更新＋重啟 Agent"),
-    ):
-        latest_control = next((task for task in agent_tasks
-                               if task.get("action") == action and task.get("task_id") in session_control_ids), None)
-        if latest_control:
-            with st.expander(f"{label}｜{latest_control.get('status', '')}", expanded=True):
-                st.write(latest_control.get("message") or "等待 Agent 執行；請按重新檢查心跳更新結果。")
-                try:
-                    control_log = read_local_agent_task_log(latest_control.get("task_id", ""))
-                except Exception as exc:
-                    control_log = f"無法讀取 Log：{exc}"
-                if control_log:
-                    st.code(control_log, language="text")
+    render_agent_control_results(tuple(AGENT_CONTROL_LABELS),
+                                 tuple(task.get("task_id", "") for task in running_tasks))
 
     st.markdown(
         """

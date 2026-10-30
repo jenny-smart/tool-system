@@ -3,7 +3,7 @@ from pathlib import Path
 
 def _agent_help_source() -> str:
     source = Path("toolapp.py").read_text(encoding="utf-8")
-    start = source.index("def render_agent_help")
+    start = source.index("AGENT_CONTROL_LABELS = {")  # 含自動刷新的控制結果 fragment
     end = source.index("# Google Drive OAuth", start)
     return source[start:end]
 

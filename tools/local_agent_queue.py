@@ -468,11 +468,13 @@ def claim_next_task(
     pending = _skip_superseded_downloads(pending, service=service, spreadsheet_id=spreadsheet_id)
     if not pending:
         return None
-    # 驗證碼有時效，優先處理擷取及送出任務。
-    priority = {"fubon.verify": 0, "fubon.captcha": 1}
+    # 驗證碼有時效，優先處理擷取及送出任務；其次是更新／重啟 Agent，
+    # 中止工作後按下就能馬上執行，不必等後面排隊的工作（例如留紀錄）跑完。
+    priority = {"fubon.verify": 0, "fubon.captcha": 1,
+                "system.git_pull_restart": 2, "system.agent_restart": 2, "system.git_pull": 2}
     task = min(
         enumerate(pending),
-        key=lambda item: (priority.get(item[1].get("action", ""), 2), item[0]),
+        key=lambda item: (priority.get(item[1].get("action", ""), 3), item[0]),
     )[1]
     row_number = int(task["_row"])
     update_task(
