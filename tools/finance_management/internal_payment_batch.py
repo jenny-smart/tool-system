@@ -15,6 +15,7 @@ import json
 import re
 import sys
 from datetime import datetime
+from decimal import Decimal
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
@@ -53,7 +54,8 @@ def _items_for(kind: str, area: str, values: list[list[str]]) -> list[dict]:
     if kind == "payment":
         for c in pending_payment_requests(values):
             items.append({"kind": kind, "area": area, "row": int(c["sheet_row"]), "rows": [int(c["sheet_row"])],
-                          "month": "", "payee": c["name"], "amount": str(c["amount"]), "memo": c.get("memo", "")})
+                          "month": "", "payee": c["name"], "amount": str(c["amount"]), "memo": c.get("memo", ""),
+                          "account": str(c.get("account_number") or "") or str(c.get("account_text") or "")})
     elif kind == "deposit":
         for c in pending_deposit_refunds(values):
             items.append({"kind": kind, "area": area, "row": int(c["sheet_row"]), "rows": [int(c["sheet_row"])],
@@ -93,11 +95,27 @@ def _key(item: dict) -> tuple:
     return item["kind"], item["area"], int(item["row"]), item.get("month", "")
 
 
+def merge_preview(items: list[dict], merge_rows) -> list[dict]:
+    """勾了「合併」的請款記錄裡，同地區、同收款對象＋收款帳號、超過一列的會合併成一筆（跟 merge_by_payee 同規則）。"""
+    groups: dict[tuple, list[dict]] = {}
+    for i in items:
+        if i["kind"] == "payment" and (i["area"], int(i["row"])) in merge_rows:
+            groups.setdefault((i["area"], i.get("payee", ""), i.get("account", "")), []).append(i)
+    result = []
+    for (area, payee, _account), members in groups.items():
+        if len(members) < 2:
+            continue
+        total = sum(Decimal(str(m.get("amount") or 0)) for m in members)
+        result.append({"area": area, "payee": payee, "rows": sorted(int(m["row"]) for m in members),
+                       "amount": str(int(total)) if total == total.to_integral() else format(total, "f")})
+    return result
+
+
 def queue_actions(items: list[dict], create_task: Callable, created_by: str = "內部請款整合執行",
-                  log: Callable[[str], None] = print, merge_payments: bool = False) -> list[dict]:
+                  log: Callable[[str], None] = print, merge_rows=()) -> list[dict]:
     """每區排一筆本機 Agent 任務：登入一次、轉帳全部做完才下載明細；最後排一筆「留紀錄」。
 
-    merge_payments：請款記錄同一收款對象合併成一筆轉帳。要合併與不合併的請分兩次執行。"""
+    merge_rows：勾了「合併」的請款記錄 {(地區, 列號)}；其中同一收款對象的列合併成一筆轉帳，沒勾的照單筆轉。"""
     tasks = []
     for area in AREAS:
         hit = [i for i in items if i["area"] == area]
@@ -111,8 +129,9 @@ def queue_actions(items: list[dict], create_task: Callable, created_by: str = "�
         params = {"area": area, "payment_rows": sorted(rows["payment"]), "deposit_rows": sorted(rows["deposit"]),
                   "supply": {month: sorted(r) for month, r in sorted(supply.items())},
                   "cdp_url": "http://127.0.0.1:9222"}
-        if merge_payments and params["payment_rows"]:
-            params["merge"] = True
+        merge = sorted(r for r in params["payment_rows"] if (area, r) in merge_rows)
+        if merge:
+            params["merge_rows"] = merge
         task = create_task(BATCH_ACTION, params, created_by=created_by)
         tasks.append(task)
         counts = "、".join(f"{label} {sum(1 for i in hit if i['kind'] == kind)} 筆"

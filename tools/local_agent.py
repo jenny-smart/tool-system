@@ -608,7 +608,9 @@ def build_fubon_internal_payment(params: dict[str, Any]) -> list[str]:
         ",".join(str(int(row)) for row in deposit_rows),
         "--supply",
         json.dumps(supply, ensure_ascii=False),
-    ] + (["--merge"] if params.get("merge") else [])
+    ] + (["--merge"] if params.get("merge") else []) + (
+        ["--merge-rows", ",".join(str(int(row)) for row in params["merge_rows"])] if params.get("merge_rows") else []
+    )
 
 
 def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:

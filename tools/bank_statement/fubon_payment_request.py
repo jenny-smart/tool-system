@@ -78,8 +78,10 @@ def fill_payment_request(
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
 
 
-def prepare(area: str, rows: set[int], merge: bool = False) -> dict:
-    """進銀行前先讀報表、挑出勾選的待付款列（失敗就不登入富邦）。"""
+def prepare(area: str, rows: set[int], merge: bool | set[int] = False) -> dict:
+    """進銀行前先讀報表、挑出勾選的待付款列（失敗就不登入富邦）。
+
+    merge：True＝全部勾選列參與合併；列號集合＝只有這些列參與合併，其他照單筆轉。"""
     values = read_report_values(PAYMENT_REQUEST_TYPE, area)
     candidates = pending_payment_requests(values)
     selected = [item for item in candidates if int(item["sheet_row"]) in rows]
@@ -87,7 +89,10 @@ def prepare(area: str, rows: set[int], merge: bool = False) -> dict:
         raise ValueError("勾選列中沒有符合 A=待付款 且 F/G 欄完整的資料")
     if merge:
         # 同一收款對象合併成一筆轉帳（金額加總），轉完每一列都回填
-        selected = merge_by_payee(selected)
+        merge_rows = rows if merge is True else set(merge)
+        joined = [item for item in selected if int(item["sheet_row"]) in merge_rows]
+        single = [item for item in selected if int(item["sheet_row"]) not in merge_rows]
+        selected = sorted(merge_by_payee(joined) + single, key=lambda m: int(m["sheet_row"]))
         for item in selected:
             if len(item["rows"]) > 1:
                 print(f"合併：{item['name']} {item['memo']}，合計 NT$ {item['amount']}")

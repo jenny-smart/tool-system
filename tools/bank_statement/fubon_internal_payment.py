@@ -26,7 +26,7 @@ def prepare_all(
     payment_rows: set[int],
     deposit_rows: set[int],
     supply: dict[str, set[int]],
-    merge: bool = False,
+    merge: bool | set[int] = False,
 ) -> tuple[list[tuple[str, object, dict]], list[str]]:
     """回傳 ([(說明, 模組, prepared)], [失敗訊息])，順序即轉帳順序。"""
     jobs = []
@@ -55,7 +55,7 @@ def run(
     supply: dict[str, set[int]],
     accounts_file: Path,
     cdp_url: str,
-    merge: bool = False,
+    merge: bool | set[int] = False,
 ) -> int:
     ready, errors = prepare_all(area, payment_rows, deposit_rows, supply, merge)
     if not ready:
@@ -85,13 +85,14 @@ def main() -> int:
     parser.add_argument("--payment-rows", default="", help="請款記錄勾選列號，以逗號分隔")
     parser.add_argument("--deposit-rows", default="", help="工具包押金退款勾選列號，以逗號分隔")
     parser.add_argument("--supply", default="{}", help='清潔用品採購 JSON：{"202610": [4, 8]}')
-    parser.add_argument("--merge", action="store_true", help="請款記錄同一收款對象合併成一筆轉帳")
+    parser.add_argument("--merge", action="store_true", help="請款記錄同一收款對象合併成一筆轉帳（全部勾選列）")
+    parser.add_argument("--merge-rows", default="", help="只有這些請款記錄列號參與合併，以逗號分隔；其他照單筆轉")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     args = parser.parse_args()
     supply = {str(month): {int(r) for r in rows} for month, rows in json.loads(args.supply).items()}
     return run(args.area, _rows(args.payment_rows), _rows(args.deposit_rows), supply,
-               args.accounts_file, args.cdp_url, merge=args.merge)
+               args.accounts_file, args.cdp_url, merge=args.merge or _rows(args.merge_rows))
 
 
 if __name__ == "__main__":
