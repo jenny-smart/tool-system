@@ -25,7 +25,7 @@
 | **Scheduled Fubon Pending Check**（`scheduled_fubon_pending_check.yml`） | 每週二、五 10:00 | GitHub | 富邦待辦通知：盤點台北／台中待付款的請款記錄、工具包押金退款、清潔用品採購，在行事曆提醒。 |
 | **Scheduled Fubon Statement Download**（`scheduled_fubon_statement.yml`） | 每日 08:00；工作日另加 11:00、16:30（週六日與國定假日只跑 08:00） | **本機 Agent（Mac）** | 見下方說明。 |
 | **Scheduled Yuanta Statement Download**（`scheduled_yuanta_statement.yml`） | 每月 25 日 11:00；遇例假日提前到前一個工作日 | **本機 Agent（Mac）** | 見下方說明。 |
-| **Scheduled Monthly Jobs**（`scheduled_monthly.yml`） | 15 日 17:00 上半月訂單；月底 17:00 下半月訂單、18:00 已退款；1 日 00:00 預收、00:10 儲值金結算、00:20 儲值金預收 | GitHub | 月排程。手動可選 target 與期別。 |
+| **Scheduled Monthly Jobs**（`scheduled_monthly.yml`） | 15 日 12:00 上半月訂單；月底 12:00 下半月訂單、18:00 已退款；1 日 00:00 預收、00:10 儲值金結算、00:20 儲值金預收 | GitHub | 月排程。手動可選 target 與期別。 |
 | **Scheduled Finance Jobs**（`scheduled_finance.yml`） | 1 日 00:30 固定費用＋排入月初藍新／鯨躍／現金缺口；01:00 【儲值金】完整流程；02:00 全區現金缺口；單月 10 日 10:00 會計事務所費用確認提醒 | GitHub（月初藍新／鯨躍由 **本機 Agent（Mac）** 執行） | 見下方「每月 1 日財務」。手動可選 target 與模擬執行日。 |
 | **Scheduled Gmail 401 Archive**（`Scheduled_gmail_401.yml`） | 每月 20 日 00:00 | GitHub | 把 Gmail 主旨含「401」信件的 401 PDF 附件，依檔名關鍵字存到各區雲端資料夾的西元年子資料夾（設定在 `systems.yaml` 的 `gmail_401`），處理過的信加上「401已歸檔」標籤。 |
 | **New Year Generate**（`new_year_generate.yml`） | 只能手動 | GitHub | 年度切換：依主控表「生成新年度」產生新年度資料夾／檔案。參數：年度、列、`dry_run`（預設只預覽）、`fresh`。 |

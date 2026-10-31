@@ -47,10 +47,10 @@ def plan(when):
     if hm == '00:00' and when.day == 20:
         add('Scheduled_gmail_401')
     month = when.strftime('%Y%m')
-    if when.day == 15 and hm == '17:00':
+    if when.day == 15 and hm == '12:00':
         add('scheduled_monthly', target='half_month_orders_1', period=month + '-1')
-    if last_day and hm in {'17:00', '18:00'}:
-        add('scheduled_monthly', target='half_month_orders_2' if hm == '17:00' else 'refund_report', period=month + '-2')
+    if last_day and hm in {'12:00', '18:00'}:
+        add('scheduled_monthly', target='half_month_orders_2' if hm == '12:00' else 'refund_report', period=month + '-2')
     monthly = {'00:00': 'prepaid_report', '00:10': 'stored_value_settlement', '00:20': 'stored_value_prepaid'}
     if when.day == 1 and hm in monthly:
         previous = (when.replace(day=1) - dt.timedelta(days=1)).strftime('%Y%m')
