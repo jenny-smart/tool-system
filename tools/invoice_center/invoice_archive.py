@@ -8,6 +8,7 @@ import math
 import os
 import re
 import tempfile
+import warnings
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -446,8 +447,16 @@ def _archive_members(path: Path) -> Iterable[tuple[str, bytes]]:
 
 def _read_excel(data: bytes, name: str, sheet_name: str | int = 0) -> pd.DataFrame:
     suffix = Path(name).suffix.lower()
-    engine = "xlrd" if suffix == ".xls" else "openpyxl"
-    return pd.read_excel(io.BytesIO(data), sheet_name=sheet_name, dtype=object, engine=engine)
+    if suffix != ".xls":
+        return pd.read_excel(io.BytesIO(data), sheet_name=sheet_name, dtype=object, engine="openpyxl")
+    # 舊版 xls 優先用 calamine：xlrd 在 pandas 已棄用，且會把 OLE 解析除錯訊息印到 log
+    try:
+        return pd.read_excel(io.BytesIO(data), sheet_name=sheet_name, dtype=object, engine="calamine")
+    except Exception:
+        with open(os.devnull, "w") as devnull, warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return pd.read_excel(io.BytesIO(data), sheet_name=sheet_name, dtype=object,
+                                 engine="xlrd", engine_kwargs={"logfile": devnull})
 
 
 def paper_rows(path: Path) -> list[list[Any]]:

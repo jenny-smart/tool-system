@@ -16,6 +16,7 @@ import json
 import os
 import re
 import unicodedata
+import warnings
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -256,10 +257,13 @@ def read_excel(content: bytes) -> pd.DataFrame:
     if content[:2] == b"PK":
         return pd.read_excel(BytesIO(content), engine="openpyxl")
     if content[:4] == b"\xd0\xcf\x11\xe0":
+        # 優先用 calamine：xlrd 在 pandas 已棄用，且會把 OLE 解析除錯訊息印到 log
         try:
-            return pd.read_excel(BytesIO(content), engine="xlrd")
-        except Exception:
             return pd.read_excel(BytesIO(content), engine="calamine")
+        except Exception:
+            with open(os.devnull, "w") as devnull, warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                return pd.read_excel(BytesIO(content), engine="xlrd", engine_kwargs={"logfile": devnull})
     return pd.read_excel(BytesIO(content), engine="openpyxl")
 
 
