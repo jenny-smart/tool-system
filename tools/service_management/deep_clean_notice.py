@@ -533,8 +533,7 @@ def _price_text(start: datetime, end: datetime, weekday_rate: float, weekend_rat
 def _service_intro(phase1_start: datetime, phase2_end: datetime) -> str:
     return (
         f"{phase1_start.year}年節大掃除期間：{_date_range(phase1_start, phase2_end)}\n"
-        f"基本時數為 2 人 {MINIMUM_SERVICE_HOURS} 小時起\n"
-        "大掃除服務主要為方便需求6–8小時客戶，服務內容同居家清潔，以人時計價。"
+        f"基本時數為 2 人 {MINIMUM_SERVICE_HOURS} 小時起"
     )
 
 
