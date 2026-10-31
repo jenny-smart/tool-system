@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Callable
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -280,15 +280,37 @@ AMOUNT_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}, "horizo
 # 日期寫成真正的日期後固定顯示格式，比對已同步明細時讀回的文字才會和原本一致
 DATE_FORMAT = {"numberFormat": {"type": "DATE", "pattern": "yyyy/mm/dd"}}
 DATETIME_FORMAT = {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy/mm/dd hh:mm:ss"}}
-FUBON_ATM_SHEET_ID = "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44"
+ATM_FILE_CATEGORY = "內勤工作表單"   # 富邦更新 L 欄查「ATM」分頁：各區、各年度自己的內勤工作表單
 
 
-def _fubon_formulas(r: int) -> list[str]:
-    """富邦更新 K:P：帳務日、分類標籤、M-P＝E-H。"""
+def atm_sheet_id(area: str, year: int) -> str:
+    """該區該年度內勤工作表單的 ID（依主控表「年度根目錄設定」找）；找不到回傳空字串。"""
+    try:
+        from tools.common.year_roots import root_file_id
+
+        return root_file_id(ATM_FILE_CATEGORY, area, year)
+    except Exception as exc:
+        print(f"⚠ 找不到 {area} {year} 年內勤工作表單（ATM），富邦更新 L 欄只填匯款類標籤：{exc}", flush=True)
+        return ""
+
+
+def _row_year(row: list[Any]) -> int:
+    for value in row[:2]:
+        match = re.match(r"\s*(\d{4})", str(value or ""))
+        if match:
+            return int(match.group(1))
+    return datetime.now().year
+
+
+def _fubon_formulas(r: int, atm_id: str = "") -> list[str]:
+    """富邦更新 K:P：帳務日、分類標籤、M-P＝E-H。
+
+    L 欄：支出（E）有值→「yyyy.mm-備註前 10 字」；否則到該區該年度內勤工作表單「ATM」查分類。
+    找不到內勤工作表單時不查（留空），避免查到別區或別年度的檔。"""
+    lookup = (f'vlookup(C{r},importrange("{atm_id}","ATM!B:G"),6,false)' if atm_id else '""')
     return [
         f'=TEXT(LEFT(C{r},10),"yyyy/mm/dd")',
-        f'=if(E{r}<>0,text(K{r},"yyyy.mm")&"-"&left(I{r},10),'
-        f'vlookup(C{r},importrange("{FUBON_ATM_SHEET_ID}","ATM!B:G"),6,false))',
+        f'=if(E{r}<>0,text(K{r},"yyyy.mm")&"-"&left(I{r},10),{lookup})',
         f"=E{r}", f"=F{r}", f"=G{r}", f"=H{r}",
     ]
 
@@ -308,11 +330,13 @@ def _skip_blank(values: list[Any]) -> list[Any]:
     return [None if str(value).strip() == "" else value for value in values]
 
 
-def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]]):
+def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]],
+                        atm_lookup: Callable[[int], str] | None = None):
     """拆成 (RAW 資料, USER_ENTERED 資料, 格式設定)；格式只加在有值的格子。
 
     富邦 rows＝B:H（交易日、帳務日、說明、支出、存入、餘額、備註）；
     元大 rows＝A:I（序號、交易日、帳務日、說明、行庫、支出、存入、餘額、備註）。
+    atm_lookup(年度)→該年度內勤工作表單 ID（富邦 L 欄用；跨年的一批明細各列依自己的年度）。
     """
     end_row = start_row + len(rows) - 1
     if bank == "fubon":
@@ -320,7 +344,9 @@ def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]]):
         raw = [{"range": f"D{start_row}:H{end_row}", "values": [_skip_blank(row[2:7]) for row in rows]}]
         entered = [
             {"range": f"B{start_row}:C{end_row}", "values": dates},
-            {"range": f"K{start_row}:P{end_row}", "values": [_fubon_formulas(start_row + i) for i in range(len(rows))]},
+            {"range": f"K{start_row}:P{end_row}", "values": [
+                _fubon_formulas(start_row + i, atm_lookup(_row_year(row)) if atm_lookup else "")
+                for i, row in enumerate(rows)]},
         ]
         amount_columns = {"E": 3, "F": 4, "G": 5}
     else:
@@ -382,7 +408,14 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
         )
         start_column, end_column = "A", "I"
     start_row = last_row + 1
-    raw_data, entered_data, formats = report_cell_updates(bank, start_row, rows)
+    atm_ids: dict[int, str] = {}
+
+    def atm_lookup(year: int) -> str:
+        if year not in atm_ids:
+            atm_ids[year] = atm_sheet_id(area, year)
+        return atm_ids[year]
+
+    raw_data, entered_data, formats = report_cell_updates(bank, start_row, rows, atm_lookup)
     worksheet.batch_update(raw_data, value_input_option="RAW")
     # 交易日／帳務日用 USER_ENTERED 寫成日期（RAW 會變成前面帶 ' 的文字），公式欄同樣要解析
     worksheet.batch_update(entered_data, value_input_option="USER_ENTERED")

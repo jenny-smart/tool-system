@@ -65,8 +65,9 @@ def test_fubon_report_formats_only_written_amount_cells():
     ns = dict(load_sheet_target=lambda *_: target, Credentials=MagicMock(),
         load_google_credentials=MagicMock(), SCOPES=[], gspread=gspread,
         _normalize_text=lambda v: v, build_fubon_financial_report_rows=lambda _: rows)
-    ns.update(AMOUNT_FORMAT={'a': 1}, DATE_FORMAT={'d': 1}, DATETIME_FORMAT={'t': 1}, FUBON_ATM_SHEET_ID='x', Any=object)
-    for helper in ('_skip_blank', '_fubon_formulas', '_yuanta_formulas', 'report_cell_updates'):
+    ns.update(AMOUNT_FORMAT={'a': 1}, DATE_FORMAT={'d': 1}, DATETIME_FORMAT={'t': 1}, Any=object, re=__import__('re'),
+              datetime=__import__('datetime').datetime, atm_sheet_id=lambda area, year: '')
+    for helper in ('_skip_blank', '_row_year', '_fubon_formulas', '_yuanta_formulas', 'report_cell_updates'):
         load_function('sheet_filter.py', helper, ns)
     sync = load_function('sheet_filter.py', 'sync_financial_report', ns)
     table = MagicMock(rows=rows)
@@ -80,18 +81,42 @@ def test_fubon_report_formats_only_written_amount_cells():
 
 
 def test_report_formulas_follow_jenny_layout():
-    ns = dict(AMOUNT_FORMAT={'a': 1}, DATE_FORMAT={'d': 1}, DATETIME_FORMAT={'t': 1},
-              FUBON_ATM_SHEET_ID='1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44', Any=object)
-    for helper in ('_skip_blank', '_fubon_formulas', '_yuanta_formulas', 'report_cell_updates'):
+    ns = dict(AMOUNT_FORMAT={'a': 1}, DATE_FORMAT={'d': 1}, DATETIME_FORMAT={'t': 1}, Any=object,
+              re=__import__('re'), datetime=__import__('datetime').datetime)
+    for helper in ('_skip_blank', '_row_year', '_fubon_formulas', '_yuanta_formulas', 'report_cell_updates'):
         load_function('sheet_filter.py', helper, ns)
-    _raw, entered, _fmt = ns['report_cell_updates']('fubon', 2387, [['2026/10/20', '2026/10/19 22:05:09', '網路自轉', '', 3000, 4407053, '中秋禮品']])
+    taichung_2026 = '1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM'
+    _raw, entered, _fmt = ns['report_cell_updates'](
+        'fubon', 2387, [['2026/10/20', '2026/10/19 22:05:09', '網路自轉', '', 3000, 4407053, '中秋禮品']],
+        lambda year: {2026: taichung_2026}.get(year, ''))
     assert entered[1] == {'range': 'K2387:P2387', 'values': [[
         '=TEXT(LEFT(C2387,10),"yyyy/mm/dd")',
         '=if(E2387<>0,text(K2387,"yyyy.mm")&"-"&left(I2387,10),'
-        'vlookup(C2387,importrange("1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44","ATM!B:G"),6,false))',
+        'vlookup(C2387,importrange("1AlsgBL7uAooiU8hb0v-02J2MdBgDVJtGHgvD3U84hCM","ATM!B:G"),6,false))',
         '=E2387', '=F2387', '=G2387', '=H2387']]}
     raw, entered, fmt = ns['report_cell_updates']('yuanta', 90, [[54, '2026/10/16 10:41:00', '2026/10/16', 'ATM轉', '台北富邦', '', 748791, 793981, '備註']])
     assert raw[1] == {'range': 'D90:I90', 'values': [['ATM轉', '台北富邦', None, 748791, 793981, '備註']]}
     assert entered[1]['values'][0][:2] == ['=TEXT(LEFT(C90,10),"yyyy/mm/dd")', '=text(L90,"YYYY.MM")&"-"&J90']
     assert entered[1]['values'][0][2:] == ['=F90', '=G90', '=H90', '=I90']
     assert 'F90' not in {f['range'] for f in fmt}
+
+
+
+def test_atm_lookup_uses_each_rows_year_and_blank_when_missing():
+    ns = dict(AMOUNT_FORMAT={'a': 1}, DATE_FORMAT={'d': 1}, DATETIME_FORMAT={'t': 1}, Any=object,
+              re=__import__('re'), datetime=__import__('datetime').datetime)
+    for helper in ('_skip_blank', '_row_year', '_fubon_formulas', '_yuanta_formulas', 'report_cell_updates'):
+        load_function('sheet_filter.py', helper, ns)
+    rows = [['2026/12/31', '2026/12/31 23:00:00', 'x', '', 1, 1, ''],
+            ['2027/01/01', '2027/01/01 09:00:00', 'y', '', 1, 1, '']]
+    asked = []
+
+    def lookup(year):
+        asked.append(year)
+        return {2026: 'ATM2026'}.get(year, '')
+
+    _raw, entered, _fmt = ns['report_cell_updates']('fubon', 10, rows, lookup)
+    l_2026, l_2027 = entered[1]['values'][0][1], entered[1]['values'][1][1]
+    assert 'importrange("ATM2026"' in l_2026
+    assert 'importrange' not in l_2027 and l_2027.endswith(',"")')  # 2027 檔找不到：不查別年度
+    assert asked == [2026, 2027]
