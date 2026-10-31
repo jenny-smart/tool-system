@@ -1,0 +1,139 @@
+⚠️ 月排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+📁 月排程年度資料夾：2026專員承攬服務費 (1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK)
+📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
+📂 本次使用年度：2026
+📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+📝 月排程打卡：下半月訂單 / running
+⚠️ 月排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+📌 期別：202610-2
+📌 日期：2026-10-16 ~ 2026-10-31
+📌 執行區域：all
+📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+
+=== 處理 台北 ===
+✅ 登入成功：jenny@lemonclean.com.tw
+📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 使用既有資料夾：202610-2 / 12V_ZK9GQ0oVndV_puLSUoZaHcqBvGtvz
+📁 期別資料夾：202610-2 / 12V_ZK9GQ0oVndV_puLSUoZaHcqBvGtvz
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+ 1600= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+ 1620  4 4 4 3 2 2 2 2 2 2 2 2 2 2 2 2 2 
+🗑️ 已刪除舊項目：202610-2訂單-台北.xlsx
+☁️ 已上傳新檔：202610-2訂單-台北.xlsx → folder_id=12V_ZK9GQ0oVndV_puLSUoZaHcqBvGtvz https://docs.google.com/spreadsheets/d/1vpGguQ8T9o5bszEXKGVwj8wuqXHtNckH/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2訂單-台北.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202610-2 / 1sGSgA1-kpmJeiV580YZMR0U3il74gQge
+📁 期別資料夾：202610-2 / 1sGSgA1-kpmJeiV580YZMR0U3il74gQge
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  100= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  120  4 4 4 4 4 4 4 4 4 3 2 2 
+🗑️ 已刪除舊項目：202610-2訂單-台中.xlsx
+☁️ 已上傳新檔：202610-2訂單-台中.xlsx → folder_id=1sGSgA1-kpmJeiV580YZMR0U3il74gQge https://docs.google.com/spreadsheets/d/1B5jJ6hP34SaDyRXlCqn0Ga6amLAhD9sO/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2訂單-台中.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202610-2 / 16NxIntzkRaEaEoHJwEKR4_TO-UGmr5H_
+📁 期別資料夾：202610-2 / 16NxIntzkRaEaEoHJwEKR4_TO-UGmr5H_
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  400= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+  420  4 4 3 2 2 2 2 
+🗑️ 已刪除舊項目：202610-2訂單-桃園.xlsx
+☁️ 已上傳新檔：202610-2訂單-桃園.xlsx → folder_id=16NxIntzkRaEaEoHJwEKR4_TO-UGmr5H_ https://docs.google.com/spreadsheets/d/1UKrggM-2FgjC54VQswPaMjXsQeIdSWYW/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2訂單-桃園.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202610-2 / 1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF
+📁 期別資料夾：202610-2 / 1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   20  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   60= 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 
+   80  4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 3 2 
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 3 
+   20  2 
+✅ 新竹 儲值金地址核對：候選 4 筆 → 本區 0 筆
+🗑️ 已刪除舊項目：202610-2原訂單-新竹.xlsx
+☁️ 已上傳新檔：202610-2原訂單-新竹.xlsx → folder_id=1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF https://docs.google.com/spreadsheets/d/1pPLGn_K7X3SK5mpVFdoLBkJ6IM1-XlaO/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2原訂單-新竹.xlsx
+🗑️ 已刪除舊項目：202610-2儲值金-新竹.xlsx
+☁️ 已上傳新檔：202610-2儲值金-新竹.xlsx → folder_id=1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF https://docs.google.com/spreadsheets/d/1OXH1RC1uTnqf3xU-erRe1x3-219y2vjp/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2儲值金-新竹.xlsx
+✅ 新竹 儲值金抓到 0 筆（服務日期 2026-10-16 ~ 2026-10-31 / 儲值金 / 已付款 / 客戶地址核對）
+✅ 新竹 合併完成：原訂單 25 + 儲值金 0 → 合併 25 筆
+🗑️ 已刪除舊項目：202610-2訂單-新竹.xlsx
+☁️ 已上傳新檔：202610-2訂單-新竹.xlsx → folder_id=1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF https://docs.google.com/spreadsheets/d/1p9MVdbg5-YzDLNrjJdt-CcpMO0MiS_W4/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2訂單-新竹.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202610-2 / 1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g
+📁 期別資料夾：202610-2 / 1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g
+_locate_stream(Workbook): seen
+    0  5 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 3 
+   20  2 
+✅ 高雄 儲值金地址核對：候選 4 筆 → 本區 4 筆
+🗑️ 已刪除舊項目：202610-2-訂單-原台南.xlsx
+☁️ 已上傳新檔：202610-2-訂單-原台南.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1K7cCM-pNdzArUbu2yvwY2mxbbSxGCa9U/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2-訂單-原台南.xlsx
+🗑️ 已刪除舊項目：202610-2-訂單-原高雄.xlsx
+☁️ 已上傳新檔：202610-2-訂單-原高雄.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1J0CSRop6b5xamYzLTzrB87MHgL-1dlwP/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2-訂單-原高雄.xlsx
+🗑️ 已刪除舊項目：202610-2儲值金-高雄.xlsx
+☁️ 已上傳新檔：202610-2儲值金-高雄.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1G8axtHieC7i8SkPLwMI3WorWjiHXasQ_/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2儲值金-高雄.xlsx
+✅ 高雄 儲值金抓到 4 筆（服務日期 2026-10-16 ~ 2026-10-31 / 儲值金 / 已付款 / 客戶地址核對）
+✅ 高雄 合併完成：原訂單 25 + 儲值金 4 → 合併 29 筆
+🗑️ 已刪除舊項目：202610-2-訂單-高雄.xlsx
+☁️ 已上傳新檔：202610-2-訂單-高雄.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1TlawysMdr83vg2byL6sKGFA1vBF6BVlz/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202610-2/202610-2-訂單-高雄.xlsx
+✅ 已寫入月排程 Log
+
+✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄
+🎉 half_month_orders.py 全部完成
+
+/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py:260: Pandas4Warning: The xlrd engine is deprecated and will be removed in a future version. Use the calamine engine instead, by setting engine='calamine'.
+  return pd.read_excel(BytesIO(content), engine="xlrd")
+/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py:260: Pandas4Warning: The xlrd engine is deprecated and will be removed in a future version. Use the calamine engine instead, by setting engine='calamine'.
+  return pd.read_excel(BytesIO(content), engine="xlrd")
+/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py:260: Pandas4Warning: The xlrd engine is deprecated and will be removed in a future version. Use the calamine engine instead, by setting engine='calamine'.
+  return pd.read_excel(BytesIO(content), engine="xlrd")
+/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py:260: Pandas4Warning: The xlrd engine is deprecated and will be removed in a future version. Use the calamine engine instead, by setting engine='calamine'.
+  return pd.read_excel(BytesIO(content), engine="xlrd")
+/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py:260: Pandas4Warning: The xlrd engine is deprecated and will be removed in a future version. Use the calamine engine instead, by setting engine='calamine'.
+  return pd.read_excel(BytesIO(content), engine="xlrd")
+/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py:260: Pandas4Warning: The xlrd engine is deprecated and will be removed in a future version. Use the calamine engine instead, by setting engine='calamine'.
+  return pd.read_excel(BytesIO(content), engine="xlrd")
+
+📝 月排程打卡：下半月訂單 / success
+scheduled_monthly scheduler 全部完成
