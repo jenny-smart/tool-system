@@ -202,8 +202,15 @@ class VipStoredValueWorkflow:
         return f"{year}{month - 1:02d}"
 
     def get_period_folder(self, period: str) -> Dict[str, Any]:
-        """根目錄（02.VIP儲值金）→ 年度資料夾（例如 2026）→ 期別資料夾（例如 202606），共三層。"""
-        year_folder = self.drive.get_or_create_folder(self.root_folder_id, period[:4])
+        """根目錄（02.VIP儲值金）→ 年度資料夾（2026 起「2026儲值金」，2025 以前舊名「2025」）
+        → 期別資料夾（例如 202606），共三層。"""
+        year = int(period[:4])
+        name = f"{year}儲值金"
+        year_folder = self.drive.find_folder(self.root_folder_id, name)
+        if year_folder is None and year <= 2025:
+            year_folder = self.drive.find_folder(self.root_folder_id, str(year))
+        if year_folder is None:
+            year_folder = self.drive.get_or_create_folder(self.root_folder_id, name)
         return self.drive.get_or_create_folder(year_folder["id"], period)
 
     def summary_file_name(self, period: str) -> str:
