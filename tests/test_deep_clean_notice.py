@@ -395,7 +395,7 @@ def test_nonroutine_notice_uses_open_window_and_correct_customer_label():
     assert "VIP 定期客戶" not in notice
     assert "2026年節大掃除期間：2026/12/15～2027/02/04" in notice
     assert "基本時數為 2 人 3 小時起" in notice
-    assert "服務內容同居家清潔，以人時計價" in notice
+    assert "方便需求6–8小時客戶" not in notice
 
 
 def test_price_comparison_uses_matching_part_customer_type_and_day_type():
