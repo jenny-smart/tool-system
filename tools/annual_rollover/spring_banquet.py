@@ -30,7 +30,9 @@ tools/annual_rollover/spring_banquet.py
 
 from __future__ import annotations
 
+import os
 import re
+import warnings
 from datetime import date
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -211,10 +213,18 @@ def export_staff_frame(area: str, accounts: Dict[str, Dict[str, str]]) -> pd.Dat
     content_type = res.headers.get("Content-Type", "").lower()
     if "excel" not in content_type and "octet-stream" not in content_type:
         raise RuntimeError(f"{area} 專員個資回傳不是 Excel，Content-Type={content_type}")
+    # 後台實際給的是舊版 xls（副檔名是 xlsx）；優先用 calamine，xlrd 在 pandas 已棄用且會印除錯訊息
     try:
-        # 後台實際給的是舊版 xls（副檔名是 xlsx），xlrd 會誤判檔案損毀，需略過檢查
-        return pd.read_excel(BytesIO(res.content), dtype=str, engine="xlrd",
-                             engine_kwargs={"ignore_workbook_corruption": True}).fillna("")
+        return pd.read_excel(BytesIO(res.content), dtype=str, engine="calamine").fillna("")
+    except Exception:
+        pass
+    try:
+        # xlrd 會誤判檔案損毀，需略過檢查
+        with open(os.devnull, "w") as devnull, warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return pd.read_excel(BytesIO(res.content), dtype=str, engine="xlrd",
+                                 engine_kwargs={"ignore_workbook_corruption": True,
+                                                "logfile": devnull}).fillna("")
     except Exception:
         return pd.read_excel(BytesIO(res.content), dtype=str).fillna("")
 
