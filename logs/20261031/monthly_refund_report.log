@@ -1,0 +1,83 @@
+⚠️ 月排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+📁 月排程年度資料夾：2026專員承攬服務費 (1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK)
+📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
+📂 本次使用年度：2026
+📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+📝 月排程打卡：已退款 / running
+⚠️ 月排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/refund_report.py
+📌 功能：已退款
+📌 版本：0704_v3
+📌 期別：202610-2
+📌 存取期間：退款/加收：2026-10-01 ~ 2026-10-31
+📌 執行區域：all
+📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+
+=== 處理 台北 ===
+✅ 登入成功：jenny@lemonclean.com.tw
+📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 使用既有資料夾：202610-2 / 12V_ZK9GQ0oVndV_puLSUoZaHcqBvGtvz
+✅ 保留公式與格式：/tmp/tmp03jslqxq/202610-2已退款全部加收-台北.xlsx
+✅ 保留公式與格式：/tmp/tmp03jslqxq/202610-2已退款全部退款-台北.xlsx
+☁️ 已上傳新檔：202610-2已退款全部加收-台北.xlsx → folder_id=12V_ZK9GQ0oVndV_puLSUoZaHcqBvGtvz https://docs.google.com/spreadsheets/d/1TNMLQImXRrfKRuljaGiH1i2DsHC6Zn_Q/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2已退款全部退款-台北.xlsx → folder_id=12V_ZK9GQ0oVndV_puLSUoZaHcqBvGtvz https://docs.google.com/spreadsheets/d/17wnpLcVxhbfZoAOtJjIRxoBypVlblwqD/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202610-2 / 1sGSgA1-kpmJeiV580YZMR0U3il74gQge
+✅ 保留公式與格式：/tmp/tmpk_fwm0u0/202610-2已退款全部加收-台中.xlsx
+✅ 保留公式與格式：/tmp/tmpk_fwm0u0/202610-2已退款全部退款-台中.xlsx
+☁️ 已上傳新檔：202610-2已退款全部加收-台中.xlsx → folder_id=1sGSgA1-kpmJeiV580YZMR0U3il74gQge https://docs.google.com/spreadsheets/d/1BYWdn3Dx6RSXZmICj50Jh73VpK4Ty7ek/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2已退款全部退款-台中.xlsx → folder_id=1sGSgA1-kpmJeiV580YZMR0U3il74gQge https://docs.google.com/spreadsheets/d/1P0BZDyVPQH_7b5kfiZNGrxeE1brBskWf/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202610-2 / 16NxIntzkRaEaEoHJwEKR4_TO-UGmr5H_
+✅ 保留公式與格式：/tmp/tmp754yoc_8/202610-2已退款全部加收-桃園.xlsx
+✅ 保留公式與格式：/tmp/tmp754yoc_8/202610-2已退款全部退款-桃園.xlsx
+☁️ 已上傳新檔：202610-2已退款全部加收-桃園.xlsx → folder_id=16NxIntzkRaEaEoHJwEKR4_TO-UGmr5H_ https://docs.google.com/spreadsheets/d/123D5qv20QR7ldDtai20ThWKAVlTHDb96/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2已退款全部退款-桃園.xlsx → folder_id=16NxIntzkRaEaEoHJwEKR4_TO-UGmr5H_ https://docs.google.com/spreadsheets/d/106wXHRMq6kZE18JzMfUIiZAWge8Fkc1i/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202610-2 / 1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF
+✅ 保留公式與格式：/tmp/tmph8wl9lk_/202610-2已退款全部加收-新竹.xlsx
+✅ 保留公式與格式：/tmp/tmph8wl9lk_/202610-2已退款全部退款-新竹.xlsx
+☁️ 已上傳新檔：202610-2已退款全部加收-新竹.xlsx → folder_id=1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF https://docs.google.com/spreadsheets/d/1AHd1NgH1GtyJPr5pmE3Ci2wfPp0vT-QZ/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2已退款全部退款-新竹.xlsx → folder_id=1Rf7crLQZ4u7UYnKz5s2DTl-WknMAJzVF https://docs.google.com/spreadsheets/d/1r9oXN6p1jrj0OXx7QgOK_32K3J26ZJva/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202610-2 / 1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g
+✅ 已退款全部加收：台南接入高雄並去重 → 202610-2-已退款全部加收-高雄.xlsx
+✅ 已退款全部退款：台南接入高雄並去重 → 202610-2-已退款全部退款-高雄.xlsx
+☁️ 已上傳新檔：202610-2-已退款全部加收-原台南.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1-3zvyQo9UvqOkfvh48ksmKaAD-GueR18/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2-已退款全部加收-原高雄.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1LQYFvigWqdRKCAMHugNQlDTH0TIlAZp1/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2-已退款全部加收-高雄.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1lZdvaOICAKedNcmUVbYRe11k1HcRQvSM/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2-已退款全部退款-原台南.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1Fz_3VjwsqP04rXQwgLjtYsBqZnwuiZ_N/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2-已退款全部退款-原高雄.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1Y_bxrQbJ7jfvyP6zFgS_I7aPe_DzflfL/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+☁️ 已上傳新檔：202610-2-已退款全部退款-高雄.xlsx → folder_id=1njhs9aCB6Gv4FwzVWDoYU_x4fOTomE9g https://docs.google.com/spreadsheets/d/1LCV7VSoaK4kgLtuRm-CIK-5GPhp2qTvD/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+✅ 已寫入月排程 Log
+
+✅ 成功地區：台北, 台中, 桃園, 新竹, 高雄
+🎉 已退款 全部完成
+
+📝 月排程打卡：已退款 / success
+scheduled_monthly scheduler 全部完成
