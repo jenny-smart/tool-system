@@ -25,7 +25,8 @@
 | **Scheduled Fubon Pending Check**（`scheduled_fubon_pending_check.yml`） | 每週二、五 10:00 | GitHub | 富邦待辦通知：盤點台北／台中待付款的請款記錄、工具包押金退款、清潔用品採購，在行事曆提醒。 |
 | **Scheduled Fubon Statement Download**（`scheduled_fubon_statement.yml`） | 每日 08:00；工作日另加 11:00、16:30（週六日與國定假日只跑 08:00） | **本機 Agent（Mac）** | 見下方說明。 |
 | **Scheduled Yuanta Statement Download**（`scheduled_yuanta_statement.yml`） | 每月 25 日 11:00；遇例假日提前到前一個工作日 | **本機 Agent（Mac）** | 見下方說明。 |
-| **Scheduled Monthly Jobs**（`scheduled_monthly.yml`） | 15 日 17:00 上半月訂單；月底 17:00 下半月訂單、18:00 已退款；1 日 00:00 預收、00:30 儲值金結算、00:40 儲值金預收 | GitHub | 月排程。手動可選 target 與期別。 |
+| **Scheduled Monthly Jobs**（`scheduled_monthly.yml`） | 15 日 17:00 上半月訂單；月底 17:00 下半月訂單、18:00 已退款；1 日 00:00 預收、00:10 儲值金結算、00:20 儲值金預收 | GitHub | 月排程。手動可選 target 與期別。 |
+| **Scheduled Finance Jobs**（`scheduled_finance.yml`） | 1 日 00:30 固定費用＋排入月初藍新／鯨躍／現金缺口；01:00 【儲值金】完整流程；02:00 全區現金缺口；單月 10 日 10:00 會計事務所費用確認提醒 | GitHub（月初藍新／鯨躍由 **本機 Agent（Mac）** 執行） | 見下方「每月 1 日財務」。手動可選 target 與模擬執行日。 |
 | **Scheduled Gmail 401 Archive**（`Scheduled_gmail_401.yml`） | 每月 20 日 00:00 | GitHub | 把 Gmail 主旨含「401」信件的 401 PDF 附件，依檔名關鍵字存到各區雲端資料夾的西元年子資料夾（設定在 `systems.yaml` 的 `gmail_401`），處理過的信加上「401已歸檔」標籤。 |
 | **New Year Generate**（`new_year_generate.yml`） | 只能手動 | GitHub | 年度切換：依主控表「生成新年度」產生新年度資料夾／檔案。參數：年度、列、`dry_run`（預設只預覽）、`fresh`。 |
 
@@ -40,6 +41,20 @@
 
 - 每月 25 日 11:00，遇例假日（週六日、國定假日）提前到前一個工作日（`scheduled_yuanta_statement.yml`，每月 18～25 日 11:00 叫起來，由 `tools/scheduled_daily/yuanta_statement_queue.py` 判斷是不是本月執行日）。
 - 一樣只在主控表新增 `yuanta.download`（台北、台中），由 Mac 上的本機 Agent 執行；查詢開始日＝財報「元大更新」最後一列的日期，結束日＝今天。已登記的明細會比對濾掉。
+
+## 每月 1 日財務
+
+| 台北時間 | 內容 |
+|---|---|
+| 00:00 | 預收（`scheduled_monthly`） |
+| 00:10 | 儲值金結算（`scheduled_monthly`） |
+| 00:20 | 儲值金預收（`scheduled_monthly`） |
+| 00:30 | 【整合執行】固定費用：新增當月台北辦公室租金 77,343／管理費 9,392；單月另新增台中當月＋下月租金管理費各 18,000（已新增過的略過）。同時排入【整合執行】月初藍新／鯨躍／現金缺口（上個月）給 Mac 本機 Agent：藍新收退款 → 藍新發票金額 → 鯨躍發票 → 現金缺口，藍新每區需人工輸入驗證碼，Mac 沒開機就排隊等開機。 |
+| 01:00 | 【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式），上個月；找不到 00:10／00:20 產出的來源檔會失敗，需補跑月排程後再手動執行。 |
+| 02:00 | 全區現金缺口（截至上個月底）。這時藍新發票金額可能還沒做；Mac 做完藍新發票金額後，月初整合執行會再算一次覆蓋。 |
+| 單月 10 日 10:00 | 會計事務所費用確認：在 Jenny 行事曆建提醒，到 Tools App【整合執行】會計事務所費用確認填金額新增請款記錄／台北。 |
+
+所有【整合執行】功能都在財務管理選單的「整合執行」同一組，先按「盤點」列出目前可做的項目（預設打勾，可全選／全不選）再執行。
 
 ## 共通
 

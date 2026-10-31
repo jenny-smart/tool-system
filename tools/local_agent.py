@@ -425,6 +425,16 @@ def build_change_order_batch_run(params: dict[str, Any]) -> list[str]:
             "--plan", json.dumps(plan, ensure_ascii=False), "--cdp-url", cdp_url]
 
 
+def build_month_start_batch_run(params: dict[str, Any]) -> list[str]:
+    period = str(params.get("period") or "").strip()
+    steps = [str(s) for s in params.get("steps") or [] if str(s).strip()]
+    if not re.fullmatch(r"\d{6}", period) or not steps:
+        raise ValueError("月初整合執行缺少期別或步驟")
+    _area, cdp_url = _common_invoice_args(params)
+    return [sys.executable, "-m", "tools.finance_management.month_start_batch", "run",
+            "--period", period, "--steps", ",".join(steps), "--cdp-url", cdp_url]
+
+
 def build_internal_payment_record(params: dict[str, Any]) -> list[str]:
     items = params.get("items") or []
     if not items:
@@ -829,6 +839,7 @@ register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjust
 register_action("change_order.sync", build_change_order_sync)
 register_action("change_order.batch_run", build_change_order_batch_run)
 register_action("internal_payment.record", build_internal_payment_record)
+register_action("month_start.batch_run", build_month_start_batch_run)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
 register_action("fubon.atm_refund", build_fubon_atm_refund)
@@ -892,13 +903,14 @@ ACTION_LABELS = {
     "change_order.sync": "【清潔異動】回寫系統",
     "change_order.batch_run": "【清潔異動】整合執行（逐區依序）",
     "internal_payment.record": "【富邦銀行】內部請款留紀錄",
+    "month_start.batch_run": "【整合執行】月初藍新／鯨躍／現金缺口",
     "fubon.login": "【富邦銀行】富邦登入",
     "fubon.download": "【富邦銀行】富邦明細下載",
     "fubon.atm_refund": "【富邦銀行】異動 ATM 退款",
     "fubon.payment_request": "【富邦銀行】請款記錄",
     "fubon.deposit_refund": "【富邦銀行】工具包押金退款",
     "fubon.supply_purchase": "【富邦銀行】清潔用品採購",
-    "fubon.internal_payment": "【富邦銀行】內部請款整合執行",
+    "fubon.internal_payment": "【整合執行】富邦內部請款",
     "fubon.fixed_expense_transfer": "【財報】各區固定費用匯款",
     "fubon.captcha": "【富邦銀行】擷取驗證碼",
     "fubon.verify": "【富邦銀行】送出驗證碼",

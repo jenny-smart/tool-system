@@ -1,0 +1,138 @@
+name: Scheduled Finance Jobs
+
+run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
+
+# 時間一律台北時間（cron 為 UTC，台北＝UTC＋8）：
+#   每月 1 日 00:30 month_start（固定費用＋排入月初藍新／鯨躍／現金缺口）
+#   每月 1 日 01:00 vip_full_pipeline（【儲值金】完整流程）
+#   每月 1 日 02:00 cash_gap（全區現金缺口）
+#   單月 10 日 10:00 accounting_reminder（會計事務所費用確認提醒）
+# 外部排程（cloud_schedule.yml）啟用時，原生 cron 會略過，改由 Router 派送。
+on:
+  schedule:
+    - cron: "30 16 28-31 * *"         # 台北 1 日 00:30（UTC 為前一日，程式判斷台北日期）
+    - cron: "0 17 28-31 * *"          # 台北 1 日 01:00
+    - cron: "0 18 28-31 * *"          # 台北 1 日 02:00
+    - cron: "0 2 10 1,3,5,7,9,11 *"   # 台北單月 10 日 10:00
+  workflow_dispatch:
+    inputs:
+      scheduled_slot:
+        description: External scheduler slot (leave blank for manual runs)
+        required: false
+        type: string
+        default: ""
+      target:
+        description: "要執行的任務"
+        required: true
+        default: "month_start"
+        type: choice
+        options: [month_start, month_start_queue, fixed_expense, vip_full_pipeline, cash_gap, accounting_reminder]
+      date:
+        description: "模擬執行日 YYYY-MM-DD（留空＝今天；期別會用這天的上個月）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  run-finance-job:
+    if: github.event_name != 'schedule' || vars.EXTERNAL_SCHEDULER_ENABLED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
+      GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
+      GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
+      TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
+      MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: pip install -r requirements.txt
+
+      - name: Resolve task
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_TARGET: ${{ github.event.inputs.target }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+        run: |
+          set -euo pipefail
+          TW_DAY=$(TZ=Asia/Taipei date +"%d")
+          TARGET=""
+          SHOULD_RUN="true"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TARGET="$INPUT_TARGET"
+          else
+            case "$SCHEDULE" in
+              "30 16 28-31 * *") TARGET="month_start" ;;
+              "0 17 28-31 * *") TARGET="vip_full_pipeline" ;;
+              "0 18 28-31 * *") TARGET="cash_gap" ;;
+              "0 2 10 1,3,5,7,9,11 *") TARGET="accounting_reminder" ;;
+              *) echo "未知排程來源：$SCHEDULE" >&2; exit 1 ;;
+            esac
+            # 月初任務的 UTC cron 在月底幾天都會叫起來，只有台北已經是 1 日才執行
+            if [ "$TARGET" != "accounting_reminder" ] && [ "$TW_DAY" != "01" ]; then
+              SHOULD_RUN="false"
+              echo "今天台北不是 1 日，略過候選 cron。"
+            fi
+          fi
+          {
+            echo "should_run=$SHOULD_RUN"
+            echo "target=$TARGET"
+            echo "date=${INPUT_DATE:-}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run finance task
+        if: steps.resolve.outputs.should_run == 'true'
+        shell: bash
+        env:
+          TARGET: ${{ steps.resolve.outputs.target }}
+          RUN_DATE: ${{ steps.resolve.outputs.date }}
+        run: |
+          set +e
+          TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
+          LOG_DIR="logs/$TODAY"
+          NAME="finance_${TARGET}"
+          mkdir -p "$LOG_DIR"
+          START_TS=$(date +%s)
+          START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          CMD=(python -u -m tools.scheduled_finance.runner "$TARGET")
+          [ -n "$RUN_DATE" ] && CMD+=(--date "$RUN_DATE")
+          "${CMD[@]}" > "$LOG_DIR/$NAME.log" 2>&1
+          EXIT_CODE=$?
+          END_TS=$(date +%s)
+          END_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
+          echo "$EXIT_CODE" > "$LOG_DIR/$NAME.exit"
+          [ "$EXIT_CODE" -eq 0 ] && STATUS="success" || STATUS="failed"
+          printf '{"job_name":"%s","status":"%s","exit_code":%s,"started_at":"%s","finished_at":"%s","duration_seconds":%s}\n' "$NAME" "$STATUS" "$EXIT_CODE" "$START_TEXT" "$END_TEXT" "$((END_TS-START_TS))" > "$LOG_DIR/$NAME.json"
+          cat "$LOG_DIR/$NAME.log"
+          exit "$EXIT_CODE"
+
+      - name: Commit logs
+        if: always() && steps.resolve.outputs.should_run == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f logs
+          if ! git diff --cached --quiet; then
+            git commit -m "Update finance logs"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            git push
+          fi

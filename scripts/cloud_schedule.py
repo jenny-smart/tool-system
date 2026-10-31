@@ -51,10 +51,16 @@ def plan(when):
         add('scheduled_monthly', target='half_month_orders_1', period=month + '-1')
     if last_day and hm in {'17:00', '18:00'}:
         add('scheduled_monthly', target='half_month_orders_2' if hm == '17:00' else 'refund_report', period=month + '-2')
-    monthly = {'00:00': 'prepaid_report', '00:30': 'stored_value_settlement', '00:40': 'stored_value_prepaid'}
+    monthly = {'00:00': 'prepaid_report', '00:10': 'stored_value_settlement', '00:20': 'stored_value_prepaid'}
     if when.day == 1 and hm in monthly:
         previous = (when.replace(day=1) - dt.timedelta(days=1)).strftime('%Y%m')
         add('scheduled_monthly', target=monthly[hm], period=previous + '-2')
+    # 每月 1 日財務：00:30 固定費用＋排入月初藍新／鯨躍／現金缺口（Mac），01:00 儲值金完整流程，02:00 現金缺口
+    finance = {'00:30': 'month_start', '01:00': 'vip_full_pipeline', '02:00': 'cash_gap'}
+    if when.day == 1 and hm in finance:
+        add('scheduled_finance', target=finance[hm])
+    if when.day == 10 and when.month % 2 == 1 and hm == '10:00':
+        add('scheduled_finance', target='accounting_reminder')  # 單月 10 日：會計事務所費用確認提醒
     return jobs
 
 def api(path, payload=None):

@@ -1,4 +1,4 @@
-"""【清潔異動】已備妥整合執行：盤點 → 勾選 → 一次排入本機 Agent → 回寫系統。"""
+"""【整合執行】清潔異動已備妥：盤點 → 勾選 → 一次排入本機 Agent → 回寫系統。"""
 from __future__ import annotations
 
 from typing import Callable
@@ -7,15 +7,16 @@ import pandas as pd
 import streamlit as st
 
 from tools.finance_management import change_order_batch as batch
+from tools.finance_management.batch_ui_common import checked, reset_select_all, select_all_controls
 
 STATE_KEY = "change_order_batch_items"
 RUN_COLUMN = "執行"
 
 
-def _rows(items: list[dict]) -> pd.DataFrame:
+def _rows(items: list[dict], override=None) -> pd.DataFrame:
     return pd.DataFrame([
         {
-            RUN_COLUMN: bool(item["actions"]),
+            RUN_COLUMN: checked(bool(item["actions"]), override, bool(item["actions"])),
             "地區": item["region"],
             "列號": item["row"],
             "狀態": item["status"],
@@ -44,6 +45,7 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     if st.button("🔍 盤點", key="change_order_batch_scan", type="primary"):
         with st.spinner("讀取各區清潔異動中…"):
             st.session_state[STATE_KEY] = batch.scan(regions, log=log)
+        reset_select_all("change_order_batch")
 
     items = st.session_state.get(STATE_KEY)
     if items is None:
@@ -69,12 +71,13 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     else:
         st.markdown(f"共 **{len(items)}** 列：可自動執行 **{len(runnable)}** 列、"
                     f"未備妥（缺資料）**{len(missing)}** 列、需人工 **{len(manual)}** 列。")
+    override, editor_key = select_all_controls("change_order_batch")
     edited = st.data_editor(
-        _rows(items),
+        _rows(items, override),
         hide_index=True,
         width="stretch",
         disabled=[c for c in _rows(items[:1]).columns if c != RUN_COLUMN],
-        key=f"change_order_batch_editor_{'sync' if sync_only else 'all'}",
+        key=f"{editor_key}_{'sync' if sync_only else 'all'}",
     )
     selected = [item for item, flag in zip(items, edited[RUN_COLUMN]) if flag and item["actions"]]
     for item in (item for item, flag in zip(items, edited[RUN_COLUMN]) if flag and not item["actions"]):
