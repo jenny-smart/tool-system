@@ -56,9 +56,12 @@ def plan(when):
         previous = (when.replace(day=1) - dt.timedelta(days=1)).strftime('%Y%m')
         add('scheduled_monthly', target=monthly[hm], period=previous + '-2')
     # 每月 1 日財務：00:30 固定費用＋排入月初藍新／鯨躍／現金缺口（Mac），01:00 儲值金完整流程，02:00 現金缺口
-    finance = {'00:30': 'month_start', '01:00': 'vip_full_pipeline', '02:00': 'cash_gap'}
+    # 02:00 起每小時月初檢查（02:00 跟現金缺口合併成 cash_gap_check：同時段同 workflow 只能派送一次）
+    finance = {'00:30': 'month_start', '01:00': 'vip_full_pipeline', '02:00': 'cash_gap_check'}
     if when.day == 1 and hm in finance:
         add('scheduled_finance', target=finance[hm])
+    elif when.day == 1 and when.minute == 0 and 3 <= when.hour <= 23:
+        add('scheduled_finance', target='month_start_check')
     if when.day == 10 and when.month % 2 == 1 and hm == '10:00':
         add('scheduled_finance', target='accounting_reminder')  # 單月 10 日：會計事務所費用確認提醒
     return jobs

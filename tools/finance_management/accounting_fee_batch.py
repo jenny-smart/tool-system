@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
@@ -110,8 +110,10 @@ def remind(today: Optional[date] = None, log: Callable[[str], None] = print) -> 
     title, body = build_reminder_text(period, items)
     from tools.orders_system import calendar_notify
 
+    # 開始時間留 30 分鐘前導，Google 的提醒推播才排得進去（20、10 分鐘前各跳一次）
     event = calendar_notify.create_notify_event(summary=title, description=body, calendar_id=REMIND_CALENDAR_ID,
-                                                attendee="")
+                                                start=datetime.now(TW_TZ) + timedelta(minutes=30),
+                                                attendee="", reminder_minutes=[20, 10])
     log(f"已在 {REMIND_CALENDAR_ID} 行事曆建提醒：{title}")
     return event
 

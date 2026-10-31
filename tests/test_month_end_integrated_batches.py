@@ -138,3 +138,33 @@ def test_accounting_even_month_and_reminder():
         fixed.mark_status(acc.planned_items("202611"), {"台北": {"2026.11-辦公室二代健保"}})))
     assert "2026.11" in title and "（請填金額）" in body and "已新增過：2026.11-辦公室二代健保" in body
     assert "會計師簽證費" not in body.split("已新增過")[0]
+
+
+# ── 月初檢查 ────────────────────────────────────────
+
+def test_month_start_check_cloud_logs():
+    from tools.finance_management import month_start_check as chk
+
+    logs = {"monthly_prepaid_report": {"status": "success"},
+            "monthly_stored_value_settlement": {"status": "failed", "exit_code": 1}}
+    problems = chk.cloud_problems(date(2026, 12, 1), read=lambda _d, name: logs.get(name))
+    assert [p["label"] for p in problems] == ["儲值金結算", "儲值金預收", "儲值金完整流程"]
+    assert problems[0]["status"] == "失敗（exit 1）" and problems[1]["status"] == "沒有執行紀錄"
+
+
+def test_month_start_check_pending_items_and_text():
+    from datetime import datetime
+
+    from tools.finance_management import month_start_check as chk
+
+    tasks = [_task(ms.BATCH_ACTION, {"period": "202611", "steps": list(ms.STEP_ORDER)}, status="pending")]
+    items = ms.build_items("202611", tasks, [], [])
+    problems = chk.month_start_problems(items)
+    assert len(problems) == 4  # 排隊等 Mac 也算未完成
+    done = ms.build_items("202611", [_task(ms.BATCH_ACTION, {"period": "202611", "steps": list(ms.STEP_ORDER)})],
+                          [["地區", "月份"], ["台北", "202611"]], [["", "台北"], ["日期", "2026/11/30"]])
+    assert chk.month_start_problems(done) == []
+    fixed_items = fixed.mark_status(fixed.planned_items("202612"), {"台北": {"2026.12-辦公室租金"}, "台中": set()})
+    assert [p["label"] for p in chk.fixed_expense_problems(fixed_items)] == ["固定費用 台北 2026.12-辦公室管理費"]
+    title, body = chk.build_reminder(date(2026, 12, 1), datetime(2026, 12, 1, 3, 0), problems)
+    assert "4 項" in title and chk.MONTH_START_FIX in body and body.count(chk.MONTH_START_FIX) == 1

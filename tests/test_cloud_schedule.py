@@ -37,9 +37,15 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(self.jobs('2027-01-01T00:40'),[])
 
     def test_month_start_finance(self):
-        for hm, target in [('00:30','month_start'),('01:00','vip_full_pipeline'),('02:00','cash_gap')]:
+        for hm, target in [('00:30','month_start'),('01:00','vip_full_pipeline'),('02:00','cash_gap_check')]:
             self.assertIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-01T'+hm))
             self.assertNotIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-02T'+hm))
+        for hour in range(3, 24):
+            self.assertEqual([j for j in self.jobs('2026-11-01T%02d:00' % hour) if j[0]=='scheduled_finance.yml'],
+                             [('scheduled_finance.yml',{'target':'month_start_check'})])
+        for hm in ['00:00','01:00','02:30','03:10']:
+            self.assertNotIn(('scheduled_finance.yml',{'target':'month_start_check'}),self.jobs('2026-11-01T'+hm))
+        self.assertNotIn(('scheduled_finance.yml',{'target':'month_start_check'}),self.jobs('2026-11-02T09:00'))
         self.assertIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-11-10T10:00'))
         self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-12-10T10:00'))
         self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-11-11T10:00'))
@@ -62,7 +68,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-21T00:00'))
 
     def test_five_cloud_expressions_cover_all_slots(self):
-        slots={(h,0) for h in [0,1,2,5,7,8,10,11,12,18,22]} | {(0,10),(1,10),(0,20),(1,20),(0,30),(1,30),(5,30),(16,30)}
+        # 整點：每天的整點 job＋1 日 02:00～23:00 每小時月初檢查
+        slots={(h,0) for h in range(24)} | {(0,10),(1,10),(0,20),(1,20),(0,30),(1,30),(5,30),(16,30)}
         for day in range(1,32):
             for hour in range(24):
                 for minute in [0,10,20,30,40,50]:

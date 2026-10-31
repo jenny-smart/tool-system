@@ -5,7 +5,8 @@
     fixed_expense        【整合執行】固定費用：新增當月台北辦公室租金／管理費、單月台中當月＋下月租金
   1 日 01:00  vip_full_pipeline    【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式），上個月
                                    （00:10 儲值金結算、00:20 儲值金預收的檔案要先產出）
-  1 日 02:00  cash_gap             全區現金缺口（截至上個月底）；藍新發票金額晚點做完，月初整合執行會再算一次
+  1 日 02:00  cash_gap_check       全區現金缺口（截至上個月底）＋月初檢查；藍新發票金額晚點做完，月初整合執行會再算一次
+  1 日 03:00～23:00 每小時  month_start_check  月初檢查：沒完成的項目在 Jenny 行事曆建會跳通知的提醒
   單月 10 日 10:00  accounting_reminder  會計事務所費用確認：在 Jenny 行事曆建提醒
 
 手動：python -m tools.scheduled_finance.runner <target> [--date YYYY-MM-DD]（--date 模擬執行日）
@@ -18,7 +19,8 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-TARGETS = ("month_start", "month_start_queue", "fixed_expense", "vip_full_pipeline", "cash_gap", "accounting_reminder")
+TARGETS = ("month_start", "month_start_queue", "fixed_expense", "vip_full_pipeline", "cash_gap", "cash_gap_check",
+           "month_start_check", "accounting_reminder")
 
 
 def log(text: str) -> None:
@@ -103,6 +105,28 @@ def run_cash_gap(today: date) -> int:
     from tools.finance_management.month_start_batch import _run_step
 
     return _run_step("cash_gap", previous_period(today), "")
+
+
+def run_month_start_check(today: date) -> int:
+    """月初檢查：沒完成的項目在 Jenny 行事曆建會跳通知的提醒（只提醒，不重跑）。"""
+    from tools.finance_management.month_start_check import check
+
+    now = datetime.now(TW_TZ)
+    if today != now.date():
+        now = datetime.combine(today, now.time(), tzinfo=TW_TZ)
+    check(now, log=log)
+    return 0
+
+
+def run_cash_gap_check(today: date) -> int:
+    """02:00：先算現金缺口，再做月初檢查（同一時段同一個 workflow 只能派送一次，所以合併）。"""
+    code = 1
+    try:
+        code = run_cash_gap(today)
+    except Exception as exc:
+        log(f"❌ 現金缺口失敗：{exc}")
+    run_month_start_check(today)
+    return code
 
 
 def run_accounting_reminder(today: date) -> int:
