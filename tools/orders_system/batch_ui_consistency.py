@@ -49,7 +49,7 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
     region = c1.selectbox("執行區域", regions, index=default_index, key="batch_opt_region")
     sheet_name = c2.text_input("工作表名稱", placeholder="例：台北202610", key="batch_opt_sheet_name").strip()
     row_spec = c3.text_input("執行列號", placeholder="例：2,3,5-7", key="batch_opt_row_spec",
-                             help="單列 2、逗號 2,3,5、區間 5-7；範圍內不符合條件的列會略過，不中止整批。").strip()
+                             help="單列 2、逗號 2,3,5、區間 5-7；空白＝不限（需勾自動篩選）。有填時只在這些列裡，再依預約對象與自動篩選挑出要約的列（AND）。").strip()
     dev_sheet_copy.render_notice(st, env, sheet_name, "batch_opt", region=region,
                                  credentials=_region_credentials(region, backend_email, backend_password))
 
@@ -100,11 +100,14 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
         log_box.text("\n\n".join(logs[-160:]))
 
     try:
+        # 執行列號 AND 自動篩選 AND 預約條件：有填列號時，只在這些列裡篩。
         explicit_rows = _parse_rows(batch_opt, row_spec)
-        requested_rows = set(explicit_rows)
+        requested_rows = set() if modes else set(explicit_rows)
         for mode in modes:
             requested_rows.update(_auto_filter_rows(batch_opt, sheet_name, mode, region=region, allow_failed=True,
                                                     service_start=service_start, service_end=service_end))
+        if modes and explicit_rows:
+            requested_rows &= set(explicit_rows)
         requested_rows = sorted(requested_rows)
         if not requested_rows and not modes:
             raise ValueError("沒有指定列號，也沒有自動篩選到符合條件的列。")
@@ -123,8 +126,8 @@ def render_optimized_like_batch(backend_email: str, backend_password: str, env: 
                 continue
             target_rows.append(row_no)
 
-        held = _held_for_request(batch_opt, sheet_name, region, explicit_rows, modes,
-                                 service_start=service_start, service_end=service_end)
+        held = _held_for_request(batch_opt, sheet_name, region, () if modes else explicit_rows, modes,
+                                 mode_scope=explicit_rows or None, service_start=service_start, service_end=service_end)
         invalid = [row_no for row_no in invalid if row_no not in set(held)]
         if held:
             ui_log(f"⏭️ {held_message(batch_opt, sheet_name, held)}：" + "、".join(map(str, held)))
