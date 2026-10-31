@@ -1413,6 +1413,148 @@ def stream_subprocess(
     )
 
 
+def _classify_service_stderr(line: str) -> str:
+    if "[ERROR]" in line or "[CRITICAL]" in line:
+        return "error"
+    if "[WARNING]" in line:
+        return "warning"
+    return "info"
+
+
+SERVICE_RUN_TIMEOUT = 600
+
+
+def _start_service_background_run(cmd: list[str], env: dict, function: str, ctx: dict) -> None:
+    """客服排程系統的子程序改在背景執行；同一個工作階段一次只跑一個。"""
+    from tools.common import background_run
+
+    running = st.session_state.get("service_bg_run")
+    if running:
+        run = background_run.get(running["id"])
+        if run is not None and not run.done:
+            raise RuntimeError(f"「{running['function']}」還在背景執行中，請等它完成再執行。")
+    child_env = dict(env)
+    child_env["TZ"] = "Asia/Taipei"
+    run_id = background_run.start(cmd, cwd=BASE_DIR, env=child_env, timeout=SERVICE_RUN_TIMEOUT)
+    st.session_state["service_bg_run"] = {
+        "id": run_id, "function": function, "ctx": ctx, "seen": 0,
+        "log_ctx": dict(st.session_state.get("_unified_log_ctx", {})),
+    }
+    st.session_state.pop("service_bg_result", None)
+
+
+def _service_log(message: str, level: str = "info", log_ctx: dict | None = None) -> None:
+    """只寫進 session_state（fragment 裡不能畫主日誌框），成功／失敗照常記到統一 Log。"""
+    _append_log_entry(message, level)
+    if level in ("success", "error") and log_ctx:
+        from tools.common import unified_log
+
+        ctx = st.session_state.setdefault("_unified_log_ctx", {})
+        saved = dict(ctx)
+        ctx.clear()
+        ctx.update(log_ctx)
+        unified_log.report(st, level, message)
+        log_ctx.update(ctx)
+        ctx.clear()
+        ctx.update(saved)
+
+
+def _finish_service_run(state: dict, run) -> None:
+    """背景執行結束：解析各 Step 結果，寫進日誌與「最近一次執行結果」。"""
+    function, log_ctx = state["function"], state.get("log_ctx") or {}
+    completed = run.completed()
+    stdout_text = completed.stdout or ""
+    messages = []
+    for _line in stdout_text.splitlines():
+        if _line.startswith("VIP_SCHEDULE_DIFF="):
+            try:
+                _diff_result = json.loads(_line.split("=", 1)[1])
+                _diff_counts = _diff_result.get("differences", {})
+                messages.append(("info", f"{_diff_result['sheet']}：" + ("、".join(
+                    f"{_kind} {_count} 筆" for _kind, _count in _diff_counts.items()
+                ) or "無新增差異")))
+                _stages = (_diff_result.get("booking_gate") or {}).get("stages") or {}
+                if _stages:
+                    messages.append(("info", "預約條件：" + "、".join(
+                        f"{_name} {_stages[_name]} 列" for _name in ("可約", "改加", "人時不足", "已確認", "未回覆") if _name in _stages)))
+                if _diff_result.get("report_url"):
+                    messages.append(("markdown", f"[開啟排程差異表]({_diff_result['report_url']})"))
+                messages.append(("caption", f"詳細差異請查看工作表「{_diff_result['report']}」。"
+                                 + ("本次只比對，排程尚未更新。" if _diff_result.get("compare_only") else "")))
+            except (ValueError, KeyError, TypeError):
+                pass
+    success_steps = [l for l in stdout_text.splitlines() if "完成" in l and "ERROR" not in l and "失敗" not in l]
+    failed_steps = [l for l in stdout_text.splitlines() if "失敗" in l and "[ERROR]" in l]
+
+    if run.timed_out:
+        status = f"❌ 執行逾時（超過 {SERVICE_RUN_TIMEOUT // 60} 分鐘已停止）：{function}"
+        _service_log(status, "error", log_ctx)
+    elif completed.returncode == 0:
+        status = f"✅ {function} 全部成功"
+        form = (state.get("ctx") or {}).get("deep_clean_form")
+        if form:
+            year, values = form
+            st.session_state[f"deep_clean_saved_form_{year}"] = values
+            st.session_state[f"deep_clean_load_status_{year}"] = "loaded"
+        _service_log(status, "success", log_ctx)
+        _service_log("執行完成", "success", log_ctx)
+    elif success_steps and failed_steps:
+        status = f"⚠️ 部分完成：{len(success_steps)} 個步驟成功，{len(failed_steps)} 個步驟失敗"
+        _service_log(status, "warning", log_ctx)
+        for fl in failed_steps[-5:]:
+            _service_log(fl.strip(), "error", log_ctx)
+    else:
+        stderr_lines = [line.strip() for line in (completed.stderr or "").splitlines() if line.strip()]
+        failure_reason = stderr_lines[-1] if stderr_lines else "子程序未提供錯誤內容"
+        status = f"❌ 執行失敗（exit {completed.returncode}）：{function}"
+        _service_log(f"失敗原因：{failure_reason}", "error", log_ctx)
+        _service_log(f"執行失敗：{status}\n原因：{failure_reason}", "error", log_ctx)
+    st.session_state["service_bg_result"] = {
+        "function": function, "status": status, "finished": tw_now_text("%Y-%m-%d %H:%M:%S"),
+        "elapsed": run.elapsed(), "messages": messages,
+    }
+
+
+@st.fragment(run_every="2s")
+def render_service_background_run() -> None:
+    """背景執行中：每 2 秒把新輸出收進日誌並顯示最新幾行；結束後整頁重跑一次顯示完整結果。"""
+    from tools.common import background_run
+
+    state = st.session_state.get("service_bg_run")
+    if not state:
+        return
+    run = background_run.get(state["id"])
+    if run is None:
+        st.session_state.pop("service_bg_run", None)
+        st.warning(f"找不到「{state['function']}」的背景執行紀錄（伺服器可能已重新啟動）；請到工作表確認結果後再執行一次。")
+        return
+    new_lines = background_run.snapshot(run, state["seen"])
+    for origin, line in new_lines:
+        _append_log_entry(line, "info" if origin == "stdout" else _classify_service_stderr(line))
+    state["seen"] += len(new_lines)
+    if not run.done:
+        st.info(f"⏳ 背景執行中：{state['function']}（已 {run.elapsed()} 秒）。"
+                "關閉或重新整理頁面不會中斷，回來會接著顯示進度。")
+        tail = background_run.snapshot(run, max(state["seen"] - 12, 0))
+        st.code("\n".join(line for _, line in reversed(tail)) or "等待輸出…", language="text")
+        return
+    st.session_state.pop("service_bg_run", None)
+    _finish_service_run(state, run)
+    st.rerun(scope="app")
+
+
+def render_service_last_result() -> None:
+    """最近一次背景執行的結果（差異筆數、預約條件、差異表連結），重新整理後仍顯示。"""
+    result = st.session_state.get("service_bg_result")
+    if not result:
+        return
+    with st.container(border=True):
+        st.markdown(f"**最近一次執行結果**　{result['status']}")
+        st.caption(f"完成時間：{result['finished']}（耗時 {result['elapsed']} 秒）")
+        for kind, text in result.get("messages", []):
+            getattr(st, kind)(text)
+
+
 def run_script(script_path: str, args: list[str] | None = None) -> str:
     args = args or []
 
@@ -5920,6 +6062,10 @@ st.markdown("</div>", unsafe_allow_html=True)
 LOG_PLACEHOLDER = st.empty()
 render_log()
 
+if system_type == "service_schedule":
+    render_service_background_run()
+    render_service_last_result()
+
 if system_type == "finance_management" and selected_function.startswith(("【檸檬後台】", "【鯨躍發票】", "【藍新金流】", "【富邦銀行】", "【元大銀行】", "【財政部電子發票】")):
     render_agent_task_progress(("lemon.", "cetustek.", "newebpay.", "fubon.", "yuanta.", "mofei."))
 
@@ -6214,6 +6360,7 @@ if run_clicked:
     # 每次按執行都是新的一輪，依地區進度板從空的開始，不會混到上一輪
     # 不相關的地區×類型殘留紀錄。
     st.session_state.area_log = {}
+    _service_bg_started = False
 
     if not selected_system:
         add_log("請先新增或啟用系統設定", "error")
@@ -6866,81 +7013,31 @@ if run_clicked:
                         cmd += ["--date", start_date_value.strftime("%Y-%m-%d")]
                     add_log(f"客服排程執行：{selected_function}（--step {step}）", "info")
 
-                def _classify_service_stderr(line: str) -> str:
-                    if "[ERROR]" in line or "[CRITICAL]" in line:
-                        return "error"
-                    if "[WARNING]" in line:
-                        return "warning"
-                    return "info"
-
-                completed = stream_subprocess(
-                    cmd,
-                    cwd=BASE_DIR,
-                    env=_svc_env,
-                    timeout=600,
-                    classify_stderr_line=_classify_service_stderr,
-                )
-
-                # 解析各 Step 結果，顯示部分成功
-                stdout_text = completed.stdout or ""
-                for _line in stdout_text.splitlines():
-                    if _line.startswith("VIP_SCHEDULE_DIFF="):
-                        try:
-                            _diff_result = json.loads(_line.split("=", 1)[1])
-                            _diff_counts = _diff_result.get("differences", {})
-                            st.info(f"{_diff_result['sheet']}：" + ("、".join(
-                                f"{_kind} {_count} 筆" for _kind, _count in _diff_counts.items()
-                            ) or "無新增差異"))
-                            _stages = (_diff_result.get("booking_gate") or {}).get("stages") or {}
-                            if _stages:
-                                st.info("預約條件：" + "、".join(
-                                    f"{_name} {_stages[_name]} 列" for _name in ("可約", "改加", "人時不足", "已確認", "未回覆") if _name in _stages))
-                            if _diff_result.get("report_url"):
-                                st.markdown(f"[開啟排程差異表]({_diff_result['report_url']})")
-                            st.caption(f"詳細差異請查看工作表「{_diff_result['report']}」。"
-                                       + ("本次只比對，排程尚未更新。" if _diff_result.get("compare_only") else ""))
-                        except (ValueError, KeyError, TypeError):
-                            pass
-                success_steps = [l for l in stdout_text.splitlines() if "完成" in l and "ERROR" not in l and "失敗" not in l]
-                failed_steps  = [l for l in stdout_text.splitlines() if "失敗" in l and "[ERROR]" in l]
-
-                if completed.returncode == 0:
-                    result = f"✅ {selected_function} 全部成功"
-                    if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
-                        st.session_state[f"deep_clean_saved_form_{deep_clean_season_year}"] = {
-                            "phase1_start": deep_clean_phase1_start,
-                            "phase1_end": deep_clean_phase1_end,
-                            "phase1_weekday_rate": deep_clean_phase1_weekday_rate,
-                            "phase1_weekend_rate": deep_clean_phase1_weekend_rate,
-                            "phase1_nonvip_weekday_rate": deep_clean_phase1_nonvip_weekday_rate,
-                            "phase1_nonvip_weekend_rate": deep_clean_phase1_nonvip_weekend_rate,
-                            "phase2_start": deep_clean_phase2_start,
-                            "phase2_end": deep_clean_phase2_end,
-                            "phase2_weekday_rate": deep_clean_phase2_weekday_rate,
-                            "phase2_weekend_rate": deep_clean_phase2_weekend_rate,
-                            "phase2_nonvip_weekday_rate": deep_clean_phase2_nonvip_weekday_rate,
-                            "phase2_nonvip_weekend_rate": deep_clean_phase2_nonvip_weekend_rate,
-                            "reply_deadline": deep_clean_reply_deadline,
-                            "booking_start": deep_clean_booking_start,
-                            "booking_end": deep_clean_booking_end,
-                            "lunar_new_year_start": deep_clean_lunar_new_year_start,
-                            "lunar_new_year_end": deep_clean_lunar_new_year_end,
-                        }
-                        st.session_state[f"deep_clean_load_status_{deep_clean_season_year}"] = "loaded"
-                elif success_steps and failed_steps:
-                    # 部分成功：不拋例外，顯示 warning
-                    result = f"⚠️ 部分完成：{len(success_steps)} 個步驟成功，{len(failed_steps)} 個步驟失敗"
-                    add_log(result, "warning")
-                    for fl in failed_steps[-5:]:
-                        add_log(fl.strip(), "error")
-                else:
-                    stderr_lines = [line.strip() for line in (completed.stderr or "").splitlines() if line.strip()]
-                    failure_reason = stderr_lines[-1] if stderr_lines else "子程序未提供錯誤內容"
-                    add_log(f"失敗原因：{failure_reason}", "error")
-                    raise RuntimeError(
-                        f"執行失敗（exit {completed.returncode}）：{selected_function}\n"
-                        f"原因：{failure_reason}"
-                    )
+                _service_ctx = {}
+                if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
+                    _service_ctx["deep_clean_form"] = (deep_clean_season_year, {
+                        "phase1_start": deep_clean_phase1_start,
+                        "phase1_end": deep_clean_phase1_end,
+                        "phase1_weekday_rate": deep_clean_phase1_weekday_rate,
+                        "phase1_weekend_rate": deep_clean_phase1_weekend_rate,
+                        "phase1_nonvip_weekday_rate": deep_clean_phase1_nonvip_weekday_rate,
+                        "phase1_nonvip_weekend_rate": deep_clean_phase1_nonvip_weekend_rate,
+                        "phase2_start": deep_clean_phase2_start,
+                        "phase2_end": deep_clean_phase2_end,
+                        "phase2_weekday_rate": deep_clean_phase2_weekday_rate,
+                        "phase2_weekend_rate": deep_clean_phase2_weekend_rate,
+                        "phase2_nonvip_weekday_rate": deep_clean_phase2_nonvip_weekday_rate,
+                        "phase2_nonvip_weekend_rate": deep_clean_phase2_nonvip_weekend_rate,
+                        "reply_deadline": deep_clean_reply_deadline,
+                        "booking_start": deep_clean_booking_start,
+                        "booking_end": deep_clean_booking_end,
+                        "lunar_new_year_start": deep_clean_lunar_new_year_start,
+                        "lunar_new_year_end": deep_clean_lunar_new_year_end,
+                    })
+                # 背景執行：連線中斷或頁面重跑都不會中斷讀取，進度由 render_service_background_run 每 2 秒更新。
+                _start_service_background_run(cmd, _svc_env, selected_function, _service_ctx)
+                _service_bg_started = True
+                add_log("已在背景開始執行；關閉或重新整理頁面不會中斷，進度會自動更新。", "info")
             # ────────────────────────────────────────────────────────
 
             else:
@@ -6952,7 +7049,8 @@ if run_clicked:
             elif result is not None:
                 add_log(str(result), "success")
 
-            add_log("執行完成", "success")
+            if not _service_bg_started:
+                add_log("執行完成", "success")
 
         except Exception as e:
             add_log(f"執行失敗：{e}", "error")
