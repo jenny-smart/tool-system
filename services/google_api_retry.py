@@ -105,7 +105,7 @@ def install_gspread_retry() -> None:
             self.timeout = DEFAULT_HTTP_TIMEOUT
         return retry_call(
             lambda: original_request(self, *args, **kwargs),
-            retries=4,
+            retries=6,  # 429 配額：等到 60 秒一輪的視窗重置（6→12→24→48→60→60 秒）
         )
 
     request_with_retry._retry_installed = True
@@ -145,7 +145,7 @@ def install_googleapiclient_retry() -> None:
             transport.timeout = DEFAULT_HTTP_TIMEOUT[1]
         return retry_call(
             lambda: original_execute(self, *args, **kwargs),
-            retries=4,
+            retries=6,  # 429 配額：等到 60 秒一輪的視窗重置（6→12→24→48→60→60 秒）
         )
 
     execute_with_retry._retry_installed = True
