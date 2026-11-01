@@ -559,6 +559,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, help="自訂輸出根目錄")
     parser.add_argument("--format", choices=("csv", "excel"), default="csv")
     parser.add_argument("--detail", action="store_true", help="匯出含明細")
+    parser.add_argument("--skip-area", action="append", default=[],
+                        help="略過的區域（可重複），例如 高雄（跟新竹同一個鯨躍帳號，跑新竹一次就好）")
+    parser.add_argument("--paper-pdf-area", action="append", default=[],
+                        help="同一次登入裡順便產生有買方統編的紙本發票 PDF 的區域（可重複），例如 台中；只用於整月模式")
     parser.add_argument(
         "--cdp-url",
         default=DEFAULT_CDP_URL,
@@ -584,6 +588,11 @@ def main() -> int:
         range_mode = False
     accounts = load_accounts(args.accounts)
     areas = [normalize_area(args.area)] if args.area and args.area.lower() != "all" else configured_areas(accounts)
+    skip = {normalize_area(a) for a in args.skip_area}
+    if skip:
+        print(f"略過：{', '.join(AREA_ENV[a]['label'] for a in skip if a in AREA_ENV)}")
+        areas = [a for a in areas if a not in skip]
+    pdf_areas = {normalize_area(a) for a in args.paper_pdf_area} if not args.start_date else set()
     csv = args.format == "csv"
     extension = ".csv" if csv else ".xls"
     print(f"日期：{start} ～ {end}")
@@ -595,6 +604,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="ei_invoice_month_") as temp_root, sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         print(f"瀏覽器：已連接現有 Chrome（{args.cdp_url}）")
+        if pdf_areas:
+            # 紙本發票 PDF 的 B2B預覽(A5) 頁面 onload 會叫 window.print()，先蓋掉
+            context.add_init_script("window.print = () => {};")
         portal_page, existing_ei_page = find_invoice_pages(context)
         try:
             for index, area in enumerate(areas):
@@ -664,6 +676,18 @@ def main() -> int:
                                 paper_path=paper_archive,
                                 prize_path=prize_download,
                             )
+                    if area in pdf_areas:
+                        # 同一次登入順便產生有買方統編的紙本發票 PDF（不用再輸入驗證碼）；失敗不影響下載結果
+                        try:
+                            from tools.invoice_center.paper_invoice_pdf import generate_pdfs
+
+                            print(f"[{credentials.label}] 紙本發票（有統編）PDF 建檔")
+                            total, saved = generate_pdfs(context, ei_page, credentials.label, yyyymm, processor)
+                            if saved < total:
+                                failures.append(f"{credentials.label} 紙本PDF: {total} 筆只成功 {saved} 筆")
+                        except Exception as exc:
+                            failures.append(f"{credentials.label} 紙本PDF: {exc}")
+                            print(f"  紙本發票 PDF 失敗：{exc}", file=sys.stderr)
                     logout_second(ei_page, credentials.label)
                     if ei_page is not portal_page and not reused_existing_ei:
                         ei_page.close()
@@ -676,7 +700,8 @@ def main() -> int:
         finally:
             if failures:
                 try:
-                    input("\n發生錯誤，瀏覽器會保留供檢查。查看完成後按 Enter 關閉：")
+                    if sys.stdin.isatty():
+                        input("\n發生錯誤，瀏覽器會保留供檢查。查看完成後按 Enter 關閉：")
                 except EOFError:
                     pass
             else:

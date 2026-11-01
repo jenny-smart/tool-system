@@ -3,7 +3,10 @@
 盤點（scan）：列出期別（預設上個月）的三個步驟目前狀態，可做的才預設打勾：
   - 藍新收退款＋手續費發票金額（全區）：一律一起做，每區只登入一次、只輸入一次驗證碼
     （tools.newebpay.month_close：下載期別 1 日～月底收款／退款，發票金額寫入主控表「藍新發票總表」）
-  - 鯨躍發票下載（全區，期別整月）                 → 本機 Agent cetustek.download
+  - 鯨躍發票（全區，期別整月；每區只登入一次）→ 本機 Agent cetustek.download，同一次登入裡：
+    下載全月／紙本／單月中獎發票並歸檔、台中有買方統編的紙本發票 PDF 建檔；
+    下載完再更新紙本發票、單月中獎發票到年度發票檔（只讀 Drive，不用再登入）
+  - 藍新、鯨躍的高雄跟新竹同一個帳號，跑新竹一次就好（高雄略過）
   - 全區現金缺口（截至期別月底，寫入「現金缺口試算」） → 只讀寫 Google 試算表
   狀態依「本機Agent任務」裡同期別最新一筆任務判斷（排隊中／執行中不能再排，已完成預設不勾）；
   現金缺口另看「藍新發票總表」有沒有該期別的發票金額、「現金缺口試算」是不是已算到期別月底。
@@ -34,7 +37,7 @@ CDP_URL = "http://127.0.0.1:9222"
 # 步驟 → (顯示名稱, 本機 Agent action；空字串＝不經瀏覽器，直接讀寫試算表)
 STEPS = {
     "newebpay": ("藍新收退款＋發票金額", ""),  # tools.newebpay.month_close，每區只登入一次
-    "cetustek_download": ("鯨躍發票下載", "cetustek.download"),
+    "cetustek_download": ("鯨躍發票下載＋紙本／中獎更新＋台中統編PDF", "cetustek.download"),
     "cash_gap": ("全區現金缺口", ""),
 }
 STEP_ORDER = tuple(STEPS)
@@ -47,6 +50,10 @@ DEPENDS_ON = {"cash_gap": "newebpay"}
 def normalize_steps(steps) -> list[str]:
     steps = ["newebpay" if s in LEGACY_NEWEBPAY_STEPS else s for s in steps]
     return [s for s in STEP_ORDER if s in steps]
+
+# 高雄跟新竹用同一個藍新／鯨躍帳號，跑新竹一次就好；台中有買方統編的紙本發票要建 PDF
+SHARED_ACCOUNT_SKIP = ("高雄",)
+PAPER_PDF_AREAS = ("台中",)
 
 ACTIVE = {"pending": "已排入，等待本機 Agent", "running": "執行中", "cancel_requested": "正在中止"}
 
@@ -67,7 +74,8 @@ def step_params(step: str, period: str) -> dict[str, Any]:
     if step == "newebpay":
         return {"period": period, "cdp_url": CDP_URL}
     if step == "cetustek_download":
-        return {"month": period, "start_date": "", "end_date": "", "area": "全區", "format": "csv", "cdp_url": CDP_URL}
+        return {"month": period, "start_date": "", "end_date": "", "area": "全區", "format": "csv", "cdp_url": CDP_URL,
+                "skip_areas": list(SHARED_ACCOUNT_SKIP), "paper_pdf_areas": list(PAPER_PDF_AREAS)}
     if step == "cash_gap":
         return {"period": period}
     raise ValueError(f"不支援的步驟：{step}")
@@ -229,7 +237,36 @@ def _run_step(step: str, period: str, cdp_url: str) -> int:
             print("⚠️ 現金缺口有項目出錯：" + "、".join(errors), flush=True)
         return 0
     sys.stdout.flush()
-    return subprocess.run(_step_command(step, period, cdp_url)).returncode
+    code = subprocess.run(_step_command(step, period, cdp_url)).returncode
+    if step == "cetustek_download":
+        code = max(code, update_invoice_sheets(period))
+    return code
+
+
+def update_invoice_sheets(period: str, log: Callable[[str], None] = lambda t: print(t, flush=True)) -> int:
+    """鯨躍下載完：把 Drive 上的紙本發票、單月中獎發票更新到各區年度發票檔（不用登入鯨躍）。"""
+    from tools.invoice_center.invoice_archive import InvoiceArchiveProcessor, previous_prize_period
+
+    processor = InvoiceArchiveProcessor()
+    prize = previous_prize_period(period)
+    failures = []
+    for area in [a for a in processor.configs if a not in SHARED_ACCOUNT_SKIP]:
+        jobs = [("紙本發票更新", lambda a=area: processor.update_paper(area=a, yyyymm=period), period)]
+        if prize:
+            jobs.append(("中獎發票更新", lambda a=area: processor.update_prize_period(area=a, period8=prize), prize))
+        for name, job, job_period in jobs:
+            try:
+                count = job()
+                processor.write_update_log(function_name=name, area=area, period=job_period, status="成功", count=count)
+                log(f"[{area}] {name}完成：{count} 筆")
+            except Exception as exc:
+                failures.append(f"{area} {name}")
+                processor.write_update_log(function_name=name, area=area, period=job_period, status="失敗",
+                                           message=str(exc))
+                log(f"❌ [{area}] {name}失敗：{exc}")
+    if not prize:
+        log(f"{period} 是雙月，沒有單月中獎發票要更新")
+    return 1 if failures else 0
 
 
 def _invoice_ready(period: str) -> bool:

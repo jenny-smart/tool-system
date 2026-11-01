@@ -15,6 +15,8 @@ from pathlib import Path
 
 DOWNLOAD_FAILED = 1
 INVOICE_FAILED = 2
+# 高雄跟新竹用同一個藍新帳號，跑新竹一次就好（2026-11 與 Jenny 確認）
+SKIP_AREAS = ("高雄",)
 
 
 def exit_code(download_failures: list[str], invoice_failures: list[str]) -> int:
@@ -32,6 +34,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="藍新月結：每區登入一次，下載收退款＋查手續費發票金額")
     parser.add_argument("period", help="YYYYMM，例如 202610")
     parser.add_argument("--area", help="只做指定區域，例如 台北")
+    parser.add_argument("--skip-area", action="append", default=None,
+                        help=f"略過的區域（可重複）；預設略過 {'、'.join(SKIP_AREAS)}（跟新竹同一個帳號）")
     parser.add_argument("--accounts-file", type=Path, default=dr.DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     args = parser.parse_args(argv)
@@ -42,6 +46,10 @@ def main(argv=None) -> int:
                                                f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}")
     invoice_date = ia.invoice_date_for(period)
     accounts = dr.load_accounts(args.accounts_file.expanduser(), args.area)
+    skip = set(SKIP_AREAS if args.skip_area is None else args.skip_area)
+    if not args.area and skip:
+        accounts = [a for a in accounts if a.area not in skip]
+        print(f"略過：{'、'.join(sorted(skip))}（跟新竹同一個帳號，跑一次就好）")
     print(f"期別：{period}（收退款 {start}～{end}；手續費發票日 {invoice_date}）")
     print(f"區域：{', '.join(a.area for a in accounts)}；每區只登入一次")
 

@@ -264,19 +264,64 @@ def _resolve_month_folder(processor: InvoiceArchiveProcessor, area_label: str, y
     return get_or_create_folder(processor.drive, bi_month_folder_id, month2)
 
 
+def generate_pdfs(context, page: Page, area_label: str, yyyymm: str, processor=None,
+                  log=print) -> tuple[int, int]:
+    """在已登入這區鯨躍第二層的 page 上，逐筆產生有買方統編的紙本發票 PDF 並上傳。
+    【整合執行】月初藍新／鯨躍／現金缺口在鯨躍發票下載同一次登入裡呼叫（不用再輸入驗證碼）。
+    呼叫前 context 要先 add_init_script("window.print = () => {};")。回傳 (要處理筆數, 成功筆數)。"""
+    start, end = month_range(yyyymm)
+    start_roc, end_roc = to_roc_date(start), to_roc_date(end)
+    folder_id = _resolve_month_folder(processor, area_label, yyyymm) if processor else None
+    output_dir = PROJECT_ROOT / "outputs" / "paper_invoice_pdf" / area_label / yyyymm
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    _search_paper_invoices(page, start_roc, end_roc)
+    all_rows = _list_all_rows(page)
+    rows = [row for row in all_rows if str(row.get("buyer_id", "")).strip()]
+    skipped_no_buyer_id = len(all_rows) - len(rows)
+    log(f"查到 {len(all_rows)} 筆紙本發票（{start} ～ {end}）；買方統編空白略過 {skipped_no_buyer_id} 筆，實際處理 {len(rows)} 筆")
+
+    saved = 0
+    for index, row in enumerate(rows, start=1):
+        order_no = row.get("order_no", "")
+        log(f"[{index}/{len(rows)}] {order_no}\t{row.get('buyer_name', '')}")
+        if index > 1:
+            _search_paper_invoices(page, start_roc, end_roc)
+        if not _click_function_icon(page, order_no):
+            print(f"  找不到列，略過：{order_no}", file=sys.stderr)
+            continue
+        try:
+            pdf_bytes = _capture_b2b_a5_pdf(context, page)
+        except Exception as exc:
+            print(f"  產生 PDF 失敗：{exc}", file=sys.stderr)
+            continue
+        filename = _build_filename(order_no, row.get("buyer_id", ""), row.get("buyer_name", ""))
+        local_path = output_dir / filename
+        local_path.write_bytes(pdf_bytes)
+        if processor and folder_id:
+            upload_replacing(processor.drive, local_path, folder_id)
+        log(f"RESULT_FILE:{local_path}")
+        saved += 1
+
+    if processor:
+        processor.write_update_log(
+            function_name="紙本發票PDF建檔",
+            area=area_label,
+            period=yyyymm,
+            status="成功" if saved == len(rows) else "部分完成",
+            count=saved,
+            message=f"共 {len(rows)} 筆，成功 {saved} 筆",
+        )
+    log(f"完成：共 {len(rows)} 筆，成功產生 {saved} 份 PDF；已存至 {output_dir}")
+    return len(rows), saved
+
+
 def run(area: str, cdp_url: str, month: str, *, upload: bool = True) -> int:
     area_key = normalize_area(area)
     area_label = get_area_label(area_key)
     yyyymm = normalize_month(month)
-    start, end = month_range(yyyymm)
-    start_roc, end_roc = to_roc_date(start), to_roc_date(end)
     accounts = load_accounts(None)
-
     processor = InvoiceArchiveProcessor() if upload else None
-    folder_id = _resolve_month_folder(processor, area_label, yyyymm) if processor else None
-
-    output_dir = PROJECT_ROOT / "outputs" / "paper_invoice_pdf" / area_label / yyyymm
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright, ExitStack() as cleanup:
         _browser, context = connect_existing_chrome(playwright, cdp_url)
@@ -287,46 +332,7 @@ def run(area: str, cdp_url: str, month: str, *, upload: bool = True) -> int:
         page = _login(context, area_key, accounts)
         from tools.invoice_center.ei_session import logout_quietly
         cleanup.callback(logout_quietly, page, area_key)  # 做完一律登出
-
-        _search_paper_invoices(page, start_roc, end_roc)
-        all_rows = _list_all_rows(page)
-        rows = [row for row in all_rows if str(row.get("buyer_id", "")).strip()]
-        skipped_no_buyer_id = len(all_rows) - len(rows)
-        print(f"查到 {len(all_rows)} 筆紙本發票（{start} ～ {end}）；買方統編空白略過 {skipped_no_buyer_id} 筆，實際處理 {len(rows)} 筆")
-
-        saved = 0
-        for index, row in enumerate(rows, start=1):
-            order_no = row.get("order_no", "")
-            print(f"[{index}/{len(rows)}] {order_no}\t{row.get('buyer_name', '')}")
-            if index > 1:
-                _search_paper_invoices(page, start_roc, end_roc)
-            if not _click_function_icon(page, order_no):
-                print(f"  找不到列，略過：{order_no}", file=sys.stderr)
-                continue
-            try:
-                pdf_bytes = _capture_b2b_a5_pdf(context, page)
-            except Exception as exc:
-                print(f"  產生 PDF 失敗：{exc}", file=sys.stderr)
-                continue
-            filename = _build_filename(order_no, row.get("buyer_id", ""), row.get("buyer_name", ""))
-            local_path = output_dir / filename
-            local_path.write_bytes(pdf_bytes)
-            if processor and folder_id:
-                upload_replacing(processor.drive, local_path, folder_id)
-            print(f"RESULT_FILE:{local_path}")
-            saved += 1
-
-        if processor:
-            processor.write_update_log(
-                function_name="紙本發票PDF建檔",
-                area=area_label,
-                period=yyyymm,
-                status="成功" if saved == len(rows) else "部分完成",
-                count=saved,
-                message=f"共 {len(rows)} 筆，成功 {saved} 筆",
-            )
-
-    print(f"完成：共 {len(rows)} 筆，成功產生 {saved} 份 PDF；已存至 {output_dir}")
+        generate_pdfs(context, page, area_label, yyyymm, processor)
     return 0
 
 

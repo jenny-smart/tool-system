@@ -271,3 +271,36 @@ def test_last_workday_before_month_start():
     from tools.finance_management import month_start_check as chk
 
     assert chk.last_workday_before(date(2026, 11, 1)) == date(2026, 10, 30)  # 10/31 是週六
+
+
+def test_cetustek_step_skips_kaohsiung_and_makes_taichung_pdf():
+    params = ms.step_params("cetustek_download", "202611")
+    command = ACTION_HANDLERS["cetustek.download"](params)
+    assert command[command.index("--skip-area") + 1] == "高雄"
+    assert command[command.index("--paper-pdf-area") + 1] == "台中"
+    assert "202611" in command
+
+
+def test_update_invoice_sheets_paper_and_odd_month_prize(monkeypatch):
+    from tools.invoice_center import invoice_archive
+
+    calls = []
+
+    class FakeProcessor:
+        configs = {"台北": 1, "新竹": 1, "高雄": 1}
+
+        def update_paper(self, *, area, yyyymm):
+            calls.append(("paper", area, yyyymm)); return 1
+
+        def update_prize_period(self, *, area, period8):
+            calls.append(("prize", area, period8)); return 2
+
+        def write_update_log(self, **_k):
+            pass
+
+    monkeypatch.setattr(invoice_archive, "InvoiceArchiveProcessor", FakeProcessor)
+    assert ms.update_invoice_sheets("202611", log=lambda _t: None) == 0
+    assert ("prize", "台北", "20260910") in calls and not any(c[1] == "高雄" for c in calls)
+    calls.clear()
+    ms.update_invoice_sheets("202610", log=lambda _t: None)
+    assert [c[0] for c in calls] == ["paper", "paper"]  # 雙月沒有中獎發票
