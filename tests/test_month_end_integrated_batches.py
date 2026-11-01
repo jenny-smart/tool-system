@@ -332,3 +332,34 @@ def test_copy_kaohsiung_from_hsinchu(tmp_path):
     csv = tmp_path / "新竹" / "202610-2藍新收款-新竹.csv"
     csv.write_text("a")
     assert copy_for_area(csv, "新竹", "高雄").name == "202610-2藍新收款-高雄.csv"
+
+
+def test_month_start_check_auto_fix(tmp_path, monkeypatch):
+    from tools.finance_management import month_start_check as chk
+
+    monkeypatch.setattr(chk, "LOG_ROOT", tmp_path)
+    monkeypatch.setattr(chk, "read_job_log", lambda day, name, root=None: chk.json.loads(
+        (tmp_path / day.strftime("%Y%m%d") / f"{name}.json").read_text()) if (tmp_path / day.strftime("%Y%m%d") / f"{name}.json").exists() else None)
+    day = date(2026, 11, 1)
+    logs = {"monthly_stored_value_settlement": {"status": "success"}, "monthly_stored_value_prepaid": {"status": "success"}}
+    entries = chk.cloud_entries(day, read=lambda _d, name: logs.get(name))
+    entries += chk.fixed_expense_entries(fixed.mark_status(fixed.planned_items("202611"), {"台北": set(), "台中": {"2026.11-辦公室租金管理費", "2026.12-辦公室租金管理費"}}))
+    submitted, vip_runs = [], []
+    done = chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1,
+                        submit_fixed=lambda items, **_k: submitted.extend(items) or {"台北": len(items)})
+    assert [i["memo"] for i in submitted] == ["2026.11-辦公室租金", "2026.11-辦公室管理費"]
+    assert vip_runs == [day] and "儲值金完整流程：失敗" in done
+    # 失敗會記次數；第 2 次再試，第 3 次就不再自動跑
+    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1, submit_fixed=lambda *a, **k: {})
+    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1, submit_fixed=lambda *a, **k: {})
+    assert len(vip_runs) == 2
+
+
+def test_month_start_check_auto_fix_waits_for_vip_sources():
+    from tools.finance_management import month_start_check as chk
+
+    day = date(2026, 11, 1)
+    entries = chk.cloud_entries(day, read=lambda _d, name: None)  # 結算／預收都還沒跑
+    runs = []
+    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: runs.append(d) or 0, submit_fixed=lambda *a, **k: {})
+    assert runs == []

@@ -247,8 +247,62 @@ def clear_reminders(day: date, log: Callable[[str], None] = print) -> int:
     return removed
 
 
+AUTO_MAX_ATTEMPTS = 2  # 儲值金完整流程自動補做最多試 2 次，避免每小時一直失敗重跑
+
+
+def write_job_log(day: date, name: str, status: str, attempts: int, root: Optional[Path] = None) -> None:
+    """跟 workflow 寫的 logs/YYYYMMDD/{name}.json 同格式，讓下次檢查知道已經補做過（workflow 會 commit logs）。"""
+    path = (root or LOG_ROOT) / day.strftime("%Y%m%d") / f"{name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now_text = datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    path.write_text(json.dumps({"job_name": name, "status": status, "exit_code": 0 if status == "success" else 1,
+                                "started_at": now_text, "finished_at": now_text, "auto_attempts": attempts},
+                               ensure_ascii=False), encoding="utf-8")
+
+
+def auto_fix(day: date, entries: list[dict], log: Callable[[str], None] = print,
+             run_vip=None, submit_fixed=None) -> list[str]:
+    """不用人工的項目直接補做（2026-11 Jenny：儲值金、固定費用不要只提醒）：
+    - 固定費用：可新增的直接新增到請款記錄（已新增過的會略過，不會重複）
+    - 儲值金完整流程：儲值金結算／預收都成功、但完整流程沒跑或失敗 → 直接跑（最多試 AUTO_MAX_ATTEMPTS 次）
+    回傳補做結果訊息。"""
+    done = []
+    fixed = [e["item"] for e in entries if e.get("kind") == "fixed" and e.get("runnable")]
+    if fixed:
+        if submit_fixed is None:
+            from tools.finance_management.fixed_expense_batch import submit as submit_fixed
+        try:
+            added = submit_fixed(fixed, run_type="月初檢查自動補做", log=log)
+            done.append("固定費用：" + "、".join(f"{a} 新增 {n} 筆" for a, n in added.items()))
+        except Exception as exc:
+            log(f"❌ 固定費用自動補做失敗：{exc}")
+    by_key = {e.get("key"): e for e in entries if e.get("kind") == "cloud"}
+    vip = by_key.get("finance_vip_full_pipeline")
+    sources_ok = all(by_key.get(k, {}).get("ok") for k in VIP_SOURCES)
+    if vip and not vip["ok"] and sources_ok:
+        previous = read_job_log(day, "finance_vip_full_pipeline") or {}
+        attempts = int(previous.get("auto_attempts", 0) or 0)
+        if attempts >= AUTO_MAX_ATTEMPTS:
+            log(f"儲值金完整流程已自動補做 {attempts} 次都失敗，改提醒人工處理")
+        else:
+            if run_vip is None:
+                from tools.scheduled_finance.runner import run_vip_full_pipeline as run_vip
+            log("===== 自動補做：儲值金完整流程 =====")
+            try:
+                code = run_vip(day)
+            except Exception as exc:
+                log(f"❌ 儲值金完整流程失敗：{exc}")
+                code = 1
+            write_job_log(day, "finance_vip_full_pipeline", "success" if code == 0 else "failed", attempts + 1)
+            done.append("儲值金完整流程：" + ("完成" if code == 0 else "失敗"))
+    return done
+
+
 def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) -> list[dict]:
     now = now or datetime.now(TW_TZ)
+    fixed_up = auto_fix(now.date(), collect_all(now.date(), log=log, include_month_start=False), log=log)
+    if fixed_up:
+        log("自動補做：" + "；".join(fixed_up))
     problems = collect(now.date(), log=log, hour=now.hour)
     try:
         clear_reminders(now.date(), log=log)
