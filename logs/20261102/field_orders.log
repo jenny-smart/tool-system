@@ -1,0 +1,16 @@
+📋 log_spreadsheet_id 已從設定檔載入
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets.properties.title&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_limit': 'ReadRequestsPerMinutePerUser', 'window_start_time': '1793566996', 'service': 'sheets.googleapis.com', 'quota_unit': '1/min/{project}/{user}', 'consumer': 'projects/1042663213860', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_location': 'global', 'quota_limit_value': '60'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+📝 外場排程打卡：外場訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.17/x64/bin/python -u -m tools.field_management.orders --date 20261102 --system-name 外場排程系統 --run-type 排程
+[2026-11-02 05:04:09] 開始處理訂單資料：20261102訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1gn8APXePTsrK0enbVXyohK1OECpUNys71P6dXW47Xl0
+🗑️ 已刪除來源暫存 Google Sheet：1gn8APXePTsrK0enbVXyohK1OECpUNys71P6dXW47Xl0
+[2026-11-02 05:04:25] 完成：20261102訂單-台北.xls → 訂單資料!A:ZZ / rows=511
+[2026-11-02 05:04:27] 開始處理訂單資料：20261102訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1xSqx18GCl9IhkufsJ7vI3vCPnE0I3-PxSVL-nGDzQfw
+🗑️ 已刪除來源暫存 Google Sheet：1xSqx18GCl9IhkufsJ7vI3vCPnE0I3-PxSVL-nGDzQfw
+[2026-11-02 05:04:36] 完成：20261102訂單-台中.xls → 訂單資料!A:ZZ / rows=46
+[2026-11-02 05:04:38] orders.py 全部完成
+
+📝 外場排程打卡：外場訂單 / success
+field_management scheduler 全部完成
