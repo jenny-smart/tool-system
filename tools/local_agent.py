@@ -1062,6 +1062,11 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
                 continue
             print(line, flush=True)
             record(line)
+            if line.startswith("STEP_RESULTS:"):  # 整合執行逐步結果（month_start.batch_run）
+                try:
+                    special_result["steps"] = json.loads(line.split(":", 1)[1])
+                except ValueError:
+                    pass
             if line.startswith("RESULT_FILE:"):
                 file_path = line.split(":", 1)[1].strip()
                 if file_path and file_path not in result_files:

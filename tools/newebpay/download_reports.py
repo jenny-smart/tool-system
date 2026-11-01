@@ -311,6 +311,35 @@ def fill_enterprise_login(page: Page, account: AreaAccount) -> None:
     password.fill(account.password)
 
 
+# 等人工輸入驗證碼的時間（秒）；原本 30 秒太短，人在電腦前也常來不及
+LOGIN_WAIT_SECONDS = 180
+
+_PAGE_LISTENERS: dict[int, dict[str, object]] = {}
+
+
+def replace_listener(page: Page, event: str, handler) -> None:
+    """同一個分頁同一種事件只留一個處理函式。
+    逐區登入共用同一個分頁時，舊地區的 dialog 處理函式若留著，會搶先按掉對話框，
+    後面的處理函式再按就丟「Cannot accept dialog which is already handled」，
+    新地區收不到「查無交易資料」之類的訊息而誤判逾時（2026-11-01 月初整合執行實際發生）。"""
+    listeners = _PAGE_LISTENERS.setdefault(id(page), {})
+    old = listeners.get(event)
+    if old is not None:
+        try:
+            page.remove_listener(event, old)
+        except Exception:
+            pass
+    page.on(event, handler)
+    listeners[event] = handler
+
+
+def accept_dialog(dialog: object) -> None:
+    try:
+        getattr(dialog, "accept")()
+    except Exception:
+        pass  # 已經被按掉了
+
+
 def login(page: Page, account: AreaAccount) -> list[str]:
     login_messages: list[str] = []
 
@@ -319,15 +348,15 @@ def login(page: Page, account: AreaAccount) -> list[str]:
         if message:
             login_messages.append(message)
             print(f"\n[{account.area}] 藍新訊息：{message}", file=sys.stderr)
-        getattr(dialog, "accept")()
+        accept_dialog(dialog)
 
     def show_login_response(response: object) -> None:
         url = str(getattr(response, "url", ""))
         if "company_login_check" in url:
             print(f"[{account.area}] 藍新已接收登入資料（HTTP {getattr(response, 'status', '?')}）")
 
-    page.on("dialog", show_dialog)
-    page.on("response", show_login_response)
+    replace_listener(page, "dialog", show_dialog)
+    replace_listener(page, "response", show_login_response)
     if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
         if is_expected_member(page, account):
             print(f"[{account.area}] 沿用目前藍新登入狀態（{account.account}）。")
@@ -340,7 +369,7 @@ def login(page: Page, account: AreaAccount) -> list[str]:
     print("請直接在網頁輸入驗證碼，並點擊「企業會員登入」。")
     print("若被退回登入頁，終端機會顯示藍新的錯誤訊息，並可重新輸入新驗證碼。")
 
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + LOGIN_WAIT_SECONDS
     refilled_after_failure = False
     while time.monotonic() < deadline:
         if "/sale/Sell_center/search_transaction" in page.url:
@@ -401,6 +430,13 @@ def download_payments(
     if "/sale/Sell_center/search_transaction" not in page.url:
         page.goto(PAYMENT_URL, wait_until="domcontentloaded")
     form = page.locator("#trans_form")
+    if not form.count():
+        # 登入時按掉「強制登出其他位置」後，可能停在沒有表單的 ?count=1 頁面：重新進收款查詢頁
+        page.goto(PAYMENT_URL, wait_until="domcontentloaded")
+        try:
+            form.wait_for(state="attached", timeout=15_000)
+        except Exception:
+            pass
     if not form.count():
         raise RuntimeError(f"找不到收款查詢表單 #trans_form，頁面：{page.url}")
     write_date(form.locator('input[name="PeriodStartDate"]'), start)

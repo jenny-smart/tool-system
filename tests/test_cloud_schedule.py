@@ -37,10 +37,10 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(self.jobs('2027-01-01T00:40'),[])
 
     def test_month_start_finance(self):
-        for hm, target in [('00:30','fixed_expense'),('01:00','vip_full_pipeline'),('02:00','cash_gap_check'),('08:00','month_start')]:
+        for hm, target in [('00:30','fixed_expense'),('01:00','vip_full_pipeline'),('02:00','cash_gap_check'),('05:00','month_start')]:
             self.assertIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-01T'+hm))
             self.assertNotIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-02T'+hm))
-        for hour in [h for h in range(3, 24) if h != 8]:
+        for hour in [h for h in range(3, 24) if h != 5]:
             self.assertEqual([j for j in self.jobs('2026-11-01T%02d:00' % hour) if j[0]=='scheduled_finance.yml'],
                              [('scheduled_finance.yml',{'target':'month_start_check'})])
         for hm in ['00:00','01:00','02:30','03:10']:

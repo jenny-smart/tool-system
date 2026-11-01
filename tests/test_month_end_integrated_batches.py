@@ -52,20 +52,32 @@ def test_other_period_task_not_matched():
     assert items["cetustek_download"]["status"] == "尚未執行"
 
 
-def test_run_plan_order_and_dependency():
+def test_run_plan_cash_gap_runs_even_if_newebpay_fails():
     from tools.newebpay.month_close import INVOICE_FAILED
 
-    calls = []
+    calls, lines = [], []
 
     def run_step(step, period, _cdp):
         calls.append(step)
         return INVOICE_FAILED if step == "newebpay" else 0
 
     code = ms.run_plan("202610", ["cash_gap", "cetustek_download", "newebpay"],
-                       log=lambda _t: None, run_step=run_step, record=False)
-    # 藍新（收退款＋發票金額一起做）失敗 → 現金缺口略過；鯨躍照做
-    assert calls == ["newebpay", "cetustek_download"]
+                       log=lines.append, run_step=run_step, record=False)
+    assert calls == ["newebpay", "cetustek_download", "cash_gap"]  # 現金缺口照算
     assert code == 1
+    result_line = [l for l in lines if l.startswith(ms.STEP_RESULTS_PREFIX)][0]
+    assert '"cash_gap": "成功"' in result_line and "失敗（發票金額）" in result_line
+
+
+def test_status_per_step_from_result_json():
+    task = _task(ms.BATCH_ACTION, {"period": "202610", "steps": list(ms.STEP_ORDER)}, status="failed")
+    task["result_json"] = json.dumps({"steps": {"newebpay": "失敗（收退款）", "cetustek_download": "成功", "cash_gap": "成功"}},
+                                     ensure_ascii=False)
+    items = {i["step"]: i for i in ms.build_items("202610", [task], [["地區", "月份", "日期", "金額"], ["台北", "202610", "", "1"]],
+                                                     [["", "台北"], ["日期", "2026/10/31"]])}
+    assert items["newebpay"]["default"] and "失敗（收退款）" in items["newebpay"]["status"]
+    assert not items["cetustek_download"]["default"] and items["cetustek_download"]["status"].startswith("已完成")
+    assert not items["cash_gap"]["default"]
 
 
 def test_run_plan_legacy_steps_merge_into_one_login():

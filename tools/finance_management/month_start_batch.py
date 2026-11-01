@@ -12,9 +12,10 @@
   現金缺口另看「藍新發票總表」有沒有該期別的發票金額、「現金缺口試算」是不是已算到期別月底。
 執行：勾選的步驟整批排成一筆本機 Agent 任務（month_start.batch_run），依序：
   藍新收退款＋發票金額 → 鯨躍發票 → 現金缺口。藍新登入每區仍需人工輸入驗證碼（一次）。
-  藍新發票金額沒查到就算失敗、不算現金缺口（會用到舊數字）；鯨躍失敗不影響後面的步驟。
+  每一步失敗都不影響後面的步驟（現金缺口照算，藍新發票金額沒更新就用藍新發票總表目前的數字）。
+  各步驟結果寫進任務的 result_json（steps），盤點時逐步顯示，不會因為整批失敗就全部顯示失敗。
   全部跑完在 Jenny 行事曆留一筆紀錄（不跳提醒）。
-排程：每月 1 日 08:00 由雲端排入全部三個步驟（藍新約 08:00 寄手續費發票，還沒開就算失敗、可再補做；Mac 開機、輸入驗證碼時才會執行）；
+排程：每月 1 日 05:00 由雲端排入全部三個步驟（藍新約 08:00 寄手續費發票，還沒開就算失敗、可再補做；Mac 開機、輸入驗證碼時才會執行）；
   02:00 雲端另外先算一次現金缺口（不等藍新），藍新做完後這裡會再算一次覆蓋。
 """
 from __future__ import annotations
@@ -43,8 +44,9 @@ STEPS = {
 STEP_ORDER = tuple(STEPS)
 # 舊版分成兩步（已排入的舊任務照樣認得，執行時一律合併成一步）
 LEGACY_NEWEBPAY_STEPS = ("newebpay_download", "newebpay_invoice")
-# 依賴：現金缺口要用藍新發票金額，藍新這步失敗就不算現金缺口
-DEPENDS_ON = {"cash_gap": "newebpay"}
+# 現金缺口一律照算（2026-11 Jenny：要能自己跑）；藍新發票金額沒更新時會用藍新發票總表目前的數字
+DEPENDS_ON: dict[str, str] = {}
+STEP_RESULTS_PREFIX = "STEP_RESULTS:"  # 整批任務結束時印出各步驟結果，本機 Agent 存進 result_json
 
 
 def normalize_steps(steps) -> list[str]:
@@ -107,7 +109,20 @@ def latest_task(tasks: list[dict], step: str, period: str) -> Optional[dict]:
     return next((t for t in tasks if task_covers(t, step, period)), None)
 
 
-def _status_text(task: Optional[dict]) -> tuple[str, bool, bool]:
+def step_result(task: dict, step: str) -> Optional[str]:
+    """整批任務 result_json 裡這一步的結果（成功／失敗…／略過…）；舊任務沒有就回傳 None。"""
+    try:
+        steps = json.loads(task.get("result_json") or "{}").get("steps") or {}
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if step == "newebpay" and step not in steps:
+        legacy = [steps.get(s) for s in LEGACY_NEWEBPAY_STEPS if s in steps]
+        if legacy:
+            return "成功" if all(v == "成功" for v in legacy) else "失敗"
+    return steps.get(step)
+
+
+def _status_text(task: Optional[dict], step: str = "") -> tuple[str, bool, bool]:
     """回傳 (狀態文字, 可勾選, 預設打勾)。"""
     if task is None:
         return "尚未執行", True, True
@@ -115,6 +130,11 @@ def _status_text(task: Optional[dict]) -> tuple[str, bool, bool]:
     when = task.get("finished_at") or task.get("started_at") or task.get("created_at") or ""
     if status in ACTIVE:
         return f"{ACTIVE[status]}（{task.get('created_at', '')}）", False, False
+    result = step_result(task, step) if step and task.get("action") == BATCH_ACTION else None
+    if result is not None and status in ("completed", "failed"):
+        if result == "成功":
+            return f"已完成（{when}）", True, False
+        return f"上次{result}（{when}）", True, True
     if status == "completed":
         return f"已完成（{when}）", True, False
     if status == "cancelled":
@@ -147,7 +167,7 @@ def build_items(period: str, tasks: list[dict], invoice_values: list[list], cash
     for step in STEP_ORDER:
         label = STEPS[step][0]
         task = latest_task(tasks, step, period)
-        status, selectable, default = _status_text(task)
+        status, selectable, default = _status_text(task, step)
         note = ""
         if step == "newebpay":
             areas = invoice_amount_areas(invoice_values, period)
@@ -235,6 +255,12 @@ def _run_step(step: str, period: str, cdp_url: str) -> int:
         errors = [f"{area} {key}" for area, r in results.items() for key, v in r.items() if isinstance(v, str)]
         if errors:
             print("⚠️ 現金缺口有項目出錯：" + "、".join(errors), flush=True)
+        try:  # 藍新發票金額更新後，review 檔「現金缺口」區塊也跟著更新
+            from tools.finance_management.review_monthly import sync_cash_gap_block
+
+            sync_cash_gap_block(period, log=lambda t: print(t, flush=True))
+        except Exception as exc:
+            print(f"⚠️ review 檔現金缺口區塊沒更新：{exc}", flush=True)
         return 0
     sys.stdout.flush()
     code = subprocess.run(_step_command(step, period, cdp_url)).returncode
@@ -297,6 +323,7 @@ def run_plan(period: str, steps: list[str], log: Callable[[str], None] = print, 
             code = 1
         results[step] = "成功" if code == 0 else _failure_text(step, code)
         log(("✅ " if code == 0 else "❌ ") + f"{label}：{results[step]}")
+    log(STEP_RESULTS_PREFIX + json.dumps(results, ensure_ascii=False))
     if record:
         try:
             _record(period, results, log)

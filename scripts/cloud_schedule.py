@@ -56,9 +56,9 @@ def plan(when):
         previous = (when.replace(day=1) - dt.timedelta(days=1)).strftime('%Y%m')
         add('scheduled_monthly', target=monthly[hm], period=previous + '-2')
     # 每月 1 日財務：00:30 固定費用，01:00 儲值金完整流程，02:00 現金缺口，
-    # 08:00 排入月初藍新／鯨躍／現金缺口給 Mac（藍新約 08:00 寄手續費發票）
-    # 02:00 起每小時月初檢查（02:00、08:00 分別併進 cash_gap_check、month_start：同時段同 workflow 只能派送一次）
-    finance = {'00:30': 'fixed_expense', '01:00': 'vip_full_pipeline', '02:00': 'cash_gap_check', '08:00': 'month_start'}
+    # 05:00 排入月初藍新／鯨躍／現金缺口給 Mac
+    # 02:00 起每小時月初檢查（02:00、05:00 分別併進 cash_gap_check、month_start：同時段同 workflow 只能派送一次）
+    finance = {'00:30': 'fixed_expense', '01:00': 'vip_full_pipeline', '02:00': 'cash_gap_check', '05:00': 'month_start'}
     if when.day == 1 and hm in finance:
         add('scheduled_finance', target=finance[hm])
     elif when.day == 1 and when.minute == 0 and 3 <= when.hour <= 23:

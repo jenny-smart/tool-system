@@ -84,7 +84,14 @@ def main(argv=None) -> int:
                         download_failures.append(f"{account.area}: {exc}")
                         print(f"[{account.area}] 收退款下載失敗：{exc}", file=sys.stderr)
                     try:
-                        rows = {r["invoice_date"]: r for r in ia.query_invoice_rows(page, [invoice_date])}
+                        before = len(messages)
+                        try:
+                            rows = {r["invoice_date"]: r for r in ia.query_invoice_rows(page, [invoice_date])}
+                        except Exception:
+                            # 藍新跳「查無資料」＝還沒開發票：記成查無發票，不當程式錯誤
+                            if not any("查無資料" in m for m in messages[before:]):
+                                raise
+                            rows = {}
                         row = rows.get(invoice_date, {})
                         results.append(ia.InvoiceAmount(
                             area=account.area, source_month=period, invoice_date=invoice_date,

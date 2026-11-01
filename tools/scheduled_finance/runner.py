@@ -3,10 +3,11 @@
   1 日 00:30  fixed_expense        【整合執行】固定費用：新增當月台北辦公室租金／管理費、單月台中當月＋下月租金
   1 日 01:00  vip_full_pipeline    【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式），上個月
                                    （00:10 儲值金結算、00:20 儲值金預收的檔案要先產出）
-  1 日 02:00  cash_gap_check       全區現金缺口（截至上個月底，藍新發票金額這時還沒有）＋月初檢查
-  1 日 08:00  month_start          排入【整合執行】月初藍新／鯨躍／現金缺口（藍新約 08:00 寄手續費發票；還沒開會算失敗，可再補做）＋月初檢查
-  1 日 03:00～23:00 每小時（08:00 除外）  month_start_check  月初檢查：沒完成的項目在 Jenny 行事曆建提醒
-                                   （08:00 前不提醒藍新／鯨躍／現金缺口，還沒到排入時間）
+  1 日 02:00  cash_gap_check       全區現金缺口（截至上個月底，藍新發票金額這時還沒有）→ 預收款金額 →
+                                   年度review 整理欄位／預估公式／現金缺口區塊（review_monthly）→ 月初檢查
+  1 日 05:00  month_start          排入【整合執行】月初藍新／鯨躍／現金缺口（藍新約 08:00 寄手續費發票；還沒開會算失敗，可再補做）＋月初檢查
+  1 日 03:00～23:00 每小時（05:00 除外）  month_start_check  月初檢查：沒完成的項目在 Jenny 行事曆建提醒
+                                   （05:00 前不提醒藍新／鯨躍／現金缺口，還沒到排入時間）
   單月 10 日 10:00  accounting_reminder  會計事務所費用確認：在 Jenny 行事曆建提醒
   其他 target：month_start_queue（只排入）、cash_gap（只算現金缺口）
 
@@ -20,7 +21,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-TARGETS = ("month_start", "month_start_queue", "fixed_expense", "vip_full_pipeline", "cash_gap", "cash_gap_check",
+TARGETS = ("month_start", "month_start_queue", "prepaid_amount", "review_monthly", "fixed_expense", "vip_full_pipeline", "cash_gap", "cash_gap_check",
            "month_start_check", "accounting_reminder")
 
 
@@ -56,7 +57,7 @@ def run_fixed_expense(today: date) -> int:
 
 
 def run_month_start(today: date) -> int:
-    """08:00：排入月初整合執行，再做月初檢查（同時段同 workflow 只能派送一次，所以合併）。
+    """05:00：排入月初整合執行，再做月初檢查（同時段同 workflow 只能派送一次，所以合併）。
     藍新每月 1 日 08:00 才寄手續費發票，所以不在半夜排。"""
     codes = []
     for name, job in (("月初整合執行排入", run_month_start_queue), ("月初檢查", run_month_start_check)):
@@ -120,15 +121,45 @@ def run_month_start_check(today: date) -> int:
     return 0
 
 
+def run_prepaid_amount(today: date) -> int:
+    """預收款金額（藍新ATM／信用卡／ATM／家電／水洗服務金額），各區寫進「現金缺口試算」下方。"""
+    import time
+
+    from tools.prepaid_amount.prepaid_amount import CITIES, run
+
+    failed = 0
+    for i, city in enumerate(CITIES):
+        if i:
+            time.sleep(3)
+        try:
+            log(run(city, previous_period(today)))
+        except Exception as exc:
+            failed += 1
+            log(f"❌ {city} 預收款金額失敗：{exc}")
+    return 1 if failed else 0
+
+
+def run_review_monthly(today: date) -> int:
+    """年度review：欄位整理（過去看實際、當月看預估）、預估公式範圍、現金缺口區塊（當月＝上個月）。"""
+    from tools.finance_management.review_monthly import run_all
+
+    return 1 if run_all(previous_period(today), log=log) else 0
+
+
 def run_cash_gap_check(today: date) -> int:
-    """02:00：先算現金缺口，再做月初檢查（同一時段同一個 workflow 只能派送一次，所以合併）。"""
-    code = 1
-    try:
-        code = run_cash_gap(today)
-    except Exception as exc:
-        log(f"❌ 現金缺口失敗：{exc}")
+    """02:00：現金缺口 → 預收款金額 → 年度review 整理＋現金缺口區塊 → 月初檢查
+    （同一時段同一個 workflow 只能派送一次，所以合併；一步失敗不影響下一步）。"""
+    codes = []
+    for name, job in (("現金缺口", run_cash_gap), ("預收款金額", run_prepaid_amount),
+                      ("年度review", run_review_monthly)):
+        log(f"===== {name} =====")
+        try:
+            codes.append(job(today))
+        except Exception as exc:
+            log(f"❌ {name}失敗：{exc}")
+            codes.append(1)
     run_month_start_check(today)
-    return code
+    return max(codes)
 
 
 def run_accounting_reminder(today: date) -> int:
