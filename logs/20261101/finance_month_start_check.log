@@ -41,14 +41,12 @@
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 ⚠️ 讀取月初檢查不提醒失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_
 已刪除 1 則之前的月初提醒
-月初工作未完成 5 項（11/01）
-2026/11/01 15:01 檢查，5 個功能還沒完成：
+月初工作未完成 3 項（11/01）
+2026/11/01 16:01 檢查，3 個功能還沒完成：
 
 ・藍新發票：未完成：桃園❌
-・藍新帳務：未完成：台北❌、新竹❌
-・現金缺口：未完成：台北❌
-・富邦明細：未完成：台北❌
-・元大明細：未完成：台北❌、台中❌
+・藍新帳務：未完成：新竹❌
+・現金缺口：未完成：新竹❌、高雄❌
 
 處理方式：Tools App【整合執行】月初（1日所有排程）→ 盤點 → 勾選 → 執行
 
