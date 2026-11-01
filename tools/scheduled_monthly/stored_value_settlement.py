@@ -246,6 +246,21 @@ def get_or_create_single_child_folder(service, parent_id: str, folder_name: str)
     return res["id"]
 
 
+# 儲值金根目錄下的年度資料夾：2026 起為「{YYYY}儲值金」；2025 以前沿用舊名「{YYYY}」
+YEAR_FOLDER_TEMPLATE = "{year}儲值金"
+LEGACY_YEAR_FOLDER_UNTIL = 2025
+
+
+def get_stored_value_year_folder(service, root_id: str, year: int) -> str:
+    """回傳 {YYYY}儲值金 資料夾 ID（沒有就建立）；2025 以前已有的舊名「{YYYY}」資料夾照用。"""
+    name = YEAR_FOLDER_TEMPLATE.format(year=year)
+    if list_child_folders(service, root_id, name) or year > LEGACY_YEAR_FOLDER_UNTIL:
+        return get_or_create_single_child_folder(service, root_id, name)
+    if list_child_folders(service, root_id, str(year)):
+        return get_or_create_single_child_folder(service, root_id, str(year))
+    return get_or_create_single_child_folder(service, root_id, name)
+
+
 def list_files_in_folder(service, parent_folder_id: str, filename: str) -> list[dict[str, Any]]:
     escaped_name = escape_drive_query_value(filename)
     q = (
@@ -500,7 +515,7 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
         log(f"\n=== 處理 {city} ===")
         login(session, acc["email"], acc["password"])
 
-        year_folder_id = get_or_create_single_child_folder(service, args.folder_id, str(year))
+        year_folder_id = get_stored_value_year_folder(service, args.folder_id, int(year))
         tag_folder_id = get_or_create_single_child_folder(service, year_folder_id, folder_period)
 
         with tempfile.TemporaryDirectory() as temp_dir:
