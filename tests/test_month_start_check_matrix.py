@@ -326,7 +326,7 @@ def ACTION_HANDLERS_LATE():
 
 def test_newebpay_balance_row_and_parser():
     cash = [["", "台北", "台中", "桃園", "新竹", "高雄"], ["日期", "2026/10/31"],
-            ["藍新帳務日期", "2026-11-01 13:01:59", "2026-10-15 10:00:00"], ["藍新帳務金額", "461580", "5"]]
+            ["藍新帳務日期", "2026-11-01 13:01:59", "2026-09-15 10:00:00"], ["藍新帳務金額", "461580", "5"]]
     cells = chk.newebpay_balance_cells(cash, "202610")
     assert cells["台北"][0] == chk.OK and cells["台中"][0] == chk.FAIL and cells["桃園"][0] == chk.FAIL
     assert cells["高雄"][0] == chk.NA
@@ -381,3 +381,35 @@ def test_write_balances_to_cash_gap_sheet():
     ab.write_balances({"桃園": ("2026-11-01 09:00:00", 1200)}, service=Svc(), spreadsheet_id="x")
     cells = {d["range"].split("!")[1]: d["values"][0][0] for d in calls[0]}
     assert cells == {"D15": "2026-11-01 09:00:00", "D16": 1200}
+
+
+def test_newebpay_balance_ok_when_last_record_before_month_end():
+    cash = [["", "台北", "台中", "桃園", "新竹", "高雄"], ["日期", "2026/10/31"],
+            ["藍新帳務日期", "", "2026-09-30 10:00:00", "", "2026-10-27 13:02:38"], ["藍新帳務金額", "", "5", "", "20192"]]
+    cells = chk.newebpay_balance_cells(cash, "202610")
+    assert cells["新竹"][0] == chk.OK  # 10/27 之後沒交易，也算查過 10 月
+    assert cells["台中"][0] == chk.FAIL  # 9 月的資料＝還沒查 10 月
+
+
+def test_cash_gap_keeps_previous_value_when_read_fails():
+    from tools.finance_management import cash_gap
+
+    class Svc:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def get(self, **_kw):
+            return self
+
+        def execute(self):
+            return {"values": [["", "台北", "台中", "桃園", "新竹", "高雄"],
+                               ["日期", "2026/10/31", "2026/10/31", "2026/10/31", "2026/10/31", "2026/09/30"],
+                               ["富邦餘額", 1, 2, 3, 136198, 9]]}
+
+    results = {"新竹": {"富邦餘額": "錯誤：<HttpError 429>"}, "高雄": {"富邦餘額": "錯誤：<HttpError 429>"}}
+    kept = cash_gap.keep_previous_values(Svc(), "x", results, ["新竹", "高雄"], "2026/10/31")
+    assert results["新竹"]["富邦餘額"] == 136198 and kept == ["新竹 富邦餘額"]
+    assert isinstance(results["高雄"]["富邦餘額"], str)  # 舊值是 9/30 的，不沿用
