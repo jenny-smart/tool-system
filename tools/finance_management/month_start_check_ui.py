@@ -46,7 +46,7 @@ def _saved_ignored(names: list[str], options: list[tuple[str, str, str]]) -> lis
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption("每月 1 日要做的所有工作，依功能列出各地區狀態：✅ 完成　❌ 沒完成／失敗　⏳ 排入本機 Agent、執行中　"
-               "— 這區不用做（藍新查無發票先算 ❌，到下方按確認才算完成）。全部地區都完成會在「完成」欄打 ✅。"
+               "— 這區不用做（藍新查無發票算 ❌；確定沒有發票就到「不提醒設定」勾掉）。全部地區都完成會在「完成」欄打 ✅。"
                "沒完成的功能預設打勾，按「執行」只補做沒完成的地區。"
                "（1 日 02:00～23:00 排程也會每小時檢查並提醒，固定費用、儲值金彙整沒做會自動補做。）")
     today = datetime.now(ZoneInfo("Asia/Taipei")).date()
@@ -87,20 +87,6 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     } for r in rows])
     edited = st.data_editor(table, hide_index=True, width="stretch", key=editor_key,
                             disabled=[c for c in table.columns if c != RUN_COLUMN])
-    invoice_row = next((r for r in rows if r["key"] == "newebpay_invoice"), None)
-    pending = chk.unconfirmed_no_invoice_areas(invoice_row) if invoice_row else []
-    if pending:
-        st.info("藍新查不到手續費發票的地區先算 ❌。請到藍新後台確認："
-                "真的沒有發票就按下面的按鈕確認（記成 0、算完成）；有發票就勾「藍新發票」重新執行。")
-        cols = st.columns(len(pending))
-        for col, area in zip(cols, pending):
-            if col.button(f"✅ 確認{area} {period} 沒有藍新手續費發票", key=f"{PREFIX}_confirm_{area}"):
-                try:
-                    chk.confirm_no_invoice(area, period)
-                    st.success(f"已確認{area} {period} 沒有藍新手續費發票，請再按一次「盤點」")
-                    st.session_state.pop(f"{PREFIX}_result", None)
-                except Exception as exc:
-                    st.error(f"確認失敗：{exc}")
     with st.expander("🔕 不提醒設定（自己沒辦法完成的項目：盤點照樣顯示 ❌，但行事曆和 1 日每小時檢查不再提醒）"):
         options = chk.ignore_options(rows)
         names = [f"{label}／{area}" for _k, label, area in options]

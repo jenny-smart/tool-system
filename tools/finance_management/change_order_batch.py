@@ -450,7 +450,8 @@ def record_to_calendar(results: dict[str, dict], now: Optional[datetime] = None,
     from tools.orders_system import calendar_notify
 
     event = calendar_notify.create_notify_event(summary=title, description=body, start=now,
-                                                calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[])
+                                                calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
+                                                replace_prefix="本日清潔異動已回寫")
     log(f"已在 {RECORD_CALENDAR_ID} 行事曆留紀錄：{title}")
     return event
 

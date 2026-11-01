@@ -85,10 +85,25 @@ def calendar_for(calendar_id: str = ""):
     return _calendar_service(calendar_id), calendar_id
 
 
+def delete_same_day(service, calendar_id: str, prefix: str, day_start: datetime) -> int:
+    """刪掉當天（day_start 那天）標題以 prefix 開頭的事件：同一種提醒／紀錄只留最新一則，不留歷程。"""
+    events = service.events().list(calendarId=calendar_id, timeMin=day_start.isoformat(),
+                                   timeMax=(day_start + timedelta(days=1)).isoformat(), q=prefix,
+                                   singleEvents=True, maxResults=100).execute().get("items", [])
+    removed = 0
+    for event in events:
+        if str(event.get("summary", "")).startswith(prefix):
+            service.events().delete(calendarId=calendar_id, eventId=event["id"]).execute()
+            removed += 1
+    return removed
+
+
 def create_notify_event(summary: str, description: str = "", start: datetime = None,
-                         calendar_id: str = None, reminder_minutes=None, attendee: str = ""):
+                         calendar_id: str = None, reminder_minutes=None, attendee: str = "",
+                         replace_prefix: str = ""):
     """建立一個通知用日曆事件：30 分鐘、預設提前 20 分與 10 分跳窗提醒，
-    建在 Jenny 的行事曆；attendee 有給才另外邀請（會寄邀請信）。"""
+    建在 Jenny 的行事曆；attendee 有給才另外邀請（會寄邀請信）。
+    replace_prefix：先刪掉當天同樣開頭的舊事件（只留最新一則，不留歷程）。"""
     service, calendar_id = calendar_for(calendar_id)
 
     start = start or datetime.now(TAIPEI_TZ)
@@ -108,6 +123,14 @@ def create_notify_event(summary: str, description: str = "", start: datetime = N
     }
     if attendee:
         body["attendees"] = [{"email": attendee}]
+    if replace_prefix:
+        try:
+            day_start = start.astimezone(TAIPEI_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+            removed = delete_same_day(service, calendar_id, replace_prefix, day_start)
+            if removed:
+                print(f"已刪除 {removed} 則之前的「{replace_prefix}」", flush=True)
+        except Exception as exc:  # 刪不掉不影響建新的
+            print(f"⚠️ 刪除之前的「{replace_prefix}」失敗：{exc}", flush=True)
 
     return service.events().insert(
         calendarId=calendar_id, body=body, sendUpdates="all" if attendee else "none"

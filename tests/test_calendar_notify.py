@@ -77,3 +77,39 @@ def test_hers_calendar_falls_back_to_lemonclean_without_token(monkeypatch):
     assert calendar_notify.calendar_for() == ("svc", "jenny@lemonclean.com.tw")
     monkeypatch.setattr(google_auth, "_oauth_value", lambda name: "tok" if name == "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN" else "")
     assert calendar_notify.calendar_for() == ("svc", "jenny@hers.com.tw")
+
+
+def test_replace_prefix_deletes_same_day_events_before_insert(monkeypatch):
+    from datetime import datetime
+
+    log = []
+
+    class Req:
+        def __init__(self, result):
+            self.result = result
+
+        def execute(self):
+            return self.result
+
+    class Events:
+        def list(self, **kw):
+            log.append(("list", kw["q"]))
+            return Req({"items": [{"id": "old", "summary": "清潔異動未備妥：2 筆"},
+                                  {"id": "other", "summary": "別的提醒"}]})
+
+        def delete(self, calendarId, eventId):
+            log.append(("delete", eventId))
+            return Req({})
+
+        def insert(self, **kw):
+            log.append(("insert", kw["body"]["summary"]))
+            return Req({"id": "new"})
+
+    class Svc:
+        def events(self):
+            return Events()
+
+    monkeypatch.setattr(calendar_notify, "calendar_for", lambda cid=None: (Svc(), "jenny@hers.com.tw"))
+    calendar_notify.create_notify_event(summary="清潔異動未備妥：1 筆", start=datetime(2026, 11, 2, 10, 30,
+                                        tzinfo=calendar_notify.TAIPEI_TZ), replace_prefix="清潔異動未備妥")
+    assert log == [("list", "清潔異動未備妥"), ("delete", "old"), ("insert", "清潔異動未備妥：1 筆")]

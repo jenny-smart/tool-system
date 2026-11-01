@@ -70,7 +70,8 @@ def _notify(todo: list, now: datetime = None, log=print):
         log("非工作日或已過 11:00，不建提醒")
         return None
     title, body = build_notify_text(todo, now.date())
-    kwargs = dict(summary=title, description=body, start=start, reminder_minutes=[REMIND_BEFORE_MINUTES])
+    kwargs = dict(summary=title, description=body, start=start, reminder_minutes=[REMIND_BEFORE_MINUTES],
+                  replace_prefix="清潔異動未備妥")
     try:
         event = calendar_notify.create_notify_event(calendar_id=REMIND_CALENDAR_ID, attendee="", **kwargs)
         log(f"已建立 {start:%H:%M} 提醒（{REMIND_CALENDAR_ID}）")
