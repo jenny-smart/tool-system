@@ -1,0 +1,40 @@
+每月財務排程：month_start｜執行日 2026-11-01
+===== 月初整合執行排入 =====
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+202610 月初四個步驟都已完成或已排入，不重複排
+===== 月初檢查 =====
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+月初工作未完成 9 項（11/01）
+2026/11/01 09:01 檢查，9 項還沒完成：
+
+・儲值金完整流程：沒有執行紀錄
+・台北 元大明細：最後一筆 2026/10/16（要到 2026/10/30）
+・台中 元大明細：最後一筆 2026/09/18（要到 2026/10/30）
+・固定費用 台北 2026.11-辦公室租金：可新增
+・固定費用 台北 2026.11-辦公室管理費：可新增
+・藍新收退款下載：執行中（2026-11-01 08:59:22）
+・藍新手續費發票金額：執行中（2026-11-01 08:59:22）
+・鯨躍發票下載：執行中（2026-11-01 08:59:22）
+・全區現金缺口：執行中（2026-11-01 08:59:22）
+
+處理方式：
+・Tools App【儲值金】完整流程，或 GitHub Actions → Scheduled Finance Jobs → target vip_full_pipeline
+・Tools App【富邦銀行】富邦明細下載／【元大銀行】元大明細下載，或這裡勾選後執行（排入本機 Agent）
+・Tools App【整合執行】固定費用（辦公室租金）→ 盤點 → 新增
+・Tools App【整合執行】月初藍新／鯨躍／現金缺口 → 盤點 → 執行
+
+1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。
+已在 jenny@lemonclean.com.tw 行事曆建提醒
