@@ -450,6 +450,9 @@ def build_newebpay_month_close(params: dict[str, Any]) -> list[str]:
     command = [sys.executable, "-m", "tools.newebpay.month_close", period, "--cdp-url", cdp_url]
     for area in params.get("areas") or []:
         command.extend(["--area", str(area)])
+    part = str(params.get("part") or "all")
+    if part != "all":
+        command.extend(["--part", part])
     return command
 
 

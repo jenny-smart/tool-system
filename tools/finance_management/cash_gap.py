@@ -281,7 +281,11 @@ def finance_revenue(area: str, month: int) -> float:
 
 def newebpay_invoice_amount(area: str, as_of: date) -> float:
     """藍新發票金額：主控試算表固定分頁（GID=327631316）裡，A欄＝地區、B欄＝
-    月份（YYYYMM）都符合的列，取 D欄（發票金額），若有多筆則加總。"""
+    月份（YYYYMM）都符合的列，取 D欄（發票金額），若有多筆則加總。高雄不用算（2026-11 Jenny），一律 0。"""
+    from tools.newebpay.month_close import NO_INVOICE_AREAS
+
+    if area in NO_INVOICE_AREAS:
+        return 0.0
     service = get_sheets_service()
     spreadsheet_id = get_master_spreadsheet_id()
     title = NEWEBPAY_INVOICE_SHEET

@@ -230,3 +230,10 @@ def test_copy_kaohsiung_from_hsinchu(tmp_path):
     csv = tmp_path / "新竹" / "202610-2藍新收款-新竹.csv"
     csv.write_text("a")
     assert copy_for_area(csv, "新竹", "高雄").name == "202610-2藍新收款-高雄.csv"
+
+
+def test_newebpay_invoice_query_range_starts_previous_month():
+    from tools.newebpay.invoice_amounts import invoice_date_for, query_range
+
+    assert query_range([invoice_date_for("202610")]) == ("2026-10-01", "2026-11-01")
+    assert query_range([invoice_date_for("202612")]) == ("2026-12-01", "2027-01-01")

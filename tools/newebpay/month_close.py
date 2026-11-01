@@ -17,7 +17,14 @@ DOWNLOAD_FAILED = 1
 INVOICE_FAILED = 2
 # 高雄跟新竹用同一個藍新帳號：只登入新竹，下載完複製一份、地區改成高雄（2026-11 與 Jenny 確認）
 SKIP_AREAS = ("高雄",)
-COPY_AREAS = {"新竹": ("高雄",)}
+COPY_AREAS = {"新竹": ("高雄",)}  # 收退款檔複製一份給高雄
+# 高雄不用算藍新手續費發票金額（2026-11 Jenny）：發票不複製給高雄
+NO_INVOICE_AREAS = ("高雄",)
+PARTS = ("download", "invoice")
+
+
+class _Skip(Exception):
+    """這次沒勾的那一半（只做收退款或只做發票）。"""
 
 
 def copy_for_area(path: Path, source: str, target: str) -> Path:
@@ -47,6 +54,8 @@ def main(argv=None) -> int:
                         help="只做指定區域（可重複），例如 --area 桃園；高雄會改做新竹再複製一份（同一個帳號）")
     parser.add_argument("--skip-area", action="append", default=None,
                         help=f"略過的區域（可重複）；預設略過 {'、'.join(SKIP_AREAS)}（跟新竹同一個帳號）")
+    parser.add_argument("--part", choices=("all",) + PARTS, default="all",
+                        help="只做收退款（download）或只做發票金額（invoice）；預設兩個都做")
     parser.add_argument("--accounts-file", type=Path, default=dr.DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     args = parser.parse_args(argv)
@@ -67,7 +76,10 @@ def main(argv=None) -> int:
         accounts = [a for a in accounts if a.area not in skip]
         print(f"略過：{'、'.join(sorted(skip))}（跟新竹同一個帳號，跑新竹再複製一份）")
     print(f"期別：{period}（收退款 {start}～{end}；手續費發票日 {invoice_date}）")
-    print(f"區域：{', '.join(a.area for a in accounts)}；每區只登入一次")
+    do_download = args.part in ("all", "download")
+    do_invoice = args.part in ("all", "invoice")
+    print(f"區域：{', '.join(a.area for a in accounts)}；每區只登入一次；"
+          f"做：{'、'.join(n for n, on in (('收退款', do_download), ('發票金額', do_invoice)) if on)}")
 
     results = []
     download_failures: list[str] = []
@@ -87,6 +99,8 @@ def main(argv=None) -> int:
                     continue
                 try:
                     try:
+                        if not do_download:
+                            raise _Skip
                         output = dr.area_output_dir(account.area, label)
                         output.mkdir(parents=True, exist_ok=True)
                         payment = output / f"{label}藍新收款-{account.area}.csv"
@@ -100,10 +114,14 @@ def main(argv=None) -> int:
                             copies = [copy_for_area(p, account.area, copy_area) for p in (payment, refund)]
                             upload_period_files(copies, copy_area, label)
                             print(f"[{account.area}] 已複製一份收退款檔為 {copy_area}")
+                    except _Skip:
+                        pass
                     except Exception as exc:
                         download_failures.append(f"{account.area}: {exc}")
                         print(f"[{account.area}] 收退款下載失敗：{exc}", file=sys.stderr)
                     try:
+                        if not do_invoice:
+                            raise _Skip
                         before = len(messages)
                         try:
                             rows = {r["invoice_date"]: r for r in ia.query_invoice_rows(page, [invoice_date])}
@@ -118,12 +136,14 @@ def main(argv=None) -> int:
                             amount=ia.parse_amount(row["amount"]) if row else None,
                             invoice_number=row.get("invoice_number", ""), status=row.get("status", "查無發票")))
                         print(f"[{account.area}] 手續費發票：" + (f"NT$ {results[-1].amount:,}" if row else "查無發票"))
-                        for copy_area in COPY_AREAS.get(account.area, ()):
+                        for copy_area in (a for a in COPY_AREAS.get(account.area, ()) if a not in NO_INVOICE_AREAS):
                             results.append(ia.InvoiceAmount(
                                 area=copy_area, source_month=period, invoice_date=invoice_date,
                                 amount=results[-1].amount, invoice_number=results[-1].invoice_number,
                                 status=results[-1].status))
                             print(f"[{account.area}] 發票金額同步記一筆給 {copy_area}")
+                    except _Skip:
+                        pass
                     except Exception as exc:
                         invoice_failures.append(f"{account.area}: {exc}")
                         print(f"[{account.area}] 發票金額查詢失敗：{exc}", file=sys.stderr)

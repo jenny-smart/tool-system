@@ -32,6 +32,7 @@ BLOCK_WIDTH = 8
 AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 VIP_SUMMARY_SHEET = "VIP總表"
 VIP_SUMMARY_RANGE = "O3:U10"
+VIP_SUMMARY_DATE_RANGE = "O2:U10"  # 第 2 列是日期（＝台北儲值金結算 W1），用來確認是這個月的
 
 _MONTH_RE = re.compile(r"^(\d{2,4})\.(\d{1,2})(實際|預估)$")
 _YEAR_RE = re.compile(r"^(\d{4})(實際|預估)$")
@@ -198,9 +199,10 @@ def cash_gap_values(values: list[list]) -> dict[str, dict[str, Optional[float]]]
     return table
 
 
-def build_block_updates(title: str, month_end: date, vip_block: list[list], cash: dict, existing: list[list],
-                        period_label: str) -> tuple[list[dict], list[str]]:
-    """純邏輯：回傳 (values batchUpdate 的 data, 略過的格子說明)。existing＝區塊目前的公式（從第 1 列起）。"""
+def build_block_updates(title: str, month_end: date, vip_block: list[list], cash: Optional[dict], existing: list[list],
+                        period_label: str, include_vip: bool = True) -> tuple[list[dict], list[str]]:
+    """純邏輯：回傳 (values batchUpdate 的 data, 略過的格子說明)。existing＝區塊目前的公式（從第 1 列起）。
+    include_vip=False：不寫儲值金那幾列；cash=None：不寫現金缺口那幾列（儲值金彙整做完先貼儲值金）。"""
     start = block_start(month_end.month)
     label_col = column_letter(start)
     area_cols = {area: column_letter(start + 1 + i) for i, area in enumerate(AREAS)}
@@ -208,10 +210,14 @@ def build_block_updates(title: str, month_end: date, vip_block: list[list], cash
     data, skipped = [], []
     date_text = f"{month_end.year}/{month_end.month}/{month_end.day}"
     data.append({"range": f"'{title}'!{label_col}2:{all_col}2", "values": [[date_text] * 7]})
-    if vip_block:
+    if not include_vip:
+        pass
+    elif vip_block:
         data.append({"range": f"'{title}'!{label_col}3:{all_col}10", "values": vip_block})
     else:
         skipped.append("儲值金彙整（找不到 VIP總表）")
+    if cash is None:
+        return data, skipped
     for row, (label, sources) in CASH_ROWS.items():
         values = [label]
         for area in AREAS:
@@ -247,34 +253,66 @@ def _find_vip_summary(period: str) -> Optional[str]:
     return files[0]["id"] if files else None
 
 
-def sync_cash_gap_block(period: str, log: Callable[[str], None] = print) -> list[str]:
-    """寫入 review 檔「現金缺口」分頁 period 那個月的區塊；回傳略過的格子。"""
+def vip_summary_block(period: str, month_end: date, log: Callable[[str], None] = print) -> list[list]:
+    """讀彙整檔 VIP總表 O3:U10；VIP總表 O2（＝台北儲值金結算 W1）不是這個月底＝還沒彙整完（是上個月複製來的），不讀。"""
     from services.google_auth import get_sheets_service as oauth_sheets
+
+    vip_id = _find_vip_summary(period)
+    if not vip_id:
+        log(f"⚠️ 找不到 {period}VIP儲值金彙整，儲值金那幾列先不寫")
+        return []
+    raw = oauth_sheets().spreadsheets().values().get(
+        spreadsheetId=vip_id, range=f"'{VIP_SUMMARY_SHEET}'!{VIP_SUMMARY_DATE_RANGE}",
+        valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="FORMATTED_STRING").execute().get("values", [])
+    if not same_day(raw[0][0] if raw and raw[0] else "", month_end):
+        log(f"⚠️ {period}VIP儲值金彙整 的 VIP總表 日期是 {raw[0][0] if raw and raw[0] else '空白'}，"
+            f"不是 {month_end:%Y/%m/%d}（還沒彙整完），儲值金那幾列先不寫")
+        return []
+    return raw[1:]
+
+
+def same_day(value, day: date) -> bool:
+    text = str(value or "").strip().replace("-", "/")
+    try:
+        y, m, d = (int(x) for x in text.split(" ")[0].split("/"))
+    except ValueError:
+        return False
+    return (y, m, d) == (day.year, day.month, day.day)
+
+
+def sync_cash_gap_block(period: str, log: Callable[[str], None] = print, part: str = "all") -> list[str]:
+    """寫入 review 檔「現金缺口」分頁 period 那個月的區塊；回傳略過的格子。
+    part："vip"＝只貼儲值金彙整（儲值金完整流程做完）；"cash"＝只貼現金缺口試算（現金缺口算完）；"all"＝兩個都貼。"""
     from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
     from tools.finance_management.cash_gap import CASH_GAP_SHEET_NAME
-    from tools.finance_management.statement_registry import review_spreadsheet_id
 
     year, month = int(period[:4]), int(period[4:])
     month_end = date(year, month, monthrange(year, month)[1])
     service = get_sheets_service()
+    cash = None
+    if part in ("all", "cash"):
+        cash = _read_cash_gap(service, get_master_spreadsheet_id(), CASH_GAP_SHEET_NAME, period, month_end)
+    vip_block = vip_summary_block(period, month_end, log) if part in ("all", "vip") else []
+    if part == "vip" and not vip_block:
+        raise RuntimeError(f"{period}VIP儲值金彙整 還沒彙整完，沒有貼到 review")
+    return _write_block(period, month_end, vip_block, cash, part != "cash", log)
 
+
+def _read_cash_gap(service, master_id: str, sheet: str, period: str, month_end: date) -> dict:
     cash_raw = service.spreadsheets().values().get(
-        spreadsheetId=get_master_spreadsheet_id(), range=f"'{CASH_GAP_SHEET_NAME}'!A1:G30",
+        spreadsheetId=master_id, range=f"'{sheet}'!A1:G30",
         valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="FORMATTED_STRING").execute().get("values", [])
     cash_date = str(cash_raw[1][1]).strip() if len(cash_raw) > 1 and len(cash_raw[1]) > 1 else ""
     if cash_date.replace("-", "/") != month_end.strftime("%Y/%m/%d"):
         raise RuntimeError(f"現金缺口試算目前是 {cash_date or '空白'}，不是 {month_end:%Y/%m/%d}；請先算 {period} 的現金缺口")
-    cash = cash_gap_values(cash_raw)
+    return cash_gap_values(cash_raw)
 
-    vip_block: list[list] = []
-    vip_id = _find_vip_summary(period)
-    if vip_id:
-        vip_block = oauth_sheets().spreadsheets().values().get(
-            spreadsheetId=vip_id, range=f"'{VIP_SUMMARY_SHEET}'!{VIP_SUMMARY_RANGE}",
-            valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
-    else:
-        log(f"⚠️ 找不到 {period}VIP儲值金彙整，儲值金那幾列先不寫")
 
+def _write_block(period: str, month_end: date, vip_block: list[list], cash: Optional[dict], include_vip: bool,
+                 log: Callable[[str], None]) -> list[str]:
+    from tools.finance_management.statement_registry import review_spreadsheet_id
+
+    year, month = month_end.year, month_end.month
     review_id = review_spreadsheet_id()
     start = block_start(month)
     first, last = column_letter(start), column_letter(start + 6)
@@ -286,12 +324,23 @@ def sync_cash_gap_block(period: str, log: Callable[[str], None] = print) -> list
     if [str(v).strip() for v in header[1:6]] != AREAS:
         raise RuntimeError(f"「{CASH_GAP_REVIEW_SHEET}」{first}～{last} 第 1 列不是 台北～高雄，區塊位置不對，先不寫入")
     data, skipped = build_block_updates(CASH_GAP_REVIEW_SHEET, month_end, vip_block, cash, existing,
-                                        f"{year}/{month:02d}")
+                                        f"{year}/{month:02d}", include_vip=include_vip)
     service.spreadsheets().values().batchUpdate(
         spreadsheetId=review_id, body={"valueInputOption": "USER_ENTERED", "data": data}).execute()
-    log(f"【現金缺口】{year}/{month:02d} 區塊（{first}～{last}）已更新" +
+    what = "儲值金＋現金缺口" if include_vip and cash is not None else "儲值金" if include_vip else "現金缺口"
+    log(f"【review 現金缺口】{year}/{month:02d} {what}（{first}～{last}）已貼上" +
         (f"；略過：{'、'.join(skipped)}" if skipped else ""))
     return skipped
+
+
+def paste_to_review(period: str, part: str, log: Callable[[str], None] = print) -> bool:
+    """儲值金彙整／現金缺口做完就貼到 review「現金缺口」該月欄位；失敗只提醒，不讓原本的流程失敗。"""
+    try:
+        sync_cash_gap_block(period, log=log, part=part)
+        return True
+    except Exception as exc:
+        log(f"⚠️ review「{CASH_GAP_REVIEW_SHEET}」{'儲值金' if part == 'vip' else '現金缺口'}沒貼上：{exc}")
+        return False
 
 
 # ── 全部 ─────────────────────────────────────────────
