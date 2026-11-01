@@ -273,13 +273,22 @@ def visible_date_inputs(page: Page) -> list[object]:
     return result
 
 
+def query_range(wanted_dates: list[str]) -> tuple[str, str]:
+    """發票日期查詢區間：自＝前一個月 1 日（費用所屬月份），至＝發票日（下個月 1 日）。
+    起迄同一天藍新可能查不到；查回來的列仍只留 wanted_dates 那幾天。"""
+    first = min(wanted_dates)
+    previous = month_from_number(month_number(first[:4] + first[5:7]) - 1)
+    return f"{previous[:4]}-{previous[4:]}-01", max(wanted_dates)
+
+
 def query_invoice_rows(page: Page, wanted_dates: list[str]) -> list[dict[str, str]]:
     page.goto(INVOICE_URL, wait_until="domcontentloaded")
     dates = visible_date_inputs(page)
     if len(dates) < 2:
         raise RuntimeError(f"找不到發票日期起訖欄位（頁面：{page.url}）")
-    write_date(dates[0], min(wanted_dates))
-    write_date(dates[1], max(wanted_dates))
+    start, end = query_range(wanted_dates)
+    write_date(dates[0], start)
+    write_date(dates[1], end)
 
     search = page.locator('input[value="開始查詢"], button:has-text("開始查詢")')
     visible_search = [search.nth(i) for i in range(search.count()) if search.nth(i).is_visible()]
