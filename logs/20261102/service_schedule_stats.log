@@ -1,0 +1,83 @@
+2026-11-01 21:30:55 [INFO] === 客服排程系統 run_id=555885bf step=1 台北時間=2026-11-02 05:30:55 ===
+2026-11-01 21:30:55 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-11-01 21:30:55 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:07 [INFO] --- Step1_更新排班統計表 ---
+2026-11-01 21:31:09 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:09 [INFO] 本次視窗：202611 ~ 202702（共 4 個月）
+2026-11-01 21:31:09 [INFO] Drive 資料夾找到 24 個檔案
+2026-11-01 21:31:09 [INFO]   找到檔案：20270202排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270102排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261202排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261102排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270202排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270102排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261202排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261102排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270201排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270201排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270101排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270101排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261201排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261201排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261101排班統計表-台中 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261101排班統計表-台北 (application/vnd.google-apps.spreadsheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270201排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270101排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261201排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261101排班統計表-台中.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270201排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20270101排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261201排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO]   找到檔案：20261101排班統計表-台北.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+2026-11-01 21:31:09 [INFO] 排班檔確認 OK：{'202611': {'taipei': '20261102排班統計表-台北.xlsx', 'taichung': '20261102排班統計表-台中.xlsx'}, '202612': {'taipei': '20261202排班統計表-台北.xlsx', 'taichung': '20261202排班統計表-台中.xlsx'}, '202701': {'taipei': '20270102排班統計表-台北.xlsx', 'taichung': '20270102排班統計表-台中.xlsx'}, '202702': {'taipei': '20270202排班統計表-台北.xlsx', 'taichung': '20270202排班統計表-台中.xlsx'}}
+2026-11-01 21:31:10 [INFO] 已清除未使用／缺檔月份槽位：['BO3:BW1026', 'EL3:ET1026']
+2026-11-01 21:31:10 [INFO]   已清除範圍（202611 台北）：G3:O1026
+2026-11-01 21:31:10 [INFO]   匯入：20261102排班統計表-台北.xlsx
+2026-11-01 21:31:10 [INFO]   xlsx → Google Sheets：20261102排班統計表-台北
+2026-11-01 21:31:11 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:16 [INFO]   轉換完成，新 Google Sheets ID：1fBcvPyCEiG1t3707excQnRu-fzrtWcLsEMBlU0f4ZkE
+2026-11-01 21:31:18 [INFO]   → 寫入 75 列（起始 R3C7）
+2026-11-01 21:31:18 [INFO]   已清除範圍（202611 台中）：CD3:CL1026
+2026-11-01 21:31:18 [INFO]   匯入：20261102排班統計表-台中.xlsx
+2026-11-01 21:31:18 [INFO]   xlsx → Google Sheets：20261102排班統計表-台中
+2026-11-01 21:31:19 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:25 [INFO]   轉換完成，新 Google Sheets ID：1ib-pL0XpDRxZgoyoFyqGImkK6QKGwzBzPz_QCn3mT70
+2026-11-01 21:31:27 [INFO]   → 寫入 12 列（起始 R3C82）
+2026-11-01 21:31:27 [INFO]   已清除範圍（202612 台北）：V3:AD1026
+2026-11-01 21:31:27 [INFO]   匯入：20261202排班統計表-台北.xlsx
+2026-11-01 21:31:27 [INFO]   xlsx → Google Sheets：20261202排班統計表-台北
+2026-11-01 21:31:27 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:34 [INFO]   轉換完成，新 Google Sheets ID：1h2FlAHBnAT8QsGq08sfvEPbCRHg_gkNJlE0cga1Mjs8
+2026-11-01 21:31:36 [INFO]   → 寫入 45 列（起始 R3C22）
+2026-11-01 21:31:36 [INFO]   已清除範圍（202612 台中）：CS3:DA1026
+2026-11-01 21:31:36 [INFO]   匯入：20261202排班統計表-台中.xlsx
+2026-11-01 21:31:36 [INFO]   xlsx → Google Sheets：20261202排班統計表-台中
+2026-11-01 21:31:36 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:43 [INFO]   轉換完成，新 Google Sheets ID：14ZUYHVUFO_oXqoV9pnF4wxDGpmsC_-8ZBfY_XAhxdzw
+2026-11-01 21:31:44 [INFO]   → 寫入 6 列（起始 R3C97）
+2026-11-01 21:31:45 [INFO]   已清除範圍（202701 台北）：AK3:AS1026
+2026-11-01 21:31:45 [INFO]   匯入：20270102排班統計表-台北.xlsx
+2026-11-01 21:31:45 [INFO]   xlsx → Google Sheets：20270102排班統計表-台北
+2026-11-01 21:31:45 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:51 [INFO]   轉換完成，新 Google Sheets ID：1yYnuw9THIbc7BQpPCoE2ToRNOD0GAGzLMmO-epD8Ur0
+2026-11-01 21:31:52 [INFO]   → 寫入 38 列（起始 R3C37）
+2026-11-01 21:31:52 [INFO]   已清除範圍（202701 台中）：DH3:DP1026
+2026-11-01 21:31:52 [INFO]   匯入：20270102排班統計表-台中.xlsx
+2026-11-01 21:31:52 [INFO]   xlsx → Google Sheets：20270102排班統計表-台中
+2026-11-01 21:31:52 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:31:58 [INFO]   轉換完成，新 Google Sheets ID：153_VRurv7-XlD0Ay_iyO_sKEfS79T7BXYCkTB8ggBcM
+2026-11-01 21:31:59 [INFO]   → 寫入 6 列（起始 R3C112）
+2026-11-01 21:32:00 [INFO]   已清除範圍（202702 台北）：AZ3:BH1026
+2026-11-01 21:32:00 [INFO]   匯入：20270202排班統計表-台北.xlsx
+2026-11-01 21:32:00 [INFO]   xlsx → Google Sheets：20270202排班統計表-台北
+2026-11-01 21:32:00 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:32:06 [INFO]   轉換完成，新 Google Sheets ID：1OWPxn2bWzLrasTBcMXbQwtH8deDsKC99yJzJMKeBOUI
+2026-11-01 21:32:07 [INFO]   → 寫入 35 列（起始 R3C52）
+2026-11-01 21:32:07 [INFO]   已清除範圍（202702 台中）：DW3:EE1026
+2026-11-01 21:32:07 [INFO]   匯入：20270202排班統計表-台中.xlsx
+2026-11-01 21:32:07 [INFO]   xlsx → Google Sheets：20270202排班統計表-台中
+2026-11-01 21:32:07 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-01 21:32:13 [INFO]   轉換完成，新 Google Sheets ID：1xhz3nDuqnceRJyaInMWJSL5VnOEIm8M5IWSYyJSjgB0
+2026-11-01 21:32:14 [INFO]   → 寫入 6 列（起始 R3C127）
+2026-11-01 21:32:15 [INFO] Step 1 完成（66.6s）
+2026-11-01 21:32:17 [INFO] === 全部完成 run_id=555885bf（68.0s）===
