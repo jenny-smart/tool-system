@@ -4,12 +4,12 @@
 清潔異動每日檢查：台北／台中／桃園／新竹／高雄，工作日台北時間 10:00 跑一次
 （.github/workflows/scheduled_change_order_check.yml，由 scripts/cloud_schedule.py 派送）。
 
-只做兩件事，不回寫系統（回寫改由【清潔異動】已備妥整合執行處理）：
+只做兩件事，不回寫系統（回寫改由【整合執行】清潔異動已備妥處理）：
   1. 補 T（匯款金額）、Z（未稅金額）公式：待退款且 S 有值、T／Z 空白的格子。
   2. 列出登記日期 2026/10/16 以後「未備妥」的列（缺資料還不能處理，例如缺匯款帳號、
      客人尚未付款），在 jenny@lemonclean.com.tw 行事曆建一筆 11:00 的提醒，10:30 跳窗；
      沒有未備妥、非工作日就不建。資料齊全可執行或需人工的列不提醒。
-盤點規則與【清潔異動】已備妥整合執行共用 tools/finance_management/change_order_batch.py。
+盤點規則與【整合執行】清潔異動已備妥共用 tools/finance_management/change_order_batch.py。
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def build_notify_text(todo: list, today: date) -> tuple:
             f"・[{item['region']}] {item['status']} {item['order_no']}"
             f"（{item.get('customer', '')}）{_todo_text(item)}（第{item['row']}列）"
         )
-    lines += ["", "補齊資料後，可到 Tools App【清潔異動】已備妥整合執行一次處理。"]
+    lines += ["", "補齊資料後，可到 Tools App【整合執行】清潔異動已備妥一次處理。"]
     return f"清潔異動未備妥：{len(todo)} 筆", "\n".join(lines)
 
 

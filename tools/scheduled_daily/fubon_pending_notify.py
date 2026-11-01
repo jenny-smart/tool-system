@@ -1,8 +1,8 @@
 """富邦待辦通知（GitHub 排程，每週二、五 10:00）：只檢查、建提醒，不執行富邦轉帳。
 
 檢查台北／台中三種內部請款的待付款筆數：請款記錄、工具包押金退款、清潔用品採購
-（盤點規則與【富邦銀行】內部請款整合執行共用 tools/finance_management/internal_payment_batch.py）。
-異動 ATM 退款改由【清潔異動】已備妥整合執行處理，不在這裡提醒。
+（盤點規則與【整合執行】富邦內部請款共用 tools/finance_management/internal_payment_batch.py）。
+異動 ATM 退款改由【整合執行】清潔異動已備妥處理，不在這裡提醒。
 有待處理時在 jenny@lemonclean.com.tw 行事曆建提醒（30 分鐘後開始，提前 20、10 分鐘跳窗）。
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ def build_report(items: list[dict]) -> str:
             detail = "、".join(f"{i['row']}（{i['memo']}）" if i.get("memo") else str(i["row"]) for i in hit)
             lines.append(f"　{label}：{len(hit)} 筆（{detail}）")
         lines.append("")
-    lines.append("請到 Tools App【富邦銀行】內部請款整合執行勾選後執行。")
+    lines.append("請到 Tools App【整合執行】富邦內部請款勾選後執行。")
     return "\n".join(lines).strip()
 
 

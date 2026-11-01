@@ -34,6 +34,11 @@ TRADEVAN_SUBJECT = "台灣連線股份有限公司電子發票開立通知"
 AWS_CHARGE_RE = re.compile(r"AWS Service Charges\s*USD\s*([\d,]+\.\d{2})", re.I)
 FX_RATE_RE = re.compile(r"1\s*USD\s*=\s*([\d.]+)\s*TWD", re.I)
 ZHENDAN_TOTAL_RE = re.compile(r"總計\s+([\d,]+)")
+# 每月固定：(費用說明, 請款類別, 金額, 收款對象)；每月 1 日由【整合執行】固定費用自動新增當月
+OFFICE_RENT_ITEMS = [
+    ("辦公室租金", "辦公室租金", 77343, "信義路四段房東韓承艗"),
+    ("辦公室管理費", "辦公室租金", 9392, "辦公室管理費新"),
+]
 _IMAP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -278,10 +283,7 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
             errors.append(f"Gmail：{exc}")
             items.append({"label": "Gmail", "amount": None, "matched": 0, "status": f"失敗：{exc}"})
 
-    for label, category, amount, payee in [
-        ("辦公室租金", "辦公室租金", 77343, "信義路四段房東韓承艗"),
-        ("辦公室管理費", "辦公室租金", 9392, "辦公室管理費新"),
-    ]:
+    for label, category, amount, payee in OFFICE_RENT_ITEMS:
         base = f"{period_label}-{label}"
         if _already_submitted(existing, base):
             items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})

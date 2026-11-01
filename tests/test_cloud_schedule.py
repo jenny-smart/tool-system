@@ -22,16 +22,33 @@ class ScheduleTests(unittest.TestCase):
 
     def test_month_end_and_leap_year(self):
         for date in ['2026-09-30','2026-02-28','2028-02-29','2026-12-31']:
-            jobs=self.jobs(date+'T17:00')
-            self.assertEqual(jobs,[('scheduled_monthly.yml',{'target':'half_month_orders_2','period':date[:7].replace('-','')+'-2'})])
+            jobs=self.jobs(date+'T12:00')
+            self.assertIn(('scheduled_monthly.yml',{'target':'half_month_orders_2','period':date[:7].replace('-','')+'-2'}),jobs)
+            self.assertEqual(self.jobs(date+'T17:00'),[])
             self.assertIn(('scheduled_daily.yml',{'target':'month_end_cleanup'}),self.jobs(date+'T22:00'))
-        self.assertEqual(self.jobs('2028-02-28T17:00'),[])
+        self.assertEqual(self.jobs('2028-02-28T12:00'),[('performance_report.yml',{})])
+        self.assertIn(('scheduled_monthly.yml',{'target':'half_month_orders_1','period':'202611-1'}),self.jobs('2026-11-15T12:00'))
         self.assertEqual(self.jobs('2026-09-29T22:00'),[])
 
     def test_month_start_prior_period(self):
-        for hm, target in [('00:00','prepaid_report'),('00:30','stored_value_settlement'),('00:40','stored_value_prepaid')]:
+        for hm, target in [('00:00','prepaid_report'),('00:10','stored_value_settlement'),('00:20','stored_value_prepaid')]:
             self.assertIn(('scheduled_monthly.yml',{'target':target,'period':'202612-2'}),self.jobs('2027-01-01T'+hm))
         self.assertEqual(self.jobs('2026-09-30T00:30'),[])
+        self.assertEqual(self.jobs('2027-01-01T00:40'),[])
+
+    def test_month_start_finance(self):
+        for hm, target in [('00:30','fixed_expense'),('01:00','vip_full_pipeline'),('02:00','cash_gap_check'),('09:00','month_start')]:
+            self.assertIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-01T'+hm))
+            self.assertNotIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-02T'+hm))
+        for hour in [h for h in range(3, 24) if h != 9]:
+            self.assertEqual([j for j in self.jobs('2026-11-01T%02d:00' % hour) if j[0]=='scheduled_finance.yml'],
+                             [('scheduled_finance.yml',{'target':'month_start_check'})])
+        for hm in ['00:00','01:00','02:30','03:10']:
+            self.assertNotIn(('scheduled_finance.yml',{'target':'month_start_check'}),self.jobs('2026-11-01T'+hm))
+        self.assertNotIn(('scheduled_finance.yml',{'target':'month_start_check'}),self.jobs('2026-11-02T09:00'))
+        self.assertIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-11-10T10:00'))
+        self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-12-10T10:00'))
+        self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-11-11T10:00'))
 
     def test_weekly_and_401(self):
         self.assertIn(('scheduled_fubon_pending_check.yml',{}),self.jobs('2026-09-29T10:00'))
@@ -51,7 +68,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-21T00:00'))
 
     def test_five_cloud_expressions_cover_all_slots(self):
-        slots={(h,0) for h in [0,1,5,7,8,10,11,12,17,18,22]} | {(1,10),(1,20),(0,30),(1,30),(5,30),(16,30),(0,40)}
+        # 整點：每天的整點 job＋1 日 02:00～23:00 每小時月初檢查
+        slots={(h,0) for h in range(24)} | {(0,10),(1,10),(0,20),(1,20),(0,30),(1,30),(5,30),(16,30)}
         for day in range(1,32):
             for hour in range(24):
                 for minute in [0,10,20,30,40,50]:
@@ -72,7 +90,7 @@ class ScheduleTests(unittest.TestCase):
         for text in ["2026-09-30T08:00", "2026-09-30T11:00", "2026-09-30T16:30"]:
             when=dt.datetime.fromisoformat(text).replace(tzinfo=m.TZ)
             self.assertIn(("scheduled_fubon_statement.yml", {}), m.plan(when))
-        for text in ["2026-10-01T00:00", "2026-10-01T01:10", "2026-10-01T01:20", "2026-10-01T00:30", "2026-10-01T00:40"]:
+        for text in ["2026-10-01T00:00", "2026-10-01T01:10", "2026-10-01T01:20", "2026-10-01T00:10", "2026-10-01T00:20", "2026-10-01T00:30", "2026-10-01T02:00"]:
             target=dt.datetime.fromisoformat(text).replace(tzinfo=m.TZ)
             for offset in [-120,-47,0,45,120]:
                 self.assertEqual(m.scheduled_time(int(target.timestamp())+offset),target)

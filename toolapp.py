@@ -3949,7 +3949,13 @@ def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全
 
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
-    {"name": "【清潔異動】已備妥整合執行", "handler": None, "enabled": True},
+    # 整合執行：都先「盤點」目前可做的項目（預設打勾、可全選）再執行，集中在同一組
+    {"name": "【整合執行】月初檢查（1日所有排程）", "handler": None, "enabled": True},
+    {"name": "【整合執行】清潔異動已備妥", "handler": None, "enabled": True},
+    {"name": "【整合執行】富邦內部請款", "handler": None, "enabled": True},
+    {"name": "【整合執行】月初藍新／鯨躍／現金缺口", "handler": None, "enabled": True},
+    {"name": "【整合執行】固定費用（辦公室租金）", "handler": None, "enabled": True},
+    {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
     {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
@@ -3958,7 +3964,6 @@ FINANCE_TASKS = [
     {"name": "【富邦銀行】請款記錄", "handler": queue_fubon_payment_request, "enabled": True},
     {"name": "【富邦銀行】工具包押金退款", "handler": queue_fubon_deposit_refund, "enabled": True},
     {"name": "【富邦銀行】清潔用品採購", "handler": queue_fubon_supply_purchase, "enabled": True},
-    {"name": "【富邦銀行】內部請款整合執行", "handler": None, "enabled": True},
     {"name": "【元大銀行】元大登入", "handler": queue_yuanta_login, "enabled": True},
     {"name": "【元大銀行】元大明細下載", "handler": queue_yuanta_download, "enabled": True},
     {"name": "【元大銀行】檢查薪資付款狀態", "handler": queue_yuanta_salary_status, "enabled": True},
@@ -4424,7 +4429,7 @@ _unified_log.install_streamlit_hooks(
     operator=str(st.session_state.get("username", "") or ""),
 )
 
-if system_type == "finance_management" and selected_function == "【富邦銀行】內部請款整合執行":
+if system_type == "finance_management" and selected_function == "【整合執行】富邦內部請款":
     st.markdown("</div>", unsafe_allow_html=True)
     fresh_module("tools.finance_management.internal_payment_batch")
     render_internal_payment_batch = fresh_module("tools.finance_management.internal_payment_batch_ui").render
@@ -4435,7 +4440,7 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
     render_agent_task_progress(("fubon.", "internal_payment."))
     st.stop()
 
-if system_type == "finance_management" and selected_function == "【清潔異動】已備妥整合執行":
+if system_type == "finance_management" and selected_function == "【整合執行】清潔異動已備妥":
     st.markdown("</div>", unsafe_allow_html=True)
     from tools.finance_management.change_order_batch_ui import render as render_change_order_batch
 
@@ -4443,6 +4448,52 @@ if system_type == "finance_management" and selected_function == "【清潔異動
     LOG_PLACEHOLDER = st.empty()
     render_log()
     render_agent_task_progress(("cetustek.", "fubon.", "newebpay.", "lemon.", "change_order."))
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【整合執行】月初檢查（1日所有排程）":
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.finance_management.month_start_batch")
+    fresh_module("tools.finance_management.fixed_expense_batch")
+    fresh_module("tools.finance_management.month_start_check")
+    render_month_start_check = fresh_module("tools.finance_management.month_start_check_ui").render
+
+    render_month_start_check(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("month_start.", "newebpay.", "cetustek."))
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【整合執行】月初藍新／鯨躍／現金缺口":
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.finance_management.month_start_batch")
+    render_month_start_batch = fresh_module("tools.finance_management.month_start_batch_ui").render
+
+    render_month_start_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("month_start.", "newebpay.", "cetustek."))
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【整合執行】固定費用（辦公室租金）":
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.finance_management.fixed_expense_batch")
+    render_fixed_expense_batch = fresh_module("tools.finance_management.fixed_expense_batch_ui").render
+
+    render_fixed_expense_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【整合執行】會計事務所費用確認":
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.finance_management.fixed_expense_batch")
+    fresh_module("tools.finance_management.fixed_expense_batch_ui")
+    fresh_module("tools.finance_management.accounting_fee_batch")
+    render_accounting_fee_batch = fresh_module("tools.finance_management.accounting_fee_batch_ui").render
+
+    render_accounting_fee_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
     st.stop()
 
 if system_type == "finance_management" and selected_function == "【鯨躍發票】二聯改三聯":
