@@ -24,17 +24,17 @@ class _Service:
 
 def test_default_calendar_is_jenny_without_invite(monkeypatch):
     service = _Service()
-    monkeypatch.setattr(calendar_notify, "_calendar_service", lambda: service)
+    monkeypatch.setattr(calendar_notify, "_calendar_service", lambda *_a: service)
     calendar_notify.create_notify_event(summary="ATM對帳完成")
     call = service.calls[0]
-    assert call["calendarId"] == "jenny@lemonclean.com.tw"
+    assert call["calendarId"] in ("jenny@hers.com.tw", "jenny@lemonclean.com.tw")
     assert call["sendUpdates"] == "none" and "attendees" not in call["body"]
     assert [r["minutes"] for r in call["body"]["reminders"]["overrides"]] == [10, 20]
 
 
 def test_empty_reminders_means_no_popup(monkeypatch):
     service = _Service()
-    monkeypatch.setattr(calendar_notify, "_calendar_service", lambda: service)
+    monkeypatch.setattr(calendar_notify, "_calendar_service", lambda *_a: service)
     calendar_notify.create_notify_event(summary="紀錄", reminder_minutes=[])
     assert service.calls[0]["body"]["reminders"]["overrides"] == []
 
@@ -67,3 +67,13 @@ def test_calendar_client_override_matches_refresh_token_client(monkeypatch):
     monkeypatch.setattr("tools.common.google_auth._oauth_value", lambda name: values.get(name, ""))
     creds = calendar_notify._oauth_credentials()
     assert (creds.client_id, creds.client_secret) == ("cal-id", "cal-secret")
+
+
+def test_hers_calendar_falls_back_to_lemonclean_without_token(monkeypatch):
+    from tools.common import google_auth
+
+    monkeypatch.setattr(calendar_notify, "_calendar_service", lambda *_a: "svc")
+    monkeypatch.setattr(google_auth, "_oauth_value", lambda name: "")
+    assert calendar_notify.calendar_for() == ("svc", "jenny@lemonclean.com.tw")
+    monkeypatch.setattr(google_auth, "_oauth_value", lambda name: "tok" if name == "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN" else "")
+    assert calendar_notify.calendar_for() == ("svc", "jenny@hers.com.tw")

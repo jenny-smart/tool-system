@@ -28,7 +28,7 @@ from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
+REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 LOG_ROOT = Path(__file__).resolve().parents[2] / "logs"
 AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 PAGE = "Tools App【整合執行】月初（1日所有排程）→ 盤點 → 勾選 → 執行"
@@ -592,15 +592,15 @@ def clear_reminders(day: date, log: Callable[[str], None] = print) -> int:
     """刪掉 day 當天之前建的「月初工作未完成」提醒（只留最新一則／全部完成就全刪）。"""
     from tools.orders_system import calendar_notify
 
-    service = calendar_notify._calendar_service()
+    service, calendar_id = calendar_notify.calendar_for(REMIND_CALENDAR_ID)
     start = datetime.combine(day, datetime.min.time(), tzinfo=TW_TZ)
-    events = service.events().list(calendarId=REMIND_CALENDAR_ID, timeMin=start.isoformat(),
+    events = service.events().list(calendarId=calendar_id, timeMin=start.isoformat(),
                                    timeMax=(start + timedelta(days=2)).isoformat(), q=REMINDER_PREFIX,
                                    singleEvents=True, maxResults=100).execute().get("items", [])
     removed = 0
     for event in events:
         if str(event.get("summary", "")).startswith(REMINDER_PREFIX):
-            service.events().delete(calendarId=REMIND_CALENDAR_ID, eventId=event["id"]).execute()
+            service.events().delete(calendarId=calendar_id, eventId=event["id"]).execute()
             removed += 1
     if removed:
         log(f"已刪除 {removed} 則之前的月初提醒")

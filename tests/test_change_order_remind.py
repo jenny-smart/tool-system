@@ -39,7 +39,7 @@ def test_notify_creates_event_on_jenny_calendar(monkeypatch):
     monkeypatch.setattr(chk.calendar_notify, "create_notify_event", lambda **kw: calls.append(kw) or {"id": "e"})
     assert chk._notify(TODO, now=_at(10), log=lambda *_: None) == {"id": "e"}
     kw = calls[0]
-    assert kw["calendar_id"] == "jenny@lemonclean.com.tw" and kw["attendee"] == ""
+    assert kw["calendar_id"] == "jenny@hers.com.tw" and kw["attendee"] == ""
     assert kw["start"] == _at(11) and kw["reminder_minutes"] == [30]
     assert "LC1" in kw["description"] and "缺退款銀行代碼／帳號（P／Q）" in kw["description"]
 
@@ -54,7 +54,7 @@ def test_notify_failure_does_not_use_shared_calendar(monkeypatch):
     monkeypatch.setattr(chk, "next_remind_slot", lambda now: _at(11))
     monkeypatch.setattr(chk.calendar_notify, "create_notify_event", fake)
     assert chk._notify(TODO, now=_at(10), log=lambda *_: None) is None
-    assert len(calls) == 1 and calls[0]["calendar_id"] == "jenny@lemonclean.com.tw"
+    assert len(calls) == 1 and calls[0]["calendar_id"] == "jenny@hers.com.tw"
 
 
 def test_notify_skips_without_todo(monkeypatch):

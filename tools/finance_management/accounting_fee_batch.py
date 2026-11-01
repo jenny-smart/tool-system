@@ -23,7 +23,7 @@ TW_TZ = ZoneInfo("Asia/Taipei")
 AREA = "台北"
 TOOL_NAME = "會計事務所費用確認"
 PAYEE = "會計事務所"
-REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
+REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 
 RENT_WITHHOLDING = 8800  # 辦公室租金代扣繳，每月
 RENT_NHI = 1857  # 辦公室租金二代健保，每月

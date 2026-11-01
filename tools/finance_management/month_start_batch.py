@@ -31,7 +31,7 @@ from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
+RECORD_CALENDAR_ID = "jenny@hers.com.tw"
 BATCH_ACTION = "month_start.batch_run"
 CDP_URL = "http://127.0.0.1:9222"
 

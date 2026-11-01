@@ -6,7 +6,7 @@
 優先用 Jenny 本人的 OAuth 授權（GOOGLE_CALENDAR_REFRESH_TOKEN，與 Drive 共用
 GOOGLE_OAUTH_CLIENT_ID／SECRET）；尚未設定時改用 tools.common.config_loader 的
 共用服務帳號（不載入 orders.py 整個大檔）。事件一律建在 Jenny 的
-行事曆（jenny@lemonclean.com.tw），不用共用日曆（lemonclean925），也不另寄邀請信。
+行事曆（jenny@hers.com.tw），不用共用日曆（lemonclean925），也不另寄邀請信。
 """
 from __future__ import annotations
 
@@ -20,8 +20,13 @@ from tools.common.config_loader import get_service_account_info
 
 TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
-# 系統通知一律建在 Jenny 的行事曆，不用共用日曆（lemonclean925）
-NOTIFY_CALENDAR_ID = "jenny@lemonclean.com.tw"
+# 系統通知一律建在 Jenny 的行事曆 jenny@hers.com.tw（2026-11 Jenny），不用共用日曆（lemonclean925）。
+# hers 的 Workspace 不允許把日曆編輯權共用給網域外帳號，要用 jenny@hers.com.tw 本人授權
+# （tools/common/google_oauth_setup_calendar.py → GOOGLE_HERS_CALENDAR_REFRESH_TOKEN）；
+# 還沒設定這個 token 時，先建在原本的 jenny@lemonclean.com.tw，提醒不會漏掉。
+NOTIFY_CALENDAR_ID = "jenny@hers.com.tw"
+LEMONCLEAN_CALENDAR_ID = "jenny@lemonclean.com.tw"
+HERS_CALENDAR_REFRESH_TOKEN_KEY = "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN"
 EVENT_DURATION_MINUTES = 30
 REMINDER_MINUTES = [10, 20]
 
@@ -34,13 +39,13 @@ _CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 CALENDAR_REFRESH_TOKEN_KEY = "GOOGLE_CALENDAR_REFRESH_TOKEN"
 
 
-def _oauth_credentials():
+def _oauth_credentials(token_key: str = CALENDAR_REFRESH_TOKEN_KEY):
     """有 Jenny 行事曆授權時回傳 OAuth 憑證，否則回傳 None。"""
     from google.oauth2.credentials import Credentials as OAuthCredentials
 
     from tools.common.google_auth import _oauth_value
 
-    refresh_token = _oauth_value(CALENDAR_REFRESH_TOKEN_KEY)
+    refresh_token = _oauth_value(token_key)
     if not refresh_token:
         return None
     return OAuthCredentials(
@@ -55,21 +60,36 @@ def _oauth_credentials():
     )
 
 
-def _calendar_service():
-    # 優先用 Jenny 本人授權（服務帳號沒有她行事曆的寫入權限，會回 404）；
-    # 尚未設定時沿用服務帳號
+def _calendar_service(calendar_id: str = ""):
+    # jenny@hers.com.tw 用她本人的 hers 授權；其他行事曆優先用 Jenny（lemonclean）本人授權
+    # （服務帳號沒有她行事曆的寫入權限，會回 404）；尚未設定時沿用服務帳號
+    if calendar_id == NOTIFY_CALENDAR_ID:
+        hers = _oauth_credentials(HERS_CALENDAR_REFRESH_TOKEN_KEY)
+        if hers is not None:
+            return build("calendar", "v3", credentials=hers, cache_discovery=False)
     credentials = _oauth_credentials() or Credentials.from_service_account_info(
         get_service_account_info(), scopes=_CALENDAR_SCOPES
     )
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
 
+def calendar_for(calendar_id: str = ""):
+    """回傳 (service, 實際要用的行事曆 ID)。要建在 jenny@hers.com.tw 但還沒有 hers 授權時，
+    改用 jenny@lemonclean.com.tw（並印出提醒），排程不會因此失敗。"""
+    from tools.common.google_auth import _oauth_value
+
+    calendar_id = calendar_id or NOTIFY_CALENDAR_ID
+    if calendar_id == NOTIFY_CALENDAR_ID and not _oauth_value(HERS_CALENDAR_REFRESH_TOKEN_KEY):
+        print(f"⚠️ 還沒設定 {HERS_CALENDAR_REFRESH_TOKEN_KEY}，行事曆事件先建在 {LEMONCLEAN_CALENDAR_ID}", flush=True)
+        calendar_id = LEMONCLEAN_CALENDAR_ID
+    return _calendar_service(calendar_id), calendar_id
+
+
 def create_notify_event(summary: str, description: str = "", start: datetime = None,
                          calendar_id: str = None, reminder_minutes=None, attendee: str = ""):
     """建立一個通知用日曆事件：30 分鐘、預設提前 20 分與 10 分跳窗提醒，
     建在 Jenny 的行事曆；attendee 有給才另外邀請（會寄邀請信）。"""
-    service = _calendar_service()
-    calendar_id = calendar_id or NOTIFY_CALENDAR_ID
+    service, calendar_id = calendar_for(calendar_id)
 
     start = start or datetime.now(TAIPEI_TZ)
     end = start + timedelta(minutes=EVENT_DURATION_MINUTES)

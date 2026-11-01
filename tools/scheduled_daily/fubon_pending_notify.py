@@ -3,7 +3,7 @@
 檢查台北／台中三種內部請款的待付款筆數：請款記錄、工具包押金退款、清潔用品採購
 （盤點規則與【整合執行】富邦內部請款共用 tools/finance_management/internal_payment_batch.py）。
 異動 ATM 退款改由【整合執行】清潔異動已備妥處理，不在這裡提醒。
-有待處理時在 jenny@lemonclean.com.tw 行事曆建提醒（30 分鐘後開始，提前 20、10 分鐘跳窗）。
+有待處理時在 jenny@hers.com.tw 行事曆建提醒（30 分鐘後開始，提前 20、10 分鐘跳窗）。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from tools.finance_management import internal_payment_batch as batch
 from tools.orders_system import calendar_notify
 
 TZ = ZoneInfo("Asia/Taipei")
-REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
+REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 
 
 def build_report(items: list[dict]) -> str:
