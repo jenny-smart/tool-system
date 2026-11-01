@@ -26,6 +26,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import calendar
 import time
 
 from config.vip_config import (
@@ -162,6 +163,61 @@ def resolve_hsinchu_areas(
     return result
 
 
+# 結算日：台北儲值金結算 W1（其他地區的 W1 與 VIP總表 O2 都是 ='台北儲值金結算'!W1）
+SETTLEMENT_DATE_AREA = "台北"
+SETTLEMENT_DATE_CELL = "W1"
+YEAR_HEADER = "購買年份"
+YEAR_SCAN_RANGE = "A1:BZ40"
+
+
+def col_letter(index: int) -> str:
+    """0-based → A1 欄位字母"""
+    letters, index = "", index + 1
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def _grid(sheet_id: int, last_row: int, col: int) -> Dict[str, int]:
+    return {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": last_row + 1,
+            "startColumnIndex": col, "endColumnIndex": col + 1}
+
+
+def _year(value: Any) -> Optional[int]:
+    try:
+        number = float(str(value).strip())
+    except ValueError:
+        return None
+    return int(number) if number.is_integer() and 2000 <= number <= 2100 else None
+
+
+def plan_year_column(rows: List[List[Any]], year: int) -> Optional[Tuple[int, int, int, int]]:
+    """各區儲值金結算第 1 列「購買年份」右邊是年度欄（2025、2026…）。最後一個年度 < year 時，
+    回傳 (來源欄, 新欄, 要複製到第幾列(0-based), 新年度)；已經有了回傳 None。
+    新欄必須是空的（不是 Total、下面也沒有東西）才會加，否則丟錯不亂蓋。"""
+    header = rows[0] if rows else []
+    cells = [str(v).strip() for v in header]
+    if YEAR_HEADER not in cells:
+        raise RuntimeError(f"第 1 列找不到「{YEAR_HEADER}」")
+    col = cells.index(YEAR_HEADER) + 1
+    last = None
+    while col < len(cells) and _year(cells[col]) is not None:
+        last, col = col, col + 1
+    if last is None:
+        raise RuntimeError(f"「{YEAR_HEADER}」右邊沒有年度欄")
+    if _year(cells[last]) >= year:
+        return None
+    dst = last + 1
+    # 只複製到年度欄最後一個公式那列（下面例如台北第 16 列是手打的數字，不算）
+    used = [r for r, row in enumerate(rows) if last < len(row) and str(row[last]).strip().startswith("=")]
+    last_row = max(used or [0])
+    occupied = [r + 1 for r in range(last_row + 1) if r < len(rows) and dst < len(rows[r]) and str(rows[r][dst]).strip()]
+    if occupied:
+        raise RuntimeError(f"要新增 {_year(cells[last]) + 1} 年度的 {col_letter(dst)} 欄不是空的（第 {occupied[0]} 列有資料），請手動處理")
+    return last, dst, last_row, _year(cells[last]) + 1
+
+
 class VipStoredValueWorkflow:
     def __init__(
         self,
@@ -286,7 +342,42 @@ class VipStoredValueWorkflow:
 
         result.add_message(f"已建立 {new_name}")
         self.execution_log.append(period, "複製期別檔案", "完成", f"已建立 {new_name}")
+        try:
+            for msg in self.prepare_settlement_sheets(period, self.sheets.open_by_id(file["id"])):
+                result.add_message(msg)
+        except Exception as exc:
+            msg = f"儲值金結算日期／年度欄設定失敗：{exc}"
+            result.add_error(msg)
+            self.execution_log.append(period, "複製期別檔案", "失敗", msg)
         return result
+
+    def prepare_settlement_sheets(self, period: str, summary) -> List[str]:
+        """彙整檔是複製上個月的：
+        1. 「台北儲值金結算」W1（結算日，其他地區與 VIP總表都參照它）改成這個期別的最後一天
+        2. 跨年度：各區「儲值金結算」購買年份（第 1 列 Z、AA…）沒有今年就新增一欄，複製前一欄的公式"""
+        year, month = int(period[:4]), int(period[4:6])
+        month_end = f"{year}/{month}/{calendar.monthrange(year, month)[1]}"
+        messages = []
+        summary.worksheet(f"{SETTLEMENT_DATE_AREA}儲值金結算").update(
+            range_name=SETTLEMENT_DATE_CELL, values=[[month_end]], value_input_option="USER_ENTERED")
+        messages.append(f"{SETTLEMENT_DATE_AREA}儲值金結算 {SETTLEMENT_DATE_CELL} 改成 {month_end}")
+        titles = {ws.title: ws for ws in summary.worksheets()}
+        for area in AREAS:
+            ws = titles.get(f"{area}儲值金結算")
+            if ws is None:
+                continue
+            for _ in range(3):  # 最多一次補三個年度
+                rows = ws.get(YEAR_SCAN_RANGE, value_render_option="FORMULA")
+                plan = plan_year_column(rows, year)
+                if plan is None:
+                    break
+                src, dst, last_row, new_year = plan
+                summary.batch_update({"requests": [{"copyPaste": {
+                    "source": _grid(ws.id, last_row, src), "destination": _grid(ws.id, last_row, dst),
+                    "pasteType": "PASTE_NORMAL"}}]})
+                ws.update(range_name=f"{col_letter(dst)}1", values=[[new_year]], value_input_option="USER_ENTERED")
+                messages.append(f"{ws.title} 新增 {new_year} 年度欄（{col_letter(dst)}，複製 {col_letter(src)} 欄公式）")
+        return messages
 
     # ============================================================
     # File classify

@@ -104,6 +104,10 @@ def run_vip_full_pipeline(today: date) -> int:
             return VIP_NO_SOURCE
         if failed:
             return 1
+    # 彙整完成 → VIP總表 O3:U10 貼到 review「現金缺口」該月欄位
+    from tools.finance_management.review_monthly import paste_to_review
+
+    paste_to_review(period, "vip", log=log)
     return 0
 
 

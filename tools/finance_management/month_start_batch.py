@@ -258,12 +258,10 @@ def _run_step(step: str, period: str, cdp_url: str) -> int:
         errors = [f"{area} {key}" for area, r in results.items() for key, v in r.items() if isinstance(v, str)]
         if errors:
             print("⚠️ 現金缺口有項目出錯：" + "、".join(errors), flush=True)
-        try:  # 藍新發票金額更新後，review 檔「現金缺口」區塊也跟著更新
-            from tools.finance_management.review_monthly import sync_cash_gap_block
+        # 現金缺口算完（含藍新發票金額）→ 貼到 review「現金缺口」該月欄位
+        from tools.finance_management.review_monthly import paste_to_review
 
-            sync_cash_gap_block(period, log=lambda t: print(t, flush=True))
-        except Exception as exc:
-            print(f"⚠️ review 檔現金缺口區塊沒更新：{exc}", flush=True)
+        paste_to_review(period, "cash", log=lambda t: print(t, flush=True))
         return 0
     sys.stdout.flush()
     code = subprocess.run(_step_command(step, period, cdp_url)).returncode

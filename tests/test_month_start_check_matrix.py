@@ -1,4 +1,5 @@
 """【整合執行】月初（1日所有排程）：依功能盤點各地區狀態、完成標記、只補做沒完成的地區。"""
+import pytest
 from datetime import date
 
 from tools.finance_management import month_start_batch as ms
@@ -196,3 +197,80 @@ def test_vip_period_folder_prefers_duplicate_with_source_files():
     workflow = VipStoredValueWorkflow.__new__(VipStoredValueWorkflow)
     workflow.drive, workflow.root_folder_id = Drive(), "root"
     assert workflow.get_period_folder("202610")["id"] == "src"
+
+
+def _taipei_rows():
+    rows = [[""] * 34 for _ in range(16)]
+    rows[0][24:27] = ["購買年份", 2025, 2026]
+    rows[0][33] = "Total"
+    for r in (1, 2, 3, 4, 8, 9, 10, 11, 12, 13):
+        rows[r][25] = f"=SUMIFS($X:$X,$V:$V,Z$1) r{r}"
+        rows[r][26] = f"=SUMIFS($X:$X,$V:$V,AA$1) r{r}"
+    rows[7][25:27] = [2019, "=AA1"]
+    rows[15][25:30] = [700786, 1209881, 899022, 678983, 1660970]  # 手打數字，不影響
+    return rows
+
+
+def test_plan_year_column_adds_next_year_only_when_needed():
+    from services.vip_workflow import col_letter, plan_year_column
+
+    assert plan_year_column(_taipei_rows(), 2026) is None
+    src, dst, last_row, new_year = plan_year_column(_taipei_rows(), 2027)
+    assert (col_letter(src), col_letter(dst), last_row, new_year) == ("AA", "AB", 13, 2027)
+    rows = _taipei_rows()
+    rows[3][27] = "x"
+    with pytest.raises(RuntimeError):
+        plan_year_column(rows, 2027)
+
+
+def test_prepare_settlement_sheets_sets_date_and_year():
+    from services.vip_workflow import VipStoredValueWorkflow
+
+    calls = []
+
+    class Ws:
+        def __init__(self, title, sheet_id):
+            self.title, self.id, self.rows = title, sheet_id, _taipei_rows()
+
+        def update(self, range_name, values, value_input_option):
+            calls.append((self.title, range_name, values[0][0]))
+            if range_name == "AB1":
+                self.rows[0][27] = values[0][0]
+
+        def get(self, _rng, value_render_option):
+            return self.rows
+
+    sheets = {t: Ws(t, i) for i, t in enumerate(["台北儲值金結算", "桃園儲值金結算", "VIP總表"])}
+
+    class Summary:
+        def worksheet(self, title):
+            return sheets[title]
+
+        def worksheets(self):
+            return list(sheets.values())
+
+        def batch_update(self, body):
+            calls.append(("copy", body["requests"][0]["copyPaste"]["destination"]["startColumnIndex"]))
+
+    workflow = VipStoredValueWorkflow.__new__(VipStoredValueWorkflow)
+    messages = workflow.prepare_settlement_sheets("202701", Summary())
+    assert calls[0] == ("台北儲值金結算", "W1", "2027/1/31")
+    assert ("copy", 27) in calls and ("台北儲值金結算", "AB1", 2027) in calls and ("桃園儲值金結算", "AB1", 2027) in calls
+    assert len([m for m in messages if "新增 2027" in m]) == 2
+    calls.clear()
+    workflow.prepare_settlement_sheets("202610", Summary())
+    assert calls == [("台北儲值金結算", "W1", "2026/10/31")]
+
+
+def test_review_block_parts():
+    from tools.finance_management import review_monthly as rm
+
+    vip = [[f"r{r}"] + [r] * 6 for r in range(3, 11)]
+    cash = {"富邦餘額": {a: 1 for a in chk.AREAS}, "元大餘額": {a: 2 for a in chk.AREAS}}
+    only_vip, _ = rm.build_block_updates("現金缺口", date(2026, 10, 31), vip, None, [], "2026/10")
+    ranges = [d["range"] for d in only_vip]
+    assert any(r.endswith("3:CI10") for r in ranges) and not any(r.endswith("14") for r in ranges)
+    only_cash, _ = rm.build_block_updates("現金缺口", date(2026, 10, 31), [], cash, [], "2026/10", include_vip=False)
+    ranges = [d["range"] for d in only_cash]
+    assert not any("3:" in r for r in ranges) and "'現金缺口'!CD14" in ranges
+    assert rm.same_day("2026/10/31", date(2026, 10, 31)) and not rm.same_day("2026/9/30", date(2026, 10, 31))

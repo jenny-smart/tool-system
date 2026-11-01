@@ -3968,7 +3968,14 @@ def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全
         workflow.move_files(period, area=area, on_progress=on_progress),
         workflow.apply_formulas(period, area=area, on_progress=on_progress),
     ]
-    return _format_step_results(results)
+    text = _format_step_results(results)
+    if area == "全區" and not any(r.errors for r in results):
+        from tools.finance_management.review_monthly import paste_to_review
+
+        notes = []
+        paste_to_review(period, "vip", log=notes.append)
+        text += " ｜ review 現金缺口：" + ("；".join(notes) or "已貼上")
+    return text
 
 
 FINANCE_TASKS = [
