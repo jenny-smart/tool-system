@@ -503,20 +503,20 @@ def persist_file(service, path: str, folder_id: str, args: RunArgs, tag: str, ci
 
 
 def check_uninvoiced(city: str, df: pd.DataFrame) -> list[dict[str, str]]:
-    """已付款／已加收但沒開發票的訂單（只提醒，不影響下載結果）。"""
+    """已付款未開發票、已加收／已退款資料沒填完整的訂單（只提醒，不影響下載結果）。"""
     from tools.scheduled_monthly.uninvoiced_check import find_uninvoiced, summary_lines
 
     try:
         items = find_uninvoiced(df)
     except Exception as exc:
-        log(f"⚠️ {city} 未開發票檢查失敗：{exc}")
+        log(f"⚠️ {city} 訂單資料檢查失敗：{exc}")
         return []
     if items:
-        log(f"⚠️ {city} 已付款／已加收但未開發票 {len(items)} 筆：")
+        log(f"⚠️ {city} 已付款未開發票／加收、退款資料待補 {len(items)} 筆：")
         for line in summary_lines(city, items):
             log("   " + line)
     else:
-        log(f"✅ {city} 沒有已付款／已加收但未開發票的訂單")
+        log(f"✅ {city} 沒有未開發票、加收／退款資料待補的訂單")
     return items
 
 
@@ -529,8 +529,8 @@ def notify_uninvoiced(tag: str, found: dict[str, list[dict[str, str]]]) -> None:
         return
     lines = [line for city, items in found.items() for line in summary_lines(city, items)]
     title = f"{REMINDER_PREFIX}：{tag} {total} 筆"
-    body = "\n".join([f"{tag} 上下半月訂單下載後檢查：已付款或已加收，但發票號碼空白", ""] + lines +
-                      ["", "請到後台確認是否要補開發票。"])
+    body = "\n".join([f"{tag} 上下半月訂單下載後檢查：已付款未開發票、已加收／已退款欄位沒填完整", ""] + lines +
+                      ["", "請到後台補開發票或補填加收／退款資料（上傳的訂單檔已用底色標出：淺黃＝加收／退款，淺紅＝缺的格子）。"])
     try:
         from tools.orders_system import calendar_notify
 
@@ -606,12 +606,20 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
                 final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
                 save_preserved_excel(original_content, final_path)
 
+            try:  # 有加收／退款狀態的列加底色、缺的格子紅底
+                from tools.scheduled_monthly.uninvoiced_check import highlight_workbook
+
+                colored = highlight_workbook(final_path)
+                if colored:
+                    log(f"🎨 {city} 訂單檔已標底色 {colored} 列（加收／退款狀態、缺的欄位）")
+            except Exception as exc:
+                log(f"⚠️ {city} 訂單檔標底色失敗：{exc}")
             persist_file(service, final_path, tag_folder_id, args, tag, city, start, end, "訂單")
             source_files.append(os.path.basename(final_path))
             status = "成功"
             message = "已上傳：" + "、".join(source_files)
             if uninvoiced:
-                message += f"；⚠️ 已付款／已加收未開發票 {len(uninvoiced)} 筆：" + "、".join(
+                message += f"；⚠️ 未開發票／加收、退款資料待補 {len(uninvoiced)} 筆：" + "、".join(
                     i["訂單編號"] for i in uninvoiced[:20])
             return uninvoiced
     except Exception as exc:
