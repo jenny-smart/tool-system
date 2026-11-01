@@ -70,6 +70,9 @@ def run_month_start(today: date) -> int:
     return max(codes)
 
 
+VIP_NO_SOURCE = 2  # 期別資料夾沒有儲值金結算／預收來源檔
+
+
 def run_vip_full_pipeline(today: date) -> int:
     from config.vip_config import MASTER_SPREADSHEET_ID, ROOT_FOLDER_ID
     from services.google_auth import get_drive_service, get_gspread_client
@@ -98,7 +101,7 @@ def run_vip_full_pipeline(today: date) -> int:
         if any("沒有找到需要轉檔" in m for m in result.messages):
             # 00:10 儲值金結算／00:20 儲值金預收沒產出檔案：後面搬運、套公式沒東西可做
             log("❌ 沒有儲值金結算／預收來源檔，請確認 00:10、00:20 月排程有成功，補跑後再手動執行完整流程")
-            return 1
+            return VIP_NO_SOURCE
         if failed:
             return 1
     return 0

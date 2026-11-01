@@ -211,7 +211,28 @@ class VipStoredValueWorkflow:
             year_folder = self.drive.find_folder(self.root_folder_id, str(year))
         if year_folder is None:
             year_folder = self.drive.get_or_create_folder(self.root_folder_id, name)
-        return self.drive.get_or_create_folder(year_folder["id"], period)
+        return self._pick_period_folder(year_folder["id"], period)
+
+    def _pick_period_folder(self, year_folder_id: str, period: str) -> Dict[str, Any]:
+        """同一年度資料夾裡可能有兩個同名期別資料夾（2026-11-01：00:10／00:20 月排程用 service account
+        建了一個並上傳來源檔，彙整用 Jenny OAuth 用名稱搜尋找不到，又建了一個空的）。
+        改成直接列出年度資料夾底下的子資料夾，同名有多個時用「有來源檔」的那個（都有就用最早建立的）。"""
+        try:
+            children = self.drive.list_children(year_folder_id)
+        except Exception:
+            children = []
+        same = [f for f in children if f.get("name") == period and f.get("mimeType") == "application/vnd.google-apps.folder"]
+        if len(same) > 1:
+            def has_source(folder) -> bool:
+                try:
+                    return any(is_source_spreadsheet_file(f) for f in self.drive.list_children(folder["id"]))
+                except Exception:
+                    return False
+            # 有來源檔優先；同樣有／沒有時用最早修改的（先建的那個）
+            same = sorted(same, key=lambda f: (not has_source(f), f.get("modifiedTime", "")))
+        if same:
+            return same[0]
+        return self.drive.get_or_create_folder(year_folder_id, period)
 
     def summary_file_name(self, period: str) -> str:
         return SUMMARY_FILE_NAME_TEMPLATE.format(period=period)

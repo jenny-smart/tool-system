@@ -303,6 +303,11 @@ def newebpay_invoice_amount(area: str, as_of: date) -> float:
     return total
 
 
+def is_missing_account(exc: Exception, report: str) -> bool:
+    """財報沒有這個銀行的分頁＝這區沒有這個帳戶（高雄沒有富邦）。"""
+    return f"找不到「{report}」分頁" in str(exc)
+
+
 def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
     """回傳現金缺口試算各項目的值，試算但不寫回試算表。
 
@@ -320,6 +325,9 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
         try:
             return _report_values(area, report), None
         except Exception as exc:
+            if is_missing_account(exc, report):
+                # 這區沒有這個銀行帳戶（例如高雄沒有富邦，財報沒有「富邦更新」分頁）：當成 0，不算錯誤
+                return [], None
             return None, exc
 
     fubon_values, fubon_error = _try_fetch("富邦更新")

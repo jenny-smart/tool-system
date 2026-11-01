@@ -441,6 +441,18 @@ def build_month_start_batch_run(params: dict[str, Any]) -> list[str]:
             "--period", period, "--steps", ",".join(steps), "--cdp-url", cdp_url]
 
 
+def build_newebpay_month_close(params: dict[str, Any]) -> list[str]:
+    """藍新月結（收退款＋手續費發票，每區登入一次），可只做指定地區。"""
+    period = str(params.get("period") or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("藍新月結缺少期別")
+    _area, cdp_url = _common_invoice_args(params)
+    command = [sys.executable, "-m", "tools.newebpay.month_close", period, "--cdp-url", cdp_url]
+    for area in params.get("areas") or []:
+        command.extend(["--area", str(area)])
+    return command
+
+
 def build_internal_payment_record(params: dict[str, Any]) -> list[str]:
     items = params.get("items") or []
     if not items:
@@ -846,6 +858,7 @@ register_action("change_order.sync", build_change_order_sync)
 register_action("change_order.batch_run", build_change_order_batch_run)
 register_action("internal_payment.record", build_internal_payment_record)
 register_action("month_start.batch_run", build_month_start_batch_run)
+register_action("newebpay.month_close", build_newebpay_month_close)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
 register_action("fubon.atm_refund", build_fubon_atm_refund)
@@ -910,6 +923,7 @@ ACTION_LABELS = {
     "change_order.batch_run": "【清潔異動】整合執行（逐區依序）",
     "internal_payment.record": "【富邦銀行】內部請款留紀錄",
     "month_start.batch_run": "【整合執行】月初藍新／鯨躍／現金缺口（本機 Agent）",
+    "newebpay.month_close": "【藍新金流】藍新收退款＋發票金額（指定地區）",
     "fubon.login": "【富邦銀行】富邦登入",
     "fubon.download": "【富邦銀行】富邦明細下載",
     "fubon.atm_refund": "【富邦銀行】異動 ATM 退款",
