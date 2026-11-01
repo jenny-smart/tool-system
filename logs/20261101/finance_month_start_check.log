@@ -12,17 +12,15 @@
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+❌ 【台中】請款記錄讀取失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1hrcup-zsrDKwjde9Tgpes6Mu8x7WFGuPIW4w_AJQK-8/values/%27%E8%AB%8B%E6%AC%BE%E8%A8%98%E9%8C%84%27%21E%3AE?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'service': 'sheets.googleapis.com', 'quota_limit_value': '60', 'consumer': 'projects/1042663213860', 'quota_metric': 'sheets.googleapis.com/read_requests', 'window_start_time': '1793502072', 'quota_location': 'global', 'quota_unit': '1/min/{project}/{user}', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-【台北】請款記錄新增 2 筆
 ===== 自動補做：儲值金完整流程 =====
 【儲值金】完整流程：期別 202610
-建立當月彙整檔：已建立 202610VIP儲值金彙整
+建立當月彙整檔：202610VIP儲值金彙整 已存在（1 份），先移到垃圾桶再重新建立、已建立 202610VIP儲值金彙整
 沒有找到需要轉檔的 xlsx/xls/csv
 轉檔：沒有找到需要轉檔的 xlsx/xls/csv
 ❌ 沒有儲值金結算／預收來源檔，請確認 00:10、00:20 月排程有成功，補跑後再手動執行完整流程
-自動補做：固定費用：台北 新增 2 筆；儲值金完整流程：失敗
+自動補做：儲值金完整流程：失敗
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
@@ -38,15 +36,13 @@
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 已刪除 1 則之前的月初提醒
-月初工作未完成 6 項（11/01）
-2026/11/01 10:01 檢查，6 項還沒完成：
+月初工作未完成 4 項（11/01）
+2026/11/01 11:01 檢查，4 項還沒完成：
 
 ・儲值金完整流程：未完成（搬運 0／10 項）
 ・台北 元大明細：最後一筆 2026/10/16（要到 2026/10/30）
 ・台中 元大明細：最後一筆 2026/09/18（要到 2026/10/30）
-・藍新收退款＋發票金額：執行中（2026-11-01 09:52:11）
-・鯨躍發票下載＋紙本／中獎更新＋台中統編PDF：執行中（2026-11-01 09:52:11）
-・全區現金缺口：執行中（2026-11-01 09:52:11）
+・鯨躍發票下載＋紙本／中獎更新＋台中統編PDF：上次失敗（exit 1）（2026-11-01 10:03:36）
 
 處理方式：
 ・Tools App【儲值金】完整流程，或 GitHub Actions → Scheduled Finance Jobs → target vip_full_pipeline
