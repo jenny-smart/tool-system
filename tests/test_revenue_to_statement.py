@@ -19,8 +19,20 @@ def test_plan_maps_rows_and_month_column():
     header = ["新竹服務"] + [f"{m}{k}" for m in MONTHS for k in ("實際", "預估")]
     plans, notes = plan_updates(_source(), {"財務": header, "現金": header}, "202610")
     assert notes == []
-    assert plans["財務"] == [(4, "U", 4800), (5, "U", 40640), (8, "U", 59350), (9, "U", 0), (11, "U", 3600)]
-    assert plans["現金"] == [(4, "U", 4800), (5, "U", 55180), (8, "U", 0)]  # 18 儲值金預收，不是 19 總計
+    assert plans["財務"] == [(4, "U", 4800, True), (5, "U", 40640, True), (8, "U", 59350, False),
+                             (9, "U", 0, False), (11, "U", 3600, False)]  # 4、5 待確認：只標底色
+    assert plans["現金"] == [(4, "U", 4800, False), (5, "U", 55180, False), (8, "U", 0, True)]  # 8 待確認
+
+
+def test_hold_cells_only_get_color_and_note():
+    from tools.finance_management.revenue_to_statement import HOLD_FILL, hold_requests
+
+    request = hold_requests(7, [(4, "U", 4800, True)], "202610")[0]["updateCells"]
+    assert request["range"] == {"sheetId": 7, "startRowIndex": 3, "endRowIndex": 4,
+                                "startColumnIndex": 20, "endColumnIndex": 21}
+    cell = request["rows"][0]["values"][0]
+    assert cell["userEnteredFormat"]["backgroundColor"] == HOLD_FILL and "4,800" in cell["note"]
+    assert "userEnteredValue" not in cell and "userEnteredValue" not in request["fields"]  # 不動數字
 
 
 def test_missing_month_is_reported():

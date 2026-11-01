@@ -8,6 +8,9 @@
   15 當月服務收現→4、16 次月服務預收→5、18 儲值金預收→8、
   20 家電清潔→9、21 收納服務→10、22 水洗服務→11、23 消毒服務→12
 來源格子空白的不貼（保留財報原值）；「-」＝0。
+
+對應還沒確認的列（財務 4、5：財報 1～4 月跟 5 月起放法相反；現金 8：用 18 還是 19 列），
+先不更新數字，只把財報那格標淺橘底，並加註解寫營業額總表的值，讓 Jenny 對照（2026-11）。
 """
 from __future__ import annotations
 
@@ -18,10 +21,11 @@ SOURCE_SHEET = "{year}財報總表"
 SOURCE_RANGE = "A1:P30"
 TARGETS = {
     "財務": {"sheet": "股東損益表_財務", "header_row": 1,
-             "rows": {2: 4, 3: 5, 6: 8, 8: 9, 9: 10, 10: 11, 11: 12}},
+             "rows": {2: 4, 3: 5, 6: 8, 8: 9, 9: 10, 10: 11, 11: 12}, "hold": {4, 5}},
     "現金": {"sheet": "股東損益表_現金", "header_row": 14,
-             "rows": {15: 4, 16: 5, 18: 8, 20: 9, 21: 10, 22: 11, 23: 12}},
+             "rows": {15: 4, 16: 5, 18: 8, 20: 9, 21: 10, 22: 11, 23: 12}, "hold": {8}},
 }
+HOLD_FILL = {"red": 0.988, "green": 0.898, "blue": 0.804}  # 淺橘：先不更新、待確認
 NAME_PATTERNS = ("{year}{area}營業額總表", "{year}營業額總表-{area}")
 
 
@@ -57,7 +61,7 @@ def _number(value):
 
 def plan_updates(source: list[list], target_headers: dict[str, list], period: str) -> tuple[dict[str, list], list[str]]:
     """純邏輯：source＝營業額總表「財報總表」A1:P30（未格式化值），target_headers＝{財務／現金: 財報第 1 列}。
-    回傳 ({財務／現金: [(列, 欄字母, 值)]}, 說明)。"""
+    回傳 ({財務／現金: [(列, 欄字母, 值, 先不更新只標底色)]}, 說明)。"""
     label = f"{period[:4]}.{period[4:]}"
     plans: dict[str, list] = {}
     notes: list[str] = []
@@ -76,7 +80,7 @@ def plan_updates(source: list[list], target_headers: dict[str, list], period: st
         for src_row, dst_row in spec["rows"].items():
             value = _number(_cell(source, src_row, src_col))
             if value is not None:
-                plans[kind].append((dst_row, dst_col, value))
+                plans[kind].append((dst_row, dst_col, value, dst_row in spec.get("hold", ())))
     return plans, notes
 
 
@@ -125,14 +129,52 @@ def sync_area(area: str, period: str, log: Callable[[str], None] = print, servic
     written = 0
     for kind, cells in plans.items():
         sid, title = locations[kind]
-        if not cells:
-            continue
-        service.spreadsheets().values().batchUpdate(spreadsheetId=sid, body={
-            "valueInputOption": "USER_ENTERED",
-            "data": [{"range": f"'{title}'!{col}{row}", "values": [[value]]} for row, col, value in cells]}).execute()
-        written += len(cells)
-        log(f"【{area}】{title} {cells[0][1]} 欄（{period[:4]}.{period[4:]}預估）已貼 {len(cells)} 格")
+        writes = [c for c in cells if not c[3]]
+        holds = [c for c in cells if c[3]]
+        if writes:
+            service.spreadsheets().values().batchUpdate(spreadsheetId=sid, body={
+                "valueInputOption": "USER_ENTERED",
+                "data": [{"range": f"'{title}'!{col}{row}", "values": [[value]]} for row, col, value, _h in writes]}
+            ).execute()
+            written += len(writes)
+            log(f"【{area}】{title} {writes[0][1]} 欄（{period[:4]}.{period[4:]}預估）已貼 {len(writes)} 格")
+        if holds:
+            mark_holds(service, sid, title, holds, period)
+            log(f"【{area}】{title} 第 {'、'.join(str(c[0]) for c in holds)} 列先不更新，已標淺橘底並加註解（營業額總表："
+                + "、".join(f"{c[0]}列 {_shown(c[2])}" for c in holds) + "）")
     return written
+
+
+def _shown(value) -> str:
+    return f"{value:,}" if isinstance(value, (int, float)) else str(value)
+
+
+def _column_index(letters: str) -> int:
+    index = 0
+    for ch in letters:
+        index = index * 26 + (ord(ch) - 64)
+    return index - 1
+
+
+def hold_requests(sheet_id: int, cells: list[tuple], period: str) -> list[dict]:
+    """先不更新的格子：淺橘底＋註解（營業額總表的值），不動格子內容。"""
+    requests = []
+    for row, col, value, _hold in cells:
+        col_index = _column_index(col)
+        requests.append({"updateCells": {
+            "range": {"sheetId": sheet_id, "startRowIndex": row - 1, "endRowIndex": row,
+                      "startColumnIndex": col_index, "endColumnIndex": col_index + 1},
+            "rows": [{"values": [{"userEnteredFormat": {"backgroundColor": HOLD_FILL},
+                                  "note": f"{period[:4]}.{period[4:]} 營業額總表：{_shown(value)}（對應待確認，先不更新）"}]}],
+            "fields": "userEnteredFormat.backgroundColor,note"}})
+    return requests
+
+
+def mark_holds(service, spreadsheet_id: str, title: str, cells: list[tuple], period: str) -> None:
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id, fields="sheets.properties").execute()
+    sheet_id = next(s["properties"]["sheetId"] for s in meta.get("sheets", []) if s["properties"]["title"] == title)
+    service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id,
+                                       body={"requests": hold_requests(sheet_id, cells, period)}).execute()
 
 
 def run(period: str, areas: Optional[list[str]] = None, log: Callable[[str], None] = print) -> list[str]:
