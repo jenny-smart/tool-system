@@ -43,7 +43,8 @@ def main(argv=None) -> int:
 
     parser = argparse.ArgumentParser(description="藍新月結：每區登入一次，下載收退款＋查手續費發票金額")
     parser.add_argument("period", help="YYYYMM，例如 202610")
-    parser.add_argument("--area", help="只做指定區域，例如 台北")
+    parser.add_argument("--area", action="append", default=None,
+                        help="只做指定區域（可重複），例如 --area 桃園；高雄會改做新竹再複製一份（同一個帳號）")
     parser.add_argument("--skip-area", action="append", default=None,
                         help=f"略過的區域（可重複）；預設略過 {'、'.join(SKIP_AREAS)}（跟新竹同一個帳號）")
     parser.add_argument("--accounts-file", type=Path, default=dr.DEFAULT_ACCOUNTS_FILE)
@@ -55,11 +56,16 @@ def main(argv=None) -> int:
     start, end, label = dr.explicit_date_range(f"{year}-{month:02d}-01",
                                                f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}")
     invoice_date = ia.invoice_date_for(period)
-    accounts = dr.load_accounts(args.accounts_file.expanduser(), args.area)
+    wanted = set(args.area or [])
+    for source, copies in COPY_AREAS.items():  # 高雄＝新竹的複本：要高雄就做新竹
+        if wanted & set(copies):
+            wanted = (wanted - set(copies)) | {source}
+    accounts = [a for a in dr.load_accounts(args.accounts_file.expanduser(), None)
+                if not wanted or a.area in wanted]
     skip = set(SKIP_AREAS if args.skip_area is None else args.skip_area)
-    if not args.area and skip:
+    if skip:
         accounts = [a for a in accounts if a.area not in skip]
-        print(f"略過：{'、'.join(sorted(skip))}（跟新竹同一個帳號，跑一次就好）")
+        print(f"略過：{'、'.join(sorted(skip))}（跟新竹同一個帳號，跑新竹再複製一份）")
     print(f"期別：{period}（收退款 {start}～{end}；手續費發票日 {invoice_date}）")
     print(f"區域：{', '.join(a.area for a in accounts)}；每區只登入一次")
 
@@ -90,7 +96,7 @@ def main(argv=None) -> int:
                         upload_period_files([payment, refund], account.area, label)
                         for file_path in (payment, refund):
                             print(f"RESULT_FILE: {file_path}")
-                        for copy_area in COPY_AREAS.get(account.area, ()) if not args.area else ():
+                        for copy_area in COPY_AREAS.get(account.area, ()):
                             copies = [copy_for_area(p, account.area, copy_area) for p in (payment, refund)]
                             upload_period_files(copies, copy_area, label)
                             print(f"[{account.area}] 已複製一份收退款檔為 {copy_area}")
@@ -112,7 +118,7 @@ def main(argv=None) -> int:
                             amount=ia.parse_amount(row["amount"]) if row else None,
                             invoice_number=row.get("invoice_number", ""), status=row.get("status", "查無發票")))
                         print(f"[{account.area}] 手續費發票：" + (f"NT$ {results[-1].amount:,}" if row else "查無發票"))
-                        for copy_area in COPY_AREAS.get(account.area, ()) if not args.area else ():
+                        for copy_area in COPY_AREAS.get(account.area, ()):
                             results.append(ia.InvoiceAmount(
                                 area=copy_area, source_month=period, invoice_date=invoice_date,
                                 amount=results[-1].amount, invoice_number=results[-1].invoice_number,

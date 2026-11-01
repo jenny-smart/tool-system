@@ -85,8 +85,11 @@ def test_run_rows_only_unfinished_areas_in_order():
                          ("prepaid_report", "高雄")]
     assert order[4:] == ["vip", "fixed"]
     actions = [a for a, _p in queued]
-    assert actions == ["fubon.download", "yuanta.download", "cetustek.paper_invoice_pdf", ms.BATCH_ACTION]
-    assert queued[-1][1]["steps"] == ["newebpay", "cash_gap"]  # 現金缺口跟在藍新後面
+    # 藍新只有部分地區沒做：只重跑那幾區（不是五區全跑），現金缺口排在後面
+    assert actions == ["fubon.download", "yuanta.download", "cetustek.paper_invoice_pdf",
+                       "newebpay.month_close", ms.BATCH_ACTION]
+    assert len(queued[3][1]["areas"]) < len(chk.AREAS)
+    assert queued[-1][1]["steps"] == ["cash_gap"]
     assert not any(m.startswith("❌") for m in messages)
 
 
@@ -127,3 +130,69 @@ def test_confirm_no_invoice_marks_done():
     confirmed[3][3], confirmed[3][5] = "0", "確認無發票"
     rows = rows_by_key(**{"藍新發票總表": lambda: confirmed})
     assert rows["newebpay_invoice"]["done"] and rows["newebpay_invoice"]["cells"]["桃園"] == (chk.OK, "確認無發票")
+
+
+def test_statement_done_when_downloaded_past_month_end_even_without_late_transactions():
+    task = {"action": "yuanta.download", "status": "completed",
+            "params_json": '{"area": "台中", "end_date": "2026-11-01", "start_from": "sheet"}'}
+    rows = rows_by_key(**{"本機Agent任務": lambda: [task]})
+    assert rows["yuanta"]["cells"]["台中"][0] == chk.OK and "已下載到 11/01" in rows["yuanta"]["cells"]["台中"][1]
+    assert rows["fubon"]["cells"]["台中"][0] == chk.FAIL  # 富邦沒有下載任務、最後一筆 9/18
+    old = dict(task, params_json='{"area": "台中", "end_date": "2026-10-25"}')
+    assert rows_by_key(**{"本機Agent任務": lambda: [old]})["yuanta"]["cells"]["台中"][0] == chk.FAIL
+
+
+def test_newebpay_rerun_only_unfinished_area_then_cash_gap():
+    invoice = [r[:] for r in INVOICE]
+    rows = [r for r in rows_by_key(**{"藍新發票總表": lambda: invoice}).values()
+            if r["key"] in ("newebpay_invoice", "cash_gap")]
+    queued = []
+    chk.run_rows(rows, DAY, lambda action, params, created_by: queued.append((action, params)) or {"task_id": "q"},
+                 log=lambda _t: None, runners={})
+    assert queued[0] == ("newebpay.month_close", {"period": "202610", "areas": ["桃園"], "cdp_url": "http://127.0.0.1:9222"})
+    assert queued[1][0] == ms.BATCH_ACTION and queued[1][1]["steps"] == ["cash_gap"]  # 藍新做完才算
+    from tools.local_agent import ACTION_HANDLERS
+    command = ACTION_HANDLERS["newebpay.month_close"](queued[0][1])
+    assert command[command.index("--area") + 1] == "桃園"
+
+
+def test_vip_without_source_files_reruns_settlement_and_prepaid():
+    rows = [r for r in rows_by_key().values() if r["key"] == "vip_full_pipeline"]
+    calls, codes = [], iter([chk.VIP_NO_SOURCE, 0])
+    messages = chk.run_rows(rows, DAY, lambda *a, **k: {}, log=lambda _t: None, runners={
+        "vip": lambda day, log: calls.append("vip") or next(codes),
+        "monthly": lambda target, p2, area, log: calls.append((target, area))})
+    assert calls == ["vip", ("stored_value_settlement", "all"), ("stored_value_prepaid", "all"), "vip"]
+    assert messages[-1] == "✅ 儲值金彙整（完整流程）：完成"
+
+
+def test_missing_bank_account_is_not_an_error():
+    def read(area, report):
+        if area == "高雄" and report == "富邦更新":
+            raise RuntimeError("試算表 x 找不到「富邦更新」分頁")
+        return [["", "帳務日"], ["", "2026/10/30"]]
+    rows = rows_by_key(**{"財報": read})
+    assert rows["fubon"]["cells"]["高雄"] == (chk.NA, "沒有這個帳戶")
+
+
+def test_vip_period_folder_prefers_duplicate_with_source_files():
+    from services.vip_workflow import VipStoredValueWorkflow
+
+    folder = "application/vnd.google-apps.folder"
+
+    class Drive:
+        def find_folder(self, parent, name):
+            return {"id": "year"} if name == "2026儲值金" else None
+
+        def list_children(self, folder_id):
+            return {"year": [{"id": "empty", "name": "202610", "mimeType": folder, "modifiedTime": "2026-11-01T02"},
+                             {"id": "src", "name": "202610", "mimeType": folder, "modifiedTime": "2026-10-31T16"}],
+                    "empty": [{"name": "202610VIP儲值金彙整", "mimeType": "application/vnd.google-apps.spreadsheet"}],
+                    "src": [{"name": "202610儲值金結算-台北.xlsx", "mimeType": "x"}]}[folder_id]
+
+        def get_or_create_folder(self, *_a):
+            raise AssertionError("不該再建新資料夾")
+
+    workflow = VipStoredValueWorkflow.__new__(VipStoredValueWorkflow)
+    workflow.drive, workflow.root_folder_id = Drive(), "root"
+    assert workflow.get_period_folder("202610")["id"] == "src"

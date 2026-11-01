@@ -46,6 +46,7 @@ MONTHLY_JOBS = [("refund_report", "已退款", "refund_report"), ("prepaid_repor
                 ("stored_value_settlement", "儲值金結算", "stored_value_settlement"),
                 ("stored_value_prepaid", "儲值金預收", "stored_value_prepaid")]
 VIP_KEY, VIP_LABEL = "vip_full_pipeline", "儲值金彙整（完整流程）"
+VIP_NO_SOURCE = 2  # runner.run_vip_full_pipeline：期別資料夾沒有結算／預收來源檔
 # 月排程總根目錄（03 服務分潤表），跟 scheduled_monthly.yml 的 MONTHLY_ROOT_FOLDER_ID 相同
 MONTHLY_ROOT_FOLDER_DEFAULT = "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
 PDF_AREAS = ("台中",)
@@ -320,7 +321,7 @@ def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optiona
     rows.append(make_row("cash_gap", "現金缺口", _agent_wait(cells, waiting("cash_gap")), "cash_gap"))
 
     rows.append(fixed_expense_row(day, log, readers))
-    rows += statement_rows(day, readers)
+    rows += statement_rows(day, readers, tasks=tasks or [])
     return rows
 
 
@@ -362,23 +363,53 @@ def last_statement_date(values: list[list]) -> Optional[date]:
     return max(dates) if dates else None
 
 
-def statement_rows(day: date, readers: Optional[dict] = None, target: Optional[date] = None) -> list[dict]:
-    """富邦／元大明細：最後一筆帳務日要到上個月最後一個工作天。台北／台中可補做、會提醒；其他地區只顯示。"""
+def downloaded_through(tasks: list[dict], action: str, area: str) -> Optional[date]:
+    """本機 Agent 已完成的明細下載任務（富邦／元大），這區下載到哪一天（params end_date 最大值）。"""
+    best = None
+    for task in tasks:
+        if task.get("action") != action or task.get("status") != "completed":
+            continue
+        try:
+            params = json.loads(task.get("params_json") or "{}")
+            end = date.fromisoformat(str(params.get("end_date") or ""))
+        except (ValueError, TypeError):
+            continue
+        if params.get("area") == area and (best is None or end > best):
+            best = end
+    return best
+
+
+def statement_rows(day: date, readers: Optional[dict] = None, target: Optional[date] = None,
+                   tasks: Optional[list[dict]] = None) -> list[dict]:
+    """富邦／元大明細：已更新到月底才算完成。兩種情況都算：
+      ① 財報最後一筆帳務日已到上個月最後一個工作天；
+      ② 本機 Agent 已完成一次下載、而且下載到上個月月底以後（月底那幾天沒交易的帳戶，最後一筆本來就比較早，
+         例如台中元大最後一筆 10/21，2026-11 Jenny 回報更新完仍是 ❌）。
+    台北／台中可補做、會提醒；其他地區由各區處理，只看 ①。"""
     from tools.finance_management.cash_gap import _report_values
 
     read_values = (readers or {}).get("財報", _report_values)
     target = target or last_workday_before(day)
+    month_end = day - timedelta(days=1)
     rows = []
     for key, label, report, action in STATEMENT_REPORTS:
         cells = {}
         for area in AREAS:
             try:
                 last = last_statement_date(read_values(area, report))
-                ok = bool(last and last >= target)
                 text = f"最後一筆 {last:%m/%d}" if last else "沒有資料"
-                cells[area] = (OK if ok else FAIL, text if ok else f"{text}（要到 {target:%m/%d}）")
+                through = downloaded_through(tasks or [], action, area)
+                if last and last >= target:
+                    cells[area] = (OK, text)
+                elif through and through >= month_end:
+                    cells[area] = (OK, f"{text}（已下載到 {through:%m/%d}，之後沒有交易）")
+                else:
+                    cells[area] = (FAIL, f"{text}（要到 {target:%m/%d}，或下載到 {month_end:%m/%d} 以後）")
             except Exception as exc:
-                cells[area] = (FAIL, f"讀取失敗：{str(exc)[:60]}")
+                from tools.finance_management.cash_gap import is_missing_account
+
+                cells[area] = (NA, "沒有這個帳戶") if is_missing_account(exc, report) else \
+                    (FAIL, f"讀取失敗：{str(exc)[:60]}")
         rows.append(make_row(key, label, cells, "statement", required=AGENT_STATEMENT_AREAS,
                              note="桃園／新竹／高雄由各區財務更新，只顯示、不提醒",
                              extra={"agent_action": action}))
@@ -444,6 +475,16 @@ def run_rows(rows: list[dict], day: date, create_task, log: Callable[[str], None
     if VIP_KEY in by_key:
         try:
             code = run_vip(day, log)
+            if code == VIP_NO_SOURCE:
+                # 期別資料夾沒有結算／預收檔（例如舊程式存到別的資料夾）：重跑兩個月排程再彙整一次
+                messages.append(f"ℹ️ {VIP_LABEL}：找不到儲值金結算／預收檔，先重跑儲值金結算、儲值金預收")
+                for target, label in (("stored_value_settlement", "儲值金結算"), ("stored_value_prepaid", "儲值金預收")):
+                    try:
+                        run_monthly(target, f"{period}-2", "all", log)
+                        messages.append(f"✅ {label}（重跑）：完成")
+                    except Exception as exc:
+                        messages.append(f"❌ {label}（重跑）：{str(exc)[:200]}")
+                code = run_vip(day, log)
             messages.append(f"✅ {VIP_LABEL}：完成" if code == 0 else f"❌ {VIP_LABEL}：失敗，請看執行日誌")
         except Exception as exc:
             messages.append(f"❌ {VIP_LABEL}：{exc}")
@@ -481,10 +522,21 @@ def run_rows(rows: list[dict], day: date, create_task, log: Callable[[str], None
         task = create_task("cetustek.paper_invoice_pdf", {"area": area, "month": period, "upload": True,
                                                           "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
         messages.append(f"✅ 發票PDF／{area}：已排入本機 Agent（{task.get('task_id', '')}），要輸入鯨躍驗證碼")
-    if "newebpay_files" in by_key or "newebpay_invoice" in by_key:
+    newebpay_areas = sorted({a for k in ("newebpay_files", "newebpay_invoice") for a in by_key.get(k, {}).get("todo", [])},
+                            key=AREAS.index)
+    newebpay_queued = False
+    if newebpay_areas and len(newebpay_areas) < len(AREAS):
+        # 只有部分地區沒完成：只重做這幾區（每區登入一次），不用每區都再輸入驗證碼
+        task = create_task("newebpay.month_close", {"period": period, "areas": newebpay_areas,
+                                                    "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
+        messages.append(f"✅ 藍新收退款＋發票／{'、'.join(newebpay_areas)}：已排入本機 Agent（{task.get('task_id', '')}）")
+        newebpay_queued = True
+    elif newebpay_areas:
         steps.insert(0, "newebpay")
     if "cash_gap" in by_key:
-        if "newebpay" in steps:
+        if newebpay_queued and "cash_gap" not in steps:
+            steps.append("cash_gap")  # 本機 Agent 依序執行：藍新做完才算現金缺口
+        elif "newebpay" in steps:
             steps.append("cash_gap")  # 跟在藍新後面算，才會用到新的藍新發票金額
         else:
             code = runners.get("cash_gap", lambda p: msb._run_step("cash_gap", p, ""))(period)
