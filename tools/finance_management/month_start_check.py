@@ -95,19 +95,22 @@ def cloud_entries(day: date, read=read_job_log) -> list[dict]:
             status, ok = f"失敗（exit {result.get('exit_code', '?')}）", False
         else:
             status, ok = f"成功（{result.get('finished_at', '')}）", True
-        entries.append({"label": label, "status": status, "fix": fix, "ok": ok})
+        entries.append({"label": label, "status": status, "fix": fix, "ok": ok,
+                        "kind": "cloud", "key": name, "runnable": not ok})
     return entries
 
 
 def month_start_entries(items: list[dict]) -> list[dict]:
     """月初整合執行的盤點結果：預設打勾（沒做／失敗）或不能勾（排隊等 Mac、執行中）都是未完成。"""
     return [{"label": i["label"], "status": i["status"], "fix": MONTH_START_FIX,
-             "ok": not (i["default"] or not i["selectable"])} for i in items]
+             "ok": not (i["default"] or not i["selectable"]),
+             "kind": "month", "key": i["step"], "runnable": bool(i["default"] and i["selectable"])} for i in items]
 
 
 def fixed_expense_entries(items: list[dict]) -> list[dict]:
     return [{"label": f"固定費用 {i['area']} {i['memo']}", "status": i["status"], "fix": FIXED_EXPENSE_FIX,
-             "ok": not (i["default"] or i["status"] == "請款記錄讀取失敗")}
+             "ok": not (i["default"] or i["status"] == "請款記錄讀取失敗"),
+             "kind": "fixed", "item": i, "runnable": bool(i["default"])}
             for i in items if not i.get("info")]
 
 
@@ -182,3 +185,85 @@ def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) ->
                                         calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10])
     log(f"已在 {REMIND_CALENDAR_ID} 行事曆建提醒")
     return problems
+
+
+# ── 檢查完直接補做 ───────────────────────────────────
+# 雲端排程 → 用 GitHub API 觸發 workflow（App secrets [github] 的 token 要有 Actions 寫入權限）
+CLOUD_DISPATCH = {
+    "monthly_prepaid_report": ("scheduled_monthly.yml", "prepaid_report"),
+    "monthly_stored_value_settlement": ("scheduled_monthly.yml", "stored_value_settlement"),
+    "monthly_stored_value_prepaid": ("scheduled_monthly.yml", "stored_value_prepaid"),
+    "finance_vip_full_pipeline": ("scheduled_finance.yml", "vip_full_pipeline"),
+}
+VIP_SOURCES = {"monthly_stored_value_settlement", "monthly_stored_value_prepaid"}
+
+
+def dispatch_inputs(key: str, day: date) -> tuple[str, dict]:
+    from tools.finance_management.month_start_batch import previous_period
+
+    workflow, target = CLOUD_DISPATCH[key]
+    if workflow == "scheduled_monthly.yml":
+        return workflow, {"target": target, "period": previous_period(day) + "-2"}
+    return workflow, {"target": target, "date": day.isoformat()}
+
+
+def dispatch_workflow(workflow: str, inputs: dict) -> None:
+    import requests
+
+    owner, repo, token, branch = _github_config()
+    if not (owner and repo and token):
+        raise RuntimeError("App 沒有設定 GitHub token（secrets [github] owner／repo／token），請到 GitHub Actions 手動執行")
+    response = requests.post(
+        f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+        json={"ref": branch, "inputs": inputs}, timeout=30,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+    if response.status_code != 204:
+        raise RuntimeError(f"GitHub 觸發失敗（HTTP {response.status_code}）：{response.text[:200]}")
+
+
+def plan_run(entries: list[dict]) -> tuple[list[dict], list[str]]:
+    """勾選的項目 → (實際要做的, 提醒)。儲值金完整流程要等結算／預收的檔案，同一次勾了就先不做。"""
+    selected = [e for e in entries if e.get("runnable")]
+    notes = []
+    cloud_keys = {e["key"] for e in selected if e["kind"] == "cloud"}
+    if "finance_vip_full_pipeline" in cloud_keys and cloud_keys & VIP_SOURCES:
+        selected = [e for e in selected if e.get("key") != "finance_vip_full_pipeline"]
+        notes.append("儲值金完整流程要等儲值金結算／預收跑完（約 2 分鐘）再回來檢查、執行")
+    return selected, notes
+
+
+def run_selected(entries: list[dict], day: date, create_task, log: Callable[[str], None] = print,
+                 dispatch=dispatch_workflow, created_by: str = "月初檢查") -> list[str]:
+    """補做勾選的未完成項目：雲端排程觸發 GitHub workflow、固定費用直接新增、
+    藍新／鯨躍排入本機 Agent；只有現金缺口（不用等藍新）時直接在這裡算。回傳結果訊息。"""
+    from tools.finance_management import month_start_batch
+
+    selected, messages = plan_run(entries)
+    for entry in (e for e in selected if e["kind"] == "cloud"):
+        workflow, inputs = dispatch_inputs(entry["key"], day)
+        try:
+            dispatch(workflow, inputs)
+            messages.append(f"✅ {entry['label']}：已觸發 GitHub {workflow}（target {inputs['target']}），約幾分鐘後完成")
+        except Exception as exc:
+            messages.append(f"❌ {entry['label']}：{exc}")
+    fixed = [e["item"] for e in selected if e["kind"] == "fixed"]
+    if fixed:
+        from tools.finance_management.fixed_expense_batch import submit
+
+        try:
+            added = submit(fixed, run_type="月初檢查補做", log=log)
+            messages.append("✅ 固定費用：" + "、".join(f"{a} 新增 {n} 筆" for a, n in added.items()))
+        except Exception as exc:
+            messages.append(f"❌ 固定費用：{exc}")
+    steps = [e["key"] for e in selected if e["kind"] == "month"]
+    period = month_start_batch.previous_period(day)
+    if steps == ["cash_gap"]:
+        code = month_start_batch._run_step("cash_gap", period, "")
+        messages.append("✅ 現金缺口：已重新試算" if code == 0 else "❌ 現金缺口：試算失敗")
+    elif steps:
+        task = month_start_batch.queue_steps(period, steps, create_task, created_by=created_by, log=log)
+        labels = "→".join(month_start_batch.STEPS[s][0] for s in month_start_batch.STEP_ORDER if s in steps)
+        messages.append(f"✅ {labels}：已排入本機 Agent（{(task or {}).get('task_id', '')}），藍新／鯨躍要到 Mac 輸入驗證碼")
+    for message in messages:
+        log(message)
+    return messages

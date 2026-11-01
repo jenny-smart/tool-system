@@ -4460,6 +4460,7 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_month_start_check(create_local_agent_task, add_log, st.session_state.get("username", ""))
     LOG_PLACEHOLDER = st.empty()
     render_log()
+    render_agent_task_progress(("month_start.", "newebpay.", "cetustek."))
     st.stop()
 
 if system_type == "finance_management" and selected_function == "【整合執行】月初藍新／鯨躍／現金缺口":

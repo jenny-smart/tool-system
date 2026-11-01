@@ -188,3 +188,30 @@ def test_month_start_check_skips_mac_items_before_queue_hour(monkeypatch):
     monkeypatch.setattr(month_start_batch, "scan", lambda period, log=print: ms.build_items(period, [], [], []))
     assert chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=3) == []
     assert len(chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=10)) == 4
+
+
+def test_month_start_check_run_selected(monkeypatch):
+    from tools.finance_management import fixed_expense_batch, month_start_check as chk
+
+    entries = chk.cloud_entries(date(2026, 12, 1), read=lambda _d, name: None)
+    entries += chk.fixed_expense_entries(fixed.mark_status(fixed.planned_items("202612"), {"台北": set(), "台中": set()}))
+    entries += chk.month_start_entries(ms.build_items("202611", [], [], []))
+    selected, notes = chk.plan_run(entries)
+    assert "finance_vip_full_pipeline" not in {e.get("key") for e in selected} and notes  # 要等結算／預收
+
+    dispatched, submitted, queued = [], [], []
+    monkeypatch.setattr(fixed_expense_batch, "submit", lambda items, **_k: submitted.extend(items) or {"台北": len(items)})
+    messages = chk.run_selected(entries, date(2026, 12, 1),
+                                lambda action, params, created_by: queued.append(params) or {"task_id": "q"},
+                                log=lambda _t: None, dispatch=lambda wf, inputs: dispatched.append((wf, inputs)))
+    assert ("scheduled_monthly.yml", {"target": "stored_value_settlement", "period": "202611-2"}) in dispatched
+    assert len(dispatched) == 3 and len(submitted) == 2
+    assert queued[0]["period"] == "202611" and queued[0]["steps"] == list(ms.STEP_ORDER)
+    assert not any(m.startswith("❌") for m in messages)
+
+
+def test_month_start_check_vip_alone_dispatches_with_date():
+    from tools.finance_management import month_start_check as chk
+
+    assert chk.dispatch_inputs("finance_vip_full_pipeline", date(2026, 11, 1)) == \
+        ("scheduled_finance.yml", {"target": "vip_full_pipeline", "date": "2026-11-01"})
