@@ -160,7 +160,13 @@ def main(argv=None) -> int:
                         print(f"[{account.area}] 發票金額查詢失敗：{exc}", file=sys.stderr)
                     if do_balance and account.area not in ab.NO_BALANCE_AREAS:
                         try:
-                            found = ab.query_balance(page, period)
+                            try:
+                                found = ab.query_balance(page, period)
+                            except ab.SessionExpired:
+                                # 沿用的登入狀態已過期（2026-11-01 台北）：重新登入一次再查
+                                print(f"[{account.area}] 藍新登入已過期，請重新輸入驗證碼登入")
+                                messages = dr.login(page, account)
+                                found = ab.query_balance(page, period)
                             if found:
                                 balances[account.area] = found
                                 print(f"[{account.area}] 藍新帳務：{found[0]} 本次剩餘金額 NT$ {found[1]:,}")

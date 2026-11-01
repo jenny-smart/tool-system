@@ -3866,6 +3866,19 @@ def run_review_monthly(*, month="", start_date=None, end_date=None, area="全區
     return "完成" if not failures else "部分失敗：\n" + "\n".join(failures)
 
 
+def run_revenue_to_statement(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    """各區「{YYYY}{地區}營業額總表」的「{YYYY}財報總表」→ 該區財報「股東損益表_財務／現金」當月預估欄。"""
+    from tools.finance_management import revenue_to_statement
+
+    period = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202610")
+    log = (lambda text: on_progress(text, "info")) if on_progress else (lambda text: None)
+    areas = None if area in ("全區", "", None) else [area]
+    failures = revenue_to_statement.run(period, areas, log=log)
+    return "完成" if not failures else "部分失敗：\n" + "\n".join(failures)
+
+
 def run_review_group_hide_actual(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from tools.finance_management.review_update import group_hide_actual_columns
 
@@ -4043,6 +4056,7 @@ FINANCE_TASKS = [
     {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
+    {"name": "【財報】營收總表→財報｜貼入當月預估（股東損益表_財務／現金）", "handler": run_revenue_to_statement, "enabled": True},
     {"name": "【財報】年度review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
     {"name": "【財報】年度review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
     {"name": "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）", "handler": run_review_monthly, "enabled": True},
@@ -5066,6 +5080,23 @@ with date_col:
                 "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來；"
                 "「分組隱藏當月後預估欄位」則相反，把該期別之後的「預估」欄位分組收合，"
                 "該期別及之前的預估欄位會維持顯示（若之前被誤收合會自動解開）。"
+            )
+        elif selected_function == "【財報】營收總表→財報｜貼入當月預估（股東損益表_財務／現金）":
+            st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
+            last_month = today_date.replace(day=1) - timedelta(days=1)
+            period = st.text_input(
+                "期別",
+                value=last_month.strftime("%Y%m"),
+                placeholder="例如：202610",
+                label_visibility="collapsed",
+                key="finance_revenue_statement_period",
+            )
+            st.caption(
+                "把各區「{YYYY}{地區}營業額總表」的「{YYYY}財報總表」該月數字，貼進該區財報當月「預估」欄："
+                "服務基礎 2～3、6、8～11 列 → 股東損益表_財務 4～5、8、9～12 列；"
+                "現金基礎 15～16、18、20～23 列 → 股東損益表_現金 4～5、8、9～12 列。"
+                "營業額總表空白的格子不貼；執行區域選「全區」五區一起做。"
+                "對應待確認的列（財務 4、5 列，現金 8 列）先不更新數字，只標淺橘底，註解寫營業額總表的值。"
             )
         elif selected_function == "【儲值金】複製期別檔案":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
@@ -6538,6 +6569,7 @@ if run_clicked:
                 "【財報】年度review｜預覽公式調整",
                 "【財報】年度review｜套用公式調整",
                 "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）",
+                "【財報】營收總表→財報｜貼入當月預估（股東損益表_財務／現金）",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完

@@ -502,7 +502,46 @@ def persist_file(service, path: str, folder_id: str, args: RunArgs, tag: str, ci
         })
 
 
-def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], service, start: str, end: str, tag: str) -> None:
+def check_uninvoiced(city: str, df: pd.DataFrame) -> list[dict[str, str]]:
+    """已付款未開發票、已加收／已退款資料沒填完整的訂單（只提醒，不影響下載結果）。"""
+    from tools.scheduled_monthly.uninvoiced_check import find_uninvoiced, summary_lines
+
+    try:
+        items = find_uninvoiced(df)
+    except Exception as exc:
+        log(f"⚠️ {city} 訂單資料檢查失敗：{exc}")
+        return []
+    if items:
+        log(f"⚠️ {city} 已付款未開發票／加收、退款資料待補 {len(items)} 筆：")
+        for line in summary_lines(city, items):
+            log("   " + line)
+    else:
+        log(f"✅ {city} 沒有未開發票、加收／退款資料待補的訂單")
+    return items
+
+
+def notify_uninvoiced(tag: str, found: dict[str, list[dict[str, str]]]) -> None:
+    """有未開發票就在 Jenny 行事曆建提醒（當天同類提醒只留最新一則）。"""
+    from tools.scheduled_monthly.uninvoiced_check import REMINDER_PREFIX, summary_lines
+
+    total = sum(len(v) for v in found.values())
+    if not total:
+        return
+    lines = [line for city, items in found.items() for line in summary_lines(city, items)]
+    title = f"{REMINDER_PREFIX}：{tag} {total} 筆"
+    body = "\n".join([f"{tag} 上下半月訂單下載後檢查：已付款未開發票、已加收／已退款欄位沒填完整", ""] + lines +
+                      ["", "請到後台補開發票或補填加收／退款資料（上傳的訂單檔已用底色標出：淺黃＝加收／退款，淺紅＝缺的格子）。"])
+    try:
+        from tools.orders_system import calendar_notify
+
+        calendar_notify.create_notify_event(summary=title, description=body, start=tw_now() + timedelta(minutes=30),
+                                            attendee="", reminder_minutes=[20, 10], replace_prefix=REMINDER_PREFIX)
+        log(f"已建行事曆提醒：{title}")
+    except Exception as exc:
+        log(f"⚠️ 建立未開發票提醒失敗：{exc}")
+
+
+def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], service, start: str, end: str, tag: str) -> list[dict[str, str]]:
     session = requests.Session()
     acc = accounts[city]
     log(f"\n=== 處理 {city} ===")
@@ -512,6 +551,7 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
     log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
 
     status, message, source_files = "失敗", "", []
+    uninvoiced: list[dict[str, str]] = []
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             south_paths = []
@@ -554,19 +594,34 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
                 final_path = os.path.join(temp_dir, f"{tag}-訂單-高雄.xlsx" if city == "高雄" else f"{tag}訂單-{city}.xlsx")
                 original_source_path = original_merged_path if city == "高雄" else original_path
                 merge_workbook_files([original_source_path, stored_path], final_path)
-                merged_count = len(pd.read_excel(final_path, engine="openpyxl"))
+                final_df = pd.read_excel(final_path, engine="openpyxl")
+                merged_count = len(final_df)
                 log(f"✅ {city} 合併完成：原訂單 {len(original_df)} + 儲值金 {len(stored_df)} → 合併 {merged_count} 筆")
+                uninvoiced = check_uninvoiced(city, final_df)
             else:
                 if original_df.empty:
                     status, message = "成功", "本期無資料，略過上傳"
-                    return
+                    return []
+                uninvoiced = check_uninvoiced(city, original_df)
                 final_path = os.path.join(temp_dir, f"{tag}訂單-{city}.xlsx")
                 save_preserved_excel(original_content, final_path)
 
+            try:  # 有加收／退款狀態的列加底色、缺的格子紅底
+                from tools.scheduled_monthly.uninvoiced_check import highlight_workbook
+
+                colored = highlight_workbook(final_path)
+                if colored:
+                    log(f"🎨 {city} 訂單檔已標底色 {colored} 列（加收／退款狀態、缺的欄位）")
+            except Exception as exc:
+                log(f"⚠️ {city} 訂單檔標底色失敗：{exc}")
             persist_file(service, final_path, tag_folder_id, args, tag, city, start, end, "訂單")
             source_files.append(os.path.basename(final_path))
             status = "成功"
             message = "已上傳：" + "、".join(source_files)
+            if uninvoiced:
+                message += f"；⚠️ 未開發票／加收、退款資料待補 {len(uninvoiced)} 筆：" + "、".join(
+                    i["訂單編號"] for i in uninvoiced[:20])
+            return uninvoiced
     except Exception as exc:
         message = str(exc)
         raise
@@ -597,9 +652,10 @@ def main() -> None:
     service = get_drive_service()
     failed: list[tuple[str, str]] = []
     succeeded: list[str] = []
+    uninvoiced: dict[str, list[dict[str, str]]] = {}
     for city in resolve_cities(args, accounts):
         try:
-            process_city(city, args, accounts, service, start, end, tag)
+            uninvoiced[city] = process_city(city, args, accounts, service, start, end, tag) or []
             succeeded.append(city)
         except Exception as exc:
             log(f"❌ {city} 失敗：{exc}")
@@ -607,6 +663,7 @@ def main() -> None:
             if args.area != "all":
                 raise
     log(f"\n✅ 成功地區：{', '.join(succeeded) if succeeded else '無'}")
+    notify_uninvoiced(tag, uninvoiced)
     if failed:
         for city, message in failed:
             log(f"- {city}: {message}")

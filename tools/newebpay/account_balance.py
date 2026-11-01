@@ -52,11 +52,17 @@ def query_range(period: str, today: Optional[date] = None) -> tuple[str, str]:
     return start.isoformat(), max(end, start).isoformat()
 
 
+class SessionExpired(RuntimeError):
+    """藍新登入已過期（沿用的登入狀態開帳務中心被導回登入頁）：要重新登入再查。"""
+
+
 def query_balance(page, period: str) -> Optional[tuple[str, int]]:
     """在已登入的藍新頁面查帳戶明細，回傳第一筆 (處理日期, 本次剩餘金額)。"""
     from tools.newebpay.invoice_amounts import visible_date_inputs, write_date
 
     page.goto(BALANCE_URL, wait_until="domcontentloaded")
+    if "login_center" in page.url or "single_login" in page.url:
+        raise SessionExpired(f"藍新登入已過期，被導回登入頁（{page.url[:80]}）")
     dates = visible_date_inputs(page)
     if len(dates) < 2:
         raise RuntimeError(f"找不到帳戶明細查詢的日期起訖欄位（頁面：{page.url}）")

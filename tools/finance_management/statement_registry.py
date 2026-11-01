@@ -60,7 +60,24 @@ def _extract_spreadsheet_id(raw: str) -> str:
     return text.strip()
 
 
+_REGISTRY_CACHE: dict[str, tuple[float, list[list[str]]]] = {}
+REGISTRY_CACHE_SECONDS = 300
+
+
 def _read_registry() -> list[list[str]]:
+    """「財報設定」登記表：同一次執行 5 分鐘內只讀一次（現金缺口跑全區時每個項目都要查，
+    全部用 Jenny OAuth 後共用每分鐘 60 次讀取配額，重複讀會觸發 429）。"""
+    import time as _time
+
+    cached = _REGISTRY_CACHE.get("rows")
+    if cached and _time.monotonic() - cached[0] < REGISTRY_CACHE_SECONDS:
+        return cached[1]
+    rows = _read_registry_now()
+    _REGISTRY_CACHE["rows"] = (_time.monotonic(), rows)
+    return rows
+
+
+def _read_registry_now() -> list[list[str]]:
     service = get_sheets_service()
     res = (
         service.spreadsheets()

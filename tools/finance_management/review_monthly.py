@@ -166,13 +166,13 @@ CASH_ROWS = {
     28: ("春酒費用", ("春酒費用",)),
     # 2026-11 Jenny：藍新發票金額不放「相關費用」（26 列不動），改貼 38；藍新帳務（本次剩餘金額）貼 39～40
     38: ("藍新發票金額", ("藍新發票金額",)),
-    40: ("藍新帳務金額", ("藍新帳務金額",)),
 }
-# 文字列（日期）：照原樣貼
-TEXT_ROWS = {39: ("藍新帳務日期", "藍新帳務日期")}
+# 照原樣貼、空白不貼（還沒查的地區、高雄跟新竹同帳號不查）
+TEXT_ROWS = {39: ("藍新帳務日期", "藍新帳務日期"), 40: ("藍新帳務金額", "藍新帳務金額")}
+CLEAR_ROWS = (26,)  # 相關費用：Jenny 要空白（2026-11）
 TEXT_LABELS = {source for _label, source in TEXT_ROWS.values()}
 LAST_BLOCK_ROW = 40
-OPTIONAL_ROWS = {40}
+OPTIONAL_ROWS: set[int] = set()
 # 公式列：空白才補（{c}＝該欄字母）
 FORMULA_ROWS = {
     20: "={c}14-SUM({c}15:{c}19)",
@@ -194,13 +194,21 @@ def _number(value) -> Optional[float]:
         return None  # 「錯誤：…」之類
 
 
+def _cash_label(value) -> str:
+    """現金缺口試算 A 欄標題；「2%」那格是數字 0.02（UNFORMATTED_VALUE 讀回來不是「2%」）。"""
+    if isinstance(value, (int, float)) and abs(float(value) - 0.02) < 1e-9:
+        return "2%"
+    text = str(value or "").strip()
+    return "2%" if text in ("0.02", "2%") else text
+
+
 def cash_gap_values(values: list[list]) -> dict[str, dict[str, Optional[float]]]:
     """現金缺口試算（A 標題、B～F 台北～高雄）→ {標題: {地區: 數字或 None（錯誤）}}"""
     header = [str(v).strip() for v in (values[0] if values else [])]
     cols = {area: header.index(area) for area in AREAS if area in header}
     table = {}
     for row in values[2:]:
-        label = str(row[0] if row else "").strip()
+        label = _cash_label(row[0] if row else "")
         if label in TEXT_LABELS:
             table[label] = {area: str(row[i]).strip() if i < len(row) else "" for area, i in cols.items()}
         elif label:
@@ -242,6 +250,9 @@ def build_block_updates(title: str, month_end: date, vip_block: list[list], cash
             col = label_col if i == 0 else area_cols[AREAS[i - 1]]
             if value is not None:
                 data.append({"range": f"'{title}'!{col}{row}", "values": [[value]]})
+    for row in CLEAR_ROWS:
+        data.append({"range": f"'{title}'!{area_cols[AREAS[0]]}{row}:{area_cols[AREAS[-1]]}{row}",
+                     "values": [[""] * len(AREAS)]})
     for row, (label, source) in TEXT_ROWS.items():
         data.append({"range": f"'{title}'!{label_col}{row}", "values": [[label]]})
         for area in AREAS:

@@ -68,5 +68,17 @@ def test_cash_gap_block_newebpay_balance_rows():
     ])
     data, _ = rm.build_block_updates("現金缺口", date(2026, 10, 31), [], cash, [], "2026/10")
     cells = {d["range"].split("!")[1]: d["values"][0][0] for d in data}
-    assert cells["CD39"] == "2026-11-01 13:01:59" and cells["CD40"] == 461580 and cells["CF40"] == 1200
+    assert cells["CD39"] == "2026-11-01 13:01:59" and cells["CD40"] == "461580" and cells["CF40"] == "1200"
     assert cells["CC39"] == "藍新帳務日期" and cells["CC40"] == "藍新帳務金額" and cells["CC38"] == "藍新發票金額"
+
+
+def test_review_two_percent_label_and_clear_related_fee():
+    cash = rm.cash_gap_values([
+        ["", "台北", "台中", "桃園", "新竹", "高雄", "ALL"], ["日期", "2026/10/31"],
+        [0.02, 5, 0, 0, 0, 0], ["藍新帳務日期", "", "2026-11-01 13:01:56"], ["藍新帳務金額", "", "179340"],
+    ])
+    data, skipped = rm.build_block_updates("現金缺口", date(2026, 10, 31), [], cash, [], "2026/10")
+    cells = {d["range"].split("!")[1]: d["values"] for d in data}
+    assert cells["CD24"] == [[5]] and not any("2%" in s for s in skipped)  # 2% 那格是 0.02
+    assert cells["CD26:CH26"] == [[""] * 5]  # 相關費用空白
+    assert "CD40" not in cells and cells["CE40"] == [["179340"]]  # 台北還沒查不寫 0
