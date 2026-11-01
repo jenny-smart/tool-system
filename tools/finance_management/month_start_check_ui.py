@@ -34,6 +34,16 @@ def _how(row: dict) -> str:
             "statement": "台北／台中排入本機 Agent；其他地區由各區處理"}.get(row["action"], "")
 
 
+def _saved_ignored(names: list[str], options: list[tuple[str, str, str]]) -> list[str]:
+    """已存的不提醒設定（含已完成的項目，multiselect 預設值要完整顯示）。"""
+    try:
+        values = chk._read_master(chk.IGNORE_SHEET, "A:D")
+    except Exception:
+        return []
+    saved = chk.read_ignored(values)
+    return [n for n, (k, _l, a) in zip(names, options) if (k, a) in saved]
+
+
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption("每月 1 日要做的所有工作，依功能列出各地區狀態：✅ 完成　❌ 沒完成／失敗　⏳ 排入本機 Agent、執行中　"
                "— 這區不用做（藍新查無發票先算 ❌，到下方按確認才算完成）。全部地區都完成會在「完成」欄打 ✅。"
@@ -69,9 +79,9 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                    "（可補做的已預設打勾）。")
     override, editor_key = select_all_controls(PREFIX)
     table = pd.DataFrame([{
-        RUN_COLUMN: checked(r["runnable"], override, r["runnable"]),
+        RUN_COLUMN: checked(r["runnable"] and bool(r.get("remind_todo", r["todo"])), override, r["runnable"]),
         "功能": r["label"],
-        DONE_COLUMN: "✅ 完成" if r["done"] else "❌ 未完成",
+        DONE_COLUMN: "✅ 完成" if r["done"] else "❌ 未完成（不提醒）" if not r.get("remind_todo", r["todo"]) else "❌ 未完成",
         **{area: r["cells"][area][0] for area in chk.AREAS},
         "說明": _how(r),
     } for r in rows])
@@ -91,6 +101,25 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                     st.session_state.pop(f"{PREFIX}_result", None)
                 except Exception as exc:
                     st.error(f"確認失敗：{exc}")
+    with st.expander("🔕 不提醒設定（自己沒辦法完成的項目：盤點照樣顯示 ❌，但行事曆和 1 日每小時檢查不再提醒）"):
+        options = chk.ignore_options(rows)
+        names = [f"{label}／{area}" for _k, label, area in options]
+        current = [n for n, (k, _l, a) in zip(names, options) if any(k == r["key"] and a in r.get("ignored", [])
+                                                                     for r in rows)]
+        saved = st.session_state.get(f"{PREFIX}_ignored_saved")
+        picked = st.multiselect("不提醒的功能／地區（每個月都適用）", names,
+                                default=saved if saved is not None else _saved_ignored(names, options),
+                                key=f"{PREFIX}_ignored")
+        if st.button("💾 儲存不提醒設定", key=f"{PREFIX}_ignored_save"):
+            try:
+                count = chk.save_ignored([options[names.index(n)] for n in picked])
+                st.session_state[f"{PREFIX}_ignored_saved"] = picked
+                st.success(f"已儲存 {count} 項不提醒，請再按一次「盤點」")
+                st.session_state.pop(f"{PREFIX}_result", None)
+            except Exception as exc:
+                st.error(f"儲存失敗：{exc}")
+        if current:
+            st.caption("這次盤點沒完成但不提醒：" + "、".join(current))
     with st.expander("各地區明細（日期、筆數、錯誤訊息）"):
         st.dataframe(pd.DataFrame([{"功能": r["label"], **{a: f"{r['cells'][a][0]} {r['cells'][a][1]}".strip()
                                                           for a in chk.AREAS}} for r in rows]),

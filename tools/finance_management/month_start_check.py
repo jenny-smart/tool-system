@@ -326,7 +326,56 @@ def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optiona
 
     rows.append(fixed_expense_row(day, log, readers))
     rows += statement_rows(day, readers, tasks=tasks or [])
+    ignore_values, err = read("月初檢查不提醒", lambda: _read_master(IGNORE_SHEET, "A:D"))
+    if err and "Unable to parse range" not in err:
+        log(f"⚠️ {err}")
+    return apply_ignored(rows, read_ignored(ignore_values or []))
+
+
+# ── 不提醒：有些功能 Jenny 自己沒辦法完成（例如其他地區的富邦／元大明細），盤點照樣顯示 ❌，
+#    但行事曆、1 日每小時檢查不再提醒（2026-11 Jenny）。設定存在主控表「月初檢查不提醒」，每個月都適用。
+IGNORE_SHEET = "月初檢查不提醒"
+IGNORE_HEADER = ["功能代碼", "功能", "地區", "設定時間"]
+
+
+def read_ignored(values: list[list]) -> set[tuple[str, str]]:
+    return {(_cell(r, 0), _cell(r, 2)) for r in values[1:] if _cell(r, 0) and _cell(r, 2)}
+
+
+def apply_ignored(rows: list[dict], ignored: set[tuple[str, str]]) -> list[dict]:
+    """每列加上 ignored（設定不提醒、還沒完成的地區）與 remind_todo（還要提醒的地區）。"""
+    for row in rows:
+        row["ignored"] = [a for a in row["todo"] if (row["key"], a) in ignored]
+        row["remind_todo"] = [a for a in row["todo"] if a not in row["ignored"]]
     return rows
+
+
+def ignore_options(rows: list[dict]) -> list[tuple[str, str, str]]:
+    """可以設定不提醒的 (功能代碼, 功能, 地區)：這個功能要做的地區（— 的不列）。"""
+    return [(r["key"], r["label"], a) for r in rows for a in AREAS if r["cells"].get(a, (NA, ""))[0] != NA]
+
+
+def save_ignored(items: list[tuple[str, str, str]], write=None) -> int:
+    """整份覆寫「月初檢查不提醒」：items＝[(功能代碼, 功能, 地區)]。分頁不存在會自動建。"""
+    now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M")
+    values = [IGNORE_HEADER] + [[k, label, area, now] for k, label, area in items]
+    if write is None:
+        from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+
+        service, sid = get_sheets_service(), get_master_spreadsheet_id()
+        titles = [s["properties"]["title"] for s in service.spreadsheets().get(
+            spreadsheetId=sid, fields="sheets.properties.title").execute().get("sheets", [])]
+        if IGNORE_SHEET not in titles:
+            service.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [
+                {"addSheet": {"properties": {"title": IGNORE_SHEET}}}]}).execute()
+        service.spreadsheets().values().clear(spreadsheetId=sid, range=f"'{IGNORE_SHEET}'!A:D").execute()
+
+        def write(vals):
+            service.spreadsheets().values().update(
+                spreadsheetId=sid, range=f"'{IGNORE_SHEET}'!A1", valueInputOption="RAW",
+                body={"values": vals}).execute()
+    write(values)
+    return len(items)
 
 
 def fixed_expense_row(day: date, log, readers: dict) -> dict:
@@ -576,13 +625,14 @@ AUTO_MAX_ATTEMPTS = 2  # 儲值金彙整自動補做最多試 2 次，避免每�
 
 def problems(rows: list[dict], hour: int = 23) -> list[dict]:
     """排程要提醒的列：沒完成、會提醒；05:00 前不看藍新／鯨躍（還沒排入）。"""
-    return [r for r in rows if not r["done"] and r["remind"]
+    return [r for r in rows if not r["done"] and r["remind"] and r.get("remind_todo", r["todo"])
             and (hour >= MONTH_START_QUEUE_HOUR or r["key"] not in AGENT_ROW_KEYS)]
 
 
 def build_reminder(day: date, now: datetime, todo: list[dict]) -> tuple[str, str]:
     lines = [f"{now:%Y/%m/%d %H:%M} 檢查，{len(todo)} 個功能還沒完成：", ""]
-    lines += [f"・{r['label']}：{summary_text(r)}" for r in todo]
+    lines += [f"・{r['label']}：未完成：" + "、".join(f"{a}{r['cells'][a][0]}" for a in r.get("remind_todo", r["todo"]))
+              for r in todo]
     lines += ["", f"處理方式：{PAGE}", "",
               "1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。"]
     return f"{REMINDER_PREFIX} {len(todo)} 項（{day:%m/%d}）", "\n".join(lines)

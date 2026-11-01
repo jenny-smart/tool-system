@@ -31,7 +31,7 @@ CASH = [["", "台北", "台中", "桃園", "新竹", "高雄", "ALL"], ["日期"
 def readers(**overrides):
     base = {"月排程執行Log": lambda: MONTHLY_LOG, "儲值金月度作業紀錄": lambda: VIP_LOG,
             "本機Agent任務": lambda: [], "藍新收退款檔": lambda: FILES, "藍新發票總表": lambda: INVOICE,
-            "鯨躍發票更新Log": lambda: EI_LOG, "現金缺口試算": lambda: CASH,
+            "鯨躍發票更新Log": lambda: EI_LOG, "現金缺口試算": lambda: CASH, "月初檢查不提醒": lambda: [],
             "固定費用": lambda: [{"area": "台北", "memo": "2026.11-辦公室租金", "default": True},
                              {"area": "台中", "memo": "2026.11-辦公室租金管理費", "default": False}],
             "財報": lambda area, report: [["", "帳務日"], ["", "2026/10/30" if area != "台中" else "2026/09/18"]]}
@@ -296,3 +296,17 @@ def test_kaohsiung_needs_no_newebpay_invoice():
     from tools.finance_management.cash_gap import newebpay_invoice_amount
 
     assert newebpay_invoice_amount("高雄", date(2026, 10, 31)) == 0.0
+
+
+def test_ignored_items_still_shown_but_not_reminded():
+    rows = list(rows_by_key(**{"月初檢查不提醒": lambda: [chk.IGNORE_HEADER, ["prepaid_report", "預收", "台中", ""]]}).values())
+    row = next(r for r in rows if r["key"] == "prepaid_report")
+    assert not row["done"] and row["ignored"] == ["台中"]
+    assert row["remind_todo"] == [a for a in row["todo"] if a != "台中"]
+    only_taichung = [dict(r, remind_todo=[]) if r["key"] == "prepaid_report" else r for r in rows]
+    assert "prepaid_report" not in [r["key"] for r in chk.problems(only_taichung)]
+    written = []
+    assert chk.save_ignored([("fubon", "富邦明細", "桃園")], write=written.append) == 1
+    assert written[0][0] == chk.IGNORE_HEADER and written[0][1][:3] == ["fubon", "富邦明細", "桃園"]
+    keys = {(k, a) for k, _l, a in chk.ignore_options(rows)}
+    assert ("cash_gap", "高雄") in keys and ("prize", "台北") not in keys  # 「—」的不列
