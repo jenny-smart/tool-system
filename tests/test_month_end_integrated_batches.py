@@ -53,16 +53,33 @@ def test_other_period_task_not_matched():
 
 
 def test_run_plan_order_and_dependency():
+    from tools.newebpay.month_close import INVOICE_FAILED
+
     calls = []
 
     def run_step(step, period, _cdp):
         calls.append(step)
-        return 1 if step == "newebpay_invoice" else 0
+        return INVOICE_FAILED if step == ms.COMBINED_NEWEBPAY else 0
 
     code = ms.run_plan("202610", ["cash_gap", "cetustek_download", "newebpay_invoice", "newebpay_download"],
                        log=lambda _t: None, run_step=run_step, record=False)
-    assert calls == ["newebpay_download", "newebpay_invoice", "cetustek_download"]  # 現金缺口被略過
+    # 藍新收退款＋發票金額一起做（每區登入一次）；發票失敗 → 現金缺口略過
+    assert calls == [ms.COMBINED_NEWEBPAY, "cetustek_download"]
     assert code == 1
+
+
+def test_run_plan_single_newebpay_steps_run_alone():
+    calls = []
+    ms.run_plan("202610", ["newebpay_invoice", "cash_gap"], log=lambda _t: None,
+                run_step=lambda step, *_a: calls.append(step) or 0, record=False)
+    assert calls == ["newebpay_invoice", "cash_gap"]
+
+
+def test_month_close_exit_code():
+    from tools.newebpay.month_close import exit_code
+
+    assert exit_code([], []) == 0 and exit_code(["台北"], []) == 1
+    assert exit_code([], ["台北"]) == 2 and exit_code(["a"], ["b"]) == 3
 
 
 def test_queue_and_agent_command():

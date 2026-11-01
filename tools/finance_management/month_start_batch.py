@@ -8,6 +8,7 @@
   狀態依「本機Agent任務」裡同期別最新一筆任務判斷（排隊中／執行中不能再排，已完成預設不勾）；
   現金缺口另看「藍新發票總表」有沒有該期別的發票金額、「現金缺口試算」是不是已算到期別月底。
 執行：勾選的步驟整批排成一筆本機 Agent 任務（month_start.batch_run），依序：
+  （藍新收退款＋發票金額都勾時，改跑 tools.newebpay.month_close：每區只登入一次、只輸入一次驗證碼）
   藍新收退款 → 藍新發票金額 → 鯨躍發票 → 現金缺口。藍新登入每區仍需人工輸入驗證碼。
   藍新發票金額失敗就不算現金缺口（會用到舊數字）；其他步驟失敗不影響後面的步驟。
   全部跑完在 Jenny 行事曆留一筆紀錄（不跳提醒）。
@@ -209,7 +210,20 @@ def _step_command(step: str, period: str, cdp_url: str) -> list[str]:
     return ACTION_HANDLERS[STEPS[step][1]](params)
 
 
+COMBINED_NEWEBPAY = "newebpay_combined"  # 收退款＋發票金額一起做：每區只登入一次
+
+
 def _run_step(step: str, period: str, cdp_url: str) -> int:
+    if step == COMBINED_NEWEBPAY:
+        from tools.newebpay.month_close import INVOICE_FAILED
+
+        sys.stdout.flush()
+        code = subprocess.run([sys.executable, "-m", "tools.newebpay.month_close", period,
+                               "--cdp-url", cdp_url or CDP_URL]).returncode
+        if not code & INVOICE_FAILED and not _invoice_ready(period):
+            print("❌ 藍新發票總表還沒有這個期別的發票金額（藍新每月 1 日 08:00 才寄發票），請晚點再執行", flush=True)
+            code |= INVOICE_FAILED
+        return code
     if step == "cash_gap":
         from tools.finance_management.cash_gap import write_cash_gap_sheet
 
@@ -242,6 +256,22 @@ def run_plan(period: str, steps: list[str], log: Callable[[str], None] = print, 
     results: dict[str, str] = {}
     for step in [s for s in STEP_ORDER if s in steps]:
         label = STEPS[step][0]
+        if step == "newebpay_invoice" and step in results:
+            continue  # 已跟收退款一起做完
+        if step == "newebpay_download" and "newebpay_invoice" in steps:
+            # 兩個都勾：每區只登入一次（只輸入一次驗證碼），收退款＋發票金額一起做
+            from tools.newebpay.month_close import DOWNLOAD_FAILED, INVOICE_FAILED
+
+            log(f"===== {period} 藍新收退款＋發票金額（每區登入一次） =====")
+            try:
+                code = run_step(COMBINED_NEWEBPAY, period, cdp_url)
+            except Exception as exc:
+                log(f"❌ 藍新無法執行：{exc}")
+                code = DOWNLOAD_FAILED | INVOICE_FAILED
+            for key, bit in (("newebpay_download", DOWNLOAD_FAILED), ("newebpay_invoice", INVOICE_FAILED)):
+                results[key] = "失敗" if code & bit else "成功"
+                log(("❌ " if code & bit else "✅ ") + f"{STEPS[key][0]}：{results[key]}")
+            continue
         dependency = DEPENDS_ON.get(step)
         if dependency in steps and results.get(dependency) != "成功":
             results[step] = f"略過（{STEPS[dependency][0]}沒有成功）"

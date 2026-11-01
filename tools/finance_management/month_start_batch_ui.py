@@ -50,7 +50,8 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         st.warning(f"{item['label']}：{item['status']}，不會重複排入。")
     if any(i["step"] == "cash_gap" for i in selected) and not any(i["step"] == "newebpay_invoice" for i in selected):
         st.caption("提醒：沒有勾藍新手續費發票金額時，現金缺口會用藍新發票總表目前的數字。")
-    st.caption("依序執行：藍新收退款 → 藍新發票金額 → 鯨躍發票 → 現金缺口；藍新發票金額失敗就不算現金缺口。"
+    st.caption("依序執行：藍新收退款 → 藍新發票金額 → 鯨躍發票 → 現金缺口；藍新兩項都勾時每區只登入一次（只輸入一次驗證碼）；"
+               "藍新發票金額失敗就不算現金缺口。"
                "跑完會在 Jenny 行事曆留紀錄。")
     if st.button(f"▶️ 執行勾選的 {len(selected)} 項", key=f"{PREFIX}_run", disabled=not selected):
         batch.queue_steps(scanned_period, [i["step"] for i in selected], create_task,
