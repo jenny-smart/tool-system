@@ -23,6 +23,8 @@ def _how(entry: dict) -> str:
         return "由各區財務更新（排程不提醒）"
     if not entry["runnable"]:
         return "排隊中／執行中，等本機 Agent 跑完" if entry.get("kind") == "month" else entry["fix"]
+    if entry.get("key") == "finance_vip_full_pipeline":
+        return "直接在這裡執行（同【儲值金】完整流程，約幾分鐘）"
     return {"cloud": "觸發 GitHub 排程重跑", "fixed": "直接新增到請款記錄",
             "statement": "排入本機 Agent 下載明細（財報最後一列日期～今天）",
             "month": "排入本機 Agent（現金缺口單獨勾就直接算）"}[entry["kind"]]

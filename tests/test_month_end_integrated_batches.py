@@ -363,3 +363,29 @@ def test_month_start_check_auto_fix_waits_for_vip_sources():
     runs = []
     chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: runs.append(d) or 0, submit_fixed=lambda *a, **k: {})
     assert runs == []
+
+
+def test_vip_status_from_monthly_log():
+    from tools.finance_management import month_start_check as chk
+
+    values = [["項目", "202609", "202610"], ["彙整檔建立時間", "x", "y"],
+              ["台北儲值金結算搬運時間", "2026/10/01 2:36:35", "2026/11/01 1:05:00"],
+              ["台北儲值金預收搬運時間", "2026/10/01 2:36:17", ""]]
+    assert chk.vip_status_from_log(values, "202609")[0] is True
+    ok, status = chk.vip_status_from_log(values, "202610")
+    assert not ok and "1／2" in status
+    assert chk.vip_status_from_log(values, "202611") is None
+    entries = chk.cloud_entries(date(2026, 11, 1), read=lambda *_a: None, read_vip_log=lambda: values)
+    vip = [e for e in entries if e["key"] == "finance_vip_full_pipeline"][0]
+    assert not vip["ok"] and vip["runnable"]
+
+
+def test_run_selected_runs_vip_here_not_github():
+    from tools.finance_management import month_start_check as chk
+
+    vip = {"label": "儲值金完整流程", "status": "", "ok": False, "kind": "cloud",
+           "key": "finance_vip_full_pipeline", "runnable": True, "fix": ""}
+    dispatched, ran = [], []
+    messages = chk.run_selected([vip], date(2026, 11, 1), lambda *a, **k: {}, log=lambda _t: None,
+                                dispatch=lambda *a: dispatched.append(a), run_vip=lambda d, log: ran.append(d) or 0)
+    assert ran == [date(2026, 11, 1)] and not dispatched and messages == ["✅ 儲值金完整流程：完成"]
