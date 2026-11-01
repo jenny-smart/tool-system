@@ -119,7 +119,7 @@ def sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:
     raise RuntimeError(f"試算表 {spreadsheet_id} 找不到 GID={gid} 對應的分頁")
 
 
-def resolve_statement_location(area: str, report: str) -> tuple[str, str]:
+def resolve_statement_location(area: str, report: str, service=None) -> tuple[str, str]:
     """回傳 (試算表ID, 分頁標題)。report 為 富邦更新／元大更新／財務／現金。"""
     if report not in REPORT_SHEET_TITLES:
         raise ValueError(f"不支援的財報類型：{report}")
@@ -129,7 +129,7 @@ def resolve_statement_location(area: str, report: str) -> tuple[str, str]:
     )
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少試算表ID")
-    title = require_sheet_title(get_sheets_service(), spreadsheet_id, REPORT_SHEET_TITLES[report])
+    title = require_sheet_title(service or get_sheets_service(), spreadsheet_id, REPORT_SHEET_TITLES[report])
     return spreadsheet_id, title
 
 

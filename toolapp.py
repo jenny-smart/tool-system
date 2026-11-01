@@ -2900,6 +2900,21 @@ def queue_newebpay_invoice_amounts(*, month="", start_date=None, end_date=None, 
     return f"任務已建立：{task['task_id']}（等待本機 Agent）"
 
 
+def queue_newebpay_account_balance(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
+    """藍新帳務查詢：帳戶明細查詢第一列的處理日期＋本次剩餘金額 → 現金缺口試算（藍新帳務日期／金額）→ review。"""
+    period = str(month or "").strip()
+    if not period and start_date:
+        period = start_date.strftime("%Y%m")
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入期別（YYYYMM），例如 202610")
+    task = create_local_agent_task(
+        "newebpay.account_balance",
+        {"period": period, "area": area, "cdp_url": "http://127.0.0.1:9222"},
+        created_by=st.session_state.get("username", "Tool System"),
+    )
+    return f"任務已建立：{task['task_id']}（等待本機 Agent；查 {period} 帳戶明細本次剩餘金額）"
+
+
 def queue_newebpay_refund_pending(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     if not selected_rows:
         raise ValueError("請先勾選要退款的資料")
@@ -4016,6 +4031,7 @@ FINANCE_TASKS = [
     {"name": "【藍新金流】藍新收退款下載", "handler": queue_newebpay_download, "enabled": True},
     {"name": "【藍新金流】藍新信用卡待退款", "handler": queue_newebpay_refund_pending, "enabled": True},
     {"name": "【藍新金流】藍新手續費發票金額", "handler": queue_newebpay_invoice_amounts, "enabled": True},
+    {"name": "【藍新金流】藍新帳務查詢", "handler": queue_newebpay_account_balance, "enabled": True},
     {"name": "【藍新金流】藍新快速收款查帳", "handler": queue_newebpay_express_payment_check, "enabled": True},
     {"name": "【財報】台北固定費用請款", "handler": run_taipei_fixed_expense_billing, "enabled": True},
     {"name": "【財報】台中固定費用請款", "handler": run_taichung_fixed_expense_billing, "enabled": True},

@@ -29,7 +29,8 @@ def _how(row: dict) -> str:
         return "已排入本機 Agent／執行中" if any(row["cells"][a][0] == chk.WAIT for a in row["todo"]) else row.get("note", "")
     return {"monthly": "這裡直接跑（只跑沒完成的地區）", "vip": "這裡直接跑（排在結算／預收之後）",
             "fixed": "直接新增到請款記錄", "invoice_update": "讀 Drive 直接更新（沒有鯨躍檔就排入鯨躍下載）",
-            "pdf": "排入本機 Agent（要鯨躍驗證碼）", "agent": "排入本機 Agent（藍新每區登入一次）",
+            "pdf": "排入本機 Agent（要鯨躍驗證碼）",
+            "agent": "排入本機 Agent（藍新收退款／發票／帳務勾哪個做哪個，每區登入一次）",
             "cash_gap": "同時勾「藍新發票」：等本機 Agent 查完藍新發票金額再算；沒勾：按執行就直接重算",
             "statement": "台北／台中排入本機 Agent；其他地區由各區處理"}.get(row["action"], "")
 

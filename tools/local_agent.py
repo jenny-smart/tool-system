@@ -450,9 +450,23 @@ def build_newebpay_month_close(params: dict[str, Any]) -> list[str]:
     command = [sys.executable, "-m", "tools.newebpay.month_close", period, "--cdp-url", cdp_url]
     for area in params.get("areas") or []:
         command.extend(["--area", str(area)])
-    part = str(params.get("part") or "all")
-    if part != "all":
-        command.extend(["--part", part])
+    part = params.get("part") or "all"
+    parts = part if isinstance(part, list) else [p.strip() for p in str(part).split(",") if p.strip()]
+    if parts and "all" not in parts:
+        for item in parts:
+            command.extend(["--part", item])
+    return command
+
+
+def build_newebpay_account_balance(params: dict[str, Any]) -> list[str]:
+    """藍新帳務查詢（帳戶明細本次剩餘金額 → 現金缺口試算／review）：month_close 只做 balance。"""
+    period = str(params.get("period") or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("藍新帳務查詢缺少期別")
+    area, cdp_url = _common_invoice_args(params)
+    command = [sys.executable, "-m", "tools.newebpay.month_close", period, "--cdp-url", cdp_url, "--part", "balance"]
+    if area and area != "全區":
+        command.extend(["--area", area])
     return command
 
 
@@ -862,6 +876,7 @@ register_action("change_order.batch_run", build_change_order_batch_run)
 register_action("internal_payment.record", build_internal_payment_record)
 register_action("month_start.batch_run", build_month_start_batch_run)
 register_action("newebpay.month_close", build_newebpay_month_close)
+register_action("newebpay.account_balance", build_newebpay_account_balance)
 register_action("fubon.login", build_fubon_login)
 register_action("fubon.download", build_fubon_download)
 register_action("fubon.atm_refund", build_fubon_atm_refund)
@@ -926,7 +941,8 @@ ACTION_LABELS = {
     "change_order.batch_run": "【清潔異動】整合執行（逐區依序）",
     "internal_payment.record": "【富邦銀行】內部請款留紀錄",
     "month_start.batch_run": "【整合執行】月初藍新／鯨躍／現金缺口（本機 Agent）",
-    "newebpay.month_close": "【藍新金流】藍新收退款＋發票金額（指定地區）",
+    "newebpay.month_close": "【藍新金流】藍新收退款＋發票金額＋帳務（指定地區）",
+    "newebpay.account_balance": "【藍新金流】藍新帳務查詢",
     "fubon.login": "【富邦銀行】富邦登入",
     "fubon.download": "【富邦銀行】富邦明細下載",
     "fubon.atm_refund": "【富邦銀行】異動 ATM 退款",

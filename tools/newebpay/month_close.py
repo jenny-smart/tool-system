@@ -1,10 +1,10 @@
-"""藍新月結：每區只登入一次（輸入一次驗證碼），依序下載收款／退款 CSV、查手續費發票金額，再登出。
+"""藍新月結：每區只登入一次（輸入一次驗證碼），依序下載收款／退款 CSV、查手續費發票金額、查藍新帳務（帳戶明細本次剩餘金額），再登出。
 
 原本【藍新金流】藍新收退款下載、藍新手續費發票金額是兩支程式，各自登入／登出，
 每區要輸入兩次驗證碼。【整合執行】月初藍新／鯨躍／現金缺口兩個都勾時改跑這支。
 藍新每月 1 日 08:00 才開手續費發票，所以排程 09:00 才排入。
 
-結束代碼：0＝全部成功；1＝有地區收退款下載失敗；2＝有地區發票金額查詢失敗；3＝兩種都有失敗。
+結束代碼（可相加）：0＝全部成功；1＝收退款下載失敗；2＝發票金額查詢失敗；4＝藍新帳務查詢失敗。
 """
 from __future__ import annotations
 
@@ -15,12 +15,13 @@ from pathlib import Path
 
 DOWNLOAD_FAILED = 1
 INVOICE_FAILED = 2
+BALANCE_FAILED = 4
 # 高雄跟新竹用同一個藍新帳號：只登入新竹，下載完複製一份、地區改成高雄（2026-11 與 Jenny 確認）
 SKIP_AREAS = ("高雄",)
 COPY_AREAS = {"新竹": ("高雄",)}  # 收退款檔複製一份給高雄
 # 高雄不用算藍新手續費發票金額（2026-11 Jenny）：發票不複製給高雄
 NO_INVOICE_AREAS = ("高雄",)
-PARTS = ("download", "invoice")
+PARTS = ("download", "invoice", "balance")  # 收退款、手續費發票、帳務查詢（帳戶明細本次剩餘金額）
 
 
 class _Skip(Exception):
@@ -36,8 +37,9 @@ def copy_for_area(path: Path, source: str, target: str) -> Path:
     return copy
 
 
-def exit_code(download_failures: list[str], invoice_failures: list[str]) -> int:
-    return (DOWNLOAD_FAILED if download_failures else 0) | (INVOICE_FAILED if invoice_failures else 0)
+def exit_code(download_failures: list[str], invoice_failures: list[str], balance_failures=()) -> int:
+    return ((DOWNLOAD_FAILED if download_failures else 0) | (INVOICE_FAILED if invoice_failures else 0)
+            | (BALANCE_FAILED if balance_failures else 0))
 
 
 def main(argv=None) -> int:
@@ -54,8 +56,8 @@ def main(argv=None) -> int:
                         help="只做指定區域（可重複），例如 --area 桃園；高雄會改做新竹再複製一份（同一個帳號）")
     parser.add_argument("--skip-area", action="append", default=None,
                         help=f"略過的區域（可重複）；預設略過 {'、'.join(SKIP_AREAS)}（跟新竹同一個帳號）")
-    parser.add_argument("--part", choices=("all",) + PARTS, default="all",
-                        help="只做收退款（download）或只做發票金額（invoice）；預設兩個都做")
+    parser.add_argument("--part", action="append", choices=("all",) + PARTS, default=None,
+                        help="只做收退款（download）／發票金額（invoice）／帳務查詢（balance），可重複；預設全部")
     parser.add_argument("--accounts-file", type=Path, default=dr.DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     args = parser.parse_args(argv)
@@ -76,14 +78,18 @@ def main(argv=None) -> int:
         accounts = [a for a in accounts if a.area not in skip]
         print(f"略過：{'、'.join(sorted(skip))}（跟新竹同一個帳號，跑新竹再複製一份）")
     print(f"期別：{period}（收退款 {start}～{end}；手續費發票日 {invoice_date}）")
-    do_download = args.part in ("all", "download")
-    do_invoice = args.part in ("all", "invoice")
-    print(f"區域：{', '.join(a.area for a in accounts)}；每區只登入一次；"
-          f"做：{'、'.join(n for n, on in (('收退款', do_download), ('發票金額', do_invoice)) if on)}")
+    parts = set(PARTS) if not args.part or "all" in args.part else set(args.part)
+    do_download, do_invoice, do_balance = ("download" in parts), ("invoice" in parts), ("balance" in parts)
+    print(f"區域：{', '.join(a.area for a in accounts)}；每區只登入一次；做：" + "、".join(
+        n for n, on in (("收退款", do_download), ("發票金額", do_invoice), ("帳務查詢", do_balance)) if on))
+
+    from tools.newebpay import account_balance as ab
 
     results = []
+    balances: dict[str, tuple[str, int]] = {}
     download_failures: list[str] = []
     invoice_failures: list[str] = []
+    balance_failures: list[str] = []
     with sync_playwright() as playwright:
         _browser, context = connect_existing_chrome(playwright, args.cdp_url)
         page = find_existing_page(context, ("newebpay.com",)) or context.new_page()
@@ -93,8 +99,12 @@ def main(argv=None) -> int:
                 try:
                     messages = dr.login(page, account)
                 except Exception as exc:
-                    download_failures.append(f"{account.area}: 登入失敗 {exc}")
-                    invoice_failures.append(f"{account.area}: 登入失敗")
+                    if do_download:
+                        download_failures.append(f"{account.area}: 登入失敗 {exc}")
+                    if do_invoice:
+                        invoice_failures.append(f"{account.area}: 登入失敗")
+                    if do_balance and account.area not in ab.NO_BALANCE_AREAS:
+                        balance_failures.append(f"{account.area}: 登入失敗")
                     print(f"[{account.area}] 登入失敗：{exc}", file=sys.stderr)
                     continue
                 try:
@@ -148,6 +158,17 @@ def main(argv=None) -> int:
                     except Exception as exc:
                         invoice_failures.append(f"{account.area}: {exc}")
                         print(f"[{account.area}] 發票金額查詢失敗：{exc}", file=sys.stderr)
+                    if do_balance and account.area not in ab.NO_BALANCE_AREAS:
+                        try:
+                            found = ab.query_balance(page, period)
+                            if found:
+                                balances[account.area] = found
+                                print(f"[{account.area}] 藍新帳務：{found[0]} 本次剩餘金額 NT$ {found[1]:,}")
+                            else:
+                                print(f"[{account.area}] 藍新帳務：查無資料")
+                        except Exception as exc:
+                            balance_failures.append(f"{account.area}: {exc}")
+                            print(f"[{account.area}] 藍新帳務查詢失敗：{exc}", file=sys.stderr)
                 finally:
                     try:
                         dr.logout(page, account.area)
@@ -161,12 +182,22 @@ def main(argv=None) -> int:
     if results:
         written, titles = ia.sync_fee_sheets(results)
         print(f"藍新發票獨立工作表寫入 {written} 筆：{', '.join(titles)}")
-    for title, failures in (("收退款下載未完成", download_failures), ("發票金額未完成", invoice_failures)):
+    if balances:
+        ab.write_balances(balances)
+        print(f"藍新帳務寫入「現金缺口試算」：{'、'.join(balances)}")
+        try:  # 現金缺口已算到這個月底的話，一起貼到 review「現金缺口」39～40 列
+            from tools.finance_management.review_monthly import paste_to_review
+
+            paste_to_review(period, "cash", log=print)
+        except Exception as exc:
+            print(f"⚠️ review 沒更新：{exc}")
+    for title, failures in (("收退款下載未完成", download_failures), ("發票金額未完成", invoice_failures),
+                            ("藍新帳務未完成", balance_failures)):
         if failures:
             print(f"\n{title}：", file=sys.stderr)
             for failure in failures:
                 print(f"- {failure}", file=sys.stderr)
-    return exit_code(download_failures, invoice_failures)
+    return exit_code(download_failures, invoice_failures, balance_failures)
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ CDP_URL = "http://127.0.0.1:9222"
 
 # 步驟 → (顯示名稱, 本機 Agent action；空字串＝不經瀏覽器，直接讀寫試算表)
 STEPS = {
-    "newebpay": ("藍新收退款＋發票金額", ""),  # tools.newebpay.month_close，每區只登入一次
+    "newebpay": ("藍新收退款＋發票金額＋帳務", ""),  # tools.newebpay.month_close，每區只登入一次
     "cetustek_download": ("鯨躍發票下載＋紙本／中獎更新＋台中統編PDF", "cetustek.download"),
     "cash_gap": ("全區現金缺口", ""),
 }
@@ -335,9 +335,10 @@ def run_plan(period: str, steps: list[str], log: Callable[[str], None] = print, 
 
 def _failure_text(step: str, code: int) -> str:
     if step == "newebpay":
-        from tools.newebpay.month_close import DOWNLOAD_FAILED, INVOICE_FAILED
+        from tools.newebpay.month_close import BALANCE_FAILED, DOWNLOAD_FAILED, INVOICE_FAILED
 
-        parts = [name for bit, name in ((DOWNLOAD_FAILED, "收退款"), (INVOICE_FAILED, "發票金額")) if code & bit]
+        parts = [name for bit, name in ((DOWNLOAD_FAILED, "收退款"), (INVOICE_FAILED, "發票金額"),
+                                        (BALANCE_FAILED, "帳務")) if code & bit]
         if parts:
             return f"失敗（{'、'.join(parts)}）"
     return f"失敗（exit {code}）"

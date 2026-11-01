@@ -54,7 +54,19 @@ def test_cash_gap_block_position_and_values():
     data, skipped = rm.build_block_updates("現金缺口", date(2026, 10, 31), [["a"] * 7] * 8, cash, existing, "2026/10")
     cells = {d["range"].split("!")[1]: d["values"][0][0] for d in data}
     assert cells["CD14"] == 105 and "CH14" not in cells and "高雄 現金餘額" in skipped
-    assert cells["CD23"] == 11 and cells["CD22"] == 7 and cells["CD26"] == 41654  # 藍新發票金額→相關費用
+    assert cells["CD23"] == 11 and cells["CD22"] == 7 and cells["CD38"] == 41654  # 藍新發票金額→38
+    assert "CD26" not in cells and "CD40" not in cells and not any("藍新帳務" in x for x in skipped)
     assert cells["CC33"] == "2026/10-現金缺口"
     assert "CD20" not in cells and cells["CE20"] == "=CE14-SUM(CE15:CE19)"  # 已有公式不覆蓋
     assert any(d["range"].endswith("CC2:CI2") for d in data) and any(d["range"].endswith("CC3:CI10") for d in data)
+
+
+def test_cash_gap_block_newebpay_balance_rows():
+    cash = rm.cash_gap_values([
+        ["", "台北", "台中", "桃園", "新竹", "高雄", "ALL"], ["日期", "2026/10/31"],
+        ["藍新帳務日期", "2026-11-01 13:01:59", "", "2026-11-01 09:00:00"], ["藍新帳務金額", 461580, "", 1200],
+    ])
+    data, _ = rm.build_block_updates("現金缺口", date(2026, 10, 31), [], cash, [], "2026/10")
+    cells = {d["range"].split("!")[1]: d["values"][0][0] for d in data}
+    assert cells["CD39"] == "2026-11-01 13:01:59" and cells["CD40"] == 461580 and cells["CF40"] == 1200
+    assert cells["CC39"] == "藍新帳務日期" and cells["CC40"] == "藍新帳務金額" and cells["CC38"] == "藍新發票金額"

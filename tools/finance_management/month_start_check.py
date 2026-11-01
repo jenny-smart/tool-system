@@ -54,7 +54,7 @@ STATEMENT_REPORTS = [("fubon", "富邦明細", "富邦更新", "fubon.download")
                      ("yuanta", "元大明細", "元大更新", "yuanta.download")]
 AGENT_STATEMENT_AREAS = ("台北", "台中")
 # 要人工驗證碼、05:00 才排入的列：05:00 前排程不提醒
-AGENT_ROW_KEYS = {"newebpay_files", "newebpay_invoice", "paper", "prize", "pdf"}
+AGENT_ROW_KEYS = {"newebpay_files", "newebpay_invoice", "newebpay_balance", "paper", "prize", "pdf"}
 MONTH_START_QUEUE_HOUR = 5
 
 
@@ -237,6 +237,30 @@ def cash_gap_cells(values: list[list], period: str) -> dict[str, tuple[str, str]
     return cells
 
 
+def newebpay_balance_cells(values: list[list], period: str) -> dict[str, tuple[str, str]]:
+    """現金缺口試算「藍新帳務日期／金額」兩列：日期在期別月底（含）之後＝已查這個月 ✅。高雄跟新竹同一帳號 —。"""
+    from tools.newebpay.account_balance import AMOUNT_LABEL, DATE_LABEL, NO_BALANCE_AREAS
+
+    header = [str(v).strip() for v in (values[0] if values else [])]
+    rows = {_cell(r, 0): r for r in values}
+    end = period_end(period)
+    cells = {}
+    for area in AREAS:
+        if area in NO_BALANCE_AREAS:
+            cells[area] = (NA, "跟新竹同一個藍新帳號")
+            continue
+        col = header.index(area) if area in header else -1
+        when = _cell(rows.get(DATE_LABEL, []), col) if col >= 0 else ""
+        amount = _cell(rows.get(AMOUNT_LABEL, []), col) if col >= 0 else ""
+        try:
+            day = date.fromisoformat(when[:10].replace("/", "-"))
+        except ValueError:
+            day = None
+        cells[area] = (OK, f"{when} NT$ {amount}") if day and day >= end else \
+            (FAIL, f"還沒查（目前 {when or '空白'}）")
+    return cells
+
+
 def _agent_wait(cells: dict, waiting: bool) -> dict:
     """已排入本機 Agent、還在跑的：沒完成的格子改成 ⏳。"""
     if not waiting:
@@ -320,9 +344,16 @@ def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optiona
     cells = ei_log_cells(ei_log, "紙本發票PDF建檔", period, PDF_AREAS) if ei_log is not None else _error_cells(err)
     rows.append(make_row("pdf", "發票PDF（台中有統編）", _agent_wait(cells, cetustek_wait), "pdf", required=PDF_AREAS))
 
-    cash, err = read("現金缺口試算", lambda: _read_master(CASH_GAP_SHEET, "A1:G16"))
+    cash, err = read("現金缺口試算", lambda: _read_master(CASH_GAP_SHEET, "A1:G40"))
     cells = cash_gap_cells(cash, period) if cash is not None else _error_cells(err)
     rows.append(make_row("cash_gap", "現金缺口", _agent_wait(cells, waiting("cash_gap")), "cash_gap"))
+    from tools.newebpay.account_balance import NO_BALANCE_AREAS
+
+    cells = newebpay_balance_cells(cash, period) if cash is not None else _error_cells(err)
+    balance_row = make_row("newebpay_balance", "藍新帳務", _agent_wait(cells, waiting("newebpay")), "agent",
+                           required=[a for a in AREAS if a not in NO_BALANCE_AREAS])
+    after = next((i + 1 for i, r in enumerate(rows) if r["key"] == "newebpay_invoice"), len(rows))
+    rows.insert(after, balance_row)
 
     rows.append(fixed_expense_row(day, log, readers))
     rows += statement_rows(day, readers, tasks=tasks or [])
@@ -482,7 +513,8 @@ def _run_monthly_here(target: str, period2: str, area: str, log: Callable[[str],
     run_monthly(target=target, folder_id=folder_id, area=area, period=period2)
 
 
-NEWEBPAY_PART_LABELS = {"all": "藍新收退款＋發票", "download": "藍新收退款", "invoice": "藍新發票"}
+NEWEBPAY_PART_LABELS = {"download": "藍新收退款", "invoice": "藍新發票", "balance": "藍新帳務"}
+NEWEBPAY_ROW_PARTS = (("newebpay_files", "download"), ("newebpay_invoice", "invoice"), ("newebpay_balance", "balance"))
 
 
 def newebpay_plan(by_key: dict) -> list[tuple[str, list[str]]]:
@@ -492,14 +524,15 @@ def newebpay_plan(by_key: dict) -> list[tuple[str, list[str]]]:
 
     alias = {copy: source for source, copies in COPY_AREAS.items() for copy in copies}
     need: dict[str, set] = {}
-    for key, part in (("newebpay_files", "download"), ("newebpay_invoice", "invoice")):
+    for key, part in NEWEBPAY_ROW_PARTS:
         for area in by_key.get(key, {}).get("todo", []):
             need.setdefault(alias.get(area, area), set()).add(part)
     groups: dict[str, list[str]] = {}
     for area in sorted(need, key=AREAS.index):
-        part = "all" if len(need[area]) == 2 else next(iter(need[area]))
+        parts = [p for _k, p in NEWEBPAY_ROW_PARTS if p in need[area]]
+        part = "all" if len(parts) == len(NEWEBPAY_ROW_PARTS) else ",".join(parts)
         groups.setdefault(part, []).append(area)
-    return [(part, groups[part]) for part in ("all", "download", "invoice") if part in groups]
+    return list(groups.items())
 
 
 def _run_vip_here(day: date, log: Callable[[str], None]) -> int:
@@ -600,7 +633,8 @@ def run_rows(rows: list[dict], day: date, create_task, log: Callable[[str], None
         # 勾哪一邊就只跑哪一邊（兩個都勾＝同一次登入一起做）；只跑沒完成的地區，每區登入一次
         task = create_task("newebpay.month_close", {"period": period, "areas": areas, "part": part,
                                                     "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
-        messages.append(f"✅ {NEWEBPAY_PART_LABELS[part]}／{'、'.join(areas)}：已排入本機 Agent（{task.get('task_id', '')}）")
+        label = "藍新收退款＋發票＋帳務" if part == "all" else "＋".join(NEWEBPAY_PART_LABELS[p] for p in part.split(","))
+        messages.append(f"✅ {label}／{'、'.join(areas)}：已排入本機 Agent（{task.get('task_id', '')}）")
         newebpay_queued = True
     if "cash_gap" in by_key:
         if newebpay_queued and "cash_gap" not in steps:
