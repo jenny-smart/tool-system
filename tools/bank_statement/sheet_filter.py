@@ -182,9 +182,16 @@ def filter_yuanta_report_rows(
     return CapturedTable(headers=table.headers, rows=new_rows)
 
 
+def _credentials():
+    """盡量用 Jenny OAuth（jenny@lemonclean.com.tw，各區財報都有權限），沒有才用服務帳號。"""
+    from tools.common.google_auth import preferred_credentials
+
+    return preferred_credentials(SCOPES, load_google_credentials)
+
+
 def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable:
     target = load_sheet_target(area, bank)
-    credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
+    credentials = _credentials()
     client = gspread.authorize(credentials)
     worksheet = client.open_by_key(target.spreadsheet_id).worksheet(target.worksheet_title)
     if bank == "yuanta":
@@ -214,7 +221,7 @@ def query_start_from_report(area: str, bank: str, end: date) -> date:
     """明細查詢開始日＝要貼入的財報最後一列日期（含當天，已登記的會被比對濾掉）。
     財報還沒有資料（例如年初新檔）就從當年 1/1 開始。"""
     target = load_sheet_target(area, bank)
-    credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
+    credentials = _credentials()
     worksheet = gspread.authorize(credentials).open_by_key(target.spreadsheet_id).worksheet(target.worksheet_title)
     column = REPORT_TIME_COLUMN[bank]
     last = last_report_date(worksheet.get(f"{column}2:{column}"))
@@ -379,7 +386,7 @@ def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
     if not table.rows:
         return 0
     target = load_sheet_target(area, bank)
-    credentials = Credentials.from_service_account_info(load_google_credentials(), scopes=SCOPES)
+    credentials = _credentials()
     worksheet = (
         gspread.authorize(credentials)
         .open_by_key(target.spreadsheet_id)

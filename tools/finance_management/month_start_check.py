@@ -28,7 +28,7 @@ from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
+REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 LOG_ROOT = Path(__file__).resolve().parents[2] / "logs"
 AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 PAGE = "Tools App【整合執行】月初（1日所有排程）→ 盤點 → 勾選 → 執行"
@@ -54,7 +54,7 @@ STATEMENT_REPORTS = [("fubon", "富邦明細", "富邦更新", "fubon.download")
                      ("yuanta", "元大明細", "元大更新", "yuanta.download")]
 AGENT_STATEMENT_AREAS = ("台北", "台中")
 # 要人工驗證碼、05:00 才排入的列：05:00 前排程不提醒
-AGENT_ROW_KEYS = {"newebpay_files", "newebpay_invoice", "paper", "prize", "pdf"}
+AGENT_ROW_KEYS = {"newebpay_files", "newebpay_invoice", "newebpay_balance", "paper", "prize", "pdf"}
 MONTH_START_QUEUE_HOUR = 5
 
 
@@ -237,6 +237,30 @@ def cash_gap_cells(values: list[list], period: str) -> dict[str, tuple[str, str]
     return cells
 
 
+def newebpay_balance_cells(values: list[list], period: str) -> dict[str, tuple[str, str]]:
+    """現金缺口試算「藍新帳務日期／金額」兩列：日期在期別月底（含）之後＝已查這個月 ✅。高雄跟新竹同一帳號 —。"""
+    from tools.newebpay.account_balance import AMOUNT_LABEL, DATE_LABEL, NO_BALANCE_AREAS
+
+    header = [str(v).strip() for v in (values[0] if values else [])]
+    rows = {_cell(r, 0): r for r in values}
+    end = period_end(period)
+    cells = {}
+    for area in AREAS:
+        if area in NO_BALANCE_AREAS:
+            cells[area] = (NA, "跟新竹同一個藍新帳號")
+            continue
+        col = header.index(area) if area in header else -1
+        when = _cell(rows.get(DATE_LABEL, []), col) if col >= 0 else ""
+        amount = _cell(rows.get(AMOUNT_LABEL, []), col) if col >= 0 else ""
+        try:
+            day = date.fromisoformat(when[:10].replace("/", "-"))
+        except ValueError:
+            day = None
+        cells[area] = (OK, f"{when} NT$ {amount}") if day and day >= end else \
+            (FAIL, f"還沒查（目前 {when or '空白'}）")
+    return cells
+
+
 def _agent_wait(cells: dict, waiting: bool) -> dict:
     """已排入本機 Agent、還在跑的：沒完成的格子改成 ⏳。"""
     if not waiting:
@@ -320,13 +344,69 @@ def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optiona
     cells = ei_log_cells(ei_log, "紙本發票PDF建檔", period, PDF_AREAS) if ei_log is not None else _error_cells(err)
     rows.append(make_row("pdf", "發票PDF（台中有統編）", _agent_wait(cells, cetustek_wait), "pdf", required=PDF_AREAS))
 
-    cash, err = read("現金缺口試算", lambda: _read_master(CASH_GAP_SHEET, "A1:G16"))
+    cash, err = read("現金缺口試算", lambda: _read_master(CASH_GAP_SHEET, "A1:G40"))
     cells = cash_gap_cells(cash, period) if cash is not None else _error_cells(err)
     rows.append(make_row("cash_gap", "現金缺口", _agent_wait(cells, waiting("cash_gap")), "cash_gap"))
+    from tools.newebpay.account_balance import NO_BALANCE_AREAS
+
+    cells = newebpay_balance_cells(cash, period) if cash is not None else _error_cells(err)
+    balance_row = make_row("newebpay_balance", "藍新帳務", _agent_wait(cells, waiting("newebpay")), "agent",
+                           required=[a for a in AREAS if a not in NO_BALANCE_AREAS])
+    after = next((i + 1 for i, r in enumerate(rows) if r["key"] == "newebpay_invoice"), len(rows))
+    rows.insert(after, balance_row)
 
     rows.append(fixed_expense_row(day, log, readers))
     rows += statement_rows(day, readers, tasks=tasks or [])
+    ignore_values, err = read("月初檢查不提醒", lambda: _read_master(IGNORE_SHEET, "A:D"))
+    if err and "Unable to parse range" not in err:
+        log(f"⚠️ {err}")
+    return apply_ignored(rows, read_ignored(ignore_values or []))
+
+
+# ── 不提醒：有些功能 Jenny 自己沒辦法完成（例如其他地區的富邦／元大明細），盤點照樣顯示 ❌，
+#    但行事曆、1 日每小時檢查不再提醒（2026-11 Jenny）。設定存在主控表「月初檢查不提醒」，每個月都適用。
+IGNORE_SHEET = "月初檢查不提醒"
+IGNORE_HEADER = ["功能代碼", "功能", "地區", "設定時間"]
+
+
+def read_ignored(values: list[list]) -> set[tuple[str, str]]:
+    return {(_cell(r, 0), _cell(r, 2)) for r in values[1:] if _cell(r, 0) and _cell(r, 2)}
+
+
+def apply_ignored(rows: list[dict], ignored: set[tuple[str, str]]) -> list[dict]:
+    """每列加上 ignored（設定不提醒、還沒完成的地區）與 remind_todo（還要提醒的地區）。"""
+    for row in rows:
+        row["ignored"] = [a for a in row["todo"] if (row["key"], a) in ignored]
+        row["remind_todo"] = [a for a in row["todo"] if a not in row["ignored"]]
     return rows
+
+
+def ignore_options(rows: list[dict]) -> list[tuple[str, str, str]]:
+    """可以設定不提醒的 (功能代碼, 功能, 地區)：這個功能要做的地區（— 的不列）。"""
+    return [(r["key"], r["label"], a) for r in rows for a in AREAS if r["cells"].get(a, (NA, ""))[0] != NA]
+
+
+def save_ignored(items: list[tuple[str, str, str]], write=None) -> int:
+    """整份覆寫「月初檢查不提醒」：items＝[(功能代碼, 功能, 地區)]。分頁不存在會自動建。"""
+    now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M")
+    values = [IGNORE_HEADER] + [[k, label, area, now] for k, label, area in items]
+    if write is None:
+        from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+
+        service, sid = get_sheets_service(), get_master_spreadsheet_id()
+        titles = [s["properties"]["title"] for s in service.spreadsheets().get(
+            spreadsheetId=sid, fields="sheets.properties.title").execute().get("sheets", [])]
+        if IGNORE_SHEET not in titles:
+            service.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [
+                {"addSheet": {"properties": {"title": IGNORE_SHEET}}}]}).execute()
+        service.spreadsheets().values().clear(spreadsheetId=sid, range=f"'{IGNORE_SHEET}'!A:D").execute()
+
+        def write(vals):
+            service.spreadsheets().values().update(
+                spreadsheetId=sid, range=f"'{IGNORE_SHEET}'!A1", valueInputOption="RAW",
+                body={"values": vals}).execute()
+    write(values)
+    return len(items)
 
 
 def fixed_expense_row(day: date, log, readers: dict) -> dict:
@@ -433,7 +513,8 @@ def _run_monthly_here(target: str, period2: str, area: str, log: Callable[[str],
     run_monthly(target=target, folder_id=folder_id, area=area, period=period2)
 
 
-NEWEBPAY_PART_LABELS = {"all": "藍新收退款＋發票", "download": "藍新收退款", "invoice": "藍新發票"}
+NEWEBPAY_PART_LABELS = {"download": "藍新收退款", "invoice": "藍新發票", "balance": "藍新帳務"}
+NEWEBPAY_ROW_PARTS = (("newebpay_files", "download"), ("newebpay_invoice", "invoice"), ("newebpay_balance", "balance"))
 
 
 def newebpay_plan(by_key: dict) -> list[tuple[str, list[str]]]:
@@ -443,14 +524,15 @@ def newebpay_plan(by_key: dict) -> list[tuple[str, list[str]]]:
 
     alias = {copy: source for source, copies in COPY_AREAS.items() for copy in copies}
     need: dict[str, set] = {}
-    for key, part in (("newebpay_files", "download"), ("newebpay_invoice", "invoice")):
+    for key, part in NEWEBPAY_ROW_PARTS:
         for area in by_key.get(key, {}).get("todo", []):
             need.setdefault(alias.get(area, area), set()).add(part)
     groups: dict[str, list[str]] = {}
     for area in sorted(need, key=AREAS.index):
-        part = "all" if len(need[area]) == 2 else next(iter(need[area]))
+        parts = [p for _k, p in NEWEBPAY_ROW_PARTS if p in need[area]]
+        part = "all" if len(parts) == len(NEWEBPAY_ROW_PARTS) else ",".join(parts)
         groups.setdefault(part, []).append(area)
-    return [(part, groups[part]) for part in ("all", "download", "invoice") if part in groups]
+    return list(groups.items())
 
 
 def _run_vip_here(day: date, log: Callable[[str], None]) -> int:
@@ -551,7 +633,8 @@ def run_rows(rows: list[dict], day: date, create_task, log: Callable[[str], None
         # 勾哪一邊就只跑哪一邊（兩個都勾＝同一次登入一起做）；只跑沒完成的地區，每區登入一次
         task = create_task("newebpay.month_close", {"period": period, "areas": areas, "part": part,
                                                     "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
-        messages.append(f"✅ {NEWEBPAY_PART_LABELS[part]}／{'、'.join(areas)}：已排入本機 Agent（{task.get('task_id', '')}）")
+        label = "藍新收退款＋發票＋帳務" if part == "all" else "＋".join(NEWEBPAY_PART_LABELS[p] for p in part.split(","))
+        messages.append(f"✅ {label}／{'、'.join(areas)}：已排入本機 Agent（{task.get('task_id', '')}）")
         newebpay_queued = True
     if "cash_gap" in by_key:
         if newebpay_queued and "cash_gap" not in steps:
@@ -576,13 +659,14 @@ AUTO_MAX_ATTEMPTS = 2  # 儲值金彙整自動補做最多試 2 次，避免每�
 
 def problems(rows: list[dict], hour: int = 23) -> list[dict]:
     """排程要提醒的列：沒完成、會提醒；05:00 前不看藍新／鯨躍（還沒排入）。"""
-    return [r for r in rows if not r["done"] and r["remind"]
+    return [r for r in rows if not r["done"] and r["remind"] and r.get("remind_todo", r["todo"])
             and (hour >= MONTH_START_QUEUE_HOUR or r["key"] not in AGENT_ROW_KEYS)]
 
 
 def build_reminder(day: date, now: datetime, todo: list[dict]) -> tuple[str, str]:
     lines = [f"{now:%Y/%m/%d %H:%M} 檢查，{len(todo)} 個功能還沒完成：", ""]
-    lines += [f"・{r['label']}：{summary_text(r)}" for r in todo]
+    lines += [f"・{r['label']}：未完成：" + "、".join(f"{a}{r['cells'][a][0]}" for a in r.get("remind_todo", r["todo"]))
+              for r in todo]
     lines += ["", f"處理方式：{PAGE}", "",
               "1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。"]
     return f"{REMINDER_PREFIX} {len(todo)} 項（{day:%m/%d}）", "\n".join(lines)
@@ -592,15 +676,15 @@ def clear_reminders(day: date, log: Callable[[str], None] = print) -> int:
     """刪掉 day 當天之前建的「月初工作未完成」提醒（只留最新一則／全部完成就全刪）。"""
     from tools.orders_system import calendar_notify
 
-    service = calendar_notify._calendar_service()
+    service, calendar_id = calendar_notify.calendar_for(REMIND_CALENDAR_ID)
     start = datetime.combine(day, datetime.min.time(), tzinfo=TW_TZ)
-    events = service.events().list(calendarId=REMIND_CALENDAR_ID, timeMin=start.isoformat(),
+    events = service.events().list(calendarId=calendar_id, timeMin=start.isoformat(),
                                    timeMax=(start + timedelta(days=2)).isoformat(), q=REMINDER_PREFIX,
                                    singleEvents=True, maxResults=100).execute().get("items", [])
     removed = 0
     for event in events:
         if str(event.get("summary", "")).startswith(REMINDER_PREFIX):
-            service.events().delete(calendarId=REMIND_CALENDAR_ID, eventId=event["id"]).execute()
+            service.events().delete(calendarId=calendar_id, eventId=event["id"]).execute()
             removed += 1
     if removed:
         log(f"已刪除 {removed} 則之前的月初提醒")

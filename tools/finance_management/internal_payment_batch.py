@@ -5,7 +5,7 @@
   - 工具包押金退款（H 押金＞0、I 有日期、S 空白）        → 【富邦銀行】工具包押金退款
   - 清潔用品採購（進貨明細表，Q 匯款日期與 S 請款日期都空白，依月份） → 【富邦銀行】清潔用品採購
 勾選後每個地區排一筆本機 Agent：登入一次、轉帳全部做完才下載明細（財報最後一列日期～今天）（富邦轉帳仍需手機核准）；最後排一筆「留紀錄」，
-重新盤點勾選的列，已付款的列寫進 Jenny 行事曆（jenny@lemonclean.com.tw，不跳提醒）。
+重新盤點勾選的列，已付款的列寫進 Jenny 行事曆（jenny@hers.com.tw，不跳提醒）。
 每週二、五 10:00 的富邦待辦通知也用這裡的 scan() 列出待處理筆數。
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 AREAS = ["台北", "台中"]
-RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
+RECORD_CALENDAR_ID = "jenny@hers.com.tw"
 
 # kind → (顯示名稱, 本機 Agent action)
 KINDS = {
@@ -179,7 +179,8 @@ def record(selected: list[dict], log: Callable[[str], None] = print, now: Option
     from tools.orders_system import calendar_notify
 
     calendar_notify.create_notify_event(summary=title, description=body, start=now,
-                                        calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[])
+                                        calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
+                                        replace_prefix="本日內部請款已付款")
     log(f"已在 {RECORD_CALENDAR_ID} 行事曆留紀錄")
     return {"done": done, "pending": pending}
 

@@ -31,13 +31,13 @@ from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
+RECORD_CALENDAR_ID = "jenny@hers.com.tw"
 BATCH_ACTION = "month_start.batch_run"
 CDP_URL = "http://127.0.0.1:9222"
 
 # 步驟 → (顯示名稱, 本機 Agent action；空字串＝不經瀏覽器，直接讀寫試算表)
 STEPS = {
-    "newebpay": ("藍新收退款＋發票金額", ""),  # tools.newebpay.month_close，每區只登入一次
+    "newebpay": ("藍新收退款＋發票金額＋帳務", ""),  # tools.newebpay.month_close，每區只登入一次
     "cetustek_download": ("鯨躍發票下載＋紙本／中獎更新＋台中統編PDF", "cetustek.download"),
     "cash_gap": ("全區現金缺口", ""),
 }
@@ -163,7 +163,8 @@ def cash_gap_date(values: list[list]) -> str:
     return str(values[1][1]).strip() if len(values) > 1 and len(values[1]) > 1 else ""
 
 
-def build_items(period: str, tasks: list[dict], invoice_values: list[list], cash_gap_values: list[list]) -> list[dict]:
+def build_items(period: str, tasks: list[dict], invoice_values: list[list], cash_gap_values: list[list],
+                balance_done: bool = True) -> list[dict]:
     """純邏輯（方便測試）：依任務紀錄與試算表內容盤點三個步驟。"""
     _start, end = period_range(period)
     items = []
@@ -176,8 +177,12 @@ def build_items(period: str, tasks: list[dict], invoice_values: list[list], cash
             areas = invoice_amount_areas(invoice_values, period)
             note = f"藍新發票總表已有：{'、'.join(areas)}" if areas else \
                 "藍新發票總表還沒有這個期別的發票金額（藍新每月 1 日 08:00 才寄發票）"
-            if areas and task is None:
+            if not balance_done:
+                note += "；藍新帳務還沒查這個期別"
+            if areas and task is None and balance_done:
                 status, default = "已有資料（之前手動或排程做過）", False
+            elif areas and task is None:
+                status, default = "收退款／發票已有資料，但藍新帳務還沒查", True
             elif not areas and selectable and status.startswith("已完成"):
                 status, default = f"{status}，但還沒有發票金額", True
         if step == "cash_gap":
@@ -217,7 +222,17 @@ def scan(period: str, log: Callable[[str], None] = print) -> list[dict]:
     except Exception as exc:
         log(f"⚠️ 讀取本機Agent任務失敗：{exc}")
         tasks = []
-    return build_items(period, tasks, read(NEWEBPAY_INVOICE_SHEET, "A:D"), read(CASH_GAP_SHEET_NAME, "A1:C2"))
+    cash = read(CASH_GAP_SHEET_NAME, "A1:G40")
+    return build_items(period, tasks, read(NEWEBPAY_INVOICE_SHEET, "A:D"), cash, balance_done=_balance_done(cash, period))
+
+
+def _balance_done(cash: list[list], period: str) -> bool:
+    """現金缺口試算的藍新帳務日期／金額：該查的地區都已查到這個期別。"""
+    from tools.finance_management.month_start_check import OK, newebpay_balance_cells
+    from tools.newebpay.account_balance import NO_BALANCE_AREAS
+
+    cells = newebpay_balance_cells(cash, period)
+    return all(icon == OK for area, (icon, _t) in cells.items() if area not in NO_BALANCE_AREAS)
 
 
 def queue_steps(period: str, steps: list[str], create_task: Callable, created_by: str = "月初整合執行",
@@ -335,9 +350,10 @@ def run_plan(period: str, steps: list[str], log: Callable[[str], None] = print, 
 
 def _failure_text(step: str, code: int) -> str:
     if step == "newebpay":
-        from tools.newebpay.month_close import DOWNLOAD_FAILED, INVOICE_FAILED
+        from tools.newebpay.month_close import BALANCE_FAILED, DOWNLOAD_FAILED, INVOICE_FAILED
 
-        parts = [name for bit, name in ((DOWNLOAD_FAILED, "收退款"), (INVOICE_FAILED, "發票金額")) if code & bit]
+        parts = [name for bit, name in ((DOWNLOAD_FAILED, "收退款"), (INVOICE_FAILED, "發票金額"),
+                                        (BALANCE_FAILED, "帳務")) if code & bit]
         if parts:
             return f"失敗（{'、'.join(parts)}）"
     return f"失敗（exit {code}）"
@@ -358,7 +374,8 @@ def _record(period: str, results: dict[str, str], log: Callable[[str], None]) ->
     now = datetime.now(TW_TZ)
     title, body = build_record_text(period, results, now)
     calendar_notify.create_notify_event(summary=title, description=body, start=now,
-                                        calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[])
+                                        calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
+                                        replace_prefix=title.split("：")[0])
     log(f"已在 {RECORD_CALENDAR_ID} 行事曆留紀錄：{title}")
 
 

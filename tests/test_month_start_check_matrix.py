@@ -31,7 +31,7 @@ CASH = [["", "台北", "台中", "桃園", "新竹", "高雄", "ALL"], ["日期"
 def readers(**overrides):
     base = {"月排程執行Log": lambda: MONTHLY_LOG, "儲值金月度作業紀錄": lambda: VIP_LOG,
             "本機Agent任務": lambda: [], "藍新收退款檔": lambda: FILES, "藍新發票總表": lambda: INVOICE,
-            "鯨躍發票更新Log": lambda: EI_LOG, "現金缺口試算": lambda: CASH,
+            "鯨躍發票更新Log": lambda: EI_LOG, "現金缺口試算": lambda: CASH, "月初檢查不提醒": lambda: [],
             "固定費用": lambda: [{"area": "台北", "memo": "2026.11-辦公室租金", "default": True},
                              {"area": "台中", "memo": "2026.11-辦公室租金管理費", "default": False}],
             "財報": lambda area, report: [["", "帳務日"], ["", "2026/10/30" if area != "台中" else "2026/09/18"]]}
@@ -87,9 +87,10 @@ def test_run_rows_only_unfinished_areas_in_order():
     assert order[4:] == ["vip", "fixed"]
     actions = [a for a, _p in queued]
     # 藍新只有部分地區沒做：只重跑那幾區（不是五區全跑），現金缺口排在後面
-    assert actions == ["fubon.download", "yuanta.download", "cetustek.paper_invoice_pdf",
-                       "newebpay.month_close", ms.BATCH_ACTION]
-    assert len(queued[3][1]["areas"]) < len(chk.AREAS)
+    assert actions[:3] == ["fubon.download", "yuanta.download", "cetustek.paper_invoice_pdf"]
+    assert set(actions[3:-1]) == {"newebpay.month_close"} and actions[-1] == ms.BATCH_ACTION
+    newebpay = {tuple(p["areas"]): p["part"] for a, p in queued if a == "newebpay.month_close"}
+    assert all(len(areas) < len(chk.AREAS) for areas in newebpay)  # 只跑沒完成的地區，高雄不查帳務
     assert queued[-1][1]["steps"] == ["cash_gap"]
     assert not any(m.startswith("❌") for m in messages)
 
@@ -282,7 +283,12 @@ def test_newebpay_plan_runs_only_checked_part():
         return {"todo": todo}
 
     both = {"newebpay_files": row(["台北", "高雄"]), "newebpay_invoice": row(["台北", "桃園"])}
-    assert chk.newebpay_plan(both) == [("all", ["台北"]), ("download", ["新竹"]), ("invoice", ["桃園"])]
+    assert chk.newebpay_plan(both) == [("download,invoice", ["台北"]), ("invoice", ["桃園"]), ("download", ["新竹"])]
+    three = dict(both, newebpay_balance=row(["台北", "台中"]))
+    assert chk.newebpay_plan(three) == [("all", ["台北"]), ("balance", ["台中"]), ("invoice", ["桃園"]),
+                                        ("download", ["新竹"])]
+    command = ACTION_HANDLERS_LATE()["newebpay.month_close"]({"period": "202610", "areas": ["台北"], "part": "download,invoice"})
+    assert [command[i + 1] for i, c in enumerate(command) if c == "--part"] == ["download", "invoice"]
     assert chk.newebpay_plan({"newebpay_invoice": row(["桃園"])}) == [("invoice", ["桃園"])]
     assert chk.newebpay_plan({"newebpay_files": row(["桃園"])}) == [("download", ["桃園"])]
     from tools.local_agent import ACTION_HANDLERS
@@ -296,3 +302,82 @@ def test_kaohsiung_needs_no_newebpay_invoice():
     from tools.finance_management.cash_gap import newebpay_invoice_amount
 
     assert newebpay_invoice_amount("高雄", date(2026, 10, 31)) == 0.0
+
+
+def test_ignored_items_still_shown_but_not_reminded():
+    rows = list(rows_by_key(**{"月初檢查不提醒": lambda: [chk.IGNORE_HEADER, ["prepaid_report", "預收", "台中", ""]]}).values())
+    row = next(r for r in rows if r["key"] == "prepaid_report")
+    assert not row["done"] and row["ignored"] == ["台中"]
+    assert row["remind_todo"] == [a for a in row["todo"] if a != "台中"]
+    only_taichung = [dict(r, remind_todo=[]) if r["key"] == "prepaid_report" else r for r in rows]
+    assert "prepaid_report" not in [r["key"] for r in chk.problems(only_taichung)]
+    written = []
+    assert chk.save_ignored([("fubon", "富邦明細", "桃園")], write=written.append) == 1
+    assert written[0][0] == chk.IGNORE_HEADER and written[0][1][:3] == ["fubon", "富邦明細", "桃園"]
+    keys = {(k, a) for k, _l, a in chk.ignore_options(rows)}
+    assert ("cash_gap", "高雄") in keys and ("prize", "台北") not in keys  # 「—」的不列
+
+
+def ACTION_HANDLERS_LATE():
+    from tools.local_agent import ACTION_HANDLERS
+
+    return ACTION_HANDLERS
+
+
+def test_newebpay_balance_row_and_parser():
+    cash = [["", "台北", "台中", "桃園", "新竹", "高雄"], ["日期", "2026/10/31"],
+            ["藍新帳務日期", "2026-11-01 13:01:59", "2026-10-15 10:00:00"], ["藍新帳務金額", "461580", "5"]]
+    cells = chk.newebpay_balance_cells(cash, "202610")
+    assert cells["台北"][0] == chk.OK and cells["台中"][0] == chk.FAIL and cells["桃園"][0] == chk.FAIL
+    assert cells["高雄"][0] == chk.NA
+    rows = rows_by_key()
+    assert list(rows).index("newebpay_balance") == list(rows).index("newebpay_invoice") + 1
+    from tools.newebpay.account_balance import parse_first_balance, query_range
+
+    table = [["處理日期", "處理序號", "處理方式", "商店代號", "前次剩餘金額", "本次金額", "手續費", "本次剩餘金額", "狀態"],
+             ["款項來源(結算期間)"],
+             ["2026-11-01 13:01:59", "EC2611", "撥款\n(明細)", "MS1", "NT$ 74,872", "NT$ 394,600", "NT$ 7,892",
+              "NT$ 461,580", "已撥款"],
+             ["信用卡 (2026-10-27~2026-10-27)"],
+             ["2026-10-31 13:00:00", "EC2610", "撥款", "MS1", "NT$ 1", "NT$ 2", "NT$ 0", "NT$ 3", "已撥款"]]
+    assert parse_first_balance(table) == ("2026-11-01 13:01:59", 461580)
+    assert parse_first_balance(table[:2]) is None
+    assert query_range("202610", today=date(2026, 11, 5)) == ("2026-10-01", "2026-11-01")
+    assert query_range("202612", today=date(2027, 1, 1)) == ("2026-12-01", "2027-01-01")
+    from tools.local_agent import ACTION_HANDLERS
+
+    command = ACTION_HANDLERS["newebpay.account_balance"]({"period": "202610", "area": "桃園"})
+    assert command[-4:] == ["--part", "balance", "--area", "桃園"]
+
+
+def test_write_balances_to_cash_gap_sheet():
+    from tools.newebpay import account_balance as ab
+
+    calls = []
+
+    class Req:
+        def __init__(self, result):
+            self.result = result
+
+        def execute(self):
+            return self.result
+
+    class Values:
+        def get(self, **kw):
+            return Req({"values": [["", "台北", "台中", "桃園"], ["日期"]] + [[f"r{i}"] for i in range(3, 15)]
+                                  + [["藍新帳務日期"], ["藍新帳務金額"]]})
+
+        def batchUpdate(self, spreadsheetId, body):
+            calls.append(body["data"])
+            return Req({})
+
+    class Svc:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return Values()
+
+    ab.write_balances({"桃園": ("2026-11-01 09:00:00", 1200)}, service=Svc(), spreadsheet_id="x")
+    cells = {d["range"].split("!")[1]: d["values"][0][0] for d in calls[0]}
+    assert cells == {"D15": "2026-11-01 09:00:00", "D16": 1200}

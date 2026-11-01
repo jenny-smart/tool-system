@@ -45,7 +45,7 @@ from zoneinfo import ZoneInfo
 TW_TZ = ZoneInfo("Asia/Taipei")
 REGIONS = ["台北", "台中", "桃園", "新竹", "高雄"]
 CUTOFF = date(2026, 10, 16)
-RECORD_CALENDAR_ID = "jenny@lemonclean.com.tw"
+RECORD_CALENDAR_ID = "jenny@hers.com.tw"
 
 DONE_STATUSES = ("已退款", "VIP已退券", "已收款", "已扣儲值金", "已返儲值金", "已處理發票")
 REFUND_STATUSES = {"待退款", "VIP待退券"}
@@ -450,7 +450,8 @@ def record_to_calendar(results: dict[str, dict], now: Optional[datetime] = None,
     from tools.orders_system import calendar_notify
 
     event = calendar_notify.create_notify_event(summary=title, description=body, start=now,
-                                                calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[])
+                                                calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
+                                                replace_prefix="本日清潔異動已回寫")
     log(f"已在 {RECORD_CALENDAR_ID} 行事曆留紀錄：{title}")
     return event
 

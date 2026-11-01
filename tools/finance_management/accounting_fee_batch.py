@@ -23,7 +23,7 @@ TW_TZ = ZoneInfo("Asia/Taipei")
 AREA = "台北"
 TOOL_NAME = "會計事務所費用確認"
 PAYEE = "會計事務所"
-REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
+REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 
 RENT_WITHHOLDING = 8800  # 辦公室租金代扣繳，每月
 RENT_NHI = 1857  # 辦公室租金二代健保，每月
@@ -113,7 +113,8 @@ def remind(today: Optional[date] = None, log: Callable[[str], None] = print) -> 
     # 開始時間留 30 分鐘前導，Google 的提醒推播才排得進去（20、10 分鐘前各跳一次）
     event = calendar_notify.create_notify_event(summary=title, description=body, calendar_id=REMIND_CALENDAR_ID,
                                                 start=datetime.now(TW_TZ) + timedelta(minutes=30),
-                                                attendee="", reminder_minutes=[20, 10])
+                                                attendee="", reminder_minutes=[20, 10],
+                                                replace_prefix=title.split("：")[0])
     log(f"已在 {REMIND_CALENDAR_ID} 行事曆建提醒：{title}")
     return event
 

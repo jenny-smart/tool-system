@@ -162,10 +162,17 @@ CASH_ROWS = {
     23: ("行銷費用", ("行銷費用(廣告)", "行銷費用(服務)")),
     24: ("2%支出", ("2%",)),
     25: ("營業稅", ("營業稅",)),
-    26: ("相關費用", ("藍新發票金額",)),
     27: ("年終費用", ("年終費用",)),
     28: ("春酒費用", ("春酒費用",)),
+    # 2026-11 Jenny：藍新發票金額不放「相關費用」（26 列不動），改貼 38；藍新帳務（本次剩餘金額）貼 39～40
+    38: ("藍新發票金額", ("藍新發票金額",)),
+    40: ("藍新帳務金額", ("藍新帳務金額",)),
 }
+# 文字列（日期）：照原樣貼
+TEXT_ROWS = {39: ("藍新帳務日期", "藍新帳務日期")}
+TEXT_LABELS = {source for _label, source in TEXT_ROWS.values()}
+LAST_BLOCK_ROW = 40
+OPTIONAL_ROWS = {40}
 # 公式列：空白才補（{c}＝該欄字母）
 FORMULA_ROWS = {
     20: "={c}14-SUM({c}15:{c}19)",
@@ -194,7 +201,9 @@ def cash_gap_values(values: list[list]) -> dict[str, dict[str, Optional[float]]]
     table = {}
     for row in values[2:]:
         label = str(row[0] if row else "").strip()
-        if label:
+        if label in TEXT_LABELS:
+            table[label] = {area: str(row[i]).strip() if i < len(row) else "" for area, i in cols.items()}
+        elif label:
             table[label] = {area: _number(row[i] if i < len(row) else "") for area, i in cols.items()}
     return table
 
@@ -219,6 +228,8 @@ def build_block_updates(title: str, month_end: date, vip_block: list[list], cash
     if cash is None:
         return data, skipped
     for row, (label, sources) in CASH_ROWS.items():
+        if row in OPTIONAL_ROWS and not any(src in cash for src in sources):
+            continue  # 還沒查藍新帳務：這列先不貼
         values = [label]
         for area in AREAS:
             parts = [cash.get(src, {}).get(area) for src in sources]
@@ -231,6 +242,12 @@ def build_block_updates(title: str, month_end: date, vip_block: list[list], cash
             col = label_col if i == 0 else area_cols[AREAS[i - 1]]
             if value is not None:
                 data.append({"range": f"'{title}'!{col}{row}", "values": [[value]]})
+    for row, (label, source) in TEXT_ROWS.items():
+        data.append({"range": f"'{title}'!{label_col}{row}", "values": [[label]]})
+        for area in AREAS:
+            text = cash.get(source, {}).get(area, "")
+            if text:
+                data.append({"range": f"'{title}'!{area_cols[area]}{row}", "values": [[text]]})
     data.append({"range": f"'{title}'!{label_col}33", "values": [[f"{period_label}-現金缺口"]]})
     for row, formula in FORMULA_ROWS.items():
         current = existing[row - 1] if row - 1 < len(existing) else []
@@ -318,7 +335,7 @@ def _write_block(period: str, month_end: date, vip_block: list[list], cash: Opti
     first, last = column_letter(start), column_letter(start + 6)
     service = review_service()
     existing = service.spreadsheets().values().get(
-        spreadsheetId=review_id, range=f"'{CASH_GAP_REVIEW_SHEET}'!{first}1:{last}34",
+        spreadsheetId=review_id, range=f"'{CASH_GAP_REVIEW_SHEET}'!{first}1:{last}{LAST_BLOCK_ROW}",
         valueRenderOption="FORMULA").execute().get("values", [])
     header = existing[0] if existing else []
     if [str(v).strip() for v in header[1:6]] != AREAS:

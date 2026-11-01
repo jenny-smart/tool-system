@@ -47,7 +47,7 @@ def test_record_lists_done_and_pending(monkeypatch):
     result = batch.record(selected, log=lambda *_: None, now=datetime(2026, 10, 20, 15, 0, tzinfo=batch.TW_TZ))
     assert [r["row"] for r in result["done"]] == [5] and [r["row"] for r in result["pending"]] == [9]
     kw = calls[0]
-    assert kw["calendar_id"] == "jenny@lemonclean.com.tw" and kw["reminder_minutes"] == [] and kw["attendee"] == ""
+    assert kw["calendar_id"] == "jenny@hers.com.tw" and kw["reminder_minutes"] == [] and kw["attendee"] == ""
     assert kw["summary"] == "本日內部請款已付款：1 筆（未完成 1 筆）"
     assert "台北 請款記錄：1筆，列數：5（李 500）" in kw["description"]
 
@@ -59,7 +59,7 @@ def test_weekly_reminder_has_no_atm_and_uses_lemonclean_calendar(monkeypatch):
     monkeypatch.setattr(notify.calendar_notify, "create_notify_event", lambda **kw: calls.append(kw))
     notify.main()
     kw = calls[0]
-    assert kw["calendar_id"] == "jenny@lemonclean.com.tw" and kw["reminder_minutes"] == [20, 10]
+    assert kw["calendar_id"] == "jenny@hers.com.tw" and kw["reminder_minutes"] == [20, 10]
     assert "ATM" not in kw["summary"] + kw["description"]
     assert "清潔用品採購：1 筆" in kw["description"]
 

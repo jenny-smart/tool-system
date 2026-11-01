@@ -123,8 +123,8 @@ def _parse_date(value: object) -> date | None:
     return None
 
 
-def _read_values(spreadsheet_id: str, title: str) -> list[list[object]]:
-    service = get_sheets_service()
+def _read_values(spreadsheet_id: str, title: str, service=None) -> list[list[object]]:
+    service = service or get_sheets_service()
     res = (
         service.spreadsheets()
         .values()
@@ -147,9 +147,25 @@ def _column_letter(index: int) -> str:
     return letters
 
 
+def is_permission_error(exc: Exception) -> bool:
+    text = str(exc)
+    return "403" in text and ("permission" in text.lower() or "PERMISSION_DENIED" in text)
+
+
 def _report_values(area: str, report: str) -> list[list[object]]:
-    spreadsheet_id, title = resolve_statement_location(area, report)
-    return _read_values(spreadsheet_id, title)
+    """讀各區財報。服務帳號沒有權限（403，例如桃園／新竹／高雄財報沒分享給服務帳號）時，
+    改用 Jenny 本人的 OAuth 再讀一次。"""
+    try:
+        spreadsheet_id, title = resolve_statement_location(area, report)
+        return _read_values(spreadsheet_id, title)
+    except Exception as exc:
+        if not is_permission_error(exc):
+            raise
+        from services.google_auth import get_sheets_service as oauth_sheets_service
+
+        oauth = oauth_sheets_service()
+        spreadsheet_id, title = resolve_statement_location(area, report, service=oauth)
+        return _read_values(spreadsheet_id, title, service=oauth)
 
 
 def _month_end_balance_from_values(values: list[list[object]], balance_col: int, as_of: date) -> float:
@@ -254,10 +270,18 @@ def marketing_expense_row(area: str, month: int, row: int) -> float:
     return _to_number(values[0][0]) if values and values[0] else 0.0
 
 
-def _finance_column_value(area: str, month: int, row: int) -> float:
-    """財務分頁「{年月}預估」欄，指定列數的值。"""
-    spreadsheet_id, title = resolve_statement_location(area, "財務")
-    service = get_sheets_service()
+def _finance_column_value(area: str, month: int, row: int, service=None) -> float:
+    """財務分頁「{年月}預估」欄，指定列數的值。服務帳號沒權限時改用 Jenny OAuth。"""
+    if service is None:
+        try:
+            return _finance_column_value(area, month, row, service=get_sheets_service())
+        except Exception as exc:
+            if not is_permission_error(exc):
+                raise
+            from services.google_auth import get_sheets_service as oauth_sheets_service
+
+            return _finance_column_value(area, month, row, service=oauth_sheets_service())
+    spreadsheet_id, title = resolve_statement_location(area, "財務", service=service)
     column_index = FINANCE_BASE_COLUMN + (month - 1) * FINANCE_MONTH_STEP_COLUMNS
     column_letter = _column_letter(column_index)
     res = (

@@ -7,7 +7,7 @@
 只做兩件事，不回寫系統（回寫改由【整合執行】清潔異動已備妥處理）：
   1. 補 T（匯款金額）、Z（未稅金額）公式：待退款且 S 有值、T／Z 空白的格子。
   2. 列出登記日期 2026/10/16 以後「未備妥」的列（缺資料還不能處理，例如缺匯款帳號、
-     客人尚未付款），在 jenny@lemonclean.com.tw 行事曆建一筆 11:00 的提醒，10:30 跳窗；
+     客人尚未付款），在 jenny@hers.com.tw 行事曆建一筆 11:00 的提醒，10:30 跳窗；
      沒有未備妥、非工作日就不建。資料齊全可執行或需人工的列不提醒。
 盤點規則與【整合執行】清潔異動已備妥共用 tools/finance_management/change_order_batch.py。
 """
@@ -26,7 +26,7 @@ REGIONS = batch.REGIONS
 TW_TZ = ZoneInfo("Asia/Taipei")
 
 # 未備妥提醒：工作日 11:00 一筆，建在 Jenny 的行事曆，提前 30 分鐘（10:30）跳窗
-REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
+REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 REMIND_SLOT = time(11, 0)
 REMIND_BEFORE_MINUTES = 30
 
@@ -70,7 +70,8 @@ def _notify(todo: list, now: datetime = None, log=print):
         log("非工作日或已過 11:00，不建提醒")
         return None
     title, body = build_notify_text(todo, now.date())
-    kwargs = dict(summary=title, description=body, start=start, reminder_minutes=[REMIND_BEFORE_MINUTES])
+    kwargs = dict(summary=title, description=body, start=start, reminder_minutes=[REMIND_BEFORE_MINUTES],
+                  replace_prefix="清潔異動未備妥")
     try:
         event = calendar_notify.create_notify_event(calendar_id=REMIND_CALENDAR_ID, attendee="", **kwargs)
         log(f"已建立 {start:%H:%M} 提醒（{REMIND_CALENDAR_ID}）")

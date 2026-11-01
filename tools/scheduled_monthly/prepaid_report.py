@@ -189,10 +189,9 @@ def get_service_account_info() -> dict[str, Any]:
 
 
 def get_drive_service():
-    creds = service_account.Credentials.from_service_account_info(
-        get_service_account_info(),
-        scopes=GDRIVE_SCOPES,
-    )
+    from tools.common.google_auth import preferred_credentials  # 盡量用 Jenny OAuth
+
+    creds = preferred_credentials(GDRIVE_SCOPES, get_service_account_info)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
