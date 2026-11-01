@@ -88,9 +88,47 @@ def read_job_log(day: date, name: str, root: Path = LOG_ROOT) -> Optional[dict]:
         return None
 
 
-def cloud_entries(day: date, read=read_job_log) -> list[dict]:
+VIP_LOG_SHEET = "儲值金月度作業紀錄"
+
+
+def vip_status_from_log(values: list[list], period: str) -> Optional[tuple[bool, str]]:
+    """主控表「儲值金月度作業紀錄」：期別那一欄的「*搬運時間」都有值＝完整流程跑完了
+    （手動在 Tools App 跑的也算）。找不到期別欄回傳 None。"""
+    header = [str(v).strip() for v in (values[0] if values else [])]
+    if period not in header:
+        return None
+    col = header.index(period)
+    moved = [str(row[col] if col < len(row) else "").strip() for row in values[1:]
+             if row and str(row[0]).endswith("搬運時間")]
+    if moved and all(moved):
+        return True, f"已完成（搬運 {max(moved)}）"
+    done = sum(1 for v in moved if v)
+    return False, f"未完成（搬運 {done}／{len(moved)} 項）" if moved else "未完成（還沒搬運）"
+
+
+def _read_vip_log() -> list[list]:
+    from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+
+    return get_sheets_service().spreadsheets().values().get(
+        spreadsheetId=get_master_spreadsheet_id(), range=f"'{VIP_LOG_SHEET}'!A1:ZZ120").execute().get("values", [])
+
+
+def cloud_entries(day: date, read=read_job_log, read_vip_log=None) -> list[dict]:
     entries = []
     for label, name, fix in CLOUD_JOBS:
+        if name == "finance_vip_full_pipeline":
+            # 儲值金完整流程以「儲值金月度作業紀錄」為準（排程或手動跑的都看得到）
+            from tools.finance_management.month_start_batch import previous_period
+
+            try:
+                vip = vip_status_from_log((read_vip_log or _read_vip_log)(), previous_period(day))
+            except Exception:
+                vip = None
+            if vip is not None:
+                ok, status = vip
+                entries.append({"label": label, "status": status, "fix": fix, "ok": ok,
+                                "kind": "cloud", "key": name, "runnable": not ok})
+                continue
         result = read(day, name)
         if result is None:
             status, ok = "沒有執行紀錄", False
@@ -247,8 +285,62 @@ def clear_reminders(day: date, log: Callable[[str], None] = print) -> int:
     return removed
 
 
+AUTO_MAX_ATTEMPTS = 2  # 儲值金完整流程自動補做最多試 2 次，避免每小時一直失敗重跑
+
+
+def write_job_log(day: date, name: str, status: str, attempts: int, root: Optional[Path] = None) -> None:
+    """跟 workflow 寫的 logs/YYYYMMDD/{name}.json 同格式，讓下次檢查知道已經補做過（workflow 會 commit logs）。"""
+    path = (root or LOG_ROOT) / day.strftime("%Y%m%d") / f"{name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now_text = datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    path.write_text(json.dumps({"job_name": name, "status": status, "exit_code": 0 if status == "success" else 1,
+                                "started_at": now_text, "finished_at": now_text, "auto_attempts": attempts},
+                               ensure_ascii=False), encoding="utf-8")
+
+
+def auto_fix(day: date, entries: list[dict], log: Callable[[str], None] = print,
+             run_vip=None, submit_fixed=None) -> list[str]:
+    """不用人工的項目直接補做（2026-11 Jenny：儲值金、固定費用不要只提醒）：
+    - 固定費用：可新增的直接新增到請款記錄（已新增過的會略過，不會重複）
+    - 儲值金完整流程：儲值金結算／預收都成功、但完整流程沒跑或失敗 → 直接跑（最多試 AUTO_MAX_ATTEMPTS 次）
+    回傳補做結果訊息。"""
+    done = []
+    fixed = [e["item"] for e in entries if e.get("kind") == "fixed" and e.get("runnable")]
+    if fixed:
+        if submit_fixed is None:
+            from tools.finance_management.fixed_expense_batch import submit as submit_fixed
+        try:
+            added = submit_fixed(fixed, run_type="月初檢查自動補做", log=log)
+            done.append("固定費用：" + "、".join(f"{a} 新增 {n} 筆" for a, n in added.items()))
+        except Exception as exc:
+            log(f"❌ 固定費用自動補做失敗：{exc}")
+    by_key = {e.get("key"): e for e in entries if e.get("kind") == "cloud"}
+    vip = by_key.get("finance_vip_full_pipeline")
+    sources_ok = all(by_key.get(k, {}).get("ok") for k in VIP_SOURCES)
+    if vip and not vip["ok"] and sources_ok:
+        previous = read_job_log(day, "finance_vip_full_pipeline") or {}
+        attempts = int(previous.get("auto_attempts", 0) or 0)
+        if attempts >= AUTO_MAX_ATTEMPTS:
+            log(f"儲值金完整流程已自動補做 {attempts} 次都失敗，改提醒人工處理")
+        else:
+            if run_vip is None:
+                from tools.scheduled_finance.runner import run_vip_full_pipeline as run_vip
+            log("===== 自動補做：儲值金完整流程 =====")
+            try:
+                code = run_vip(day)
+            except Exception as exc:
+                log(f"❌ 儲值金完整流程失敗：{exc}")
+                code = 1
+            write_job_log(day, "finance_vip_full_pipeline", "success" if code == 0 else "failed", attempts + 1)
+            done.append("儲值金完整流程：" + ("完成" if code == 0 else "失敗"))
+    return done
+
+
 def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) -> list[dict]:
     now = now or datetime.now(TW_TZ)
+    fixed_up = auto_fix(now.date(), collect_all(now.date(), log=log, include_month_start=False), log=log)
+    if fixed_up:
+        log("自動補做：" + "；".join(fixed_up))
     problems = collect(now.date(), log=log, hour=now.hour)
     try:
         clear_reminders(now.date(), log=log)
@@ -313,14 +405,28 @@ def plan_run(entries: list[dict]) -> tuple[list[dict], list[str]]:
     return selected, notes
 
 
+def _run_vip_here(day: date, log: Callable[[str], None]) -> int:
+    from tools.scheduled_finance import runner
+
+    runner.log = log  # 進度直接顯示在 Tools App 執行日誌
+    return runner.run_vip_full_pipeline(day)
+
+
 def run_selected(entries: list[dict], day: date, create_task, log: Callable[[str], None] = print,
-                 dispatch=dispatch_workflow, created_by: str = "月初檢查") -> list[str]:
+                 dispatch=dispatch_workflow, created_by: str = "月初檢查", run_vip=None) -> list[str]:
     """補做勾選的未完成項目：雲端排程觸發 GitHub workflow、固定費用直接新增、
     藍新／鯨躍排入本機 Agent；只有現金缺口（不用等藍新）時直接在這裡算。回傳結果訊息。"""
     from tools.finance_management import month_start_batch
 
     selected, messages = plan_run(entries)
-    for entry in (e for e in selected if e["kind"] == "cloud"):
+    for entry in (e for e in selected if e["kind"] == "cloud" and e["key"] == "finance_vip_full_pipeline"):
+        # 儲值金完整流程直接在這裡跑（不用 GitHub token），跟【儲值金】完整流程同一支
+        try:
+            code = (run_vip or _run_vip_here)(day, log)
+            messages.append("✅ 儲值金完整流程：完成" if code == 0 else "❌ 儲值金完整流程：失敗，請看執行日誌")
+        except Exception as exc:
+            messages.append(f"❌ 儲值金完整流程：{exc}")
+    for entry in (e for e in selected if e["kind"] == "cloud" and e["key"] != "finance_vip_full_pipeline"):
         workflow, inputs = dispatch_inputs(entry["key"], day)
         try:
             dispatch(workflow, inputs)

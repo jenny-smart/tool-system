@@ -332,3 +332,60 @@ def test_copy_kaohsiung_from_hsinchu(tmp_path):
     csv = tmp_path / "新竹" / "202610-2藍新收款-新竹.csv"
     csv.write_text("a")
     assert copy_for_area(csv, "新竹", "高雄").name == "202610-2藍新收款-高雄.csv"
+
+
+def test_month_start_check_auto_fix(tmp_path, monkeypatch):
+    from tools.finance_management import month_start_check as chk
+
+    monkeypatch.setattr(chk, "LOG_ROOT", tmp_path)
+    monkeypatch.setattr(chk, "read_job_log", lambda day, name, root=None: chk.json.loads(
+        (tmp_path / day.strftime("%Y%m%d") / f"{name}.json").read_text()) if (tmp_path / day.strftime("%Y%m%d") / f"{name}.json").exists() else None)
+    day = date(2026, 11, 1)
+    logs = {"monthly_stored_value_settlement": {"status": "success"}, "monthly_stored_value_prepaid": {"status": "success"}}
+    entries = chk.cloud_entries(day, read=lambda _d, name: logs.get(name))
+    entries += chk.fixed_expense_entries(fixed.mark_status(fixed.planned_items("202611"), {"台北": set(), "台中": {"2026.11-辦公室租金管理費", "2026.12-辦公室租金管理費"}}))
+    submitted, vip_runs = [], []
+    done = chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1,
+                        submit_fixed=lambda items, **_k: submitted.extend(items) or {"台北": len(items)})
+    assert [i["memo"] for i in submitted] == ["2026.11-辦公室租金", "2026.11-辦公室管理費"]
+    assert vip_runs == [day] and "儲值金完整流程：失敗" in done
+    # 失敗會記次數；第 2 次再試，第 3 次就不再自動跑
+    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1, submit_fixed=lambda *a, **k: {})
+    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1, submit_fixed=lambda *a, **k: {})
+    assert len(vip_runs) == 2
+
+
+def test_month_start_check_auto_fix_waits_for_vip_sources():
+    from tools.finance_management import month_start_check as chk
+
+    day = date(2026, 11, 1)
+    entries = chk.cloud_entries(day, read=lambda _d, name: None)  # 結算／預收都還沒跑
+    runs = []
+    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: runs.append(d) or 0, submit_fixed=lambda *a, **k: {})
+    assert runs == []
+
+
+def test_vip_status_from_monthly_log():
+    from tools.finance_management import month_start_check as chk
+
+    values = [["項目", "202609", "202610"], ["彙整檔建立時間", "x", "y"],
+              ["台北儲值金結算搬運時間", "2026/10/01 2:36:35", "2026/11/01 1:05:00"],
+              ["台北儲值金預收搬運時間", "2026/10/01 2:36:17", ""]]
+    assert chk.vip_status_from_log(values, "202609")[0] is True
+    ok, status = chk.vip_status_from_log(values, "202610")
+    assert not ok and "1／2" in status
+    assert chk.vip_status_from_log(values, "202611") is None
+    entries = chk.cloud_entries(date(2026, 11, 1), read=lambda *_a: None, read_vip_log=lambda: values)
+    vip = [e for e in entries if e["key"] == "finance_vip_full_pipeline"][0]
+    assert not vip["ok"] and vip["runnable"]
+
+
+def test_run_selected_runs_vip_here_not_github():
+    from tools.finance_management import month_start_check as chk
+
+    vip = {"label": "儲值金完整流程", "status": "", "ok": False, "kind": "cloud",
+           "key": "finance_vip_full_pipeline", "runnable": True, "fix": ""}
+    dispatched, ran = [], []
+    messages = chk.run_selected([vip], date(2026, 11, 1), lambda *a, **k: {}, log=lambda _t: None,
+                                dispatch=lambda *a: dispatched.append(a), run_vip=lambda d, log: ran.append(d) or 0)
+    assert ran == [date(2026, 11, 1)] and not dispatched and messages == ["✅ 儲值金完整流程：完成"]
