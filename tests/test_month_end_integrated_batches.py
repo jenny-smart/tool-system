@@ -248,3 +248,12 @@ def test_pick_fee_invoice_allows_late_issue():
     assert pick_fee_invoice(rows + [{"invoice_date": "2026-11-01", "amount": "0"}], "2026-11-01")["amount"] == "0"
     assert pick_fee_invoice(rows[:1], "2026-11-01") == {}
     assert pick_fee_invoice([{"invoice_date": "2026-10-31", "amount": "5"}], "2026-11-01")["amount"] == "5"
+
+
+def test_newebpay_step_default_when_balance_missing():
+    invoice = [["地區", "月份", "發票日期", "發票金額"], ["台北", "202610", "2026-11-01", "1234"]]
+    done = {i["step"]: i for i in ms.build_items("202610", [], invoice, [])}
+    assert not done["newebpay"]["default"]
+    missing = {i["step"]: i for i in ms.build_items("202610", [], invoice, [], balance_done=False)}
+    assert missing["newebpay"]["default"] and "帳務" in missing["newebpay"]["status"]
+    assert not ms._balance_done([["", "台北", "台中", "桃園", "新竹", "高雄"]], "202610")
