@@ -18,8 +18,9 @@ def _task(action, params, status="completed", task_id="t1"):
 def test_previous_period_and_params():
     assert ms.previous_period(date(2026, 11, 1)) == "202610"
     assert ms.previous_period(date(2027, 1, 1)) == "202612"
-    assert ms.step_params("newebpay_download", "202602")["end_date"] == "2026-02-28"
-    assert ms.step_params("newebpay_invoice", "202610")["months"] == "202610"
+    assert ms.period_range("202602")[1] == date(2026, 2, 28)
+    assert ms.step_params("newebpay", "202610")["period"] == "202610"
+    assert ms.normalize_steps(["cash_gap", "newebpay_invoice", "newebpay_download"]) == ["newebpay", "cash_gap"]
 
 
 def test_scan_defaults_nothing_done():
@@ -29,13 +30,12 @@ def test_scan_defaults_nothing_done():
 
 
 def test_scan_queued_batch_is_not_requeued_and_completed_unchecked():
-    tasks = [_task(ms.BATCH_ACTION, {"period": "202610", "steps": ["newebpay_download", "cetustek_download"]},
+    tasks = [_task(ms.BATCH_ACTION, {"period": "202610", "steps": ["newebpay", "cetustek_download"]},
                    status="pending"),
              _task("newebpay.invoice_amounts", {"months": "202610", "area": "全區"}, task_id="t2")]
     items = {i["step"]: i for i in ms.build_items("202610", tasks, [["地區", "月份", "發票日期", "發票金額"], ["台北", "202610", "2026/11/01", "1234"]], [])}
-    assert not items["newebpay_download"]["selectable"]
+    assert not items["newebpay"]["selectable"]  # 已排入，不能再排
     assert not items["cetustek_download"]["selectable"]
-    assert items["newebpay_invoice"]["selectable"] and not items["newebpay_invoice"]["default"]
     # 現金缺口還沒算到 10/31 → 預設打勾
     assert items["cash_gap"]["default"]
 
@@ -52,27 +52,61 @@ def test_other_period_task_not_matched():
     assert items["cetustek_download"]["status"] == "尚未執行"
 
 
-def test_run_plan_order_and_dependency():
-    calls = []
+def test_run_plan_cash_gap_runs_even_if_newebpay_fails():
+    from tools.newebpay.month_close import INVOICE_FAILED
+
+    calls, lines = [], []
 
     def run_step(step, period, _cdp):
         calls.append(step)
-        return 1 if step == "newebpay_invoice" else 0
+        return INVOICE_FAILED if step == "newebpay" else 0
 
-    code = ms.run_plan("202610", ["cash_gap", "cetustek_download", "newebpay_invoice", "newebpay_download"],
-                       log=lambda _t: None, run_step=run_step, record=False)
-    assert calls == ["newebpay_download", "newebpay_invoice", "cetustek_download"]  # 現金缺口被略過
+    code = ms.run_plan("202610", ["cash_gap", "cetustek_download", "newebpay"],
+                       log=lines.append, run_step=run_step, record=False)
+    assert calls == ["newebpay", "cetustek_download", "cash_gap"]  # 現金缺口照算
     assert code == 1
+    result_line = [l for l in lines if l.startswith(ms.STEP_RESULTS_PREFIX)][0]
+    assert '"cash_gap": "成功"' in result_line and "失敗（發票金額）" in result_line
+
+
+def test_status_per_step_from_result_json():
+    task = _task(ms.BATCH_ACTION, {"period": "202610", "steps": list(ms.STEP_ORDER)}, status="failed")
+    task["result_json"] = json.dumps({"steps": {"newebpay": "失敗（收退款）", "cetustek_download": "成功", "cash_gap": "成功"}},
+                                     ensure_ascii=False)
+    items = {i["step"]: i for i in ms.build_items("202610", [task], [["地區", "月份", "日期", "金額"], ["台北", "202610", "", "1"]],
+                                                     [["", "台北"], ["日期", "2026/10/31"]])}
+    assert items["newebpay"]["default"] and "失敗（收退款）" in items["newebpay"]["status"]
+    assert not items["cetustek_download"]["default"] and items["cetustek_download"]["status"].startswith("已完成")
+    assert not items["cash_gap"]["default"]
+
+
+def test_run_plan_legacy_steps_merge_into_one_login():
+    calls = []
+    ms.run_plan("202610", ["newebpay_invoice", "newebpay_download", "cash_gap"], log=lambda _t: None,
+                run_step=lambda step, *_a: calls.append(step) or 0, record=False)
+    assert calls == ["newebpay", "cash_gap"]
+
+
+def test_newebpay_failure_text():
+    assert ms._failure_text("newebpay", 2) == "失敗（發票金額）"
+    assert ms._failure_text("newebpay", 3) == "失敗（收退款、發票金額）"
+
+
+def test_month_close_exit_code():
+    from tools.newebpay.month_close import exit_code
+
+    assert exit_code([], []) == 0 and exit_code(["台北"], []) == 1
+    assert exit_code([], ["台北"]) == 2 and exit_code(["a"], ["b"]) == 3
 
 
 def test_queue_and_agent_command():
     created = []
-    task = ms.queue_steps("202610", ["cash_gap", "newebpay_download"],
+    task = ms.queue_steps("202610", ["cash_gap", "newebpay"],
                           lambda action, params, created_by: created.append((action, params)) or {"task_id": "x"},
                           log=lambda _t: None)
     assert task == {"task_id": "x"}
     action, params = created[0]
-    assert params["steps"] == ["newebpay_download", "cash_gap"]
+    assert params["steps"] == ["newebpay", "cash_gap"]
     command = ACTION_HANDLERS[action](params)
     assert "tools.finance_management.month_start_batch" in command and "202610" in command
 
@@ -160,23 +194,23 @@ def test_month_start_check_pending_items_and_text():
     tasks = [_task(ms.BATCH_ACTION, {"period": "202611", "steps": list(ms.STEP_ORDER)}, status="pending")]
     items = ms.build_items("202611", tasks, [], [])
     problems = chk.month_start_problems(items)
-    assert len(problems) == 4  # 排隊等 Mac 也算未完成
+    assert len(problems) == 3  # 排隊等 Mac 也算未完成
     done = ms.build_items("202611", [_task(ms.BATCH_ACTION, {"period": "202611", "steps": list(ms.STEP_ORDER)})],
                           [["地區", "月份", "發票日期", "發票金額"], ["台北", "202611", "2026/12/01", "1234"]], [["", "台北"], ["日期", "2026/11/30"]])
     assert chk.month_start_problems(done) == []
     fixed_items = fixed.mark_status(fixed.planned_items("202612"), {"台北": {"2026.12-辦公室租金"}, "台中": set()})
     assert [p["label"] for p in chk.fixed_expense_problems(fixed_items)] == ["固定費用 台北 2026.12-辦公室管理費"]
     title, body = chk.build_reminder(date(2026, 12, 1), datetime(2026, 12, 1, 3, 0), problems)
-    assert "4 項" in title and chk.MONTH_START_FIX in body and body.count(chk.MONTH_START_FIX) == 1
+    assert "3 項" in title and chk.MONTH_START_FIX in body and body.count(chk.MONTH_START_FIX) == 1
 
 
 def test_invoice_without_amount_is_not_ready():
     # 1 日 08:00 前查會寫入「查無發票」（金額空白）：不算有資料，發票金額步驟要再做
     empty = [["地區", "月份", "發票日期", "發票金額"], ["台北", "202610", "2026/11/01", ""]]
     assert ms.invoice_amount_areas(empty, "202610") == []
-    tasks = [_task("newebpay.invoice_amounts", {"months": "202610", "area": "全區"})]
+    tasks = [_task(ms.BATCH_ACTION, {"period": "202610", "steps": ["newebpay"]})]
     items = {i["step"]: i for i in ms.build_items("202610", tasks, empty, [])}
-    assert items["newebpay_invoice"]["default"] and "還沒有發票金額" in items["newebpay_invoice"]["status"]
+    assert items["newebpay"]["default"] and "還沒有發票金額" in items["newebpay"]["status"]
 
 
 def test_month_start_check_skips_mac_items_before_queue_hour(monkeypatch):
@@ -188,7 +222,7 @@ def test_month_start_check_skips_mac_items_before_queue_hour(monkeypatch):
     monkeypatch.setattr(fixed_expense_batch, "scan", lambda *_a, **_k: [])
     monkeypatch.setattr(month_start_batch, "scan", lambda period, log=print: ms.build_items(period, [], [], []))
     assert chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=3) == []
-    assert len(chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=10)) == 4
+    assert len(chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=10)) == 3
 
 
 def test_month_start_check_run_selected(monkeypatch):
@@ -249,3 +283,52 @@ def test_last_workday_before_month_start():
     from tools.finance_management import month_start_check as chk
 
     assert chk.last_workday_before(date(2026, 11, 1)) == date(2026, 10, 30)  # 10/31 是週六
+
+
+def test_cetustek_step_skips_kaohsiung_and_makes_taichung_pdf():
+    params = ms.step_params("cetustek_download", "202611")
+    command = ACTION_HANDLERS["cetustek.download"](params)
+    assert command[command.index("--skip-area") + 1] == "高雄"
+    assert command[command.index("--paper-pdf-area") + 1] == "台中"
+    assert command[command.index("--copy-area") + 1] == "新竹=高雄"
+    assert "202611" in command
+
+
+def test_update_invoice_sheets_paper_and_odd_month_prize(monkeypatch):
+    from tools.invoice_center import invoice_archive
+
+    calls = []
+
+    class FakeProcessor:
+        configs = {"台北": 1, "新竹": 1, "高雄": 1}
+
+        def update_paper(self, *, area, yyyymm):
+            calls.append(("paper", area, yyyymm)); return 1
+
+        def update_prize_period(self, *, area, period8):
+            calls.append(("prize", area, period8)); return 2
+
+        def write_update_log(self, **_k):
+            pass
+
+    monkeypatch.setattr(invoice_archive, "InvoiceArchiveProcessor", FakeProcessor)
+    assert ms.update_invoice_sheets("202611", log=lambda _t: None) == 0
+    assert ("prize", "台北", "20260910") in calls and ("paper", "高雄", "202611") in calls  # 高雄是新竹的複本，一樣更新
+    calls.clear()
+    ms.update_invoice_sheets("202610", log=lambda _t: None)
+    assert [c[0] for c in calls] == ["paper", "paper", "paper"]  # 雙月沒有中獎發票
+
+
+def test_copy_kaohsiung_from_hsinchu(tmp_path):
+    from tools.invoice_center.ei_export_all import copy_as_area
+    from tools.newebpay.month_close import copy_for_area
+
+    src = tmp_path / "新竹" / "202610紙本發票-新竹.zip"
+    src.parent.mkdir()
+    src.write_bytes(b"x")
+    copied = copy_as_area(src, "新竹", "高雄")
+    assert copied == tmp_path / "高雄" / "202610紙本發票-高雄.zip" and copied.read_bytes() == b"x"
+    assert copy_as_area(None, "新竹", "高雄") is None
+    csv = tmp_path / "新竹" / "202610-2藍新收款-新竹.csv"
+    csv.write_text("a")
+    assert copy_for_area(csv, "新竹", "高雄").name == "202610-2藍新收款-高雄.csv"

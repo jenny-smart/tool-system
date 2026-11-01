@@ -167,10 +167,14 @@ def login(page: Page, account: AreaAccount) -> None:
             print(f"[{account.area}] 藍新訊息：{message}", file=sys.stderr)
             if "MEM50012" in message or "登入已失效" in message:
                 needs_relogin = True
-        getattr(dialog, "accept")()
+        accept_dialog(dialog)
 
-    page.on("dialog", handle_dialog)
-    from tools.newebpay.download_reports import check_member_after_login, is_expected_member, logged_in_member
+    from tools.newebpay.download_reports import (
+        LOGIN_WAIT_SECONDS, accept_dialog, check_member_after_login, is_expected_member, logged_in_member,
+        replace_listener,
+    )
+
+    replace_listener(page, "dialog", handle_dialog)
 
     if "newebpay.com" in page.url and "/main/login_center/single_login" not in page.url:
         # 接續目前畫面：已登入這區帳號就不用再輸入驗證碼
@@ -181,9 +185,12 @@ def login(page: Page, account: AreaAccount) -> None:
         logout(page, account.area)
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
     fill_enterprise_login(page, account)
-    print(f"\n[{account.area}] 帳密已填入，請在 Chrome 輸入驗證碼並按企業會員登入。")
+    from tools.invoice_center.chrome_cdp import focus_login_page
 
-    deadline = time.monotonic() + 30
+    focus_login_page(page, ("newebpay.com",))  # 只留這一個藍新視窗並拉到最前面
+    print(f"\n[{account.area}] 帳密已填入，請在最前面的藍新視窗輸入驗證碼並按企業會員登入。")
+
+    deadline = time.monotonic() + LOGIN_WAIT_SECONDS
     unexpected_page_since: float | None = None
     while time.monotonic() < deadline:
         # 失效訊息的優先度高於網址；藍新可能先短暫進後台，再彈出 MEM50012。

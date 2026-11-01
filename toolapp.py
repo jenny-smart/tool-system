@@ -3827,6 +3827,30 @@ def run_review_formula_apply(*, month="", start_date=None, end_date=None, area="
     return "\n".join(lines)
 
 
+def run_review_monthly(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    """每月整理年度review：欄位顯示（過去看實際、當月看預估）＋預估公式範圍＋（全區時）現金缺口區塊。
+    每月 1 日 02:00 排程會自動做上個月；這裡可手動補做。"""
+    from tools.finance_management import review_monthly
+
+    period = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", period):
+        raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202610（1 日做上個月）")
+    log = (lambda text: on_progress(text, "info")) if on_progress else (lambda text: None)
+    if area == "全區":
+        failures = review_monthly.run_all(period, log=log)
+    else:
+        from tools.finance_management.review_update import apply_review_formula_updates
+
+        target = "年度review" if area == MASTER_REVIEW_SELECT_AREA else area
+        failures = []
+        try:
+            review_monthly.layout(target, period, log=log)
+            apply_review_formula_updates(target, f"{period[:4]}.{period[4:]}")
+        except Exception as exc:
+            failures.append(f"{target}：{exc}")
+    return "完成" if not failures else "部分失敗：\n" + "\n".join(failures)
+
+
 def run_review_group_hide_actual(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from tools.finance_management.review_update import group_hide_actual_columns
 
@@ -3999,8 +4023,7 @@ FINANCE_TASKS = [
     {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
     {"name": "【財報】年度review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
     {"name": "【財報】年度review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
-    {"name": "【財報】年度review｜分組隱藏當月起實際欄位", "handler": run_review_group_hide_actual, "enabled": True},
-    {"name": "【財報】年度review｜分組隱藏當月後預估欄位", "handler": run_review_group_hide_future_forecast, "enabled": True},
+    {"name": "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）", "handler": run_review_monthly, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
@@ -5003,8 +5026,7 @@ with date_col:
         elif selected_function in (
             "【財報】年度review｜預覽公式調整",
             "【財報】年度review｜套用公式調整",
-            "【財報】年度review｜分組隱藏當月起實際欄位",
-            "【財報】年度review｜分組隱藏當月後預估欄位",
+            "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）",
         ):
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -5582,8 +5604,7 @@ with area_col:
     if selected_function in (
         "【財報】年度review｜預覽公式調整",
         "【財報】年度review｜套用公式調整",
-        "【財報】年度review｜分組隱藏當月起實際欄位",
-        "【財報】年度review｜分組隱藏當月後預估欄位",
+        "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）",
     ):
         # 「年度review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
         # 分頁；「全區」已經會一併處理它，這個選項是給只想單獨重跑彙總
@@ -6494,8 +6515,7 @@ if run_clicked:
                 "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
                 "【財報】年度review｜預覽公式調整",
                 "【財報】年度review｜套用公式調整",
-                "【財報】年度review｜分組隱藏當月起實際欄位",
-                "【財報】年度review｜分組隱藏當月後預估欄位",
+                "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完

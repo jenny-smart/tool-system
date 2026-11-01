@@ -192,8 +192,8 @@ def build_reminder(day: date, now: datetime, problems: list[dict]) -> tuple[str,
     return f"{REMINDER_PREFIX} {len(problems)} 項（{day:%m/%d}）", "\n".join(lines)
 
 
-# 月初藍新／鯨躍 09:00 才排入（藍新 08:00 才寄手續費發票），之前不提醒這幾項
-MONTH_START_QUEUE_HOUR = 9
+# 月初藍新／鯨躍 05:00 才排入，之前不提醒這幾項
+MONTH_START_QUEUE_HOUR = 5
 
 
 def collect_all(day: date, log: Callable[[str], None] = print, include_month_start: bool = True) -> list[dict]:
@@ -221,7 +221,7 @@ def collect_all(day: date, log: Callable[[str], None] = print, include_month_sta
 
 
 def collect(day: date, log: Callable[[str], None] = print, hour: int = 23) -> list[dict]:
-    """排程用：只回傳沒完成的；09:00 前不看月初藍新／鯨躍／現金缺口（還沒排入）。"""
+    """排程用：只回傳沒完成的；05:00 前不看月初藍新／鯨躍／現金缺口（還沒排入）。"""
     return _problems(collect_all(day, log=log, include_month_start=hour >= MONTH_START_QUEUE_HOUR))
 
 

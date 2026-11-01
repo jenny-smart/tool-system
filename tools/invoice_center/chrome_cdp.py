@@ -79,3 +79,27 @@ def find_invoice_pages(context: BrowserContext) -> tuple[Page | None, Page | Non
     portal_page = find_existing_page(context, ("cetustek.com.tw",))
     ei_page = find_existing_page(context, ("ei.com.tw/InvoiceRent",))
     return portal_page, ei_page
+
+
+def focus_login_page(page: Page, url_parts: Iterable[str] = (), keep: Iterable[Page] = ()) -> None:
+    """要人工輸入驗證碼前：關掉同網站多開的分頁（url_parts）與空白分頁，只留這一頁並拉到最前面，
+    避免開太多視窗不知道要在哪一個登入（2026-11 Jenny）。關不掉只略過，不影響登入。"""
+    parts = tuple(url_parts)
+    keep_ids = {id(p) for p in keep} | {id(page)}
+    try:
+        pages = list(page.context.pages)
+    except Exception:
+        pages = []
+    for other in pages:
+        if id(other) in keep_ids or other.is_closed():
+            continue
+        url = other.url or ""
+        if url in ("", "about:blank", "chrome://newtab/") or (parts and any(p in url for p in parts)):
+            try:
+                other.close()
+            except Exception:
+                pass
+    try:
+        page.bring_to_front()
+    except Exception:
+        pass

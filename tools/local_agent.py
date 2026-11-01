@@ -154,6 +154,12 @@ def build_cetustek_download(params: dict[str, Any]) -> list[str]:
         command.append("--detail")
     if area and area != "全區":
         command.extend(["--area", area])
+    for skip in params.get("skip_areas") or []:
+        command.extend(["--skip-area", str(skip)])
+    for pair in params.get("copy_areas") or []:
+        command.extend(["--copy-area", str(pair)])
+    for pdf_area in params.get("paper_pdf_areas") or []:
+        command.extend(["--paper-pdf-area", str(pdf_area)])
     return command
 
 
@@ -1058,6 +1064,11 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
                 continue
             print(line, flush=True)
             record(line)
+            if line.startswith("STEP_RESULTS:"):  # 整合執行逐步結果（month_start.batch_run）
+                try:
+                    special_result["steps"] = json.loads(line.split(":", 1)[1])
+                except ValueError:
+                    pass
             if line.startswith("RESULT_FILE:"):
                 file_path = line.split(":", 1)[1].strip()
                 if file_path and file_path not in result_files:
