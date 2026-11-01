@@ -185,7 +185,10 @@ def login(page: Page, account: AreaAccount) -> None:
         logout(page, account.area)
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
     fill_enterprise_login(page, account)
-    print(f"\n[{account.area}] 帳密已填入，請在 Chrome 輸入驗證碼並按企業會員登入。")
+    from tools.invoice_center.chrome_cdp import focus_login_page
+
+    focus_login_page(page, ("newebpay.com",))  # 只留這一個藍新視窗並拉到最前面
+    print(f"\n[{account.area}] 帳密已填入，請在最前面的藍新視窗輸入驗證碼並按企業會員登入。")
 
     deadline = time.monotonic() + LOGIN_WAIT_SECONDS
     unexpected_page_since: float | None = None

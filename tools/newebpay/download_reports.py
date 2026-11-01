@@ -364,8 +364,10 @@ def login(page: Page, account: AreaAccount) -> list[str]:
         print(f"[{account.area}] 目前登入的藍新帳號（{logged_in_member(page, 1_000) or '讀不到'}）不是{account.area}，先登出再登入。")
         logout(page, account.area)
     fill_enterprise_login(page, account)
+    from tools.invoice_center.chrome_cdp import focus_login_page
 
-    print(f"\n[{account.area}] 企業帳密已預填。")
+    focus_login_page(page, ("newebpay.com",))  # 只留這一個藍新視窗並拉到最前面
+    print(f"\n[{account.area}] 企業帳密已預填（請在最前面的藍新視窗輸入驗證碼）。")
     print("請直接在網頁輸入驗證碼，並點擊「企業會員登入」。")
     print("若被退回登入頁，終端機會顯示藍新的錯誤訊息，並可重新輸入新驗證碼。")
 

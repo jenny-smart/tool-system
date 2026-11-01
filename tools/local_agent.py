@@ -156,6 +156,8 @@ def build_cetustek_download(params: dict[str, Any]) -> list[str]:
         command.extend(["--area", area])
     for skip in params.get("skip_areas") or []:
         command.extend(["--skip-area", str(skip)])
+    for pair in params.get("copy_areas") or []:
+        command.extend(["--copy-area", str(pair)])
     for pdf_area in params.get("paper_pdf_areas") or []:
         command.extend(["--paper-pdf-area", str(pdf_area)])
     return command

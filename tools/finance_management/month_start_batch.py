@@ -6,7 +6,7 @@
   - 鯨躍發票（全區，期別整月；每區只登入一次）→ 本機 Agent cetustek.download，同一次登入裡：
     下載全月／紙本／單月中獎發票並歸檔、台中有買方統編的紙本發票 PDF 建檔；
     下載完再更新紙本發票、單月中獎發票到年度發票檔（只讀 Drive，不用再登入）
-  - 藍新、鯨躍的高雄跟新竹同一個帳號，跑新竹一次就好（高雄略過）
+  - 藍新、鯨躍的高雄跟新竹同一個帳號：只登入新竹，下載完複製一份、地區改成高雄（檔案、發票金額都有高雄的）
   - 全區現金缺口（截至期別月底，寫入「現金缺口試算」） → 只讀寫 Google 試算表
   狀態依「本機Agent任務」裡同期別最新一筆任務判斷（排隊中／執行中不能再排，已完成預設不勾）；
   現金缺口另看「藍新發票總表」有沒有該期別的發票金額、「現金缺口試算」是不是已算到期別月底。
@@ -55,6 +55,8 @@ def normalize_steps(steps) -> list[str]:
 
 # 高雄跟新竹用同一個藍新／鯨躍帳號，跑新竹一次就好；台中有買方統編的紙本發票要建 PDF
 SHARED_ACCOUNT_SKIP = ("高雄",)
+# 高雄不登入，改由新竹下載完複製一份、地區改成高雄歸檔
+SHARED_ACCOUNT_COPIES = ("新竹=高雄",)
 PAPER_PDF_AREAS = ("台中",)
 
 ACTIVE = {"pending": "已排入，等待本機 Agent", "running": "執行中", "cancel_requested": "正在中止"}
@@ -77,7 +79,8 @@ def step_params(step: str, period: str) -> dict[str, Any]:
         return {"period": period, "cdp_url": CDP_URL}
     if step == "cetustek_download":
         return {"month": period, "start_date": "", "end_date": "", "area": "全區", "format": "csv", "cdp_url": CDP_URL,
-                "skip_areas": list(SHARED_ACCOUNT_SKIP), "paper_pdf_areas": list(PAPER_PDF_AREAS)}
+                "skip_areas": list(SHARED_ACCOUNT_SKIP), "copy_areas": list(SHARED_ACCOUNT_COPIES),
+                "paper_pdf_areas": list(PAPER_PDF_AREAS)}
     if step == "cash_gap":
         return {"period": period}
     raise ValueError(f"不支援的步驟：{step}")
@@ -276,7 +279,7 @@ def update_invoice_sheets(period: str, log: Callable[[str], None] = lambda t: pr
     processor = InvoiceArchiveProcessor()
     prize = previous_prize_period(period)
     failures = []
-    for area in [a for a in processor.configs if a not in SHARED_ACCOUNT_SKIP]:
+    for area in list(processor.configs):  # 高雄的檔案是新竹複製過去的，一樣要更新
         jobs = [("紙本發票更新", lambda a=area: processor.update_paper(area=a, yyyymm=period), period)]
         if prize:
             jobs.append(("中獎發票更新", lambda a=area: processor.update_prize_period(area=a, period8=prize), prize))

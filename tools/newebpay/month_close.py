@@ -15,8 +15,18 @@ from pathlib import Path
 
 DOWNLOAD_FAILED = 1
 INVOICE_FAILED = 2
-# 高雄跟新竹用同一個藍新帳號，跑新竹一次就好（2026-11 與 Jenny 確認）
+# 高雄跟新竹用同一個藍新帳號：只登入新竹，下載完複製一份、地區改成高雄（2026-11 與 Jenny 確認）
 SKIP_AREAS = ("高雄",)
+COPY_AREAS = {"新竹": ("高雄",)}
+
+
+def copy_for_area(path: Path, source: str, target: str) -> Path:
+    import shutil
+
+    copy = path.parent.parent / target / path.name.replace(source, target)
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, copy)
+    return copy
 
 
 def exit_code(download_failures: list[str], invoice_failures: list[str]) -> int:
@@ -80,6 +90,10 @@ def main(argv=None) -> int:
                         upload_period_files([payment, refund], account.area, label)
                         for file_path in (payment, refund):
                             print(f"RESULT_FILE: {file_path}")
+                        for copy_area in COPY_AREAS.get(account.area, ()) if not args.area else ():
+                            copies = [copy_for_area(p, account.area, copy_area) for p in (payment, refund)]
+                            upload_period_files(copies, copy_area, label)
+                            print(f"[{account.area}] 已複製一份收退款檔為 {copy_area}")
                     except Exception as exc:
                         download_failures.append(f"{account.area}: {exc}")
                         print(f"[{account.area}] 收退款下載失敗：{exc}", file=sys.stderr)
@@ -98,6 +112,12 @@ def main(argv=None) -> int:
                             amount=ia.parse_amount(row["amount"]) if row else None,
                             invoice_number=row.get("invoice_number", ""), status=row.get("status", "查無發票")))
                         print(f"[{account.area}] 手續費發票：" + (f"NT$ {results[-1].amount:,}" if row else "查無發票"))
+                        for copy_area in COPY_AREAS.get(account.area, ()) if not args.area else ():
+                            results.append(ia.InvoiceAmount(
+                                area=copy_area, source_month=period, invoice_date=invoice_date,
+                                amount=results[-1].amount, invoice_number=results[-1].invoice_number,
+                                status=results[-1].status))
+                            print(f"[{account.area}] 發票金額同步記一筆給 {copy_area}")
                     except Exception as exc:
                         invoice_failures.append(f"{account.area}: {exc}")
                         print(f"[{account.area}] 發票金額查詢失敗：{exc}", file=sys.stderr)

@@ -290,6 +290,7 @@ def test_cetustek_step_skips_kaohsiung_and_makes_taichung_pdf():
     command = ACTION_HANDLERS["cetustek.download"](params)
     assert command[command.index("--skip-area") + 1] == "高雄"
     assert command[command.index("--paper-pdf-area") + 1] == "台中"
+    assert command[command.index("--copy-area") + 1] == "新竹=高雄"
     assert "202611" in command
 
 
@@ -312,7 +313,22 @@ def test_update_invoice_sheets_paper_and_odd_month_prize(monkeypatch):
 
     monkeypatch.setattr(invoice_archive, "InvoiceArchiveProcessor", FakeProcessor)
     assert ms.update_invoice_sheets("202611", log=lambda _t: None) == 0
-    assert ("prize", "台北", "20260910") in calls and not any(c[1] == "高雄" for c in calls)
+    assert ("prize", "台北", "20260910") in calls and ("paper", "高雄", "202611") in calls  # 高雄是新竹的複本，一樣更新
     calls.clear()
     ms.update_invoice_sheets("202610", log=lambda _t: None)
-    assert [c[0] for c in calls] == ["paper", "paper"]  # 雙月沒有中獎發票
+    assert [c[0] for c in calls] == ["paper", "paper", "paper"]  # 雙月沒有中獎發票
+
+
+def test_copy_kaohsiung_from_hsinchu(tmp_path):
+    from tools.invoice_center.ei_export_all import copy_as_area
+    from tools.newebpay.month_close import copy_for_area
+
+    src = tmp_path / "新竹" / "202610紙本發票-新竹.zip"
+    src.parent.mkdir()
+    src.write_bytes(b"x")
+    copied = copy_as_area(src, "新竹", "高雄")
+    assert copied == tmp_path / "高雄" / "202610紙本發票-高雄.zip" and copied.read_bytes() == b"x"
+    assert copy_as_area(None, "新竹", "高雄") is None
+    csv = tmp_path / "新竹" / "202610-2藍新收款-新竹.csv"
+    csv.write_text("a")
+    assert copy_for_area(csv, "新竹", "高雄").name == "202610-2藍新收款-高雄.csv"

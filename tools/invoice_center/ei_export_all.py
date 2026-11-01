@@ -185,6 +185,10 @@ def fill_if_present(page: Page, selector: str, value: str) -> None:
         locator.first.fill(value)
 
 
+# 等人工輸入驗證碼的時間（秒）；原本 30 秒太短
+LOGIN_WAIT_SECONDS = 180
+
+
 def login_portal(page: Page, accounts: dict[str, Any]) -> None:
     install_dialog_log(page, "第一層")
     # 沿用目前 Chrome 的登入狀態；已登入時直接使用會員頁。
@@ -202,13 +206,16 @@ def login_portal(page: Page, accounts: dict[str, Any]) -> None:
     fill_if_present(page, "#txtmemberid", member_id)
     fill_if_present(page, "#txtpasswd", password)
 
+    from tools.invoice_center.chrome_cdp import focus_login_page
+
+    focus_login_page(page)  # 關掉空白分頁，把要輸入驗證碼的鯨躍視窗拉到最前面
     if company_id and password:
-        print("\n[第一層] 帳密已預填，請在網頁輸入驗證碼並點擊「登入」。")
+        print("\n[第一層] 帳密已預填，請在最前面的鯨躍視窗輸入驗證碼並點擊「登入」。")
     else:
         print("\n[第一層] 尚未設定入口帳密，請在網頁輸入統編、帳號、密碼、驗證碼並登入。")
         print("登入後可把 portal_company_id / portal_account / portal_password 加到帳密檔 common。")
 
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + LOGIN_WAIT_SECONDS
     while time.monotonic() < deadline:
         try:
             find_ei_link(page)
@@ -276,9 +283,13 @@ def login_second(page: Page, credentials: EICredentials) -> None:
         page.goto(EI_LOGIN_URL, wait_until="domcontentloaded")
     page.locator("#userid").fill(credentials.userid)
     page.locator("#pwd").fill(credentials.password)
-    print(f"[{credentials.label}] 第二層帳密已預填，請在網頁輸入驗證碼並點擊「登入」。")
+    from tools.invoice_center.chrome_cdp import focus_login_page
 
-    deadline = time.monotonic() + 30
+    # 只留這一個第二層（ei.com.tw）分頁並拉到最前面，避免開太多視窗不知道在哪個登入
+    focus_login_page(page, ("ei.com.tw/InvoiceRent",))
+    print(f"[{credentials.label}] 第二層帳密已預填，請在最前面的鯨躍視窗輸入驗證碼並點擊「登入」。")
+
+    deadline = time.monotonic() + LOGIN_WAIT_SECONDS
     last_message = ""
     while time.monotonic() < deadline:
         login_field = page.locator("#userid")
@@ -443,6 +454,16 @@ def export_invoices(
     return final_path
 
 
+def copy_as_area(path: Path | None, source_label: str, target_label: str) -> Path | None:
+    """複製一份檔案，檔名裡的地區換成 target_label（放在 target_label 子資料夾）。"""
+    if path is None:
+        return None
+    target = path.parent.parent / target_label / path.name.replace(source_label, target_label)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, target)
+    return target
+
+
 def archive_as_zip(downloaded: Path, archive_path: Path) -> Path:
     """鯨躍原檔可能是 CSV/XLS/ZIP；對外一律保存為指定 ZIP 名稱。"""
     archive_path.parent.mkdir(parents=True, exist_ok=True)
@@ -561,6 +582,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--detail", action="store_true", help="匯出含明細")
     parser.add_argument("--skip-area", action="append", default=[],
                         help="略過的區域（可重複），例如 高雄（跟新竹同一個鯨躍帳號，跑新竹一次就好）")
+    parser.add_argument("--copy-area", action="append", default=[],
+                        help="來源=複本（可重複），例如 新竹=高雄：新竹下載完複製一份、地區改成高雄歸檔（同一個鯨躍帳號）")
     parser.add_argument("--paper-pdf-area", action="append", default=[],
                         help="同一次登入裡順便產生有買方統編的紙本發票 PDF 的區域（可重複），例如 台中；只用於整月模式")
     parser.add_argument(
@@ -593,6 +616,12 @@ def main() -> int:
         print(f"略過：{', '.join(AREA_ENV[a]['label'] for a in skip if a in AREA_ENV)}")
         areas = [a for a in areas if a not in skip]
     pdf_areas = {normalize_area(a) for a in args.paper_pdf_area} if not args.start_date else set()
+    copy_areas: dict[str, list[str]] = {}
+    for pair in args.copy_area:
+        source, _, target = pair.partition("=")
+        if source and target:
+            copy_areas.setdefault(AREA_ENV[normalize_area(source)]["label"], []).append(
+                AREA_ENV[normalize_area(target)]["label"])
     csv = args.format == "csv"
     extension = ".csv" if csv else ".xls"
     print(f"日期：{start} ～ {end}")
@@ -676,6 +705,14 @@ def main() -> int:
                                 paper_path=paper_archive,
                                 prize_path=prize_download,
                             )
+                        for copy_label in copy_areas.get(credentials.label, []):
+                            # 同一個鯨躍帳號（例如新竹＝高雄）：複製一份、檔名地區改成複本地區後歸檔
+                            copies = [copy_as_area(path, credentials.label, copy_label)
+                                      for path in (full_archive, paper_archive, prize_download)]
+                            if processor is not None:
+                                processor.archive_month(area=copy_label, yyyymm=yyyymm, full_path=copies[0],
+                                                        paper_path=copies[1], prize_path=copies[2])
+                            print(f"[{credentials.label}] 已複製一份歸檔為 {copy_label}")
                     if area in pdf_areas:
                         # 同一次登入順便產生有買方統編的紙本發票 PDF（不用再輸入驗證碼）；失敗不影響下載結果
                         try:
