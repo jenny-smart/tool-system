@@ -18,7 +18,6 @@
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-儲值金彙整已自動補做 2 次都失敗，改提醒人工處理
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
@@ -37,14 +36,11 @@
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-已刪除 1 則之前的月初提醒
-月初工作未完成 4 項（11/01）
-2026/11/01 12:01 檢查，4 個功能還沒完成：
+月初工作未完成 2 項（11/01）
+2026/11/01 13:01 檢查，2 個功能還沒完成：
 
-・儲值金彙整（完整流程）：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・藍新發票：未完成：桃園❌
 ・現金缺口：未完成：桃園❌、新竹❌、高雄❌
-・富邦明細：未完成：台中❌
-・元大明細：未完成：台北❌、台中❌
 
 處理方式：Tools App【整合執行】月初（1日所有排程）→ 盤點 → 勾選 → 執行
 
