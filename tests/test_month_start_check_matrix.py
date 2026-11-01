@@ -50,7 +50,8 @@ def test_rows_per_function_and_area_with_done_mark():
     assert not rows["prepaid_report"]["done"] and rows["prepaid_report"]["todo"] == ["台中", "桃園", "新竹", "高雄"]
     assert rows["vip_full_pipeline"]["todo"] == ["高雄"]
     assert rows["newebpay_files"]["done"]
-    assert rows["newebpay_invoice"]["done"] and rows["newebpay_invoice"]["cells"]["桃園"][0] == chk.NONE
+    # 查無發票先算 ❌，要確認過才算完成
+    assert rows["newebpay_invoice"]["todo"] == ["桃園"] and chk.unconfirmed_no_invoice_areas(rows["newebpay_invoice"]) == ["桃園"]
     assert rows["paper"]["done"] and rows["prize"]["done"] and rows["prize"]["cells"]["台北"][0] == chk.NA
     assert rows["pdf"]["todo"] == ["台中"] and rows["pdf"]["cells"]["台北"][0] == chk.NA
     assert rows["cash_gap"]["todo"] == ["桃園"]
@@ -116,3 +117,13 @@ def test_vip_auto_fix_waits_for_sources():
     runs = []
     chk.auto_fix(DAY, rows, log=lambda _t: None, run_vip=lambda d: runs.append(d) or 0, submit_fixed=lambda *a, **k: {})
     assert runs == []
+
+
+def test_confirm_no_invoice_marks_done():
+    writes = []
+    row_no = chk.confirm_no_invoice("桃園", "202610", values=INVOICE, write=lambda rng, vals: writes.append((rng, vals)))
+    assert row_no == 4 and writes == [("D4", [[0]]), ("F4", [["確認無發票"]])]
+    confirmed = [r[:] for r in INVOICE]
+    confirmed[3][3], confirmed[3][5] = "0", "確認無發票"
+    rows = rows_by_key(**{"藍新發票總表": lambda: confirmed})
+    assert rows["newebpay_invoice"]["done"] and rows["newebpay_invoice"]["cells"]["桃園"] == (chk.OK, "確認無發票")

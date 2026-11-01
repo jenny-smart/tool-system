@@ -1,14 +1,14 @@
 """【整合執行】月初（1日所有排程）：依「功能」盤點各地區的執行狀態，盤點完勾選沒完成的直接執行。
 
 每一列是一個功能、每一欄是一個地區（台北／台中／桃園／新竹／高雄），格子：
-  ✅ 完成　❌ 沒完成／失敗　⏳ 已排入本機 Agent、執行中　⚪ 查無資料（算完成）　— 這區不用做
+  ✅ 完成　❌ 沒完成／失敗　⏳ 已排入本機 Agent、執行中　— 這區不用做
 全部地區都完成，「完成」欄打 ✅ 完成。
 
 功能與狀態來源（期別＝上個月，例如 11/1 做 202610）：
   已退款／預收／儲值金結算／儲值金預收 → 主控表「月排程執行Log」各地區最新結果（排程或手動都算）
   儲值金彙整（完整流程）             → 「儲值金月度作業紀錄」期別欄各地區的結算／預收搬運時間
   藍新收／退款                       → Drive 有沒有 {期別}-2藍新收款／退款-{地區}.csv
-  藍新發票                           → 「藍新發票總表」期別各地區的發票金額（查無發票＝⚪）
+  藍新發票                           → 「藍新發票總表」期別各地區的發票金額（查無發票先算 ❌，確認後才 ✅）
   發票紙本／發票中獎（單月期別才有）／發票PDF（台中） → 「鯨躍發票更新Log」
   現金缺口                           → 「現金缺口試算」日期是期別月底、各地區沒有「錯誤」
   固定費用（台北每月、台中單月）      → 請款記錄
@@ -138,7 +138,8 @@ def newebpay_file_cells(names: list[str], period: str) -> dict[str, tuple[str, s
 
 
 def newebpay_invoice_cells(values: list[list], period: str) -> dict[str, tuple[str, str]]:
-    """藍新發票總表（A 地區、B 月份、D 金額、F 狀態）：有金額 ✅；只有「查無發票」⚪（算完成）。"""
+    """藍新發票總表（A 地區、B 月份、D 金額、F 狀態）：有金額 ✅；只有「查無發票」先算 ❌，
+    要 Jenny 在盤點頁按「確認沒有發票」（寫成金額 0、狀態「確認無發票」）才算 ✅（2026-11 Jenny）。"""
     rows: dict[str, list] = {}
     for row in values[1:]:
         if _cell(row, 1) == period:
@@ -150,11 +151,45 @@ def newebpay_invoice_cells(values: list[list], period: str) -> dict[str, tuple[s
         row = rows.get(area)
         if row is None:
             cells[area] = (FAIL, "還沒有資料")
+        elif _cell(row, 5) == CONFIRMED_NO_INVOICE:
+            cells[area] = (OK, CONFIRMED_NO_INVOICE)
         elif _cell(row, 3):
             cells[area] = (OK, f"NT$ {_cell(row, 3)}")
         else:
-            cells[area] = (NONE, _cell(row, 5) or "查無發票")
+            cells[area] = (FAIL, f"{NO_INVOICE_PREFIX}（{_cell(row, 5) or '查無發票'}），請確認")
     return cells
+
+
+NO_INVOICE_PREFIX = "查無發票"
+CONFIRMED_NO_INVOICE = "確認無發票"
+
+
+def unconfirmed_no_invoice_areas(row: dict) -> list[str]:
+    """藍新發票那一列，「查無發票、還沒確認」的地區（盤點頁要顯示確認按鈕）。"""
+    return [a for a in row["todo"] if row["cells"][a][1].startswith(NO_INVOICE_PREFIX)]
+
+
+def confirm_no_invoice(area: str, period: str, values: Optional[list[list]] = None, write=None) -> int:
+    """Jenny 確認某區某期別沒有藍新手續費發票：「藍新發票總表」那一列寫金額 0、狀態「確認無發票」。
+    現金缺口的藍新發票金額本來就算 0，不受影響。回傳更新的列號。"""
+    if values is None:
+        values = _read_master(NEWEBPAY_INVOICE_SHEET, "A:F")
+    target = None
+    for index, row in enumerate(values[1:], start=2):
+        if _cell(row, 0) == area and _cell(row, 1) == period and not _cell(row, 3):
+            target = index
+    if target is None:
+        raise RuntimeError(f"藍新發票總表找不到 {area} {period} 的查無發票列")
+    if write is None:
+        from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+
+        def write(rng, vals):
+            get_sheets_service().spreadsheets().values().update(
+                spreadsheetId=get_master_spreadsheet_id(), range=f"'{NEWEBPAY_INVOICE_SHEET}'!{rng}",
+                valueInputOption="USER_ENTERED", body={"values": vals}).execute()
+    write(f"D{target}", [[0]])
+    write(f"F{target}", [[CONFIRMED_NO_INVOICE]])
+    return target
 
 
 def ei_log_cells(values: list[list], function: str, period: str, areas=tuple(AREAS)) -> dict[str, tuple[str, str]]:
