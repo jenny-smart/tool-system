@@ -1,0 +1,77 @@
+開始執行：專員班表
+⚠️ 一鍵日排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 一鍵日排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_daily/staff_schedule.py
+[2026-11-02 01:11:02] ====================================================
+[2026-11-02 01:11:02] staff_schedule.py 開始執行
+[2026-11-02 01:11:02] GITHUB_ACTIONS = true
+[2026-11-02 01:11:02] PWD = /home/runner/work/tool-system/tool-system
+[2026-11-02 01:11:02] LOCAL_OUTPUT_DIR = /Users/jenny/Library/CloudStorage/GoogleDrive-jenny@lemonclean.com.tw/我的雲端硬碟/lemon_Jenny/Jenny@lemon程式/專員班表
+[2026-11-02 01:11:02] LOCAL_OUTPUT_DIR exists = False
+[2026-11-02 01:11:02] can_use_local_output_dir = False
+[2026-11-02 01:11:02] root folder_id = 11O6eKHQ1e3Irqps7Kq1XJOSVVge3pCAc
+[2026-11-02 01:11:02] ====================================================
+[2026-11-02 01:11:02] Google Drive 初始化成功
+[2026-11-02 01:11:03] 📁 使用既有資料夾：專員班表
+[2026-11-02 01:11:03] this_month = 2026-11
+[2026-11-02 01:11:03] next_month = 2026-12
+[2026-11-02 01:11:03] this_date = 20261102
+[2026-11-02 01:11:03] next_date = 20261202
+[2026-11-02 01:11:03] 專員班表 folder_id = 1V2AUNsT_jzQWawmnBNU_u-e7odYviwEk
+[2026-11-02 01:11:03] 帳號數量 = 2
+[2026-11-02 01:11:03] 
+[2026-11-02 01:11:03] === 開始處理 台北 ===
+[2026-11-02 01:11:03] 開始登入：jenny@lemonclean.com.tw
+[2026-11-02 01:11:04] 登入成功：jenny@lemonclean.com.tw
+[2026-11-02 01:11:04] 開始下載：city=台北 / month=2026-11 / filename=20261102專員班表-台北.xls
+[2026-11-02 01:11:07] ✅ 已下載到暫存：/tmp/tmp0zs45an9/20261102專員班表-台北.xls
+[2026-11-02 01:11:07] 📦 檔案大小：122368 bytes
+[2026-11-02 01:11:07] 📂 暫存目錄存在：True
+[2026-11-02 01:11:07] 📄 暫存檔案存在：True
+[2026-11-02 01:11:07] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-11-02 01:11:07] Google Drive 初始化成功
+[2026-11-02 01:11:07] 準備上傳到 Google Drive：20261102專員班表-台北.xls
+[2026-11-02 01:11:10] ☁️ 已上傳新檔：20261102專員班表-台北.xls (file_id=1hf-KBhInOzDHe_hEFfBRScWwZ2e9CLR6) https://docs.google.com/spreadsheets/d/1hf-KBhInOzDHe_hEFfBRScWwZ2e9CLR6/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-11-02 01:11:10] ✅ 完成處理：20261102專員班表-台北.xls
+[2026-11-02 01:11:10] 開始下載：city=台北 / month=2026-12 / filename=20261202專員班表-台北.xls
+[2026-11-02 01:11:13] ✅ 已下載到暫存：/tmp/tmp9wfi_6nb/20261202專員班表-台北.xls
+[2026-11-02 01:11:13] 📦 檔案大小：88064 bytes
+[2026-11-02 01:11:13] 📂 暫存目錄存在：True
+[2026-11-02 01:11:13] 📄 暫存檔案存在：True
+[2026-11-02 01:11:13] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-11-02 01:11:13] Google Drive 初始化成功
+[2026-11-02 01:11:13] 準備上傳到 Google Drive：20261202專員班表-台北.xls
+[2026-11-02 01:11:15] ☁️ 已上傳新檔：20261202專員班表-台北.xls (file_id=1_U-euz_8nbRqnEp1o5O9f8hyKrmCjoMH) https://docs.google.com/spreadsheets/d/1_U-euz_8nbRqnEp1o5O9f8hyKrmCjoMH/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-11-02 01:11:15] ✅ 完成處理：20261202專員班表-台北.xls
+[2026-11-02 01:11:15] ✅ 台北 全部完成
+[2026-11-02 01:11:15] 
+[2026-11-02 01:11:15] === 開始處理 台中 ===
+[2026-11-02 01:11:15] 開始登入：jenny.tc@lemonclean.com.tw
+[2026-11-02 01:11:16] 登入成功：jenny.tc@lemonclean.com.tw
+[2026-11-02 01:11:16] 開始下載：city=台中 / month=2026-11 / filename=20261102專員班表-台中.xls
+[2026-11-02 01:11:17] ✅ 已下載到暫存：/tmp/tmptdfbsruv/20261102專員班表-台中.xls
+[2026-11-02 01:11:17] 📦 檔案大小：24064 bytes
+[2026-11-02 01:11:17] 📂 暫存目錄存在：True
+[2026-11-02 01:11:17] 📄 暫存檔案存在：True
+[2026-11-02 01:11:17] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-11-02 01:11:17] Google Drive 初始化成功
+[2026-11-02 01:11:17] 準備上傳到 Google Drive：20261102專員班表-台中.xls
+[2026-11-02 01:11:20] ☁️ 已上傳新檔：20261102專員班表-台中.xls (file_id=1D9uSFcJQl-4S3ULGDEzcw0pKRi1ud4a7) https://docs.google.com/spreadsheets/d/1D9uSFcJQl-4S3ULGDEzcw0pKRi1ud4a7/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-11-02 01:11:20] ✅ 完成處理：20261102專員班表-台中.xls
+[2026-11-02 01:11:20] 開始下載：city=台中 / month=2026-12 / filename=20261202專員班表-台中.xls
+[2026-11-02 01:11:20] ✅ 已下載到暫存：/tmp/tmpmudm8hex/20261202專員班表-台中.xls
+[2026-11-02 01:11:20] 📦 檔案大小：24064 bytes
+[2026-11-02 01:11:20] 📂 暫存目錄存在：True
+[2026-11-02 01:11:20] 📄 暫存檔案存在：True
+[2026-11-02 01:11:20] 目前不是 Jenny 本機環境，略過本機存檔
+[2026-11-02 01:11:20] Google Drive 初始化成功
+[2026-11-02 01:11:20] 準備上傳到 Google Drive：20261202專員班表-台中.xls
+[2026-11-02 01:11:23] ☁️ 已上傳新檔：20261202專員班表-台中.xls (file_id=1SND7NuU7f1QWNqRRei_23pxRcRGEZZ5X) https://docs.google.com/spreadsheets/d/1SND7NuU7f1QWNqRRei_23pxRcRGEZZ5X/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+[2026-11-02 01:11:23] ✅ 完成處理：20261202專員班表-台中.xls
+[2026-11-02 01:11:23] ✅ 台中 全部完成
+[2026-11-02 01:11:23] 🎉 staff_schedule.py 全部完成
+
+完成執行：專員班表
+scheduled_daily scheduler 全部完成
