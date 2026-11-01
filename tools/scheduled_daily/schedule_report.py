@@ -139,11 +139,10 @@ def get_schedule_months(now: datetime | None = None) -> list[tuple[str, str]]:
 
 
 def get_drive_service():
+    from tools.common.google_auth import preferred_credentials  # 盡量用 Jenny OAuth
+
     try:
-        credentials = service_account.Credentials.from_service_account_info(
-            get_service_account_info(),
-            scopes=GDRIVE_SCOPES,
-        )
+        credentials = preferred_credentials(GDRIVE_SCOPES, get_service_account_info)
 
         service = build("drive", "v3", credentials=credentials)
         log("Google Drive 初始化成功")

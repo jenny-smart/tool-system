@@ -144,11 +144,10 @@ def get_months():
 
 
 def get_drive_service():
+    from tools.common.google_auth import preferred_credentials  # 盡量用 Jenny OAuth
+
     try:
-        creds = service_account.Credentials.from_service_account_info(
-            get_service_account_info(),
-            scopes=GDRIVE_SCOPES,
-        )
+        creds = preferred_credentials(GDRIVE_SCOPES, get_service_account_info)
 
         service = build("drive", "v3", credentials=creds)
         log("Google Drive 初始化成功")

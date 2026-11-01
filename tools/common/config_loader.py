@@ -65,10 +65,10 @@ def get_service_account_info() -> dict[str, Any]:
 
 
 def get_sheets_service():
-    creds = service_account.Credentials.from_service_account_info(
-        get_service_account_info(),
-        scopes=SCOPES,
-    )
+    """盡量用 Jenny OAuth（jenny@lemonclean.com.tw），沒有才用服務帳號。"""
+    from tools.common.google_auth import preferred_credentials
+
+    creds = preferred_credentials(SCOPES, get_service_account_info)
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 

@@ -62,7 +62,7 @@ def test_fubon_report_formats_only_written_amount_cells():
     gspread.authorize().open_by_key().worksheet.return_value = worksheet
     target = MagicMock()
     rows = [['2026/09/14', '2026/09/14 10:00:00', '轉帳', 1234, '', 56789, 'note']]
-    ns = dict(load_sheet_target=lambda *_: target, Credentials=MagicMock(),
+    ns = dict(load_sheet_target=lambda *_: target, Credentials=MagicMock(), _credentials=MagicMock(),
         load_google_credentials=MagicMock(), SCOPES=[], gspread=gspread,
         _normalize_text=lambda v: v, build_fubon_financial_report_rows=lambda _: rows)
     ns.update(AMOUNT_FORMAT={'a': 1}, DATE_FORMAT={'d': 1}, DATETIME_FORMAT={'t': 1}, Any=object, re=__import__('re'),
