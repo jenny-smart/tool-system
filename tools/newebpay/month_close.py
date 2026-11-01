@@ -124,15 +124,16 @@ def main(argv=None) -> int:
                             raise _Skip
                         before = len(messages)
                         try:
-                            rows = {r["invoice_date"]: r for r in ia.query_invoice_rows(page, [invoice_date])}
+                            row = ia.query_fee_invoice(page, invoice_date)
                         except Exception:
                             # 藍新跳「查無資料」＝還沒開發票：記成查無發票，不當程式錯誤
                             if not any("查無資料" in m for m in messages[before:]):
                                 raise
-                            rows = {}
-                        row = rows.get(invoice_date, {})
+                            row = {}
+                        if row and row["invoice_date"] != invoice_date:
+                            print(f"[{account.area}] 手續費發票不是 {invoice_date} 開，是 {row['invoice_date']}")
                         results.append(ia.InvoiceAmount(
-                            area=account.area, source_month=period, invoice_date=invoice_date,
+                            area=account.area, source_month=period, invoice_date=row.get("invoice_date") or invoice_date,
                             amount=ia.parse_amount(row["amount"]) if row else None,
                             invoice_number=row.get("invoice_number", ""), status=row.get("status", "查無發票")))
                         print(f"[{account.area}] 手續費發票：" + (f"NT$ {results[-1].amount:,}" if row else "查無發票"))

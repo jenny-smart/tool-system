@@ -281,12 +281,46 @@ def query_range(wanted_dates: list[str]) -> tuple[str, str]:
     return f"{previous[:4]}-{previous[4:]}-01", max(wanted_dates)
 
 
-def query_invoice_rows(page: Page, wanted_dates: list[str]) -> list[dict[str, str]]:
+# 手續費發票通常是下個月 1 日開，但有的地區會晚幾天（2026-11 桃園查 11/01 查無資料）：
+# 往後找幾天，取最接近發票日的那張
+FEE_INVOICE_LATE_DAYS = 9
+FEE_INVOICE_EARLY_DAYS = 3  # 也可能月底先開（例如 10/31）
+
+
+def pick_fee_invoice(rows: list[dict[str, str]], invoice_date: str) -> dict[str, str]:
+    """從查到的發票裡挑手續費發票：發票日當天優先，否則取發票日前 3 天～後 9 天內最接近發票日的一張。"""
+    from datetime import date as _date, timedelta as _td
+
+    target = _date.fromisoformat(invoice_date)
+    earliest, latest = target - _td(days=FEE_INVOICE_EARLY_DAYS), target + _td(days=FEE_INVOICE_LATE_DAYS)
+    candidates = []
+    for row in rows:
+        try:
+            day = _date.fromisoformat(row["invoice_date"])
+        except ValueError:
+            continue
+        if earliest <= day <= latest:
+            candidates.append((abs((day - target).days), day, row))
+    return min(candidates, key=lambda c: (c[0], c[1]))[2] if candidates else {}
+
+
+def query_fee_invoice(page: Page, invoice_date: str) -> dict[str, str]:
+    """查某個發票日的手續費發票（容許晚開幾天）；查無回傳 {}。"""
+    from datetime import date as _date, timedelta as _td
+
+    end = min(_date.fromisoformat(invoice_date) + _td(days=FEE_INVOICE_LATE_DAYS), _date.today())
+    rows = query_invoice_rows(page, [invoice_date], end_date=end.isoformat(), keep_all=True)
+    return pick_fee_invoice(rows, invoice_date)
+
+
+def query_invoice_rows(page: Page, wanted_dates: list[str], end_date: str = "",
+                       keep_all: bool = False) -> list[dict[str, str]]:
     page.goto(INVOICE_URL, wait_until="domcontentloaded")
     dates = visible_date_inputs(page)
     if len(dates) < 2:
         raise RuntimeError(f"找不到發票日期起訖欄位（頁面：{page.url}）")
     start, end = query_range(wanted_dates)
+    end = max(end, end_date or end)
     write_date(dates[0], start)
     write_date(dates[1], end)
 
@@ -324,7 +358,7 @@ def query_invoice_rows(page: Page, wanted_dates: list[str]) -> list[dict[str, st
             if len(cells) <= max(date_index, amount_index):
                 continue
             row_date = cells[date_index].strip().replace("/", "-")
-            if row_date not in wanted_dates:
+            if row_date not in wanted_dates and not keep_all:
                 continue
             rows.append(
                 {

@@ -237,3 +237,14 @@ def test_newebpay_invoice_query_range_starts_previous_month():
 
     assert query_range([invoice_date_for("202610")]) == ("2026-10-01", "2026-11-01")
     assert query_range([invoice_date_for("202612")]) == ("2026-12-01", "2027-01-01")
+
+
+def test_pick_fee_invoice_allows_late_issue():
+    from tools.newebpay.invoice_amounts import pick_fee_invoice
+
+    rows = [{"invoice_date": "2026-10-01", "amount": "1"}, {"invoice_date": "2026-11-03", "amount": "3"},
+            {"invoice_date": "2026-11-02", "amount": "2"}, {"invoice_date": "2026-11-20", "amount": "9"}]
+    assert pick_fee_invoice(rows, "2026-11-01")["amount"] == "2"  # 晚一天開也抓得到，取最早
+    assert pick_fee_invoice(rows + [{"invoice_date": "2026-11-01", "amount": "0"}], "2026-11-01")["amount"] == "0"
+    assert pick_fee_invoice(rows[:1], "2026-11-01") == {}
+    assert pick_fee_invoice([{"invoice_date": "2026-10-31", "amount": "5"}], "2026-11-01")["amount"] == "5"
