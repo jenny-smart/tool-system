@@ -29,7 +29,7 @@ def excel_bytes(frame):
 
 
 def functions():
-    names = {'build_export_url', 'period_to_dates', 'purchase_records', '_customer_key', '_address_city', 'stored_value_customer_city', 'export_stored_value', 'process_city', 'area_by_phone', '_order_recency'}
+    names = {'build_export_url', 'period_to_dates', 'purchase_records', '_customer_key', '_address_city', 'stored_value_customer_city', 'export_stored_value', 'process_city', 'area_by_phone', '_order_recency', 'check_uninvoiced'}
     tree = ast.parse(SOURCE.read_text())
     nodes = [ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0)]
     nodes += [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
