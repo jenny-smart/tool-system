@@ -1,18 +1,23 @@
-"""月初檢查：每月 1 日 02:00 起每小時（02:00～23:00）檢查 1 日該完成的工作，沒完成就在 Jenny 行事曆建會跳通知的提醒。
+"""【整合執行】月初（1日所有排程）：依「功能」盤點各地區的執行狀態，盤點完勾選沒完成的直接執行。
 
-檢查項目：
-  - 雲端月排程：預收、儲值金結算、儲值金預收（scheduled_monthly）、儲值金完整流程（scheduled_finance）
-    → 看 repo 裡當天 logs/YYYYMMDD/*.json 的執行結果（沒有 json＝沒跑）
-  - 固定費用：當月台北租金／管理費、單月台中租金是不是已新增到請款記錄
-  - 月初藍新收退款、藍新發票金額、鯨躍發票、現金缺口：同【整合執行】月初藍新／鯨躍／現金缺口的盤點
-    （排隊等 Mac、失敗、沒做都算未完成）
-02:00 那次跟現金缺口同一個排程，先算完現金缺口再檢查（同一時段同一個 workflow 只能派送一次）。
-全部完成就不建提醒。只提醒、不自動重跑：要人工驗證碼的步驟，等有空時再到整合執行按「盤點→執行」。
-  - 富邦／元大明細：各區財報「富邦更新」「元大更新」最後一筆帳務日要到上個月最後一個工作天（現金缺口要用月底餘額）。
-    台北／台中由本機 Agent 下載，會提醒、可補做；桃園／新竹／高雄由各區處理，只在檢查頁顯示，排程不提醒。
-提醒只留最新一則：每次檢查先刪掉當天之前建的「月初工作未完成」提醒，全部完成就全部刪掉。
-Tools App【整合執行】月初檢查（1日所有排程）也用這裡的 collect_all()，按一下就列出所有項目的狀態。
-雲端排程結果優先從 GitHub 讀 main 上的 logs（App 裡的 repo 不一定是最新），讀不到才看本機 logs。
+每一列是一個功能、每一欄是一個地區（台北／台中／桃園／新竹／高雄），格子：
+  ✅ 完成　❌ 沒完成／失敗　⏳ 已排入本機 Agent、執行中　⚪ 查無資料（算完成）　— 這區不用做
+全部地區都完成，「完成」欄打 ✅ 完成。
+
+功能與狀態來源（期別＝上個月，例如 11/1 做 202610）：
+  已退款／預收／儲值金結算／儲值金預收 → 主控表「月排程執行Log」各地區最新結果（排程或手動都算）
+  儲值金彙整（完整流程）             → 「儲值金月度作業紀錄」期別欄各地區的結算／預收搬運時間
+  藍新收／退款                       → Drive 有沒有 {期別}-2藍新收款／退款-{地區}.csv
+  藍新發票                           → 「藍新發票總表」期別各地區的發票金額（查無發票＝⚪）
+  發票紙本／發票中獎（單月期別才有）／發票PDF（台中） → 「鯨躍發票更新Log」
+  現金缺口                           → 「現金缺口試算」日期是期別月底、各地區沒有「錯誤」
+  固定費用（台北每月、台中單月）      → 請款記錄
+  富邦明細／元大明細                  → 各區財報最後一筆帳務日；台北／台中可排入 Mac 補下載，其他地區只顯示
+執行（依序）：月排程（沒完成的地區逐區跑）→ 儲值金彙整 → 固定費用 → 紙本／中獎更新（讀 Drive，不用登入）
+  → 排入本機 Agent：富邦／元大、台中紙本PDF、藍新（收退款＋發票，每區登入一次）、鯨躍、現金缺口
+  （有排藍新時現金缺口跟在藍新後面算；沒排藍新就直接在這裡算）。
+排程：每月 1 日 02:00～23:00 每小時用同一份盤點檢查，沒完成就在 Jenny 行事曆建提醒（只留最新一則，
+  全部完成就刪掉）；固定費用、儲值金彙整沒做會自動補做（儲值金最多自動試 2 次）。
 """
 from __future__ import annotations
 
@@ -25,141 +30,284 @@ from zoneinfo import ZoneInfo
 TW_TZ = ZoneInfo("Asia/Taipei")
 REMIND_CALENDAR_ID = "jenny@lemonclean.com.tw"
 LOG_ROOT = Path(__file__).resolve().parents[2] / "logs"
+AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
+PAGE = "Tools App【整合執行】月初（1日所有排程）→ 盤點 → 勾選 → 執行"
 
-# (顯示名稱, logs 裡的 json 名稱, 補跑方式)
-CLOUD_JOBS = [
-    ("預收", "monthly_prepaid_report", "GitHub Actions → Scheduled Monthly Jobs → target prepaid_report"),
-    ("儲值金結算", "monthly_stored_value_settlement",
-     "GitHub Actions → Scheduled Monthly Jobs → target stored_value_settlement"),
-    ("儲值金預收", "monthly_stored_value_prepaid",
-     "GitHub Actions → Scheduled Monthly Jobs → target stored_value_prepaid"),
-    ("儲值金完整流程", "finance_vip_full_pipeline",
-     "Tools App【儲值金】完整流程，或 GitHub Actions → Scheduled Finance Jobs → target vip_full_pipeline"),
-]
-MONTH_START_FIX = "Tools App【整合執行】月初藍新／鯨躍／現金缺口 → 盤點 → 執行"
-FIXED_EXPENSE_FIX = "Tools App【整合執行】固定費用（辦公室租金）→ 盤點 → 新增"
+OK, FAIL, WAIT, NONE, NA = "✅", "❌", "⏳", "⚪", "—"
+DONE_ICONS = {OK, NONE, NA}
 
-
-def _github_config() -> tuple[str, str, str, str]:
-    """App 的 secrets [github] owner／repo／token／branch（沒設定就用環境變數）。"""
-    import os
-
-    values = {"owner": os.getenv("GITHUB_OWNER", ""), "repo": os.getenv("GITHUB_REPO", ""),
-              "token": os.getenv("GITHUB_TOKEN", ""), "branch": os.getenv("GITHUB_BRANCH", "") or "main"}
-    try:
-        import streamlit as st
-
-        section = st.secrets.get("github", {}) or {}
-        for key in values:
-            values[key] = str(section.get(key, "") or values[key])
-    except Exception:
-        pass
-    return values["owner"], values["repo"], values["token"], values["branch"]
-
-
-def _read_github_log(day: date, name: str) -> Optional[dict]:
-    """從 GitHub 讀 main 上的 logs；沒設定 GitHub token 或讀不到回傳 None。"""
-    owner, repo, token, branch = _github_config()
-    if not (owner and repo and token):
-        return None
-    import base64
-
-    import requests
-
-    url = f"https://api.github.com/repos/{owner}/{repo}/contents/logs/{day:%Y%m%d}/{name}.json"
-    try:
-        response = requests.get(url, params={"ref": branch}, timeout=20, headers={
-            "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
-        if response.status_code != 200:
-            return None
-        return json.loads(base64.b64decode(response.json()["content"]).decode("utf-8"))
-    except Exception:
-        return None
-
-
-def read_job_log(day: date, name: str, root: Path = LOG_ROOT) -> Optional[dict]:
-    result = _read_github_log(day, name)
-    if result is not None:
-        return result
-    path = root / day.strftime("%Y%m%d") / f"{name}.json"
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-
-
+MONTHLY_LOG_SHEET = "月排程執行Log"
 VIP_LOG_SHEET = "儲值金月度作業紀錄"
+NEWEBPAY_INVOICE_SHEET = "藍新發票總表"
+EI_LOG_SHEET = "鯨躍發票更新Log"
+CASH_GAP_SHEET = "現金缺口試算"
+# 月排程：(列 key, 顯示名稱＝月排程 Log 的「功能」, scheduler target)；依這個順序執行
+MONTHLY_JOBS = [("refund_report", "已退款", "refund_report"), ("prepaid_report", "預收", "prepaid_report"),
+                ("stored_value_settlement", "儲值金結算", "stored_value_settlement"),
+                ("stored_value_prepaid", "儲值金預收", "stored_value_prepaid")]
+VIP_KEY, VIP_LABEL = "vip_full_pipeline", "儲值金彙整（完整流程）"
+# 月排程總根目錄（03 服務分潤表），跟 scheduled_monthly.yml 的 MONTHLY_ROOT_FOLDER_ID 相同
+MONTHLY_ROOT_FOLDER_DEFAULT = "1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe"
+PDF_AREAS = ("台中",)
+STATEMENT_REPORTS = [("fubon", "富邦明細", "富邦更新", "fubon.download"),
+                     ("yuanta", "元大明細", "元大更新", "yuanta.download")]
+AGENT_STATEMENT_AREAS = ("台北", "台中")
+# 要人工驗證碼、05:00 才排入的列：05:00 前排程不提醒
+AGENT_ROW_KEYS = {"newebpay_files", "newebpay_invoice", "paper", "prize", "pdf"}
+MONTH_START_QUEUE_HOUR = 5
 
 
-def vip_status_from_log(values: list[list], period: str) -> Optional[tuple[bool, str]]:
-    """主控表「儲值金月度作業紀錄」：期別那一欄的「*搬運時間」都有值＝完整流程跑完了
-    （手動在 Tools App 跑的也算）。找不到期別欄回傳 None。"""
-    header = [str(v).strip() for v in (values[0] if values else [])]
-    if period not in header:
-        return None
-    col = header.index(period)
-    moved = [str(row[col] if col < len(row) else "").strip() for row in values[1:]
-             if row and str(row[0]).endswith("搬運時間")]
-    if moved and all(moved):
-        return True, f"已完成（搬運 {max(moved)}）"
-    done = sum(1 for v in moved if v)
-    return False, f"未完成（搬運 {done}／{len(moved)} 項）" if moved else "未完成（還沒搬運）"
+# ── 讀資料 ────────────────────────────────────────────
 
-
-def _read_vip_log() -> list[list]:
+def _read_master(sheet: str, rng: str) -> list[list]:
     from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 
     return get_sheets_service().spreadsheets().values().get(
-        spreadsheetId=get_master_spreadsheet_id(), range=f"'{VIP_LOG_SHEET}'!A1:ZZ120").execute().get("values", [])
+        spreadsheetId=get_master_spreadsheet_id(), range=f"'{sheet}'!{rng}").execute().get("values", [])
 
 
-def cloud_entries(day: date, read=read_job_log, read_vip_log=None) -> list[dict]:
-    entries = []
-    for label, name, fix in CLOUD_JOBS:
-        if name == "finance_vip_full_pipeline":
-            # 儲值金完整流程以「儲值金月度作業紀錄」為準（排程或手動跑的都看得到）
-            from tools.finance_management.month_start_batch import previous_period
+def _drive_names(name_contains: str) -> list[str]:
+    from services.google_auth import get_drive_service
 
-            try:
-                vip = vip_status_from_log((read_vip_log or _read_vip_log)(), previous_period(day))
-            except Exception:
-                vip = None
-            if vip is not None:
-                ok, status = vip
-                entries.append({"label": label, "status": status, "fix": fix, "ok": ok,
-                                "kind": "cloud", "key": name, "runnable": not ok})
-                continue
-        result = read(day, name)
-        if result is None:
-            status, ok = "沒有執行紀錄", False
-        elif result.get("status") != "success":
-            status, ok = f"失敗（exit {result.get('exit_code', '?')}）", False
+    files = get_drive_service().files().list(
+        q=f"name contains '{name_contains}' and trashed=false", fields="files(name)", pageSize=200,
+        supportsAllDrives=True, includeItemsFromAllDrives=True).execute().get("files", [])
+    return [f["name"] for f in files]
+
+
+def previous_period(day: date) -> str:
+    return (day.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
+
+
+def period_end(period: str) -> date:
+    from calendar import monthrange
+
+    year, month = int(period[:4]), int(period[4:])
+    return date(year, month, monthrange(year, month)[1])
+
+
+# ── 各功能逐區狀態（純邏輯，方便測試） ─────────────────────
+
+def _cell(row: list, index: int) -> str:
+    return str(row[index]).strip() if row and index < len(row) else ""
+
+
+def monthly_cells(values: list[list], label: str, period2: str) -> dict[str, tuple[str, str]]:
+    """月排程執行Log（A 時間、C 功能、E 區域、F 期別、I 結果）：各地區最新一筆；只有 all 成功那筆也算。"""
+    latest: dict[str, list] = {}
+    for row in values[1:]:
+        if _cell(row, 2) == label and _cell(row, 5) == period2:
+            latest[_cell(row, 4)] = row
+    cells = {}
+    for area in AREAS:
+        row = latest.get(area)
+        if row is None and _cell(latest.get("all", []), 8) == "成功":
+            row = latest["all"]
+        if row is None:
+            cells[area] = (FAIL, "沒有執行紀錄")
+        elif _cell(row, 8) == "成功":
+            cells[area] = (OK, _cell(row, 0))
+        elif _cell(row, 8) == "執行中":
+            cells[area] = (WAIT, "執行中")
         else:
-            status, ok = f"成功（{result.get('finished_at', '')}）", True
-        entries.append({"label": label, "status": status, "fix": fix, "ok": ok,
-                        "kind": "cloud", "key": name, "runnable": not ok})
-    return entries
+            cells[area] = (FAIL, f"{_cell(row, 8)}：{_cell(row, 9)[:60]}")
+    return cells
 
 
-def month_start_entries(items: list[dict]) -> list[dict]:
-    """月初整合執行的盤點結果：預設打勾（沒做／失敗）或不能勾（排隊等 Mac、執行中）都是未完成。"""
-    return [{"label": i["label"], "status": i["status"], "fix": MONTH_START_FIX,
-             "ok": not (i["default"] or not i["selectable"]),
-             "kind": "month", "key": i["step"], "runnable": bool(i["default"] and i["selectable"])} for i in items]
+def vip_cells(values: list[list], period: str) -> dict[str, tuple[str, str]]:
+    """儲值金月度作業紀錄：期別欄「{地區}儲值金結算搬運時間」「{地區}儲值金預收搬運時間」都有值＝完成。"""
+    header = [str(v).strip() for v in (values[0] if values else [])]
+    if period not in header:
+        return {area: (FAIL, "還沒有這個期別的紀錄") for area in AREAS}
+    col = header.index(period)
+    rows = {_cell(r, 0): _cell(r, col) for r in values[1:] if r}
+    cells = {}
+    for area in AREAS:
+        moved = [rows.get(f"{area}儲值金{kind}搬運時間", "") for kind in ("結算", "預收")]
+        cells[area] = (OK, max(moved)) if all(moved) else (FAIL, f"搬運 {sum(1 for m in moved if m)}／2")
+    return cells
 
 
-def fixed_expense_entries(items: list[dict]) -> list[dict]:
-    return [{"label": f"固定費用 {i['area']} {i['memo']}", "status": i["status"], "fix": FIXED_EXPENSE_FIX,
-             "ok": not (i["default"] or i["status"] == "請款記錄讀取失敗"),
-             "kind": "fixed", "item": i, "runnable": bool(i["default"])}
-            for i in items if not i.get("info")]
+def newebpay_file_cells(names: list[str], period: str) -> dict[str, tuple[str, str]]:
+    cells = {}
+    for area in AREAS:
+        has = [f"{period}-2藍新{kind}-{area}.csv" in names for kind in ("收款", "退款")]
+        cells[area] = (OK, "收款＋退款") if all(has) else (FAIL, "缺" + "、".join(
+            k for k, h in zip(("收款", "退款"), has) if not h))
+    return cells
 
 
-# 富邦／元大明細：台北、台中由本機 Agent 下載（可提醒、可補做）；其他地區由各區處理，只顯示
-STATEMENT_REPORTS = {"富邦更新": "fubon.download", "元大更新": "yuanta.download"}
-AGENT_STATEMENT_AREAS = ("台北", "台中")
-STATEMENT_FIX = "Tools App【富邦銀行】富邦明細下載／【元大銀行】元大明細下載，或這裡勾選後執行（排入本機 Agent）"
-OTHER_STATEMENT_FIX = "由各區財務更新財報（Tools App 無法代為下載），排程不提醒"
+def newebpay_invoice_cells(values: list[list], period: str) -> dict[str, tuple[str, str]]:
+    """藍新發票總表（A 地區、B 月份、D 金額、F 狀態）：有金額 ✅；只有「查無發票」⚪（算完成）。"""
+    rows: dict[str, list] = {}
+    for row in values[1:]:
+        if _cell(row, 1) == period:
+            area = _cell(row, 0)
+            if _cell(row, 3) or area not in rows:
+                rows[area] = row
+    cells = {}
+    for area in AREAS:
+        row = rows.get(area)
+        if row is None:
+            cells[area] = (FAIL, "還沒有資料")
+        elif _cell(row, 3):
+            cells[area] = (OK, f"NT$ {_cell(row, 3)}")
+        else:
+            cells[area] = (NONE, _cell(row, 5) or "查無發票")
+    return cells
+
+
+def ei_log_cells(values: list[list], function: str, period: str, areas=tuple(AREAS)) -> dict[str, tuple[str, str]]:
+    """鯨躍發票更新Log（A 時間、B 功能、C 地區、D 期別、E 狀態、F 筆數、G 訊息）：各地區最新一筆。"""
+    latest: dict[str, list] = {}
+    for row in values[1:]:
+        if _cell(row, 1) == function and _cell(row, 3) == period:
+            latest[_cell(row, 2)] = row
+    cells = {}
+    for area in AREAS:
+        if area not in areas:
+            cells[area] = (NA, "")
+            continue
+        row = latest.get(area)
+        if row is None:
+            cells[area] = (FAIL, "沒有執行紀錄")
+        elif _cell(row, 4) == "成功":
+            cells[area] = (OK, f"{_cell(row, 5) or 0} 筆")
+        else:
+            cells[area] = (FAIL, f"{_cell(row, 4)}：{_cell(row, 6)[:60]}")
+    return cells
+
+
+def cash_gap_cells(values: list[list], period: str) -> dict[str, tuple[str, str]]:
+    """現金缺口試算（第 1 列地區、第 2 列日期）：日期是期別月底、該區沒有「錯誤」才算完成。"""
+    header = [str(v).strip() for v in (values[0] if values else [])]
+    dates = values[1] if len(values) > 1 else []
+    want = period_end(period).strftime("%Y/%m/%d")
+    cells = {}
+    for area in AREAS:
+        if area not in header:
+            cells[area] = (FAIL, "還沒有資料")
+            continue
+        col = header.index(area)
+        if _cell(dates, col).replace("-", "/") != want:
+            cells[area] = (FAIL, f"還沒算到 {want}")
+            continue
+        errors = [_cell(r, 0) for r in values[2:] if _cell(r, col).startswith("錯誤")]
+        cells[area] = (FAIL, "出錯：" + "、".join(errors)) if errors else (OK, want)
+    return cells
+
+
+def _agent_wait(cells: dict, waiting: bool) -> dict:
+    """已排入本機 Agent、還在跑的：沒完成的格子改成 ⏳。"""
+    if not waiting:
+        return cells
+    return {a: ((WAIT, "已排入本機 Agent") if icon == FAIL else (icon, text)) for a, (icon, text) in cells.items()}
+
+
+def make_row(key: str, label: str, cells: dict, action: str, required=tuple(AREAS), note: str = "",
+             remind: bool = True, extra: Optional[dict] = None) -> dict:
+    todo = [a for a in AREAS if a in required and cells.get(a, (NA, ""))[0] not in DONE_ICONS]
+    waiting = any(cells.get(a, (NA, ""))[0] == WAIT for a in todo)
+    row = {"key": key, "label": label, "cells": cells, "action": action, "todo": todo,
+           "done": not todo, "runnable": bool(todo) and not waiting and bool(action), "remind": remind,
+           "note": note}
+    row.update(extra or {})
+    return row
+
+
+def summary_text(row: dict) -> str:
+    return "完成" if row["done"] else "未完成：" + "、".join(f"{a}{row['cells'][a][0]}" for a in row["todo"])
+
+
+# ── 盤點 ──────────────────────────────────────────────
+
+def _error_cells(text: str) -> dict:
+    return {area: (FAIL, text) for area in AREAS}
+
+
+def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optional[dict] = None) -> list[dict]:
+    """day＝那個月的 1 日（期別＝上個月）。readers 可替換讀資料的函式（測試用）。"""
+    from tools.finance_management import month_start_batch as msb
+    from tools.invoice_center.invoice_archive import previous_prize_period
+
+    readers = readers or {}
+    period = previous_period(day)
+
+    def read(name: str, default):
+        try:
+            return readers.get(name, default)(), ""
+        except Exception as exc:
+            return None, f"讀取{name}失敗：{str(exc)[:120]}"
+
+    rows: list[dict] = []
+    monthly, err = read("月排程執行Log", lambda: _read_master(MONTHLY_LOG_SHEET, "A:J"))
+    for key, label, _target in MONTHLY_JOBS:
+        cells = monthly_cells(monthly, label, f"{period}-2") if monthly is not None else _error_cells(err)
+        rows.append(make_row(key, label, cells, "monthly"))
+    vip, err = read("儲值金月度作業紀錄", lambda: _read_master(VIP_LOG_SHEET, "A1:ZZ120"))
+    rows.append(make_row(VIP_KEY, VIP_LABEL, vip_cells(vip, period) if vip is not None else _error_cells(err), "vip"))
+
+    def list_agent_tasks():
+        from tools.local_agent_queue import list_tasks
+
+        return list_tasks(limit=500)
+
+    tasks, _err = read("本機Agent任務", list_agent_tasks)
+
+    def waiting(step: str) -> bool:
+        task = msb.latest_task(tasks or [], step, period)
+        return bool(task and task.get("status") in msb.ACTIVE)
+
+    names, err = read("藍新收退款檔", lambda: _drive_names(f"{period}-2藍新"))
+    cells = newebpay_file_cells(names, period) if names is not None else _error_cells(err)
+    rows.append(make_row("newebpay_files", "藍新收／退款", _agent_wait(cells, waiting("newebpay")), "agent"))
+    invoice, err = read("藍新發票總表", lambda: _read_master(NEWEBPAY_INVOICE_SHEET, "A:F"))
+    cells = newebpay_invoice_cells(invoice, period) if invoice is not None else _error_cells(err)
+    rows.append(make_row("newebpay_invoice", "藍新發票", _agent_wait(cells, waiting("newebpay")), "agent"))
+
+    ei_log, err = read("鯨躍發票更新Log", lambda: _read_master(EI_LOG_SHEET, "A:G"))
+    cetustek_wait = waiting("cetustek_download")
+    cells = ei_log_cells(ei_log, "紙本發票更新", period) if ei_log is not None else _error_cells(err)
+    rows.append(make_row("paper", "發票紙本", _agent_wait(cells, cetustek_wait), "invoice_update"))
+    prize = previous_prize_period(period)
+    if prize:
+        cells = ei_log_cells(ei_log, "中獎發票更新", prize) if ei_log is not None else _error_cells(err)
+        rows.append(make_row("prize", f"發票中獎（{prize[4:6]}-{prize[6:]}）", _agent_wait(cells, cetustek_wait),
+                             "invoice_update", extra={"prize_period": prize}))
+    else:
+        rows.append(make_row("prize", "發票中獎", {a: (NA, "雙月沒有") for a in AREAS}, "",
+                             note=f"{period} 是雙月，沒有單月中獎發票"))
+    cells = ei_log_cells(ei_log, "紙本發票PDF建檔", period, PDF_AREAS) if ei_log is not None else _error_cells(err)
+    rows.append(make_row("pdf", "發票PDF（台中有統編）", _agent_wait(cells, cetustek_wait), "pdf", required=PDF_AREAS))
+
+    cash, err = read("現金缺口試算", lambda: _read_master(CASH_GAP_SHEET, "A1:G16"))
+    cells = cash_gap_cells(cash, period) if cash is not None else _error_cells(err)
+    rows.append(make_row("cash_gap", "現金缺口", _agent_wait(cells, waiting("cash_gap")), "cash_gap"))
+
+    rows.append(fixed_expense_row(day, log, readers))
+    rows += statement_rows(day, readers)
+    return rows
+
+
+def fixed_expense_row(day: date, log, readers: dict) -> dict:
+    from tools.finance_management import fixed_expense_batch
+
+    try:
+        items = readers.get("固定費用", lambda: fixed_expense_batch.scan(day.strftime("%Y%m"), log=log))()
+    except Exception as exc:
+        cells = {a: (FAIL, f"讀取請款記錄失敗：{str(exc)[:80]}") if a in ("台北", "台中") else (NA, "") for a in AREAS}
+        return make_row("fixed", "固定費用（辦公室租金）", cells, "", required=("台北", "台中"))
+    cells = {}
+    for area in AREAS:
+        mine = [i for i in items if i["area"] == area and not i.get("info")]
+        if not mine:
+            info = [i for i in items if i["area"] == area and i.get("info")]
+            cells[area] = (NA, info[0]["info"] if info else "")
+            continue
+        todo = [i for i in mine if i.get("default")]
+        cells[area] = (FAIL, "未新增：" + "、".join(i["memo"] for i in todo)) if todo else (OK, f"{len(mine)} 筆已新增")
+    return make_row("fixed", "固定費用（辦公室租金）", cells, "fixed", required=("台北", "台中"),
+                    extra={"items": [i for i in items if i.get("default") and not i.get("info")]})
 
 
 def last_workday_before(day: date) -> date:
@@ -173,97 +321,166 @@ def last_workday_before(day: date) -> date:
 
 
 def last_statement_date(values: list[list]) -> Optional[date]:
-    from tools.finance_management.cash_gap import COL_B, _cell, _parse_date
+    from tools.finance_management.cash_gap import COL_B, _cell as cg_cell, _parse_date
 
-    dates = [d for row in values[1:] if (d := _parse_date(_cell(row, COL_B)))]
+    dates = [d for row in values[1:] if (d := _parse_date(cg_cell(row, COL_B)))]
     return max(dates) if dates else None
 
 
-def statement_entries(day: date, read_values=None, target: Optional[date] = None) -> list[dict]:
-    from tools.finance_management.cash_gap import CASH_GAP_AREAS, _report_values
+def statement_rows(day: date, readers: Optional[dict] = None, target: Optional[date] = None) -> list[dict]:
+    """富邦／元大明細：最後一筆帳務日要到上個月最後一個工作天。台北／台中可補做、會提醒；其他地區只顯示。"""
+    from tools.finance_management.cash_gap import _report_values
 
-    read_values = read_values or _report_values
+    read_values = (readers or {}).get("財報", _report_values)
     target = target or last_workday_before(day)
-    entries = []
-    for area in CASH_GAP_AREAS:
-        mine = area in AGENT_STATEMENT_AREAS
-        for report, action in STATEMENT_REPORTS.items():
-            label = f"{area} {report[:2]}明細"
+    rows = []
+    for key, label, report, action in STATEMENT_REPORTS:
+        cells = {}
+        for area in AREAS:
             try:
                 last = last_statement_date(read_values(area, report))
                 ok = bool(last and last >= target)
-                status = (f"最後一筆 {last:%Y/%m/%d}" if last else "沒有資料") + ("" if ok else f"（要到 {target:%Y/%m/%d}）")
+                text = f"最後一筆 {last:%m/%d}" if last else "沒有資料"
+                cells[area] = (OK if ok else FAIL, text if ok else f"{text}（要到 {target:%m/%d}）")
             except Exception as exc:
-                ok, status = False, f"讀取失敗：{exc}"
-            entries.append({"label": label, "status": status, "ok": ok, "kind": "statement",
-                            "key": (area, action), "remind": mine, "runnable": mine and not ok,
-                            "fix": STATEMENT_FIX if mine else OTHER_STATEMENT_FIX})
-    return entries
+                cells[area] = (FAIL, f"讀取失敗：{str(exc)[:60]}")
+        rows.append(make_row(key, label, cells, "statement", required=AGENT_STATEMENT_AREAS,
+                             note="桃園／新竹／高雄由各區財務更新，只顯示、不提醒",
+                             extra={"agent_action": action}))
+    return rows
 
 
-def _problems(entries: list[dict]) -> list[dict]:
-    """沒完成、而且排程要提醒的（桃園／新竹／高雄的富邦元大明細不提醒）。"""
-    return [{k: e[k] for k in ("label", "status", "fix")} for e in entries
-            if not e["ok"] and e.get("remind", True)]
+# ── 執行 ──────────────────────────────────────────────
+
+def _run_monthly_here(target: str, period2: str, area: str, log: Callable[[str], None]) -> None:
+    """在 Tools App 直接跑月排程（同月排程系統，失敗會丟例外）。"""
+    import os
+
+    from tools.scheduled_monthly.scheduler import main as run_monthly
+
+    folder_id = os.getenv("MONTHLY_ROOT_FOLDER_ID", "").strip() or MONTHLY_ROOT_FOLDER_DEFAULT
+    log(f"===== 月排程：{target}／{area}（{period2}） =====")
+    run_monthly(target=target, folder_id=folder_id, area=area, period=period2)
 
 
-def cloud_problems(day: date, read=read_job_log) -> list[dict]:
-    return _problems(cloud_entries(day, read))
+def _run_vip_here(day: date, log: Callable[[str], None]) -> int:
+    from tools.scheduled_finance import runner
+
+    runner.log = log  # 進度直接顯示在 Tools App 執行日誌
+    return runner.run_vip_full_pipeline(day)
 
 
-def month_start_problems(items: list[dict]) -> list[dict]:
-    return _problems(month_start_entries(items))
+def _update_invoice_here(kind: str, area: str, period: str) -> int:
+    from tools.invoice_center.invoice_archive import InvoiceArchiveProcessor
 
-
-def fixed_expense_problems(items: list[dict]) -> list[dict]:
-    return _problems(fixed_expense_entries(items))
-
-
-def build_reminder(day: date, now: datetime, problems: list[dict]) -> tuple[str, str]:
-    lines = [f"{now:%Y/%m/%d %H:%M} 檢查，{len(problems)} 項還沒完成：", ""]
-    for p in problems:
-        lines.append(f"・{p['label']}：{p['status']}")
-    lines += ["", "處理方式："]
-    for fix in dict.fromkeys(p["fix"] for p in problems):
-        lines.append(f"・{fix}")
-    lines += ["", "1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。"]
-    return f"{REMINDER_PREFIX} {len(problems)} 項（{day:%m/%d}）", "\n".join(lines)
-
-
-# 月初藍新／鯨躍 05:00 才排入，之前不提醒這幾項
-MONTH_START_QUEUE_HOUR = 5
-
-
-def collect_all(day: date, log: Callable[[str], None] = print, include_month_start: bool = True) -> list[dict]:
-    """day＝那個月的 1 日。回傳所有項目（含已完成，ok=True）。"""
-    from tools.finance_management import fixed_expense_batch, month_start_batch
-
-    entries = cloud_entries(day)
+    processor = InvoiceArchiveProcessor()
+    name = "紙本發票更新" if kind == "paper" else "中獎發票更新"
     try:
-        entries += statement_entries(day)
+        count = processor.update_paper(area=area, yyyymm=period) if kind == "paper" else \
+            processor.update_prize_period(area=area, period8=period)
     except Exception as exc:
-        entries.append({"label": "富邦／元大明細", "status": f"檢查失敗：{exc}", "fix": STATEMENT_FIX, "ok": False, "kind": "error", "runnable": False})
-    try:
-        entries += fixed_expense_entries(fixed_expense_batch.scan(day.strftime("%Y%m"), log=log))
-    except Exception as exc:
-        entries.append({"label": "固定費用", "status": f"檢查失敗：{exc}", "fix": FIXED_EXPENSE_FIX, "ok": False, "kind": "error", "runnable": False})
-    if not include_month_start:
-        return entries
-    try:
-        items = month_start_batch.scan(month_start_batch.previous_period(day), log=log)
-        entries += month_start_entries(items)
-    except Exception as exc:
-        entries.append({"label": "月初藍新／鯨躍／現金缺口", "status": f"檢查失敗：{exc}", "fix": MONTH_START_FIX,
-                        "ok": False, "kind": "error", "runnable": False})
-    return entries
+        processor.write_update_log(function_name=name, area=area, period=period, status="失敗", message=str(exc))
+        raise
+    processor.write_update_log(function_name=name, area=area, period=period, status="成功", count=count)
+    return count
 
 
-def collect(day: date, log: Callable[[str], None] = print, hour: int = 23) -> list[dict]:
-    """排程用：只回傳沒完成的；05:00 前不看月初藍新／鯨躍／現金缺口（還沒排入）。"""
-    return _problems(collect_all(day, log=log, include_month_start=hour >= MONTH_START_QUEUE_HOUR))
+def run_rows(rows: list[dict], day: date, create_task, log: Callable[[str], None] = print,
+             created_by: str = "月初整合執行", runners: Optional[dict] = None) -> list[str]:
+    """執行勾選的列（只做沒完成的地區）。runners 可替換執行函式（測試用）。回傳結果訊息。"""
+    from tools.finance_management import month_start_batch as msb
 
+    runners = runners or {}
+    run_monthly = runners.get("monthly", _run_monthly_here)
+    run_vip = runners.get("vip", _run_vip_here)
+    update_invoice = runners.get("invoice_update", _update_invoice_here)
+    period = previous_period(day)
+    by_key = {r["key"]: r for r in rows if r.get("runnable")}
+    messages: list[str] = []
+    steps: list[str] = []
+
+    for key, label, target in MONTHLY_JOBS:  # 已退款 → 預收 → 儲值金結算 → 儲值金預收
+        for area in by_key.get(key, {}).get("todo", []):
+            try:
+                run_monthly(target, f"{period}-2", area, log)
+                messages.append(f"✅ {label}／{area}：完成")
+            except Exception as exc:
+                messages.append(f"❌ {label}／{area}：{str(exc)[:200]}")
+    if VIP_KEY in by_key:
+        try:
+            code = run_vip(day, log)
+            messages.append(f"✅ {VIP_LABEL}：完成" if code == 0 else f"❌ {VIP_LABEL}：失敗，請看執行日誌")
+        except Exception as exc:
+            messages.append(f"❌ {VIP_LABEL}：{exc}")
+    if "fixed" in by_key:
+        from tools.finance_management.fixed_expense_batch import submit
+
+        try:
+            added = runners.get("fixed", submit)(by_key["fixed"]["items"], run_type="月初整合執行", log=log)
+            messages.append("✅ 固定費用：" + "、".join(f"{a} 新增 {n} 筆" for a, n in added.items()))
+        except Exception as exc:
+            messages.append(f"❌ 固定費用：{exc}")
+    for key in ("paper", "prize"):
+        row = by_key.get(key)
+        for area in (row or {}).get("todo", []):
+            try:
+                count = update_invoice(key, area, row.get("prize_period", period))
+                messages.append(f"✅ {row['label']}／{area}：{count} 筆")
+            except Exception as exc:
+                if "找不到檔案" in str(exc):  # Drive 還沒有鯨躍檔：排入鯨躍下載（下載完會自動更新）
+                    if "cetustek_download" not in steps:
+                        steps.append("cetustek_download")
+                    messages.append(f"ℹ️ {row['label']}／{area}：Drive 還沒有鯨躍檔，改排入鯨躍下載")
+                else:
+                    messages.append(f"❌ {row['label']}／{area}：{str(exc)[:200]}")
+    for key in ("fubon", "yuanta"):
+        row = by_key.get(key)
+        for area in (row or {}).get("todo", []):
+            params = {"start_from": "sheet", "end_date": datetime.now(TW_TZ).strftime("%Y-%m-%d"), "area": area,
+                      "cdp_url": "http://127.0.0.1:9222"}
+            if key == "fubon":
+                params["resume"] = "download"
+            task = create_task(row["agent_action"], params, created_by=created_by)
+            messages.append(f"✅ {row['label']}／{area}：已排入本機 Agent（{task.get('task_id', '')}）")
+    for area in by_key.get("pdf", {}).get("todo", []):
+        task = create_task("cetustek.paper_invoice_pdf", {"area": area, "month": period, "upload": True,
+                                                          "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
+        messages.append(f"✅ 發票PDF／{area}：已排入本機 Agent（{task.get('task_id', '')}），要輸入鯨躍驗證碼")
+    if "newebpay_files" in by_key or "newebpay_invoice" in by_key:
+        steps.insert(0, "newebpay")
+    if "cash_gap" in by_key:
+        if "newebpay" in steps:
+            steps.append("cash_gap")  # 跟在藍新後面算，才會用到新的藍新發票金額
+        else:
+            code = runners.get("cash_gap", lambda p: msb._run_step("cash_gap", p, ""))(period)
+            messages.append("✅ 現金缺口：已重新試算" if code == 0 else "❌ 現金缺口：試算失敗")
+    if steps:
+        task = msb.queue_steps(period, steps, create_task, created_by=created_by, log=log)
+        labels = "→".join(msb.STEPS[s][0] for s in msb.STEP_ORDER if s in steps)
+        messages.append(f"✅ {labels}：已排入本機 Agent（{(task or {}).get('task_id', '')}），要到 Mac 輸入驗證碼")
+    for message in messages:
+        log(message)
+    return messages
+
+
+# ── 排程：提醒＋自動補做 ───────────────────────────────
 
 REMINDER_PREFIX = "月初工作未完成"
+AUTO_MAX_ATTEMPTS = 2  # 儲值金彙整自動補做最多試 2 次，避免每小時一直失敗重跑
+
+
+def problems(rows: list[dict], hour: int = 23) -> list[dict]:
+    """排程要提醒的列：沒完成、會提醒；05:00 前不看藍新／鯨躍（還沒排入）。"""
+    return [r for r in rows if not r["done"] and r["remind"]
+            and (hour >= MONTH_START_QUEUE_HOUR or r["key"] not in AGENT_ROW_KEYS)]
+
+
+def build_reminder(day: date, now: datetime, todo: list[dict]) -> tuple[str, str]:
+    lines = [f"{now:%Y/%m/%d %H:%M} 檢查，{len(todo)} 個功能還沒完成：", ""]
+    lines += [f"・{r['label']}：{summary_text(r)}" for r in todo]
+    lines += ["", f"處理方式：{PAGE}", "",
+              "1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。"]
+    return f"{REMINDER_PREFIX} {len(todo)} 項（{day:%m/%d}）", "\n".join(lines)
 
 
 def clear_reminders(day: date, log: Callable[[str], None] = print) -> int:
@@ -285,71 +502,74 @@ def clear_reminders(day: date, log: Callable[[str], None] = print) -> int:
     return removed
 
 
-AUTO_MAX_ATTEMPTS = 2  # 儲值金完整流程自動補做最多試 2 次，避免每小時一直失敗重跑
+def _attempts_path(day: date) -> Path:
+    return LOG_ROOT / day.strftime("%Y%m%d") / "finance_vip_full_pipeline.json"
 
 
-def write_job_log(day: date, name: str, status: str, attempts: int, root: Optional[Path] = None) -> None:
-    """跟 workflow 寫的 logs/YYYYMMDD/{name}.json 同格式，讓下次檢查知道已經補做過（workflow 會 commit logs）。"""
-    path = (root or LOG_ROOT) / day.strftime("%Y%m%d") / f"{name}.json"
+def read_attempts(day: date) -> int:
+    try:
+        return int(json.loads(_attempts_path(day).read_text(encoding="utf-8")).get("auto_attempts", 0) or 0)
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
+def write_attempts(day: date, status: str, attempts: int) -> None:
+    """寫進 logs/YYYYMMDD/（workflow 會 commit），下一次檢查才知道已經自動試過幾次。"""
+    path = _attempts_path(day)
     path.parent.mkdir(parents=True, exist_ok=True)
     now_text = datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    path.write_text(json.dumps({"job_name": name, "status": status, "exit_code": 0 if status == "success" else 1,
-                                "started_at": now_text, "finished_at": now_text, "auto_attempts": attempts},
-                               ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps({"job_name": "finance_vip_full_pipeline", "status": status,
+                                "exit_code": 0 if status == "success" else 1, "finished_at": now_text,
+                                "auto_attempts": attempts}, ensure_ascii=False), encoding="utf-8")
 
 
-def auto_fix(day: date, entries: list[dict], log: Callable[[str], None] = print,
-             run_vip=None, submit_fixed=None) -> list[str]:
-    """不用人工的項目直接補做（2026-11 Jenny：儲值金、固定費用不要只提醒）：
-    - 固定費用：可新增的直接新增到請款記錄（已新增過的會略過，不會重複）
-    - 儲值金完整流程：儲值金結算／預收都成功、但完整流程沒跑或失敗 → 直接跑（最多試 AUTO_MAX_ATTEMPTS 次）
-    回傳補做結果訊息。"""
+def auto_fix(day: date, rows: list[dict], log: Callable[[str], None] = print, run_vip=None, submit_fixed=None) -> list[str]:
+    """不用人工的直接補做：固定費用直接新增；儲值金結算／預收都完成但儲值金彙整沒完成 → 直接跑（最多 2 次）。"""
     done = []
-    fixed = [e["item"] for e in entries if e.get("kind") == "fixed" and e.get("runnable")]
-    if fixed:
+    by_key = {r["key"]: r for r in rows}
+    fixed = by_key.get("fixed")
+    if fixed and fixed.get("runnable") and fixed.get("items"):
         if submit_fixed is None:
             from tools.finance_management.fixed_expense_batch import submit as submit_fixed
         try:
-            added = submit_fixed(fixed, run_type="月初檢查自動補做", log=log)
+            added = submit_fixed(fixed["items"], run_type="月初檢查自動補做", log=log)
             done.append("固定費用：" + "、".join(f"{a} 新增 {n} 筆" for a, n in added.items()))
         except Exception as exc:
             log(f"❌ 固定費用自動補做失敗：{exc}")
-    by_key = {e.get("key"): e for e in entries if e.get("kind") == "cloud"}
-    vip = by_key.get("finance_vip_full_pipeline")
-    sources_ok = all(by_key.get(k, {}).get("ok") for k in VIP_SOURCES)
-    if vip and not vip["ok"] and sources_ok:
-        previous = read_job_log(day, "finance_vip_full_pipeline") or {}
-        attempts = int(previous.get("auto_attempts", 0) or 0)
+    vip = by_key.get(VIP_KEY)
+    sources_ok = all(by_key.get(k, {}).get("done") for k in ("stored_value_settlement", "stored_value_prepaid"))
+    if vip and not vip["done"] and sources_ok:
+        attempts = read_attempts(day)
         if attempts >= AUTO_MAX_ATTEMPTS:
-            log(f"儲值金完整流程已自動補做 {attempts} 次都失敗，改提醒人工處理")
+            log(f"儲值金彙整已自動補做 {attempts} 次都失敗，改提醒人工處理")
         else:
             if run_vip is None:
                 from tools.scheduled_finance.runner import run_vip_full_pipeline as run_vip
-            log("===== 自動補做：儲值金完整流程 =====")
+            log("===== 自動補做：儲值金彙整（完整流程） =====")
             try:
                 code = run_vip(day)
             except Exception as exc:
-                log(f"❌ 儲值金完整流程失敗：{exc}")
+                log(f"❌ 儲值金彙整失敗：{exc}")
                 code = 1
-            write_job_log(day, "finance_vip_full_pipeline", "success" if code == 0 else "failed", attempts + 1)
-            done.append("儲值金完整流程：" + ("完成" if code == 0 else "失敗"))
+            write_attempts(day, "success" if code == 0 else "failed", attempts + 1)
+            done.append("儲值金彙整：" + ("完成" if code == 0 else "失敗"))
     return done
 
 
 def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) -> list[dict]:
     now = now or datetime.now(TW_TZ)
-    fixed_up = auto_fix(now.date(), collect_all(now.date(), log=log, include_month_start=False), log=log)
+    fixed_up = auto_fix(now.date(), collect_rows(now.date(), log=log), log=log)
     if fixed_up:
         log("自動補做：" + "；".join(fixed_up))
-    problems = collect(now.date(), log=log, hour=now.hour)
+    todo = problems(collect_rows(now.date(), log=log), now.hour)
     try:
         clear_reminders(now.date(), log=log)
     except Exception as exc:
         log(f"⚠️ 刪除之前的月初提醒失敗：{exc}")
-    if not problems:
+    if not todo:
         log("月初工作全部完成，不建提醒 🎉")
         return []
-    title, body = build_reminder(now.date(), now, problems)
+    title, body = build_reminder(now.date(), now, todo)
     log(title + "\n" + body)
     from tools.orders_system import calendar_notify
 
@@ -357,111 +577,4 @@ def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) ->
     calendar_notify.create_notify_event(summary=title, description=body, start=now + timedelta(minutes=30),
                                         calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10])
     log(f"已在 {REMIND_CALENDAR_ID} 行事曆建提醒")
-    return problems
-
-
-# ── 檢查完直接補做 ───────────────────────────────────
-# 雲端排程 → 用 GitHub API 觸發 workflow（App secrets [github] 的 token 要有 Actions 寫入權限）
-CLOUD_DISPATCH = {
-    "monthly_prepaid_report": ("scheduled_monthly.yml", "prepaid_report"),
-    "monthly_stored_value_settlement": ("scheduled_monthly.yml", "stored_value_settlement"),
-    "monthly_stored_value_prepaid": ("scheduled_monthly.yml", "stored_value_prepaid"),
-    "finance_vip_full_pipeline": ("scheduled_finance.yml", "vip_full_pipeline"),
-}
-VIP_SOURCES = {"monthly_stored_value_settlement", "monthly_stored_value_prepaid"}
-
-
-def dispatch_inputs(key: str, day: date) -> tuple[str, dict]:
-    from tools.finance_management.month_start_batch import previous_period
-
-    workflow, target = CLOUD_DISPATCH[key]
-    if workflow == "scheduled_monthly.yml":
-        return workflow, {"target": target, "period": previous_period(day) + "-2"}
-    return workflow, {"target": target, "date": day.isoformat()}
-
-
-def dispatch_workflow(workflow: str, inputs: dict) -> None:
-    import requests
-
-    owner, repo, token, branch = _github_config()
-    if not (owner and repo and token):
-        raise RuntimeError("App 沒有設定 GitHub token（secrets [github] owner／repo／token），請到 GitHub Actions 手動執行")
-    response = requests.post(
-        f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
-        json={"ref": branch, "inputs": inputs}, timeout=30,
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
-    if response.status_code != 204:
-        raise RuntimeError(f"GitHub 觸發失敗（HTTP {response.status_code}）：{response.text[:200]}")
-
-
-def plan_run(entries: list[dict]) -> tuple[list[dict], list[str]]:
-    """勾選的項目 → (實際要做的, 提醒)。儲值金完整流程要等結算／預收的檔案，同一次勾了就先不做。"""
-    selected = [e for e in entries if e.get("runnable")]
-    notes = []
-    cloud_keys = {e["key"] for e in selected if e["kind"] == "cloud"}
-    if "finance_vip_full_pipeline" in cloud_keys and cloud_keys & VIP_SOURCES:
-        selected = [e for e in selected if e.get("key") != "finance_vip_full_pipeline"]
-        notes.append("儲值金完整流程要等儲值金結算／預收跑完（約 2 分鐘）再回來檢查、執行")
-    return selected, notes
-
-
-def _run_vip_here(day: date, log: Callable[[str], None]) -> int:
-    from tools.scheduled_finance import runner
-
-    runner.log = log  # 進度直接顯示在 Tools App 執行日誌
-    return runner.run_vip_full_pipeline(day)
-
-
-def run_selected(entries: list[dict], day: date, create_task, log: Callable[[str], None] = print,
-                 dispatch=dispatch_workflow, created_by: str = "月初檢查", run_vip=None) -> list[str]:
-    """補做勾選的未完成項目：雲端排程觸發 GitHub workflow、固定費用直接新增、
-    藍新／鯨躍排入本機 Agent；只有現金缺口（不用等藍新）時直接在這裡算。回傳結果訊息。"""
-    from tools.finance_management import month_start_batch
-
-    selected, messages = plan_run(entries)
-    for entry in (e for e in selected if e["kind"] == "cloud" and e["key"] == "finance_vip_full_pipeline"):
-        # 儲值金完整流程直接在這裡跑（不用 GitHub token），跟【儲值金】完整流程同一支
-        try:
-            code = (run_vip or _run_vip_here)(day, log)
-            messages.append("✅ 儲值金完整流程：完成" if code == 0 else "❌ 儲值金完整流程：失敗，請看執行日誌")
-        except Exception as exc:
-            messages.append(f"❌ 儲值金完整流程：{exc}")
-    for entry in (e for e in selected if e["kind"] == "cloud" and e["key"] != "finance_vip_full_pipeline"):
-        workflow, inputs = dispatch_inputs(entry["key"], day)
-        try:
-            dispatch(workflow, inputs)
-            messages.append(f"✅ {entry['label']}：已觸發 GitHub {workflow}（target {inputs['target']}），約幾分鐘後完成")
-        except Exception as exc:
-            messages.append(f"❌ {entry['label']}：{exc}")
-    for entry in (e for e in selected if e["kind"] == "statement"):
-        area, action = entry["key"]
-        params = {"start_from": "sheet", "end_date": datetime.now(TW_TZ).strftime("%Y-%m-%d"), "area": area,
-                  "cdp_url": "http://127.0.0.1:9222"}
-        if action == "fubon.download":
-            params["resume"] = "download"
-        try:
-            task = create_task(action, params, created_by=created_by)
-            messages.append(f"✅ {entry['label']}：已排入本機 Agent（{task.get('task_id', '')}），富邦需手機核准")
-        except Exception as exc:
-            messages.append(f"❌ {entry['label']}：{exc}")
-    fixed = [e["item"] for e in selected if e["kind"] == "fixed"]
-    if fixed:
-        from tools.finance_management.fixed_expense_batch import submit
-
-        try:
-            added = submit(fixed, run_type="月初檢查補做", log=log)
-            messages.append("✅ 固定費用：" + "、".join(f"{a} 新增 {n} 筆" for a, n in added.items()))
-        except Exception as exc:
-            messages.append(f"❌ 固定費用：{exc}")
-    steps = [e["key"] for e in selected if e["kind"] == "month"]
-    period = month_start_batch.previous_period(day)
-    if steps == ["cash_gap"]:
-        code = month_start_batch._run_step("cash_gap", period, "")
-        messages.append("✅ 現金缺口：已重新試算" if code == 0 else "❌ 現金缺口：試算失敗")
-    elif steps:
-        task = month_start_batch.queue_steps(period, steps, create_task, created_by=created_by, log=log)
-        labels = "→".join(month_start_batch.STEPS[s][0] for s in month_start_batch.STEP_ORDER if s in steps)
-        messages.append(f"✅ {labels}：已排入本機 Agent（{(task or {}).get('task_id', '')}），藍新／鯨躍要到 Mac 輸入驗證碼")
-    for message in messages:
-        log(message)
-    return messages
+    return todo

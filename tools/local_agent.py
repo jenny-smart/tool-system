@@ -909,7 +909,7 @@ ACTION_LABELS = {
     "change_order.sync": "【清潔異動】回寫系統",
     "change_order.batch_run": "【清潔異動】整合執行（逐區依序）",
     "internal_payment.record": "【富邦銀行】內部請款留紀錄",
-    "month_start.batch_run": "【整合執行】月初藍新／鯨躍／現金缺口",
+    "month_start.batch_run": "【整合執行】月初藍新／鯨躍／現金缺口（本機 Agent）",
     "fubon.login": "【富邦銀行】富邦登入",
     "fubon.download": "【富邦銀行】富邦明細下載",
     "fubon.atm_refund": "【富邦銀行】異動 ATM 退款",

@@ -3974,10 +3974,9 @@ def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     # 整合執行：都先「盤點」目前可做的項目（預設打勾、可全選）再執行，集中在同一組
-    {"name": "【整合執行】月初檢查（1日所有排程）", "handler": None, "enabled": True},
+    {"name": "【整合執行】月初（1日所有排程）", "handler": None, "enabled": True},
     {"name": "【整合執行】清潔異動已備妥", "handler": None, "enabled": True},
     {"name": "【整合執行】富邦內部請款", "handler": None, "enabled": True},
-    {"name": "【整合執行】月初藍新／鯨躍／現金缺口", "handler": None, "enabled": True},
     {"name": "【整合執行】固定費用（辦公室租金）", "handler": None, "enabled": True},
     {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
@@ -4473,7 +4472,7 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_agent_task_progress(("cetustek.", "fubon.", "newebpay.", "lemon.", "change_order."))
     st.stop()
 
-if system_type == "finance_management" and selected_function == "【整合執行】月初檢查（1日所有排程）":
+if system_type == "finance_management" and selected_function == "【整合執行】月初（1日所有排程）":
     st.markdown("</div>", unsafe_allow_html=True)
     fresh_module("tools.finance_management.month_start_batch")
     fresh_module("tools.finance_management.fixed_expense_batch")

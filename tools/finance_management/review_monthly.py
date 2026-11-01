@@ -99,12 +99,24 @@ def layout_requests(sheet_id: int, columns: dict[int, tuple], groups: list[dict]
     return clear, regroup, len(hide)
 
 
+def review_service():
+    """review 檔用 Jenny 的 OAuth 寫入：服務帳號沒有 2026目標及review 的編輯權限（Mac 上實際 403）。
+    沒有 OAuth 設定時才退回服務帳號。"""
+    try:
+        from services.google_auth import get_sheets_service as oauth_sheets
+
+        return oauth_sheets()
+    except Exception:
+        from tools.common.config_loader import get_sheets_service
+
+        return get_sheets_service()
+
+
 def layout(area: str, period: str, log: Callable[[str], None] = print) -> int:
-    from tools.common.config_loader import get_sheets_service
     from tools.finance_management.review_update import _resolve_location
 
     spreadsheet_id, title = _resolve_location(area)
-    service = get_sheets_service()
+    service = review_service()
     header = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"'{title}'!1:1",
                                                  valueRenderOption="FORMATTED_VALUE").execute().get("values", [[]])
     columns = classify_header(header[0] if header else [])
@@ -266,6 +278,7 @@ def sync_cash_gap_block(period: str, log: Callable[[str], None] = print) -> list
     review_id = review_spreadsheet_id()
     start = block_start(month)
     first, last = column_letter(start), column_letter(start + 6)
+    service = review_service()
     existing = service.spreadsheets().values().get(
         spreadsheetId=review_id, range=f"'{CASH_GAP_REVIEW_SHEET}'!{first}1:{last}34",
         valueRenderOption="FORMULA").execute().get("values", [])
@@ -285,8 +298,10 @@ def sync_cash_gap_block(period: str, log: Callable[[str], None] = print) -> list
 
 def run_all(period: str, log: Callable[[str], None] = print, include_cash_gap: bool = True) -> list[str]:
     """回傳失敗清單（空＝全部成功）。"""
+    from tools.finance_management import review_update
     from tools.finance_management.review_update import apply_review_formula_updates
 
+    review_update.get_sheets_service = review_service  # 公式調整也用 OAuth 寫 review 檔
     failures = []
     year_month = f"{period[:4]}.{period[4:]}"
     for area in REVIEW_SHEETS:

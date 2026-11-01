@@ -200,8 +200,16 @@ def _click_function_icon(page: Page, order_no: str) -> bool:
             continue
         function_cell = cells.nth(cell_count - 1)
         clickable = function_cell.locator("a, img, button")
-        target = clickable.first if clickable.count() else function_cell
-        target.click()
+        candidates = [clickable.nth(k) for k in range(clickable.count())]
+        visible = [c for c in candidates if c.is_visible()]
+        if visible:
+            visible[0].click()
+        elif candidates:
+            # 功能連結（InvoiceView(...)）有時是隱藏的，Playwright 點不到會等 30 秒逾時；
+            # 直接用 JavaScript 觸發它的點擊（2026-11-01 台中 PDF 實際發生）
+            candidates[0].evaluate("el => el.click()")
+        else:
+            function_cell.click()
         return True
     return False
 
