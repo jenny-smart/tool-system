@@ -18,7 +18,7 @@ RUN_COLUMN = "執行"
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption("每月 1 日要做的事：藍新收退款＋發票金額、鯨躍發票下載（本機 Agent，藍新每區需人工輸入驗證碼）、"
-               "全區現金缺口。每月 1 日 09:00 排程會自動排入（藍新 08:00 才寄手續費發票）；這裡可盤點目前狀態、補排沒做到的步驟。")
+               "全區現金缺口。每月 1 日 08:00 排程會自動排入（藍新約 08:00 寄手續費發票）；這裡可盤點目前狀態、補排沒做到的步驟。")
     today = datetime.now(ZoneInfo("Asia/Taipei")).date()
     period = st.text_input("期別（YYYYMM，預設上個月）", value=batch.previous_period(today),
                            key=f"{PREFIX}_period").strip()
@@ -48,10 +48,10 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     selected = [i for i, flag in zip(items, edited[RUN_COLUMN]) if flag and i["selectable"]]
     for item in (i for i, flag in zip(items, edited[RUN_COLUMN]) if flag and not i["selectable"]):
         st.warning(f"{item['label']}：{item['status']}，不會重複排入。")
-    if any(i["step"] == "cash_gap" for i in selected) and not any(i["step"] == "newebpay_invoice" for i in selected):
-        st.caption("提醒：沒有勾藍新手續費發票金額時，現金缺口會用藍新發票總表目前的數字。")
-    st.caption("依序執行：藍新收退款 → 藍新發票金額 → 鯨躍發票 → 現金缺口；藍新兩項都勾時每區只登入一次（只輸入一次驗證碼）；"
-               "藍新發票金額失敗就不算現金缺口。"
+    if any(i["step"] == "cash_gap" for i in selected) and not any(i["step"] == "newebpay" for i in selected):
+        st.caption("提醒：沒有勾藍新時，現金缺口會用藍新發票總表目前的數字。")
+    st.caption("依序執行：藍新收退款＋發票金額（每區只登入一次、只輸入一次驗證碼）→ 鯨躍發票 → 現金缺口；"
+               "藍新發票金額沒查到就不算現金缺口。"
                "跑完會在 Jenny 行事曆留紀錄。")
     if st.button(f"▶️ 執行勾選的 {len(selected)} 項", key=f"{PREFIX}_run", disabled=not selected):
         batch.queue_steps(scanned_period, [i["step"] for i in selected], create_task,

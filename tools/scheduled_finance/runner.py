@@ -4,9 +4,9 @@
   1 日 01:00  vip_full_pipeline    【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式），上個月
                                    （00:10 儲值金結算、00:20 儲值金預收的檔案要先產出）
   1 日 02:00  cash_gap_check       全區現金缺口（截至上個月底，藍新發票金額這時還沒有）＋月初檢查
-  1 日 09:00  month_start          排入【整合執行】月初藍新／鯨躍／現金缺口（藍新 08:00 才寄手續費發票）＋月初檢查
-  1 日 03:00～23:00 每小時（09:00 除外）  month_start_check  月初檢查：沒完成的項目在 Jenny 行事曆建提醒
-                                   （09:00 前不提醒藍新／鯨躍／現金缺口，還沒到排入時間）
+  1 日 08:00  month_start          排入【整合執行】月初藍新／鯨躍／現金缺口（藍新約 08:00 寄手續費發票；還沒開會算失敗，可再補做）＋月初檢查
+  1 日 03:00～23:00 每小時（08:00 除外）  month_start_check  月初檢查：沒完成的項目在 Jenny 行事曆建提醒
+                                   （08:00 前不提醒藍新／鯨躍／現金缺口，還沒到排入時間）
   單月 10 日 10:00  accounting_reminder  會計事務所費用確認：在 Jenny 行事曆建提醒
   其他 target：month_start_queue（只排入）、cash_gap（只算現金缺口）
 
@@ -56,7 +56,7 @@ def run_fixed_expense(today: date) -> int:
 
 
 def run_month_start(today: date) -> int:
-    """09:00：排入月初整合執行，再做月初檢查（同時段同 workflow 只能派送一次，所以合併）。
+    """08:00：排入月初整合執行，再做月初檢查（同時段同 workflow 只能派送一次，所以合併）。
     藍新每月 1 日 08:00 才寄手續費發票，所以不在半夜排。"""
     codes = []
     for name, job in (("月初整合執行排入", run_month_start_queue), ("月初檢查", run_month_start_check)):
