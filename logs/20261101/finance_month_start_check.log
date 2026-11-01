@@ -19,6 +19,17 @@
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠️ 讀取月初檢查不提醒失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+❌ 【台中】請款記錄讀取失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8/values/%27%E8%B2%A1%E5%8B%99%E5%B8%B3%E5%8B%99%E8%A8%AD%E5%AE%9A%27%21A%3AZ?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'service': 'sheets.googleapis.com', 'window_start_time': '1793512829', 'quota_unit': '1/min/{project}/{user}', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_location': 'global', 'consumer': 'projects/1042663213860', 'quota_limit_value': '60', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+❌ 【台北】請款記錄讀取失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8/values/%27%E8%B2%A1%E5%8B%99%E5%B8%B3%E5%8B%99%E8%A8%AD%E5%AE%9A%27%21A%3AZ?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_location': 'global', 'quota_limit_value': '60', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'window_start_time': '1793512829', 'service': 'sheets.googleapis.com', 'quota_metric': 'sheets.googleapis.com/read_requests', 'consumer': 'projects/1042663213860', 'quota_unit': '1/min/{project}/{user}'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
@@ -30,19 +41,24 @@
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
 [config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
-月初工作未完成 2 項（11/01）
-2026/11/01 13:01 檢查，2 個功能還沒完成：
+⚠️ 讀取月初檢查不提醒失敗：<HttpError 400 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_
+月初工作未完成 12 項（11/01）
+2026/11/01 14:01 檢查，12 個功能還沒完成：
 
-・藍新發票：未完成：桃園❌
-・現金缺口：未完成：桃園❌、新竹❌、高雄❌
+・已退款：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・預收：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・儲值金結算：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・儲值金預收：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・儲值金彙整（完整流程）：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・藍新發票：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・藍新帳務：未完成：台北❌、台中❌、桃園❌、新竹❌
+・發票紙本：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・發票PDF（台中有統編）：未完成：台中❌
+・現金缺口：未完成：台北❌、台中❌、桃園❌、新竹❌、高雄❌
+・富邦明細：未完成：台北❌、台中❌
+・元大明細：未完成：台北❌、台中❌
 
 處理方式：Tools App【整合執行】月初（1日所有排程）→ 盤點 → 勾選 → 執行
 
 1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。
-已在 jenny@lemonclean.com.tw 行事曆建提醒
+已在 jenny@hers.com.tw 行事曆建提醒
