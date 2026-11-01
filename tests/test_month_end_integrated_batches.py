@@ -184,6 +184,7 @@ def test_month_start_check_skips_mac_items_before_queue_hour(monkeypatch):
     from tools.finance_management import month_start_check as chk
 
     monkeypatch.setattr(chk, "cloud_entries", lambda _day: [])
+    monkeypatch.setattr(chk, "statement_entries", lambda _day: [])
     monkeypatch.setattr(fixed_expense_batch, "scan", lambda *_a, **_k: [])
     monkeypatch.setattr(month_start_batch, "scan", lambda period, log=print: ms.build_items(period, [], [], []))
     assert chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=3) == []
@@ -215,3 +216,36 @@ def test_month_start_check_vip_alone_dispatches_with_date():
 
     assert chk.dispatch_inputs("finance_vip_full_pipeline", date(2026, 11, 1)) == \
         ("scheduled_finance.yml", {"target": "vip_full_pipeline", "date": "2026-11-01"})
+
+
+def test_statement_entries_remind_only_taipei_taichung():
+    from tools.finance_management import month_start_check as chk
+
+    def read(area, report):
+        last = "2026/10/30" if area in ("台北", "桃園") else "2026/10/20"
+        return [["", "帳務日"], ["", last], ["", "2026/10/01"]]
+
+    entries = {e["label"]: e for e in chk.statement_entries(date(2026, 11, 1), read_values=read,
+                                                             target=date(2026, 10, 30))}
+    assert entries["台北 富邦明細"]["ok"] and entries["桃園 元大明細"]["ok"]
+    assert not entries["台中 富邦明細"]["ok"] and entries["台中 富邦明細"]["runnable"]
+    assert not entries["高雄 元大明細"]["ok"] and not entries["高雄 元大明細"]["runnable"]
+    problems = chk._problems(list(entries.values()))
+    assert {p["label"] for p in problems} == {"台中 富邦明細", "台中 元大明細"}  # 新竹／高雄不提醒
+
+
+def test_statement_follow_up_queues_agent_download():
+    from tools.finance_management import month_start_check as chk
+
+    entry = {"label": "台中 富邦明細", "status": "", "ok": False, "kind": "statement",
+             "key": ("台中", "fubon.download"), "remind": True, "runnable": True, "fix": ""}
+    queued = []
+    chk.run_selected([entry], date(2026, 11, 1), lambda action, params, created_by: queued.append((action, params)) or {"task_id": "t"},
+                     log=lambda _t: None, dispatch=lambda *_a: None)
+    assert queued[0][0] == "fubon.download" and queued[0][1]["start_from"] == "sheet" and queued[0][1]["area"] == "台中"
+
+
+def test_last_workday_before_month_start():
+    from tools.finance_management import month_start_check as chk
+
+    assert chk.last_workday_before(date(2026, 11, 1)) == date(2026, 10, 30)  # 10/31 是週六

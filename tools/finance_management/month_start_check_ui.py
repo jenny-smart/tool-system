@@ -19,15 +19,19 @@ RUN_COLUMN = "執行"
 def _how(entry: dict) -> str:
     if entry["ok"]:
         return ""
+    if entry.get("kind") == "statement" and not entry.get("remind", True):
+        return "由各區財務更新（排程不提醒）"
     if not entry["runnable"]:
-        return "排隊中／執行中，等本機 Agent 跑完"
+        return "排隊中／執行中，等本機 Agent 跑完" if entry.get("kind") == "month" else entry["fix"]
     return {"cloud": "觸發 GitHub 排程重跑", "fixed": "直接新增到請款記錄",
+            "statement": "排入本機 Agent 下載明細（財報最後一列日期～今天）",
             "month": "排入本機 Agent（現金缺口單獨勾就直接算）"}[entry["kind"]]
 
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption("檢查某個月 1 日該完成的工作：預收、儲值金結算／預收、儲值金完整流程、固定費用、"
-               "藍新收退款、藍新發票金額、鯨躍發票、現金缺口。沒完成的預設打勾，按「執行」直接補做。"
+               "藍新收退款、藍新發票金額、鯨躍發票、現金缺口、各區富邦／元大明細（桃園／新竹／高雄只顯示）。"
+               "沒完成的預設打勾，按「執行」直接補做。"
                "（1 日 02:00～23:00 排程也會每小時自動檢查並建行事曆提醒。）")
     today = datetime.now(ZoneInfo("Asia/Taipei")).date()
     month = st.text_input("月份（YYYYMM，檢查這個月的 1 日）", value=today.strftime("%Y%m"), key=f"{PREFIX}_month").strip()
@@ -45,8 +49,18 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     entries = result[1]
     day = date(int(month[:4]), int(month[4:]), 1)
     todo = [e for e in entries if not e["ok"]]
+    others = [e for e in todo if not e.get("remind", True)]
+    todo = [e for e in todo if e.get("remind", True)]
+    if others:
+        st.caption(f"桃園／新竹／高雄的富邦元大明細有 {len(others)} 項未更新到月底（由各區處理，排程不提醒，現金缺口會用目前的餘額）。")
     if not todo:
         st.success(f"{day:%Y/%m/%d} 的工作全部完成 🎉")
+        if st.session_state.get(f"{PREFIX}_cleared") != month:
+            try:
+                chk.clear_reminders(day, log=log)  # 全部完成：把之前的月初提醒刪掉
+            except Exception as exc:
+                st.caption(f"⚠️ 刪除之前的月初提醒失敗：{exc}")
+            st.session_state[f"{PREFIX}_cleared"] = month
     else:
         st.warning(f"{day:%Y/%m/%d}：{len(entries)} 項中還有 **{len(todo)}** 項沒完成（可補做的已預設打勾）。")
     override, editor_key = select_all_controls(PREFIX)

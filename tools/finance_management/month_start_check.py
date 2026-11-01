@@ -8,6 +8,9 @@
     （排隊等 Mac、失敗、沒做都算未完成）
 02:00 那次跟現金缺口同一個排程，先算完現金缺口再檢查（同一時段同一個 workflow 只能派送一次）。
 全部完成就不建提醒。只提醒、不自動重跑：要人工驗證碼的步驟，等有空時再到整合執行按「盤點→執行」。
+  - 富邦／元大明細：各區財報「富邦更新」「元大更新」最後一筆帳務日要到上個月最後一個工作天（現金缺口要用月底餘額）。
+    台北／台中由本機 Agent 下載，會提醒、可補做；桃園／新竹／高雄由各區處理，只在檢查頁顯示，排程不提醒。
+提醒只留最新一則：每次檢查先刪掉當天之前建的「月初工作未完成」提醒，全部完成就全部刪掉。
 Tools App【整合執行】月初檢查（1日所有排程）也用這裡的 collect_all()，按一下就列出所有項目的狀態。
 雲端排程結果優先從 GitHub 讀 main 上的 logs（App 裡的 repo 不一定是最新），讀不到才看本機 logs。
 """
@@ -114,8 +117,56 @@ def fixed_expense_entries(items: list[dict]) -> list[dict]:
             for i in items if not i.get("info")]
 
 
+# 富邦／元大明細：台北、台中由本機 Agent 下載（可提醒、可補做）；其他地區由各區處理，只顯示
+STATEMENT_REPORTS = {"富邦更新": "fubon.download", "元大更新": "yuanta.download"}
+AGENT_STATEMENT_AREAS = ("台北", "台中")
+STATEMENT_FIX = "Tools App【富邦銀行】富邦明細下載／【元大銀行】元大明細下載，或這裡勾選後執行（排入本機 Agent）"
+OTHER_STATEMENT_FIX = "由各區財務更新財報（Tools App 無法代為下載），排程不提醒"
+
+
+def last_workday_before(day: date) -> date:
+    """day（某月 1 日）的前一個工作天＝上個月最後一個工作天。"""
+    from tools.common.tw_holidays import is_workday
+
+    current = day - timedelta(days=1)
+    while not is_workday(current):
+        current -= timedelta(days=1)
+    return current
+
+
+def last_statement_date(values: list[list]) -> Optional[date]:
+    from tools.finance_management.cash_gap import COL_B, _cell, _parse_date
+
+    dates = [d for row in values[1:] if (d := _parse_date(_cell(row, COL_B)))]
+    return max(dates) if dates else None
+
+
+def statement_entries(day: date, read_values=None, target: Optional[date] = None) -> list[dict]:
+    from tools.finance_management.cash_gap import CASH_GAP_AREAS, _report_values
+
+    read_values = read_values or _report_values
+    target = target or last_workday_before(day)
+    entries = []
+    for area in CASH_GAP_AREAS:
+        mine = area in AGENT_STATEMENT_AREAS
+        for report, action in STATEMENT_REPORTS.items():
+            label = f"{area} {report[:2]}明細"
+            try:
+                last = last_statement_date(read_values(area, report))
+                ok = bool(last and last >= target)
+                status = (f"最後一筆 {last:%Y/%m/%d}" if last else "沒有資料") + ("" if ok else f"（要到 {target:%Y/%m/%d}）")
+            except Exception as exc:
+                ok, status = False, f"讀取失敗：{exc}"
+            entries.append({"label": label, "status": status, "ok": ok, "kind": "statement",
+                            "key": (area, action), "remind": mine, "runnable": mine and not ok,
+                            "fix": STATEMENT_FIX if mine else OTHER_STATEMENT_FIX})
+    return entries
+
+
 def _problems(entries: list[dict]) -> list[dict]:
-    return [{k: e[k] for k in ("label", "status", "fix")} for e in entries if not e["ok"]]
+    """沒完成、而且排程要提醒的（桃園／新竹／高雄的富邦元大明細不提醒）。"""
+    return [{k: e[k] for k in ("label", "status", "fix")} for e in entries
+            if not e["ok"] and e.get("remind", True)]
 
 
 def cloud_problems(day: date, read=read_job_log) -> list[dict]:
@@ -137,8 +188,8 @@ def build_reminder(day: date, now: datetime, problems: list[dict]) -> tuple[str,
     lines += ["", "處理方式："]
     for fix in dict.fromkeys(p["fix"] for p in problems):
         lines.append(f"・{fix}")
-    lines += ["", "1 日每小時會再檢查一次（到 23:00），全部完成就不再提醒。"]
-    return f"月初工作未完成 {len(problems)} 項（{day:%m/%d}）", "\n".join(lines)
+    lines += ["", "1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。"]
+    return f"{REMINDER_PREFIX} {len(problems)} 項（{day:%m/%d}）", "\n".join(lines)
 
 
 # 月初藍新／鯨躍 09:00 才排入（藍新 08:00 才寄手續費發票），之前不提醒這幾項
@@ -151,9 +202,13 @@ def collect_all(day: date, log: Callable[[str], None] = print, include_month_sta
 
     entries = cloud_entries(day)
     try:
+        entries += statement_entries(day)
+    except Exception as exc:
+        entries.append({"label": "富邦／元大明細", "status": f"檢查失敗：{exc}", "fix": STATEMENT_FIX, "ok": False, "kind": "error", "runnable": False})
+    try:
         entries += fixed_expense_entries(fixed_expense_batch.scan(day.strftime("%Y%m"), log=log))
     except Exception as exc:
-        entries.append({"label": "固定費用", "status": f"檢查失敗：{exc}", "fix": FIXED_EXPENSE_FIX, "ok": False})
+        entries.append({"label": "固定費用", "status": f"檢查失敗：{exc}", "fix": FIXED_EXPENSE_FIX, "ok": False, "kind": "error", "runnable": False})
     if not include_month_start:
         return entries
     try:
@@ -161,7 +216,7 @@ def collect_all(day: date, log: Callable[[str], None] = print, include_month_sta
         entries += month_start_entries(items)
     except Exception as exc:
         entries.append({"label": "月初藍新／鯨躍／現金缺口", "status": f"檢查失敗：{exc}", "fix": MONTH_START_FIX,
-                        "ok": False})
+                        "ok": False, "kind": "error", "runnable": False})
     return entries
 
 
@@ -170,9 +225,35 @@ def collect(day: date, log: Callable[[str], None] = print, hour: int = 23) -> li
     return _problems(collect_all(day, log=log, include_month_start=hour >= MONTH_START_QUEUE_HOUR))
 
 
+REMINDER_PREFIX = "月初工作未完成"
+
+
+def clear_reminders(day: date, log: Callable[[str], None] = print) -> int:
+    """刪掉 day 當天之前建的「月初工作未完成」提醒（只留最新一則／全部完成就全刪）。"""
+    from tools.orders_system import calendar_notify
+
+    service = calendar_notify._calendar_service()
+    start = datetime.combine(day, datetime.min.time(), tzinfo=TW_TZ)
+    events = service.events().list(calendarId=REMIND_CALENDAR_ID, timeMin=start.isoformat(),
+                                   timeMax=(start + timedelta(days=2)).isoformat(), q=REMINDER_PREFIX,
+                                   singleEvents=True, maxResults=100).execute().get("items", [])
+    removed = 0
+    for event in events:
+        if str(event.get("summary", "")).startswith(REMINDER_PREFIX):
+            service.events().delete(calendarId=REMIND_CALENDAR_ID, eventId=event["id"]).execute()
+            removed += 1
+    if removed:
+        log(f"已刪除 {removed} 則之前的月初提醒")
+    return removed
+
+
 def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) -> list[dict]:
     now = now or datetime.now(TW_TZ)
     problems = collect(now.date(), log=log, hour=now.hour)
+    try:
+        clear_reminders(now.date(), log=log)
+    except Exception as exc:
+        log(f"⚠️ 刪除之前的月初提醒失敗：{exc}")
     if not problems:
         log("月初工作全部完成，不建提醒 🎉")
         return []
@@ -244,6 +325,17 @@ def run_selected(entries: list[dict], day: date, create_task, log: Callable[[str
         try:
             dispatch(workflow, inputs)
             messages.append(f"✅ {entry['label']}：已觸發 GitHub {workflow}（target {inputs['target']}），約幾分鐘後完成")
+        except Exception as exc:
+            messages.append(f"❌ {entry['label']}：{exc}")
+    for entry in (e for e in selected if e["kind"] == "statement"):
+        area, action = entry["key"]
+        params = {"start_from": "sheet", "end_date": datetime.now(TW_TZ).strftime("%Y-%m-%d"), "area": area,
+                  "cdp_url": "http://127.0.0.1:9222"}
+        if action == "fubon.download":
+            params["resume"] = "download"
+        try:
+            task = create_task(action, params, created_by=created_by)
+            messages.append(f"✅ {entry['label']}：已排入本機 Agent（{task.get('task_id', '')}），富邦需手機核准")
         except Exception as exc:
             messages.append(f"❌ {entry['label']}：{exc}")
     fixed = [e["item"] for e in selected if e["kind"] == "fixed"]
