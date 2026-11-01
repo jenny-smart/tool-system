@@ -147,10 +147,14 @@ def newebpay_invoice_cells(values: list[list], period: str) -> dict[str, tuple[s
             area = _cell(row, 0)
             if _cell(row, 3) or area not in rows:
                 rows[area] = row
+    from tools.newebpay.month_close import NO_INVOICE_AREAS
+
     cells = {}
     for area in AREAS:
         row = rows.get(area)
-        if row is None:
+        if area in NO_INVOICE_AREAS:
+            cells[area] = (NA, "不用算藍新發票金額")
+        elif row is None:
             cells[area] = (FAIL, "還沒有資料")
         elif _cell(row, 5) == CONFIRMED_NO_INVOICE:
             cells[area] = (OK, CONFIRMED_NO_INVOICE)
@@ -429,6 +433,26 @@ def _run_monthly_here(target: str, period2: str, area: str, log: Callable[[str],
     run_monthly(target=target, folder_id=folder_id, area=area, period=period2)
 
 
+NEWEBPAY_PART_LABELS = {"all": "藍新收退款＋發票", "download": "藍新收退款", "invoice": "藍新發票"}
+
+
+def newebpay_plan(by_key: dict) -> list[tuple[str, list[str]]]:
+    """勾了「藍新收／退款」「藍新發票」哪幾列 → [(part, 地區)]。同一區兩邊都要做就一起做（只登入一次）。
+    高雄跟新竹同一個帳號：高雄收退款改做新竹（會複製一份）。"""
+    from tools.newebpay.month_close import COPY_AREAS
+
+    alias = {copy: source for source, copies in COPY_AREAS.items() for copy in copies}
+    need: dict[str, set] = {}
+    for key, part in (("newebpay_files", "download"), ("newebpay_invoice", "invoice")):
+        for area in by_key.get(key, {}).get("todo", []):
+            need.setdefault(alias.get(area, area), set()).add(part)
+    groups: dict[str, list[str]] = {}
+    for area in sorted(need, key=AREAS.index):
+        part = "all" if len(need[area]) == 2 else next(iter(need[area]))
+        groups.setdefault(part, []).append(area)
+    return [(part, groups[part]) for part in ("all", "download", "invoice") if part in groups]
+
+
 def _run_vip_here(day: date, log: Callable[[str], None]) -> int:
     from tools.scheduled_finance import runner
 
@@ -522,22 +546,16 @@ def run_rows(rows: list[dict], day: date, create_task, log: Callable[[str], None
         task = create_task("cetustek.paper_invoice_pdf", {"area": area, "month": period, "upload": True,
                                                           "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
         messages.append(f"✅ 發票PDF／{area}：已排入本機 Agent（{task.get('task_id', '')}），要輸入鯨躍驗證碼")
-    newebpay_areas = sorted({a for k in ("newebpay_files", "newebpay_invoice") for a in by_key.get(k, {}).get("todo", [])},
-                            key=AREAS.index)
     newebpay_queued = False
-    if newebpay_areas and len(newebpay_areas) < len(AREAS):
-        # 只有部分地區沒完成：只重做這幾區（每區登入一次），不用每區都再輸入驗證碼
-        task = create_task("newebpay.month_close", {"period": period, "areas": newebpay_areas,
+    for part, areas in newebpay_plan(by_key):
+        # 勾哪一邊就只跑哪一邊（兩個都勾＝同一次登入一起做）；只跑沒完成的地區，每區登入一次
+        task = create_task("newebpay.month_close", {"period": period, "areas": areas, "part": part,
                                                     "cdp_url": "http://127.0.0.1:9222"}, created_by=created_by)
-        messages.append(f"✅ 藍新收退款＋發票／{'、'.join(newebpay_areas)}：已排入本機 Agent（{task.get('task_id', '')}）")
+        messages.append(f"✅ {NEWEBPAY_PART_LABELS[part]}／{'、'.join(areas)}：已排入本機 Agent（{task.get('task_id', '')}）")
         newebpay_queued = True
-    elif newebpay_areas:
-        steps.insert(0, "newebpay")
     if "cash_gap" in by_key:
         if newebpay_queued and "cash_gap" not in steps:
             steps.append("cash_gap")  # 本機 Agent 依序執行：藍新做完才算現金缺口
-        elif "newebpay" in steps:
-            steps.append("cash_gap")  # 跟在藍新後面算，才會用到新的藍新發票金額
         else:
             code = runners.get("cash_gap", lambda p: msb._run_step("cash_gap", p, ""))(period)
             messages.append("✅ 現金缺口：已重新試算" if code == 0 else "❌ 現金缺口：試算失敗")

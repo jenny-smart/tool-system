@@ -150,11 +150,12 @@ def test_newebpay_rerun_only_unfinished_area_then_cash_gap():
     queued = []
     chk.run_rows(rows, DAY, lambda action, params, created_by: queued.append((action, params)) or {"task_id": "q"},
                  log=lambda _t: None, runners={})
-    assert queued[0] == ("newebpay.month_close", {"period": "202610", "areas": ["桃園"], "cdp_url": "http://127.0.0.1:9222"})
+    assert queued[0] == ("newebpay.month_close", {"period": "202610", "areas": ["桃園"], "part": "invoice",
+                                                  "cdp_url": "http://127.0.0.1:9222"})
     assert queued[1][0] == ms.BATCH_ACTION and queued[1][1]["steps"] == ["cash_gap"]  # 藍新做完才算
     from tools.local_agent import ACTION_HANDLERS
     command = ACTION_HANDLERS["newebpay.month_close"](queued[0][1])
-    assert command[command.index("--area") + 1] == "桃園"
+    assert command[command.index("--area") + 1] == "桃園" and command[command.index("--part") + 1] == "invoice"
 
 
 def test_vip_without_source_files_reruns_settlement_and_prepaid():
@@ -274,3 +275,24 @@ def test_review_block_parts():
     ranges = [d["range"] for d in only_cash]
     assert not any("3:" in r for r in ranges) and "'現金缺口'!CD14" in ranges
     assert rm.same_day("2026/10/31", date(2026, 10, 31)) and not rm.same_day("2026/9/30", date(2026, 10, 31))
+
+
+def test_newebpay_plan_runs_only_checked_part():
+    def row(todo):
+        return {"todo": todo}
+
+    both = {"newebpay_files": row(["台北", "高雄"]), "newebpay_invoice": row(["台北", "桃園"])}
+    assert chk.newebpay_plan(both) == [("all", ["台北"]), ("download", ["新竹"]), ("invoice", ["桃園"])]
+    assert chk.newebpay_plan({"newebpay_invoice": row(["桃園"])}) == [("invoice", ["桃園"])]
+    assert chk.newebpay_plan({"newebpay_files": row(["桃園"])}) == [("download", ["桃園"])]
+    from tools.local_agent import ACTION_HANDLERS
+
+    assert "--part" not in ACTION_HANDLERS["newebpay.month_close"]({"period": "202610", "areas": ["台北"], "part": "all"})
+
+
+def test_kaohsiung_needs_no_newebpay_invoice():
+    cells = chk.newebpay_invoice_cells([["地區", "月份", "", "金額"]], "202610")
+    assert cells["高雄"][0] == chk.NA and cells["台北"][0] == chk.FAIL
+    from tools.finance_management.cash_gap import newebpay_invoice_amount
+
+    assert newebpay_invoice_amount("高雄", date(2026, 10, 31)) == 0.0
