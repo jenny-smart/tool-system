@@ -32,7 +32,7 @@ def test_scan_queued_batch_is_not_requeued_and_completed_unchecked():
     tasks = [_task(ms.BATCH_ACTION, {"period": "202610", "steps": ["newebpay_download", "cetustek_download"]},
                    status="pending"),
              _task("newebpay.invoice_amounts", {"months": "202610", "area": "全區"}, task_id="t2")]
-    items = {i["step"]: i for i in ms.build_items("202610", tasks, [["地區", "月份"], ["台北", "202610"]], [])}
+    items = {i["step"]: i for i in ms.build_items("202610", tasks, [["地區", "月份", "發票日期", "發票金額"], ["台北", "202610", "2026/11/01", "1234"]], [])}
     assert not items["newebpay_download"]["selectable"]
     assert not items["cetustek_download"]["selectable"]
     assert items["newebpay_invoice"]["selectable"] and not items["newebpay_invoice"]["default"]
@@ -42,7 +42,7 @@ def test_scan_queued_batch_is_not_requeued_and_completed_unchecked():
 
 def test_cash_gap_already_computed_with_invoice_unchecked():
     items = {i["step"]: i for i in ms.build_items(
-        "202610", [], [["地區", "月份"], ["台北", "202610"]], [["", "台北"], ["日期", "2026/10/31"]])}
+        "202610", [], [["地區", "月份", "發票日期", "發票金額"], ["台北", "202610", "2026/11/01", "1234"]], [["", "台北"], ["日期", "2026/10/31"]])}
     assert not items["cash_gap"]["default"] and items["cash_gap"]["selectable"]
 
 
@@ -162,9 +162,29 @@ def test_month_start_check_pending_items_and_text():
     problems = chk.month_start_problems(items)
     assert len(problems) == 4  # 排隊等 Mac 也算未完成
     done = ms.build_items("202611", [_task(ms.BATCH_ACTION, {"period": "202611", "steps": list(ms.STEP_ORDER)})],
-                          [["地區", "月份"], ["台北", "202611"]], [["", "台北"], ["日期", "2026/11/30"]])
+                          [["地區", "月份", "發票日期", "發票金額"], ["台北", "202611", "2026/12/01", "1234"]], [["", "台北"], ["日期", "2026/11/30"]])
     assert chk.month_start_problems(done) == []
     fixed_items = fixed.mark_status(fixed.planned_items("202612"), {"台北": {"2026.12-辦公室租金"}, "台中": set()})
     assert [p["label"] for p in chk.fixed_expense_problems(fixed_items)] == ["固定費用 台北 2026.12-辦公室管理費"]
     title, body = chk.build_reminder(date(2026, 12, 1), datetime(2026, 12, 1, 3, 0), problems)
     assert "4 項" in title and chk.MONTH_START_FIX in body and body.count(chk.MONTH_START_FIX) == 1
+
+
+def test_invoice_without_amount_is_not_ready():
+    # 1 日 08:00 前查會寫入「查無發票」（金額空白）：不算有資料，發票金額步驟要再做
+    empty = [["地區", "月份", "發票日期", "發票金額"], ["台北", "202610", "2026/11/01", ""]]
+    assert ms.invoice_amount_areas(empty, "202610") == []
+    tasks = [_task("newebpay.invoice_amounts", {"months": "202610", "area": "全區"})]
+    items = {i["step"]: i for i in ms.build_items("202610", tasks, empty, [])}
+    assert items["newebpay_invoice"]["default"] and "還沒有發票金額" in items["newebpay_invoice"]["status"]
+
+
+def test_month_start_check_skips_mac_items_before_queue_hour(monkeypatch):
+    from tools.finance_management import fixed_expense_batch, month_start_batch
+    from tools.finance_management import month_start_check as chk
+
+    monkeypatch.setattr(chk, "cloud_entries", lambda _day: [])
+    monkeypatch.setattr(fixed_expense_batch, "scan", lambda *_a, **_k: [])
+    monkeypatch.setattr(month_start_batch, "scan", lambda period, log=print: ms.build_items(period, [], [], []))
+    assert chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=3) == []
+    assert len(chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=10)) == 4

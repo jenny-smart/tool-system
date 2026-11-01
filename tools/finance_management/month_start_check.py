@@ -8,6 +8,8 @@
     （排隊等 Mac、失敗、沒做都算未完成）
 02:00 那次跟現金缺口同一個排程，先算完現金缺口再檢查（同一時段同一個 workflow 只能派送一次）。
 全部完成就不建提醒。只提醒、不自動重跑：要人工驗證碼的步驟，等有空時再到整合執行按「盤點→執行」。
+Tools App【整合執行】月初檢查（1日所有排程）也用這裡的 collect_all()，按一下就列出所有項目的狀態。
+雲端排程結果優先從 GitHub 讀 main 上的 logs（App 裡的 repo 不一定是最新），讀不到才看本機 logs。
 """
 from __future__ import annotations
 
@@ -35,7 +37,47 @@ MONTH_START_FIX = "Tools App【整合執行】月初藍新／鯨躍／現金缺�
 FIXED_EXPENSE_FIX = "Tools App【整合執行】固定費用（辦公室租金）→ 盤點 → 新增"
 
 
+def _github_config() -> tuple[str, str, str, str]:
+    """App 的 secrets [github] owner／repo／token／branch（沒設定就用環境變數）。"""
+    import os
+
+    values = {"owner": os.getenv("GITHUB_OWNER", ""), "repo": os.getenv("GITHUB_REPO", ""),
+              "token": os.getenv("GITHUB_TOKEN", ""), "branch": os.getenv("GITHUB_BRANCH", "") or "main"}
+    try:
+        import streamlit as st
+
+        section = st.secrets.get("github", {}) or {}
+        for key in values:
+            values[key] = str(section.get(key, "") or values[key])
+    except Exception:
+        pass
+    return values["owner"], values["repo"], values["token"], values["branch"]
+
+
+def _read_github_log(day: date, name: str) -> Optional[dict]:
+    """從 GitHub 讀 main 上的 logs；沒設定 GitHub token 或讀不到回傳 None。"""
+    owner, repo, token, branch = _github_config()
+    if not (owner and repo and token):
+        return None
+    import base64
+
+    import requests
+
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/logs/{day:%Y%m%d}/{name}.json"
+    try:
+        response = requests.get(url, params={"ref": branch}, timeout=20, headers={
+            "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+        if response.status_code != 200:
+            return None
+        return json.loads(base64.b64decode(response.json()["content"]).decode("utf-8"))
+    except Exception:
+        return None
+
+
 def read_job_log(day: date, name: str, root: Path = LOG_ROOT) -> Optional[dict]:
+    result = _read_github_log(day, name)
+    if result is not None:
+        return result
     path = root / day.strftime("%Y%m%d") / f"{name}.json"
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -43,26 +85,46 @@ def read_job_log(day: date, name: str, root: Path = LOG_ROOT) -> Optional[dict]:
         return None
 
 
-def cloud_problems(day: date, read=read_job_log) -> list[dict]:
-    problems = []
+def cloud_entries(day: date, read=read_job_log) -> list[dict]:
+    entries = []
     for label, name, fix in CLOUD_JOBS:
         result = read(day, name)
         if result is None:
-            problems.append({"label": label, "status": "沒有執行紀錄", "fix": fix})
+            status, ok = "沒有執行紀錄", False
         elif result.get("status") != "success":
-            problems.append({"label": label, "status": f"失敗（exit {result.get('exit_code', '?')}）", "fix": fix})
-    return problems
+            status, ok = f"失敗（exit {result.get('exit_code', '?')}）", False
+        else:
+            status, ok = f"成功（{result.get('finished_at', '')}）", True
+        entries.append({"label": label, "status": status, "fix": fix, "ok": ok})
+    return entries
+
+
+def month_start_entries(items: list[dict]) -> list[dict]:
+    """月初整合執行的盤點結果：預設打勾（沒做／失敗）或不能勾（排隊等 Mac、執行中）都是未完成。"""
+    return [{"label": i["label"], "status": i["status"], "fix": MONTH_START_FIX,
+             "ok": not (i["default"] or not i["selectable"])} for i in items]
+
+
+def fixed_expense_entries(items: list[dict]) -> list[dict]:
+    return [{"label": f"固定費用 {i['area']} {i['memo']}", "status": i["status"], "fix": FIXED_EXPENSE_FIX,
+             "ok": not (i["default"] or i["status"] == "請款記錄讀取失敗")}
+            for i in items if not i.get("info")]
+
+
+def _problems(entries: list[dict]) -> list[dict]:
+    return [{k: e[k] for k in ("label", "status", "fix")} for e in entries if not e["ok"]]
+
+
+def cloud_problems(day: date, read=read_job_log) -> list[dict]:
+    return _problems(cloud_entries(day, read))
 
 
 def month_start_problems(items: list[dict]) -> list[dict]:
-    """月初整合執行的盤點結果：預設打勾（沒做／失敗）或不能勾（排隊等 Mac、執行中）都是未完成。"""
-    return [{"label": i["label"], "status": i["status"], "fix": MONTH_START_FIX}
-            for i in items if i["default"] or not i["selectable"]]
+    return _problems(month_start_entries(items))
 
 
 def fixed_expense_problems(items: list[dict]) -> list[dict]:
-    return [{"label": f"固定費用 {i['area']} {i['memo']}", "status": i["status"], "fix": FIXED_EXPENSE_FIX}
-            for i in items if i["default"] or i["status"] == "請款記錄讀取失敗"]
+    return _problems(fixed_expense_entries(items))
 
 
 def build_reminder(day: date, now: datetime, problems: list[dict]) -> tuple[str, str]:
@@ -76,25 +138,38 @@ def build_reminder(day: date, now: datetime, problems: list[dict]) -> tuple[str,
     return f"月初工作未完成 {len(problems)} 項（{day:%m/%d}）", "\n".join(lines)
 
 
-def collect(day: date, log: Callable[[str], None] = print) -> list[dict]:
+# 月初藍新／鯨躍 09:00 才排入（藍新 08:00 才寄手續費發票），之前不提醒這幾項
+MONTH_START_QUEUE_HOUR = 9
+
+
+def collect_all(day: date, log: Callable[[str], None] = print, include_month_start: bool = True) -> list[dict]:
+    """day＝那個月的 1 日。回傳所有項目（含已完成，ok=True）。"""
     from tools.finance_management import fixed_expense_batch, month_start_batch
 
-    problems = cloud_problems(day)
+    entries = cloud_entries(day)
     try:
-        problems += fixed_expense_problems(fixed_expense_batch.scan(day.strftime("%Y%m"), log=log))
+        entries += fixed_expense_entries(fixed_expense_batch.scan(day.strftime("%Y%m"), log=log))
     except Exception as exc:
-        problems.append({"label": "固定費用", "status": f"檢查失敗：{exc}", "fix": FIXED_EXPENSE_FIX})
+        entries.append({"label": "固定費用", "status": f"檢查失敗：{exc}", "fix": FIXED_EXPENSE_FIX, "ok": False})
+    if not include_month_start:
+        return entries
     try:
         items = month_start_batch.scan(month_start_batch.previous_period(day), log=log)
-        problems += month_start_problems(items)
+        entries += month_start_entries(items)
     except Exception as exc:
-        problems.append({"label": "月初藍新／鯨躍／現金缺口", "status": f"檢查失敗：{exc}", "fix": MONTH_START_FIX})
-    return problems
+        entries.append({"label": "月初藍新／鯨躍／現金缺口", "status": f"檢查失敗：{exc}", "fix": MONTH_START_FIX,
+                        "ok": False})
+    return entries
+
+
+def collect(day: date, log: Callable[[str], None] = print, hour: int = 23) -> list[dict]:
+    """排程用：只回傳沒完成的；09:00 前不看月初藍新／鯨躍／現金缺口（還沒排入）。"""
+    return _problems(collect_all(day, log=log, include_month_start=hour >= MONTH_START_QUEUE_HOUR))
 
 
 def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) -> list[dict]:
     now = now or datetime.now(TW_TZ)
-    problems = collect(now.date(), log=log)
+    problems = collect(now.date(), log=log, hour=now.hour)
     if not problems:
         log("月初工作全部完成，不建提醒 🎉")
         return []

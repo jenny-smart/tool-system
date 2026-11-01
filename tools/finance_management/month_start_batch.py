@@ -11,7 +11,7 @@
   藍新收退款 → 藍新發票金額 → 鯨躍發票 → 現金缺口。藍新登入每區仍需人工輸入驗證碼。
   藍新發票金額失敗就不算現金缺口（會用到舊數字）；其他步驟失敗不影響後面的步驟。
   全部跑完在 Jenny 行事曆留一筆紀錄（不跳提醒）。
-排程：每月 1 日 00:30 由雲端排入全部四個步驟（Mac 開機、輸入驗證碼時才會執行）；
+排程：每月 1 日 09:00 由雲端排入全部四個步驟（藍新 08:00 才寄手續費發票；Mac 開機、輸入驗證碼時才會執行）；
   02:00 雲端另外先算一次現金缺口（不等藍新），藍新做完後這裡會再算一次覆蓋。
 """
 from __future__ import annotations
@@ -117,12 +117,14 @@ def _status_text(task: Optional[dict]) -> tuple[str, bool, bool]:
 
 
 def invoice_amount_areas(values: list[list], period: str) -> list[str]:
-    """「藍新發票總表」裡已有該期別發票金額的地區（A 地區、B 月份）。"""
+    """「藍新發票總表」裡已有該期別發票金額的地區（A 地區、B 月份、D 金額有值）。
+    藍新每月 1 日 08:00 才開手續費發票，太早查會寫入「查無發票」（D 空白），不算有資料。"""
     areas = []
     for row in values[1:]:
         area = str(row[0] if row else "").strip()
         month = str(row[1] if len(row) > 1 else "").strip()
-        if month == period and area and area not in areas:
+        amount = str(row[3] if len(row) > 3 else "").strip()
+        if month == period and area and amount and area not in areas:
             areas.append(area)
     return areas
 
@@ -143,9 +145,12 @@ def build_items(period: str, tasks: list[dict], invoice_values: list[list], cash
         note = ""
         if step == "newebpay_invoice":
             areas = invoice_amount_areas(invoice_values, period)
-            note = f"藍新發票總表已有：{'、'.join(areas)}" if areas else "藍新發票總表還沒有這個期別的資料"
+            note = f"藍新發票總表已有：{'、'.join(areas)}" if areas else \
+                "藍新發票總表還沒有這個期別的發票金額（藍新每月 1 日 08:00 才寄發票）"
             if areas and task is None:
                 status, default = "已有資料（之前手動或排程做過）", False
+            elif not areas and selectable and status.startswith("已完成"):
+                status, default = f"{status}，但還沒有發票金額", True
         if step == "cash_gap":
             computed = cash_gap_date(cash_gap_values)
             done = computed == end.strftime("%Y/%m/%d")
@@ -183,7 +188,7 @@ def scan(period: str, log: Callable[[str], None] = print) -> list[dict]:
     except Exception as exc:
         log(f"⚠️ 讀取本機Agent任務失敗：{exc}")
         tasks = []
-    return build_items(period, tasks, read(NEWEBPAY_INVOICE_SHEET, "A:B"), read(CASH_GAP_SHEET_NAME, "A1:C2"))
+    return build_items(period, tasks, read(NEWEBPAY_INVOICE_SHEET, "A:D"), read(CASH_GAP_SHEET_NAME, "A1:C2"))
 
 
 def queue_steps(period: str, steps: list[str], create_task: Callable, created_by: str = "月初整合執行",
@@ -215,7 +220,21 @@ def _run_step(step: str, period: str, cdp_url: str) -> int:
             print("⚠️ 現金缺口有項目出錯：" + "、".join(errors), flush=True)
         return 0
     sys.stdout.flush()
-    return subprocess.run(_step_command(step, period, cdp_url)).returncode
+    code = subprocess.run(_step_command(step, period, cdp_url)).returncode
+    if step == "newebpay_invoice" and code == 0 and not _invoice_ready(period):
+        # 查得到頁面但還沒開發票（例如 1 日 08:00 前）：算失敗，現金缺口就不會用 0 去算
+        print("❌ 藍新發票總表還沒有這個期別的發票金額（藍新每月 1 日 08:00 才寄發票），請晚點再執行", flush=True)
+        return 3
+    return code
+
+
+def _invoice_ready(period: str) -> bool:
+    from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+    from tools.finance_management.cash_gap import NEWEBPAY_INVOICE_SHEET
+
+    values = get_sheets_service().spreadsheets().values().get(
+        spreadsheetId=get_master_spreadsheet_id(), range=f"'{NEWEBPAY_INVOICE_SHEET}'!A:D").execute().get("values", [])
+    return bool(invoice_amount_areas(values, period))
 
 
 def run_plan(period: str, steps: list[str], log: Callable[[str], None] = print, cdp_url: str = CDP_URL,
