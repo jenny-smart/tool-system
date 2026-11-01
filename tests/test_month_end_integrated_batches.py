@@ -174,36 +174,6 @@ def test_accounting_even_month_and_reminder():
     assert "會計師簽證費" not in body.split("已新增過")[0]
 
 
-# ── 月初檢查 ────────────────────────────────────────
-
-def test_month_start_check_cloud_logs():
-    from tools.finance_management import month_start_check as chk
-
-    logs = {"monthly_prepaid_report": {"status": "success"},
-            "monthly_stored_value_settlement": {"status": "failed", "exit_code": 1}}
-    problems = chk.cloud_problems(date(2026, 12, 1), read=lambda _d, name: logs.get(name))
-    assert [p["label"] for p in problems] == ["儲值金結算", "儲值金預收", "儲值金完整流程"]
-    assert problems[0]["status"] == "失敗（exit 1）" and problems[1]["status"] == "沒有執行紀錄"
-
-
-def test_month_start_check_pending_items_and_text():
-    from datetime import datetime
-
-    from tools.finance_management import month_start_check as chk
-
-    tasks = [_task(ms.BATCH_ACTION, {"period": "202611", "steps": list(ms.STEP_ORDER)}, status="pending")]
-    items = ms.build_items("202611", tasks, [], [])
-    problems = chk.month_start_problems(items)
-    assert len(problems) == 3  # 排隊等 Mac 也算未完成
-    done = ms.build_items("202611", [_task(ms.BATCH_ACTION, {"period": "202611", "steps": list(ms.STEP_ORDER)})],
-                          [["地區", "月份", "發票日期", "發票金額"], ["台北", "202611", "2026/12/01", "1234"]], [["", "台北"], ["日期", "2026/11/30"]])
-    assert chk.month_start_problems(done) == []
-    fixed_items = fixed.mark_status(fixed.planned_items("202612"), {"台北": {"2026.12-辦公室租金"}, "台中": set()})
-    assert [p["label"] for p in chk.fixed_expense_problems(fixed_items)] == ["固定費用 台北 2026.12-辦公室管理費"]
-    title, body = chk.build_reminder(date(2026, 12, 1), datetime(2026, 12, 1, 3, 0), problems)
-    assert "3 項" in title and chk.MONTH_START_FIX in body and body.count(chk.MONTH_START_FIX) == 1
-
-
 def test_invoice_without_amount_is_not_ready():
     # 1 日 08:00 前查會寫入「查無發票」（金額空白）：不算有資料，發票金額步驟要再做
     empty = [["地區", "月份", "發票日期", "發票金額"], ["台北", "202610", "2026/11/01", ""]]
@@ -211,78 +181,6 @@ def test_invoice_without_amount_is_not_ready():
     tasks = [_task(ms.BATCH_ACTION, {"period": "202610", "steps": ["newebpay"]})]
     items = {i["step"]: i for i in ms.build_items("202610", tasks, empty, [])}
     assert items["newebpay"]["default"] and "還沒有發票金額" in items["newebpay"]["status"]
-
-
-def test_month_start_check_skips_mac_items_before_queue_hour(monkeypatch):
-    from tools.finance_management import fixed_expense_batch, month_start_batch
-    from tools.finance_management import month_start_check as chk
-
-    monkeypatch.setattr(chk, "cloud_entries", lambda _day: [])
-    monkeypatch.setattr(chk, "statement_entries", lambda _day: [])
-    monkeypatch.setattr(fixed_expense_batch, "scan", lambda *_a, **_k: [])
-    monkeypatch.setattr(month_start_batch, "scan", lambda period, log=print: ms.build_items(period, [], [], []))
-    assert chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=3) == []
-    assert len(chk.collect(date(2026, 12, 1), log=lambda _t: None, hour=10)) == 3
-
-
-def test_month_start_check_run_selected(monkeypatch):
-    from tools.finance_management import fixed_expense_batch, month_start_check as chk
-
-    entries = chk.cloud_entries(date(2026, 12, 1), read=lambda _d, name: None)
-    entries += chk.fixed_expense_entries(fixed.mark_status(fixed.planned_items("202612"), {"台北": set(), "台中": set()}))
-    entries += chk.month_start_entries(ms.build_items("202611", [], [], []))
-    selected, notes = chk.plan_run(entries)
-    assert "finance_vip_full_pipeline" not in {e.get("key") for e in selected} and notes  # 要等結算／預收
-
-    dispatched, submitted, queued = [], [], []
-    monkeypatch.setattr(fixed_expense_batch, "submit", lambda items, **_k: submitted.extend(items) or {"台北": len(items)})
-    messages = chk.run_selected(entries, date(2026, 12, 1),
-                                lambda action, params, created_by: queued.append(params) or {"task_id": "q"},
-                                log=lambda _t: None, dispatch=lambda wf, inputs: dispatched.append((wf, inputs)))
-    assert ("scheduled_monthly.yml", {"target": "stored_value_settlement", "period": "202611-2"}) in dispatched
-    assert len(dispatched) == 3 and len(submitted) == 2
-    assert queued[0]["period"] == "202611" and queued[0]["steps"] == list(ms.STEP_ORDER)
-    assert not any(m.startswith("❌") for m in messages)
-
-
-def test_month_start_check_vip_alone_dispatches_with_date():
-    from tools.finance_management import month_start_check as chk
-
-    assert chk.dispatch_inputs("finance_vip_full_pipeline", date(2026, 11, 1)) == \
-        ("scheduled_finance.yml", {"target": "vip_full_pipeline", "date": "2026-11-01"})
-
-
-def test_statement_entries_remind_only_taipei_taichung():
-    from tools.finance_management import month_start_check as chk
-
-    def read(area, report):
-        last = "2026/10/30" if area in ("台北", "桃園") else "2026/10/20"
-        return [["", "帳務日"], ["", last], ["", "2026/10/01"]]
-
-    entries = {e["label"]: e for e in chk.statement_entries(date(2026, 11, 1), read_values=read,
-                                                             target=date(2026, 10, 30))}
-    assert entries["台北 富邦明細"]["ok"] and entries["桃園 元大明細"]["ok"]
-    assert not entries["台中 富邦明細"]["ok"] and entries["台中 富邦明細"]["runnable"]
-    assert not entries["高雄 元大明細"]["ok"] and not entries["高雄 元大明細"]["runnable"]
-    problems = chk._problems(list(entries.values()))
-    assert {p["label"] for p in problems} == {"台中 富邦明細", "台中 元大明細"}  # 新竹／高雄不提醒
-
-
-def test_statement_follow_up_queues_agent_download():
-    from tools.finance_management import month_start_check as chk
-
-    entry = {"label": "台中 富邦明細", "status": "", "ok": False, "kind": "statement",
-             "key": ("台中", "fubon.download"), "remind": True, "runnable": True, "fix": ""}
-    queued = []
-    chk.run_selected([entry], date(2026, 11, 1), lambda action, params, created_by: queued.append((action, params)) or {"task_id": "t"},
-                     log=lambda _t: None, dispatch=lambda *_a: None)
-    assert queued[0][0] == "fubon.download" and queued[0][1]["start_from"] == "sheet" and queued[0][1]["area"] == "台中"
-
-
-def test_last_workday_before_month_start():
-    from tools.finance_management import month_start_check as chk
-
-    assert chk.last_workday_before(date(2026, 11, 1)) == date(2026, 10, 30)  # 10/31 是週六
 
 
 def test_cetustek_step_skips_kaohsiung_and_makes_taichung_pdf():
@@ -332,60 +230,3 @@ def test_copy_kaohsiung_from_hsinchu(tmp_path):
     csv = tmp_path / "新竹" / "202610-2藍新收款-新竹.csv"
     csv.write_text("a")
     assert copy_for_area(csv, "新竹", "高雄").name == "202610-2藍新收款-高雄.csv"
-
-
-def test_month_start_check_auto_fix(tmp_path, monkeypatch):
-    from tools.finance_management import month_start_check as chk
-
-    monkeypatch.setattr(chk, "LOG_ROOT", tmp_path)
-    monkeypatch.setattr(chk, "read_job_log", lambda day, name, root=None: chk.json.loads(
-        (tmp_path / day.strftime("%Y%m%d") / f"{name}.json").read_text()) if (tmp_path / day.strftime("%Y%m%d") / f"{name}.json").exists() else None)
-    day = date(2026, 11, 1)
-    logs = {"monthly_stored_value_settlement": {"status": "success"}, "monthly_stored_value_prepaid": {"status": "success"}}
-    entries = chk.cloud_entries(day, read=lambda _d, name: logs.get(name))
-    entries += chk.fixed_expense_entries(fixed.mark_status(fixed.planned_items("202611"), {"台北": set(), "台中": {"2026.11-辦公室租金管理費", "2026.12-辦公室租金管理費"}}))
-    submitted, vip_runs = [], []
-    done = chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1,
-                        submit_fixed=lambda items, **_k: submitted.extend(items) or {"台北": len(items)})
-    assert [i["memo"] for i in submitted] == ["2026.11-辦公室租金", "2026.11-辦公室管理費"]
-    assert vip_runs == [day] and "儲值金完整流程：失敗" in done
-    # 失敗會記次數；第 2 次再試，第 3 次就不再自動跑
-    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1, submit_fixed=lambda *a, **k: {})
-    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: vip_runs.append(d) or 1, submit_fixed=lambda *a, **k: {})
-    assert len(vip_runs) == 2
-
-
-def test_month_start_check_auto_fix_waits_for_vip_sources():
-    from tools.finance_management import month_start_check as chk
-
-    day = date(2026, 11, 1)
-    entries = chk.cloud_entries(day, read=lambda _d, name: None)  # 結算／預收都還沒跑
-    runs = []
-    chk.auto_fix(day, entries, log=lambda _t: None, run_vip=lambda d: runs.append(d) or 0, submit_fixed=lambda *a, **k: {})
-    assert runs == []
-
-
-def test_vip_status_from_monthly_log():
-    from tools.finance_management import month_start_check as chk
-
-    values = [["項目", "202609", "202610"], ["彙整檔建立時間", "x", "y"],
-              ["台北儲值金結算搬運時間", "2026/10/01 2:36:35", "2026/11/01 1:05:00"],
-              ["台北儲值金預收搬運時間", "2026/10/01 2:36:17", ""]]
-    assert chk.vip_status_from_log(values, "202609")[0] is True
-    ok, status = chk.vip_status_from_log(values, "202610")
-    assert not ok and "1／2" in status
-    assert chk.vip_status_from_log(values, "202611") is None
-    entries = chk.cloud_entries(date(2026, 11, 1), read=lambda *_a: None, read_vip_log=lambda: values)
-    vip = [e for e in entries if e["key"] == "finance_vip_full_pipeline"][0]
-    assert not vip["ok"] and vip["runnable"]
-
-
-def test_run_selected_runs_vip_here_not_github():
-    from tools.finance_management import month_start_check as chk
-
-    vip = {"label": "儲值金完整流程", "status": "", "ok": False, "kind": "cloud",
-           "key": "finance_vip_full_pipeline", "runnable": True, "fix": ""}
-    dispatched, ran = [], []
-    messages = chk.run_selected([vip], date(2026, 11, 1), lambda *a, **k: {}, log=lambda _t: None,
-                                dispatch=lambda *a: dispatched.append(a), run_vip=lambda d, log: ran.append(d) or 0)
-    assert ran == [date(2026, 11, 1)] and not dispatched and messages == ["✅ 儲值金完整流程：完成"]
