@@ -1,12 +1,8 @@
 """【財報】營收總表→財報：各地區「{YYYY}{地區}營業額總表」的「{YYYY}財報總表」數字，
 貼進該區財報「股東損益表_財務／股東損益表_現金」當月「YYYY.MM預估」欄（2026-11 Jenny）。
 
-財務（服務基礎，標題列第 1 列）→ 股東損益表_財務：
-  2 當月服務收現→4、3 當月服務上月預收→5、6 儲值金→8、
-  8 家電清潔→9、9 收納服務→10、10 水洗服務→11、11 消毒服務→12
-現金（現金基礎，標題列第 14 列）→ 股東損益表_現金：
-  15 當月服務收現→4、16 次月服務預收→5、18 儲值金預收→8、
-  20 家電清潔→9、21 收納服務→10、22 水洗服務→11、23 消毒服務→12
+各區營業額總表排法不同，依 A～C 欄（基礎／服務／項目）找來源列、依財報 A 欄標題找目標列，
+對應見 TARGETS（新竹：服務基礎 2→4、3→5、6→8、8～11→9～12；現金基礎 15→4、16→5、18→8、20～23→9～12）。
 來源格子空白的不貼（保留財報原值）；「-」＝0。
 
 對應還沒確認的列（財務 4、5：財報 1～4 月跟 5 月起放法相反；現金 8：用 18 還是 19 列），
@@ -18,14 +14,37 @@ from typing import Callable, Optional
 
 AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
 SOURCE_SHEET = "{year}財報總表"
-SOURCE_RANGE = "A1:P30"
-TARGETS = {
-    "財務": {"sheet": "股東損益表_財務", "header_row": 1,
-             "rows": {2: 4, 3: 5, 6: 8, 8: 9, 9: 10, 10: 11, 11: 12}, "hold": {4, 5}},
-    "現金": {"sheet": "股東損益表_現金", "header_row": 14,
-             "rows": {15: 4, 16: 5, 18: 8, 20: 9, 21: 10, 22: 11, 23: 12}, "hold": {8}},
-}
+SOURCE_RANGE = "1:40"  # 整列讀：各區欄數不同（台北只到 BX），超出格線會報錯
+TARGET_LABEL_RANGE = "A1:A40"
 HOLD_FILL = {"red": 0.988, "green": 0.898, "blue": 0.804}  # 淺橘：先不更新、待確認
+
+# 各區營業額總表排法不同（台北／台中／高雄的月份從 2020～2025 年排起、列順序也不一樣），
+# 一律依 A～C 欄（基礎／服務／項目）找來源列，依財報 A 欄標題找目標列（2026-11）。
+# (服務, 項目, 財報 A 欄可能的標題, 先不更新只標底色)
+TARGETS = {
+    "財務": {"sheet": "股東損益表_財務", "basis": "服務基礎", "items": [
+        ("專業清潔", "當月服務收現", ("一般服務預收",), True),  # Jenny：營業額總表 2→財報 4（待確認）
+        ("專業清潔", "當月服務上月預收", ("一般服務本月", "一般服務收入"), True),  # 3→5（待確認）
+        ("專業清潔", "VIP服務", ("VIP券收入",), False),
+        ("專業清潔", "儲值金", ("儲值金收入",), False),
+        ("家電清潔", "總計", ("家電清潔收入",), False),
+        ("家電服務", "總計", ("家電清潔收入",), False),
+        ("收納服務", "總計", ("整理收納收入", "茉莉家事收入"), False),
+        ("水洗服務", "總計", ("水洗清潔收入",), False),
+        ("消毒服務", "總計", ("環境消毒收入",), False),
+    ]},
+    "現金": {"sheet": "股東損益表_現金", "basis": "現金基礎", "items": [
+        ("專業清潔", "當月服務收現", ("一般服務本月", "一般服務收入"), False),
+        ("專業清潔", "次月服務預收", ("一般服務預收",), False),
+        ("專業清潔", "VIP預收收現", ("VIP券預收", "VIP券收入"), False),
+        ("專業清潔", "儲值金預收", ("儲值金收入",), True),  # 18 還是 19 列待確認
+        ("家電清潔", "總計", ("家電清潔收入",), False),
+        ("家電服務", "總計", ("家電清潔收入",), False),
+        ("收納服務", "總計", ("整理收納收入", "茉莉家事收入"), False),
+        ("水洗服務", "總計", ("水洗清潔收入",), False),
+        ("消毒服務", "總計", ("環境消毒收入",), False),
+    ]},
+}
 NAME_PATTERNS = ("{year}{area}營業額總表", "{year}營業額總表-{area}")
 
 
@@ -38,17 +57,16 @@ def column_letter(index: int) -> str:
     return letters
 
 
-def _cell(rows: list[list], row: int, col: int):
-    values = rows[row - 1] if 0 < row <= len(rows) else []
-    return values[col] if 0 <= col < len(values) else ""
+def _clean(value) -> str:
+    return "".join(str(value or "").split())
 
 
 def _number(value):
-    """營業額總表的格子：數字照用；「-」＝0；空白回傳 None（不貼）。"""
+    """營業額總表的格子：數字照用；「-」＝0；空白、#REF!／#N-A 回傳 None（不貼）。"""
     if isinstance(value, (int, float)):
         return value
     text = str(value or "").strip().replace(",", "")
-    if not text:
+    if not text or text.startswith("#"):
         return None
     if text.strip("- ") == "":
         return 0
@@ -59,28 +77,48 @@ def _number(value):
     return int(number) if number.is_integer() else number
 
 
-def plan_updates(source: list[list], target_headers: dict[str, list], period: str) -> tuple[dict[str, list], list[str]]:
-    """純邏輯：source＝營業額總表「財報總表」A1:P30（未格式化值），target_headers＝{財務／現金: 財報第 1 列}。
-    回傳 ({財務／現金: [(列, 欄字母, 值, 先不更新只標底色)]}, 說明)。"""
+def _month_column(source: list[list], basis: str, label: str) -> int:
+    """月份欄：先找這個基礎自己的標題列（新竹／桃園現金基礎在第 14 列），沒有就用第 1 列。"""
+    candidates = [row for row in source if row and _clean(row[0]) == basis and label in [_clean(v) for v in row]]
+    candidates.append(source[0] if source else [])
+    for row in candidates:
+        cells = [_clean(v) for v in row]
+        if label in cells:
+            return cells.index(label)
+    return -1
+
+
+def plan_updates(source: list[list], target_labels: dict[str, list], target_headers: dict[str, list],
+                 period: str) -> tuple[dict[str, list], list[str]]:
+    """純邏輯：source＝營業額總表「財報總表」（未格式化值）；target_labels＝{財務／現金: 財報 A 欄}；
+    target_headers＝{財務／現金: 財報第 1 列}。回傳 ({財務／現金: [(列, 欄字母, 值, 先不更新只標底色)]}, 說明)。"""
     label = f"{period[:4]}.{period[4:]}"
     plans: dict[str, list] = {}
     notes: list[str] = []
     for kind, spec in TARGETS.items():
-        source_header = [str(v).strip() for v in (source[spec["header_row"] - 1] if len(source) >= spec["header_row"] else [])]
-        if label not in source_header:
-            notes.append(f"{kind}：營業額總表第 {spec['header_row']} 列找不到 {label}")
+        src_col = _month_column(source, spec["basis"], label)
+        if src_col < 0:
+            notes.append(f"{kind}：營業額總表找不到 {label} 欄")
             continue
-        src_col = source_header.index(label)
-        header = [str(v).strip() for v in target_headers.get(kind, [])]
+        header = [_clean(v) for v in target_headers.get(kind, [])]
         if f"{label}預估" not in header:
             notes.append(f"{kind}：「{spec['sheet']}」第 1 列找不到 {label}預估")
             continue
         dst_col = column_letter(header.index(f"{label}預估"))
+        titles = [_clean(r[0]) if r else "" for r in target_labels.get(kind, [])]
         plans[kind] = []
-        for src_row, dst_row in spec["rows"].items():
-            value = _number(_cell(source, src_row, src_col))
-            if value is not None:
-                plans[kind].append((dst_row, dst_col, value, dst_row in spec.get("hold", ())))
+        used = set()
+        for service, item, names, hold in spec["items"]:
+            row = next((r for r in source if len(r) > 2 and _clean(r[0]) == spec["basis"]
+                        and _clean(r[1]) == service and _clean(r[2]) == item), None)
+            if row is None:
+                continue
+            value = _number(row[src_col] if src_col < len(row) else "")
+            dst_row = next((titles.index(_clean(n)) + 1 for n in names if _clean(n) in titles), 0)
+            if value is None or not dst_row or dst_row in used:
+                continue
+            used.add(dst_row)
+            plans[kind].append((dst_row, dst_col, value, hold))
     return plans, notes
 
 
@@ -121,9 +159,11 @@ def sync_area(area: str, period: str, log: Callable[[str], None] = print, servic
         spreadsheetId=source_id, range=f"'{SOURCE_SHEET.format(year=year)}'!{SOURCE_RANGE}",
         valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
     locations = {kind: resolve_statement_location(area, kind, service=service) for kind in TARGETS}
-    headers = {kind: service.spreadsheets().values().get(spreadsheetId=sid, range=f"'{title}'!1:1").execute()
-               .get("values", [[]])[0] for kind, (sid, title) in locations.items()}
-    plans, notes = plan_updates(source, headers, period)
+    headers = {kind: (service.spreadsheets().values().get(spreadsheetId=sid, range=f"'{title}'!1:1").execute()
+                      .get("values", [[]]) or [[]])[0] for kind, (sid, title) in locations.items()}
+    labels = {kind: service.spreadsheets().values().get(spreadsheetId=sid, range=f"'{title}'!{TARGET_LABEL_RANGE}")
+              .execute().get("values", []) for kind, (sid, title) in locations.items()}
+    plans, notes = plan_updates(source, labels, headers, period)
     for note in notes:
         log(f"⚠️ {area} {note}")
     written = 0

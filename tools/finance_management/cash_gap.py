@@ -152,7 +152,22 @@ def is_permission_error(exc: Exception) -> bool:
     return "403" in text and ("permission" in text.lower() or "PERMISSION_DENIED" in text)
 
 
+_REPORT_CACHE: dict[tuple[str, str], tuple[float, list[list[object]]]] = {}
+REPORT_CACHE_SECONDS = 300
+
+
 def _report_values(area: str, report: str) -> list[list[object]]:
+    """讀各區財報（同一次執行 5 分鐘內同一個分頁只讀一次：富邦更新每區要用好幾次，重複讀會撞 429）。"""
+    key = (area, report)
+    cached = _REPORT_CACHE.get(key)
+    if cached and time.monotonic() - cached[0] < REPORT_CACHE_SECONDS:
+        return cached[1]
+    values = _report_values_now(area, report)
+    _REPORT_CACHE[key] = (time.monotonic(), values)
+    return values
+
+
+def _report_values_now(area: str, report: str) -> list[list[object]]:
     """讀各區財報。服務帳號沒有權限（403，例如桃園／新竹／高雄財報沒分享給服務帳號）時，
     改用 Jenny 本人的 OAuth 再讀一次。"""
     try:
@@ -412,6 +427,33 @@ def _ensure_cash_gap_sheet(service, spreadsheet_id: str) -> None:
     ).execute()
 
 
+def keep_previous_values(service, spreadsheet_id: str, results: dict, areas: list[str], date_text: str) -> list[str]:
+    """這次讀取失敗（429 之類）的格子，表上如果已經有同一天算好的數字，就沿用，不要蓋成錯誤。回傳沿用的項目。"""
+    try:
+        old = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id, range=f"'{CASH_GAP_SHEET_NAME}'!A1:G{len(CASH_GAP_ROWS) + 2}",
+            valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="FORMATTED_STRING").execute().get("values", [])
+    except Exception:
+        return []
+    header = [str(v).strip() for v in (old[0] if old else [])]
+    dates = old[1] if len(old) > 1 else []
+    by_label = {str(r[0]).strip(): r for r in old[2:] if r}
+    kept = []
+    for area in areas:
+        if area not in header:
+            continue
+        col = header.index(area)
+        if col >= len(dates) or str(dates[col]).strip().replace("-", "/") != date_text:
+            continue
+        for label, key in CASH_GAP_ROWS:
+            row = by_label.get(label, [])
+            previous = row[col] if col < len(row) else ""
+            if isinstance(results[area].get(key), str) and isinstance(previous, (int, float)):
+                results[area][key] = previous
+                kept.append(f"{area} {label}")
+    return kept
+
+
 def write_cash_gap_sheet(
     as_of: date, areas: list[str] | None = None, on_progress=None
 ) -> dict[str, dict[str, float]]:
@@ -423,6 +465,13 @@ def write_cash_gap_sheet(
     Streamlit 執行日誌）即時顯示進度，不用等全部地區跑完才看到結果。
     """
     areas = areas or CASH_GAP_AREAS
+    _REPORT_CACHE.clear()  # 每次試算重新讀最新的財報
+    try:  # 429（每分鐘讀取上限）自動等一下再重試
+        from services.google_api_retry import install_googleapiclient_retry
+
+        install_googleapiclient_retry()
+    except Exception:
+        pass
     log_execution("All財報現金缺口", "／".join(areas), "開始", f"期別截至 {as_of}")
     results = {}
     for i, area in enumerate(areas):
@@ -447,6 +496,9 @@ def write_cash_gap_sheet(
     _ensure_cash_gap_sheet(service, spreadsheet_id)
 
     date_text = as_of.strftime("%Y/%m/%d")
+    kept = keep_previous_values(service, spreadsheet_id, results, areas, date_text)
+    if kept and on_progress:
+        on_progress("這次讀取失敗、沿用表上同一天的數字：" + "、".join(kept), "warning")
     rows = [
         [""] + areas + ["ALL"],
         ["日期"] + [date_text] * len(areas) + [date_text],

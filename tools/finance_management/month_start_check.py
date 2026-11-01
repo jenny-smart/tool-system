@@ -238,12 +238,13 @@ def cash_gap_cells(values: list[list], period: str) -> dict[str, tuple[str, str]
 
 
 def newebpay_balance_cells(values: list[list], period: str) -> dict[str, tuple[str, str]]:
-    """現金缺口試算「藍新帳務日期／金額」兩列：日期在期別月底（含）之後＝已查這個月 ✅。高雄跟新竹同一帳號 —。"""
+    """現金缺口試算「藍新帳務日期／金額」兩列：日期在期別那個月（含）之後＝已查這個月 ✅
+    （帳戶明細第一筆是最後一次異動，月底前幾天沒交易就會早於月底，例如新竹 10/27）。高雄跟新竹同一帳號 —。"""
     from tools.newebpay.account_balance import AMOUNT_LABEL, DATE_LABEL, NO_BALANCE_AREAS
 
     header = [str(v).strip() for v in (values[0] if values else [])]
     rows = {_cell(r, 0): r for r in values}
-    end = period_end(period)
+    start = period_end(period).replace(day=1)
     cells = {}
     for area in AREAS:
         if area in NO_BALANCE_AREAS:
@@ -256,7 +257,7 @@ def newebpay_balance_cells(values: list[list], period: str) -> dict[str, tuple[s
             day = date.fromisoformat(when[:10].replace("/", "-"))
         except ValueError:
             day = None
-        cells[area] = (OK, f"{when} NT$ {amount}") if day and day >= end else \
+        cells[area] = (OK, f"{when} NT$ {amount}") if day and day >= start else \
             (FAIL, f"還沒查（目前 {when or '空白'}）")
     return cells
 
@@ -294,6 +295,13 @@ def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optiona
     from tools.finance_management import month_start_batch as msb
     from tools.invoice_center.invoice_archive import previous_prize_period
 
+    if not readers:  # 實際讀 Google：429（每分鐘讀取上限）自動等一下再重試，不要直接算 ❌
+        try:
+            from services.google_api_retry import install_googleapiclient_retry
+
+            install_googleapiclient_retry()
+        except Exception:
+            pass
     readers = readers or {}
     period = previous_period(day)
 
@@ -358,7 +366,7 @@ def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optiona
     rows.append(fixed_expense_row(day, log, readers))
     rows += statement_rows(day, readers, tasks=tasks or [])
     ignore_values, err = read("月初檢查不提醒", lambda: _read_master(IGNORE_SHEET, "A:D"))
-    if err and "Unable to parse range" not in err:
+    if err and "Unable to parse range" not in err and "HttpError 400" not in err:  # 還沒存過設定＝沒有這個分頁
         log(f"⚠️ {err}")
     return apply_ignored(rows, read_ignored(ignore_values or []))
 
@@ -747,10 +755,12 @@ def auto_fix(day: date, rows: list[dict], log: Callable[[str], None] = print, ru
 
 def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) -> list[dict]:
     now = now or datetime.now(TW_TZ)
-    fixed_up = auto_fix(now.date(), collect_rows(now.date(), log=log), log=log)
-    if fixed_up:
+    rows = collect_rows(now.date(), log=log)
+    fixed_up = auto_fix(now.date(), rows, log=log)
+    if fixed_up:  # 有補做才重新盤點（少讀一輪，避免 429）
         log("自動補做：" + "；".join(fixed_up))
-    todo = problems(collect_rows(now.date(), log=log), now.hour)
+        rows = collect_rows(now.date(), log=log)
+    todo = problems(rows, now.hour)
     try:
         clear_reminders(now.date(), log=log)
     except Exception as exc:
