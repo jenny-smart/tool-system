@@ -32,6 +32,7 @@ def _how(row: dict) -> str:
             "pdf": "排入本機 Agent（要鯨躍驗證碼）",
             "agent": "排入本機 Agent（藍新收退款／發票／帳務勾哪個做哪個，每區登入一次）",
             "cash_gap": "同時勾「藍新發票」：等本機 Agent 查完藍新發票金額再算；沒勾：按執行就直接重算",
+            "revenue_batch": "這裡直接補跑未完成地區；⑥–⑩與搬入營收總表＋財報分開執行",
             "statement": "台北／台中排入本機 Agent；其他地區由各區處理"}.get(row["action"], "")
 
 
@@ -114,7 +115,7 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     selected = [r for r, flag in zip(rows, edited[RUN_COLUMN]) if flag and r["runnable"]]
     for row in (r for r, flag in zip(rows, edited[RUN_COLUMN]) if flag and not r["runnable"]):
         st.caption(f"「{row['label']}」{'已完成' if row['done'] else '已排入或執行中'}，不會重複執行。")
-    st.caption("執行順序：月排程（已退款→預收→儲值金結算→儲值金預收，只跑沒完成的地區）→ 儲值金彙整 → 固定費用 → "
+    st.caption("執行順序：月排程 → 儲值金彙整 → 財報營收⑥–⑩ → 搬入營收總表＋財報 → 固定費用 → "
                "紙本／中獎更新 → 排入本機 Agent（富邦／元大、台中PDF、藍新、鯨躍、現金缺口）。"
                "月排程與儲值金要幾分鐘，請勿關閉頁面。")
     if st.button(f"▶️ 執行勾選的 {len(selected)} 個功能", key=f"{PREFIX}_do", disabled=not selected):

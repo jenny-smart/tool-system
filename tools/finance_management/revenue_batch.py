@@ -1,4 +1,4 @@
-"""【整合執行】財報營收：salary-system 金流 ⑥～⑫＋營收總表貼財報。"""
+"""【整合執行】財報營收：⑥–⑩ 金流對帳／搬入營收總表＋財報，分成兩個任務。"""
 from __future__ import annotations
 
 import importlib
@@ -12,15 +12,21 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 AREAS = ["台北", "台中", "桃園", "新竹", "高雄"]
+RECONCILE_AREAS = ["台北", "台中", "桃園", "新竹"]
 SALARY_MASTER_ID = "1GdW3FSZ0s3TGeYiNx3JtYvED_RRfJjiFYwLFeYHZ1hA"
 STEPS = (
     ("convert", "⑥ 金流對帳轉檔"),
     ("refund", "⑦ 搬運退款＋預收"),
     ("invoice", "⑧ 搬運發票＋藍新"),
     ("atm", "⑨ 搬運ATM"),
+    ("reconcile", "⑩ 金流對帳彙總＋檢核"),
     ("mark", "⑪ 立帳標記"),
     ("export", "⑫ 搬入營收總表"),
     ("statement", "營收總表→財報（財務／現金當月預估）"),
+)
+GROUPS = (
+    ("cash_flow", "⑥–⑩ 金流對帳彙總＋檢核", ("convert", "refund", "invoice", "atm", "reconcile")),
+    ("revenue", "搬入營收總表＋財報", ("mark", "export", "statement")),
 )
 AUDIT_SHEET = "財報營收盤點"
 AUDIT_HEADERS = ["完成時間", "地區", "期別", "功能", "狀態", "說明"]
@@ -46,7 +52,11 @@ def _salary_module():
         return importlib.import_module("modules.payment_reconciliation")
     except ModuleNotFoundError:
         configured = os.getenv("SALARY_SYSTEM_PATH", "").strip()
-        root = Path(configured).expanduser() if configured else Path(__file__).resolve().parents[3] / "salary-system"
+        candidates = ([Path(configured).expanduser()] if configured else []) + [
+            Path(__file__).resolve().parents[3] / "salary-system",  # 本機：tool-system 與 salary-system 並列
+            Path(__file__).resolve().parents[2] / "salary-system",  # GitHub Actions：checkout 到專案內
+        ]
+        root = next((p for p in candidates if (p / "modules" / "payment_reconciliation.py").exists()), candidates[0])
         if not (root / "modules" / "payment_reconciliation.py").exists():
             raise RuntimeError("找不到 salary-system；請設定 SALARY_SYSTEM_PATH")
         sys.path.insert(0, str(root))
@@ -122,7 +132,7 @@ def _legacy_done(values: list[list], period: str, step: str) -> bool:
                for task in tasks)
 
 
-def scan(period: str, areas: list[str], service=None, audit_values=None,
+def _scan_steps(period: str, areas: list[str], service=None, audit_values=None,
          legacy_values=None) -> list[dict]:
     """盤點地區×功能；最新成功紀錄為完成，最新失敗或無紀錄為未完成。"""
     from tools.common.config_loader import get_sheets_service
@@ -163,6 +173,31 @@ def scan(period: str, areas: list[str], service=None, audit_values=None,
             results.append({"area": area, "step": step, "label": label, "done": done,
                             "status": "✅ 完成" if done else "❌ 未完成", "note": note})
     return results
+
+
+def scan(period: str, areas: list[str], service=None, audit_values=None,
+         legacy_values=None) -> list[dict]:
+    """兩個任務的盤點：⑥–⑩、搬入營收總表＋財報。"""
+    details = _scan_steps(period, areas, service=service, audit_values=audit_values,
+                          legacy_values=legacy_values)
+    by_key = {(row["area"], row["step"]): row for row in details}
+    results = []
+    for area in areas:
+        for group, label, steps in GROUPS:
+            if group == "cash_flow" and area not in RECONCILE_AREAS:
+                continue
+            parts = [by_key[(area, step)] for step in steps]
+            done = all(row["done"] for row in parts)
+            missing = [row["label"] for row in parts if not row["done"]]
+            results.append({"area": area, "step": group, "label": label, "done": done,
+                            "status": "✅ 完成" if done else "❌ 未完成",
+                            "note": "全部完成" if done else "未完成：" + "、".join(missing)})
+    return results
+
+
+def expand_groups(groups: list[str]) -> list[str]:
+    mapping = {key: steps for key, _label, steps in GROUPS}
+    return [step for group in groups for step in mapping.get(group, (group,))]
 
 
 def _open_sheet(file_id: str):
@@ -256,6 +291,14 @@ def run(period: str, areas: list[str], steps: list[str], log: Callable[[str], No
                 elif step == "refund": module.move_refund_and_prepaid(cfg["root_folder_id"], salary_period, area, log)
                 elif step == "invoice": module.move_invoice_and_bluenew(cfg["root_folder_id"], salary_period, area, log)
                 elif step == "atm": module.move_atm_from_allowance(cfg.get("allowance_id", ""), cfg["root_folder_id"], salary_period, area, log)
+                elif step == "reconcile":
+                    result = module.copy_template_to_reconciliation(cfg["root_folder_id"], salary_period, area, log)
+                    module.setup_reconciliation_marks(cfg["root_folder_id"], salary_period, area, log)
+                    checked = module.check_reconciliation(cfg["root_folder_id"], salary_period, area, log)
+                    reverse = module.reverse_check_sources(cfg["root_folder_id"], salary_period, area, log)
+                    issues = len(checked.get("issues", []))
+                    missing = sum(len(value.get("missing", [])) for value in reverse.values())
+                    log(f"🔎 【{area}】⑩ 彙總 {result['count']} 筆；檢核異常 {issues} 筆；反向缺漏 {missing} 筆")
                 elif step == "mark": _mark_accounts(module, cfg, salary_period, area, log)
                 elif step == "export": _export(module, cfg, salary_period, area, log)
                 elif step == "statement":
