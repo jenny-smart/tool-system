@@ -10,6 +10,7 @@ from tools.bank_statement.yuanta_salary_upload import (
     _select_file_format,
     _upload_staged,
     _normalized_text,
+    _visible_control,
     upload_salary_files,
     xlsx_total,
 )
@@ -53,6 +54,12 @@ def test_yuanta_upload_uses_bank_page_button_order():
 def test_yuanta_click_can_accept_deposit_warning_dialog():
     source = inspect.getsource(_click_text)
     assert 'frame.page.once("dialog", lambda dialog: dialog.accept())' in source
+
+
+def test_yuanta_controls_include_image_buttons_and_alt_labels():
+    source = inspect.getsource(_visible_control)
+    assert "input[type='image']" in source
+    assert 'get_attribute("alt")' in source
 
 
 def test_yuanta_file_format_targets_the_actual_jsf_field():
