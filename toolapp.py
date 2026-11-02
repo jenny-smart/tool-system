@@ -4014,6 +4014,7 @@ FINANCE_TASKS = [
     {"name": "【整合執行】富邦內部請款", "handler": None, "enabled": True},
     {"name": "【整合執行】固定費用（辦公室租金）", "handler": None, "enabled": True},
     {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
+    {"name": "【整合執行】財報營收", "handler": None, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
     {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
@@ -4056,7 +4057,6 @@ FINANCE_TASKS = [
     {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
-    {"name": "【財報】營收總表→財報｜貼入當月預估（股東損益表_財務／現金）", "handler": run_revenue_to_statement, "enabled": True},
     {"name": "【財報】年度review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
     {"name": "【財報】年度review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
     {"name": "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）", "handler": run_review_monthly, "enabled": True},
@@ -4551,6 +4551,16 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_accounting_fee_batch = fresh_module("tools.finance_management.accounting_fee_batch_ui").render
 
     render_accounting_fee_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【整合執行】財報營收":
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.finance_management.revenue_batch")
+    render_revenue_batch = fresh_module("tools.finance_management.revenue_batch_ui").render
+
+    render_revenue_batch(add_log, st.session_state.get("username", ""))
     LOG_PLACEHOLDER = st.empty()
     render_log()
     st.stop()
