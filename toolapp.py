@@ -4700,13 +4700,13 @@ with date_col:
                 key="finance_yuanta_salary_internal",
             )
             yuanta_salary_transfer_fubon = st.checkbox(
-                "先由富邦匯總金額到元大帳戶",
+                "元大薪資檔全部上傳完成後，由富邦匯總金額到元大帳戶",
                 value=True,
                 key="finance_yuanta_salary_transfer_fubon",
             )
             st.caption(
-                "Agent 會先列出檔案與合計；富邦轉帳須人工確認，成功後自動更新富邦明細，"
-                "再到元大上傳並審核至待放行。"
+                "Agent 會先列出檔案與合計，略過已待放行檔案並續傳其餘檔案；"
+                "元大全部完成後才執行富邦轉帳，成功後自動更新富邦明細。"
             )
         elif selected_function == "【元大銀行】檢查薪資付款狀態":
             st.markdown('<div class="field-label">📆 付款日期</div>', unsafe_allow_html=True)
@@ -6150,7 +6150,7 @@ if system_type == "finance_management" and selected_function == "【元大銀行
         _yuanta_total = sum(int(row["amount"]) for row in _preview_rows)
         st.markdown(f"**本次合計：NT$ {_yuanta_total:,}**")
         if yuanta_salary_transfer_fubon:
-            st.info(f"執行時將先由富邦轉 NT$ {_yuanta_total:,} 至元大{selected_area_value}；銀行端須人工確認。")
+            st.info(f"元大檔案全部上傳完成後，將由富邦轉 NT$ {_yuanta_total:,} 至元大{selected_area_value}；銀行端須人工確認。")
         else:
             st.info("本次未勾選富邦轉元大，只執行元大薪資檔上傳待放行。")
     else:

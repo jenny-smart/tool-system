@@ -47,6 +47,7 @@ from tools.staff_payroll import ROOT_FOLDER_ID as INTERNAL_SALARY_ROOT_ID
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SUPPORTED_AREAS = tuple(AREA_FOLDER_NAMES)
+FUBON_COMPLETION_FILE = "yuanta_salary_fubon_completion.json"
 
 
 @dataclass(frozen=True)
@@ -344,36 +345,100 @@ def _set_file(page: Any, path: Path) -> None:
 
 
 def _visible_control(scope: Any, text: str) -> Any | None:
-    controls = scope.locator(
-        "a,button,input[type='button'],input[type='submit'],input[type='image']"
-    )
-    for index in range(controls.count()):
-        item = controls.nth(index)
-        if not item.is_visible():
-            continue
-        label = (
-            item.get_attribute("value")
-            or item.get_attribute("alt")
-            or item.get_attribute("aria-label")
-            or item.get_attribute("title")
-            or item.inner_text()
-            or ""
+    try:
+        controls = scope.locator(
+            "a,button,input[type='button'],input[type='submit'],input[type='image']"
         )
-        if _normalized_text(label) == _normalized_text(text):
-            return item
+        for index in range(controls.count()):
+            item = controls.nth(index)
+            if not item.is_visible():
+                continue
+            label = (
+                item.get_attribute("value")
+                or item.get_attribute("alt")
+                or item.get_attribute("aria-label")
+                or item.get_attribute("title")
+                or item.inner_text()
+                or ""
+            )
+            if _normalized_text(label) == _normalized_text(text):
+                return item
+    except Exception:
+        # JSF 換頁時舊 frame 會瞬間 detached；交由外層重新取得最新 frame。
+        return None
     return None
+
+
+def _click_visible_control(page: Any, text: str, timeout_seconds: int = 10) -> bool:
+    """Click a control while tolerating JSF frame replacement during navigation."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        for frame in _all_frames(page):
+            item = _visible_control(frame, text)
+            if item is None:
+                continue
+            try:
+                item.click(timeout=5_000)
+                return True
+            except Exception:
+                continue
+        page.wait_for_timeout(250)
+    return False
+
+
+def _fubon_completion_path(accounts_file: Path) -> Path:
+    return accounts_file.expanduser().parent / FUBON_COMPLETION_FILE
+
+
+def _fubon_completion_key(area: str, period: str, amount: int) -> str:
+    return f"{area}|{period}|{amount}"
+
+
+def _fubon_completion_stage(
+    accounts_file: Path, area: str, period: str, amount: int
+) -> str:
+    path = _fubon_completion_path(accounts_file)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return ""
+    record = data.get(_fubon_completion_key(area, period, amount), {})
+    return str(record.get("stage") or "")
+
+
+def _mark_fubon_completion(
+    accounts_file: Path, area: str, period: str, amount: int, stage: str
+) -> None:
+    path = _fubon_completion_path(accounts_file)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        data = {}
+    data[_fubon_completion_key(area, period, amount)] = {
+        "stage": stage,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    temporary.replace(path)
 
 
 def _pending_list_table(page: Any) -> Any | None:
     for frame in _all_frames(page):
-        tables = frame.locator("table")
-        for index in range(tables.count()):
-            table = tables.nth(index)
-            if not table.is_visible():
-                continue
-            text = _normalized_text(table.inner_text())
-            if "案件編號" in text and "總金額" in text and "檢視" in text:
-                return table
+        try:
+            tables = frame.locator("table")
+            for index in range(tables.count()):
+                table = tables.nth(index)
+                if not table.is_visible():
+                    continue
+                text = _normalized_text(table.inner_text())
+                if "案件編號" in text and "總金額" in text and "檢視" in text:
+                    return table
+        except Exception:
+            continue
     return None
 
 
@@ -381,10 +446,13 @@ def _pending_detail(page: Any, timeout_seconds: int = 20) -> tuple[int, str]:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         for frame in _all_frames(page):
-            body = frame.locator("body")
-            if not body.count():
+            try:
+                body = frame.locator("body")
+                if not body.count():
+                    continue
+                text = body.inner_text()
+            except Exception:
                 continue
-            text = body.inner_text()
             if "交易狀態" not in text or "付款總金額" not in text or "摘要" not in text:
                 continue
             amount_match = re.search(r"付款總金額\s*([\d,]+)", text)
@@ -401,12 +469,8 @@ def _pending_detail(page: Any, timeout_seconds: int = 20) -> tuple[int, str]:
 def pending_salary_batches(page: Any) -> list[tuple[int, str]]:
     """儀表板／進度檢視／薪資臺幣整批付款×待放行，讀取現有案件。"""
     # 若人員上次停在案件明細，先關閉再從儀表板重新進入，避免讀到舊畫面。
-    for frame in _all_frames(page):
-        close = _visible_control(frame, "關閉")
-        if close is not None:
-            close.click(timeout=5_000)
-            page.wait_for_timeout(500)
-            break
+    if _click_visible_control(page, "關閉", timeout_seconds=2):
+        page.wait_for_timeout(500)
     _click_text(page, "儀表板")
     _click_text(page, "進度檢視")
 
@@ -414,15 +478,18 @@ def pending_salary_batches(page: Any) -> list[tuple[int, str]]:
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline and pending_link is None:
         for frame in _all_frames(page):
-            rows = frame.locator("tr")
-            for index in range(rows.count()):
-                row = rows.nth(index)
-                if not row.is_visible() or "薪資臺幣整批付款" not in row.inner_text():
-                    continue
-                candidate = row.locator('a[id*="PASS_CTXSA001"]')
-                if candidate.count() and candidate.first.is_visible():
-                    pending_link = candidate.first
-                    break
+            try:
+                rows = frame.locator("tr")
+                for index in range(rows.count()):
+                    row = rows.nth(index)
+                    if not row.is_visible() or "薪資臺幣整批付款" not in row.inner_text():
+                        continue
+                    candidate = row.locator('a[id*="PASS_CTXSA001"]')
+                    if candidate.count() and candidate.first.is_visible():
+                        pending_link = candidate.first
+                        break
+            except Exception:
+                continue
             if pending_link is not None:
                 break
         if pending_link is None:
@@ -456,14 +523,7 @@ def pending_salary_batches(page: Any) -> list[tuple[int, str]]:
             continue
         view.click(timeout=5_000)
         batches.append(_pending_detail(page))
-        closed = False
-        for frame in _all_frames(page):
-            close = _visible_control(frame, "關閉")
-            if close is not None:
-                close.click(timeout=5_000)
-                closed = True
-                break
-        if not closed:
+        if not _click_visible_control(page, "關閉"):
             raise RuntimeError("元大待放行案件明細找不到關閉按鈕")
         page.wait_for_timeout(500)
     print(
@@ -556,6 +616,10 @@ def transfer_total_from_fubon(
     """Fill a Fubon transfer to the saved Yuanta account, then sync today's statement."""
     if amount <= 0:
         raise ValueError("富邦匯往元大的總金額必須大於 0")
+    completion_stage = _fubon_completion_stage(accounts_file, area, period, amount)
+    if completion_stage == "statement_completed":
+        print("富邦轉帳與明細同步已有完成記錄，本次略過，避免重複匯款。", flush=True)
+        return
     account = load_account("fubon", area, accounts_file.expanduser())
     destination = f"元大{area}"
     with sync_playwright() as playwright, ExitStack() as cleanup:
@@ -563,7 +627,9 @@ def transfer_total_from_fubon(
         page = ensure_login(context, account)
         cleanup.callback(fubon_logout_quietly, context, page)  # 轉帳完（或失敗）一律登出富邦
         stage = transfer_page_stage(page, str(amount))
-        if stage in {"confirmation", "completed"}:
+        if completion_stage == "transfer_completed":
+            print("富邦轉帳已有完成記錄，不重複匯款；接續同步富邦明細。", flush=True)
+        elif stage in {"confirmation", "completed"}:
             print(f"偵測到富邦目前停在{stage}階段，從現有畫面接續。", flush=True)
         else:
             page = open_transfer_form(page)
@@ -577,15 +643,22 @@ def transfer_total_from_fubon(
             fill_row_inputs(page, "給對方", [memo])
             print(f"富邦已填入：NT$ {amount:,}，轉入常用帳號「{destination}」。", flush=True)
             print("請人工核對並完成富邦交易；確認成功頁後系統才會繼續。", flush=True)
-        wait_user_completed_transfer(
-            page,
-            require_completed_at=True,
-            expected_amount=str(amount),
-        )
+        if completion_stage != "transfer_completed":
+            wait_user_completed_transfer(
+                page,
+                require_completed_at=True,
+                expected_amount=str(amount),
+            )
+            _mark_fubon_completion(
+                accounts_file, area, period, amount, "transfer_completed"
+            )
         try:
             today = datetime.now().date()
             print(f"富邦轉帳完成，開始同步 {area} 富邦明細（財報最後一列日期～今天）。", flush=True)
             run_download(context, page, account, report_query_start(account, today), today)
+            _mark_fubon_completion(
+                accounts_file, area, period, amount, "statement_completed"
+            )
             print(f"{area} 富邦明細更新完成。", flush=True)
         except Exception as exc:
             raise RuntimeError(
@@ -600,7 +673,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--period", required=True, help="YYYYMM-1 或 YYYYMM-2")
     parser.add_argument("--no-contract", action="store_true", help="不找專員承攬費／工具包押金")
     parser.add_argument("--internal", action="store_true", help="一併上傳內勤薪資元大帳戶檔")
-    parser.add_argument("--fubon-transfer", action="store_true", help="先由富邦匯總額到該地區元大帳戶")
+    parser.add_argument("--fubon-transfer", action="store_true", help="元大上傳完成後由富邦匯總額到該地區元大帳戶")
     parser.add_argument("--expected-plan", help="畫面預覽確認過的檔名與金額 JSON")
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
@@ -630,12 +703,13 @@ def main() -> int:
     total = sum(item.amount for item in files)
     print(f"合計：NT$ {total:,}", flush=True)
     uploaded, skipped = upload_salary_files(files, args.area, args.cdp_url, args.accounts_file)
+    if skipped:
+        print(
+            "已略過待放行案件，其他尚未完成的元大檔案已接續處理："
+            + "、".join(item.name for item in skipped),
+            flush=True,
+        )
     if args.fubon_transfer:
-        if skipped:
-            raise RuntimeError(
-                "元大已存在待放行案件，為避免重複匯款，本次不執行富邦轉帳；"
-                "請先人工確認元大與富邦既有紀錄"
-            )
         transfer_total_from_fubon(
             total,
             args.area,

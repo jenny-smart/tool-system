@@ -7,6 +7,8 @@ from openpyxl import Workbook
 
 from tools.bank_statement.yuanta_salary_upload import (
     _click_text,
+    _fubon_completion_stage,
+    _mark_fubon_completion,
     _select_file_format,
     _submit_import_for_review,
     _upload_staged,
@@ -59,6 +61,14 @@ def test_yuanta_controls_include_image_buttons_and_alt_labels():
     source = inspect.getsource(_visible_control)
     assert "input[type='image']" in source
     assert 'get_attribute("alt")' in source
+
+
+def test_detached_yuanta_frame_is_ignored_and_retried():
+    class DetachedFrame:
+        def locator(self, _selector):
+            raise RuntimeError("Frame was detached")
+
+    assert _visible_control(DetachedFrame(), "關閉") is None
 
 
 def test_all_yuanta_salary_files_share_submit_flow():
@@ -120,3 +130,19 @@ def test_pending_check_targets_salary_pending_release_cross_cell():
     assert '"儀表板"' in source
     assert '"進度檢視"' in source
     assert 'PASS_CTXSA001' in source
+
+
+def test_fubon_completion_marker_prevents_duplicate_transfer(tmp_path):
+    accounts_file = tmp_path / "bank_accounts.json"
+    _mark_fubon_completion(accounts_file, "台北", "202610-2", 123456, "transfer_completed")
+    assert _fubon_completion_stage(accounts_file, "台北", "202610-2", 123456) == "transfer_completed"
+    _mark_fubon_completion(accounts_file, "台北", "202610-2", 123456, "statement_completed")
+    assert _fubon_completion_stage(accounts_file, "台北", "202610-2", 123456) == "statement_completed"
+
+
+def test_existing_yuanta_batches_do_not_block_remaining_files_or_fubon():
+    from tools.bank_statement import yuanta_salary_upload as module
+
+    source = inspect.getsource(module.main)
+    assert "其他尚未完成的元大檔案已接續處理" in source
+    assert "本次不執行富邦轉帳" not in source
