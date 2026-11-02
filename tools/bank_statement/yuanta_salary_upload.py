@@ -495,11 +495,11 @@ def upload_salary_files(
                 _upload_staged(page, account, upload_staged)
                 return [item for item, _path in upload_staged], skipped
             finally:
-                logout_yuanta_quietly()  # 送審完（或失敗）一律登出
+                logout_yuanta_quietly()  # 審核完（或失敗）一律登出
 
 
 def _upload_staged(page: Any, account: Any, staged: list) -> None:
-    """逐檔上傳、選付款帳號（末五碼）、送審。"""
+    """逐檔上傳、選付款帳號（末五碼）、審核。"""
     for item, path in staged:
         print(f"上傳中：{item.name}（NT$ {item.amount:,}）", flush=True)
         _click_text(page, "收付款服務")
@@ -514,8 +514,8 @@ def _upload_staged(page: Any, account: Any, staged: list) -> None:
         _select_option_containing(page, payment_account)
         _select_option_containing(page, item.summary, "摘要")
         _click_text(page, "確定匯入")
-        _click_text(page, "送審")
-        _click_text(page, "確認送審")
+        _click_text(page, "審核")
+        _click_text(page, "確認審核")
         print(f"已送待放行：{item.name}", flush=True)
 
 

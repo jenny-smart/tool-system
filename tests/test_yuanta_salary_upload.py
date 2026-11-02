@@ -42,8 +42,8 @@ def test_yuanta_upload_uses_bank_page_button_order():
         '_select_option_containing(page, payment_account)',
         '_select_option_containing(page, item.summary, "摘要")',
         '_click_text(page, "確定匯入")',
-        '_click_text(page, "送審")',
-        '_click_text(page, "確認送審")',
+        '_click_text(page, "審核")',
+        '_click_text(page, "確認審核")',
     ]
     positions = [source.index(step) for step in steps]
     assert positions == sorted(positions)
