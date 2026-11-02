@@ -266,6 +266,63 @@ def _select_option_containing(
     raise RuntimeError(f"元大頁面找不到選項「{option_text}」")
 
 
+def _select_file_format(page: Any, timeout_seconds: int = 30) -> None:
+    """直接鎖定元大薪資上傳的檔案格式欄位，並確認網站已選取成功。"""
+    expected_text = "臺幣薪轉格式Excel"
+    expected = _normalized_text(expected_text)
+    deadline = time.monotonic() + timeout_seconds
+    observed: list[str] = []
+    while time.monotonic() < deadline:
+        observed = []
+        for frame in _all_frames(page):
+            selects = frame.locator(
+                'select[id$="fileFormatCombo"], select[name$="fileFormatCombo"]'
+            )
+            for index in range(selects.count()):
+                select = selects.nth(index)
+                try:
+                    if not select.is_visible():
+                        continue
+                    options = select.evaluate(
+                        "el => Array.from(el.options).map(o => "
+                        "({text: o.textContent || '', value: o.value}))"
+                    )
+                except Exception:
+                    continue
+                observed.extend(str(option.get("text") or "").strip() for option in options)
+                target = next(
+                    (
+                        option for option in options
+                        if expected == _normalized_text(option.get("text"))
+                    ),
+                    None,
+                )
+                if not target:
+                    continue
+                value = str(target.get("value", ""))
+                try:
+                    select.select_option(value=value, timeout=3_000)
+                except Exception:
+                    # JSF 偶爾在畫面切換後攔截 Playwright 的原生選取；
+                    # 退回設定值並送出 input/change，效果與人工選取一致。
+                    select.evaluate(
+                        """(el, value) => {
+                          el.value = value;
+                          el.dispatchEvent(new Event('input', {bubbles: true}));
+                          el.dispatchEvent(new Event('change', {bubbles: true}));
+                        }""",
+                        value,
+                    )
+                selected = select.evaluate(
+                    "el => el.options[el.selectedIndex]?.textContent || ''"
+                )
+                if expected == _normalized_text(selected):
+                    return
+        page.wait_for_timeout(250)
+    detail = "、".join(dict.fromkeys(item for item in observed if item)) or "未讀到選項"
+    raise RuntimeError(f"元大檔案格式欄位找不到「{expected_text}」；目前選項：{detail}")
+
+
 def _set_file(page: Any, path: Path) -> None:
     for frame in _all_frames(page):
         item = _visible(frame.locator("input[type=file]"))
@@ -306,7 +363,7 @@ def _upload_staged(page: Any, account: Any, staged: list) -> None:
         _click_text(page, "收付款服務")
         _click_text(page, "薪資付款")
         _click_text(page, "薪資臺幣整批付款")
-        _select_option_containing(page, "臺幣薪轉格式Excel")
+        _select_file_format(page)
         _set_file(page, path)
         _click_text(page, "確定")
         # 帳號顯示名稱可能是「元大大同-綜合活期-...」等不同格式；
