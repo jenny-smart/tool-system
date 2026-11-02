@@ -4014,7 +4014,8 @@ FINANCE_TASKS = [
     {"name": "【整合執行】富邦內部請款", "handler": None, "enabled": True},
     {"name": "【整合執行】固定費用（辦公室租金）", "handler": None, "enabled": True},
     {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
-    {"name": "【整合執行】財報營收", "handler": None, "enabled": True},
+    {"name": "【整合執行】財報營收｜⑥–⑩ 金流對帳", "handler": None, "enabled": True},
+    {"name": "【整合執行】財報營收｜⑪–⑬ 搬入營收總表＋財報", "handler": None, "enabled": True},
     {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
     {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
@@ -4555,12 +4556,16 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_log()
     st.stop()
 
-if system_type == "finance_management" and selected_function == "【整合執行】財報營收":
+if system_type == "finance_management" and selected_function in (
+    "【整合執行】財報營收｜⑥–⑩ 金流對帳",
+    "【整合執行】財報營收｜⑪–⑬ 搬入營收總表＋財報",
+):
     st.markdown("</div>", unsafe_allow_html=True)
     fresh_module("tools.finance_management.revenue_batch")
     render_revenue_batch = fresh_module("tools.finance_management.revenue_batch_ui").render
 
-    render_revenue_batch(add_log, st.session_state.get("username", ""))
+    revenue_group = "cash_flow" if "⑥–⑩" in selected_function else "revenue"
+    render_revenue_batch(add_log, st.session_state.get("username", ""), revenue_group)
     LOG_PLACEHOLDER = st.empty()
     render_log()
     st.stop()

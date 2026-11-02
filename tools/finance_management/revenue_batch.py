@@ -22,7 +22,7 @@ STEPS = (
     ("reconcile", "⑩ 金流對帳彙總＋檢核"),
     ("mark", "⑪ 立帳標記"),
     ("export", "⑫ 搬入營收總表"),
-    ("statement", "營收總表→財報（財務／現金當月預估）"),
+    ("statement", "⑬ 營收總表→財報（財務／現金當月預估）"),
 )
 GROUPS = (
     ("cash_flow", "⑥–⑩ 金流對帳彙總＋檢核", ("convert", "refund", "invoice", "atm", "reconcile")),
