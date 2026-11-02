@@ -532,12 +532,17 @@ def _upload_staged(page: Any, account: Any, staged: list) -> None:
         payment_account = account.bank_account[-5:] if account.bank_account else "元大大同"
         _select_option_containing(page, payment_account)
         _select_option_containing(page, item.summary, "摘要")
-        # 工具包押金摘要為「費用」，元大會額外跳出非薪轉優惠提示；
-        # Playwright 若未註冊 handler 會自動取消，畫面便會留在本頁。
-        _click_text(page, "確定匯入", accept_dialog=item.summary == "費用")
-        _click_text(page, "送審")
-        _click_text(page, "確認送審")
+        _submit_import_for_review(page, accept_import_warning=item.summary == "費用")
         print(f"已送待放行：{item.name}", flush=True)
+
+
+def _submit_import_for_review(page: Any, *, accept_import_warning: bool) -> None:
+    """三種薪資檔共用：確定匯入 → 送審 → 確認送審。"""
+    # 僅工具包押金摘要為「費用」，會多一個非薪轉優惠提示。
+    _click_text(page, "確定匯入", accept_dialog=accept_import_warning)
+    # 元大送審也使用瀏覽器確認對話框；未接受時按鈕看似按下但不換頁。
+    _click_text(page, "送審", accept_dialog=True)
+    _click_text(page, "確認送審")
 
 
 def transfer_total_from_fubon(
