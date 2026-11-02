@@ -8,6 +8,7 @@ from tools.finance_management.batch_ui_common import checked, reset_select_all, 
 
 PREFIX = "revenue_batch"
 STATE_KEY = f"{PREFIX}_scan_result"
+CONFIRM_KEY = f"{PREFIX}_confirm"
 
 
 def render(log, username=""):
@@ -34,16 +35,38 @@ def render(log, username=""):
     edited = st.data_editor(table, hide_index=True, width="stretch", key=editor_key,
                             disabled=[c for c in table.columns if c != "執行"])
     selected = [(row, flag) for row, flag in zip(rows, edited["執行"]) if flag]
-    st.caption("依序執行 ⑥→⑦→⑧→⑨→⑪→⑫，再貼入財報；單一步驟失敗仍會繼續下一步。")
-    if st.button(f"▶️ 補跑勾選的 {len(selected)} 項", disabled=not selected, key="revenue_batch_run"):
+    signature = (period, tuple(areas), tuple((row["area"], row["step"]) for row, _flag in selected))
+    st.caption("勾選後先重新盤點確認；已在這段時間完成的項目會自動排除，不會重複執行。")
+    if st.button(f"🔄 重新盤點並確認勾選的 {len(selected)} 項", disabled=not selected,
+                 key="revenue_batch_precheck"):
+        with st.spinner("執行前重新盤點中…"):
+            refreshed = batch.scan(period, areas)
+        wanted = set(signature[2])
+        pending = [row for row in refreshed if (row["area"], row["step"]) in wanted and not row["done"]]
+        newly_done = [row for row in refreshed if (row["area"], row["step"]) in wanted and row["done"]]
+        st.session_state[CONFIRM_KEY] = (signature, pending, newly_done)
+    confirmation = st.session_state.get(CONFIRM_KEY)
+    if not confirmation or confirmation[0] != signature:
+        return
+    pending, newly_done = confirmation[1], confirmation[2]
+    if newly_done:
+        st.info("重新盤點後已完成、將不重複執行：" + "、".join(
+            f"{row['area']}／{row['label']}" for row in newly_done))
+    if not pending:
+        st.success("重新盤點後，勾選項目都已完成，沒有需要執行的功能。")
+        return
+    st.warning("請再次確認要執行：\n" + "\n".join(f"- {row['area']}／{row['label']}" for row in pending))
+    st.caption("確認後依序執行 ⑥→⑦→⑧→⑨→⑪→⑫，再貼入財報；單一步驟失敗仍繼續下一步。")
+    if st.button(f"▶️ 確認執行 {len(pending)} 項", key="revenue_batch_run", type="primary"):
         failures = []
         with st.spinner("執行中，請勿關閉頁面…"):
             for area in areas:
-                keys = [row["step"] for row, _flag in selected if row["area"] == area]
+                keys = [row["step"] for row in pending if row["area"] == area]
                 if keys:
                     failures += batch.run(period, [area], keys,
                         log=lambda text: log(text, "error" if text.startswith("❌") else "info"))
         st.session_state.pop(STATE_KEY, None)
+        st.session_state.pop(CONFIRM_KEY, None)
         if failures:
             st.error("部分失敗：\n" + "\n".join(failures))
         else:
