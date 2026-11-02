@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from tools.bank_statement.yuanta_salary_upload import (
     _click_text,
     _select_file_format,
+    _submit_import_for_review,
     _upload_staged,
     _normalized_text,
     _visible_control,
@@ -43,9 +44,7 @@ def test_yuanta_upload_uses_bank_page_button_order():
         '_click_text(page, "確定")',
         '_select_option_containing(page, payment_account)',
         '_select_option_containing(page, item.summary, "摘要")',
-        '_click_text(page, "確定匯入", accept_dialog=item.summary == "費用")',
-        '_click_text(page, "送審")',
-        '_click_text(page, "確認送審")',
+        "_submit_import_for_review(",
     ]
     positions = [source.index(step) for step in steps]
     assert positions == sorted(positions)
@@ -60,6 +59,15 @@ def test_yuanta_controls_include_image_buttons_and_alt_labels():
     source = inspect.getsource(_visible_control)
     assert "input[type='image']" in source
     assert 'get_attribute("alt")' in source
+
+
+def test_all_yuanta_salary_files_share_submit_flow():
+    upload_source = inspect.getsource(_upload_staged)
+    submit_source = inspect.getsource(_submit_import_for_review)
+    assert "_submit_import_for_review(" in upload_source
+    assert '_click_text(page, "確定匯入"' in submit_source
+    assert '_click_text(page, "送審", accept_dialog=True)' in submit_source
+    assert '_click_text(page, "確認送審")' in submit_source
 
 
 def test_yuanta_file_format_targets_the_actual_jsf_field():
