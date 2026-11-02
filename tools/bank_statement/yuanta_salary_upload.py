@@ -344,13 +344,22 @@ def _set_file(page: Any, path: Path) -> None:
 
 
 def _visible_control(scope: Any, text: str) -> Any | None:
-    controls = scope.locator("a,button,input[type='button'],input[type='submit']")
+    controls = scope.locator(
+        "a,button,input[type='button'],input[type='submit'],input[type='image']"
+    )
     for index in range(controls.count()):
         item = controls.nth(index)
         if not item.is_visible():
             continue
-        label = (item.get_attribute("value") or item.inner_text() or "").strip()
-        if label == text:
+        label = (
+            item.get_attribute("value")
+            or item.get_attribute("alt")
+            or item.get_attribute("aria-label")
+            or item.get_attribute("title")
+            or item.inner_text()
+            or ""
+        )
+        if _normalized_text(label) == _normalized_text(text):
             return item
     return None
 
