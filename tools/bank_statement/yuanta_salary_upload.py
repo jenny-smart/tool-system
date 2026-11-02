@@ -219,13 +219,23 @@ def _normalized_text(value: object) -> str:
     return re.sub(r"\s+", "", str(value or ""))
 
 
-def _click_text(page: Any, text: str, timeout_seconds: int = 30) -> None:
+def _click_text(
+    page: Any, text: str, timeout_seconds: int = 30, *, accept_dialog: bool = False
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         for frame in _all_frames(page):
+            control = _visible_control(frame, text)
+            if control is not None:
+                if accept_dialog:
+                    frame.page.once("dialog", lambda dialog: dialog.accept())
+                control.click()
+                return
             for exact in (True, False):
                 item = _visible(frame.get_by_text(text, exact=exact))
                 if item:
+                    if accept_dialog:
+                        frame.page.once("dialog", lambda dialog: dialog.accept())
                     item.click()
                     return
         page.wait_for_timeout(500)
@@ -513,9 +523,11 @@ def _upload_staged(page: Any, account: Any, staged: list) -> None:
         payment_account = account.bank_account[-5:] if account.bank_account else "元大大同"
         _select_option_containing(page, payment_account)
         _select_option_containing(page, item.summary, "摘要")
-        _click_text(page, "確定匯入")
-        _click_text(page, "審核")
-        _click_text(page, "確認審核")
+        # 工具包押金摘要為「費用」，元大會額外跳出非薪轉優惠提示；
+        # Playwright 若未註冊 handler 會自動取消，畫面便會留在本頁。
+        _click_text(page, "確定匯入", accept_dialog=item.summary == "費用")
+        _click_text(page, "送審")
+        _click_text(page, "確認送審")
         print(f"已送待放行：{item.name}", flush=True)
 
 
