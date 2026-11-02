@@ -39,10 +39,18 @@ def test_scan_uses_latest_record_and_legacy_salary_records():
         ["2026/11/01 12:00", "台北", "202610-2", "refund", "失敗", "缺檔"],
         ["2026/11/01 13:00", "台北", "202610-2", "invoice", "完成", ""],
     ]
-    rows = batch.scan("202610-2", ["台北"], service=object(), audit_values=audit,
-                      legacy_values={"台北": legacy})
+    rows = batch._scan_steps("202610-2", ["台北"], service=object(), audit_values=audit,
+                             legacy_values={"台北": legacy})
     by_step = {row["step"]: row for row in rows}
     assert by_step["convert"]["done"] is True
     assert by_step["refund"]["done"] is False and "缺檔" in by_step["refund"]["note"]
     assert by_step["invoice"]["done"] is True
     assert by_step["atm"]["done"] is False
+
+
+def test_group_scan_splits_cash_flow_and_revenue():
+    audit = [["t", "台北", "202610-2", step, "完成", ""]
+             for step in batch.expand_groups(["cash_flow"])]
+    rows = batch.scan("202610-2", ["台北"], service=object(), audit_values=audit,
+                      legacy_values={"台北": []})
+    assert [(r["step"], r["done"]) for r in rows] == [("cash_flow", True), ("revenue", False)]

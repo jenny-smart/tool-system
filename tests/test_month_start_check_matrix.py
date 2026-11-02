@@ -32,6 +32,10 @@ def readers(**overrides):
     base = {"月排程執行Log": lambda: MONTHLY_LOG, "儲值金月度作業紀錄": lambda: VIP_LOG,
             "本機Agent任務": lambda: [], "藍新收退款檔": lambda: FILES, "藍新發票總表": lambda: INVOICE,
             "鯨躍發票更新Log": lambda: EI_LOG, "現金缺口試算": lambda: CASH, "月初檢查不提醒": lambda: [],
+            "財報營收盤點": lambda: [
+                {"area": a, "step": group, "done": True, "note": "完成"}
+                for a in chk.AREAS for group in ("cash_flow", "revenue")
+            ],
             "固定費用": lambda: [{"area": "台北", "memo": "2026.11-辦公室租金", "default": True},
                              {"area": "台中", "memo": "2026.11-辦公室租金管理費", "default": False}],
             "財報": lambda area, report: [["", "帳務日"], ["", "2026/10/30" if area != "台中" else "2026/09/18"]]}
@@ -45,8 +49,9 @@ def rows_by_key(**overrides):
 
 def test_rows_per_function_and_area_with_done_mark():
     rows = rows_by_key()
-    assert [r["label"] for r in rows.values()][:6] == ["已退款", "預收", "儲值金結算", "儲值金預收",
-                                                       "儲值金彙整（完整流程）", "藍新收／退款"]
+    assert [r["label"] for r in rows.values()][:5] == ["已退款", "預收", "儲值金結算", "儲值金預收",
+                                                       "儲值金彙整（完整流程）"]
+    assert rows["revenue_cash_flow"]["done"] and rows["revenue_export"]["done"]
     assert rows["refund_report"]["done"] and rows["refund_report"]["cells"]["高雄"][0] == chk.OK  # all 成功
     assert not rows["prepaid_report"]["done"] and rows["prepaid_report"]["todo"] == ["台中", "桃園", "新竹", "高雄"]
     assert rows["vip_full_pipeline"]["todo"] == ["高雄"]

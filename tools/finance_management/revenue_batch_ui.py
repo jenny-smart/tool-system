@@ -1,4 +1,4 @@
-"""【整合執行】財報營收 UI。"""
+"""【整合執行】財報營收：兩個獨立任務的盤點、確認與補跑。"""
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import streamlit as st
@@ -61,7 +61,7 @@ def render(log, username=""):
         failures = []
         with st.spinner("執行中，請勿關閉頁面…"):
             for area in areas:
-                keys = [row["step"] for row in pending if row["area"] == area]
+                keys = batch.expand_groups([row["step"] for row in pending if row["area"] == area])
                 if keys:
                     failures += batch.run(period, [area], keys,
                         log=lambda text: log(text, "error" if text.startswith("❌") else "info"))

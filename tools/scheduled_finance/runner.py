@@ -6,7 +6,8 @@
   1 日 02:00  cash_gap_check       全區現金缺口（截至上個月底，藍新發票金額這時還沒有）→ 預收款金額 →
                                    年度review 整理欄位／預估公式／現金缺口區塊（review_monthly）→ 月初檢查
   1 日 05:00  month_start          排入【整合執行】月初藍新／鯨躍／現金缺口（藍新約 08:00 寄手續費發票；還沒開會算失敗，可再補做）＋月初檢查
-  1 日 03:00～23:00 每小時（05:00 除外）  month_start_check  月初檢查：沒完成的項目在 Jenny 行事曆建提醒
+  1 日 03:00  revenue_reconcile     台北／台中／桃園／新竹執行財報營收 ⑥–⑩，再做月初檢查
+  1 日 04:00～23:00（05:00 除外） month_start_check  月初檢查
                                    （05:00 前不提醒藍新／鯨躍／現金缺口，還沒到排入時間）
   單月 10 日 10:00  accounting_reminder  會計事務所費用確認：在 Jenny 行事曆建提醒
   其他 target：month_start_queue（只排入）、cash_gap（只算現金缺口）
@@ -22,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 TARGETS = ("month_start", "month_start_queue", "prepaid_amount", "review_monthly", "fixed_expense", "vip_full_pipeline", "cash_gap", "cash_gap_check",
-           "month_start_check", "accounting_reminder")
+           "revenue_reconcile", "month_start_check", "accounting_reminder")
 
 
 def log(text: str) -> None:
@@ -126,6 +127,17 @@ def run_month_start_check(today: date) -> int:
         now = datetime.combine(today, now.time(), tzinfo=TW_TZ)
     check(now, log=log)
     return 0
+
+
+def run_revenue_reconcile(today: date) -> int:
+    """03:00：四區執行 ⑥–⑩ 金流對帳彙總＋檢核；不搬營收總表、不貼財報。"""
+    from tools.finance_management import revenue_batch as batch
+
+    period = previous_period(today) + "-2"
+    steps = batch.expand_groups(["cash_flow"])
+    failures = batch.run(period, batch.RECONCILE_AREAS, steps, log=log)
+    run_month_start_check(today)
+    return 1 if failures else 0
 
 
 def run_prepaid_amount(today: date) -> int:

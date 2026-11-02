@@ -12,6 +12,7 @@
   發票紙本／發票中獎（單月期別才有）／發票PDF（台中） → 「鯨躍發票更新Log」
   現金缺口                           → 「現金缺口試算」日期是期別月底、各地區沒有「錯誤」
   固定費用（台北每月、台中單月）      → 請款記錄
+  財報營收 ⑥–⑩／搬入營收總表＋財報  → 「財報營收盤點」完成紀錄
   富邦明細／元大明細                  → 各區財報最後一筆帳務日；台北／台中可排入 Mac 補下載，其他地區只顯示
 執行（依序）：月排程（沒完成的地區逐區跑）→ 儲值金彙整 → 固定費用 → 紙本／中獎更新（讀 Drive，不用登入）
   → 排入本機 Agent：富邦／元大、台中紙本PDF、藍新（收退款＋發票，每區登入一次）、鯨躍、現金缺口
@@ -319,6 +320,22 @@ def collect_rows(day: date, log: Callable[[str], None] = print, readers: Optiona
     vip, err = read("儲值金月度作業紀錄", lambda: _read_master(VIP_LOG_SHEET, "A1:ZZ120"))
     rows.append(make_row(VIP_KEY, VIP_LABEL, vip_cells(vip, period) if vip is not None else _error_cells(err), "vip"))
 
+    from tools.finance_management import revenue_batch
+    revenue, err = read("財報營收盤點", lambda: revenue_batch.scan(f"{period}-2", AREAS))
+    for group, key, required in (("cash_flow", "revenue_cash_flow", tuple(revenue_batch.RECONCILE_AREAS)),
+                                 ("revenue", "revenue_export", tuple(AREAS))):
+        if revenue is None:
+            cells = _error_cells(err)
+            label = dict((g, label) for g, label, _steps in revenue_batch.GROUPS)[group]
+        else:
+            selected = {r["area"]: r for r in revenue if r["step"] == group}
+            label = next(label for g, label, _steps in revenue_batch.GROUPS if g == group)
+            cells = {a: ((OK, selected[a]["note"]) if selected.get(a, {}).get("done") else
+                         (FAIL, selected.get(a, {}).get("note", "尚無完成紀錄"))) if a in required else
+                     (NA, "此任務不執行") for a in AREAS}
+        rows.append(make_row(key, label, cells, "revenue_batch", required=required,
+                             extra={"revenue_group": group}))
+
     def list_agent_tasks():
         from tools.local_agent_queue import list_tasks
 
@@ -602,6 +619,22 @@ def run_rows(rows: list[dict], day: date, create_task, log: Callable[[str], None
             messages.append(f"✅ {VIP_LABEL}：完成" if code == 0 else f"❌ {VIP_LABEL}：失敗，請看執行日誌")
         except Exception as exc:
             messages.append(f"❌ {VIP_LABEL}：{exc}")
+    for key in ("revenue_cash_flow", "revenue_export"):
+        row = by_key.get(key)
+        if not row:
+            continue
+        try:
+            from tools.finance_management import revenue_batch
+
+            group = row["revenue_group"]
+            failures = runners.get("revenue_batch", revenue_batch.run)(
+                f"{period}-2", row["todo"], revenue_batch.expand_groups([group]), log=log)
+            if failures:
+                messages += [f"❌ {text}" for text in failures]
+            else:
+                messages.append(f"✅ {row['label']}／{'、'.join(row['todo'])}：完成")
+        except Exception as exc:
+            messages.append(f"❌ {row['label']}：{exc}")
     if "fixed" in by_key:
         from tools.finance_management.fixed_expense_batch import submit
 
