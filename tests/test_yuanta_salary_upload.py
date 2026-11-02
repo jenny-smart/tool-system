@@ -6,6 +6,7 @@ import pytest
 from openpyxl import Workbook
 
 from tools.bank_statement.yuanta_salary_upload import (
+    _select_file_format,
     _upload_staged,
     _normalized_text,
     upload_salary_files,
@@ -35,6 +36,7 @@ def test_yuanta_option_text_ignores_bank_spacing():
 
 def test_yuanta_upload_uses_bank_page_button_order():
     source = inspect.getsource(_upload_staged)  # 上傳步驟抽到 _upload_staged（外層負責登入與登出）
+    assert "_select_file_format(page)" in source
     steps = [
         '_click_text(page, "確定")',
         '_select_option_containing(page, payment_account)',
@@ -45,6 +47,12 @@ def test_yuanta_upload_uses_bank_page_button_order():
     ]
     positions = [source.index(step) for step in steps]
     assert positions == sorted(positions)
+
+
+def test_yuanta_file_format_targets_the_actual_jsf_field():
+    source = inspect.getsource(_select_file_format)
+    assert 'fileFormatCombo' in source
+    assert 'selectedIndex' in source
 
 
 def test_agent_command_preserves_preview_and_selected_steps():
