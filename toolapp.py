@@ -4135,6 +4135,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【儲值】重新排序排程工作表",
         # 年節大掃除 VIP 通知／Email 合併清單
         "【大掃除】年度設定",
+        "【大掃除】下載儲值金結算",
         "【大掃除】更新VIP通知清單",
     ],
     # ────────────────────────────────────────────────────────
@@ -4253,9 +4254,11 @@ SERVICE_CRM_MAP = {
 }
 
 SERVICE_DEEP_CLEAN_SETTINGS = "【大掃除】年度設定"
+SERVICE_DEEP_CLEAN_BALANCES = "【大掃除】下載儲值金結算"
 SERVICE_DEEP_CLEAN_UPDATE = "【大掃除】更新VIP通知清單"
 SERVICE_DEEP_CLEAN_FUNCTIONS = {
     SERVICE_DEEP_CLEAN_SETTINGS,
+    SERVICE_DEEP_CLEAN_BALANCES,
     SERVICE_DEEP_CLEAN_UPDATE,
 }
 # ────────────────────────────────────────────────────────────
@@ -5211,6 +5214,13 @@ with date_col:
                 "根目錄／YYYY／YYYY年終大掃除系統調整、YYYY年終大掃除VIP"
             )
 
+            if selected_function == SERVICE_DEEP_CLEAN_BALANCES:
+                st.info(
+                    "下載月排程使用的儲值金結算快照，僅保留下載當下仍有儲值金或購物金的客人，"
+                    "寫入年度大掃除資料試算表。",
+                    icon="💰",
+                )
+
             if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
                 _saved_form_key = f"deep_clean_saved_form_{deep_clean_season_year}"
                 _load_status_key = f"deep_clean_load_status_{deep_clean_season_year}"
@@ -5613,6 +5623,9 @@ with area_col:
         area_options = ["全區"]
 
     area_select_options = ["全區"] + [area for area in area_options if area != "全區"]
+    if selected_function == SERVICE_DEEP_CLEAN_BALANCES:
+        # 此功能沿用月排程儲值金結算，需涵蓋月排程的五個地區。
+        area_select_options = ["全區", "台北", "台中", "桃園", "新竹", "高雄"]
     if selected_function in (
         "【檸檬後台】異動儲值金",
         "【藍新金流】藍新登入",
@@ -7097,6 +7110,8 @@ if run_clicked:
                             "--lunar-new-year-start", deep_clean_lunar_new_year_start.strftime("%Y-%m-%d"),
                             "--lunar-new-year-end", deep_clean_lunar_new_year_end.strftime("%Y-%m-%d"),
                         ]
+                    elif selected_function == SERVICE_DEEP_CLEAN_BALANCES:
+                        cmd += ["--mode", "download-balances"]
                     else:
                         cmd += ["--mode", "update-all"]
                     add_log(f"大掃除執行：{selected_function}／{deep_clean_season_year}", "info")

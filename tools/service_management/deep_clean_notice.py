@@ -70,6 +70,18 @@ NONROUTINE_NOTICE_HEADERS = [
     "寄送時間",
 ]
 
+DEEP_CLEAN_BALANCE_HEADERS = [
+    "地區",
+    "客人姓名",
+    "電話",
+    "mail",
+    "LINE連結",
+    "儲值金餘額",
+    "購物金餘額",
+]
+
+DEEP_CLEAN_BALANCE_AREAS = ("台北", "台中", "桃園", "新竹", "高雄")
+
 SETTINGS_HEADERS = [
     "年度",
     "PART1開始",
@@ -113,6 +125,105 @@ def _output_gc() -> gspread.Client:
         return get_gspread_client()
     except Exception:
         return _gc()
+
+
+def _balance_number(value: Any) -> float:
+    text = str(value or "").strip().replace(",", "").replace("$", "")
+    try:
+        return float(text) if text else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _first_value(record: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        value = record.get(name)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def build_deep_clean_balance_rows(area: str, values: list[list[Any]]) -> list[list[Any]]:
+    """把月排程儲值金結算匯出整理成一位客人一列，僅保留尚有餘額者。"""
+    if not values:
+        return []
+    headers = [str(value).strip() for value in values[0]]
+    customers: dict[str, dict[str, Any]] = {}
+    for source_row in values[1:]:
+        padded = list(source_row) + [""] * max(0, len(headers) - len(source_row))
+        record = dict(zip(headers, padded))
+        name = str(_first_value(record, "客戶姓名", "客人姓名", "姓名", "name", "customer_name")).strip()
+        phone = normalize_member_phone(str(_first_value(record, "電話", "手機", "行動電話", "phone", "mobile")))
+        email = str(_first_value(record, "email", "Email", "mail", "電子信箱", "信箱")).strip()
+        line_url = str(_first_value(record, "LINE@", "LINE連結", "LINE", "line_url", "line_id")).strip()
+        stored = _balance_number(_first_value(record, "剩餘儲值金", "儲值金餘額", "stored_value", "stored_balance"))
+        shopping = _balance_number(_first_value(record, "剩餘購物金", "購物金餘額", "shopping_value", "shopping_balance"))
+        if not name and not phone and not email:
+            continue
+        key = phone or email.lower() or name
+        customer = customers.setdefault(key, {
+            "name": name, "phone": phone, "email": email, "line": line_url,
+            "stored": 0.0, "shopping": 0.0,
+        })
+        for field, value in (("name", name), ("phone", phone), ("email", email), ("line", line_url)):
+            if not customer[field] and value:
+                customer[field] = value
+        customer["stored"] += stored
+        customer["shopping"] += shopping
+
+    rows = []
+    for customer in customers.values():
+        if customer["stored"] <= 0 and customer["shopping"] <= 0:
+            continue
+        stored = int(customer["stored"]) if customer["stored"].is_integer() else customer["stored"]
+        shopping = int(customer["shopping"]) if customer["shopping"].is_integer() else customer["shopping"]
+        rows.append([
+            area, customer["name"], customer["phone"], customer["email"], customer["line"], stored, shopping,
+        ])
+    return sorted(rows, key=lambda row: (str(row[1]), str(row[2])))
+
+
+def download_deep_clean_balances(
+    season_year: int,
+    area: str,
+    settings_spreadsheet_id: str,
+) -> dict[str, Any]:
+    """下載月排程同源結算資料，彙整到年度大掃除資料試算表。"""
+    from tools.service_management.stored_value import (
+        _convert_stored_value_export,
+        _download_stored_value_export,
+        _login_backend_session,
+        get_area_credentials,
+    )
+
+    target_areas = list(DEEP_CLEAN_BALANCE_AREAS) if area == "全區" else [area]
+    gc = _output_gc()
+    rows: list[list[Any]] = []
+    counts: dict[str, int] = {}
+    for area_name in target_areas:
+        email, password = get_area_credentials(area_name)
+        session = _login_backend_session(email, password, area_name)
+        try:
+            content = _download_stored_value_export(session, area_name)
+            values = _convert_stored_value_export(gc, content, area_name)
+        finally:
+            session.close()
+        area_rows = build_deep_clean_balance_rows(area_name, values)
+        rows.extend(area_rows)
+        counts[area_name] = len(area_rows)
+
+    title = f"{season_year}大掃除儲值金結算"
+    ss = gc.open_by_key(settings_spreadsheet_id)
+    sh = _get_or_create_sheet(ss, title, max(len(rows) + 20, 100), len(DEEP_CLEAN_BALANCE_HEADERS))
+    sh.clear()
+    sh.update(values=[DEEP_CLEAN_BALANCE_HEADERS, *rows], range_name="A1", value_input_option="USER_ENTERED")
+    sh.freeze(rows=1)
+    sh.format("A1:G1", {
+        "backgroundColor": {"red": 0.93, "green": 0.93, "blue": 0.93},
+        "textFormat": {"bold": True},
+        "wrapStrategy": "WRAP",
+    })
+    return {"sheet": title, "count": len(rows), "areas": counts}
 
 
 def resolve_deep_clean_sheet_ids(
@@ -1303,8 +1414,8 @@ def update_all_vip_notices(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="建立大掃除 VIP 通知資料")
-    parser.add_argument("--mode", choices=["regular", "save-settings", "update-all"], default="regular")
-    parser.add_argument("--area", choices=["全區", "台北", "台中"], default="全區")
+    parser.add_argument("--mode", choices=["regular", "save-settings", "update-all", "download-balances"], default="regular")
+    parser.add_argument("--area", choices=["全區", *DEEP_CLEAN_BALANCE_AREAS], default="全區")
     parser.add_argument("--season-year", type=int)
     parser.add_argument("--phase1-start")
     parser.add_argument("--phase1-end")
@@ -1329,7 +1440,7 @@ def main() -> None:
     parser.add_argument("--target-spreadsheet-id", default="")
     args = parser.parse_args()
 
-    if args.mode in {"save-settings", "update-all"}:
+    if args.mode in {"save-settings", "update-all", "download-balances"}:
         if not args.season_year:
             parser.error("--season-year 為必填")
         master_settings_id, master_notice_id = resolve_deep_clean_sheet_ids(
@@ -1345,6 +1456,25 @@ def main() -> None:
         master_notice_id = choose_file_id("大掃除", "共用", DEFAULT_NOTICE_SPREADSHEET_ID, file_index=1)
     settings_spreadsheet_id = args.settings_spreadsheet_id.strip() or master_settings_id
     notice_spreadsheet_id = args.notice_spreadsheet_id.strip() or master_notice_id
+
+    if args.mode == "download-balances":
+        result = download_deep_clean_balances(
+            args.season_year,
+            args.area,
+            settings_spreadsheet_id,
+        )
+        append_master_execution_log(
+            args.master_spreadsheet_id,
+            args.season_year,
+            "下載儲值金結算",
+            args.area,
+            "成功",
+            f"{result['sheet']}，共 {result['count']} 位仍有餘額客人",
+        )
+        print(f"大掃除儲值金結算完成：{result['sheet']}，共 {result['count']} 位客人")
+        for area_name, count in result["areas"].items():
+            print(f"{area_name}：{count} 位")
+        return
 
     if args.mode == "update-all":
         result = update_all_vip_notices(
