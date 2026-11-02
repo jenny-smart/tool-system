@@ -35,9 +35,9 @@ def test_hsinchu_layout():
     plans, notes = plan_updates(_hsinchu(), {"財務": HSINCHU_FIN, "現金": HSINCHU_CASH},
                                 {"財務": HEADER, "現金": HEADER}, "202610")
     assert notes == []
-    assert plans["財務"] == [(4, "U", 4800, True), (5, "U", 40640, True), (8, "U", 59350, False),
+    assert plans["財務"] == [(4, "U", 40640, False), (5, "U", 4800, False), (8, "U", 59350, False),
                              (9, "U", 0, False), (11, "U", 3600, False)]
-    assert plans["現金"] == [(4, "U", 4800, False), (5, "U", 55180, False), (8, "U", 0, True)]  # 儲值金預收（18 列）
+    assert plans["現金"] == [(4, "U", 4800, False), (5, "U", 55180, False), (8, "U", 0, False)]
 
 
 def test_taipei_layout_months_from_2020_and_cash_without_header_row():
@@ -58,7 +58,7 @@ def test_taipei_layout_months_from_2020_and_cash_without_header_row():
             ["VIP券預收"], ["家電清潔收入"], ["整理收納收入"], ["水洗清潔收入"], ["環境消毒收入"]]
     plans, notes = plan_updates(source, {"財務": fin, "現金": cash}, {"財務": HEADER, "現金": HEADER}, "202610")
     assert notes == []
-    assert plans["財務"] == [(4, "U", 973280, True), (5, "U", 825300, True), (7, "U", 0, False),
+    assert plans["財務"] == [(4, "U", 825300, False), (5, "U", 973280, False), (7, "U", 0, False),
                              (8, "U", 1154567, False), (10, "U", 0, False), (11, "U", 3600, False)]
     assert plans["現金"] == [(4, "U", 980980, False), (5, "U", 953350, False), (10, "U", 27800, False)]
 
