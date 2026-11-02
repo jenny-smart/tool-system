@@ -6,6 +6,7 @@ import pytest
 from openpyxl import Workbook
 
 from tools.bank_statement.yuanta_salary_upload import (
+    _click_text,
     _select_file_format,
     _upload_staged,
     _normalized_text,
@@ -41,12 +42,17 @@ def test_yuanta_upload_uses_bank_page_button_order():
         '_click_text(page, "確定")',
         '_select_option_containing(page, payment_account)',
         '_select_option_containing(page, item.summary, "摘要")',
-        '_click_text(page, "確定匯入")',
-        '_click_text(page, "審核")',
-        '_click_text(page, "確認審核")',
+        '_click_text(page, "確定匯入", accept_dialog=item.summary == "費用")',
+        '_click_text(page, "送審")',
+        '_click_text(page, "確認送審")',
     ]
     positions = [source.index(step) for step in steps]
     assert positions == sorted(positions)
+
+
+def test_yuanta_click_can_accept_deposit_warning_dialog():
+    source = inspect.getsource(_click_text)
+    assert 'frame.page.once("dialog", lambda dialog: dialog.accept())' in source
 
 
 def test_yuanta_file_format_targets_the_actual_jsf_field():
