@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import ExitStack
 
 import argparse
+from collections import Counter
 import io
 import json
 import re
@@ -332,7 +333,133 @@ def _set_file(page: Any, path: Path) -> None:
     raise RuntimeError("元大頁面找不到檔案上傳欄位")
 
 
-def upload_salary_files(files: list[SalaryFile], area: str, cdp_url: str, accounts_file: Path) -> None:
+def _visible_control(scope: Any, text: str) -> Any | None:
+    controls = scope.locator("a,button,input[type='button'],input[type='submit']")
+    for index in range(controls.count()):
+        item = controls.nth(index)
+        if not item.is_visible():
+            continue
+        label = (item.get_attribute("value") or item.inner_text() or "").strip()
+        if label == text:
+            return item
+    return None
+
+
+def _pending_list_table(page: Any) -> Any | None:
+    for frame in _all_frames(page):
+        tables = frame.locator("table")
+        for index in range(tables.count()):
+            table = tables.nth(index)
+            if not table.is_visible():
+                continue
+            text = _normalized_text(table.inner_text())
+            if "案件編號" in text and "總金額" in text and "檢視" in text:
+                return table
+    return None
+
+
+def _pending_detail(page: Any, timeout_seconds: int = 20) -> tuple[int, str]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        for frame in _all_frames(page):
+            body = frame.locator("body")
+            if not body.count():
+                continue
+            text = body.inner_text()
+            if "交易狀態" not in text or "付款總金額" not in text or "摘要" not in text:
+                continue
+            amount_match = re.search(r"付款總金額\s*([\d,]+)", text)
+            summary_match = re.search(r"摘要\s*([^\n]+)", text)
+            if amount_match and summary_match:
+                return (
+                    int(amount_match.group(1).replace(",", "")),
+                    summary_match.group(1).strip(),
+                )
+        page.wait_for_timeout(250)
+    raise RuntimeError("元大待放行案件明細無法辨識總金額或摘要")
+
+
+def pending_salary_batches(page: Any) -> list[tuple[int, str]]:
+    """儀表板／進度檢視／薪資臺幣整批付款×待放行，讀取現有案件。"""
+    # 若人員上次停在案件明細，先關閉再從儀表板重新進入，避免讀到舊畫面。
+    for frame in _all_frames(page):
+        close = _visible_control(frame, "關閉")
+        if close is not None:
+            close.click(timeout=5_000)
+            page.wait_for_timeout(500)
+            break
+    _click_text(page, "儀表板")
+    _click_text(page, "進度檢視")
+
+    pending_link = None
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and pending_link is None:
+        for frame in _all_frames(page):
+            rows = frame.locator("tr")
+            for index in range(rows.count()):
+                row = rows.nth(index)
+                if not row.is_visible() or "薪資臺幣整批付款" not in row.inner_text():
+                    continue
+                candidate = row.locator('a[id*="PASS_CTXSA001"]')
+                if candidate.count() and candidate.first.is_visible():
+                    pending_link = candidate.first
+                    break
+            if pending_link is not None:
+                break
+        if pending_link is None:
+            page.wait_for_timeout(250)
+    if pending_link is None:
+        print("元大進度檢視：目前沒有薪資臺幣整批付款待放行案件。", flush=True)
+        return []
+
+    pending_link.click(timeout=5_000)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and _pending_list_table(page) is None:
+        page.wait_for_timeout(250)
+    table = _pending_list_table(page)
+    if table is None:
+        raise RuntimeError("元大待放行清單未載入")
+
+    rows = table.locator("tr")
+    row_indexes = [
+        index for index in range(rows.count())
+        if rows.nth(index).is_visible() and "總金額" in rows.nth(index).inner_text()
+    ]
+    batches: list[tuple[int, str]] = []
+    for row_index in row_indexes:
+        # 每次關閉明細後 DOM 可能重建，因此重新取得 table/row。
+        table = _pending_list_table(page)
+        if table is None:
+            raise RuntimeError("元大待放行清單在讀取途中消失")
+        row = table.locator("tr").nth(row_index)
+        view = _visible_control(row, "檢視")
+        if view is None:
+            continue
+        view.click(timeout=5_000)
+        batches.append(_pending_detail(page))
+        closed = False
+        for frame in _all_frames(page):
+            close = _visible_control(frame, "關閉")
+            if close is not None:
+                close.click(timeout=5_000)
+                closed = True
+                break
+        if not closed:
+            raise RuntimeError("元大待放行案件明細找不到關閉按鈕")
+        page.wait_for_timeout(500)
+    print(
+        "元大進度檢視：" + (
+            "、".join(f"{summary} NT$ {amount:,}" for amount, summary in batches)
+            if batches else "沒有薪資待放行案件"
+        ),
+        flush=True,
+    )
+    return batches
+
+
+def upload_salary_files(
+    files: list[SalaryFile], area: str, cdp_url: str, accounts_file: Path
+) -> tuple[list[SalaryFile], list[SalaryFile]]:
     account = load_account("yuanta", area, accounts_file.expanduser())
     drive = get_drive_service()
     with tempfile.TemporaryDirectory(prefix="yuanta-salary-") as tmp:
@@ -351,7 +478,22 @@ def upload_salary_files(files: list[SalaryFile], area: str, cdp_url: str, accoun
             bind_yuanta_page(page)
             wait_for_yuanta_login(account, timeout=300)
             try:
-                _upload_staged(page, account, staged)
+                pending = Counter(pending_salary_batches(page))
+                upload_staged: list[tuple[SalaryFile, Path]] = []
+                skipped: list[SalaryFile] = []
+                for item, path in staged:
+                    key = (item.amount, item.summary)
+                    if pending[key] > 0:
+                        pending[key] -= 1
+                        skipped.append(item)
+                        print(
+                            f"略過已在待放行：{item.name}（{item.summary} NT$ {item.amount:,}）",
+                            flush=True,
+                        )
+                    else:
+                        upload_staged.append((item, path))
+                _upload_staged(page, account, upload_staged)
+                return [item for item, _path in upload_staged], skipped
             finally:
                 logout_yuanta_quietly()  # 送審完（或失敗）一律登出
 
@@ -383,6 +525,7 @@ def transfer_total_from_fubon(
     period: str,
     cdp_url: str,
     accounts_file: Path,
+    include_internal: bool = False,
 ) -> None:
     """Fill a Fubon transfer to the saved Yuanta account, then sync today's statement."""
     if amount <= 0:
@@ -403,7 +546,7 @@ def transfer_total_from_fubon(
             page.wait_for_timeout(800)
             fill_row_inputs(page, "轉帳金額", [str(amount)])
             choose_immediate_date(page)
-            memo = f"{period}薪資"
+            memo = f"{period[4:6]}承攬費" + ("內勤" if include_internal else "")
             fill_row_inputs(page, "給自己", [memo])
             fill_row_inputs(page, "給對方", [memo])
             print(f"富邦已填入：NT$ {amount:,}，轉入常用帳號「{destination}」。", flush=True)
@@ -460,19 +603,21 @@ def main() -> int:
         print(f"找到：{item.kind}｜{item.name}｜NT$ {item.amount:,}", flush=True)
     total = sum(item.amount for item in files)
     print(f"合計：NT$ {total:,}", flush=True)
-    transferred = False
+    uploaded, skipped = upload_salary_files(files, args.area, args.cdp_url, args.accounts_file)
     if args.fubon_transfer:
-        transfer_total_from_fubon(total, args.area, args.period, args.cdp_url, args.accounts_file)
-        transferred = True
-    try:
-        upload_salary_files(files, args.area, args.cdp_url, args.accounts_file)
-    except Exception as exc:
-        if transferred:
+        if skipped:
             raise RuntimeError(
-                "富邦轉帳及明細更新已完成，但元大薪資檔上傳失敗；請勿重複執行富邦轉帳，"
-                f"請依日誌續做元大上傳：{exc}"
-            ) from exc
-        raise
+                "元大已存在待放行案件，為避免重複匯款，本次不執行富邦轉帳；"
+                "請先人工確認元大與富邦既有紀錄"
+            )
+        transfer_total_from_fubon(
+            total,
+            args.area,
+            args.period,
+            args.cdp_url,
+            args.accounts_file,
+            include_internal=args.internal,
+        )
     return 0
 
 

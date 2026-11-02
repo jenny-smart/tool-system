@@ -79,3 +79,23 @@ def test_agent_command_requires_at_least_one_source():
             "include_contract": False,
             "include_internal": False,
         })
+
+
+def test_yuanta_runs_upload_before_fubon_and_uses_month_memo():
+    from tools.bank_statement import yuanta_salary_upload as module
+
+    source = inspect.getsource(module.main)
+    assert source.index("upload_salary_files(") < source.index("transfer_total_from_fubon(")
+    transfer_source = inspect.getsource(module.transfer_total_from_fubon)
+    assert 'period[4:6]' in transfer_source
+    assert "承攬費" in transfer_source
+    assert '"內勤" if include_internal' in transfer_source
+
+
+def test_pending_check_targets_salary_pending_release_cross_cell():
+    from tools.bank_statement.yuanta_salary_upload import pending_salary_batches
+
+    source = inspect.getsource(pending_salary_batches)
+    assert '"儀表板"' in source
+    assert '"進度檢視"' in source
+    assert 'PASS_CTXSA001' in source
