@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import re
 import unicodedata
 from collections import defaultdict
@@ -68,6 +69,7 @@ NONROUTINE_NOTICE_HEADERS = [
     "通知內容",
     "寄送狀態",
     "寄送時間",
+    "通知內容（HTML）",
 ]
 
 DEEP_CLEAN_BALANCE_HEADERS = [
@@ -648,6 +650,49 @@ def _service_intro(phase1_start: datetime, phase2_end: datetime) -> str:
     )
 
 
+def _nonroutine_booking_block(booking_start: datetime, booking_end: datetime) -> str:
+    return (
+        "💛《VIP 客戶優先預約》\n"
+        f"VIP 開放預約時間：{booking_start:%Y/%m/%d} 中午12點 ～{booking_end:%Y/%m/%d}\n"
+        "建議您於開放期間內，\n"
+        "洽檸檬家事官網預約：https://www.lemonclean.com.tw/home/pattern\n"
+        "或檸檬家事官方 LINE@ 與我們聯繫預約。\n"
+        "我們將優先為您安排大掃除服務，謝謝您！"
+    )
+
+
+def _nonroutine_notice_html(
+    notice: str,
+    booking_start: datetime,
+    booking_end: datetime,
+) -> str:
+    """Return an email-ready HTML version while keeping the Sheet's plain text useful."""
+    booking_block = _nonroutine_booking_block(booking_start, booking_end)
+    prefix, marker, suffix = notice.partition(booking_block)
+    if not marker:
+        return html.escape(notice).replace("\n", "<br>\n")
+
+    booking_line = (
+        f"VIP 開放預約時間：{booking_start:%Y/%m/%d} 中午12點 ～{booking_end:%Y/%m/%d}"
+    )
+    booking_html = (
+        "<strong>"
+        "💛《VIP 客戶優先預約》<br>\n"
+        f'<span style="color:#d93025;">{html.escape(booking_line)}</span><br>\n'
+        "建議您於開放期間內，<br>\n"
+        '洽檸檬家事官網預約：<a href="https://www.lemonclean.com.tw/home/pattern">'
+        "https://www.lemonclean.com.tw/home/pattern</a><br>\n"
+        "或檸檬家事官方 LINE@ 與我們聯繫預約。<br>\n"
+        "我們將優先為您安排大掃除服務，謝謝您！"
+        "</strong>"
+    )
+    return (
+        html.escape(prefix).replace("\n", "<br>\n")
+        + booking_html
+        + html.escape(suffix).replace("\n", "<br>\n")
+    )
+
+
 def _comparison_values(settings: DeepCleanSettings, hours: int, include_base: bool) -> list[float]:
     rates = (
         settings.phase1_nonvip_weekday_rate,
@@ -802,10 +847,7 @@ def build_nonroutine_notice(
         f"📍PART 2：{_price_text(phase2_start, phase2_end, phase2_weekday_rate, phase2_weekend_rate)}\n\n"
         "💰「年節加價」將自動從您的「儲值金」帳戶扣除，無需現場付款；"
         "惟「車馬費」仍須於現場支付。\n\n"
-        "💛《VIP 客戶優先預約》\n"
-        f"VIP 開放預約時間：{_date_range(booking_start, booking_end)}\n"
-        "建議您於開放期間內，透過官方 LINE@ 與我們聯繫預約。\n"
-        "我們將優先為您安排大掃除服務，謝謝您！\n\n"
+        f"{_nonroutine_booking_block(booking_start, booking_end)}\n\n"
         "檸檬家事服務 🍋\n陪您一起迎新年、好運滿滿過好年 🌟"
     )
 
@@ -1110,7 +1152,6 @@ def _write_system_update_sheet(ss: Any, settings: DeepCleanSettings) -> str:
         ["分類", "設定項目", "內容", "系統處理方式"],
         ["說明", "完整大掃除期間", _date_range(settings.phase1_start, settings.phase2_end), "未特別註明 PART 時，一律顯示完整區間"],
         ["說明", "基本時數", f"2 人 {MINIMUM_SERVICE_HOURS} 小時起", "最低 6 人時"],
-        ["說明", "服務內容", "大掃除服務主要為方便需求6–8小時客戶，服務內容同居家清潔，以人時計價。", "依實際人數 × 時數計價"],
         ["基準價", "非大掃除期間平日／週末", f"{_money(BASE_WEEKDAY_RATE)}／{_money(BASE_WEEKEND_RATE)}", "每 2 人 1 小時"],
         ["期間", "PART 1", _date_range(settings.phase1_start, settings.phase1_end), "日曆服務落在此區間者依 PART 1 計價"],
         ["期間", "PART 2", _date_range(settings.phase2_start, settings.phase2_end), "日曆服務落在此區間者依 PART 2 計價"],
@@ -1318,6 +1359,11 @@ def build_nonroutine_notice_rows(
             settings.booking_start,
             settings.booking_end,
         )
+        notice_html = _nonroutine_notice_html(
+            notice,
+            settings.booking_start,
+            settings.booking_end,
+        )
         line_url = str(member.get("line_url") or "").strip()
         line_cell = f'=HYPERLINK("{line_url}","開啟 LINE")' if re.match(r"^https?://", line_url) else line_url
         email = str(member.get("email") or "").strip()
@@ -1335,6 +1381,7 @@ def build_nonroutine_notice_rows(
             notice,
             "待寄送" if email else "缺Email",
             "",
+            notice_html,
         ])
     return sorted(output, key=lambda row: (str(row[0]), str(row[2]), str(row[3])))
 
