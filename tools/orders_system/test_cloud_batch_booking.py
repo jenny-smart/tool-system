@@ -284,6 +284,15 @@ class CloudStatusTest(unittest.TestCase):
         with patch.object(ui, '_github_get', side_effect=[jobs, logs]):
             self.assertEqual(ui._run_summary(1), (6, 5, 1, 1))
 
+    def test_finish_parser_keeps_line_messages_for_screen_copy(self):
+        jobs = Mock()
+        jobs.json.return_value = {'jobs': [{'name': 'booking', 'id': 7}]}
+        payload = '{"姓名":"王小明","地址":"台北市","訂單編號":"LC1","通知內容":"訊息"}'
+        logs = Mock(text=f'LINE_MESSAGE_JSON {payload}\nFINISH attempted=1 success=1 fail=0 remaining=0')
+        with patch.object(ui, '_github_get', side_effect=[jobs, logs]):
+            self.assertEqual(ui._run_summary(9), (1, 1, 0, 0))
+        self.assertEqual(ui._RUN_LINE_MESSAGES[9][0]['通知內容'], '訊息')
+
 
 if __name__ == '__main__':
     unittest.main()
