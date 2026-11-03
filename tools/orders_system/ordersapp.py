@@ -908,6 +908,8 @@ FUNCTION_OPTIONS = [
     ("查詢無LINE連結訂單：搜尋訂購資訊裡沒有LINE連結的訂單，可依訂購／付款／服務日期分別篩選。",
      "orders", "查詢無LINE連結訂單"),
     # ---------- D. LINE 通知／提醒 ----------
+    ("已成單預約完成通知：讀取成單工作表，只對日曆有行程的訂單產生合併日期／時段 LINE 通知。",
+     "orders", "已成單預約完成通知"),
     ("LINE 通知產生器：用已成立訂單編號補產生通知訊息，支援多筆同時產生。",
      "orders", "LINE 通知產生器"),
     ("週末服務 LINE 提醒：篩選週末已付款訂單、產生提醒訊息，並追蹤客人是否回覆。",
@@ -954,7 +956,7 @@ _CATEGORY_HEADERS_BY_FEATURE = {
     "批次建單（Google Sheet）": "A. 建單／成單流程",
     "取消訂單": "B. 訂單附屬功能",
     "雙向訂單檢查": "C. 稽核比對工具",
-    "LINE 通知產生器": "D. LINE 通知／提醒",
+    "已成單預約完成通知": "D. LINE 通知／提醒",
     "會員手機查詢": "E. 會員／客戶管理",
     "台北/台中區對帳": "F. 財務功能",
 }
@@ -1025,6 +1027,12 @@ if mode == "檸檬人換正式專員":
     import lemon_staff_replacement
 
     lemon_staff_replacement.render(backend_email, backend_password, env)
+    st.stop()
+
+if mode == "已成單預約完成通知":
+    import completed_booking_notice
+
+    completed_booking_notice.render(backend_email, backend_password, env)
     st.stop()
 
 if mode == "訂單班表記錄與返回":
