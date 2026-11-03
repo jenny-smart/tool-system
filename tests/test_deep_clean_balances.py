@@ -1,6 +1,7 @@
 from tools.service_management.deep_clean_notice import (
     DEEP_CLEAN_BALANCE_HEADERS,
     build_deep_clean_balance_rows,
+    load_deep_clean_balance_members,
 )
 
 
@@ -33,3 +34,28 @@ def test_balance_rows_aggregate_multiple_settlement_rows_per_customer():
     assert build_deep_clean_balance_rows("台中", values) == [
         ["台中", "王小明", "0912345678", "wang@example.com", "line", 300, 50],
     ]
+
+
+def test_notice_balance_members_merge_same_name_without_address_key():
+    class Worksheet:
+        def get_all_values(self):
+            return [
+                DEEP_CLEAN_BALANCE_HEADERS,
+                ["台北", "王小明", "0912345678", "a@example.com", "line-a", "100", "0"],
+                ["台北", "王小明", "", "", "", "0", "200"],
+            ]
+
+    class Spreadsheet:
+        def worksheet(self, _title):
+            return Worksheet()
+
+    class Client:
+        def open_by_key(self, _key):
+            return Spreadsheet()
+
+    members, counts = load_deep_clean_balance_members(Client(), "settings", 2026, ["台北"])
+
+    assert len(members) == 1
+    assert members[0]["stored_value"] == 100
+    assert members[0]["shopping_value"] == 200
+    assert counts == {"台北": 1}

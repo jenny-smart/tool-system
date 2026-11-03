@@ -5220,6 +5220,12 @@ with date_col:
                     "寫入年度大掃除資料試算表。",
                     icon="💰",
                 )
+            elif selected_function == SERVICE_DEEP_CLEAN_UPDATE:
+                st.info(
+                    "非定期 VIP 依年度「大掃除儲值金結算」中的客戶姓名判斷；"
+                    "儲值金或購物金任一餘額大於 0 即列入，不比對地址。請先下載最新結算。",
+                    icon="💰",
+                )
 
             if selected_function == SERVICE_DEEP_CLEAN_SETTINGS:
                 _saved_form_key = f"deep_clean_saved_form_{deep_clean_season_year}"
