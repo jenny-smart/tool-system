@@ -274,7 +274,12 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
         results = st.session_state.get("batch_opt_results") or []
         if results:
             st.dataframe(pd.DataFrame(results), width="stretch", hide_index=True)
-        for idx, message in enumerate(st.session_state.get("batch_opt_line_messages") or []):
+        saved_messages = st.session_state.get("batch_opt_line_messages") or []
+        if saved_messages:
+            from hybrid_batch_runner import line_messages_tsv
+            st.caption("以下整段可按右上角複製，直接貼到 Google Sheet：")
+            st.code(line_messages_tsv(saved_messages), language=None)
+        for idx, message in enumerate(saved_messages):
             st.text_area(f"{message.get('姓名') or '客戶'}｜預約完成 LINE 通知",
                          message.get("通知內容", ""), height=360, key=f"batch_opt_saved_line_message_{idx}")
         return
@@ -405,6 +410,11 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
     results = st.session_state.get("batch_opt_results") or []
     if results:
         st.dataframe(pd.DataFrame(results), width="stretch", hide_index=True)
-    for idx, message in enumerate(st.session_state.get("batch_opt_line_messages") or []):
+    saved_messages = st.session_state.get("batch_opt_line_messages") or []
+    if saved_messages:
+        from hybrid_batch_runner import line_messages_tsv
+        st.caption("以下整段可按右上角複製，直接貼到 Google Sheet：")
+        st.code(line_messages_tsv(saved_messages), language=None)
+    for idx, message in enumerate(saved_messages):
         st.text_area(f"{message.get('姓名') or '客戶'}｜預約完成 LINE 通知",
                      message.get("通知內容", ""), height=360, key=f"batch_opt_line_message_{idx}")
