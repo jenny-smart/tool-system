@@ -20,6 +20,5 @@ GOOGLE_CALENDAR_MAP = {
 
 COLOR_PURPLE = "3"
 COLOR_YELLOW = "5"
-COLOR_RESERVE = "7"  # Google Calendar「保留單」（孔雀藍）
 
 REQUEST_DELAY = 1

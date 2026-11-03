@@ -274,14 +274,6 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
         results = st.session_state.get("batch_opt_results") or []
         if results:
             st.dataframe(pd.DataFrame(results), width="stretch", hide_index=True)
-        saved_messages = st.session_state.get("batch_opt_line_messages") or []
-        if saved_messages:
-            from hybrid_batch_runner import line_messages_tsv
-            st.caption("以下整段可按右上角複製，直接貼到 Google Sheet：")
-            st.code(line_messages_tsv(saved_messages), language=None)
-        for idx, message in enumerate(saved_messages):
-            st.text_area(f"{message.get('姓名') or '客戶'}｜預約完成 LINE 通知",
-                         message.get("通知內容", ""), height=360, key=f"batch_opt_saved_line_message_{idx}")
         return
 
     logs = []
@@ -328,7 +320,6 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
         total_fail = 0
         total_processed = 0
         range_results = []
-        line_messages = []
 
         with st.spinner("依指定列號批次執行中..."):
             for region, row_numbers in jobs:
@@ -357,7 +348,6 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
                     total_success += success
                     total_fail += fail
                     total_processed += processed
-                    line_messages.extend(result.get("line_messages") or [])
                     range_results.append({
                         "地區": region,
                         "指定列": row_label,
@@ -379,7 +369,6 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
                     ui_log(f"❌ 執行失敗：{exc}")
 
         st.session_state.batch_opt_results = range_results
-        st.session_state.batch_opt_line_messages = line_messages
         st.session_state.batch_opt_summary = {
             "selected": len(requested_rows),
             "processed": total_processed,
@@ -410,11 +399,3 @@ def render(backend_email: str, backend_password: str, env: str) -> None:
     results = st.session_state.get("batch_opt_results") or []
     if results:
         st.dataframe(pd.DataFrame(results), width="stretch", hide_index=True)
-    saved_messages = st.session_state.get("batch_opt_line_messages") or []
-    if saved_messages:
-        from hybrid_batch_runner import line_messages_tsv
-        st.caption("以下整段可按右上角複製，直接貼到 Google Sheet：")
-        st.code(line_messages_tsv(saved_messages), language=None)
-    for idx, message in enumerate(saved_messages):
-        st.text_area(f"{message.get('姓名') or '客戶'}｜預約完成 LINE 通知",
-                     message.get("通知內容", ""), height=360, key=f"batch_opt_line_message_{idx}")
