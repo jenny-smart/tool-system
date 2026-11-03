@@ -628,8 +628,8 @@ def test_nonroutine_list_subtracts_calendar_regular_vip_by_phone():
     )
     regular_row = ["台北", "定期VIP", "王小明", "0912345678"]
     members = [
-        {"area": "台北", "member_id": "1", "name": "王小明", "phone": "0912345678", "email": "a@example.com"},
-        {"area": "台北", "member_id": "2", "name": "陳小華", "phone": "0987654321", "email": "b@example.com"},
+        {"area": "台北", "member_id": "1", "name": "王小明", "phone": "0912345678", "email": "a@example.com", "stored_value": 100},
+        {"area": "台北", "member_id": "2", "name": "陳小華", "phone": "0987654321", "email": "b@example.com", "stored_value": 100},
     ]
 
     output = build_nonroutine_notice_rows(members, [regular_row], settings)
@@ -641,6 +641,22 @@ def test_nonroutine_list_subtracts_calendar_regular_vip_by_phone():
     assert '<strong>💛《VIP 客戶優先預約》' in output[0][13]
     assert '<span style="color:#d93025;">VIP 開放預約時間：2026/11/05 中午12點 ～2026/11/10</span>' in output[0][13]
     assert '<a href="https://www.lemonclean.com.tw/home/pattern">' in output[0][13]
+
+
+def test_nonroutine_list_uses_name_and_positive_balance_without_address():
+    settings = DeepCleanSettings(
+        2026, datetime(2026, 12, 15, tzinfo=TZ), datetime(2027, 1, 21, tzinfo=TZ),
+        100, 250, datetime(2027, 1, 22, tzinfo=TZ), datetime(2027, 2, 4, tzinfo=TZ),
+        200, 300, "", datetime(2026, 11, 5, tzinfo=TZ), datetime(2026, 11, 10, tzinfo=TZ),
+    )
+    members = [
+        {"area": "台北", "member_id": "1", "name": "購物金客", "address": "地址A", "shopping_value": 500},
+        {"area": "台北", "member_id": "2", "name": "零餘額客", "address": "地址B", "stored_value": 0, "shopping_value": 0},
+    ]
+
+    output = build_nonroutine_notice_rows(members, [], settings)
+
+    assert [row[2] for row in output] == ["購物金客"]
 
 
 def test_resolve_year_files_from_master_root(monkeypatch):

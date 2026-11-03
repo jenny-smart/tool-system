@@ -11,7 +11,7 @@ from typing import Any
 
 import gspread
 
-from tools.lemon_backend.members import export_stored_value_members, normalize_member_phone
+from tools.lemon_backend.members import normalize_member_phone
 
 from tools.service_management.stored_value import (
     TZ_TAIPEI,
@@ -183,6 +183,64 @@ def build_deep_clean_balance_rows(area: str, values: list[list[Any]]) -> list[li
             area, customer["name"], customer["phone"], customer["email"], customer["line"], stored, shopping,
         ])
     return sorted(rows, key=lambda row: (str(row[1]), str(row[2])))
+
+
+def load_deep_clean_balance_members(
+    gc: gspread.Client,
+    settings_spreadsheet_id: str,
+    season_year: int,
+    areas: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """非定期 VIP 名單只依地區＋客戶姓名與正餘額；地址不參與比對。"""
+    title = f"{season_year}大掃除儲值金結算"
+    try:
+        values = gc.open_by_key(settings_spreadsheet_id).worksheet(title).get_all_values()
+    except gspread.WorksheetNotFound as exc:
+        raise ValueError(f"找不到「{title}」，請先執行【大掃除】下載儲值金結算") from exc
+    if not values:
+        return [], {area: 0 for area in areas}
+
+    headers = [str(value).strip() for value in values[0]]
+    required = set(DEEP_CLEAN_BALANCE_HEADERS)
+    if not required.issubset(headers):
+        raise ValueError(f"「{title}」欄位不完整，請重新下載儲值金結算")
+
+    selected = set(areas)
+    by_name: dict[tuple[str, str], dict[str, Any]] = {}
+    for source_row in values[1:]:
+        padded = list(source_row) + [""] * max(0, len(headers) - len(source_row))
+        record = dict(zip(headers, padded))
+        area = str(record.get("地區") or "").strip()
+        name = str(record.get("客人姓名") or "").strip()
+        name_key = normalize_name_for_compare(name)
+        stored = _balance_number(record.get("儲值金餘額"))
+        shopping = _balance_number(record.get("購物金餘額"))
+        if area not in selected or not name_key or (stored <= 0 and shopping <= 0):
+            continue
+        key = (area, name_key)
+        member = by_name.setdefault(key, {
+            "area": area,
+            "member_id": f"{area}:{name_key}",
+            "name": name,
+            "phone": "",
+            "email": "",
+            "address": "",
+            "line_url": "",
+            "member_level": "",
+            "stored_value": 0.0,
+            "shopping_value": 0.0,
+        })
+        for field, column in (("phone", "電話"), ("email", "mail"), ("line_url", "LINE連結")):
+            value = str(record.get(column) or "").strip()
+            if value and not member[field]:
+                member[field] = normalize_member_phone(value) if field == "phone" else value
+        member["stored_value"] += stored
+        member["shopping_value"] += shopping
+
+    counts = {area: 0 for area in areas}
+    for member in by_name.values():
+        counts[member["area"]] = counts.get(member["area"], 0) + 1
+    return list(by_name.values()), counts
 
 
 def download_deep_clean_balances(
@@ -1319,11 +1377,7 @@ def _regular_identity_sets(regular_rows: list[list[Any]]) -> tuple[set[str], set
     names = {
         normalize_name_for_compare(str(row[2]))
         for row in regular_rows
-        if (
-            len(row) > 3
-            and not normalize_member_phone(row[3])
-            and normalize_name_for_compare(str(row[2]))
-        )
+        if len(row) > 2 and normalize_name_for_compare(str(row[2]))
     }
     return phones, names
 
@@ -1340,9 +1394,13 @@ def build_nonroutine_notice_rows(
         phone = normalize_member_phone(member.get("phone"))
         name = str(member.get("name") or "").strip()
         normalized_name = normalize_name_for_compare(name)
+        stored_value = _balance_number(member.get("stored_value"))
+        shopping_value = _balance_number(member.get("shopping_value"))
+        if stored_value <= 0 and shopping_value <= 0:
+            continue
         if (phone and phone in regular_phones) or (normalized_name and normalized_name in regular_names):
             continue
-        unique_key = str(member.get("member_id") or "").strip() or phone or str(member.get("email") or "").lower()
+        unique_key = normalized_name or str(member.get("member_id") or "").strip() or phone or str(member.get("email") or "").lower()
         if not unique_key or unique_key in seen:
             continue
         seen.add(unique_key)
@@ -1376,7 +1434,7 @@ def build_nonroutine_notice_rows(
             str(member.get("address") or ""),
             line_cell,
             str(member.get("member_level") or ""),
-            float(member.get("stored_value") or 0),
+            stored_value,
             f"【檸檬家事服務】{settings.season_year}年節大掃除－VIP優先預約通知",
             notice,
             "待寄送" if email else "缺Email",
@@ -1435,15 +1493,12 @@ def update_all_vip_notices(
     target_areas = list(regular["areas"].keys())
     if area != "全區" and area not in target_areas:
         target_areas = [area]
-    members: list[dict[str, Any]] = []
-    backend_counts: dict[str, int] = {}
-    for area_name in target_areas:
-        area_members = export_stored_value_members(area_name)
-        backend_counts[area_name] = len(area_members)
-        members.extend(area_members)
+    gc = _output_gc()
+    members, backend_counts = load_deep_clean_balance_members(
+        gc, settings_spreadsheet_id, settings.season_year, target_areas,
+    )
 
     nonroutine_rows = build_nonroutine_notice_rows(members, regular["rows"], settings)
-    gc = _output_gc()
     nonroutine_sheet = _write_nonroutine_notice_sheet(
         gc,
         target_notice_id,
