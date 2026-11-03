@@ -391,7 +391,9 @@ def test_nonroutine_notice_uses_open_window_and_correct_customer_label():
         datetime(2026, 11, 10, tzinfo=TZ),
     )
     assert "《VIP 客戶年節大掃除加價收費說明》" in notice
-    assert "VIP 開放預約時間：2026/11/05～2026/11/10" in notice
+    assert "VIP 開放預約時間：2026/11/05 中午12點 ～2026/11/10" in notice
+    assert "建議您於開放期間內，\n洽檸檬家事官網預約：https://www.lemonclean.com.tw/home/pattern" in notice
+    assert "或檸檬家事官方 LINE@ 與我們聯繫預約。" in notice
     assert "VIP 定期客戶" not in notice
     assert "2026年節大掃除期間：2026/12/15～2027/02/04" in notice
     assert "基本時數為 2 人 3 小時起" in notice
@@ -635,6 +637,10 @@ def test_nonroutine_list_subtracts_calendar_regular_vip_by_phone():
     assert len(output) == 1
     assert output[0][2] == "陳小華"
     assert output[0][11] == "待寄送"
+    assert len(output[0]) == 14
+    assert '<strong>💛《VIP 客戶優先預約》' in output[0][13]
+    assert '<span style="color:#d93025;">VIP 開放預約時間：2026/11/05 中午12點 ～2026/11/10</span>' in output[0][13]
+    assert '<a href="https://www.lemonclean.com.tw/home/pattern">' in output[0][13]
 
 
 def test_resolve_year_files_from_master_root(monkeypatch):
