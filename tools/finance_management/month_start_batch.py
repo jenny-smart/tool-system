@@ -373,10 +373,10 @@ def _record(period: str, results: dict[str, str], log: Callable[[str], None]) ->
 
     now = datetime.now(TW_TZ)
     title, body = build_record_text(period, results, now)
-    calendar_notify.create_notify_event(summary=title, description=body, start=now,
-                                        calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
-                                        replace_prefix=title.split("：")[0])
-    log(f"已在 {RECORD_CALENDAR_ID} 行事曆留紀錄：{title}")
+    event = calendar_notify.create_notify_event(summary=title, description=body, start=now,
+                                                calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
+                                                replace_prefix=title.split("：")[0])
+    log(f"已在 {(event or {}).get('_calendar_id', RECORD_CALENDAR_ID)} 行事曆留紀錄：{title}")
 
 
 def main(argv=None) -> int:

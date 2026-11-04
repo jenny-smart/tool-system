@@ -178,10 +178,10 @@ def record(selected: list[dict], log: Callable[[str], None] = print, now: Option
     log(title)
     from tools.orders_system import calendar_notify
 
-    calendar_notify.create_notify_event(summary=title, description=body, start=now,
-                                        calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
-                                        replace_prefix="本日內部請款已付款")
-    log(f"已在 {RECORD_CALENDAR_ID} 行事曆留紀錄")
+    event = calendar_notify.create_notify_event(summary=title, description=body, start=now,
+                                                calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[],
+                                                replace_prefix="本日內部請款已付款")
+    log(f"已在 {(event or {}).get('_calendar_id', RECORD_CALENDAR_ID)} 行事曆留紀錄")
     return {"done": done, "pending": pending}
 
 

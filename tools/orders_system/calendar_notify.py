@@ -132,6 +132,9 @@ def create_notify_event(summary: str, description: str = "", start: datetime = N
         except Exception as exc:  # 刪不掉不影響建新的
             print(f"⚠️ 刪除之前的「{replace_prefix}」失敗：{exc}", flush=True)
 
-    return service.events().insert(
+    event = service.events().insert(
         calendarId=calendar_id, body=body, sendUpdates="all" if attendee else "none"
     ).execute()
+    # 實際寫入的行事曆（讀不到 hers 授權時會退回 lemonclean）：log 要印這個，不要印原本指定的
+    event["_calendar_id"] = calendar_id
+    return event

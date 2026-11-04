@@ -53,11 +53,11 @@ def main() -> None:
         report += "\n\n已自動排入本機 Agent，富邦轉帳請用手機核准。"
     subject = f"【富邦銀行】待處理提醒：請款／工具包押金退款／清潔用品採購 共 {len(items)} 筆"
     # 開始時間留 30 分鐘前導，Google 的提醒推播才排得進去
-    calendar_notify.create_notify_event(summary=subject, description=report,
-                                        start=datetime.now(TZ) + timedelta(minutes=30),
-                                        calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
-                                        replace_prefix="【富邦銀行】待處理提醒")
-    print(f"已在 {REMIND_CALENDAR_ID} 建立日曆提醒。", flush=True)
+    event = calendar_notify.create_notify_event(summary=subject, description=report,
+                                                start=datetime.now(TZ) + timedelta(minutes=30),
+                                                calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
+                                                replace_prefix="【富邦銀行】待處理提醒")
+    print(f"已在 {(event or {}).get('_calendar_id', REMIND_CALENDAR_ID)} 建立日曆提醒。", flush=True)
 
 
 if __name__ == "__main__":
