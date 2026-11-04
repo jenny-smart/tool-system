@@ -35,15 +35,13 @@ def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
         is_fare_invoice = status == "待處理發票" and detail == "車馬費發票"
         # 合併開立：C 欄寫「合併開立發票」，或 G 欄有兩張以上訂單（例如「異動發票」一次開多張訂單）；改三聯走二聯改三聯
         k_note = str(padded[9] or "")
-        is_merged = status == "待處理發票" and (
-            detail in MERGED_INVOICE_DETAILS
-            or (len(split_order_numbers(order_no)) >= 2 and not re.search(r"(?:改|轉)\s*三聯", f"{detail} {k_note}"))
-        )
+        multi = len(split_order_numbers(order_no)) >= 2
+        triplicate = bool(re.search(r"(?:改|轉)\s*三聯", f"{detail} {k_note}"))
         # 已收款但還沒開發票的異動發票／合併開立（2026-11 Jenny）
-        paid_uninvoiced = status == "已收款" and (
-            detail == "異動發票" or detail in MERGED_INVOICE_DETAILS or len(split_order_numbers(order_no)) >= 2)
-        if paid_uninvoiced and len(split_order_numbers(order_no)) >= 2:
-            is_merged = True
+        paid_uninvoiced = status == "已收款" and (detail == "異動發票" or detail in MERGED_INVOICE_DETAILS or multi)
+        # 合併開立：G 欄有兩張以上訂單（待收款、待處理發票、已收款都適用），或 C 欄寫「合併開立發票」；改三聯走二聯改三聯
+        is_merged = status in ("待收款", "待處理發票", "已收款") and not triplicate and (
+            multi or (status == "待處理發票" and detail in MERGED_INVOICE_DETAILS))
         if not (is_pending_charge or is_fare_invoice or is_merged or paid_uninvoiced) or not order_no or invoice_no:
             continue
         rows.append({

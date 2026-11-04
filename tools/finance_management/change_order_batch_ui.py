@@ -108,9 +108,19 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     if st.button("▶️ 執行勾選的動作", key="change_order_batch_run", disabled=not selected):
         agent_items = [item for item in selected if set(item["actions"]) - {"sync"}]
         if agent_items:
-            batch.queue_actions(selected, do_sync, create_task, created_by=username or "清潔異動整合執行", log=log,
+            notes: list[str] = []
+
+            def capture(text: str) -> None:
+                notes.append(str(text))
+                log(text)
+
+            batch.queue_actions(selected, do_sync, create_task, created_by=username or "清潔異動整合執行", log=capture,
                                 prepare_invoices=_prepare_invoices, prepare_triplicates=_prepare_triplicates)
-            st.success("已排入本機 Agent，請到下方查看執行進度；完成後可再按一次「盤點」確認。")
+            dropped = [n for n in notes if "未排入" in n]
+            for note in dropped:  # 開立發票／二聯改三聯組資料失敗：這一步沒排進去，一定要讓人看到
+                st.warning(note)
+            st.success("已排入本機 Agent，請到下方查看執行進度；完成後可再按一次「盤點」確認。"
+                       + ("（上面黃色訊息的項目沒有排入）" if dropped else ""))
             st.session_state.pop(STATE_KEY, None)
         elif do_sync:
             _sync_now(selected, log)

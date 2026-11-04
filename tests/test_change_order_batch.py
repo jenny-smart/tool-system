@@ -497,3 +497,21 @@ def test_paid_but_uninvoiced_change_invoice_opens_invoice_first():
     assert plan(B="已收款", C="異動發票", G=multi, N="14000", O="AB12345678")["actions"] == ["sync"]
     # 一般已收款（不是異動發票、單張訂單）照舊回寫
     assert plan(B="已收款", C="專員回報加時", G="LC00214828", N="500")["actions"] == ["sync"]
+
+
+def test_pending_invoice_candidates_merged_for_any_status(monkeypatch):
+    from tools.invoice_center import pending_charge
+
+    multi = "LC00217202 LC00217177"
+    rows = [["待收款", "異動發票", "", "", "", multi, "韓耕柏", "", "", "", "", "", "", ""],
+            ["已收款", "異動發票", "", "", "", multi, "韓耕柏", "", "", "", "", "", "", ""],
+            ["待收款", "專員回報加時", "", "", "", "LC00214828", "陳", "", "", "", "", "", "", ""],
+            ["已收款", "專員回報加時", "", "", "", "LC00214829", "陳", "", "", "", "", "", "", ""]]
+
+    class WS:
+        def get(self, _rng):
+            return rows
+
+    monkeypatch.setattr(pending_charge, "get_worksheet", lambda area: WS())
+    got = {r["列號"]: r["_invoice_flow"] for r in pending_charge.get_pending_invoice_candidates("高雄")}
+    assert got == {1: "merged", 2: "merged", 3: "charge"}
