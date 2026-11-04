@@ -7,7 +7,12 @@ import pandas as pd
 
 
 def test_failed_rows_excluded_from_candidates_and_auto_filters():
-    source = Path(__file__).parents[1] / 'tools/orders_system/selected_row_status_guard.py'
+    orders_dir = Path(__file__).parents[1] / 'tools/orders_system'
+    # order-system 同步後搬到 shared/；orders-system 舊版在根目錄
+    source = next(
+        (p for p in (orders_dir / 'shared/selected_row_status_guard.py', orders_dir / 'selected_row_status_guard.py') if p.exists()),
+        orders_dir / 'shared/selected_row_status_guard.py',
+    )
     names = {'_scalar', 'normalize_status', '_first_series', '_safe_load_candidates', '_auto_filter_rows'}
     tree = ast.parse(source.read_text())
     base = {'姓名': '王小明', '電話': '0912345678', '地址': '台北市',

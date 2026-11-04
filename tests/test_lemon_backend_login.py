@@ -61,7 +61,11 @@ def test_all_tool_system_backend_logins_use_shared_flow():
 def test_synced_orders_system_copy_matches():
     """orders-system 同步過來的 tools/orders_system/lemon_backend_login.py 程式內容要跟正本一致（說明文字除外）。"""
     root = Path(__file__).resolve().parents[1]
-    copy = root / "tools/orders_system/lemon_backend_login.py"
+    candidates = (
+        root / "tools/orders_system/shared/lemon_backend_login.py",  # order-system
+        root / "tools/orders_system/lemon_backend_login.py",  # orders-system 舊版
+    )
+    copy = next((p for p in candidates if p.exists()), candidates[0])
     if not copy.exists():
         pytest.skip("orders-system 尚未同步過來")
 
