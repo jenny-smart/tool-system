@@ -18,7 +18,8 @@ TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
     """Return rows eligible for invoice creation from the area's 清潔異動 sheet.
 
-    Eligibility: 待收款，或待處理發票＋車馬費發票／合併開立發票；G 不可空白且 O 尚無發票。
+    Eligibility: 待收款，或待處理發票＋車馬費發票／合併開立發票，或已收款＋異動發票／合併開立（還沒開發票）；
+    G 不可空白且 O 尚無發票。
     """
     ws = get_worksheet(area)
     values = ws.get("B:O")
@@ -38,7 +39,12 @@ def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
             detail in MERGED_INVOICE_DETAILS
             or (len(split_order_numbers(order_no)) >= 2 and not re.search(r"(?:改|轉)\s*三聯", f"{detail} {k_note}"))
         )
-        if not (is_pending_charge or is_fare_invoice or is_merged) or not order_no or invoice_no:
+        # 已收款但還沒開發票的異動發票／合併開立（2026-11 Jenny）
+        paid_uninvoiced = status == "已收款" and (
+            detail == "異動發票" or detail in MERGED_INVOICE_DETAILS or len(split_order_numbers(order_no)) >= 2)
+        if paid_uninvoiced and len(split_order_numbers(order_no)) >= 2:
+            is_merged = True
+        if not (is_pending_charge or is_fare_invoice or is_merged or paid_uninvoiced) or not order_no or invoice_no:
             continue
         rows.append({
             "選取": False,
