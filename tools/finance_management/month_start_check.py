@@ -806,7 +806,7 @@ def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) ->
     from tools.orders_system import calendar_notify
 
     # 開始時間留 30 分鐘前導，Google 的提醒推播才排得進去（20、10 分鐘前各跳一次）
-    calendar_notify.create_notify_event(summary=title, description=body, start=now + timedelta(minutes=30),
-                                        calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10])
-    log(f"已在 {REMIND_CALENDAR_ID} 行事曆建提醒")
+    event = calendar_notify.create_notify_event(summary=title, description=body, start=now + timedelta(minutes=30),
+                                                calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10])
+    log(f"已在 {(event or {}).get('_calendar_id', REMIND_CALENDAR_ID)} 行事曆建提醒")
     return todo

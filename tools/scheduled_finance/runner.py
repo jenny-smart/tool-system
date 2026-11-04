@@ -68,11 +68,11 @@ def remind(title: str, body: str, prefix: str) -> None:
 
     from tools.orders_system import calendar_notify
 
-    calendar_notify.create_notify_event(summary=title, description=body,
-                                        start=datetime.now(TW_TZ) + timedelta(minutes=30),
-                                        calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
-                                        replace_prefix=prefix)
-    log(f"已在 {REMIND_CALENDAR_ID} 建立提醒：{title}")
+    event = calendar_notify.create_notify_event(summary=title, description=body,
+                                                start=datetime.now(TW_TZ) + timedelta(minutes=30),
+                                                calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
+                                                replace_prefix=prefix)
+    log(f"已在 {(event or {}).get('_calendar_id', REMIND_CALENDAR_ID)} 建立提醒：{title}")
 
 
 def run_fixed_expense(today: date) -> int:

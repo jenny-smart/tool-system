@@ -115,7 +115,7 @@ def remind(today: Optional[date] = None, log: Callable[[str], None] = print) -> 
                                                 start=datetime.now(TW_TZ) + timedelta(minutes=30),
                                                 attendee="", reminder_minutes=[20, 10],
                                                 replace_prefix=title.split("：")[0])
-    log(f"已在 {REMIND_CALENDAR_ID} 行事曆建提醒：{title}")
+    log(f"已在 {(event or {}).get('_calendar_id', REMIND_CALENDAR_ID)} 行事曆建提醒：{title}")
     return event
 
 
