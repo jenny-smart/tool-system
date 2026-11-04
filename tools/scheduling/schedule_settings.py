@@ -54,6 +54,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "fubon_statement": ("scheduled_fubon_statement.yml", {}),
     "yuanta_statement": ("scheduled_yuanta_statement.yml", {}),
     "gmail_401": ("Scheduled_gmail_401.yml", {}),
+    "atm_unpaid": ("scheduled_atm_unpaid.yml", {}),
     # 清潔異動／富邦請款
     "change_order_check": ("scheduled_change_order_check.yml", {"target": "check"}),
     "change_order_scan": ("scheduled_change_order_check.yml", {"target": "batch_scan"}),
@@ -101,6 +102,8 @@ DEFAULT_ROWS: list[list] = [
     [True, "notify", "寄送日排程結果通知", "07:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "fubon_statement", "富邦明細下載（排入 Mac）", "08:00,11:00,16:30", "每日", "", "照跑", MODE_QUEUE,
      "11:00、16:30 例假日由程式略過"],
+    [False, "atm_unpaid", "ATM 待付款清單同步（台北／台中）", "09:00~18:00 每30分鐘", "每日", "", "略過", MODE_DIRECT,
+     "取代 Mac 的 ATM 本機排程：先移除 Mac launchd 再勾選啟用，避免兩邊同時貼上"],
     [True, "change_order_check", "清潔異動每日檢查（未備妥建 11:00 提醒）", "10:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
