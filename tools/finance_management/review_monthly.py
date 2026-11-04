@@ -127,7 +127,7 @@ def layout(area: str, period: str, log: Callable[[str], None] = print) -> int:
 
     last_index = letter_index(total_formula_column(area)) - 1  # 預估合計欄的前一欄（Z／AA）
 
-    spreadsheet_id, title = _resolve_location(area)
+    spreadsheet_id, title = _resolve_location(area, period)
     service = review_service()
     header = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"'{title}'!1:1",
                                                  valueRenderOption="FORMATTED_VALUE").execute().get("values", [[]])
@@ -352,7 +352,7 @@ def _write_block(period: str, month_end: date, vip_block: list[list], cash: Opti
     from tools.finance_management.statement_registry import review_spreadsheet_id
 
     year, month = month_end.year, month_end.month
-    review_id = review_spreadsheet_id()
+    review_id = review_spreadsheet_id(year)  # 12 月資料在 1 月才貼，仍寫進 12 月所屬年度的檔
     start = block_start(month)
     first, last = column_letter(start), column_letter(start + 6)
     service = review_service()

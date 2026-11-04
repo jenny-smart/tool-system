@@ -156,7 +156,7 @@ def sync_area(area: str, period: str, log: Callable[[str], None] = print, servic
     source = service.spreadsheets().values().get(
         spreadsheetId=source_id, range=f"'{SOURCE_SHEET.format(year=year)}'!{SOURCE_RANGE}",
         valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
-    locations = {kind: resolve_statement_location(area, kind, service=service) for kind in TARGETS}
+    locations = {kind: resolve_statement_location(area, kind, service=service, year=year) for kind in TARGETS}
     headers = {kind: (service.spreadsheets().values().get(spreadsheetId=sid, range=f"'{title}'!1:1").execute()
                       .get("values", [[]]) or [[]])[0] for kind, (sid, title) in locations.items()}
     labels = {kind: service.spreadsheets().values().get(spreadsheetId=sid, range=f"'{title}'!{TARGET_LABEL_RANGE}")

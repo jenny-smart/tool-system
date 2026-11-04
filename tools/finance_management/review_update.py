@@ -45,10 +45,17 @@ from tools.finance_management.statement_registry import (
 MASTER_REVIEW_AREA = "年度review"  # 特殊地區代號：指「年度review工作表」這個跨地區彙整分頁
 
 
-def _resolve_location(area: str) -> tuple[str, str]:
+def _data_year(year_month: str | None) -> int | None:
+    """「2026.12」「202612」→ 2026：review 寫進資料所屬年度的檔（1 月做 12 月 review 仍寫 2026 年檔）。"""
+    text = str(year_month or "").strip()
+    return int(text[:4]) if len(text) >= 4 and text[:4].isdigit() else None
+
+
+def _resolve_location(area: str, year_month: str | None = None) -> tuple[str, str]:
+    year = _data_year(year_month)
     if area == MASTER_REVIEW_AREA:
-        return resolve_master_review_location()
-    return resolve_review_location(area)
+        return resolve_master_review_location(year)
+    return resolve_review_location(area, year)
 
 
 TW_TZ = ZoneInfo("Asia/Taipei")
@@ -164,7 +171,7 @@ def preview_review_formula_updates(area: str, year_month: str, only_column: str 
     """
     if only_column is None:
         only_column = total_formula_column(area)
-    spreadsheet_id, title = _resolve_location(area)
+    spreadsheet_id, title = _resolve_location(area, year_month)
     service = get_sheets_service()
 
     # 標題列（row1）跟表格內容分開讀：標題可能是公式算出來的月份文字
@@ -217,7 +224,7 @@ def apply_review_formula_updates(area: str, year_month: str, only_column: str | 
             log_execution("年度review公式調整", area, "完成", "沒有需要調整的公式")
             return {"changed": 0}
 
-        spreadsheet_id, title = _resolve_location(area)
+        spreadsheet_id, title = _resolve_location(area, year_month)
         service = get_sheets_service()
         data = [
             {"range": f"'{title}'!{c['cell']}", "values": [[c["new_formula"]]]}
@@ -268,7 +275,7 @@ def group_hide_actual_columns(area: str, year_month: str) -> dict[str, object]:
     year_month 格式 YYYY.MM，例如 "2026.07"。
     """
     target_year, target_month = int(year_month[:4]), int(year_month[5:])
-    spreadsheet_id, title = _resolve_location(area)
+    spreadsheet_id, title = _resolve_location(area, year_month)
     service = get_sheets_service()
 
     header_res = service.spreadsheets().values().get(
@@ -368,7 +375,7 @@ def group_hide_future_forecast_columns(area: str, year_month: str) -> dict[str, 
     year_month 格式 YYYY.MM，例如 "2026.07"。
     """
     target_year, target_month = int(year_month[:4]), int(year_month[5:])
-    spreadsheet_id, title = _resolve_location(area)
+    spreadsheet_id, title = _resolve_location(area, year_month)
     service = get_sheets_service()
 
     header_res = service.spreadsheets().values().get(

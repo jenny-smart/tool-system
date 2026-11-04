@@ -80,7 +80,7 @@ def test_review_only_rewrites_total_column(monkeypatch):
         def values(self):
             return Values()
 
-    monkeypatch.setattr(ru, "_resolve_location", lambda area: ("id", "台北"))
+    monkeypatch.setattr(ru, "_resolve_location", lambda area, year_month=None: ("id", "台北"))
     monkeypatch.setattr(ru, "get_sheets_service", lambda: Service())
     changes = ru.preview_review_formula_updates("台北", "2026.10")
     assert changes == [{"cell": "AA2", "old_formula": formula, "new_formula": '=SUMIF(B$1:U2,"*預估*",B2:U2)'}]

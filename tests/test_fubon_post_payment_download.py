@@ -69,9 +69,9 @@ def test_fubon_report_formats_only_written_amount_cells():
               datetime=__import__('datetime').datetime, atm_sheet_id=lambda area, year: '')
     for helper in ('_skip_blank', '_row_year', '_fubon_formulas', '_yuanta_formulas', 'report_cell_updates'):
         load_function('sheet_filter.py', helper, ns)
-    sync = load_function('sheet_filter.py', 'sync_financial_report', ns)
+    sync = load_function('sheet_filter.py', '_sync_financial_report_year', ns)
     table = MagicMock(rows=rows)
-    assert sync(table, '台北', 'fubon') == 1
+    assert sync(table, '台北', 'fubon', None) == 1
     raw, = [c for c in worksheet.batch_update.call_args_list if c.kwargs['value_input_option'] == 'RAW']
     entered, = [c for c in worksheet.batch_update.call_args_list if c.kwargs['value_input_option'] == 'USER_ENTERED']
     assert raw.args[0] == [{'range': 'D3:H3', 'values': [['轉帳', 1234, None, 56789, 'note']]}]  # 空白不寫

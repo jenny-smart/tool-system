@@ -147,3 +147,57 @@ def test_mobile_resolves_start_from_report(monkeypatch):
     assert args.start == d(2026, 10, 23)
     with pytest.raises(ValueError):
         fubon_mobile._resolve_start(argparse.Namespace(start=None, end=d(2026, 10, 27), start_from_sheet=False), object())
+
+
+def test_bank_rows_split_by_transaction_year(monkeypatch):
+    """1 月初下載到的 12 月底明細，分到 12 月所屬年度（今年的列用 None＝今年財報）。"""
+    from tools.bank_statement import sheet_filter as sf
+    from tools.bank_statement.capture import CapturedTable
+
+    monkeypatch.setattr(sf, "_taipei_year", lambda: 2027)
+    fubon = CapturedTable(headers=list("1234567"), rows=[
+        ["2027/01/02", "2027/01/02 09:00:00", "a", "", "1", "1", ""],
+        ["2026/12/31", "2026/12/31 23:00:00", "b", "", "1", "1", ""],
+        ["2026/12/30", "2026/12/30 10:00:00", "c", "", "1", "1", ""],
+    ])
+    groups = sf.split_table_by_year(fubon, "fubon")
+    assert [(year, [r[2] for r in t.rows]) for year, t in groups] == [(2026, ["b", "c"]), (None, ["a"])]
+
+    yuanta = CapturedTable(headers=list("12345678"), rows=[
+        ["2026/12/31 10:41:00", "2026/12/31", "x", "", "", "1", "1", ""],
+        ["", "2027/01/04", "y", "", "", "1", "1", ""],
+    ])
+    groups = sf.split_table_by_year(yuanta, "yuanta")
+    assert [(year, [r[2] for r in t.rows]) for year, t in groups] == [(2026, ["x"]), (None, ["y"])]
+
+
+def test_bank_sync_writes_each_year_to_its_report(monkeypatch):
+    from tools.bank_statement import sheet_filter as sf
+    from tools.bank_statement.capture import CapturedTable
+
+    monkeypatch.setattr(sf, "_taipei_year", lambda: 2027)
+    written = []
+    monkeypatch.setattr(sf, "_sync_financial_report_year",
+                        lambda table, area, bank, year: written.append((year, len(table.rows))) or len(table.rows))
+    table = CapturedTable(headers=list("1234567"), rows=[
+        ["2026/12/31", "2026/12/31 23:00:00", "b", "", "1", "1", ""],
+        ["2027/01/02", "2027/01/02 09:00:00", "a", "", "1", "1", ""],
+    ])
+    assert sf.sync_financial_report(table, "台北", "fubon") == 2
+    assert written == [(2026, 1), (None, 1)]
+
+
+def test_query_start_continues_from_last_year_when_new_report_empty(monkeypatch):
+    from datetime import date as d
+
+    from tools.bank_statement import sheet_filter as sf
+
+    monkeypatch.setattr(sf, "_taipei_year", lambda: 2027)
+    last = {None: None, 2026: d(2026, 12, 29)}
+    monkeypatch.setattr(sf, "_report_last_date", lambda area, bank, year: (last[year], f"富邦更新{year}"))
+    assert sf.query_start_from_report("台北", "fubon", d(2027, 1, 3)) == d(2026, 12, 29)
+    last[None] = d(2027, 1, 2)
+    assert sf.query_start_from_report("台北", "fubon", d(2027, 1, 3)) == d(2027, 1, 2)
+    last[None] = None
+    last[2026] = None
+    assert sf.query_start_from_report("台北", "fubon", d(2027, 1, 3)) == d(2027, 1, 1)

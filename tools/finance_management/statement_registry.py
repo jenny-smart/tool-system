@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
-from tools.common.year_roots import choose_file_id, taipei_year
+from tools.common.year_roots import choose_file_id_for_year, taipei_year
 
 REGISTRY_SHEET_NAME = "財報設定"
 
@@ -35,10 +35,10 @@ CASH_GAP_AREA = "2026-現金"
 REVIEW_SPREADSHEET_AREA = "2026"
 
 
-def _review_row() -> list[str]:
-    """年度review那一列：優先找地區＝今年（例如 2027）的列，沒有才用「2026」列。"""
+def _review_row(year: int | None = None) -> list[str]:
+    """年度review那一列：優先找地區＝資料年度（沒指定＝今年，例如 2027）的列，沒有才用「2026」列。"""
     try:
-        return _find_row(str(taipei_year()))
+        return _find_row(str(year or taipei_year()))
     except RuntimeError:
         return _find_row(REVIEW_SPREADSHEET_AREA)
 
@@ -136,13 +136,15 @@ def sheet_title_for_gid(service, spreadsheet_id: str, gid: str) -> str:
     raise RuntimeError(f"試算表 {spreadsheet_id} 找不到 GID={gid} 對應的分頁")
 
 
-def resolve_statement_location(area: str, report: str, service=None) -> tuple[str, str]:
-    """回傳 (試算表ID, 分頁標題)。report 為 富邦更新／元大更新／財務／現金。"""
+def resolve_statement_location(area: str, report: str, service=None,
+                               year: int | None = None) -> tuple[str, str]:
+    """回傳 (試算表ID, 分頁標題)。report 為 富邦更新／元大更新／財務／現金。
+    year＝資料所屬年度（例如 2027 年 1 月處理 2026 年 12 月就傳 2026）；沒指定＝今年。"""
     if report not in REPORT_SHEET_TITLES:
         raise ValueError(f"不支援的財報類型：{report}")
     row = _find_row(area)
-    spreadsheet_id = choose_file_id(
-        "財報", area, _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
+    spreadsheet_id = choose_file_id_for_year(
+        "財報", area, _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID)), year
     )
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少試算表ID")
@@ -168,37 +170,42 @@ def marketing_expense_spreadsheet_id(area: str = "台北") -> str:
     return spreadsheet_id
 
 
-def resolve_marketing_expense_location(area: str = "台北") -> tuple[str, str]:
-    """回傳行銷費用來源的 (試算表ID, 今年的「{YYYY}總表」分頁)；檔案ID 登記在 G 欄。
-    生成新年度會在同一個行銷費用檔複製出新年度工作表，依名稱找就不必每年改設定。"""
+def resolve_marketing_expense_location(area: str = "台北", year: int | None = None) -> tuple[str, str]:
+    """回傳行銷費用來源的 (試算表ID, 「{YYYY}總表」分頁)；檔案ID 登記在 G 欄。
+    生成新年度會在同一個行銷費用檔複製出新年度工作表，依名稱找就不必每年改設定。
+    year＝資料所屬年度（1 月處理 12 月就讀去年的總表），沒指定＝今年。"""
     row = _find_row(area)
     spreadsheet_id = _extract_spreadsheet_id(_cell(row, COL_MARKETING_ID))
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{area} 缺少行銷ID")
-    title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{taipei_year()}總表")
+    title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{year or taipei_year()}總表")
     return spreadsheet_id, title
 
 
-def review_spreadsheet_id() -> str:
-    """2026目標及review檔本身的試算表ID：地區＝「2026」那一列的B欄。"""
-    row = _review_row()
-    spreadsheet_id = choose_file_id(
-        "目標及review", "共用", _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID))
+def review_spreadsheet_id(year: int | None = None) -> str:
+    """目標及review檔本身的試算表ID：地區＝資料年度（或「2026」）那一列的B欄；
+    year＝資料所屬年度，沒指定＝今年。"""
+    row = _review_row(year)
+    spreadsheet_id = choose_file_id_for_year(
+        "目標及review", "共用", _extract_spreadsheet_id(_cell(row, COL_SPREADSHEET_ID)), year
     )
     if not spreadsheet_id:
         raise RuntimeError(f"「{REGISTRY_SHEET_NAME}」{REVIEW_SPREADSHEET_AREA} 缺少試算表ID")
     return spreadsheet_id
 
 
-def resolve_master_review_location() -> tuple[str, str]:
-    """回傳 (試算表ID, 分頁標題)：跨地區彙整的「{YYYY}review」分頁（例如 2026review）。"""
-    spreadsheet_id = review_spreadsheet_id()
-    title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{taipei_year()}review")
+def resolve_master_review_location(year: int | None = None) -> tuple[str, str]:
+    """回傳 (試算表ID, 分頁標題)：跨地區彙整的「{YYYY}review」分頁（例如 2026review）。
+    year＝資料所屬年度，沒指定＝今年。"""
+    year = year or taipei_year()
+    spreadsheet_id = review_spreadsheet_id(year)
+    title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{year}review")
     return spreadsheet_id, title
 
 
-def resolve_review_location(area: str) -> tuple[str, str]:
-    """回傳 (試算表ID, 分頁標題)：目標及review檔裡，該地區的「{地區}財報」分頁。"""
-    spreadsheet_id = review_spreadsheet_id()
+def resolve_review_location(area: str, year: int | None = None) -> tuple[str, str]:
+    """回傳 (試算表ID, 分頁標題)：目標及review檔裡，該地區的「{地區}財報」分頁。
+    year＝資料所屬年度，沒指定＝今年。"""
+    spreadsheet_id = review_spreadsheet_id(year)
     title = require_sheet_title(get_sheets_service(), spreadsheet_id, f"{area}財報")
     return spreadsheet_id, title

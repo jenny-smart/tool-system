@@ -233,7 +233,7 @@ def test_statement_tabs_found_by_name(monkeypatch):
     monkeypatch.setattr(reg, "_read_registry", lambda: rows)
     monkeypatch.setattr(reg, "get_sheets_service", lambda: svc)
     monkeypatch.setattr(reg, "taipei_year", lambda: 2027)
-    monkeypatch.setattr(reg, "choose_file_id", lambda cat, area, sid, **k: sid)
+    monkeypatch.setattr(reg, "choose_file_id_for_year", lambda cat, area, sid, year=None, **k: sid)
     reg._TITLES_CACHE.clear()
     assert reg.resolve_marketing_expense_location("台北") == ("MKT", "2027總表")
     assert reg.resolve_statement_location("台北", "富邦更新") == ("FIN", "富邦更新")

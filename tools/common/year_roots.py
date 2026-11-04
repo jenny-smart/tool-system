@@ -336,6 +336,24 @@ def choose_file_id(category: str, area: str, configured_id: str,
         return str(configured_id or "").strip()
 
 
+def choose_file_id_for_year(category: str, area: str, configured_id: str,
+                            year: Optional[int] = None, file_index: int = 0) -> str:
+    """依「資料所屬年度」選檔：
+    - 今年（或沒指定）＝ choose_file_id，照 K 欄模式，行為不變。
+    - 往年（例如 2027 年 1 月處理 2026 年 12 月資料）＝ 只依年度根目錄找該年度檔。
+      設定表裡的 ID 是今年在用的檔，退回去會把舊年度資料寫進新年度檔，所以找不到就報錯。"""
+    current = taipei_year()
+    if not year or int(year) >= current:
+        return choose_file_id(category, area, configured_id, year=year, file_index=file_index)
+    try:
+        return root_file_id(category, area, int(year), file_index)
+    except Exception as exc:
+        raise RuntimeError(
+            f"{year} 年資料要寫回 {year} 年度檔，但年度根目錄找不到「{category}／{area or '共用'}」"
+            f"{year} 年度檔：{exc}"
+        ) from exc
+
+
 # ---------- 檢查與切換（給 toolapp「年度根目錄檢查與切換」用） ----------
 def root_file_id(category: str, area: str, year: Optional[int] = None, file_index: int = 0) -> str:
     """只用年度根目錄找檔（不用各設定表的 ID）；設定讀不到或找不到檔都會報錯。"""

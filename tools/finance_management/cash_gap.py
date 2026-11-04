@@ -39,7 +39,8 @@
 from __future__ import annotations
 
 import time
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.execution_log import log_execution
@@ -92,6 +93,10 @@ FINANCE_SPRING_PARTY_ROW = 135
 
 NEWEBPAY_INVOICE_SHEET = "藍新發票總表"
 NEWEBPAY_INVOICE_AMOUNT_COL = 4  # D
+
+
+def taipei_year() -> int:
+    return datetime.now(ZoneInfo("Asia/Taipei")).year
 
 
 def _cell(row: list[object], col: int) -> object:
@@ -152,26 +157,27 @@ def is_permission_error(exc: Exception) -> bool:
     return "403" in text and ("permission" in text.lower() or "PERMISSION_DENIED" in text)
 
 
-_REPORT_CACHE: dict[tuple[str, str], tuple[float, list[list[object]]]] = {}
+_REPORT_CACHE: dict[tuple[str, str, int | None], tuple[float, list[list[object]]]] = {}
 REPORT_CACHE_SECONDS = 300
 
 
-def _report_values(area: str, report: str) -> list[list[object]]:
-    """讀各區財報（同一次執行 5 分鐘內同一個分頁只讀一次：富邦更新每區要用好幾次，重複讀會撞 429）。"""
-    key = (area, report)
+def _report_values(area: str, report: str, year: int | None = None) -> list[list[object]]:
+    """讀各區財報（同一次執行 5 分鐘內同一個分頁只讀一次：富邦更新每區要用好幾次，重複讀會撞 429）。
+    year＝財報年度，沒指定＝今年。"""
+    key = (area, report, year)
     cached = _REPORT_CACHE.get(key)
     if cached and time.monotonic() - cached[0] < REPORT_CACHE_SECONDS:
         return cached[1]
-    values = _report_values_now(area, report)
+    values = _report_values_now(area, report, year)
     _REPORT_CACHE[key] = (time.monotonic(), values)
     return values
 
 
-def _report_values_now(area: str, report: str) -> list[list[object]]:
+def _report_values_now(area: str, report: str, year: int | None = None) -> list[list[object]]:
     """讀各區財報。服務帳號沒有權限（403，例如桃園／新竹／高雄財報沒分享給服務帳號）時，
     改用 Jenny 本人的 OAuth 再讀一次。"""
     try:
-        spreadsheet_id, title = resolve_statement_location(area, report)
+        spreadsheet_id, title = resolve_statement_location(area, report, year=year)
         return _read_values(spreadsheet_id, title)
     except Exception as exc:
         if not is_permission_error(exc):
@@ -179,7 +185,7 @@ def _report_values_now(area: str, report: str) -> list[list[object]]:
         from services.google_auth import get_sheets_service as oauth_sheets_service
 
         oauth = oauth_sheets_service()
-        spreadsheet_id, title = resolve_statement_location(area, report, service=oauth)
+        spreadsheet_id, title = resolve_statement_location(area, report, service=oauth, year=year)
         return _read_values(spreadsheet_id, title, service=oauth)
 
 
@@ -259,11 +265,11 @@ def specialist_contract_fee(
     return _dual_source_label_sum([year_month, "專員承攬費-2"], fubon_values, yuanta_values)
 
 
-def marketing_expense_row(area: str, month: int, row: int) -> float:
-    """行銷費用總管理試算表，指定月份／地區／列數那一格。"""
+def marketing_expense_row(area: str, month: int, row: int, year: int | None = None) -> float:
+    """行銷費用總管理試算表，指定月份／地區／列數那一格（year＝「{YYYY}總表」年度，沒指定＝今年）。"""
     if area not in MARKETING_REGION_OFFSETS:
         raise ValueError(f"行銷費用檔沒有「{area}」這個地區欄位")
-    spreadsheet_id, title = resolve_marketing_expense_location(area)
+    spreadsheet_id, title = resolve_marketing_expense_location(area, year=year)
     service = get_sheets_service()
     column_index = (
         MARKETING_BASE_COLUMN
@@ -285,18 +291,18 @@ def marketing_expense_row(area: str, month: int, row: int) -> float:
     return _to_number(values[0][0]) if values and values[0] else 0.0
 
 
-def _finance_column_value(area: str, month: int, row: int, service=None) -> float:
-    """財務分頁「{年月}預估」欄，指定列數的值。服務帳號沒權限時改用 Jenny OAuth。"""
+def _finance_column_value(area: str, month: int, row: int, service=None, year: int | None = None) -> float:
+    """財務分頁「{年月}預估」欄，指定列數的值（year＝財報年度，沒指定＝今年）。服務帳號沒權限時改用 Jenny OAuth。"""
     if service is None:
         try:
-            return _finance_column_value(area, month, row, service=get_sheets_service())
+            return _finance_column_value(area, month, row, service=get_sheets_service(), year=year)
         except Exception as exc:
             if not is_permission_error(exc):
                 raise
             from services.google_auth import get_sheets_service as oauth_sheets_service
 
-            return _finance_column_value(area, month, row, service=oauth_sheets_service())
-    spreadsheet_id, title = resolve_statement_location(area, "財務", service=service)
+            return _finance_column_value(area, month, row, service=oauth_sheets_service(), year=year)
+    spreadsheet_id, title = resolve_statement_location(area, "財務", service=service, year=year)
     column_index = FINANCE_BASE_COLUMN + (month - 1) * FINANCE_MONTH_STEP_COLUMNS
     column_letter = _column_letter(column_index)
     res = (
@@ -313,9 +319,9 @@ def _finance_column_value(area: str, month: int, row: int, service=None) -> floa
     return _to_number(values[0][0]) if values and values[0] else 0.0
 
 
-def finance_revenue(area: str, month: int) -> float:
+def finance_revenue(area: str, month: int, year: int | None = None) -> float:
     """總營收：財務分頁「{年月}預估」欄第3列。"""
-    return _finance_column_value(area, month, FINANCE_REVENUE_ROW)
+    return _finance_column_value(area, month, FINANCE_REVENUE_ROW, year=year)
 
 
 def newebpay_invoice_amount(area: str, as_of: date) -> float:
@@ -361,12 +367,15 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
     是哪一項、哪個地區出問題。
     """
     month = as_of.month
+    # 讀試算月份所屬年度的財報與「{YYYY}總表」：1 月試算 12 月仍讀 2026 年檔。
+    current_year = taipei_year()
+    year = as_of.year if as_of.year < current_year else None
 
     # 富邦更新／元大更新各只讀一次、重複使用，避免同一份財報短時間內被讀
     # 好幾次，觸發 Sheets API 的每分鐘讀取配額（跑「全區」很容易撞到）。
-    def _try_fetch(report: str):
+    def _try_fetch(report: str, report_year: int | None = year):
         try:
-            return _report_values(area, report), None
+            return _report_values(area, report, report_year), None
         except Exception as exc:
             if is_missing_account(exc, report):
                 # 這區沒有這個銀行帳戶（例如高雄沒有富邦，財報沒有「富邦更新」分頁）：當成 0，不算錯誤
@@ -375,6 +384,18 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
 
     fubon_values, fubon_error = _try_fetch("富邦更新")
     yuanta_values, yuanta_error = _try_fetch("元大更新")
+    # 餘額只看試算月份那一年的財報；內勤薪資、專員承攬費-2 在次月才匯款，
+    # 試算 12 月時再加上隔年財報裡標「{YYYY}.12」的列。
+    fubon_label_values, yuanta_label_values = fubon_values, yuanta_values
+    if year is not None and fubon_error is None and yuanta_error is None:
+        next_year = as_of.year + 1 if as_of.year + 1 < current_year else None
+        next_fubon, next_fubon_error = _try_fetch("富邦更新", next_year)
+        next_yuanta, next_yuanta_error = _try_fetch("元大更新", next_year)
+        fubon_error = fubon_error or next_fubon_error
+        yuanta_error = yuanta_error or next_yuanta_error
+        if fubon_error is None and yuanta_error is None:
+            fubon_label_values = fubon_values + next_fubon[1:]
+            yuanta_label_values = yuanta_values + next_yuanta[1:]
 
     def _need1(values, error, compute):
         if error is not None:
@@ -389,20 +410,22 @@ def compute_cash_gap(area: str, as_of: date) -> dict[str, float | str]:
         return compute(fubon_values, yuanta_values)
 
     def _revenue_based(multiplier):
-        return lambda: finance_revenue(area, month) * multiplier
+        return lambda: finance_revenue(area, month, year) * multiplier
 
     computations = {
         "富邦餘額": lambda: _need1(fubon_values, fubon_error, lambda v: fubon_balance(area, as_of, v)),
         "元大餘額": lambda: _need1(yuanta_values, yuanta_error, lambda v: yuanta_balance(area, as_of, v)),
-        "內勤薪資": lambda: _need2(lambda fv, yv: internal_staff_salary(area, as_of, fv, yv)),
-        "專員承攬費": lambda: _need2(lambda fv, yv: specialist_contract_fee(area, as_of, fv, yv)),
-        "行銷費用(廣告)": lambda: marketing_expense_row(area, month, MARKETING_ROW_AD),
-        "行銷費用(服務)": lambda: marketing_expense_row(area, month, MARKETING_ROW_SERVICE),
-        "總營收": lambda: finance_revenue(area, month),
+        "內勤薪資": lambda: _need2(lambda fv, yv: internal_staff_salary(
+            area, as_of, fubon_label_values, yuanta_label_values)),
+        "專員承攬費": lambda: _need2(lambda fv, yv: specialist_contract_fee(
+            area, as_of, fubon_label_values, yuanta_label_values)),
+        "行銷費用(廣告)": lambda: marketing_expense_row(area, month, MARKETING_ROW_AD, year),
+        "行銷費用(服務)": lambda: marketing_expense_row(area, month, MARKETING_ROW_SERVICE, year),
+        "總營收": lambda: finance_revenue(area, month, year),
         "2%": _revenue_based(0.02),
         "營業稅": _revenue_based(0.05),
-        "年終費用": lambda: _finance_column_value(area, month, FINANCE_YEAR_END_BONUS_ROW) * month,
-        "春酒費用": lambda: _finance_column_value(area, month, FINANCE_SPRING_PARTY_ROW) * month,
+        "年終費用": lambda: _finance_column_value(area, month, FINANCE_YEAR_END_BONUS_ROW, year=year) * month,
+        "春酒費用": lambda: _finance_column_value(area, month, FINANCE_SPRING_PARTY_ROW, year=year) * month,
         "藍新發票金額": lambda: newebpay_invoice_amount(area, as_of),
     }
     result: dict[str, float | str] = {}

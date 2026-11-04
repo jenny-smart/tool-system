@@ -50,7 +50,10 @@ from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.execution_log import log_execution
-from tools.finance_management.statement_registry import resolve_statement_location
+from tools.finance_management.statement_years import merge_year_results, statement_years
+from tools.finance_management.statement_registry import (
+    resolve_statement_location,
+)
 
 RULES_SHEET_NAME = "財報篩選規則"
 
@@ -448,7 +451,11 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
     date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
     log_execution("財報富邦更新套用規則", area, "開始", f"日期區間：{date_range}")
     try:
-        result = _apply_rules_impl(area, start_date, end_date)
+        # 區間跨年時（例如 1 月處理 12 月底的明細）各年度的列各自套用在該年財報
+        result = merge_year_results([
+            _apply_rules_impl(area, start_date, end_date, year=year)
+            for year in statement_years(start_date, end_date)
+        ])
     except Exception as exc:
         log_execution("財報富邦更新套用規則", area, "失敗", str(exc))
         raise
@@ -459,9 +466,9 @@ def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
     return result
 
 
-def _apply_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, int]:
+def _apply_rules_impl(area: str, start_date=None, end_date=None, year: int | None = None) -> dict[str, int]:
     rules = [r for r in load_rules() if r.enabled]
-    spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
+    spreadsheet_id, title = resolve_statement_location(area, "富邦更新", year=year)
     values = _read_values(spreadsheet_id, title)
     if len(values) < 2:
         return {"updated_rows": 0, "inserted_rows": 0}
