@@ -34,7 +34,7 @@ on:
         required: true
         default: "month_start"
         type: choice
-        options: [month_start, month_start_queue, fixed_expense, fixed_expense_mail, fixed_expense_remit, vip_full_pipeline, cash_gap, prepaid_amount, review_monthly, cash_gap_check, cash_gap_followup, revenue_reconcile, deposit_report, month_start_check, accounting_reminder, mof_serial, mof_serial_check]
+        options: [month_start, month_start_queue, fixed_expense, fixed_expense_mail, fixed_expense_remit, vip_full_pipeline, cash_gap, prepaid_amount, review_monthly, cash_gap_check, cash_gap_followup, revenue_reconcile, deposit_report, month_start_check, accounting_reminder, mof_serial, mof_serial_check, monthly_checklist]
       date:
         description: "模擬執行日 YYYY-MM-DD（留空＝今天；期別會用這天的上個月）"
         required: false

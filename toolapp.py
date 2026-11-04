@@ -4020,6 +4020,7 @@ def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     # 整合執行：都先「盤點」目前可做的項目（預設打勾、可全選）再執行，集中在同一組
+    {"name": "【整合執行】月度盤點", "handler": None, "enabled": True},
     {"name": "【整合執行】月初（1日所有排程）", "handler": None, "enabled": True},
     {"name": "【整合執行】清潔異動已備妥", "handler": None, "enabled": True},
     {"name": "【整合執行】富邦內部請款", "handler": None, "enabled": True},
@@ -4564,6 +4565,16 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_fixed_expense_batch = fresh_module("tools.finance_management.fixed_expense_batch_ui").render
 
     render_fixed_expense_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【整合執行】月度盤點":
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.finance_management.monthly_checklist")
+    render_monthly_checklist = fresh_module("tools.finance_management.monthly_checklist_ui").render
+
+    render_monthly_checklist(create_local_agent_task, add_log, st.session_state.get("username", ""))
     LOG_PLACEHOLDER = st.empty()
     render_log()
     st.stop()
