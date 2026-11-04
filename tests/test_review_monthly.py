@@ -11,28 +11,35 @@ GROUPS = [{"depth": 1, "range": {"startIndex": s, "endIndex": e}} for s, e in
          [{"depth": 2, "range": {"startIndex": 20, "endIndex": 25}}]
 
 
-def test_hidden_columns_rule_a_for_october():
+def test_hidden_columns_only_forecast_up_to_period():
+    """2026-11-04 Jenny：期別（含）以前只看預估；期別之後全收；年度實際合計 Z 收起、年度預估合計 AA 顯示。"""
     cols = rm.classify_header(HEADER)
-    hidden = rm.hidden_columns(cols, (2026, 10))
-    letters = [rm.column_letter(i) for i in hidden]
-    # 1～9 月預估收起（C,E,…,S）；10 月實際 T 收起、預估 U 顯示；11、12 月 V～Y 收起
-    assert "U" not in letters and "T" in letters and "S" in letters and "B" not in letters
-    assert {"V", "W", "X", "Y"} <= set(letters)
-    assert "Z" not in letters and "AA" not in letters  # 年度合計一律顯示
-    assert rm.runs(hidden)[-2:] == [(18, 20), (21, 25)]  # 9 月預估＋10 月實際相鄰，收成一組
+    hidden = rm.hidden_columns(cols, (2026, 10), last_index=rm.letter_index("Z"))
+    letters = {rm.column_letter(i) for i in hidden}
+    actual = {rm.column_letter(1 + 2 * (m - 1)) for m in range(1, 13)}  # B, D, …, X
+    assert actual <= letters  # 每月實際都收起
+    assert {"W", "Y", "Z"} <= letters  # 11、12 月預估、2026實際
+    assert not ({"C", "E", "S", "U", "AA"} & letters)  # 1～10 月預估、2026預估 顯示
+    assert len(hidden) == 12 + 2 + 1
+
+
+def test_hidden_columns_stop_at_last_index():
+    cols = rm.classify_header(HEADER)
+    hidden = rm.hidden_columns(cols, (2026, 10), last_index=rm.letter_index("Y"))
+    assert "Z" not in {rm.column_letter(i) for i in hidden}
 
 
 def test_layout_requests_clear_deepest_first_then_regroup():
     cols = rm.classify_header(HEADER)
-    clear, regroup, hidden = rm.layout_requests(9, cols, GROUPS, (2026, 10))
+    clear, regroup, hidden = rm.layout_requests(9, cols, GROUPS, (2026, 10), rm.letter_index("Z"))
     deletes = [r["deleteDimensionGroup"]["range"] for r in clear if "deleteDimensionGroup" in r]
     assert len(deletes) == len(GROUPS) and (deletes[0]["startIndex"], deletes[0]["endIndex"]) == (20, 25)
     assert clear[-1]["updateDimensionProperties"]["properties"] == {"hiddenByUser": False}
     added = [(r["addDimensionGroup"]["range"]["startIndex"], r["addDimensionGroup"]["range"]["endIndex"])
              for r in regroup if "addDimensionGroup" in r]
-    assert (21, 25) in added  # 11～12 月連續收成一組
+    assert (21, 26) in added  # 11 月實際～2026實際（V～Z）連續收成一組
     assert all(not (s <= 20 < e) for s, e in added)  # 10 月預估（U）不在任何分組
-    assert hidden == 9 + 1 + 4
+    assert hidden == 15
 
 
 def test_groups_outside_month_span_are_kept():

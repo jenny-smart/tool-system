@@ -197,12 +197,22 @@ def _already_submitted(existing: set[str], memo: str) -> bool:
     return any(x == memo or x.startswith(memo + "，") for x in existing)
 
 
-def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[str, Any]:
+LEGACY_TRADEVAN_LAST_PERIOD = "202610"
+MAIL_ITEMS = ("Amazon Web Services", "震旦行", "眾點", "台灣連線")
+RENT_LABELS = tuple(label for label, *_rest in OFFICE_RENT_ITEMS)
+
+
+def submit_taipei_fixed_expenses(period: str, run_type: str = "手動", only: set[str] | None = None) -> dict[str, Any]:
+    """period＝費用期別（上個月）；查 period 隔月收到的信。
+    台灣連線是付當月費用（2026-11 Jenny）：費用說明記隔月（＝收信的月份），例如期別 202610 記成 2026.11-台灣連線。
+    only：只處理這些項目（MAIL_ITEMS／RENT_LABELS 的名稱），None＝全部。"""
     period = (period or "").strip()
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
     period_label = f"{period[:4]}.{period[4:6]}"
     mail_label = period_label
+    next_label = f"{_next_period(period)[:4]}.{_next_period(period)[4:6]}"
+    wanted = (lambda name: only is None or name in only)
     invoice_start, invoice_end = _period_window(_next_period(period))
     invoice_since, invoice_before = _imap_date(invoice_start), _imap_date(invoice_end)
     now = datetime.now(TW_TZ).strftime("%Y/%m/%d %H:%M:%S")
@@ -220,12 +230,12 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
         rows.append(["待付款", "", now, category, memo, amount, "", payee, ""])
         items.append({"label": label, "amount": amount, "matched": None, "status": "成功"})
 
-    expected_mail_memos = [
-        f"{mail_label}-Amazon Web Services",
-        f"{period_label}-震旦行",
-        f"{period_label}-眾點",
-        f"{mail_label}-台灣連線",
-    ]
+    expected_mail_memos = [memo for name, memo in (
+        ("Amazon Web Services", f"{mail_label}-Amazon Web Services"),
+        ("震旦行", f"{period_label}-震旦行"),
+        ("眾點", f"{period_label}-眾點"),
+        ("台灣連線", f"{next_label}-台灣連線"),
+    ) if wanted(name)]
     needs_mail = any(not _already_submitted(existing, memo) for memo in expected_mail_memos)
     if needs_mail:
         try:
@@ -238,6 +248,8 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                     ("眾點", ZHONGDIAN_SUBJECT, "行銷費用", "眾點", parse_zhongdian_invoice_total, period_label, invoice_since, invoice_before),
                 ]
                 for label, subject, category, payee, parser, memo_period, search_since, search_before in singles:
+                    if not wanted(label):
+                        continue
                     base = f"{memo_period}-{label}"
                     if _already_submitted(existing, base):
                         items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
@@ -262,13 +274,19 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
                         items.append({"label": label, "amount": None, "matched": 0, "status": f"失敗：{exc}"})
 
                 label = "台灣連線"
-                if _already_submitted(existing, f"{mail_label}-{label}"):
+                if not wanted(label):
+                    pass
+                elif _already_submitted(existing, f"{next_label}-{label}") or (
+                        # 舊規則（2026-11 前）把同一封信記成期別月份：202610 以前已記過的不要重複新增
+                        period <= LEGACY_TRADEVAN_LAST_PERIOD and _already_submitted(existing, f"{period_label}-{label}")):
                     items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
                 else:
                     try:
                         messages = _matching_messages(imap, TRADEVAN_SUBJECT, invoice_since, invoice_before)
                         amount, detail = sum_tradevan_invoices(messages)
-                        append_row(label, "行銷費用", "Jenny", amount, detail)
+                        rows.append(["待付款", "", now, "行銷費用", f"{next_label}-{label}" + (f"，{detail}" if detail else ""),
+                                     amount, "", "Jenny", ""])
+                        items.append({"label": label, "amount": amount, "matched": None, "status": "成功"})
                         items[-1]["matched"] = len(messages)
                     except Exception as exc:
                         errors.append(f"{label}：{exc}")
@@ -284,6 +302,8 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動") -> dict[
             items.append({"label": "Gmail", "amount": None, "matched": 0, "status": f"失敗：{exc}"})
 
     for label, category, amount, payee in OFFICE_RENT_ITEMS:
+        if not wanted(label):
+            continue
         base = f"{period_label}-{label}"
         if _already_submitted(existing, base):
             items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})

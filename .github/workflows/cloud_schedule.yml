@@ -21,12 +21,23 @@ jobs:
   route:
     if: vars.EXTERNAL_SCHEDULER_ENABLED == 'true' || inputs.dry_run
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
-      - name: Dispatch original Taipei schedule
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install packages
+        run: pip install --quiet google-api-python-client google-auth google-auth-oauthlib
+      - name: Dispatch scheduled functions（主控表「排程設定」）
         env:
           GH_TOKEN: ${{ github.token }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
           SLOT_TIMESTAMP: ${{ inputs.timestamp }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |

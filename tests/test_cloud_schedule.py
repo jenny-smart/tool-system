@@ -1,16 +1,39 @@
+"""Cloud Schedule Router：依主控表「排程設定」（這裡用預設值）派送；各功能各自去重。"""
 import datetime as dt
 import importlib.util
 from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from tools.scheduling import schedule_settings as ss
+
 spec = importlib.util.spec_from_file_location('cloud_schedule', Path(__file__).parents[1] / 'scripts/cloud_schedule.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
+# 測試用國定假日：2026-10-09（五）、2026-10-10（六，國慶）
+HOLIDAYS = {dt.date(2026, 10, 9), dt.date(2026, 10, 10), dt.date(2027, 1, 1)}
+
+
+def workday(day):
+    return day.weekday() < 5 and day not in HOLIDAYS
+
+
 class ScheduleTests(unittest.TestCase):
+    def full(self, value, rules=None):
+        when = dt.datetime.fromisoformat(value).replace(tzinfo=m.TZ)
+        return m.plan(when, rules=rules or ss.default_rules(), is_workday=workday)
+
     def jobs(self, value):
-        return m.plan(dt.datetime.fromisoformat(value).replace(tzinfo=m.TZ))
+        return [(w, i) for w, i, _k in self.full(value)]
+
+    def keys(self, value):
+        return [k for _w, _i, k in self.full(value)]
+
+    def test_defaults_are_valid(self):
+        rules = ss.default_rules()
+        self.assertEqual([r.key for r in rules if r.errors], [])
+        self.assertEqual({r.key for r in rules}, set(ss.FUNCTIONS))
 
     def test_original_daily_times(self):
         for hm, task in [('01:00','schedule_report'),('01:10','staff_schedule'),('01:20','orders_report'),('01:30','staff_info'),('07:00','notify')]:
@@ -24,7 +47,6 @@ class ScheduleTests(unittest.TestCase):
         for date in ['2026-09-30','2026-02-28','2028-02-29','2026-12-31']:
             jobs=self.jobs(date+'T12:00')
             self.assertIn(('scheduled_monthly.yml',{'target':'half_month_orders_2','period':date[:7].replace('-','')+'-2'}),jobs)
-            self.assertEqual(self.jobs(date+'T17:00'),[])
             self.assertIn(('scheduled_daily.yml',{'target':'month_end_cleanup'}),self.jobs(date+'T22:00'))
         self.assertEqual(self.jobs('2028-02-28T12:00'),[('performance_report.yml',{})])
         self.assertIn(('scheduled_monthly.yml',{'target':'half_month_orders_1','period':'202611-1'}),self.jobs('2026-11-15T12:00'))
@@ -33,66 +55,94 @@ class ScheduleTests(unittest.TestCase):
     def test_month_start_prior_period(self):
         for hm, target in [('00:00','prepaid_report'),('00:10','stored_value_settlement'),('00:20','stored_value_prepaid')]:
             self.assertIn(('scheduled_monthly.yml',{'target':target,'period':'202612-2'}),self.jobs('2027-01-01T'+hm))
-        self.assertEqual(self.jobs('2026-09-30T00:30'),[])
         self.assertEqual(self.jobs('2027-01-01T00:40'),[])
 
-    def test_month_start_finance(self):
-        for hm, target in [('00:30','fixed_expense'),('01:00','vip_full_pipeline'),('02:00','cash_gap_check'),('05:00','month_start')]:
-            self.assertIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-01T'+hm))
-            self.assertNotIn(('scheduled_finance.yml',{'target':target}),self.jobs('2026-11-02T'+hm))
-        self.assertEqual([j for j in self.jobs('2026-11-01T03:00') if j[0]=='scheduled_finance.yml'],
-                         [('scheduled_finance.yml',{'target':'revenue_reconcile'})])
-        for hour in [h for h in range(4, 24) if h != 5]:
-            self.assertEqual([j for j in self.jobs('2026-11-01T%02d:00' % hour) if j[0]=='scheduled_finance.yml'],
-                             [('scheduled_finance.yml',{'target':'month_start_check'})])
-        for hm in ['00:00','01:00','02:30','03:10']:
-            self.assertNotIn(('scheduled_finance.yml',{'target':'month_start_check'}),self.jobs('2026-11-01T'+hm))
-        self.assertNotIn(('scheduled_finance.yml',{'target':'month_start_check'}),self.jobs('2026-11-02T09:00'))
+    def test_month_start_finance_each_function_own_slot(self):
+        for hm, key in [('01:00','vip_full_pipeline'),('03:00','revenue_reconcile'),('04:00','deposit_report'),
+                        ('04:30','review_monthly'),('05:00','month_start_queue'),('06:00','fixed_expense'),
+                        ('08:30','cash_gap_check')]:
+            self.assertIn(key, self.keys('2026-11-01T'+hm))
+            self.assertNotIn(key, self.keys('2026-11-02T'+hm))
+        # 04:00 押金財報跟月初檢查同時段、同一個 workflow，兩個都派送
+        self.assertTrue({'deposit_report', 'month_start_check'} <= set(self.keys('2026-11-01T04:00')))
+        for hour in range(4, 24):
+            self.assertIn('month_start_check', self.keys('2026-11-01T%02d:00' % hour))
+        self.assertNotIn('month_start_check', self.keys('2026-11-01T03:00'))
+        self.assertNotIn('month_start_check', self.keys('2026-11-02T09:00'))
+        for day in range(2, 11):
+            self.assertIn('cash_gap_followup', self.keys('2026-11-%02dT09:00' % day))
+        self.assertNotIn('cash_gap_followup', self.keys('2026-11-11T09:00'))
         self.assertIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-11-10T10:00'))
         self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-12-10T10:00'))
-        self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-11-11T10:00'))
 
-    def test_weekly_and_401(self):
-        self.assertIn(('scheduled_fubon_pending_check.yml',{}),self.jobs('2026-09-29T10:00'))
-        self.assertNotIn(('scheduled_fubon_pending_check.yml',{}),self.jobs('2026-09-30T10:00'))
+    def test_fixed_expense_mail_and_transfer(self):
+        for day in (5, 8, 10):
+            self.assertIn('fixed_expense_mail', self.keys('2026-11-%02dT09:00' % day))
+        self.assertNotIn('fixed_expense_mail', self.keys('2026-11-06T09:00'))
+        self.assertIn('fixed_expense_transfer', self.keys('2026-11-10T09:30'))
+        # 2026-10-10 國慶（六）、10-09 補假 → 提前到 10-08（四）
+        self.assertIn('fixed_expense_transfer', self.keys('2026-10-08T09:30'))
+        self.assertNotIn('fixed_expense_transfer', self.keys('2026-10-09T09:30'))
+        self.assertNotIn('fixed_expense_transfer', self.keys('2026-10-10T09:30'))
 
-    def test_yuanta_statement_slots(self):
+    def test_weekly_change_order_and_fubon(self):
+        # 2026-11-03 週二、11-06 週五
+        for day in ('2026-11-03', '2026-11-06'):
+            self.assertIn(('scheduled_change_order_check.yml',{'target':'batch_scan'}), self.jobs(day+'T09:30'))
+            self.assertIn(('scheduled_fubon_pending_check.yml',{}), self.jobs(day+'T10:30'))
+        self.assertNotIn(('scheduled_fubon_pending_check.yml',{}), self.jobs('2026-11-03T10:00'))
+        self.assertNotIn(('scheduled_change_order_check.yml',{'target':'batch_scan'}), self.jobs('2026-11-04T09:30'))
+        self.assertIn(('scheduled_change_order_check.yml',{'target':'check'}), self.jobs('2026-11-04T10:00'))
+
+    def test_mof_serial_earlier_on_holiday(self):
+        self.assertIn('mof_serial', self.keys('2026-11-20T10:00'))
+        # 2026-12-20 是週日 → 提前到 12-18（五）
+        self.assertIn('mof_serial', self.keys('2026-12-18T10:00'))
+        self.assertNotIn('mof_serial', self.keys('2026-12-20T10:00'))
+        for day in range(21, 26):
+            self.assertIn('mof_serial_check', self.keys('2026-11-%02dT10:00' % day))
+
+    def test_yuanta_and_401(self):
+        self.assertIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-11-25T11:00'))
+        # 2026-10-25 週日 → 提前到 10-23（五）
         self.assertIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-23T11:00'))
-        self.assertIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-25T11:00'))
-        self.assertNotIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-26T11:00'))
-        self.assertNotIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-25T10:00'))
-
-    def test_change_order_check_only_at_10(self):
-        self.assertIn(('scheduled_change_order_check.yml',{}),self.jobs('2026-10-17T10:00'))
-        for hm in ['12:00','14:00']:
-            self.assertNotIn(('scheduled_change_order_check.yml',{}),self.jobs('2026-10-17T'+hm))
+        self.assertNotIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-10-25T11:00'))
         self.assertIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-20T00:00'))
         self.assertNotIn(('Scheduled_gmail_401.yml',{}),self.jobs('2026-10-21T00:00'))
 
-    def test_five_cloud_expressions_cover_all_slots(self):
-        # 整點：每天的整點 job＋1 日 02:00～23:00 每小時月初檢查
-        slots={(h,0) for h in range(24)} | {(0,10),(1,10),(0,20),(1,20),(0,30),(1,30),(5,30),(16,30)}
-        for day in range(1,32):
-            for hour in range(24):
-                for minute in [0,10,20,30,40,50]:
-                    when=dt.datetime(2026,10,day,hour,minute,tzinfo=m.TZ)
-                    if m.plan(when): self.assertIn((hour,minute),slots)
+    def test_sheet_rows_override_and_validation(self):
+        rows = [[True, "fixed_expense", "固定費用", "07:10", "每月", "1", "照跑", "直接執行", ""],
+                [False, "review_monthly", "年度review", "04:30", "每月", "1", "照跑", "直接執行", ""],
+                [True, "deposit_report", "押金", "04:05", "每月", "1", "照跑", "直接執行", ""],
+                [True, "nope", "?", "04:00", "每日", "", "照跑", "直接執行", ""]]
+        rules = [ss.parse_row(r) for r in rows]
+        self.assertEqual(self.full('2026-11-01T07:10', rules), [('scheduled_finance.yml', {'target': 'fixed_expense'}, 'fixed_expense')])
+        self.assertEqual(self.full('2026-11-01T04:30', rules), [])  # 停用
+        self.assertTrue(rules[2].errors and rules[3].errors)  # 不是 10 分鐘倍數、不認得的代號
+        self.assertEqual(self.full('2026-11-01T04:00', rules), [])
 
-    def test_existing_run_is_not_dispatched_again(self):
+    def test_parse_time_range(self):
+        times, errors = ss.parse_times("04:00~06:00 每小時, 08:30")
+        self.assertEqual((times, errors), (["04:00", "05:00", "06:00", "08:30"], []))
+
+    def test_existing_run_is_not_dispatched_again_per_function(self):
         now=dt.datetime.now(m.TZ)
         when=now.replace(minute=(now.minute//10)*10,second=0,microsecond=0)
         slot=when.strftime('%Y%m%dT%H%M')
-        with patch.object(m,'plan',return_value=[('scheduled_service.yml',{'target':'service_all'})]), patch.object(m,'api',return_value={'workflow_runs':[{'display_title':'cloud-'+slot}]}) as api, patch('sys.argv',['cloud_schedule','--timestamp',str(int(when.timestamp()))]):
+        jobs=[('scheduled_finance.yml',{'target':'deposit_report'},'deposit_report'),
+              ('scheduled_finance.yml',{'target':'month_start_check'},'month_start_check')]
+        calls=[]
+        def api(path, payload=None):
+            calls.append((path, payload))
+            return {'workflow_runs':[{'display_title':'cloud-'+slot+'-deposit_report'}]} if payload is None else {}
+        with patch.object(m,'plan',return_value=jobs), patch.object(m,'api',side_effect=api), patch('sys.argv',['cloud_schedule','--timestamp',str(int(when.timestamp()))]):
             m.main()
-            self.assertEqual(api.call_count,1)
+        dispatched=[p for _path, p in calls if p is not None]
+        self.assertEqual(dispatched, [{'ref':'main','inputs':{'target':'month_start_check','scheduled_slot':slot+'-month_start_check'}}])
 
     def test_cloud_clock_skew(self):
         self.assertEqual(m.scheduled_time(1790755153).isoformat(), "2026-09-30T16:00:00+08:00")
-        self.assertNotIn(("scheduled_fubon_statement.yml", {}), m.plan(m.scheduled_time(1790755153)))
-        for text in ["2026-09-30T08:00", "2026-09-30T11:00", "2026-09-30T16:30"]:
-            when=dt.datetime.fromisoformat(text).replace(tzinfo=m.TZ)
-            self.assertIn(("scheduled_fubon_statement.yml", {}), m.plan(when))
-        for text in ["2026-10-01T00:00", "2026-10-01T01:10", "2026-10-01T01:20", "2026-10-01T00:10", "2026-10-01T00:20", "2026-10-01T00:30", "2026-10-01T02:00"]:
+        for text in ["2026-10-01T00:00", "2026-10-01T01:10", "2026-10-01T00:20", "2026-10-01T02:00"]:
             target=dt.datetime.fromisoformat(text).replace(tzinfo=m.TZ)
             for offset in [-120,-47,0,45,120]:
                 self.assertEqual(m.scheduled_time(int(target.timestamp())+offset),target)

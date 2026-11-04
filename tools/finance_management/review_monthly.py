@@ -1,14 +1,15 @@
 """年度review 每月整理（每月 1 日排程；「當月」＝上個月，例如 11/1 做 2026.10）。
 
-1. layout()：整理各區財報／{YYYY}review 分頁的欄位顯示（2026-11 與 Jenny 確認）
+1. layout()：整理各區財報／{YYYY}review 分頁的欄位顯示（2026-11-04 與 Jenny 確認）
    - 先清掉月份欄範圍內所有舊的欄位分組、取消隱藏（舊程式只會疊分組，越疊越亂）
-   - 當月之前：只顯示「實際」（預估收起）
-   - 當月：只顯示「預估」（實際收起）
-   - 當月之後：實際、預估都收起
-   - 年度合計「YYYY實際」「YYYY預估」一律顯示
-   收起＝連續的欄位分成一組並隱藏（保留展開箭頭）。打開檔案時凍結欄右邊就是各月實際，接著當月預估。
-2. 年度review 預估 SUMIF 公式範圍調整到當月（沿用 review_update.apply_review_formula_updates）。
-3. sync_cash_gap_block()：把上個月的儲值金彙整、現金缺口試算寫進 review 檔「現金缺口」分頁該月的區塊
+   - 期別（含）以前：每月只顯示「預估」（實際收起）
+   - 期別之後：實際、預估都收起
+   - 年度合計「YYYY實際」收起（各地區到 Z 欄、年度review 到 AA 欄）；「YYYY預估」顯示
+   收起＝連續的欄位分成一組並隱藏（保留展開箭頭）。
+2. 年度預估合計欄公式範圍調整到期別：各地區分頁 AA 欄、年度review 分頁 AB 欄
+   （=SUMIF(B$1:{期別預估欄}2,"*預估*",B2:{期別預估欄}2)；沿用 review_update.apply_review_formula_updates）。
+   不預覽，直接寫入（每格改動記在主控表「年度review公式調整記錄」）。
+3. sync_cash_gap_block()（由現金缺口排程呼叫，不在 run_all 裡）：把上個月的儲值金彙整、現金缺口試算寫進 review 檔「現金缺口」分頁該月的區塊
    - 區塊：每 8 欄一塊（標題欄＋台北／台中／桃園／新竹／高雄／ALL），1 月從 I 欄開始，每月往右 8 欄
    - 第 2 列日期改成月底
    - 第 3～10 列：儲值金彙整檔「VIP總表」O3:U10 整塊（格式相同）
@@ -53,16 +54,16 @@ def classify_header(header_row: list) -> dict[int, tuple]:
     return result
 
 
-def hidden_columns(columns: dict[int, tuple], target: tuple[int, int]) -> list[int]:
+def hidden_columns(columns: dict[int, tuple], target: tuple[int, int], last_index: Optional[int] = None) -> list[int]:
+    """期別（含）以前只看預估；期別之後全收；年度實際合計收起、年度預估合計顯示。
+    last_index（0-based）：只收到這一欄為止（各地區 Z 欄、年度review AA 欄）。"""
     hidden = []
     for idx, (kind, label, ym) in sorted(columns.items()):
-        if kind != "month":
+        if last_index is not None and idx > last_index:
             continue
-        if ym < target and label == "預估":
+        if label == "實際":
             hidden.append(idx)
-        elif ym == target and label == "實際":
-            hidden.append(idx)
-        elif ym > target:
+        elif kind == "month" and ym > target:
             hidden.append(idx)
     return hidden
 
@@ -79,7 +80,7 @@ def runs(indexes: list[int]) -> list[tuple[int, int]]:
 
 
 def layout_requests(sheet_id: int, columns: dict[int, tuple], groups: list[dict],
-                    target: tuple[int, int]) -> tuple[list[dict], list[dict], int]:
+                    target: tuple[int, int], last_index: Optional[int] = None) -> tuple[list[dict], list[dict], int]:
     """回傳 (清除用 requests, 重新分組用 requests, 收起的欄數)。只動月份欄範圍內的分組。"""
     if not columns:
         return [], [], 0
@@ -91,7 +92,7 @@ def layout_requests(sheet_id: int, columns: dict[int, tuple], groups: list[dict]
              for g in sorted(mine, key=lambda g: -g.get("depth", 1))]
     clear.append({"updateDimensionProperties": {"range": rng(*span), "properties": {"hiddenByUser": False},
                                                 "fields": "hiddenByUser"}})
-    hide = hidden_columns(columns, target)
+    hide = hidden_columns(columns, target, last_index)
     regroup = []
     for start, end in runs(hide):
         regroup.append({"addDimensionGroup": {"range": rng(start, end)}})
@@ -113,8 +114,18 @@ def review_service():
         return get_sheets_service()
 
 
+def letter_index(letters: str) -> int:
+    """欄位字母 → 0-based index。"""
+    index = 0
+    for ch in letters:
+        index = index * 26 + (ord(ch) - 64)
+    return index - 1
+
+
 def layout(area: str, period: str, log: Callable[[str], None] = print) -> int:
-    from tools.finance_management.review_update import _resolve_location
+    from tools.finance_management.review_update import _resolve_location, total_formula_column
+
+    last_index = letter_index(total_formula_column(area)) - 1  # 預估合計欄的前一欄（Z／AA）
 
     spreadsheet_id, title = _resolve_location(area)
     service = review_service()
@@ -125,12 +136,12 @@ def layout(area: str, period: str, log: Callable[[str], None] = print) -> int:
                                       fields="sheets(properties(sheetId,title),columnGroups)").execute()
     sheet = next(s for s in meta.get("sheets", []) if s["properties"]["title"] == title)
     clear, regroup, hidden = layout_requests(sheet["properties"]["sheetId"], columns, sheet.get("columnGroups", []),
-                                             (int(period[:4]), int(period[4:])))
+                                             (int(period[:4]), int(period[4:])), last_index)
     if clear:
         service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": clear}).execute()
     if regroup:
         service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": regroup}).execute()
-    log(f"【{title}】欄位整理完成：收起 {hidden} 欄（當月 {period[:4]}.{period[4:]} 看預估）")
+    log(f"【{title}】欄位整理完成：收起 {hidden} 欄（{period[:4]}.{period[4:]} 以前只看預估）")
     return hidden
 
 
@@ -373,26 +384,29 @@ def paste_to_review(period: str, part: str, log: Callable[[str], None] = print) 
 
 # ── 全部 ─────────────────────────────────────────────
 
-def run_all(period: str, log: Callable[[str], None] = print, include_cash_gap: bool = True) -> list[str]:
-    """回傳失敗清單（空＝全部成功）。"""
+def run_all(period: str, log: Callable[[str], None] = print, include_cash_gap: bool = False,
+            areas: Optional[list[str]] = None) -> list[str]:
+    """年度review：每個分頁 年度預估合計欄公式調整 → 欄位顯示。回傳失敗清單（空＝全部成功）。
+    現金缺口區塊改由現金缺口排程（08:30）貼上；include_cash_gap=True 才在這裡一起貼。"""
     from tools.finance_management import review_update
-    from tools.finance_management.review_update import apply_review_formula_updates
+    from tools.finance_management.review_update import apply_review_formula_updates, total_formula_column
 
     review_update.get_sheets_service = review_service  # 公式調整也用 OAuth 寫 review 檔
     failures = []
     year_month = f"{period[:4]}.{period[4:]}"
-    for area in REVIEW_SHEETS:
+    for area in areas or REVIEW_SHEETS:
+        column = total_formula_column(area)
+        try:
+            changed = apply_review_formula_updates(area, year_month, column)["changed"]
+            log(f"【{area}】{column} 欄預估公式調整到 {year_month}預估：{changed} 格")
+        except Exception as exc:
+            failures.append(f"{area} 公式調整：{exc}")
+            log(f"❌ {area} 預估公式調整失敗：{exc}")
         try:
             layout(area, period, log=log)
         except Exception as exc:
             failures.append(f"{area} 欄位整理：{exc}")
             log(f"❌ {area} 欄位整理失敗：{exc}")
-        try:
-            changed = apply_review_formula_updates(area, year_month)["changed"]
-            log(f"【{area}】預估公式調整 {changed} 格")
-        except Exception as exc:
-            failures.append(f"{area} 公式調整：{exc}")
-            log(f"❌ {area} 預估公式調整失敗：{exc}")
     if include_cash_gap:
         try:
             sync_cash_gap_block(period, log=log)

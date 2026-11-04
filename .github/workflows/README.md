@@ -10,7 +10,7 @@
 | GitHub 內建 cron | 各 workflow 檔的 `schedule:`。GitHub 常延遲幾分鐘到一小時。 |
 | 外部準時觸發（Cloud Schedule Router） | cron-job.org 在固定時段呼叫 `cloud_schedule.yml`，由 `scripts/cloud_schedule.py` 依時段派送對應的 workflow。repository variable `EXTERNAL_SCHEDULER_ENABLED=true` 時啟用，此時各 workflow 自己的 cron 會略過，改由 Router 觸發。詳見 `docs/cloud-schedule.md`。 |
 
-> 改排程時間要同時改三個地方：workflow 檔的 cron、`scripts/cloud_schedule.py`、cron-job.org 的時段（以及 `docs/cloud-schedule.md`）。
+> **2026-11 起改排程時間只要改主控表「排程設定」分頁**（每個功能一列）。cron-job.org 只留一個每 10 分鐘的 job，Router 讀分頁決定派送。下表與各 workflow 檔裡的原生 cron 是舊時間，只在外部排程停用時當備援；最新時間以分頁為準，說明見 `docs/cloud-schedule.md`。
 
 ## 排程一覽
 

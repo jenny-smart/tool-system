@@ -1,16 +1,24 @@
-"""每月財務排程（雲端，scheduled_finance.yml）。時間一律台北時間：
+"""每月財務排程（雲端，scheduled_finance.yml）。
 
-  1 日 00:30  fixed_expense        【整合執行】固定費用：新增當月台北辦公室租金／管理費、單月台中當月＋下月租金
-  1 日 01:00  vip_full_pipeline    【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式），上個月
-                                   （00:10 儲值金結算、00:20 儲值金預收的檔案要先產出）
-  1 日 02:00  cash_gap_check       全區現金缺口（截至上個月底，藍新發票金額這時還沒有）→ 預收款金額 →
-                                   年度review 整理欄位／預估公式／現金缺口區塊（review_monthly）→ 月初檢查
-  1 日 05:00  month_start          排入【整合執行】月初藍新／鯨躍／現金缺口（藍新約 08:00 寄手續費發票；還沒開會算失敗，可再補做）＋月初檢查
-  1 日 03:00  revenue_reconcile     台北／台中／桃園／新竹執行財報營收 ⑥–⑩，再做月初檢查
-  1 日 04:00～23:00（05:00 除外） month_start_check  月初檢查
-                                   （05:00 前不提醒藍新／鯨躍／現金缺口，還沒到排入時間）
-  單月 10 日 10:00  accounting_reminder  會計事務所費用確認：在 Jenny 行事曆建提醒
-  其他 target：month_start_queue（只排入）、cash_gap（只算現金缺口）
+執行時間不寫在這裡：一律在主控表「排程設定」分頁設定（功能代號＝target），
+由 Cloud Schedule Router 依時段派送。預設值見 tools/scheduling/schedule_settings.py。
+
+target：
+  fixed_expense           固定費用：台北當月租金／管理費、台中單月當月＋下月租金、台灣連線（記當月）
+  fixed_expense_mail      台北查信（AWS／震旦／眾點／台灣連線），期別＝上個月；最後一次（10 日）還缺就建提醒
+  fixed_expense_transfer  固定費用轉帳：盤點富邦請款記錄裡的固定費用 → 排入 Mac Agent 或建提醒等確認
+  vip_full_pipeline       【儲值金】完整流程（上個月）
+  revenue_reconcile       四區財報營收 ⑥–⑩
+  deposit_report          工具包押金：前月（覆蓋）＋當月統計 → 依統計月份打勾 → 比對異常 → 比對 Y／B1
+  review_monthly          年度review：年度預估合計欄公式（AA／AB）＋欄位顯示（期別以前只看預估）
+  month_start_queue       排入月初藍新／鯨躍／現金缺口給 Mac
+  cash_gap_check          全區現金缺口 → 預收款金額 → 貼 review「現金缺口」區塊 → 列出還沒有數字的項目
+  cash_gap_followup       同上（2～10 日重算；上游晚做的數字會補進來），還缺就建提醒
+  month_start_check       月初檢查
+  accounting_reminder     會計事務所費用確認提醒
+  mof_serial              鯨躍字軌（下一期）：盤點各區是否已配號 → 排入財政部登入＋完整流程，提醒登入
+  mof_serial_check        字軌未完成提醒
+  其他：month_start（排入＋檢查）、cash_gap、prepaid_amount
 
 手動：python -m tools.scheduled_finance.runner <target> [--date YYYY-MM-DD]（--date 模擬執行日）
 """
@@ -22,8 +30,11 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
-TARGETS = ("month_start", "month_start_queue", "prepaid_amount", "review_monthly", "fixed_expense", "vip_full_pipeline", "cash_gap", "cash_gap_check",
-           "revenue_reconcile", "month_start_check", "accounting_reminder")
+TARGETS = ("month_start", "month_start_queue", "prepaid_amount", "review_monthly", "fixed_expense", "fixed_expense_mail",
+           "fixed_expense_transfer", "vip_full_pipeline", "cash_gap", "cash_gap_check", "cash_gap_followup",
+           "revenue_reconcile", "deposit_report", "month_start_check", "accounting_reminder", "mof_serial",
+           "mof_serial_check")
+REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 
 
 def log(text: str) -> None:
@@ -50,10 +61,85 @@ def run_month_start_queue(today: date) -> int:
     return 0
 
 
+def remind(title: str, body: str, prefix: str) -> None:
+    """在 Jenny 行事曆建會跳通知的提醒（30 分鐘後開始，提前 20、10 分鐘跳窗）；同一天同開頭的舊提醒會被取代。"""
+    from datetime import timedelta
+
+    from tools.orders_system import calendar_notify
+
+    calendar_notify.create_notify_event(summary=title, description=body,
+                                        start=datetime.now(TW_TZ) + timedelta(minutes=30),
+                                        calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
+                                        replace_prefix=prefix)
+    log(f"已在 {REMIND_CALENDAR_ID} 建立提醒：{title}")
+
+
 def run_fixed_expense(today: date) -> int:
+    """台北當月租金／管理費、台中單月租金（當月＋下月），再查台灣連線（付當月費用，記當月）。"""
     from tools.finance_management.fixed_expense_batch import auto_submit
+    from tools.finance_management.taipei_fixed_expense import submit_taipei_fixed_expenses
 
     auto_submit(today, log=log)
+    try:
+        result = submit_taipei_fixed_expenses(previous_period(today), run_type="排程", only={"台灣連線"})
+        for item in result["items"]:
+            log(f"台灣連線：{item['status']}" + (f"（{item['amount']}）" if item["amount"] is not None else ""))
+        if result["errors"]:
+            log("⚠️ 台灣連線這次沒查到，5／8／10 日查信會再試：" + "；".join(result["errors"]))
+    except Exception as exc:
+        log(f"⚠️ 台灣連線查信失敗（5／8／10 日會再試）：{exc}")
+    return 0
+
+
+def run_fixed_expense_mail(today: date) -> int:
+    """台北查信（AWS／震旦／眾點／台灣連線）；已新增過的會略過。10 日以後還有沒查到的就建提醒。"""
+    from tools.finance_management.taipei_fixed_expense import MAIL_ITEMS, submit_taipei_fixed_expenses
+
+    period = previous_period(today)
+    result = submit_taipei_fixed_expenses(period, run_type="排程", only=set(MAIL_ITEMS))
+    for item in result["items"]:
+        log(f"{item['label']}：{item['status']}" + (f"（{item['amount']}）" if item["amount"] is not None else ""))
+    if result["errors"] and today.day >= 10:
+        remind(f"【固定費用】台北查信還有 {len(result['errors'])} 項沒查到",
+               "\n".join(result["errors"]) + "\n\n請確認信件後到 Tools App【財報】台北固定費用請款補做。",
+               "【固定費用】台北查信")
+    return 1 if result["errors"] and today.day >= 10 else 0
+
+
+FIXED_EXPENSE_NAMES = ("辦公室租金", "辦公室管理費", "辦公室租金管理費", "Amazon Web Services", "震旦行", "眾點",
+                       "台灣連線")
+
+
+def fixed_expense_payments(items: list[dict], today: date) -> list[dict]:
+    """富邦請款記錄待付款裡，費用說明是上個月／當月固定費用的列。"""
+    labels = {f"{p[:4]}.{p[4:]}" for p in (previous_period(today), today.strftime("%Y%m"))}
+    result = []
+    for item in items:
+        memo = str(item.get("memo") or "")
+        if item["kind"] == "payment" and any(memo.startswith(f"{label}-{name}")
+                                              for label in labels for name in FIXED_EXPENSE_NAMES):
+            result.append(item)
+    return result
+
+
+def run_fixed_expense_transfer(today: date) -> int:
+    from tools.finance_management import internal_payment_batch as batch
+    from tools.scheduling.schedule_settings import MODE_QUEUE, get_mode
+
+    items = fixed_expense_payments(batch.scan(kinds=["payment"], log=log), today)
+    if not items:
+        log("沒有待付款的固定費用")
+        return 0
+    lines = [f"{i['area']} 第{i['row']}列 {i.get('memo', '')} {i.get('payee', '')} {i.get('amount', '')}" for i in items]
+    log("\n".join(lines))
+    if get_mode("fixed_expense_transfer", MODE_QUEUE) == MODE_QUEUE:
+        from tools.local_agent_queue import create_task
+
+        batch.queue_actions(items, create_task, created_by="排程系統", log=log)
+        remind(f"【固定費用】已排入富邦轉帳 {len(items)} 筆，請用手機核准", "\n".join(lines), "【固定費用】")
+    else:
+        remind(f"【固定費用】待轉帳 {len(items)} 筆，請確認後執行",
+               "\n".join(lines) + "\n\n請到 Tools App【整合執行】富邦內部請款勾選後執行。", "【固定費用】")
     return 0
 
 
@@ -118,6 +204,69 @@ def run_cash_gap(today: date) -> int:
     return _run_step("cash_gap", previous_period(today), "")
 
 
+# 現金缺口要靠其他功能先做完才有數字的項目（0 或錯誤＝可能還沒做）
+CASH_GAP_WATCH = ("富邦餘額", "元大餘額", "行銷費用(廣告)", "總營收", "營業稅", "藍新發票金額")
+
+
+def cash_gap_missing() -> list[str]:
+    """讀主控表「現金缺口試算」，列出還是 0、空白或錯誤的項目。"""
+    from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+    from tools.finance_management.cash_gap import CASH_GAP_SHEET_NAME
+    from tools.finance_management.review_monthly import AREAS
+
+    values = get_sheets_service().spreadsheets().values().get(
+        spreadsheetId=get_master_spreadsheet_id(), range=f"'{CASH_GAP_SHEET_NAME}'!A1:G30",
+        valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
+    header = [str(v).strip() for v in (values[0] if values else [])]
+    missing = []
+    for row in values[2:]:
+        label = str(row[0]).strip() if row else ""
+        if label not in CASH_GAP_WATCH:
+            continue
+        empty = []
+        for area in AREAS:
+            if area not in header:
+                continue
+            value = row[header.index(area)] if header.index(area) < len(row) else ""
+            if isinstance(value, str) or not value:
+                empty.append(area)
+        if empty:
+            missing.append(f"{label}：{'、'.join(empty)}")
+    return missing
+
+
+def run_cash_gap_followup(today: date) -> int:
+    """現金缺口 → 預收款金額 → 貼 review「現金缺口」區塊（儲值金＋現金缺口）→ 檢查還沒有數字的項目。
+    上游（行銷、營收總表→財報、藍新、富邦／元大明細）晚幾天才做時，2～10 日這裡會重算並補進 review。"""
+    from tools.finance_management.review_monthly import paste_to_review
+
+    period = previous_period(today)
+    codes = []
+    for name, job in (("現金缺口", run_cash_gap), ("預收款金額", run_prepaid_amount)):
+        log(f"===== {name} =====")
+        try:
+            codes.append(job(today))
+        except Exception as exc:
+            log(f"❌ {name}失敗：{exc}")
+            codes.append(1)
+    log("===== review 現金缺口區塊 =====")
+    paste_to_review(period, "all", log=log)  # 預收款金額寫完再貼一次；儲值金彙整還沒完成時只貼現金缺口
+    try:
+        missing = cash_gap_missing()
+    except Exception as exc:
+        missing = [f"讀取現金缺口試算失敗：{exc}"]
+    if missing:
+        log("⚠️ 現金缺口還沒有數字（0／錯誤）：" + "；".join(missing))
+        if today.day <= 10:
+            remind(f"【現金缺口】{period[:4]}/{period[4:]} 還有 {len(missing)} 項沒有數字",
+                   "\n".join(missing) + "\n\n常見原因：行銷費用、營收總表→財報（總營收→2%／營業稅）、藍新發票、"
+                   "富邦／元大明細還沒做。做完後 2～10 日排程會自動重算並更新 review；也可到 Tools App 手動執行"
+                   "「All財報現金缺口＋預收款金額」。", "【現金缺口】")
+    else:
+        log("✅ 現金缺口各項都有數字")
+    return max(codes) if codes else 0
+
+
 def run_month_start_check(today: date) -> int:
     """月初檢查：沒完成的項目在 Jenny 行事曆建會跳通知的提醒（只提醒，不重跑）。"""
     from tools.finance_management.month_start_check import check
@@ -159,26 +308,100 @@ def run_prepaid_amount(today: date) -> int:
 
 
 def run_review_monthly(today: date) -> int:
-    """年度review：欄位整理（過去看實際、當月看預估）、預估公式範圍、現金缺口區塊（當月＝上個月）。"""
+    """年度review：年度預估合計欄（AA／AB）公式調整到上個月預估、欄位顯示（期別以前只看預估）。"""
     from tools.finance_management.review_monthly import run_all
 
-    return 1 if run_all(previous_period(today), log=log) else 0
+    failures = run_all(previous_period(today), log=log)
+    if failures:
+        remind("【年度review】每月整理有失敗", "\n".join(failures), "【年度review】")
+    return 1 if failures else 0
 
 
 def run_cash_gap_check(today: date) -> int:
-    """02:00：現金缺口 → 預收款金額 → 年度review 整理＋現金缺口區塊 → 月初檢查
-    （同一時段同一個 workflow 只能派送一次，所以合併；一步失敗不影響下一步）。"""
-    codes = []
-    for name, job in (("現金缺口", run_cash_gap), ("預收款金額", run_prepaid_amount),
-                      ("年度review", run_review_monthly)):
-        log(f"===== {name} =====")
+    """1 日：全區現金缺口 → 預收款金額 → review 現金缺口區塊 → 檢查還沒有數字的項目。"""
+    return run_cash_gap_followup(today)
+
+
+def run_deposit_report(today: date) -> int:
+    """工具包押金財報（台北、台中）：前月覆蓋＋當月統計 → 依統計月份打勾 → 比對異常 → Y／B1。"""
+    from tools.finance_management.deposit_report import run_monthly
+
+    problems = []
+    for area in ("台北", "台中"):
         try:
-            codes.append(job(today))
+            problems.extend(run_monthly(area, today, log=log))
         except Exception as exc:
-            log(f"❌ {name}失敗：{exc}")
-            codes.append(1)
-    run_month_start_check(today)
-    return max(codes)
+            problems.append(f"{area} 失敗：{exc}")
+            log(f"❌ {area} 工具包押金失敗：{exc}")
+    if problems:
+        remind(f"【工具包押金】{len(problems)} 項要確認", "\n".join(problems), "【工具包押金】")
+    return 1 if any("失敗" in p for p in problems) else 0
+
+
+MOF_SKIP_AREAS = ("高雄",)  # 跟新竹同一個鯨躍帳號
+MOF_ALLOCATE_FUNCTION = "電子發票字軌號碼配號"
+
+
+def mof_target(today: date) -> tuple[str, str, str]:
+    """下一期字軌 → (財政部期別 YYYYMM, 鯨躍查詢年份（民國）, 查詢月份 MM-MM)。"""
+    from tools.invoice_center.mof_serial import next_period, period_of
+
+    year, label = next_period(*period_of(today))
+    return f"{year}{label[:2]}", str(year - 1911), label
+
+
+def mof_status(today: date) -> tuple[list[str], list[str], str]:
+    """回傳 (已配號地區, 未完成地區, 期別顯示)。依「鯨躍字軌匯入配號Log」成功的配號紀錄判斷。"""
+    from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+    from tools.invoice_center.invoice_archive import SERIAL_LOG_SHEET, ensure_config_sheet
+
+    _period, qyear, qmonth = mof_target(today)
+    sheets = get_sheets_service()
+    master = get_master_spreadsheet_id()
+    areas = [a for a in ensure_config_sheet(sheets, master) if a not in MOF_SKIP_AREAS]
+    rows = sheets.spreadsheets().values().get(spreadsheetId=master, range=f"'{SERIAL_LOG_SHEET}'!A:F"
+                                              ).execute().get("values", [])
+    period_text = f"{qyear} {qmonth}"
+    done = {str(r[2]).strip() for r in rows[1:] if len(r) >= 5 and str(r[1]).strip() == MOF_ALLOCATE_FUNCTION
+            and str(r[3]).strip() == period_text and "成功" in str(r[4])}
+    return [a for a in areas if a in done], [a for a in areas if a not in done], period_text
+
+
+def run_mof_serial(today: date) -> int:
+    """盤點下一期字軌各區是否已配號 → 沒做的排入「財政部登入＋完整流程」（盤點後自動排入）或只提醒。"""
+    from tools.scheduling.schedule_settings import MODE_QUEUE, get_mode
+
+    done, todo, period_text = mof_status(today)
+    period, qyear, qmonth = mof_target(today)
+    log(f"字軌 {period_text}：已完成 {'、'.join(done) or '無'}；未完成 {'、'.join(todo) or '無'}")
+    if not todo:
+        return 0
+    body = (f"期別 {period_text}（財政部 {period}）未完成：{'、'.join(todo)}\n"
+            "財政部登入有圖形驗證碼，請在 Mac 的 Chrome 依序登入各區財政部電子發票平台。")
+    if get_mode("mof_serial", MODE_QUEUE) == MODE_QUEUE:
+        from tools.local_agent_queue import create_task
+
+        for area in todo:
+            params = {"area": area, "cdp_url": "http://127.0.0.1:9222"}
+            create_task("mofei.login", params, created_by="排程系統")
+            task = create_task("cetustek.full_pipeline", dict(params, month=period, qyear=qyear, qmonth=qmonth),
+                               created_by="排程系統")
+            log(f"已排入：{area} 財政部登入 → 字軌下載＋匯入＋配號（{task.get('task_id', '')}）")
+        remind(f"【鯨躍字軌】已排入 {len(todo)} 區，請登入財政部", body, "【鯨躍字軌】")
+    else:
+        remind(f"【鯨躍字軌】{len(todo)} 區待處理，請確認後執行",
+               body + "\n\n請到 Tools App【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）執行。", "【鯨躍字軌】")
+    return 0
+
+
+def run_mof_serial_check(today: date) -> int:
+    done, todo, period_text = mof_status(today)
+    if not todo:
+        log(f"字軌 {period_text} 各區都已配號")
+        return 0
+    remind(f"【鯨躍字軌】{period_text} 還有 {len(todo)} 區未完成", f"未完成：{'、'.join(todo)}（25 日前要完成）\n"
+           "請確認 Mac Agent 任務，或到 Tools App【鯨躍發票】完整流程補做。", "【鯨躍字軌】")
+    return 0
 
 
 def run_accounting_reminder(today: date) -> int:

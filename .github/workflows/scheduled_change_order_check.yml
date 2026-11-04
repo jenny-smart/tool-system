@@ -14,6 +14,12 @@ on:
         required: false
         type: string
         default: ""
+      target:
+        description: "check＝每日檢查（未備妥建提醒）；batch_scan＝【整合執行】清潔異動盤點（依排程設定排入或等確認）"
+        required: false
+        type: choice
+        default: check
+        options: [check, batch_scan]
 
 permissions:
   contents: write
@@ -116,7 +122,8 @@ jobs:
 
           TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
           LOG_DIR="logs/$TODAY"
-          NAME="change_order_daily_check"
+          TARGET="${{ inputs.target || 'check' }}"
+          if [ "$TARGET" = "batch_scan" ]; then NAME="change_order_batch_scan"; else NAME="change_order_daily_check"; fi
           mkdir -p "$LOG_DIR"
 
           echo "========================================"
@@ -128,7 +135,11 @@ jobs:
           START_TEXT=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M:%S")
           LOG_FILE="$LOG_DIR/$NAME.log"
 
-          python -u -m tools.orders_system.change_order_daily_check > "$LOG_FILE" 2>&1
+          if [ "$TARGET" = "batch_scan" ]; then
+            python -u -m tools.finance_management.change_order_batch scan > "$LOG_FILE" 2>&1
+          else
+            python -u -m tools.orders_system.change_order_daily_check > "$LOG_FILE" 2>&1
+          fi
           EXIT_CODE=$?
 
           END_TS=$(date +%s)

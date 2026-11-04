@@ -147,11 +147,23 @@ def _rewrite_formula(formula: str, target_col: str) -> str | None:
     return f"=SUMIF({start_col1}$1:{target_col}{row1},\"*預估*\",{start_col2}{row2}:{target_col}{row3})"
 
 
-def preview_review_formula_updates(area: str, year_month: str) -> list[dict[str, str]]:
+# 2026-11 Jenny：只改年度預估合計欄——各地區分頁 AA 欄、年度review 分頁 AB 欄（多一欄地區標示）
+TOTAL_FORMULA_COLUMN = {MASTER_REVIEW_AREA: "AB"}
+DEFAULT_TOTAL_FORMULA_COLUMN = "AA"
+
+
+def total_formula_column(area: str) -> str:
+    return TOTAL_FORMULA_COLUMN.get(area, DEFAULT_TOTAL_FORMULA_COLUMN)
+
+
+def preview_review_formula_updates(area: str, year_month: str, only_column: str | None = None) -> list[dict[str, str]]:
     """只讀取、不寫入。回傳 [{'cell', 'old_formula', 'new_formula'}, ...]。
 
-    year_month 格式 YYYY.MM，例如 "2026.07"。
+    year_month 格式 YYYY.MM，例如 "2026.07"。only_column（例如 "AA"）：只看這一欄的公式；
+    None＝用 total_formula_column(area)；空字串＝整張分頁。
     """
+    if only_column is None:
+        only_column = total_formula_column(area)
     spreadsheet_id, title = _resolve_location(area)
     service = get_sheets_service()
 
@@ -180,6 +192,8 @@ def preview_review_formula_updates(area: str, year_month: str) -> list[dict[str,
     changes: list[dict[str, str]] = []
     for row_idx, row in enumerate(values[1:], start=2):
         for col_idx, cell_value in enumerate(row, start=1):
+            if only_column and _column_letter(col_idx) != only_column:
+                continue
             text = str(cell_value)
             if not text.startswith("=") or "預估" not in text:
                 continue
@@ -194,11 +208,11 @@ def preview_review_formula_updates(area: str, year_month: str) -> list[dict[str,
     return changes
 
 
-def apply_review_formula_updates(area: str, year_month: str) -> dict[str, int]:
+def apply_review_formula_updates(area: str, year_month: str, only_column: str | None = None) -> dict[str, int]:
     """套用 preview_review_formula_updates() 算出的調整，實際寫回試算表。"""
     log_execution("年度review公式調整", area, "開始", f"期別 {year_month}")
     try:
-        changes = preview_review_formula_updates(area, year_month)
+        changes = preview_review_formula_updates(area, year_month, only_column)
         if not changes:
             log_execution("年度review公式調整", area, "完成", "沒有需要調整的公式")
             return {"changed": 0}

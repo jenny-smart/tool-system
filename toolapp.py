@@ -3457,30 +3457,33 @@ def get_fixed_expense_transfer_preview(period: str, area: str, schema_version: i
 
 
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
-    from tools.finance_management.deposit_report import aggregate_month_to_uy
+    from tools.finance_management.deposit_report import aggregate_month_replace, check_balance
 
     if area not in ("台北", "台中"):
         raise ValueError("請選擇台北或台中")
     year_month = (month or "").strip()
     if not re.fullmatch(r"\d{6}", year_month):
         raise ValueError("請輸入 6 位數月份（YYYYMM），例如 202608")
-    written = aggregate_month_to_uy(area, year_month)
-    return (
-        f"完成：{area} {year_month} 已新增 {written} 列到 U–X"
-        if written
-        else f"完成：{area} {year_month} 無資料可輸出"
-    )
+    first = datetime.strptime(year_month + "01", "%Y%m%d")
+    previous = (first - timedelta(days=1)).strftime("%Y%m")
+    lines = []
+    for ym in (previous, year_month):
+        r = aggregate_month_replace(area, ym)
+        lines.append(f"{ym}：寫入 {r['written']} 列、清空 {r['cleared']} 列")
+    b = check_balance(area, year_month)
+    lines.append(f"第 {b['row']} 列 Y 欄 {b['y']} {'＝' if b['equal'] else '≠'} B1 {b['b1']}")
+    return f"完成：{area} " + "；".join(lines)
 
 
 def run_deposit_report_mark_from_notes(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
-    from tools.finance_management.deposit_report import mark_from_notes
+    from tools.finance_management.deposit_report import mark_from_months
 
     if area not in ("台北", "台中"):
         raise ValueError("請選擇台北或台中")
-    range_input = st.session_state.get("finance_deposit_note_range", "").strip()
-    if not range_input:
-        raise ValueError("請輸入備註範圍，例如：U22:U25 或 22-25")
-    result = mark_from_notes(area, range_input)
+    year_month = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month):
+        raise ValueError("請輸入 6 位數統計月份（YYYYMM），例如 202611")
+    result = mark_from_months(area, year_month)
     message = (
         f"完成：處理 {result['processed_rows']} 行，"
         f"有效備註 {result['valid_notes']} 筆，打勾 {result['marked']} 個"
@@ -3843,26 +3846,15 @@ def run_review_formula_apply(*, month="", start_date=None, end_date=None, area="
 
 
 def run_review_monthly(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
-    """每月整理年度review：欄位顯示（過去看實際、當月看預估）＋預估公式範圍＋（全區時）現金缺口區塊。
-    每月 1 日 02:00 排程會自動做上個月；這裡可手動補做。"""
+    """年度review：年度預估合計欄（各地區 AA、年度review AB）公式調整到期別預估＋欄位顯示。不預覽，直接寫入。"""
     from tools.finance_management import review_monthly
 
     period = (month or "").strip()
     if not re.fullmatch(r"\d{6}", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202610（1 日做上個月）")
     log = (lambda text: on_progress(text, "info")) if on_progress else (lambda text: None)
-    if area == "全區":
-        failures = review_monthly.run_all(period, log=log)
-    else:
-        from tools.finance_management.review_update import apply_review_formula_updates
-
-        target = "年度review" if area == MASTER_REVIEW_SELECT_AREA else area
-        failures = []
-        try:
-            review_monthly.layout(target, period, log=log)
-            apply_review_formula_updates(target, f"{period[:4]}.{period[4:]}")
-        except Exception as exc:
-            failures.append(f"{target}：{exc}")
+    areas = None if area == "全區" else ["年度review" if area == MASTER_REVIEW_SELECT_AREA else area]
+    failures = review_monthly.run_all(period, log=log, areas=areas)
     return "完成" if not failures else "部分失敗：\n" + "\n".join(failures)
 
 
@@ -4052,15 +4044,13 @@ FINANCE_TASKS = [
     {"name": "【財報】台中固定費用請款", "handler": run_taichung_fixed_expense_billing, "enabled": True},
     {"name": "【財報】各區固定費用匯款", "handler": run_fixed_expense_transfer, "enabled": True},
     {"name": "【財報】工具包押金｜統計月份彙整（U–X）", "handler": run_deposit_report_aggregate, "enabled": True},
-    {"name": "【財報】工具包押金｜批次依備註打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
+    {"name": "【財報】工具包押金｜依統計月份打勾（J–M）", "handler": run_deposit_report_mark_from_notes, "enabled": True},
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
-    {"name": "【財報】年度review｜預覽公式調整", "handler": run_review_formula_preview, "enabled": True},
-    {"name": "【財報】年度review｜套用公式調整", "handler": run_review_formula_apply, "enabled": True},
-    {"name": "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）", "handler": run_review_monthly, "enabled": True},
+    {"name": "【財報】年度review｜執行（預估公式調整＋隱藏欄位）", "handler": run_review_monthly, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
@@ -5039,17 +5029,18 @@ with date_col:
                 label_visibility="collapsed",
                 key="finance_deposit_aggregate_month",
             )
-            st.caption("格式：YYYYMM；統計該月上課/退還/已退/不退，追加寫入 U–X（接在既有資料之後，不覆蓋）")
-        elif selected_function == "【財報】工具包押金｜批次依備註打勾（J–M）":
-            st.markdown('<div class="field-label">📝 備註範圍</div>', unsafe_allow_html=True)
-            st.text_input(
-                "備註範圍",
-                value="",
-                placeholder="例如：U22:U25，或只給列號 22-25（預設抓 U 欄）",
+            st.caption("格式：YYYYMM；統計前月（覆蓋前月既有的列）＋該月（有就覆蓋、沒有就新增）上課/退還/已退/不退寫入 U–X，"
+                       "最後比對該月最後一列 Y 欄和 B1 是否相等")
+        elif selected_function == "【財報】工具包押金｜依統計月份打勾（J–M）":
+            st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "統計月份",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202611",
                 label_visibility="collapsed",
-                key="finance_deposit_note_range",
+                key="finance_deposit_mark_month",
             )
-            st.caption("同一欄位的儲存格範圍；只寫列號（例如 22-25）預設抓 U 欄。會先清空整張表的 J–M 欄，再依範圍內的備註文字重新打勾")
+            st.caption("格式：YYYYMM；清空 J–M 後，依 V 欄期別在這個月份（含）以前的所有備註重新打勾（前月、當月都會更新，之前月份的勾也保留）")
         elif selected_function == "【財報】工具包押金｜比對異常標記（N欄）":
             st.markdown('<div class="field-label">📆 執行期間</div>', unsafe_allow_html=True)
             st.info("只檢查今年、已上課（J已勾）的列，異常會標記在 N 欄", icon="🔍")
@@ -5077,27 +5068,20 @@ with date_col:
                 "一次寫齊「現金缺口試算」分頁的表頭 12 列＋下方 5 列（原本兩個功能"
                 "各自的按鈕還在，這個是新增的捷徑）"
             )
-        elif selected_function in (
-            "【財報】年度review｜預覽公式調整",
-            "【財報】年度review｜套用公式調整",
-            "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）",
-        ):
+        elif selected_function == "【財報】年度review｜執行（預估公式調整＋隱藏欄位）":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
-                value=today_date.strftime("%Y%m"),
-                placeholder="例如：202607",
+                value=(today_date.replace(day=1) - timedelta(days=1)).strftime("%Y%m"),
+                placeholder="例如：202610",
                 label_visibility="collapsed",
                 key="finance_review_period",
             )
             st.caption(
-                "格式：YYYYMM；把 年度review 檔各地區分頁、以及年度review跨地區彙總分頁"
-                "（執行區域選「全區」兩者都會處理，也可以選「年度review工作表」只跑彙總分頁）"
-                "裡 SUMIF(\"*預估*\") 公式的結尾欄，改成該期別對應的預估欄。"
-                "先跑「預覽」確認調整內容沒問題，再跑「套用」寫入。"
-                "「分組隱藏當月起實際欄位」會把該期別及之後每月的「實際」欄位分組收合起來；"
-                "「分組隱藏當月後預估欄位」則相反，把該期別之後的「預估」欄位分組收合，"
-                "該期別及之前的預估欄位會維持顯示（若之前被誤收合會自動解開）。"
+                "格式：YYYYMM；直接寫入（不預覽）：各地區分頁 AA 欄、年度review 分頁 AB 欄的年度預估公式改到"
+                "「期別預估」那一欄（例如 =SUMIF(B$1:S2,\"*預估*\",B2:S2)），每格改動記在主控表「年度review公式調整記錄」；"
+                "再整理欄位顯示：期別（含）以前每月只顯示預估，期別之後及年度實際合計（Z／AA 欄）收起。"
+                "執行區域選「全區」五區＋年度review 都會處理。每月 1 日排程會自動做上個月（時間見主控表「排程設定」）。"
             )
         elif selected_function == "【財報】營收總表→財報｜貼入當月預估（股東損益表_財務／現金）":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
@@ -5656,7 +5640,7 @@ with area_col:
         "【元大銀行】檢查薪資付款狀態",
         "【元大銀行】薪資檔上傳待放行",
         "【財報】工具包押金｜統計月份彙整（U–X）",
-        "【財報】工具包押金｜批次依備註打勾（J–M）",
+        "【財報】工具包押金｜依統計月份打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
     ) or selected_function in FIELD_EXTRA_FUNCTIONS:
         area_select_options = [area for area in area_options if area != "全區"]
@@ -5668,7 +5652,7 @@ with area_col:
         "【富邦銀行】工具包押金退款",
         "【富邦銀行】清潔用品採購",
         "【財報】工具包押金｜統計月份彙整（U–X）",
-        "【財報】工具包押金｜批次依備註打勾（J–M）",
+        "【財報】工具包押金｜依統計月份打勾（J–M）",
         "【財報】工具包押金｜比對異常標記（N欄）",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
@@ -5689,9 +5673,7 @@ with area_col:
         # 常常要一起重跑，所以多一個組合選項，不用切兩次分開跑。
         area_select_options = area_select_options + ["新竹＋高雄"]
     if selected_function in (
-        "【財報】年度review｜預覽公式調整",
-        "【財報】年度review｜套用公式調整",
-        "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）",
+        "【財報】年度review｜執行（預估公式調整＋隱藏欄位）",
     ):
         # 「年度review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
         # 分頁；「全區」已經會一併處理它，這個選項是給只想單獨重跑彙總
@@ -6600,9 +6582,7 @@ if run_clicked:
                 "【財報】各區固定費用匯款",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
                 "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
-                "【財報】年度review｜預覽公式調整",
-                "【財報】年度review｜套用公式調整",
-                "【財報】年度review｜每月整理（過去看實際、當月看預估＋現金缺口區塊）",
+                "【財報】年度review｜執行（預估公式調整＋隱藏欄位）",
                 "【財報】營收總表→財報｜貼入當月預估（股東損益表_財務／現金）",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運

@@ -1,12 +1,15 @@
 """Route externally timed slots in Asia/Taipei; never infer slots from runner start."""
 import argparse
-import calendar
+import sys
+from pathlib import Path
 import datetime as dt
 import json
 import os
 import urllib.parse
 import urllib.request
 from zoneinfo import ZoneInfo
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 TZ = ZoneInfo('Asia/Taipei')
 
@@ -17,55 +20,23 @@ def scheduled_time(stamp):
         raise ValueError("雲端時間戳未落在原定時段前後兩分鐘內")
     return dt.datetime.fromtimestamp(slot_stamp, TZ)
 
-def plan(when):
+def _is_workday(day):
+    from tools.common.tw_holidays import is_workday
+
+    return is_workday(day)
+
+
+def plan(when, rules=None, is_workday=None):
+    """這個時段要派送的 [(workflow 檔, inputs, 功能代號)]。規則來自主控表「排程設定」（讀不到用預設）。"""
+    from tools.scheduling import schedule_settings as ss
+
     when = when.astimezone(TZ)
-    hm = when.strftime('%H:%M')
+    if rules is None:
+        rules, _from_sheet = ss.load_rules()
     jobs = []
-    def add(file, **inputs):
-        jobs.append((file + '.yml', inputs))
-    daily = {'01:00': 'schedule_report', '01:10': 'staff_schedule',
-             '01:20': 'orders_report', '01:30': 'staff_info', '07:00': 'notify'}
-    if hm in daily:
-        add('scheduled_daily', target=daily[hm])
-    last_day = when.day == calendar.monthrange(when.year, when.month)[1]
-    if hm == '22:00' and last_day:
-        add('scheduled_daily', target='month_end_cleanup')
-    if hm == '05:00':
-        add('scheduled_field', target='field_all')
-    if hm == '05:30':
-        add('scheduled_service', target='service_all')
-    if hm in {'00:00', '08:00', '12:00', '18:00'}:
-        add('performance_report')
-    if hm in {'08:00', '11:00', '16:30'}:
-        add('scheduled_fubon_statement')  # 11:00、16:30 例假日由 fubon_statement_queue 略過
-    if hm == '10:00':
-        add('scheduled_change_order_check')
-    if hm == '11:00' and 18 <= when.day <= 25:
-        add('scheduled_yuanta_statement')  # 25 日、遇例假日提前；實際日期由 yuanta_statement_queue 判斷
-    if hm == '10:00' and when.weekday() in {1, 4}:
-        add('scheduled_fubon_pending_check')
-    if hm == '00:00' and when.day == 20:
-        add('Scheduled_gmail_401')
-    month = when.strftime('%Y%m')
-    if when.day == 15 and hm == '12:00':
-        add('scheduled_monthly', target='half_month_orders_1', period=month + '-1')
-    if last_day and hm in {'12:00', '18:00'}:
-        add('scheduled_monthly', target='half_month_orders_2' if hm == '12:00' else 'refund_report', period=month + '-2')
-    monthly = {'00:00': 'prepaid_report', '00:10': 'stored_value_settlement', '00:20': 'stored_value_prepaid'}
-    if when.day == 1 and hm in monthly:
-        previous = (when.replace(day=1) - dt.timedelta(days=1)).strftime('%Y%m')
-        add('scheduled_monthly', target=monthly[hm], period=previous + '-2')
-    # 每月 1 日財務：00:30 固定費用，01:00 儲值金完整流程，02:00 現金缺口，03:00 財報營收⑥–⑩，
-    # 05:00 排入月初藍新／鯨躍／現金缺口給 Mac
-    # 02:00 起每小時月初檢查（02:00、05:00 分別併進 cash_gap_check、month_start：同時段同 workflow 只能派送一次）
-    finance = {'00:30': 'fixed_expense', '01:00': 'vip_full_pipeline', '02:00': 'cash_gap_check',
-               '03:00': 'revenue_reconcile', '05:00': 'month_start'}
-    if when.day == 1 and hm in finance:
-        add('scheduled_finance', target=finance[hm])
-    elif when.day == 1 and when.minute == 0 and 4 <= when.hour <= 23:
-        add('scheduled_finance', target='month_start_check')
-    if when.day == 10 and when.month % 2 == 1 and hm == '10:00':
-        add('scheduled_finance', target='accounting_reminder')  # 單月 10 日：會計事務所費用確認提醒
+    for rule in ss.due(rules, when, is_workday or _is_workday):
+        workflow, inputs = ss.dispatch_for(rule, when)
+        jobs.append((workflow, inputs, rule.key))
     return jobs
 
 def api(path, payload=None):
@@ -102,8 +73,10 @@ def main():
     print('Taipei slot:', when.isoformat(), 'tasks:', jobs)
     if args.dry_run:
         return
-    for workflow, inputs in jobs:
-        title = 'cloud-' + slot
+    for workflow, inputs, key in jobs:
+        # 每個功能各自去重：同時段同一個 workflow 的不同功能都會派送
+        job_slot = slot + '-' + key
+        title = 'cloud-' + job_slot
         # One router concurrency group serializes retries. Check every returned page;
         # any existing run counts, including failed jobs (operator can rerun them).
         query = urllib.parse.urlencode({'event': 'workflow_dispatch', 'created': '>=' + when.astimezone(dt.timezone.utc).isoformat(), 'per_page': 100})
@@ -118,11 +91,11 @@ def main():
         else:
             raise RuntimeError('Run listing exceeded safe pagination limit')
         if found:
-            print('Already dispatched:', workflow, slot)
+            print('Already dispatched:', workflow, job_slot)
             continue
         api('/actions/workflows/' + workflow + '/dispatches',
-            {'ref': 'main', 'inputs': dict(inputs, scheduled_slot=slot)})
-        print('Dispatched:', workflow, slot)
+            {'ref': 'main', 'inputs': dict(inputs, scheduled_slot=job_slot)})
+        print('Dispatched:', workflow, job_slot)
 
 if __name__ == '__main__':
     main()
