@@ -73,10 +73,27 @@ def test_pending_charge_invoice_does_not_wait_for_payment():
 def test_stored_value_and_invoice_rows():
     assert plan(B="待扣儲值金", N="500")["actions"] == ["stored_value"]
     assert plan(B="待返儲值金", S="")["missing"] == ["缺儲值金金額（S）"]
-    assert "二聯改三聯" in plan(B="待處理發票", C="異動發票")["manual"][0]
-    fare = plan(B="待處理發票", C="車馬費發票", J="300")
+    fare = plan(B="待處理發票", C="車馬費發票", J="2026/11/03 車馬費 $300")
     assert fare["actions"] == ["invoice"] and fare["amount"] == "300" and not fare["manual"]
-    assert plan(B="待處理發票", C="車馬費發票")["missing"] == ["缺車馬費金額（J）"]
+    assert plan(B="待處理發票", C="車馬費發票", J="500")["amount"] == "500"
+    assert plan(B="待處理發票", C="車馬費發票")["missing"][0].startswith("J 欄找不到車馬費金額")
+    # 二聯改三聯：資料齊全直接執行，不再需人工
+    tri = plan(B="待處理發票", C="異動發票", K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")
+    assert tri["actions"] == ["triplicate"] and not tri["manual"] and not tri["missing"]
+    assert "改三聯" in plan(B="待處理發票", C="異動發票", K="改金額")["missing"][0]
+    assert "X 欄" in plan(B="待處理發票", C="二聯改三聯", K="12345678 檸檬清潔有限公司", X="", Y="二聯式")["missing"][0]
+    assert plan(B="待處理發票", C="其他")["manual"]
+
+
+def test_run_triplicates_runs_each_row_and_stops_on_failure():
+    calls = []
+    plans = {"5": {"p": 5}, "6": {"p": 6}}
+    assert batch.run_triplicates("台北", [5, 6], plans, "cdp", run=lambda cmd: calls.append(cmd) or 0) == 0
+    assert len(calls) == 2 and "--plan" in calls[0]
+    calls.clear()
+    assert batch.run_triplicates("台北", [5, 6], plans, "cdp", run=lambda cmd: calls.append(cmd) or 3) == 3
+    assert len(calls) == 1
+    assert batch.run_triplicates("台北", [7], plans, "cdp", run=lambda cmd: 0) == 1
 
 
 def test_formula_fixes_only_fill_blank_cells():

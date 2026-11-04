@@ -95,9 +95,13 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
             counts[action] = counts.get(action, 0) + 1
     if counts:
         st.write("本次會執行：" + "、".join(f"{batch.ACTIONS[a][0]} {n} 筆" for a, n in counts.items()))
+    if any("triplicate" in item["actions"] for item in selected):
+        st.radio("二聯改三聯：原發票處理方式", ["作廢原發票", "開立折讓單（全額）"], horizontal=True,
+                 key="change_order_triplicate_action",
+                 help="同【鯨躍發票】二聯改三聯：先作廢或全額折讓原二聯發票，再開新三聯發票（新票由你按下一步及儲存）")
     do_sync = st.checkbox("執行完後回寫系統（B 欄已完成、AE 尚未更新系統的列）", value=True,
                           key="change_order_batch_sync")
-    st.caption("整批排成一筆本機 Agent 任務，逐區依序執行：① 鯨躍開立折讓單＋開立發票（發票每筆需人工按下一步及儲存）"
+    st.caption("整批排成一筆本機 Agent 任務，逐區依序執行：① 鯨躍開立折讓單＋開立發票（含車馬費發票）＋二聯改三聯（發票每筆需人工按下一步及儲存）"
                "→ ② 退款：信用卡登入藍新、ATM 登入富邦（需手機核准）→ ③ 檸檬後台儲值金 → 回寫系統。"
                "某一步失敗就不做該區後面的步驟；回寫完成會在 Jenny 行事曆留一筆紀錄。")
 
@@ -105,7 +109,7 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         agent_items = [item for item in selected if set(item["actions"]) - {"sync"}]
         if agent_items:
             batch.queue_actions(selected, do_sync, create_task, created_by=username or "清潔異動整合執行", log=log,
-                                prepare_invoices=_prepare_invoices)
+                                prepare_invoices=_prepare_invoices, prepare_triplicates=_prepare_triplicates)
             st.success("已排入本機 Agent，請到下方查看執行進度；完成後可再按一次「盤點」確認。")
             st.session_state.pop(STATE_KEY, None)
         elif do_sync:
@@ -123,6 +127,33 @@ def _prepare_invoices(region: str, rows: list[int]) -> None:
     from tools.invoice_center import ui as invoice_ui
 
     invoice_ui.prepare_pending_invoices(region, rows)
+
+
+def _prepare_triplicates(region: str, rows: list[int]) -> dict:
+    """同【鯨躍發票】二聯改三聯：讀檸檬後台組新三聯發票資料；回傳 {列號: 計畫}，失敗的列略過並顯示原因。"""
+    from tools.invoice_center.config import get_area_options
+    from tools.invoice_center.triplicate import candidate, prepare, validate_source
+    from tools.lemon_backend import BackendClient
+    from tools.lemon_backend.stored_value_sheet import get_worksheet
+
+    keys = {label: key for key, label in get_area_options()}
+    if region not in keys:
+        raise ValueError(f"鯨躍發票沒有「{region}」的設定")
+    action = "allowance" if st.session_state.get("change_order_triplicate_action") == "開立折讓單（全額）" else "cancel"
+    ws = get_worksheet(region)
+    values = ws.get_all_values()
+    backend = BackendClient(keys[region])
+    plans = {}
+    for row in rows:
+        try:
+            item = candidate(values[row - 1] if row - 1 < len(values) else [], row)
+            if item is None:
+                raise ValueError("已不是待處理的二聯改三聯")
+            validate_source(ws, item)
+            plans[row] = prepare(keys[region], item, backend, original_action=action)
+        except Exception as exc:
+            st.warning(f"{region} 第 {row} 列二聯改三聯未排入：{exc}")
+    return plans
 
 
 def _sync_now(selected: list[dict], log: Callable[[str], None]) -> None:
