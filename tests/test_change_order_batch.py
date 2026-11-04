@@ -277,12 +277,31 @@ def test_run_plan_goes_region_by_region_in_order(monkeypatch):
     code = batch.run_plan(plan, log=lambda *_: None,
                           run_step=lambda action, region, rows, cdp: calls.append((action, region)) or 0)
     assert code == 0
+    # 鯨躍步驟（折讓單→發票）同一次登入，做完才登出一次，再做退款
     assert calls == [
-        ("allowance", "台北"), ("invoice", "台北"), ("credit_refund", "台北"), ("stored_value", "台北"),
+        ("allowance", "台北"), ("invoice", "台北"), ("cetustek_logout", "台北"),
+        ("credit_refund", "台北"), ("stored_value", "台北"),
         ("sync", "台北", [6, 7, 9]),
-        ("allowance", "桃園"), ("atm_refund", "桃園"), ("sync", "桃園", [2]),
+        ("allowance", "桃園"), ("cetustek_logout", "桃園"), ("atm_refund", "桃園"), ("sync", "桃園", [2]),
         ("calendar",),
     ]
+
+
+def test_run_plan_keeps_cetustek_login_between_steps(monkeypatch):
+    import os
+
+    monkeypatch.setattr(batch, "sync_region", lambda region, log, rows: {"done": [], "failed": []})
+    monkeypatch.setattr(batch, "record_to_calendar", lambda *a, **k: None)
+    seen = []
+
+    def run_step(action, region, rows, cdp):
+        seen.append((action, os.environ.get("CETUSTEK_KEEP_LOGIN")))
+        return 0
+
+    plan = [{"region": "台北", "steps": {"allowance": [7], "invoice": [6]}, "sync_rows": []}]
+    assert batch.run_plan(plan, log=lambda *_: None, run_step=run_step) == 0
+    assert seen == [("allowance", "1"), ("invoice", "1"), ("cetustek_logout", None)]
+    assert "CETUSTEK_KEEP_LOGIN" not in os.environ
 
 
 def test_run_plan_failed_step_stops_rest_of_region_but_still_syncs(monkeypatch):
@@ -300,7 +319,8 @@ def test_run_plan_failed_step_stops_rest_of_region_but_still_syncs(monkeypatch):
         return 1 if action == "allowance" else 0
 
     assert batch.run_plan(plan, log=lambda *_: None, run_step=run_step) == 1
-    assert calls == [("allowance", "台北"), ("sync", "台北"), ("stored_value", "台中"), ("sync", "台中")]
+    assert calls == [("allowance", "台北"), ("cetustek_logout", "台北"), ("sync", "台北"),
+                     ("stored_value", "台中"), ("sync", "台中")]
 
 
 def test_vip_refund_coupon_flow():
