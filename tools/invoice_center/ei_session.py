@@ -58,8 +58,18 @@ def open_ei_page(context, area: str, accounts=None):
     return page, reused
 
 
+KEEP_LOGIN_ENV = "CETUSTEK_KEEP_LOGIN"
+
+
 def logout_quietly(page, label: str) -> None:
-    """做完一律登出第二層；登出失敗只提醒，不蓋掉原本的結果或錯誤。"""
+    """做完一律登出第二層；登出失敗只提醒，不蓋掉原本的結果或錯誤。
+    整合執行（清潔異動）會設 CETUSTEK_KEEP_LOGIN=1：同一區的折讓單、開立發票、二聯改三聯沿用同一次登入，
+    全部做完由整合執行統一登出（cetustek_logout_only），不在每一步之間登出再登入（2026-11 Jenny）。"""
+    import os
+
+    if os.environ.get(KEEP_LOGIN_ENV) == "1":
+        print(f"[{label}] 整合執行中，保留鯨躍登入（這區鯨躍步驟都做完再登出）")
+        return
     try:
         if page is not None and not page.is_closed():
             logout_second(page, label)

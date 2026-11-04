@@ -70,6 +70,9 @@ ACTIONS = {
 }
 # 每區依序執行：鯨躍（折讓單＋發票＋二聯改三聯）→ 退款（藍新信用卡、富邦 ATM）→ 儲值金，最後回寫系統
 ACTION_ORDER = ("allowance", "invoice", "triplicate", "credit_refund", "atm_refund", "stored_value")
+# 鯨躍步驟：同一區沿用同一次登入，全部做完才登出（2026-11 Jenny：不要登出再登入）
+CETUSTEK_ACTIONS = ("allowance", "invoice", "triplicate")
+CETUSTEK_LOGOUT = "cetustek_logout"
 TRIPLICATE_DETAILS = ("異動發票", "二聯轉三聯", "二聯改三聯")
 BATCH_ACTION = "change_order.batch_run"
 
@@ -554,6 +557,8 @@ def sync(regions=None, log: Callable[[str], None] = print,
 def _step_command(action: str, region: str, rows: list[int], cdp_url: str) -> list[str]:
     from tools.local_agent import ACTION_HANDLERS
 
+    if action == CETUSTEK_LOGOUT:
+        return [sys.executable, "-m", "tools.invoice_center.cetustek_logout_only", "--area", region, "--cdp-url", cdp_url]
     return ACTION_HANDLERS[ACTIONS[action][1]]({"area": region, "selected_rows": rows, "cdp_url": cdp_url})
 
 
@@ -582,20 +587,53 @@ def run_triplicates(region: str, rows: list[int], plans: dict, cdp_url: str,
 
 def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str = "http://127.0.0.1:9222",
              run_step: Callable[[str, str, list[int], str], int] = _run_step) -> int:
-    """逐區依序：鯨躍（折讓單→發票）→ 藍新／富邦退款 → 儲值金 → 回寫系統。
-    某一步失敗就不做該區後面的步驟，但仍回寫該區已完成的列；最後留一筆行事曆紀錄。"""
+    """逐區依序：鯨躍（折讓單→發票→二聯改三聯，同一次登入，做完才登出）→ 藍新／富邦退款 → 儲值金 → 回寫系統。
+    某一步失敗就不做該區後面的步驟（鯨躍仍會登出），但仍回寫該區已完成的列；最後留一筆行事曆紀錄。"""
+    import os
+    from contextlib import contextmanager
+
+    KEEP_LOGIN_ENV = "CETUSTEK_KEEP_LOGIN"  # 同 tools.invoice_center.ei_session.KEEP_LOGIN_ENV
+
+    @contextmanager
+    def keep_login():
+        previous = os.environ.get(KEEP_LOGIN_ENV)
+        os.environ[KEEP_LOGIN_ENV] = "1"
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop(KEEP_LOGIN_ENV, None)
+            else:
+                os.environ[KEEP_LOGIN_ENV] = previous
+
+    def logout(region: str) -> None:
+        log(f"===== 【{region}】鯨躍登出（這區鯨躍步驟都做完）=====")
+        try:
+            run_step(CETUSTEK_LOGOUT, region, [], cdp_url)
+        except Exception as exc:
+            log(f"⚠️ 【{region}】鯨躍登出失敗，下次執行前請手動登出：{exc}")
+
     failed = False
     results: dict[str, dict] = {}
     for entry in plan:
         region = entry["region"]
+        logged_in = False  # 這區已經跑過鯨躍步驟、還沒登出
         for action in ACTION_ORDER:
             rows = entry["steps"].get(action)
             if not rows:
                 continue
+            if logged_in and action not in CETUSTEK_ACTIONS:
+                logout(region)
+                logged_in = False
             log(f"===== 【{region}】{ACTIONS[action][0]}：第 {'、'.join(map(str, rows))} 列 =====")
             try:
-                if action == "triplicate":
-                    code = run_triplicates(region, rows, entry.get("triplicate_plans") or {}, cdp_url)
+                if action in CETUSTEK_ACTIONS:
+                    logged_in = True
+                    with keep_login():
+                        if action == "triplicate":
+                            code = run_triplicates(region, rows, entry.get("triplicate_plans") or {}, cdp_url)
+                        else:
+                            code = run_step(action, region, rows, cdp_url)
                 else:
                     code = run_step(action, region, rows, cdp_url)
             except Exception as exc:
@@ -605,6 +643,8 @@ def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str 
                 failed = True
                 log(f"❌ 【{region}】{ACTIONS[action][0]}失敗（exit {code}），本區後面的步驟先不做")
                 break
+        if logged_in:
+            logout(region)
         if entry.get("sync_rows"):
             log(f"===== 【{region}】回寫系統 =====")
             try:
