@@ -219,7 +219,10 @@ def write_invoice_result(area: str, source_row: int, order_no: str, invoice_no: 
         updates.append({"range": f"O{row_no}", "values": [[normalized_invoice]]})
     if not current_time:
         updates.append({"range": f"AA{row_no}", "values": [[now_text()]]})
-    if current_status == "待處理發票" and current_detail == "車馬費發票":
+    from tools.invoice_center.merged import split_order_numbers
+
+    if current_status == "待處理發票" and (current_detail in ("車馬費發票", "合併開立發票", "合併發票")
+                                           or len(split_order_numbers(current_order)) >= 2):
         updates.append({"range": f"B{row_no}", "values": [["已處理發票"]]})
     elif payment_marker and current_status != "已收款":
         updates.append({"range": f"B{row_no}", "values": [["已收款"]]})

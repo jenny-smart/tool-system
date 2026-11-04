@@ -172,15 +172,29 @@ def install(ui) -> None:
     def _build_payload(area_key: str, order_no: str, override: dict[str, Any] | None,
                        source: dict[str, Any]) -> dict[str, Any]:
         suffix = str(st.session_state.get("invoice_center_order_suffix", "-1") or "-1")
+        extra_rows: list = []
+        if source.get("_invoice_flow") == "merged":
+            # 合併開立：先讀其他訂單的品項，最後再讀第一張訂單（發票對象／載具／統編以第一張為準）
+            order_nos = list(source.get("_order_nos") or [])
+            if len(order_nos) < 2:
+                raise ValueError(f"第 {source.get('列號')} 列合併開立發票：G 欄要有兩張以上訂單編號")
+            order_no = order_nos[0]
+            for other in order_nos[1:]:
+                ui._load_backend_order(area_key, other, suffix)
+                extra_rows += ui._normalize_line_items(st.session_state.get("invoice_center_line_items", []))
         ui._load_backend_order(area_key, order_no, suffix)
         if override is not None:
             _apply_override(override)
-        rows = ui._normalize_line_items(st.session_state.get("invoice_center_line_items", []))
+        rows = ui._normalize_line_items(st.session_state.get("invoice_center_line_items", [])) + extra_rows
         totals = ui._calculate_totals(rows)
         payload = ui._build_payload(area_key, order_no, suffix, rows, totals)
         result = ui.create_invoice_from_payload(payload, dry_run=True).payload
         if source.get("_invoice_flow") == "fare":
             result = _apply_fare_invoice_payload(result, source)
+        if source.get("_invoice_flow") == "merged":
+            note = str(result.get("mainremark") or "").strip()
+            merged = "合併開立：" + "、".join(source.get("_order_nos") or [])
+            result["mainremark"] = f"{note}；{merged}" if note else merged
         return result
 
     def _prepare(rows: list[dict[str, Any]], area_key: str) -> list[dict[str, Any]]:

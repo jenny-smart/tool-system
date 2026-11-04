@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from tools.lemon_backend.stored_value_sheet import get_worksheet
+
+
+from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, split_order_numbers  # noqa: E402
 
 
 DISPLAY_COLUMNS = ("列號", "B 狀態", "C 細項", "G 訂單編號", "H 客戶", "J 內容", "K 後台備註", "M 收款時間", "N 收款金額")
@@ -14,7 +18,7 @@ TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
     """Return rows eligible for invoice creation from the area's 清潔異動 sheet.
 
-    Eligibility: 待收款，或待處理發票＋車馬費發票；G 不可空白且 O 尚無發票。
+    Eligibility: 待收款，或待處理發票＋車馬費發票／合併開立發票；G 不可空白且 O 尚無發票。
     """
     ws = get_worksheet(area)
     values = ws.get("B:O")
@@ -28,7 +32,13 @@ def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
         invoice_no = str(padded[13] or "").strip()
         is_pending_charge = status == "待收款"
         is_fare_invoice = status == "待處理發票" and detail == "車馬費發票"
-        if not (is_pending_charge or is_fare_invoice) or not order_no or invoice_no:
+        # 合併開立：C 欄寫「合併開立發票」，或 G 欄有兩張以上訂單（例如「異動發票」一次開多張訂單）；改三聯走二聯改三聯
+        k_note = str(padded[9] or "")
+        is_merged = status == "待處理發票" and (
+            detail in MERGED_INVOICE_DETAILS
+            or (len(split_order_numbers(order_no)) >= 2 and not re.search(r"(?:改|轉)\s*三聯", f"{detail} {k_note}"))
+        )
+        if not (is_pending_charge or is_fare_invoice or is_merged) or not order_no or invoice_no:
             continue
         rows.append({
             "選取": False,
@@ -42,7 +52,8 @@ def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
             "M 收款時間": padded[11],
             "N 收款金額": padded[12],
             "_order_no": order_no,
-            "_invoice_flow": "fare" if is_fare_invoice else "charge",
+            "_invoice_flow": "fare" if is_fare_invoice else "merged" if is_merged else "charge",
+            "_order_nos": split_order_numbers(order_no),
         })
     return rows
 
