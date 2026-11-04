@@ -72,3 +72,33 @@ def test_review_only_rewrites_total_column(monkeypatch):
     changes = ru.preview_review_formula_updates("台北", "2026.10")
     assert changes == [{"cell": "AA2", "old_formula": formula, "new_formula": '=SUMIF(B$1:U2,"*預估*",B2:U2)'}]
     assert ru.total_formula_column("年度review") == "AB"
+
+
+def test_aggregate_updates_z_date_for_all_rows_of_month(monkeypatch):
+    """2026-11 Jenny：前月／當月重新彙整時，內容沒變的列 Z 欄也蓋成當天日期。"""
+    values = [_row(A="姓名"),
+              _row(A="乙", C="2026/10/05", D="2026/10/05", U="上課：乙＋共1人", V="202610上課", W=2000, X=0, Z="2026-10-31")]
+    sent = []
+
+    class Svc:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def batchUpdate(self, spreadsheetId, body):
+            sent.append(body["data"])
+            return self
+
+        def execute(self):
+            return {}
+
+    monkeypatch.setattr(dr, "resolve_report_location", lambda *_a: ("id", "台北"))
+    monkeypatch.setattr(dr, "_read_values", lambda *_a: values)
+    monkeypatch.setattr(dr, "build_month_entries", lambda v, a, ym: [["上課：乙＋共1人", "202610上課", 2000, 0]])
+    monkeypatch.setattr(dr, "get_sheets_service", lambda: Svc())
+    result = dr.aggregate_month_replace("台北", "202610")
+    assert result == {"written": 0, "cleared": 0}
+    ranges = [d["range"] for d in sent[0]]
+    assert ranges == ["'台北'!Z2"]  # U–X 沒變不重寫，但 Z 更新
