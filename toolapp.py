@@ -4008,7 +4008,8 @@ FINANCE_TASKS = [
     {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
     {"name": "【整合執行】財報營收｜⑥–⑩ 金流對帳", "handler": None, "enabled": True},
     {"name": "【整合執行】財報營收｜⑪–⑬ 搬入營收總表＋財報", "handler": None, "enabled": True},
-    {"name": "【檸檬後台】異動儲值金", "handler": queue_lemon_stored_value_adjustment, "enabled": True},
+    # 雲端執行：盤點（含 VIP待退券歸零金額）→ 勾選 → 執行，不排給 Mac Agent
+    {"name": "【檸檬後台】異動儲值金", "handler": None, "enabled": True},
     {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
     {"name": "【富邦銀行】富邦登入", "handler": queue_fubon_login, "enabled": True},
     {"name": "【富邦銀行】富邦明細下載", "handler": queue_fubon_download, "enabled": True},
@@ -4491,6 +4492,16 @@ if system_type == "finance_management" and selected_function == "【整合執行
     LOG_PLACEHOLDER = st.empty()
     render_log()
     render_agent_task_progress(("fubon.", "internal_payment."))
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【檸檬後台】異動儲值金":
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.lemon_backend.stored_value_adjustment")
+    render_stored_value = fresh_module("tools.lemon_backend.stored_value_ui").render
+
+    render_stored_value(add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
     st.stop()
 
 if system_type == "finance_management" and selected_function == "【整合執行】清潔異動已備妥":
@@ -5829,41 +5840,6 @@ if system_type == "finance_management" and selected_function == "【藍新金流
     except Exception as exc:
         st.error(f"讀取清潔異動表失敗：{exc}")
 
-stored_value_selected_rows = []
-if system_type == "finance_management" and selected_function == "【檸檬後台】異動儲值金":
-    try:
-        from tools.lemon_backend.stored_value_sheet import get_worksheet
-        from tools.lemon_backend.stored_value_filter import pending_stored_value_adjustments
-
-        _stored_value_candidates = pending_stored_value_adjustments(get_worksheet(selected_area_value).get_all_values())
-        _stored_value_editor = st.data_editor(
-            pd.DataFrame([
-                {
-                    "執行": False,
-                    "列數": item["sheet_row"],
-                    "狀態": item["status"],
-                    "訂單編號": item["order_no"],
-                    "異動類型": item["action"],
-                    "異動金額": item["amount"],
-                    "備註": item["note"],
-                }
-                for item in _stored_value_candidates
-            ]),
-            hide_index=True,
-            use_container_width=True,
-            disabled=["列數", "狀態", "訂單編號", "異動類型", "異動金額", "備註"],
-            column_config={"執行": st.column_config.CheckboxColumn("執行")},
-            key=f"lemon_stored_value_editor_{selected_area_value}",
-        )
-        stored_value_selected_rows = [
-            int(row["列數"])
-            for _, row in _stored_value_editor.iterrows()
-            if bool(row["執行"])
-        ]
-        st.caption(f"待扣／待返儲值金、VIP待退券歸零：{len(_stored_value_candidates)} 筆；已勾選：{len(stored_value_selected_rows)} 筆")
-    except Exception as exc:
-        st.error(f"讀取儲值金異動資料失敗：{exc}")
-
 allowance_selected_rows = []
 if system_type == "finance_management" and selected_function == "【鯨躍發票】開立折讓單":
     try:
@@ -6537,8 +6513,6 @@ if run_clicked:
             }
             if selected_function == "【藍新金流】藍新信用卡待退款":
                 finance_kwargs["selected_rows"] = refund_selected_rows
-            if selected_function == "【檸檬後台】異動儲值金":
-                finance_kwargs["selected_rows"] = stored_value_selected_rows
             if selected_function == "【鯨躍發票】開立折讓單":
                 finance_kwargs["selected_rows"] = allowance_selected_rows
             if selected_function in (
