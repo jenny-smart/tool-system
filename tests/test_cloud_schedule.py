@@ -79,11 +79,10 @@ class ScheduleTests(unittest.TestCase):
         for day in (5, 8, 10):
             self.assertIn('fixed_expense_mail', self.keys('2026-11-%02dT09:00' % day))
         self.assertNotIn('fixed_expense_mail', self.keys('2026-11-06T09:00'))
-        self.assertIn('fixed_expense_transfer', self.keys('2026-11-10T09:30'))
-        # 2026-10-10 國慶（六）、10-09 補假 → 提前到 10-08（四）
-        self.assertIn('fixed_expense_transfer', self.keys('2026-10-08T09:30'))
-        self.assertNotIn('fixed_expense_transfer', self.keys('2026-10-09T09:30'))
-        self.assertNotIn('fixed_expense_transfer', self.keys('2026-10-10T09:30'))
+        # 各區固定費用匯款：每月 10 日 04:00
+        self.assertIn('fixed_expense_remit', self.keys('2026-11-10T04:00'))
+        self.assertIn('fixed_expense_remit', self.keys('2026-10-10T04:00'))
+        self.assertNotIn('fixed_expense_remit', self.keys('2026-11-09T04:00'))
 
     def test_weekly_change_order_and_fubon(self):
         # 2026-11-03 週二、11-06 週五
