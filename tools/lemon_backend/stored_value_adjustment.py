@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import time
+from contextlib import contextmanager
+from typing import Callable, Iterator
 from datetime import datetime
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
@@ -23,7 +26,21 @@ from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
 BASE_URL = "https://backend.lemonclean.com.tw"
-MANUAL_SUBMIT_TIMEOUT = 15 * 60  # 秒：VIP待退券歸零等人工按送出的上限
+MANUAL_SUBMIT_TIMEOUT = 15 * 60  # 秒：VIP待退券歸零等人工按送出的上限（只有 Mac 版 run() 用）
+TZ = ZoneInfo("Asia/Taipei")
+
+_say: Callable[[str], None] = print
+
+
+@contextmanager
+def _logging_to(log: Callable[[str], None]) -> Iterator[None]:
+    """執行期間把進度訊息送到 log（Tools App 畫面），結束後還原成 print。"""
+    global _say
+    previous, _say = _say, log
+    try:
+        yield
+    finally:
+        _say = previous
 
 
 def _visible(locator: Locator) -> Locator | None:
@@ -132,7 +149,7 @@ def _logout(page: Page, context=None) -> None:
     try:
         if page.is_closed():
             if context is None:
-                print("⚠️ 檸檬後台頁面已關閉，無法自動登出，請手動登出")
+                _say("⚠️ 檸檬後台頁面已關閉，無法自動登出，請手動登出")
                 return
             page = context.new_page()
             href = ""
@@ -142,16 +159,16 @@ def _logout(page: Page, context=None) -> None:
         page.goto(urljoin(BASE_URL, href) if href else f"{BASE_URL}/logout", wait_until="domcontentloaded")
         page.goto(f"{BASE_URL}/purchase", wait_until="domcontentloaded", timeout=60_000)
         if "/login" in page.url:
-            print("檸檬後台已登出。")
+            _say("檸檬後台已登出。")
         else:
-            print(f"⚠️ 檸檬後台登出後仍在 {page.url}，請手動登出")
+            _say(f"⚠️ 檸檬後台登出後仍在 {page.url}，請手動登出")
     except Exception as exc:
-        print(f"⚠️ 檸檬後台自動登出失敗，請手動登出：{exc}")
+        _say(f"⚠️ 檸檬後台自動登出失敗，請手動登出：{exc}")
 
 
 def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> None:
     """等人工確認並按送出，直到儲值金歷程出現這一筆（金額＋備註）。"""
-    print(f"⏸ {order_no} 已填好扣款 NT$ {int(amount):,}／備註「{note}」，請確認後在異動視窗按「送出」")
+    _say(f"⏸ {order_no} 已填好扣款 NT$ {int(amount):,}／備註「{note}」，請確認後在異動視窗按「送出」")
     deadline = time.monotonic() + MANUAL_SUBMIT_TIMEOUT
     while time.monotonic() < deadline:
         if page.is_closed():
@@ -159,7 +176,7 @@ def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> No
                                "已送出的扣款不會重扣，請重新執行並在異動視窗按「送出」")
         try:
             if _already_done(page, order_no, amount, note):
-                print(f"已確認送出：{order_no}／NT$ {int(amount):,}")
+                _say(f"已確認送出：{order_no}／NT$ {int(amount):,}")
                 return
         except Exception:
             pass  # 送出後頁面重新載入中
@@ -173,7 +190,7 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str, *, m
     amount = str(item["amount"])
     note = build_note(str(item["note"]), date_text, str(item["suffix"]))
     if _already_done(page, order_no, amount, note):
-        print(f"略過重複異動：{order_no}／{amount}／{note}")
+        _say(f"略過重複異動：{order_no}／{amount}／{note}")
         return False
 
     adjust_button = page.locator('button[data-target="#basicModal"]', has_text="異動儲值金")
@@ -186,7 +203,7 @@ def _submit_adjustment(page: Page, item: dict[str, object], date_text: str, *, m
         # 頁面剛從上一筆訂單切換過來時，按鈕看起來可點但點擊事件有時候沒接
         # 上，Bootstrap modal 不會真的開啟（沒有錯誤，只是彈窗一直是 hidden）。
         # 重新點一次通常就能正常開啟，還是失敗才真的中止。
-        print(f"{order_no} 第一次點擊「異動儲值金」後彈窗沒開啟，重試一次")
+        _say(f"{order_no} 第一次點擊「異動儲值金」後彈窗沒開啟，重試一次")
         adjust_button.click()
         modal.wait_for(state="visible", timeout=15_000)
     selects = modal.locator("select")
@@ -246,7 +263,7 @@ def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
     if stored < 0 or shopping < 0:
         raise RuntimeError(f"{order_no} 餘額為負數（儲值金 {stored}／購物金 {shopping}），請人工確認")
     steps = zero_out_steps(stored, shopping, str(item.get("refund_amount", "")))
-    print(f"{order_no} 目前儲值金餘額 {stored:,}、購物金餘額 {shopping:,}、退款金額 {item.get('refund_amount') or '-'}，"
+    _say(f"{order_no} 目前儲值金餘額 {stored:,}、購物金餘額 {shopping:,}、退款金額 {item.get('refund_amount') or '-'}，"
           f"扣款 {'＋'.join(f'{amount:,}' for _, amount in steps) or '0'}")
     created = False
     for suffix, amount in steps:
@@ -272,7 +289,7 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
         _login(page, area)
         try:
             for item in pending:
-                print(f"處理第 {item['sheet_row']} 列：{item['order_no']}／{item['action']} NT$ {item['amount']}")
+                _say(f"處理第 {item['sheet_row']} 列：{item['order_no']}／{item['action']} NT$ {item['amount']}")
                 page = _open_history(page, str(item["order_no"]))
                 if item.get("zero_out"):
                     created = _zero_out(page, item, date_text)
@@ -283,17 +300,133 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                     worksheet.update_cell(
                         int(item["sheet_row"]), int(item["time_column"]), completed_at
                     )
-                    print(f"已回寫第 {item['sheet_row']} 列時間：{completed_at}")
+                    _say(f"已回寫第 {item['sheet_row']} 列時間：{completed_at}")
                 completed_status = str(item["completed_status"])
                 worksheet.update_cell(int(item["sheet_row"]), 2, completed_status)
-                print(f"已回寫第 {item['sheet_row']} 列狀態：{completed_status}")
+                _say(f"已回寫第 {item['sheet_row']} 列狀態：{completed_status}")
                 if created:
                     completed += 1
-                    print(f"完成：{item['order_no']}／{date_text}{item['suffix']}")
+                    _say(f"完成：{item['order_no']}／{date_text}{item['suffix']}")
         finally:
             _logout(page, context)
-    print(f"檸檬後台儲值金異動完成：{completed}/{len(pending)} 筆（其餘為已存在而略過）")
+    _say(f"檸檬後台儲值金異動完成：{completed}/{len(pending)} 筆（其餘為已存在而略過）")
     return 0
+
+
+# ---------------------------------------------------------------- 雲端版：先盤點、再執行（Tools App）
+#
+# Mac 版 run() 連本機 Chrome，VIP待退券的剩餘餘額那一筆要在 Chrome 裡人工按送出。
+# 雲端版改用無頭瀏覽器：盤點時就把每一筆要扣的金額（含歸零的剩餘餘額）算好列給人確認，
+# 確認後執行才全部自動送出；執行前再讀一次餘額，跟盤點時不同就略過該列，不照舊金額扣。
+
+
+@contextmanager
+def _headless_page() -> Iterator[Page]:
+    executable = shutil.which("chromium") or shutil.which("chromium-browser")
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
+        try:
+            yield browser.new_context().new_page()
+        finally:
+            browser.close()
+
+
+def _pending_selected(area: str, selected_rows) -> tuple[object, list[dict[str, object]]]:
+    worksheet = get_worksheet(area)
+    rows = {int(row) for row in selected_rows}
+    pending = [item for item in pending_stored_value_adjustments(worksheet.get_all_values())
+               if int(item["sheet_row"]) in rows]
+    return worksheet, pending
+
+
+def plan_adjustments(area: str, selected_rows=None, log: Callable[[str], None] = print) -> list[dict[str, object]]:
+    """盤點：列出每一列要送出的異動（不送出）。selected_rows 沒給＝全部待處理列。
+
+    VIP待退券會登入後台讀儲值金歷程的餘額，算出歸零要扣的每一筆金額。"""
+    worksheet = get_worksheet(area)
+    pending = pending_stored_value_adjustments(worksheet.get_all_values())
+    if selected_rows is not None:
+        rows = {int(row) for row in selected_rows}
+        pending = [item for item in pending if int(item["sheet_row"]) in rows]
+    planned: list[dict[str, object]] = []
+    zero_out = [item for item in pending if item.get("zero_out")]
+    balances: dict[str, tuple[int, int]] = {}
+    if zero_out:
+        with _logging_to(log), _headless_page() as page:
+            _login(page, area)
+            try:
+                for item in zero_out:
+                    page = _open_history(page, str(item["order_no"]))
+                    balances[str(item["order_no"])] = _balances(page, str(item["order_no"]))
+            finally:
+                _logout(page)
+    for item in pending:
+        entry = dict(item)
+        if item.get("zero_out"):
+            stored, shopping = balances[str(item["order_no"])]
+            entry["balances"] = [stored, shopping]
+            entry["steps"] = [[suffix, amount] for suffix, amount in
+                              zero_out_steps(stored, shopping, str(item.get("refund_amount", "")))]
+        else:
+            entry["steps"] = [[str(item["suffix"]), int(float(str(item["amount"])))]]
+        planned.append(entry)
+    return planned
+
+
+def _write_back(worksheet, item: dict[str, object]) -> None:
+    if not str(item["completed_at"]).strip():
+        completed_at = datetime.now(TZ).strftime("%Y/%m/%d %H:%M:%S")
+        worksheet.update_cell(int(item["sheet_row"]), int(item["time_column"]), completed_at)
+        _say(f"已回寫第 {item['sheet_row']} 列時間：{completed_at}")
+    worksheet.update_cell(int(item["sheet_row"]), 2, str(item["completed_status"]))
+    _say(f"已回寫第 {item['sheet_row']} 列狀態：{item['completed_status']}")
+
+
+def execute_plan(area: str, planned: list[dict[str, object]],
+                 log: Callable[[str], None] = print) -> dict[str, int]:
+    """執行盤點確認過的異動（全部自動送出）。回傳 {"done", "skipped", "failed"}。
+
+    執行前會重讀工作表與餘額：列已不是待處理、或 VIP待退券的餘額跟盤點時不同，就略過不扣。"""
+    result = {"done": 0, "skipped": 0, "failed": 0}
+    if not planned:
+        return result
+    worksheet, pending = _pending_selected(area, [item["sheet_row"] for item in planned])
+    still = {int(item["sheet_row"]) for item in pending}
+    date_text = datetime.now(TZ).strftime("%m/%d")
+    with _logging_to(log), _headless_page() as page:
+        _login(page, area)
+        try:
+            for item in planned:
+                row, order_no = int(item["sheet_row"]), str(item["order_no"])
+                if row not in still:
+                    _say(f"⚠️ 第 {row} 列已不是待處理（可能已有人處理），略過")
+                    result["skipped"] += 1
+                    continue
+                try:
+                    page = _open_history(page, order_no)
+                    if item.get("zero_out"):
+                        current = list(_balances(page, order_no))
+                        if current != list(item.get("balances") or []):
+                            _say(f"⚠️ {order_no} 餘額已變動（盤點時 {item.get('balances')}，現在 {current}），"
+                                 "略過不扣，請重新盤點")
+                            result["skipped"] += 1
+                            continue
+                    for suffix, amount in item["steps"]:
+                        _say(f"處理第 {row} 列：{order_no}／{item['action']} NT$ {int(amount):,}（{suffix}）")
+                        _submit_adjustment(page, {**item, "amount": str(amount), "suffix": suffix}, date_text)
+                    if item.get("zero_out"):
+                        stored, shopping = _balances(page, order_no)
+                        if stored or shopping:
+                            raise RuntimeError(f"{order_no} 歸零後仍有儲值金 {stored:,}／購物金 {shopping:,}，請人工確認")
+                    _write_back(worksheet, item)
+                    result["done"] += 1
+                except Exception as exc:
+                    _say(f"❌ 第 {row} 列 {order_no} 失敗：{exc}")
+                    result["failed"] += 1
+        finally:
+            _logout(page)
+    _say(f"檸檬後台儲值金異動：完成 {result['done']}、略過 {result['skipped']}、失敗 {result['failed']}")
+    return result
 
 
 def main() -> int:
