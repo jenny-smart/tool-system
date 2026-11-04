@@ -35,13 +35,15 @@ DEFAULT_SETTINGS = {
     "確認表排除欄": "", "已確認欄": "B", "已確認關鍵字": "已確認", "最低人時": "6",
 }
 AREA_DEFAULTS = {
-    "台北": {"確認檔案ID": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44", "確認工作表": "2026大掃除"},
+    "台北": {"確認檔案ID": "1bNcJuFuP--jdpNo2zJKOpvuq-5rSHW3LgGE8HEepf44", "確認工作表": "{YYYY}大掃除"},
 }
 # 工作表標題的滑鼠提示。
 HEADER_NOTES = {
     "地區": "一個地區一列；由客服排程系統執行畫面儲存。是否套用與期間在執行畫面決定（期間＝匯出起迄日）。",
-    "確認檔案ID": "確認表所在的試算表 ID，或直接貼整個網址。",
-    "確認工作表": "確認表的工作表名稱，例如 2026大掃除。",
+    "確認檔案ID": "確認表所在的試算表 ID，或直接貼整個網址。工作表名稱是「YYYY大掃除」時，"
+               "會先依年度根目錄找該季年度的內勤工作表單，找不到該分頁才用這裡的 ID。",
+    "確認工作表": "確認表的工作表名稱，例如 {YYYY}大掃除（或 2026大掃除）：年份會換成這次匯出的大掃除季別年度"
+               "（7～12 月起算當年，1～6 月起算前一年，例如 2027/1 匯出仍是 2026大掃除）。",
     "姓名欄": "確認表中客人姓名所在欄位字母，用來對應排程的客人。",
     "電話欄": "確認表中電話所在欄位字母。",
     "地址欄": "確認表中地址所在欄位字母；同電話不同地址會分開對應。",
@@ -331,6 +333,43 @@ def save_settings(gc, area_name: str, settings: dict[str, Any], worksheet_not_fo
     _write_header_notes(ss, sheet)
 
 
+SEASON_SHEET_RE = re.compile(r"(\d{4})(大掃除.*)")
+
+
+def season_year(start: Any = "", today: datetime | None = None) -> int:
+    """大掃除季別年度：匯出起日（沒填用今天）7～12 月＝當年，1～6 月＝前一年（季節跨年）。"""
+    text = _date(start)
+    if text:
+        year, month = int(text[:4]), int(text[5:7])
+    else:
+        now = today or datetime.now(timezone(timedelta(hours=8)))
+        year, month = now.year, now.month
+    return year if month >= 7 else year - 1
+
+
+def season_sheet_title(title: str, year: int) -> str:
+    """「{YYYY}大掃除」或「2026大掃除」→ 該季年度的分頁名稱；其他名稱不變。"""
+    title = _text(title)
+    if "{YYYY}" in title:
+        return title.replace("{YYYY}", str(year))
+    match = SEASON_SHEET_RE.fullmatch(title)
+    return f"{year}{match.group(2)}" if match else title
+
+
+def season_spreadsheet_ids(area_name: str, configured_id: str, title: str, year: int) -> list[str]:
+    """確認表候選檔案：大掃除分頁先找該季年度的內勤工作表單（年度根目錄），再用設定的 ID。"""
+    candidates = []
+    if "{YYYY}" in _text(title) or SEASON_SHEET_RE.fullmatch(_text(title)):
+        try:
+            from tools.common.year_roots import choose_file_id_for_year
+
+            candidates.append(choose_file_id_for_year("內勤工作表單", area_name, configured_id, year))
+        except Exception:
+            pass  # 年度根目錄找不到就用設定的 ID
+    candidates.append(configured_id)
+    return [c for i, c in enumerate(candidates) if c and c not in candidates[:i]]
+
+
 def _open_source(gc, spreadsheet_id: str):
     try:
         return gc.open_by_key(spreadsheet_id)
@@ -348,10 +387,18 @@ def load_area_gate(gc, area_name: str, start: Any = "", end: Any = "",
     short_periods＝年節大掃除期間，只有這些日期檢查人時；None＝整個期間都檢查。
     """
     rule = parse_rule(load_settings(gc, area_name, worksheet_not_found), start, end, short_periods)
-    try:
-        source = _open_source(gc, rule["spreadsheet_id"]).worksheet(rule["sheet"])
-        rows = source.get_all_values()[1:]
-    except Exception as exc:
-        raise RuntimeError(f"無法讀取預約確認表 {rule['sheet']}（{rule['spreadsheet_id']}）：{exc}；"
-                           "未更新排程，避免預約未確認的客人") from exc
+    year = season_year(rule["start"])
+    configured_title = rule["sheet"]
+    rule["sheet"] = season_sheet_title(configured_title, year)
+    errors = []
+    for spreadsheet_id in season_spreadsheet_ids(area_name, rule["spreadsheet_id"], configured_title, year):
+        try:
+            rows = _open_source(gc, spreadsheet_id).worksheet(rule["sheet"]).get_all_values()[1:]
+            rule["spreadsheet_id"] = spreadsheet_id
+            break
+        except Exception as exc:
+            errors.append(f"{spreadsheet_id}：{exc}")
+    else:
+        raise RuntimeError(f"無法讀取預約確認表 {rule['sheet']}（{'；'.join(errors)}）；"
+                           "未更新排程，避免預約未確認的客人")
     return combine_gates([build_gate(rule, rows)]), [f"{rule['sheet']} {rule['start']}～{rule['end']}"]
