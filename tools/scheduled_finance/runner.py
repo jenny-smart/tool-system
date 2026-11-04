@@ -18,6 +18,7 @@ target：
   accounting_reminder     會計事務所費用確認提醒
   mof_serial              鯨躍字軌（下一期）：盤點各區是否已配號 → 排入財政部登入＋完整流程，提醒登入
   mof_serial_check        字軌未完成提醒
+  monthly_checklist       月度盤點：更新主控表「月度盤點」分頁，過期沒做完的合併成一則提醒
   其他：month_start（排入＋檢查）、cash_gap、prepaid_amount
 
 手動：python -m tools.scheduled_finance.runner <target> [--date YYYY-MM-DD]（--date 模擬執行日）
@@ -33,7 +34,7 @@ TW_TZ = ZoneInfo("Asia/Taipei")
 TARGETS = ("month_start", "month_start_queue", "prepaid_amount", "review_monthly", "fixed_expense", "fixed_expense_mail",
            "fixed_expense_remit", "vip_full_pipeline", "cash_gap", "cash_gap_check", "cash_gap_followup",
            "revenue_reconcile", "deposit_report", "month_start_check", "accounting_reminder", "mof_serial",
-           "mof_serial_check")
+           "mof_serial_check", "monthly_checklist")
 REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 
 
@@ -393,6 +394,12 @@ def run_mof_serial(today: date) -> int:
         remind(f"【鯨躍字軌】{len(todo)} 區待處理，請確認後執行",
                body + "\n\n請到 Tools App【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）執行。", "【鯨躍字軌】")
     return 0
+
+
+def run_monthly_checklist(today: date) -> int:
+    from tools.finance_management.monthly_checklist import scheduled_run
+
+    return scheduled_run(today, log=log)
 
 
 def run_mof_serial_check(today: date) -> int:

@@ -87,6 +87,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "accounting_reminder": ("scheduled_finance.yml", {"target": "accounting_reminder"}),
     "mof_serial": ("scheduled_finance.yml", {"target": "mof_serial"}),
     "mof_serial_check": ("scheduled_finance.yml", {"target": "mof_serial_check"}),
+    "monthly_checklist": ("scheduled_finance.yml", {"target": "monthly_checklist"}),
 }
 
 # 已停用的功能代號 → 說明（Sheet 裡還有這列時提醒刪除）
@@ -145,6 +146,8 @@ DEFAULT_ROWS: list[list] = [
     [True, "mof_serial", "【鯨躍發票】財政部字軌下載＋匯入＋配號（下一期）", "10:00", "雙月", "20", "提前", MODE_QUEUE,
      "雙月 20 日做下一期（例如 12 月做隔年 01-02）；需先登入財政部（圖形驗證碼）"],
     [True, "mof_serial_check", "字軌未完成提醒", "10:00", "雙月", "21-25", "照跑", MODE_DIRECT, ""],
+    [True, "monthly_checklist", "【整合執行】月度盤點（更新主控表「月度盤點」分頁＋過期提醒）", "17:00", "每日", "", "照跑",
+     MODE_DIRECT, "過了應完成日還沒做完的項目合併成一則提醒"],
     [True, "yuanta_statement", "元大明細下載（排入 Mac）", "11:00", "每月", "25", "提前", MODE_QUEUE, ""],
     [True, "gmail_401", "Gmail 401 歸檔", "00:00", "每月", "20", "照跑", MODE_DIRECT, ""],
 ]
