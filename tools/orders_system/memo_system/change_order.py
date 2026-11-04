@@ -1315,6 +1315,52 @@ FIELD_REFUND_FLOW = [
     "refundMethod", "refund_method", "refundWay", "refund_way",
 ]
 FIELD_REFUND_NOTE = ["refundNote", "refund_note"]
+# 訂單主發票號碼（purchase/edit「發票號碼」，Vue invoiceNo → 表單 invoice_no）。只認精準名稱，
+# 不用關鍵字搜尋，避免寫到「加收發票號碼」。
+FIELD_INVOICE_NO = ["invoice_no", "invoiceNo"]
+# 2026-11 Jenny：這些細項是換發新發票（二聯改三聯／異動發票），回寫時新發票（O 欄）也寫進訂單發票號碼
+INVOICE_REPLACE_DETAILS = {"異動發票", "二聯改三聯", "二聯轉三聯", "合併開立發票", "合併發票"}
+_ORDER_NO_RE = re.compile(r"LC\d{6,}", re.I)
+
+
+def split_order_numbers(text: str) -> list:
+    """G 欄訂單編號（可多張，空白／逗號／換行分隔）→ ["LC…", …]；合併開立發票會有多張。"""
+    found = [m.group(0).upper() for m in _ORDER_NO_RE.finditer(str(text or ""))]
+    if not found and str(text or "").strip():
+        found = [part for part in re.split(r"[\s,，、/／]+", str(text).strip()) if part]
+    result = []
+    for order_no in found:
+        if order_no not in result:
+            result.append(order_no)
+    return result
+
+
+def _set_invoice_no(form_data: dict, controls: dict, invoice_no: str, ui_logger=None) -> None:
+    """把新發票寫進訂單主發票號碼欄位；找不到欄位就失敗（不標記回寫完成）。"""
+    invoice_no = str(invoice_no or "").strip().upper()
+    if not invoice_no or invoice_no == "儲值金":
+        return
+    name, _control = _find_control(controls, FIELD_INVOICE_NO)
+    if not name:
+        raise RuntimeError("後台訂單頁找不到「發票號碼」欄位（invoice_no），未回寫")
+    form_data[name] = invoice_no
+    if ui_logger:
+        ui_logger(f"發票號碼 → {invoice_no}")
+
+
+def apply_merged_invoice_to_form(form_data: dict, controls: dict, item: dict, orders: list,
+                                 ui_logger=None) -> None:
+    """合併開立發票：每張訂單只寫 發票號碼＝O 欄、財務備註最上方加註（不動加收／退款欄位）。"""
+    raw = item["raw"]
+    invoice_no = _sheet_cell(raw, "O").strip().upper()
+    if not invoice_no:
+        raise RuntimeError("合併開立發票：O 欄還沒有發票號碼")
+    _set_invoice_no(form_data, controls, invoice_no, ui_logger=ui_logger)
+    note = _append_note_parts_once(_sheet_cell(raw, "K").strip(),
+                                   [f"合併開立發票{invoice_no}（{'、'.join(orders)}）"])
+    _prepend_field(form_data, controls, FIELD_FINANCE_NOTE, note, keywords=["財務備註"], ui_logger=ui_logger)
+
+
 FIELD_FINANCE_NOTE = [
     "memoFinance", "financeNote", "finance_note", "financialNote", "financial_note",
     "accountingNote", "accounting_note", "paymentNote", "payment_note",
@@ -1867,39 +1913,50 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
     raise RuntimeError(f"不支援的 B 欄狀態：{status}")
 
 
-def sync_one_to_purchase_edit(item: dict, session: requests.Session, ui_logger=None):
-    """
-    把清潔異動工作表單列 POST 回 purchase/edit/{purchase_id}。
-    需要先用訂單編號找到 purchase_id（用 fetch_order_basic 取得）。
-    """
-    def log(msg):
-        if ui_logger:
-            ui_logger(msg)
-
-    order_no = item["order_no"]
+def _post_purchase_edit(order_no: str, session: requests.Session, apply, ui_logger=None) -> None:
+    """讀 purchase/edit/{purchase_id}，原樣帶回所有欄位 + CSRF token，套用 apply(form_data, controls, order) 後送出。"""
     order = fetch_order_basic(order_no, session=session, ui_logger=ui_logger, by="orderNo")
     if not order or not order.get("purchase_id"):
         raise RuntimeError(f"找不到訂單 {order_no} 對應的 purchase_id")
-
-    purchase_id = order["purchase_id"]
-    edit_url = f"{BASE_URL}/purchase/edit/{purchase_id}"
-
-    # 取得編輯頁，拿出原本所有欄位值 + CSRF token，原樣帶回去（避免覆蓋掉沒提到的欄位）
+    edit_url = f"{BASE_URL}/purchase/edit/{order['purchase_id']}"
     resp = session.get(edit_url, timeout=20)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
-
     token_input = soup.select_one('input[name="_token"]')
     token = token_input["value"] if token_input else ""
-
     form_data, controls = _read_form_state(soup)
-    apply_sheet_row_to_form(form_data, controls, item, order=order, ui_logger=ui_logger)
+    apply(form_data, controls, order)
     form_data["_token"] = token
-
-    log(f"回填 {order_no}（purchase_id={purchase_id}，Sheet B={item.get('status')}）")
+    if ui_logger:
+        ui_logger(f"回填 {order_no}（purchase_id={order['purchase_id']}）")
     post_resp = session.post(edit_url, data=form_data, timeout=20)
     post_resp.raise_for_status()
-    log(f"✅ {order_no} 回填完成")
+    if ui_logger:
+        ui_logger(f"✅ {order_no} 回填完成")
+
+
+def sync_one_to_purchase_edit(item: dict, session: requests.Session, ui_logger=None):
+    """
+    把清潔異動工作表單列 POST 回 purchase/edit/{purchase_id}。
+    - G 欄有兩張以上訂單（合併開立發票）：每張訂單都寫 發票號碼＝O、財務備註加註，不動加收／退款欄位
+    - 細項是異動發票／二聯改三聯：照狀態回填外，新發票（O）也寫進訂單發票號碼
+    """
+    orders = split_order_numbers(item["order_no"])
+    if len(orders) >= 2:
+        for order_no in orders:
+            _post_purchase_edit(order_no, session, lambda form, controls, _order: apply_merged_invoice_to_form(
+                form, controls, item, orders, ui_logger=ui_logger), ui_logger=ui_logger)
+        return True
+
+    raw = item["raw"]
+    detail = _sheet_cell(raw, "C").strip()
+
+    def apply(form_data, controls, order):
+        apply_sheet_row_to_form(form_data, controls, item, order=order, ui_logger=ui_logger)
+        if detail in INVOICE_REPLACE_DETAILS:
+            _set_invoice_no(form_data, controls, _sheet_cell(raw, "O"), ui_logger=ui_logger)
+
+    _post_purchase_edit(orders[0] if orders else item["order_no"], session, apply, ui_logger=ui_logger)
     return True
 
 

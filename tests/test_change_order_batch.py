@@ -442,3 +442,46 @@ def test_sync_region_writes_partial_rows_without_changing_status(monkeypatch):
     monkeypatch.setattr(batch, "_logout_session", lambda *a: None)
     assert batch.sync_region("新竹", log=lambda *_: None)["done"] == [2, 3]
     assert marked == [(2, "待收款"), (3, "待退款")] and b_updates == []
+
+
+def test_merged_invoice_rows_go_to_invoice():
+    """2026-11 Jenny：G 欄多張訂單（合併開立發票）→ 以第一張訂單資料開一張發票。"""
+    multi = "LC00217202 LC00217177  LC00217199"
+    item = plan(B="待處理發票", C="異動發票", G=multi)
+    assert item["actions"] == ["invoice"] and item["amount"] == "3 張訂單"
+    assert plan(B="待處理發票", C="合併開立發票", G=multi)["actions"] == ["invoice"]
+    assert plan(B="待處理發票", C="合併開立發票")["missing"] == ["合併開立發票：G 欄要有兩張以上訂單編號"]
+    # 寫了改三聯的仍走二聯改三聯
+    tri = plan(B="待處理發票", C="異動發票", G=multi, K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")
+    assert tri["actions"] == ["triplicate"]
+
+
+def test_backend_writeback_merged_and_replacement_invoice(monkeypatch):
+    from tools.orders_system.memo_system import change_order as co
+
+    assert co.split_order_numbers("LC00217202 LC00217177,LC00217202") == ["LC00217202", "LC00217177"]
+    posted = []
+
+    def fake_post(order_no, session, apply, ui_logger=None):
+        form, controls = {"memoFinance": "舊備註"}, {"invoice_no": [{"type": "text", "context": "發票號碼"}],
+                                                   "memoFinance": [{"type": "textarea", "context": "財務備註"}]}
+        apply(form, controls, {"order_no": order_no})
+        posted.append((order_no, form))
+
+    monkeypatch.setattr(co, "_post_purchase_edit", fake_post)
+    raw = row(B="已處理發票", C="合併開立發票", G="LC00217202 LC00217177", K="", O="AB11112222")
+    co.sync_one_to_purchase_edit({"order_no": raw[6], "raw": raw, "status": "已處理發票"}, session=None)
+    assert [o for o, _ in posted] == ["LC00217202", "LC00217177"]
+    for _o, form in posted:
+        assert form["invoice_no"] == "AB11112222"
+        assert form["memoFinance"].startswith("合併開立發票AB11112222（LC00217202、LC00217177）")
+
+    posted.clear()
+    raw = row(B="已處理發票", C="二聯改三聯", G="LC00214828", K="原票CD1 改開 EF2", O="EF22223333")
+    co.sync_one_to_purchase_edit({"order_no": raw[6], "raw": raw, "status": "已處理發票"}, session=None)
+    assert posted[0][1]["invoice_no"] == "EF22223333"
+
+    posted.clear()
+    raw = row(B="已處理發票", C="車馬費發票", G="LC00217598", K="車馬費發票$200", O="GH33334444")
+    co.sync_one_to_purchase_edit({"order_no": raw[6], "raw": raw, "status": "已處理發票"}, session=None)
+    assert "invoice_no" not in posted[0][1]  # 車馬費是另一張發票，不改訂單主發票

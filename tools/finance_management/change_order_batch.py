@@ -292,6 +292,19 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             else:
                 item["actions"].append("invoice")
             return item
+        from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, split_order_numbers
+
+        orders = split_order_numbers(order_no)
+        is_triplicate = item["detail"] in TRIPLICATE_DETAILS and re.search(
+            r"(?:改|轉)\s*三聯", f"{item['detail']} {_cell(row, 'K')}")
+        if item["detail"] in MERGED_INVOICE_DETAILS or (len(orders) >= 2 and not is_triplicate):
+            # 2026-11 Jenny：合併開立發票——以第一張訂單的發票資料開一張（品項＝各訂單合計），回寫時每張訂單都寫發票號碼
+            if len(orders) < 2:
+                item["missing"].append("合併開立發票：G 欄要有兩張以上訂單編號")
+            else:
+                item["amount"] = f"{len(orders)} 張訂單"
+                item["actions"].append("invoice")
+            return item
         if item["detail"] in TRIPLICATE_DETAILS:
             # 2026-11 Jenny：二聯改三聯直接執行（作廢或全額折讓原票 → 開新三聯發票），不再到【鯨躍發票】逐筆處理
             reason = triplicate_blocker(row, row_no)
