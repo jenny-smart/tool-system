@@ -74,7 +74,9 @@ def test_stored_value_and_invoice_rows():
     assert plan(B="待扣儲值金", N="500")["actions"] == ["stored_value"]
     assert plan(B="待返儲值金", S="")["missing"] == ["缺儲值金金額（S）"]
     assert "二聯改三聯" in plan(B="待處理發票", C="異動發票")["manual"][0]
-    assert "開立發票" in plan(B="待處理發票", C="車馬費發票")["manual"][0]
+    fare = plan(B="待處理發票", C="車馬費發票", J="300")
+    assert fare["actions"] == ["invoice"] and fare["amount"] == "300" and not fare["manual"]
+    assert plan(B="待處理發票", C="車馬費發票")["missing"] == ["缺車馬費金額（J）"]
 
 
 def test_formula_fixes_only_fill_blank_cells():

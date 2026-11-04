@@ -19,7 +19,7 @@
             人工按下一步及儲存，回填 O／AA）；M 收款時間空白也先開（2026-10-29 Jenny 確認），
             但仍列為未備妥讓每日檢查提醒收款
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
-  - 待處理發票（車馬費發票／異動發票／二聯改三聯）→ 需到鯨躍發票功能逐筆確認
+  - 待處理發票：車馬費發票 → 開立發票（同待收款，金額取 J 欄車馬費，2026-11 Jenny）；異動發票／二聯改三聯 → 需人工
   - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
@@ -253,8 +253,15 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         return item
 
     if status == "待處理發票":
-        target = "開立發票" if item["detail"] == "車馬費發票" else "二聯改三聯"
-        item["manual"].append(f"請到【鯨躍發票】{target}逐筆處理")
+        if item["detail"] == "車馬費發票":
+            # 2026-11 Jenny：車馬費發票同待收款開立發票流程（金額只取 J 欄車馬費），Agent 填表、人工按下一步及儲存
+            item["amount"] = _amount(_cell(row, "J"))
+            if not item["amount"]:
+                item["missing"].append("缺車馬費金額（J）")
+            else:
+                item["actions"].append("invoice")
+            return item
+        item["manual"].append("請到【鯨躍發票】二聯改三聯逐筆處理")
         return item
 
     item["manual"].append(f"狀態「{status}」需人工處理")
@@ -524,14 +531,65 @@ def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str 
     return 1 if failed else 0
 
 
+def scan_report(items: list[dict]) -> tuple[list[dict], str]:
+    """排程盤點：可執行（有動作）的列與提醒內容。"""
+    ready = [i for i in items if i["actions"]]
+    lines = []
+    for region in REGIONS:
+        hit = [i for i in ready if i["region"] == region]
+        if not hit:
+            continue
+        lines.append(f"【{region}】{len(hit)} 筆")
+        for i in hit:
+            acts = "、".join(ACTIONS[a][0] for a in i["actions"])
+            lines.append(f"　第{i['row']}列 {i['status']} {i['detail']} {i['order_no']} {i['amount']}：{acts}")
+    waiting = [i for i in items if not i["actions"] and (i["missing"] or i["manual"])]
+    if waiting:
+        lines.append(f"\n未備妥／需人工 {len(waiting)} 筆（每日 10:00 檢查會另外提醒）")
+    return ready, "\n".join(lines)
+
+
+def scheduled_scan(log: Callable[[str], None] = print) -> int:
+    """排程（排程設定 change_order_scan）：盤點 → 依執行方式排入本機 Agent 或只建提醒等你確認。"""
+    from tools.scheduling.schedule_settings import MODE_CONFIRM, MODE_QUEUE, get_mode
+
+    items = scan(log=log)
+    ready, report = scan_report(items)
+    log(report or "沒有可執行的清潔異動")
+    if not ready:
+        return 0
+    from tools.orders_system import calendar_notify
+
+    now = datetime.now(TW_TZ)
+    if get_mode("change_order_scan", MODE_CONFIRM) == MODE_QUEUE:
+        from tools.local_agent_queue import create_task
+
+        # 排程沒有網頁端，開立發票（含車馬費）無法先組 Payload，會略過並在提醒裡列出，請到 Tools App 執行
+        queue_actions(ready, True, create_task, created_by="排程系統", log=log)
+        title = f"【清潔異動】已排入本機 Agent：{len(ready)} 筆"
+        report += "\n\n開立發票需在 Tools App【整合執行】清潔異動執行（要先組發票資料）。"
+    else:
+        title = f"【清潔異動】盤點：可執行 {len(ready)} 筆，請確認後執行"
+        report += "\n\n請到 Tools App【整合執行】清潔異動 → 盤點 → 勾選 → 執行。"
+    from datetime import timedelta
+
+    calendar_notify.create_notify_event(summary=title, description=report, start=now + timedelta(minutes=30),
+                                        calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
+                                        replace_prefix="【清潔異動】")
+    log(f"已在 {RECORD_CALENDAR_ID} 建立提醒：{title}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="清潔異動整合執行：逐區依序執行／回寫系統")
-    parser.add_argument("command", choices=["sync", "run"])
+    parser.add_argument("command", choices=["sync", "run", "scan"])
     parser.add_argument("--regions", default=",".join(REGIONS))
     parser.add_argument("--rows", default="", help='JSON：{"台北": [238, 389]}，只回寫這些列')
     parser.add_argument("--plan", default="", help="run 用：build_plan 產生的 JSON")
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     args = parser.parse_args(argv)
+    if args.command == "scan":
+        return scheduled_scan(log=lambda text: print(text, flush=True))
     if args.command == "run":
         log = lambda text: print(text, flush=True)  # noqa: E731
         return run_plan(json.loads(args.plan), log=log, cdp_url=args.cdp_url)

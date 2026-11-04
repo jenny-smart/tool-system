@@ -1,4 +1,8 @@
-"""富邦待辦通知（GitHub 排程，每週二、五 10:00）：只檢查、建提醒，不執行富邦轉帳。
+"""【整合執行】富邦內部請款盤點（排程時間見主控表「排程設定」fubon_pending_check，預設每週二、五 10:30）。
+
+執行方式（排程設定 H 欄）：
+  盤點後等確認（預設）：只盤點、建提醒，你確認後到 Tools App【整合執行】富邦內部請款執行。
+  盤點後自動排入：盤點到的全部排入本機 Agent（富邦轉帳仍需手機核准）。
 
 檢查台北／台中三種內部請款的待付款筆數：請款記錄、工具包押金退款、清潔用品採購
 （盤點規則與【整合執行】富邦內部請款共用 tools/finance_management/internal_payment_batch.py）。
@@ -34,12 +38,19 @@ def build_report(items: list[dict]) -> str:
 
 
 def main() -> None:
+    from tools.scheduling.schedule_settings import MODE_CONFIRM, MODE_QUEUE, get_mode
+
     items = batch.scan()
     report = build_report(items)
     print(report, flush=True)
     if not items:
         print("沒有待處理資料，不建立日曆提醒。", flush=True)
         return
+    if get_mode("fubon_pending_check", MODE_CONFIRM) == MODE_QUEUE:
+        from tools.local_agent_queue import create_task
+
+        batch.queue_actions(items, create_task, created_by="排程系統", log=lambda t: print(t, flush=True))
+        report += "\n\n已自動排入本機 Agent，富邦轉帳請用手機核准。"
     subject = f"【富邦銀行】待處理提醒：請款／工具包押金退款／清潔用品採購 共 {len(items)} 筆"
     # 開始時間留 30 分鐘前導，Google 的提醒推播才排得進去
     calendar_notify.create_notify_event(summary=subject, description=report,

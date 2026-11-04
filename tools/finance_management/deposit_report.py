@@ -278,6 +278,64 @@ def _parse_note(note_text: str) -> tuple[str, list[str]] | None:
     return type_, names
 
 
+def _apply_marks(spreadsheet_id: str, title: str, values: list[list[object]],
+                 notes: list[tuple[str, str]]) -> tuple[int, int, list[str]]:
+    """先清空 J–M，再依 notes [(儲存格, 備註文字)] 打勾；回傳 (打勾數, 有效備註數, 找不到的姓名)。"""
+    last_row = len(values)
+    total_rows = last_row - 1
+    name_to_row: dict[str, int] = {}
+    for i in range(total_rows):
+        row = values[i + 1] if i + 1 < len(values) else []
+        name = str(_cell(row, COL_A) or "").strip()
+        if name and name not in ("FALSE", "專員姓名"):
+            name_to_row[name] = i + 2
+
+    service = get_sheets_service()
+    # 先清空 J:M（允許多次重複執行仍保持正確）
+    clear_values = [[False, False, False, False] for _ in range(total_rows)]
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{title}'!J2:M{last_row}",
+        valueInputOption="RAW",
+        body={"values": clear_values},
+    ).execute()
+
+    marks: dict[int, dict[int, bool]] = {}
+    valid_notes = 0
+    total_marked = 0
+    missing_names: list[str] = []
+    for cell_ref, note in notes:
+        if not note:
+            continue
+        parsed = _parse_note(note)
+        if not parsed:
+            continue
+        type_, names = parsed
+        target_col = _TYPE_TO_JKLM_COL.get(type_)
+        if not target_col:
+            continue
+        valid_notes += 1
+        for name in names:
+            target_row = name_to_row.get(name)
+            if target_row:
+                marks.setdefault(target_row, {})[target_col] = True
+                total_marked += 1
+            else:
+                missing_names.append(f"{name}（在 {cell_ref}）")
+
+    if marks:
+        data = []
+        for row_num, cols in marks.items():
+            for col, value in cols.items():
+                col_letter = chr(ord("A") + col - 1)
+                data.append({"range": f"'{title}'!{col_letter}{row_num}", "values": [[value]]})
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": data},
+        ).execute()
+    return total_marked, valid_notes, missing_names
+
+
 def mark_from_notes(area: str, range_input: str) -> dict[str, object]:
     """依備註欄位批次打勾 J–M（比照原 processCustomNotesRange，每次執行會先清空 J:M）。
 
@@ -323,74 +381,14 @@ def _mark_from_notes(area: str, range_input: str) -> dict[str, object]:
         raise ValueError("起始行不能小於 1")
 
     values = _read_values(spreadsheet_id, title)
-    last_row = len(values)
-    if last_row < 2:
+    if len(values) < 2:
         return {"marked": 0, "valid_notes": 0, "missing_names": [], "processed_rows": 0}
-
-    total_rows = last_row - 1
-
-    name_to_row: dict[str, int] = {}
-    for i in range(total_rows):
-        row = values[i + 1] if i + 1 < len(values) else []
-        name = str(_cell(row, COL_A) or "").strip()
-        if name and name not in ("FALSE", "專員姓名"):
-            name_to_row[name] = i + 2
-
-    service = get_sheets_service()
-
-    # 先清空 J:M（允許多次重複執行仍保持正確）
-    clear_values = [[False, False, False, False] for _ in range(total_rows)]
-    service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=f"'{title}'!J2:M{last_row}",
-        valueInputOption="RAW",
-        body={"values": clear_values},
-    ).execute()
 
     notes = []
     for r in range(start_row, end_row + 1):
         row = values[r - 1] if r - 1 < len(values) else []
-        notes.append(str(_cell(row, note_col) or "").strip())
-
-    marks: dict[int, dict[int, bool]] = {}
-    valid_notes = 0
-    total_marked = 0
-    missing_names: list[str] = []
-
-    for i, note in enumerate(notes):
-        if not note:
-            continue
-        parsed = _parse_note(note)
-        if not parsed:
-            continue
-        type_, names = parsed
-        target_col = _TYPE_TO_JKLM_COL.get(type_)
-        if not target_col:
-            continue
-        valid_notes += 1
-        for name in names:
-            target_row = name_to_row.get(name)
-            if target_row:
-                marks.setdefault(target_row, {})[target_col] = True
-                total_marked += 1
-            else:
-                missing_names.append(f"{name}（在 {start_col_letters}{start_row + i}）")
-
-    if marks:
-        data = []
-        for row_num, cols in marks.items():
-            for col, value in cols.items():
-                col_letter = chr(ord("A") + col - 1)
-                data.append(
-                    {
-                        "range": f"'{title}'!{col_letter}{row_num}",
-                        "values": [[value]],
-                    }
-                )
-        service.spreadsheets().values().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"valueInputOption": "RAW", "data": data},
-        ).execute()
+        notes.append((f"{start_col_letters}{r}", str(_cell(row, note_col) or "").strip()))
+    total_marked, valid_notes, missing_names = _apply_marks(spreadsheet_id, title, values, notes)
 
     return {
         "marked": total_marked,
@@ -463,3 +461,142 @@ def _flag_discrepancies(area: str) -> dict[str, int]:
     ).execute()
 
     return {"flagged": flagged, "checked": checked}
+
+
+# ── 統計月份版（2026-11 Jenny：不用列號，改用統計月份；每月 1 日排程更新前月＋當月）──────────
+
+def _period_of_row(row: list[object]) -> str:
+    """V 欄期別（例如「202610上課」）→ 202610；看不懂回傳空字串。"""
+    match = re.match(r"^\s*(\d{6})", str(_cell(row, COL_V) or ""))
+    return match.group(1) if match else ""
+
+
+def month_rows(values: list[list[object]], year_month: str) -> list[int]:
+    """V 欄期別是 year_month 的列號（1-based）。"""
+    return [i + 1 for i, row in enumerate(values) if i > 0 and _period_of_row(row) == year_month]
+
+
+def build_month_entries(values: list[list[object]], area: str, year_month: str) -> list[list[object]]:
+    """該月要寫進 U–X 的列：[備註, 期別, 收入, 支出]（人數 0 的類型不寫）。"""
+    deposit_amount = _deposit_amount(area)
+    entries = []
+    for type_ in ("上課", "退還", "已退", "不退"):
+        names, total = _aggregate(values, type_, year_month)
+        if total <= 0:
+            continue
+        amount = total * deposit_amount
+        entries.append([f"{type_}：{'/'.join(names)}＋共{total}人", f"{year_month}{type_}",
+                        amount if type_ == "上課" else 0, 0 if type_ == "上課" else amount])
+    return entries
+
+
+def plan_month_update(values: list[list[object]], entries: list[list[object]], year_month: str,
+                      today_text: str) -> tuple[list[tuple[int, list[object]]], list[int]]:
+    """覆蓋該月既有的列（照原本位置），不夠的接在 U 欄最後一列之後，多的列清空。
+    回傳 ([(列號, [U,V,W,X])], [要清空的列號])。內容沒變的列不重寫（Z 更新日期不動）。"""
+    existing = month_rows(values, year_month)
+    next_row = max(_last_non_empty_row(values, COL_U) + 1, 2)
+    writes, clears = [], []
+    for i, entry in enumerate(entries):
+        if i < len(existing):
+            row_no = existing[i]
+            row = values[row_no - 1]
+            current = [_cell(row, c) for c in (COL_U, COL_V, COL_W, COL_X)]
+            if [str(v).strip() for v in current] == [str(v).strip() for v in entry]:
+                continue
+        else:
+            row_no = next_row
+            next_row += 1
+        writes.append((row_no, entry))
+    clears = existing[len(entries):]
+    return writes, clears
+
+
+def aggregate_month_replace(area: str, year_month: str) -> dict[str, int]:
+    """統計該月並覆蓋該月既有的 U–X 列（沒有就新增）；回傳 {"written", "cleared"}。"""
+    spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
+    values = _read_values(spreadsheet_id, title)
+    if not values:
+        return {"written": 0, "cleared": 0}
+    today_text = datetime.now(TW_TZ).strftime("%Y-%m-%d")
+    writes, clears = plan_month_update(values, build_month_entries(values, area, year_month), year_month, today_text)
+    data = []
+    for row_no, entry in writes:
+        data.append({"range": f"'{title}'!U{row_no}:X{row_no}", "values": [entry]})
+        data.append({"range": f"'{title}'!Z{row_no}", "values": [[today_text]]})
+    for row_no in clears:
+        data.append({"range": f"'{title}'!U{row_no}:X{row_no}", "values": [["", "", "", ""]]})
+        data.append({"range": f"'{title}'!Z{row_no}", "values": [[today_text]]})
+    if data:
+        get_sheets_service().spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"valueInputOption": "USER_ENTERED", "data": data}).execute()
+    return {"written": len(writes), "cleared": len(clears)}
+
+
+def mark_from_months(area: str, up_to_month: str) -> dict[str, object]:
+    """依統計月份打勾：清空 J–M 後，用 V 欄期別 ≤ up_to_month 的所有備註重新打勾
+    （前月、當月都會包含，之前月份的勾也會保留；V 欄沒有期別的舊列一併納入）。"""
+    spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
+    values = _read_values(spreadsheet_id, title)
+    if len(values) < 2:
+        return {"marked": 0, "valid_notes": 0, "missing_names": [], "processed_rows": 0}
+    notes = []
+    for i, row in enumerate(values[1:], start=2):
+        note = str(_cell(row, COL_U) or "").strip()
+        period = _period_of_row(row)
+        if note and (not period or period <= up_to_month):
+            notes.append((f"U{i}", note))
+    marked, valid, missing = _apply_marks(spreadsheet_id, title, values, notes)
+    return {"marked": marked, "valid_notes": valid, "missing_names": missing, "processed_rows": len(notes)}
+
+
+def check_balance(area: str, year_month: str) -> dict[str, object]:
+    """比對當月資料最後一列的 Y 欄（餘額）和 B1 是否相等；當月沒有資料時用 U 欄最後一列。"""
+    spreadsheet_id, title = resolve_report_location(DEPOSIT_REPORT_TYPE, area)
+    values = _read_values(spreadsheet_id, title)
+    rows = month_rows(values, year_month)
+    last = max(rows) if rows else _last_non_empty_row(values, COL_U)
+    res = get_sheets_service().spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id, ranges=[f"'{title}'!B1", f"'{title}'!Y{last}"],
+        valueRenderOption="UNFORMATTED_VALUE").execute().get("valueRanges", [])
+
+    def _num(vr):
+        vals = vr.get("values", [[""]])
+        try:
+            return float(str(vals[0][0]).replace(",", ""))
+        except (ValueError, IndexError):
+            return None
+
+    b1, y = (_num(res[0]), _num(res[1])) if len(res) == 2 else (None, None)
+    return {"row": last, "b1": b1, "y": y, "equal": b1 is not None and y is not None and abs(b1 - y) < 0.5}
+
+
+def run_monthly(area: str, today=None, log=print) -> list[str]:
+    """每月 1 日排程：前月（覆蓋）＋當月統計 → 依統計月份打勾 → 比對異常 → 比對 Y／B1。回傳問題清單。"""
+    from datetime import date as _date, timedelta as _td
+
+    today = today or datetime.now(TW_TZ).date()
+    current = today.strftime("%Y%m")
+    previous = (_date(today.year, today.month, 1) - _td(days=1)).strftime("%Y%m")
+    problems = []
+    for ym in (previous, current):
+        r = aggregate_month_replace(area, ym)
+        log(f"【{area}】統計月份 {ym}：寫入 {r['written']} 列，清空 {r['cleared']} 列")
+    _log_execution(area, "統計月份彙整", "完成", f"排程：{previous}（覆蓋）＋{current}")
+    m = mark_from_months(area, current)
+    log(f"【{area}】依統計月份打勾 {m['marked']} 個" +
+        (f"，找不到姓名：{'、'.join(m['missing_names'])}" if m["missing_names"] else ""))
+    if m["missing_names"]:
+        problems.append(f"{area} 打勾找不到姓名：{'、'.join(m['missing_names'])}")
+    f = flag_discrepancies(area)
+    log(f"【{area}】比對異常：檢查 {f['checked']} 人，N 欄標記 {f['flagged']} 筆")
+    if f["flagged"]:
+        problems.append(f"{area} N 欄異常 {f['flagged']} 筆")
+    b = check_balance(area, current)
+    if b["equal"]:
+        log(f"【{area}】第 {b['row']} 列 Y 欄 {b['y']:,.0f} ＝ B1 ✓")
+    else:
+        msg = f"{area} 第 {b['row']} 列 Y 欄 {b['y']} ≠ B1 {b['b1']}"
+        log("⚠️ " + msg)
+        problems.append(msg)
+    return problems

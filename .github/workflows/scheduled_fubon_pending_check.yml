@@ -4,8 +4,8 @@ run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot
 
 on:
   schedule:
-    # UTC 時間；台北時間需加 8 小時。每週二／五 台北 10:00 = UTC 02:00。
-    - cron: "0 2 * * 2,5"
+    # 外部排程（主控表「排程設定」）停用時的備援。每週二／五 台北 10:30 = UTC 02:30。
+    - cron: "30 2 * * 2,5"
   workflow_dispatch:
     inputs:
       scheduled_slot:

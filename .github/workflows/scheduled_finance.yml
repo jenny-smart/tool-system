@@ -2,7 +2,8 @@ name: Scheduled Finance Jobs
 
 run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
 
-# 時間一律台北時間（cron 為 UTC，台北＝UTC＋8）：
+# 執行時間以主控表「排程設定」分頁為準（Cloud Schedule Router 每 10 分鐘讀一次後派送，各功能各自設定）。
+# 下面的原生 cron 只在外部排程停用（EXTERNAL_SCHEDULER_ENABLED != true）時當備援，時間是舊的：
 #   每月 1 日 00:30 fixed_expense（固定費用：辦公室租金）
 #   每月 1 日 01:00 vip_full_pipeline（【儲值金】完整流程）
 #   每月 1 日 02:00 cash_gap_check（全區現金缺口→預收款金額→年度review 整理／現金缺口區塊→月初檢查）
@@ -33,7 +34,7 @@ on:
         required: true
         default: "month_start"
         type: choice
-        options: [month_start, month_start_queue, fixed_expense, vip_full_pipeline, cash_gap, prepaid_amount, review_monthly, cash_gap_check, revenue_reconcile, month_start_check, accounting_reminder]
+        options: [month_start, month_start_queue, fixed_expense, fixed_expense_mail, fixed_expense_transfer, vip_full_pipeline, cash_gap, prepaid_amount, review_monthly, cash_gap_check, cash_gap_followup, revenue_reconcile, deposit_report, month_start_check, accounting_reminder, mof_serial, mof_serial_check]
       date:
         description: "模擬執行日 YYYY-MM-DD（留空＝今天；期別會用這天的上個月）"
         required: false
@@ -70,6 +71,11 @@ jobs:
       HSINCHU_PASSWORD: ${{ secrets.HSINCHU_PASSWORD }}
       KAOHSIUNG_EMAIL: ${{ secrets.KAOHSIUNG_EMAIL }}
       KAOHSIUNG_PASSWORD: ${{ secrets.KAOHSIUNG_PASSWORD }}
+      # 台北固定費用查信（AWS／震旦／眾點／台灣連線）
+      TAIPEI_FIXED_EXPENSE_GMAIL_USER: ${{ secrets.TAIPEI_FIXED_EXPENSE_GMAIL_USER }}
+      TAIPEI_FIXED_EXPENSE_GMAIL_APP_PASSWORD: ${{ secrets.TAIPEI_FIXED_EXPENSE_GMAIL_APP_PASSWORD }}
+      GMAIL_401_USER: ${{ secrets.GMAIL_401_USER }}
+      GMAIL_401_APP_PASSWORD: ${{ secrets.GMAIL_401_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
         with:
