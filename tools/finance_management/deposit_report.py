@@ -493,7 +493,7 @@ def build_month_entries(values: list[list[object]], area: str, year_month: str) 
 def plan_month_update(values: list[list[object]], entries: list[list[object]], year_month: str,
                       today_text: str) -> tuple[list[tuple[int, list[object]]], list[int]]:
     """覆蓋該月既有的列（照原本位置），不夠的接在 U 欄最後一列之後，多的列清空。
-    回傳 ([(列號, [U,V,W,X])], [要清空的列號])。內容沒變的列不重寫（Z 更新日期不動）。"""
+    回傳 ([(列號, [U,V,W,X])], [要清空的列號])。內容沒變的列不重寫 U–X（Z 日期由呼叫端一律更新成當天）。"""
     existing = month_rows(values, year_month)
     next_row = max(_last_non_empty_row(values, COL_U) + 1, 2)
     writes, clears = [], []
@@ -519,10 +519,14 @@ def aggregate_month_replace(area: str, year_month: str) -> dict[str, int]:
     if not values:
         return {"written": 0, "cleared": 0}
     today_text = datetime.now(TW_TZ).strftime("%Y-%m-%d")
-    writes, clears = plan_month_update(values, build_month_entries(values, area, year_month), year_month, today_text)
+    entries = build_month_entries(values, area, year_month)
+    writes, clears = plan_month_update(values, entries, year_month, today_text)
     data = []
     for row_no, entry in writes:
         data.append({"range": f"'{title}'!U{row_no}:X{row_no}", "values": [entry]})
+    # 2026-11 Jenny：前月、當月每次都重新彙整，Z 欄一律蓋成當天（內容沒變的列也更新日期）
+    kept = month_rows(values, year_month)[:len(entries)]
+    for row_no in sorted(set(kept) | {r for r, _e in writes}):
         data.append({"range": f"'{title}'!Z{row_no}", "values": [[today_text]]})
     for row_no in clears:
         data.append({"range": f"'{title}'!U{row_no}:X{row_no}", "values": [["", "", "", ""]]})
