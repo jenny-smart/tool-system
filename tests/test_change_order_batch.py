@@ -485,3 +485,33 @@ def test_backend_writeback_merged_and_replacement_invoice(monkeypatch):
     raw = row(B="已處理發票", C="車馬費發票", G="LC00217598", K="車馬費發票$200", O="GH33334444")
     co.sync_one_to_purchase_edit({"order_no": raw[6], "raw": raw, "status": "已處理發票"}, session=None)
     assert "invoice_no" not in posted[0][1]  # 車馬費是另一張發票，不改訂單主發票
+
+
+def test_paid_but_uninvoiced_change_invoice_opens_invoice_first():
+    """2026-11 Jenny：已收款但 O 還沒有發票的異動發票（含多張訂單合併）→ 先開立發票，不是直接回寫。"""
+    multi = "LC00217202 LC00217177 LC00217199"
+    item = plan(B="已收款", C="異動發票", G=multi, N="14000")
+    assert item["actions"] == ["invoice"] and item["amount"] == "14000"
+    assert plan(B="已收款", C="異動發票", G="LC00214828", N="500")["actions"] == ["invoice"]
+    # 已經有發票 → 照舊回寫
+    assert plan(B="已收款", C="異動發票", G=multi, N="14000", O="AB12345678")["actions"] == ["sync"]
+    # 一般已收款（不是異動發票、單張訂單）照舊回寫
+    assert plan(B="已收款", C="專員回報加時", G="LC00214828", N="500")["actions"] == ["sync"]
+
+
+def test_pending_invoice_candidates_merged_for_any_status(monkeypatch):
+    from tools.invoice_center import pending_charge
+
+    multi = "LC00217202 LC00217177"
+    rows = [["待收款", "異動發票", "", "", "", multi, "韓耕柏", "", "", "", "", "", "", ""],
+            ["已收款", "異動發票", "", "", "", multi, "韓耕柏", "", "", "", "", "", "", ""],
+            ["待收款", "專員回報加時", "", "", "", "LC00214828", "陳", "", "", "", "", "", "", ""],
+            ["已收款", "專員回報加時", "", "", "", "LC00214829", "陳", "", "", "", "", "", "", ""]]
+
+    class WS:
+        def get(self, _rng):
+            return rows
+
+    monkeypatch.setattr(pending_charge, "get_worksheet", lambda area: WS())
+    got = {r["列號"]: r["_invoice_flow"] for r in pending_charge.get_pending_invoice_candidates("高雄")}
+    assert got == {1: "merged", 2: "merged", 3: "charge"}

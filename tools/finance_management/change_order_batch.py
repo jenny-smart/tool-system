@@ -115,6 +115,16 @@ def needs_sync(row: list) -> bool:
     return status in DONE_STATUSES and _cell(row, "AE") != synced_marker(status)
 
 
+def needs_invoice_after_paid(row: list) -> bool:
+    """已收款、O 欄還沒有發票，而且是異動發票／合併開立（G 欄多張訂單）→ 要先開發票。"""
+    from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, split_order_numbers
+
+    if _cell(row, "B") != "已收款" or _cell(row, "O"):
+        return False
+    detail = _cell(row, "C")
+    return detail == "異動發票" or detail in MERGED_INVOICE_DETAILS or len(split_order_numbers(_cell(row, "G"))) >= 2
+
+
 def ready_target(row: list) -> Optional[str]:
     """B 欄還是待處理、但折讓單／退款／收款／發票／儲值金已在別處處理好的列 → 回寫後的完成狀態。"""
     status = _cell(row, "B")
@@ -192,6 +202,15 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         "order_no": order_no, "customer": _cell(row, "H"), "payway": _cell(row, "R"),
         "amount": "", "progress": [], "actions": [], "missing": [], "manual": [], "note": _cell(row, "K"),
     }
+    if status == "已收款" and needs_invoice_after_paid(row):
+        # 2026-11 Jenny：已收款但還沒開發票（O 空白）的異動發票／合併開立 → 先開立發票，開完再回寫
+        from tools.invoice_center.merged import split_order_numbers
+
+        orders = split_order_numbers(order_no)
+        item["amount"] = _amount(_cell(row, "N")) or (f"{len(orders)} 張訂單" if len(orders) >= 2 else "")
+        item["actions"].append("invoice")
+        item["progress"].append("已收款、尚未開發票：先開立發票" + ("（合併開立，以第一張訂單資料）" if len(orders) >= 2 else ""))
+        return item
     if status in DONE_STATUSES:
         if not needs_sync(row):
             return None
