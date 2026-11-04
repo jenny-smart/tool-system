@@ -73,10 +73,27 @@ def test_pending_charge_invoice_does_not_wait_for_payment():
 def test_stored_value_and_invoice_rows():
     assert plan(B="待扣儲值金", N="500")["actions"] == ["stored_value"]
     assert plan(B="待返儲值金", S="")["missing"] == ["缺儲值金金額（S）"]
-    assert "二聯改三聯" in plan(B="待處理發票", C="異動發票")["manual"][0]
-    fare = plan(B="待處理發票", C="車馬費發票", J="300")
+    fare = plan(B="待處理發票", C="車馬費發票", J="2026/11/03 車馬費 $300")
     assert fare["actions"] == ["invoice"] and fare["amount"] == "300" and not fare["manual"]
-    assert plan(B="待處理發票", C="車馬費發票")["missing"] == ["缺車馬費金額（J）"]
+    assert plan(B="待處理發票", C="車馬費發票", J="500")["amount"] == "500"
+    assert plan(B="待處理發票", C="車馬費發票")["missing"][0].startswith("J 欄找不到車馬費金額")
+    # 二聯改三聯：資料齊全直接執行，不再需人工
+    tri = plan(B="待處理發票", C="異動發票", K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")
+    assert tri["actions"] == ["triplicate"] and not tri["manual"] and not tri["missing"]
+    assert "改三聯" in plan(B="待處理發票", C="異動發票", K="改金額")["missing"][0]
+    assert "X 欄" in plan(B="待處理發票", C="二聯改三聯", K="12345678 檸檬清潔有限公司", X="", Y="二聯式")["missing"][0]
+    assert plan(B="待處理發票", C="其他")["manual"]
+
+
+def test_run_triplicates_runs_each_row_and_stops_on_failure():
+    calls = []
+    plans = {"5": {"p": 5}, "6": {"p": 6}}
+    assert batch.run_triplicates("台北", [5, 6], plans, "cdp", run=lambda cmd: calls.append(cmd) or 0) == 0
+    assert len(calls) == 2 and "--plan" in calls[0]
+    calls.clear()
+    assert batch.run_triplicates("台北", [5, 6], plans, "cdp", run=lambda cmd: calls.append(cmd) or 3) == 3
+    assert len(calls) == 1
+    assert batch.run_triplicates("台北", [7], plans, "cdp", run=lambda cmd: 0) == 1
 
 
 def test_formula_fixes_only_fill_blank_cells():
@@ -84,9 +101,18 @@ def test_formula_fixes_only_fill_blank_cells():
               row(B="待退款", S="1000", E="2026/10/15"), row(B="待收款", S="1000")]
     updates = batch.formula_fixes(values)
     assert updates == [
-        {"range": "T2", "values": [['=IF(R2="ATM",IF(P2="012",S2,S2-15),0)']]},
         {"range": "Z2", "values": [["=S2/1.05"]]},
+        {"range": "T2", "values": [['=IF(R2="ATM",IF(P2="012",S2,S2-15),0)']]},
     ]
+
+
+def test_z_formula_when_not_formula_even_without_s():
+    """2026-11 Jenny：待退款 Z 不是公式（空白或手打數字）就帶 =S{n}/1.05；S 還沒填也先帶。"""
+    values = [["header"], row(B="待退款"), row(B="待退款", S="1000", T="985", Z="952"),
+              row(B="待退款", S="1000", T="985", Z="952"), row(B="待收款")]
+    z = [["Z"], [""], ["952"], ["=S4/1.05"], [""]]
+    assert batch.formula_fixes(values, z) == [{"range": "Z2", "values": [["=S2/1.05"]]},
+                                              {"range": "Z3", "values": [["=S3/1.05"]]}]
 
 
 def test_queue_actions_one_task_with_per_region_plan():
@@ -307,7 +333,7 @@ def test_vip_refund_coupon_flow():
 
 def test_formula_fixes_include_vip_refund_coupon():
     updates = batch.formula_fixes([["header"], row(B="VIP待退券", S="1000")])
-    assert [u["range"] for u in updates] == ["T2", "Z2"]
+    assert [u["range"] for u in updates] == ["Z2", "T2"]
 
 
 

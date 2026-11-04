@@ -19,13 +19,14 @@
             人工按下一步及儲存，回填 O／AA）；M 收款時間空白也先開（2026-10-29 Jenny 確認），
             但仍列為未備妥讓每日檢查提醒收款
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
-  - 待處理發票：車馬費發票 → 開立發票（同待收款，金額取 J 欄車馬費，2026-11 Jenny）；異動發票／二聯改三聯 → 需人工
+  - 待處理發票（2026-11 Jenny：不再需人工）：車馬費發票 → 開立發票（同待收款，金額取 J 欄「車馬費 $金額」）；
+    異動發票／二聯改三聯（C 或 K 有「改三聯」）→ 二聯改三聯（作廢或全額折讓原票＋開新三聯，同【鯨躍發票】二聯改三聯）
   - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
   - 未完全完成也先回寫（2026-10-29 Jenny 確認）：待收款已開發票（O）、待退款／VIP待退券已開折讓單或已退款（AB／AC），且 AE 還不是「更新系統（B欄：同狀態）」→ 以目前狀態回寫已完成的欄位，
     B 欄不變；之後完成時再回寫一次。待扣／待返儲值金回寫會直接改成完成狀態，不做部分回寫。
-  - 盤點時順手補 T（匯款金額）、Z（未稅金額）公式（只補空白格）。
+  - 盤點時順手補公式：待退款／VIP待退券 Z（未稅金額）不是公式就帶 =S{n}/1.05；T（匯款金額）S 有值且空白才補。
 執行（2026-10-29 與 Jenny 確認）：整批只排一筆本機 Agent 任務（change_order.batch_run），
   依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 退款（信用卡登入藍新、ATM 登入富邦）
   ③ 儲值金 → 回寫系統。前一步失敗就不做該區後面的步驟（回寫仍只回寫已完成的列），避免順序錯亂。
@@ -64,10 +65,12 @@ ACTIONS = {
     "atm_refund": ("富邦 ATM 退款", "fubon.atm_refund"),
     "credit_refund": ("藍新信用卡退款", "newebpay.refund_pending"),
     "stored_value": ("異動儲值金", "lemon.stored_value_adjustment"),
+    "triplicate": ("二聯改三聯", "cetustek.triplicate"),
     "sync": ("回寫系統", ""),
 }
-# 每區依序執行：鯨躍（折讓單＋發票）→ 退款（藍新信用卡、富邦 ATM）→ 儲值金，最後回寫系統
-ACTION_ORDER = ("allowance", "invoice", "credit_refund", "atm_refund", "stored_value")
+# 每區依序執行：鯨躍（折讓單＋發票＋二聯改三聯）→ 退款（藍新信用卡、富邦 ATM）→ 儲值金，最後回寫系統
+ACTION_ORDER = ("allowance", "invoice", "triplicate", "credit_refund", "atm_refund", "stored_value")
+TRIPLICATE_DETAILS = ("異動發票", "二聯轉三聯", "二聯改三聯")
 BATCH_ACTION = "change_order.batch_run"
 
 COL = {name: index for index, name in enumerate(
@@ -147,6 +150,30 @@ def _add_partial_sync(item: dict, row: list) -> None:
     elif _cell(row, "AE") == synced_marker(item["status"]):
         when = _cell(row, "AD")
         item["progress"].append(f"已先回寫目前進度{f'（{when}）' if when else ''}，B 欄完成後需再回寫")
+
+
+def fare_amount(text: str) -> str:
+    """J 欄「車馬費 $300」→ "300"；只有數字時直接用。"""
+    match = re.search(r"車馬費\s*[$＄]?\s*([\d,]+)", str(text or ""))
+    if match:
+        return str(int(match.group(1).replace(",", ""))) if int(match.group(1).replace(",", "")) > 0 else ""
+    return _amount(text) if re.fullmatch(r"\s*[$＄]?\s*[\d,]+(\.\d+)?\s*", str(text or "")) else ""
+
+
+def triplicate_blocker(row: list, row_no: int) -> str:
+    """二聯改三聯還不能執行的原因（空字串＝可以執行）。檢查同【鯨躍發票】二聯改三聯。"""
+    from tools.invoice_center.triplicate import INVOICE_RE, candidate, parse_requirements
+
+    item = candidate(list(row), row_no)
+    if item is None:
+        return "K 欄或 C 欄沒有寫「改三聯」，不知道要怎麼處理這張發票"
+    try:
+        parse_requirements(item["note"])
+    except ValueError as exc:
+        return str(exc)
+    if not INVOICE_RE.fullmatch(item["old_invoice"]) or "二聯" not in item["old_type"]:
+        return "X 欄原發票號碼或 Y 欄二聯式資料不完整"
+    return ""
 
 
 def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
@@ -254,33 +281,51 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
 
     if status == "待處理發票":
         if item["detail"] == "車馬費發票":
-            # 2026-11 Jenny：車馬費發票同待收款開立發票流程（金額只取 J 欄車馬費），Agent 填表、人工按下一步及儲存
-            item["amount"] = _amount(_cell(row, "J"))
+            # 2026-11 Jenny：車馬費發票直接開立發票（同待收款流程，金額只取 J 欄「車馬費 $金額」），
+            # Agent 填表、人工按下一步及儲存
+            item["amount"] = fare_amount(_cell(row, "J"))
             if not item["amount"]:
-                item["missing"].append("缺車馬費金額（J）")
+                item["missing"].append("J 欄找不到車馬費金額（例如「車馬費 $300」）")
             else:
                 item["actions"].append("invoice")
             return item
-        item["manual"].append("請到【鯨躍發票】二聯改三聯逐筆處理")
+        if item["detail"] in TRIPLICATE_DETAILS:
+            # 2026-11 Jenny：二聯改三聯直接執行（作廢或全額折讓原票 → 開新三聯發票），不再到【鯨躍發票】逐筆處理
+            reason = triplicate_blocker(row, row_no)
+            if reason:
+                item["missing"].append(reason)
+            else:
+                item["actions"].append("triplicate")
+            return item
+        item["manual"].append(f"「{item['detail'] or '空白'}」沒有對應的自動處理方式，請確認 C 欄細項")
         return item
 
     item["manual"].append(f"狀態「{status}」需人工處理")
     return item
 
 
-def formula_fixes(values: list[list]) -> list[dict[str, Any]]:
-    """S 退款金額有值、T 或 Z 空白的待退款／VIP待退券列 → 補公式（只補空白格）。"""
+def formula_fixes(values: list[list], z_formulas: Optional[list[list]] = None) -> list[dict[str, Any]]:
+    """待退款／VIP待退券列補公式：
+    - Z 未稅金額：只要不是公式（空白或手打數字）就帶 =S{n}/1.05（2026-11 Jenny，S 還沒填也先帶）
+    - T 匯款金額：S 有值且 T 空白才補
+    z_formulas：Z 欄以公式讀出的值（ws.get("Z1:Z", value_render_option="FORMULA")）；沒給時只補空白格。"""
     updates = []
     for row_no, row in enumerate(values[1:], start=2):
-        if _cell(row, "B") not in REFUND_STATUSES or not _amount(_cell(row, "S")):
+        if _cell(row, "B") not in REFUND_STATUSES:
             continue
         reg_date = parse_reg_date(_cell(row, "E"))
         if reg_date is None or reg_date < CUTOFF:
             continue
-        if not _cell(row, "T"):
-            updates.append({"range": f"T{row_no}", "values": [[T_FORMULA.format(n=row_no)]]})
-        if not _cell(row, "Z"):
+        if z_formulas is not None:
+            z = z_formulas[row_no - 1] if row_no - 1 < len(z_formulas) else []
+            z_text = str(z[0]).strip() if z else ""
+            z_missing = not z_text.startswith("=")
+        else:
+            z_missing = not _cell(row, "Z")
+        if z_missing:
             updates.append({"range": f"Z{row_no}", "values": [[Z_FORMULA.format(n=row_no)]]})
+        if _amount(_cell(row, "S")) and not _cell(row, "T"):
+            updates.append({"range": f"T{row_no}", "values": [[T_FORMULA.format(n=row_no)]]})
     return updates
 
 
@@ -294,7 +339,11 @@ def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], Non
     ws = _change_order().get_worksheet(region)
     values = ws.get_all_values()
     if fix_formulas:
-        updates = formula_fixes(values)
+        try:
+            z_formulas = ws.get("Z1:Z", value_render_option="FORMULA")
+        except Exception:
+            z_formulas = None
+        updates = formula_fixes(values, z_formulas)
         if updates:
             ws.batch_update(updates, value_input_option="USER_ENTERED")
             log(f"【{region}】已補 T／Z 公式 {len(updates)} 格")
@@ -335,11 +384,31 @@ def build_plan(items: list[dict], do_sync: bool) -> list[dict[str, Any]]:
 
 def queue_actions(items: list[dict], do_sync: bool, create_task: Callable, created_by: str = "清潔異動整合執行",
                   log: Callable[[str], None] = print,
-                  prepare_invoices: Optional[Callable[[str, list[int]], Any]] = None) -> Optional[dict]:
+                  prepare_invoices: Optional[Callable[[str, list[int]], Any]] = None,
+                  prepare_triplicates: Optional[Callable[[str, list[int]], dict]] = None) -> Optional[dict]:
     """整批只排一筆本機 Agent 任務（逐區依序執行，見 run_plan），不再每種動作各排一筆讓 Agent 同時跑。
 
-    開立發票要先在網頁端組好發票資料（同【鯨躍發票】開立發票），由 prepare_invoices(地區, 列號) 排入 Payload。"""
+    開立發票要先在網頁端組好發票資料（同【鯨躍發票】開立發票），由 prepare_invoices(地區, 列號) 排入 Payload。
+    二聯改三聯要先讀檸檬後台組好新發票資料，由 prepare_triplicates(地區, 列號) 回傳 {列號: 計畫}。"""
     plan = build_plan(items, do_sync)
+    for entry in plan:
+        rows = entry["steps"].get("triplicate")
+        if not rows:
+            continue
+        try:
+            if prepare_triplicates is None:
+                raise RuntimeError("需在 Tools App 執行（要先讀檸檬後台組新發票資料）")
+            plans = prepare_triplicates(entry["region"], rows)
+            entry["triplicate_plans"] = {str(r): plans[r] for r in rows if r in plans}
+            skipped = [r for r in rows if r not in plans]
+            if skipped:
+                log(f"⚠️ {entry['region']} 二聯改三聯第 {'、'.join(map(str, skipped))} 列未排入")
+            entry["steps"]["triplicate"] = [r for r in rows if r in plans]
+            if not entry["steps"]["triplicate"]:
+                entry["steps"].pop("triplicate")
+        except Exception as exc:
+            entry["steps"].pop("triplicate")
+            log(f"⚠️ {entry['region']} 二聯改三聯未排入（{len(rows)} 筆）：{exc}")
     for entry in plan:
         rows = entry["steps"].get("invoice")
         if not rows:
@@ -494,6 +563,23 @@ def _run_step(action: str, region: str, rows: list[int], cdp_url: str) -> int:
     return subprocess.run(_step_command(action, region, rows, cdp_url)).returncode
 
 
+def run_triplicates(region: str, rows: list[int], plans: dict, cdp_url: str,
+                    run: Callable[[list[str]], int] = lambda cmd: subprocess.run(cmd).returncode) -> int:
+    """二聯改三聯逐列執行（每列一張新發票，人工按下一步及儲存）；一列失敗就停。"""
+    from tools.local_agent import ACTION_HANDLERS
+
+    for row in rows:
+        plan = plans.get(str(row))
+        if not plan:
+            print(f"❌ 第 {row} 列沒有二聯改三聯資料", flush=True)
+            return 1
+        sys.stdout.flush()
+        code = run(ACTION_HANDLERS[ACTIONS["triplicate"][1]]({"area": region, "plan": plan, "cdp_url": cdp_url}))
+        if code != 0:
+            return code
+    return 0
+
+
 def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str = "http://127.0.0.1:9222",
              run_step: Callable[[str, str, list[int], str], int] = _run_step) -> int:
     """逐區依序：鯨躍（折讓單→發票）→ 藍新／富邦退款 → 儲值金 → 回寫系統。
@@ -508,7 +594,10 @@ def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str 
                 continue
             log(f"===== 【{region}】{ACTIONS[action][0]}：第 {'、'.join(map(str, rows))} 列 =====")
             try:
-                code = run_step(action, region, rows, cdp_url)
+                if action == "triplicate":
+                    code = run_triplicates(region, rows, entry.get("triplicate_plans") or {}, cdp_url)
+                else:
+                    code = run_step(action, region, rows, cdp_url)
             except Exception as exc:
                 log(f"❌ 【{region}】{ACTIONS[action][0]}無法執行：{exc}")
                 code = 1
