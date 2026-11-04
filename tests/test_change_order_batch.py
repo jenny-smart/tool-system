@@ -76,6 +76,8 @@ def test_stored_value_and_invoice_rows():
     fare = plan(B="待處理發票", C="車馬費發票", J="2026/11/03 車馬費 $300")
     assert fare["actions"] == ["invoice"] and fare["amount"] == "300" and not fare["manual"]
     assert plan(B="待處理發票", C="車馬費發票", J="500")["amount"] == "500"
+    assert plan(B="待處理發票", C="車馬費發票", J="車馬費發票$200")["amount"] == "200"  # 2026-11-05 台北 343 列
+    assert plan(B="待處理發票", C="車馬費發票", J="車馬費：1,200")["amount"] == "1200"
     assert plan(B="待處理發票", C="車馬費發票")["missing"][0].startswith("J 欄找不到車馬費金額")
     # 二聯改三聯：資料齊全直接執行，不再需人工
     tri = plan(B="待處理發票", C="異動發票", K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")

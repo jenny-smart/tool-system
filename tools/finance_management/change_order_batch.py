@@ -153,11 +153,11 @@ def _add_partial_sync(item: dict, row: list) -> None:
 
 
 def fare_amount(text: str) -> str:
-    """J 欄「車馬費 $300」→ "300"；只有數字時直接用。"""
-    match = re.search(r"車馬費\s*[$＄]?\s*([\d,]+)", str(text or ""))
-    if match:
-        return str(int(match.group(1).replace(",", ""))) if int(match.group(1).replace(",", "")) > 0 else ""
-    return _amount(text) if re.fullmatch(r"\s*[$＄]?\s*[\d,]+(\.\d+)?\s*", str(text or "")) else ""
+    """J 欄「車馬費 $300」「車馬費發票$200」→ "300"／"200"；只有數字時直接用；找不到回傳空字串。"""
+    from tools.invoice_center.fare import fare_amount as parse
+
+    amount = parse(text)
+    return str(amount) if amount > 0 else ""
 
 
 def triplicate_blocker(row: list, row_no: int) -> str:
@@ -285,7 +285,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             # Agent 填表、人工按下一步及儲存
             item["amount"] = fare_amount(_cell(row, "J"))
             if not item["amount"]:
-                item["missing"].append("J 欄找不到車馬費金額（例如「車馬費 $300」）")
+                item["missing"].append("J 欄找不到車馬費金額（要寫「車馬費 $300」或「車馬費發票$300」）")
             else:
                 item["actions"].append("invoice")
             return item
