@@ -95,12 +95,15 @@ class ScheduleTests(unittest.TestCase):
         self.assertIn(('scheduled_change_order_check.yml',{'target':'check'}), self.jobs('2026-11-04T10:00'))
 
     def test_mof_serial_earlier_on_holiday(self):
-        self.assertIn('mof_serial', self.keys('2026-11-20T10:00'))
+        # 雙月 20 日做下一期；單月不做
+        self.assertNotIn('mof_serial', self.keys('2026-11-20T10:00'))
+        self.assertIn('mof_serial', self.keys('2026-10-20T10:00'))
         # 2026-12-20 是週日 → 提前到 12-18（五）
         self.assertIn('mof_serial', self.keys('2026-12-18T10:00'))
         self.assertNotIn('mof_serial', self.keys('2026-12-20T10:00'))
         for day in range(21, 26):
-            self.assertIn('mof_serial_check', self.keys('2026-11-%02dT10:00' % day))
+            self.assertIn('mof_serial_check', self.keys('2026-12-%02dT10:00' % day))
+            self.assertNotIn('mof_serial_check', self.keys('2026-11-%02dT10:00' % day))
 
     def test_yuanta_and_401(self):
         self.assertIn(('scheduled_yuanta_statement.yml',{}),self.jobs('2026-11-25T11:00'))
