@@ -6,7 +6,7 @@
 target：
   fixed_expense           固定費用：台北當月租金／管理費、台中單月當月＋下月租金、台灣連線（記當月）
   fixed_expense_mail      台北查信（AWS／震旦／眾點／台灣連線），期別＝上個月；最後一次（10 日）還缺就建提醒
-  fixed_expense_transfer  固定費用轉帳：盤點富邦請款記錄裡的固定費用 → 排入 Mac Agent 或建提醒等確認
+  fixed_expense_remit     【財報】各區固定費用匯款：第72列有金額、第74列空白的地區 → 排入 Mac 富邦匯款給台北
   vip_full_pipeline       【儲值金】完整流程（上個月）
   revenue_reconcile       四區財報營收 ⑥–⑩
   deposit_report          工具包押金：前月（覆蓋）＋當月統計 → 依統計月份打勾 → 比對異常 → 比對 Y／B1
@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 TARGETS = ("month_start", "month_start_queue", "prepaid_amount", "review_monthly", "fixed_expense", "fixed_expense_mail",
-           "fixed_expense_transfer", "vip_full_pipeline", "cash_gap", "cash_gap_check", "cash_gap_followup",
+           "fixed_expense_remit", "vip_full_pipeline", "cash_gap", "cash_gap_check", "cash_gap_followup",
            "revenue_reconcile", "deposit_report", "month_start_check", "accounting_reminder", "mof_serial",
            "mof_serial_check")
 REMIND_CALENDAR_ID = "jenny@hers.com.tw"
@@ -106,40 +106,41 @@ def run_fixed_expense_mail(today: date) -> int:
     return 1 if result["errors"] and today.day >= 10 else 0
 
 
-FIXED_EXPENSE_NAMES = ("辦公室租金", "辦公室管理費", "辦公室租金管理費", "Amazon Web Services", "震旦行", "眾點",
-                       "台灣連線")
-
-
-def fixed_expense_payments(items: list[dict], today: date) -> list[dict]:
-    """富邦請款記錄待付款裡，費用說明是上個月／當月固定費用的列。"""
-    labels = {f"{p[:4]}.{p[4:]}" for p in (previous_period(today), today.strftime("%Y%m"))}
-    result = []
-    for item in items:
-        memo = str(item.get("memo") or "")
-        if item["kind"] == "payment" and any(memo.startswith(f"{label}-{name}")
-                                              for label in labels for name in FIXED_EXPENSE_NAMES):
-            result.append(item)
-    return result
-
-
-def run_fixed_expense_transfer(today: date) -> int:
-    from tools.finance_management import internal_payment_batch as batch
+def run_fixed_expense_remit(today: date) -> int:
+    """【財報】各區固定費用匯款（排程）：盤點台中／桃園／新竹／高雄 行銷費用總表第 72 列 > 0 且第 74 列空白（尚未匯款）
+    的地區 → 排入 Mac 富邦匯款給台北（手機核准；成功後同步富邦明細及原訂分錄），或只建提醒等確認。期別＝當月。"""
+    from tools.finance_management.fixed_expense_transfer import preview_fixed_expenses
     from tools.scheduling.schedule_settings import MODE_QUEUE, get_mode
 
-    items = fixed_expense_payments(batch.scan(kinds=["payment"], log=log), today)
-    if not items:
-        log("沒有待付款的固定費用")
+    period = today.strftime("%Y%m")
+    preview = preview_fixed_expenses(period, "全區")
+    ready, done = [], []
+    for plan in preview.get("plans") or []:
+        if str(plan.get("transfer_mark") or "").strip():
+            done.append(f"{plan['area']}（已匯款 {plan['transfer_mark']}）")
+        elif int(plan.get("total") or 0) > 0:
+            ready.append(plan)
+    lines = [f"{p['area']}：{int(p['total']):,}（{p.get('memo', '')}）" for p in ready]
+    log(f"{period} 各區固定費用匯款：待匯款 {len(ready)} 區" + (f"；{'、'.join(done)}" if done else "") +
+        (f"；第72列沒有金額：{'、'.join(preview.get('skipped_areas') or [])}" if preview.get("skipped_areas") else ""))
+    for line in lines:
+        log("  " + line)
+    if not ready:
         return 0
-    lines = [f"{i['area']} 第{i['row']}列 {i.get('memo', '')} {i.get('payee', '')} {i.get('amount', '')}" for i in items]
-    log("\n".join(lines))
-    if get_mode("fixed_expense_transfer", MODE_QUEUE) == MODE_QUEUE:
+    if get_mode("fixed_expense_remit", MODE_QUEUE) == MODE_QUEUE:
         from tools.local_agent_queue import create_task
 
-        batch.queue_actions(items, create_task, created_by="排程系統", log=log)
-        remind(f"【固定費用】已排入富邦轉帳 {len(items)} 筆，請用手機核准", "\n".join(lines), "【固定費用】")
+        for plan in ready:
+            task = create_task("fubon.fixed_expense_transfer",
+                               {"area": plan["area"], "month": period, "cdp_url": "http://127.0.0.1:9222"},
+                               created_by="排程系統")
+            log(f"已排入：{plan['area']} 富邦匯款給台北（{task.get('task_id', '')}）")
+        remind(f"【固定費用匯款】已排入 {len(ready)} 區富邦匯款，請用手機核准", "\n".join(lines),
+               "【固定費用匯款】")
     else:
-        remind(f"【固定費用】待轉帳 {len(items)} 筆，請確認後執行",
-               "\n".join(lines) + "\n\n請到 Tools App【整合執行】富邦內部請款勾選後執行。", "【固定費用】")
+        remind(f"【固定費用匯款】{len(ready)} 區待匯款，請確認後執行",
+               "\n".join(lines) + "\n\n請到 Tools App【財報】各區固定費用匯款勾選「執行富邦銀行匯款給台北」。",
+               "【固定費用匯款】")
     return 0
 
 
@@ -390,7 +391,7 @@ def run_mof_serial(today: date) -> int:
         remind(f"【鯨躍字軌】已排入 {len(todo)} 區，請登入財政部", body, "【鯨躍字軌】")
     else:
         remind(f"【鯨躍字軌】{len(todo)} 區待處理，請確認後執行",
-               body + "\n\n請到 Tools App【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）執行。", "【鯨躍字軌】")
+               body + "\n\n請到 Tools App【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）執行。", "【鯨躍字軌】")
     return 0
 
 

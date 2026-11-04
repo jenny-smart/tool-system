@@ -75,7 +75,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # 財務
     "fixed_expense": ("scheduled_finance.yml", {"target": "fixed_expense"}),
     "fixed_expense_mail": ("scheduled_finance.yml", {"target": "fixed_expense_mail"}),
-    "fixed_expense_transfer": ("scheduled_finance.yml", {"target": "fixed_expense_transfer"}),
+    "fixed_expense_remit": ("scheduled_finance.yml", {"target": "fixed_expense_remit"}),
     "vip_full_pipeline": ("scheduled_finance.yml", {"target": "vip_full_pipeline"}),
     "revenue_reconcile": ("scheduled_finance.yml", {"target": "revenue_reconcile"}),
     "deposit_report": ("scheduled_finance.yml", {"target": "deposit_report"}),
@@ -87,6 +87,11 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "accounting_reminder": ("scheduled_finance.yml", {"target": "accounting_reminder"}),
     "mof_serial": ("scheduled_finance.yml", {"target": "mof_serial"}),
     "mof_serial_check": ("scheduled_finance.yml", {"target": "mof_serial_check"}),
+}
+
+# 已停用的功能代號 → 說明（Sheet 裡還有這列時提醒刪除）
+RETIRED_KEYS = {
+    "fixed_expense_transfer": "改為 fixed_expense_remit【財報】各區固定費用匯款，每月 10 日 04:00",
 }
 
 # 預設值：第一次建立「排程設定」分頁時寫進去，讀不到 Sheet 時也用這份。
@@ -134,8 +139,8 @@ DEFAULT_ROWS: list[list] = [
      MODE_DIRECT, "缺的項目每天提醒到 10 日"],
     [True, "fixed_expense_mail", "台北固定費用查信（AWS／震旦／眾點／台灣連線）", "09:00", "每月", "5,8,10", "照跑",
      MODE_DIRECT, ""],
-    [True, "fixed_expense_transfer", "固定費用轉帳（富邦請款記錄）", "09:30", "每月", "10", "提前", MODE_QUEUE,
-     "排入 Mac Agent，需手機核准"],
+    [True, "fixed_expense_remit", "【財報】各區固定費用匯款（富邦匯款給台北）", "04:00", "每月", "10", "照跑", MODE_QUEUE,
+     "第72列有金額、第74列空白的地區排入 Mac，需手機核准"],
     [True, "accounting_reminder", "會計事務所費用確認提醒", "10:00", "單月", "10", "照跑", MODE_DIRECT, ""],
     [True, "mof_serial", "【鯨躍發票】財政部字軌下載＋匯入＋配號（下一期）", "10:00", "雙月", "20", "提前", MODE_QUEUE,
      "雙月 20 日做下一期（例如 12 月做隔年 01-02）；需先登入財政部（圖形驗證碼）"],
@@ -215,7 +220,9 @@ def parse_row(row: list) -> Optional[Rule]:
                 freq=str(cells[4] or "").strip() or "每日", days=str(cells[5] or "").strip(),
                 holiday=str(cells[6] or "").strip() or HOLIDAY_RUN, mode=str(cells[7] or "").strip() or MODE_DIRECT,
                 errors=errors)
-    if key not in FUNCTIONS:
+    if key in RETIRED_KEYS:
+        rule.errors.append(f"這個功能已停用（{RETIRED_KEYS[key]}），請刪除這列")
+    elif key not in FUNCTIONS:
         rule.errors.append(f"不認得的功能代號：{key}")
     if rule.freq not in ("每日", "每週", "每月", "單月", "雙月"):
         rule.errors.append(f"頻率要是 每日／每週／每月／單月／雙月：{rule.freq}")

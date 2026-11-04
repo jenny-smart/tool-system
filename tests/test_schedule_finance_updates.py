@@ -39,19 +39,6 @@ def test_month_rows_and_replace_plan():
     assert dr.plan_month_update(values, same, "202610", "x") == ([], [])
 
 
-def test_fixed_expense_payments_filter():
-    items = [
-        {"kind": "payment", "memo": "2026.10-Amazon Web Services，USD 12", "area": "台北", "row": 3},
-        {"kind": "payment", "memo": "2026.11-台灣連線", "area": "台北", "row": 4},
-        {"kind": "payment", "memo": "2026.11-辦公室租金管理費", "area": "台中", "row": 5},
-        {"kind": "payment", "memo": "2026.10-清潔用品", "area": "台北", "row": 6},
-        {"kind": "payment", "memo": "2026.08-眾點", "area": "台北", "row": 7},
-        {"kind": "deposit", "memo": "2026.11-辦公室租金", "area": "台北", "row": 8},
-    ]
-    rows = [i["row"] for i in runner.fixed_expense_payments(items, date(2026, 11, 10))]
-    assert rows == [3, 4, 5]
-
-
 def test_review_only_rewrites_total_column(monkeypatch):
     ru = _review_update(monkeypatch)
     header = ["台北服務"] + [f"2026.{m:02d}{k}" for m in range(1, 13) for k in ("實際", "預估")] + ["2026實際", "2026預估"]

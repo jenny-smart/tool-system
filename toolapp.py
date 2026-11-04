@@ -3456,6 +3456,25 @@ def get_fixed_expense_transfer_preview(period: str, area: str, schema_version: i
     return preview_fixed_expenses(period, area)
 
 
+def run_deposit_report_all(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    """整合執行：工具包押金 統計月份彙整（前月覆蓋＋當月）→ 依統計月份打勾 → 比對異常（N 欄）→ 比對 Y／B1。"""
+    from datetime import date as _date
+
+    from tools.finance_management.deposit_report import run_monthly
+
+    year_month = (month or "").strip()
+    if not re.fullmatch(r"\d{6}", year_month):
+        raise ValueError("請輸入 6 位數統計月份（YYYYMM），例如 202611")
+    areas = ["台北", "台中"] if area == "全區" else [area]
+    if any(a not in ("台北", "台中") for a in areas):
+        raise ValueError("請選擇台北、台中或全區")
+    log = (lambda text: on_progress(text, "info")) if on_progress else (lambda text: None)
+    problems = []
+    for a in areas:
+        problems.extend(run_monthly(a, _date(int(year_month[:4]), int(year_month[4:]), 1), log=log))
+    return "完成，四項都正常" if not problems else "完成，要確認：\n" + "\n".join(problems)
+
+
 def run_deposit_report_aggregate(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None):
     from tools.finance_management.deposit_report import aggregate_month_replace, check_balance
 
@@ -4008,6 +4027,10 @@ FINANCE_TASKS = [
     {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
     {"name": "【整合執行】財報營收｜⑥–⑩ 金流對帳", "handler": None, "enabled": True},
     {"name": "【整合執行】財報營收｜⑪–⑬ 搬入營收總表＋財報", "handler": None, "enabled": True},
+    {"name": "【整合執行】年度review（預估公式調整＋隱藏欄位）", "handler": run_review_monthly, "enabled": True},
+    {"name": "【整合執行】儲值金完整流程（複製＋轉檔＋搬運＋套用公式）", "handler": run_vip_full_pipeline, "enabled": True},
+    {"name": "【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）", "handler": queue_cetustek_full_pipeline, "enabled": True},
+    {"name": "【整合執行】工具包押金（彙整＋打勾＋比對異常＋Y／B1）", "handler": run_deposit_report_all, "enabled": True},
     # 雲端執行：盤點（含 VIP待退券歸零金額）→ 勾選 → 執行，不排給 Mac Agent
     {"name": "【檸檬後台】異動儲值金", "handler": None, "enabled": True},
     {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
@@ -4032,7 +4055,6 @@ FINANCE_TASKS = [
     {"name": "【鯨躍發票】電子發票字軌號碼匯入", "handler": queue_cetustek_serial_import, "enabled": True},
     {"name": "【鯨躍發票】電子發票字軌號碼配號", "handler": queue_cetustek_serial_section_query, "enabled": True},
     {"name": "【鯨躍發票】電子發票字軌號碼匯入＋配號", "handler": queue_cetustek_import_and_allocate, "enabled": True},
-    {"name": "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）", "handler": queue_cetustek_full_pipeline, "enabled": True},
     {"name": "【財政部電子發票】財政部登入", "handler": queue_mofei_login, "enabled": True},
     {"name": "【財政部電子發票】字軌取號下載", "handler": queue_mofei_download, "enabled": True},
     {"name": "【藍新金流】藍新登入", "handler": queue_newebpay_login, "enabled": True},
@@ -4051,12 +4073,10 @@ FINANCE_TASKS = [
     {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
-    {"name": "【財報】年度review｜執行（預估公式調整＋隱藏欄位）", "handler": run_review_monthly, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
     {"name": "【儲值金】轉檔", "handler": run_vip_convert_files, "enabled": True},
     {"name": "【儲值金】搬運", "handler": run_vip_move_files, "enabled": True},
     {"name": "【儲值金】套用公式", "handler": run_vip_apply_formulas, "enabled": True},
-    {"name": "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）", "handler": run_vip_full_pipeline, "enabled": True},
 ]
 
 SYSTEM_FUNCTIONS_BY_TYPE = {
@@ -4867,7 +4887,7 @@ with date_col:
                 "鯨躍查詢年月請填下拉選單實際顯示的文字。依序執行匯入→配號，任一步失敗就停止"
             )
             st.warning("配號會實際異動鯨躍發票號碼配置且無法回復，第一次執行請留意 Chrome 視窗確認結果", icon="⚠️")
-        elif selected_function == "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）":
+        elif selected_function == "【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）":
             st.markdown('<div class="field-label">📆 財政部字軌期別／鯨躍查詢年月</div>', unsafe_allow_html=True)
             _pipe_start_month = today_date.month if today_date.month % 2 else today_date.month - 1
             _pipe_next_start_month = _pipe_start_month + 2
@@ -5031,6 +5051,17 @@ with date_col:
                 )
             else:
                 st.caption("格式：YYYYMM；篩選第72列 > 0，新增台北／各區富邦更新分錄及各區請款記錄")
+        elif selected_function == "【整合執行】工具包押金（彙整＋打勾＋比對異常＋Y／B1）":
+            st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
+            period = st.text_input(
+                "統計月份",
+                value=today_date.strftime("%Y%m"),
+                placeholder="例如：202611",
+                label_visibility="collapsed",
+                key="finance_deposit_all_month",
+            )
+            st.caption("一次跑四項：① 統計月份彙整（前月覆蓋＋該月）→ ② 依統計月份打勾（J–M）→ ③ 比對異常標記（N 欄）"
+                       "→ ④ 該月最後一列 Y 欄和 B1 比對。地區選全區會依序跑台北、台中。每月 1 日排程會自動跑（排程設定 deposit_report）。")
         elif selected_function == "【財報】工具包押金｜統計月份彙整（U–X）":
             st.markdown('<div class="field-label">📆 統計月份</div>', unsafe_allow_html=True)
             period = st.text_input(
@@ -5079,7 +5110,7 @@ with date_col:
                 "一次寫齊「現金缺口試算」分頁的表頭 12 列＋下方 5 列（原本兩個功能"
                 "各自的按鈕還在，這個是新增的捷徑）"
             )
-        elif selected_function == "【財報】年度review｜執行（預估公式調整＋隱藏欄位）":
+        elif selected_function == "【整合執行】年度review（預估公式調整＋隱藏欄位）":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
@@ -5151,7 +5182,7 @@ with date_col:
                 key="finance_vip_shared_period",
             )
             st.caption("只套用「儲值金公式設定」裡啟用的公式，不會重跑轉檔／搬運；可以重複執行來除錯")
-        elif selected_function == "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）":
+        elif selected_function == "【整合執行】儲值金完整流程（複製＋轉檔＋搬運＋套用公式）":
             st.markdown('<div class="field-label">📆 期別</div>', unsafe_allow_html=True)
             period = st.text_input(
                 "期別",
@@ -5636,7 +5667,7 @@ with area_col:
         "【鯨躍發票】電子發票字軌號碼匯入",
         "【鯨躍發票】電子發票字軌號碼配號",
         "【鯨躍發票】電子發票字軌號碼匯入＋配號",
-        "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）",
+        "【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）",
         "【財政部電子發票】財政部登入",
         "【財政部電子發票】字軌取號下載",
         "【鯨躍發票】紙本發票PDF建檔",
@@ -5667,6 +5698,8 @@ with area_col:
         "【財報】工具包押金｜比對異常標記（N欄）",
     ):
         area_select_options = [area for area in ("台北", "台中") if area in area_options]
+    if selected_function == "【整合執行】工具包押金（彙整＋打勾＋比對異常＋Y／B1）":
+        area_select_options = [area for area in ("全區", "台北", "台中") if area in area_options]
     if selected_function == "【財報】台北固定費用請款":
         # 台北固定費用請款只會寫進請款記錄／台北，區域固定台北，不用選。
         area_select_options = ["台北"]
@@ -5678,13 +5711,13 @@ with area_col:
         "【儲值金】轉檔",
         "【儲值金】搬運",
         "【儲值金】套用公式",
-        "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）",
+        "【整合執行】儲值金完整流程（複製＋轉檔＋搬運＋套用公式）",
     ):
         # 高雄結算/高雄儲值金預收都是從新竹/台南資料算出來的，兩個地區
         # 常常要一起重跑，所以多一個組合選項，不用切兩次分開跑。
         area_select_options = area_select_options + ["新竹＋高雄"]
     if selected_function in (
-        "【財報】年度review｜執行（預估公式調整＋隱藏欄位）",
+        "【整合執行】年度review（預估公式調整＋隱藏欄位）",
     ):
         # 「年度review工作表」是跨地區彙總的固定分頁，不是某個地區自己的
         # 分頁；「全區」已經會一併處理它，這個選項是給只想單獨重跑彙總
@@ -6518,7 +6551,7 @@ if run_clicked:
             if selected_function in (
                 "【鯨躍發票】電子發票字軌號碼配號",
                 "【鯨躍發票】電子發票字軌號碼匯入＋配號",
-                "【鯨躍發票】財政部字軌下載＋匯入＋配號（完整流程）",
+                "【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）",
             ):
                 finance_kwargs["qyear"] = cetustek_serial_qyear
                 finance_kwargs["qmonth"] = cetustek_serial_qmonth
@@ -6549,15 +6582,16 @@ if run_clicked:
                 "【儲值金】轉檔",
                 "【儲值金】搬運",
                 "【儲值金】套用公式",
-                "【儲值金】完整流程（複製＋轉檔＋搬運＋套用公式）",
+                "【整合執行】儲值金完整流程（複製＋轉檔＋搬運＋套用公式）",
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
                 "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）",
                 "【財報】各區固定費用匯款",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
                 "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
-                "【財報】年度review｜執行（預估公式調整＋隱藏欄位）",
+                "【整合執行】年度review（預估公式調整＋隱藏欄位）",
                 "【財報】營收總表→財報｜貼入當月預估（股東損益表_財務／現金）",
+                "【整合執行】工具包押金（彙整＋打勾＋比對異常＋Y／B1）",
             ):
                 # 這幾個功能過程長，讓每一小步（例如某地區某類型轉檔/搬運
                 # 完成）都直接寫進執行日誌並即時顯示，不用等整個功能跑完
