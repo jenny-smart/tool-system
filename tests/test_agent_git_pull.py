@@ -104,28 +104,59 @@ def test_failed_pull_preserves_local_repository(monkeypatch, tmp_path):
     assert _git("-C", str(checkout), "status", "--short").stdout == " M tracked.txt\n"
 
 
-def test_pull_refuses_when_checkout_is_not_on_main(monkeypatch, tmp_path):
-    remote = tmp_path / "remote.git"
-    checkout = tmp_path / "checkout"
-    _git("init", "--bare", str(remote))
-    _git("init", str(checkout))
-    _git("-C", str(checkout), "config", "user.email", "test@example.com")
-    _git("-C", str(checkout), "config", "user.name", "Test")
-    (checkout / "a.txt").write_text("a\n", encoding="utf-8")
-    _git("-C", str(checkout), "add", "a.txt")
-    _git("-C", str(checkout), "commit", "-m", "a")
-    _git("-C", str(checkout), "branch", "-M", "main")
-    _git("-C", str(checkout), "remote", "add", "origin", str(remote))
-    _git("-C", str(checkout), "push", "-u", "origin", "main")
-    _git("-C", str(checkout), "checkout", "-b", "codex/old-branch")
-
+def _run_pull(monkeypatch, checkout):
     monkeypatch.setattr(local_agent, "PROJECT_ROOT", checkout)
-    result = subprocess.run(local_agent.build_git_pull({}), text=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return subprocess.run(local_agent.build_git_pull({}), text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+
+def test_pull_switches_back_to_main_and_backs_up_extra_commit(monkeypatch, tmp_path):
+    """2026-11 Jenny：不在 main 時自動切回 main；有 main 沒有的 commit 先另存 backup 分支。"""
+    checkout, updater = _repo_with_agent_code(tmp_path)
+    _git("-C", str(checkout), "checkout", "-b", "codex/old-branch")
+    (checkout / "local.txt").write_text("local\n", encoding="utf-8")
+    _git("-C", str(checkout), "add", "local.txt")
+    _git("-C", str(checkout), "commit", "-m", "local only")
+    old = _git("-C", str(checkout), "rev-parse", "--short", "HEAD").stdout.strip()
+    (updater / "app.py").write_text("x = 2\n", encoding="utf-8")
+    _git("-C", str(updater), "commit", "-am", "remote change")
+    _git("-C", str(updater), "push")
+
+    result = _run_pull(monkeypatch, checkout)
+
+    assert result.returncode == 0, result.stdout
+    assert "codex/old-branch" in result.stdout and "自動切回 main" in result.stdout
+    assert _git("-C", str(checkout), "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "x = 2\n"
+    assert _git("-C", str(checkout), "rev-parse", "--short", f"backup-{old}").stdout.strip() == old
+
+
+def test_pull_switches_detached_head_without_backup_when_already_in_main(monkeypatch, tmp_path):
+    checkout, updater = _repo_with_agent_code(tmp_path)
+    _git("-C", str(checkout), "checkout", "--detach")
+    (updater / "app.py").write_text("x = 3\n", encoding="utf-8")
+    _git("-C", str(updater), "commit", "-am", "remote change")
+    _git("-C", str(updater), "push")
+
+    result = _run_pull(monkeypatch, checkout)
+
+    assert result.returncode == 0, result.stdout
+    assert "另存為分支" not in result.stdout
+    assert _git("-C", str(checkout), "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "x = 3\n"
+
+
+def test_pull_refuses_to_switch_when_not_on_main_with_local_changes(monkeypatch, tmp_path):
+    checkout, _updater = _repo_with_agent_code(tmp_path)
+    _git("-C", str(checkout), "checkout", "-b", "codex/old-branch")
+    (checkout / "app.py").write_text("x = 99\n", encoding="utf-8")
+
+    result = _run_pull(monkeypatch, checkout)
 
     assert result.returncode != 0
-    assert "codex/old-branch" in result.stdout
-    assert "不在 main" in result.stdout
+    assert "未存檔的修改" in result.stdout and "app.py" in result.stdout
+    assert _git("-C", str(checkout), "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "codex/old-branch"
+    assert (checkout / "app.py").read_text(encoding="utf-8") == "x = 99\n"
 
 
 def _repo_with_agent_code(tmp_path):
