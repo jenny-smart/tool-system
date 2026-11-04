@@ -6,7 +6,12 @@ from types import SimpleNamespace
 import pytest
 
 
-SOURCE = Path(__file__).parents[1] / 'tools/orders_system/cloud_batch_booking_ui.py'
+_ORDERS = Path(__file__).parents[1] / 'tools/orders_system'
+# order-system 同步後搬到 function/；orders-system 舊版在根目錄
+SOURCE = next(
+    (p for p in (_ORDERS / 'function/cloud_batch_booking.py', _ORDERS / 'cloud_batch_booking_ui.py') if p.exists()),
+    _ORDERS / 'function/cloud_batch_booking.py',
+)
 
 
 def load_status(get):
