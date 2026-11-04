@@ -134,9 +134,9 @@ DEFAULT_ROWS: list[list] = [
     [True, "fixed_expense_transfer", "固定費用轉帳（富邦請款記錄）", "09:30", "每月", "10", "提前", MODE_QUEUE,
      "排入 Mac Agent，需手機核准"],
     [True, "accounting_reminder", "會計事務所費用確認提醒", "10:00", "單月", "10", "照跑", MODE_DIRECT, ""],
-    [True, "mof_serial", "【鯨躍發票】財政部字軌下載＋匯入＋配號", "10:00", "每月", "20", "提前", MODE_QUEUE,
-     "需先登入財政部（圖形驗證碼）"],
-    [True, "mof_serial_check", "字軌未完成提醒", "10:00", "每月", "21-25", "照跑", MODE_DIRECT, ""],
+    [True, "mof_serial", "【鯨躍發票】財政部字軌下載＋匯入＋配號（下一期）", "10:00", "雙月", "20", "提前", MODE_QUEUE,
+     "雙月 20 日做下一期（例如 12 月做隔年 01-02）；需先登入財政部（圖形驗證碼）"],
+    [True, "mof_serial_check", "字軌未完成提醒", "10:00", "雙月", "21-25", "照跑", MODE_DIRECT, ""],
     [True, "yuanta_statement", "元大明細下載（排入 Mac）", "11:00", "每月", "25", "提前", MODE_QUEUE, ""],
     [True, "gmail_401", "Gmail 401 歸檔", "00:00", "每月", "20", "照跑", MODE_DIRECT, ""],
 ]
