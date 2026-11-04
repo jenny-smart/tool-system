@@ -804,16 +804,30 @@ def build_yuanta_salary_upload(params: dict[str, Any]) -> list[str]:
     return command
 
 
-# 更新一律拉 origin/main；本機不在 main 時直接失敗並印出分支，避免「Already up to date」卻一直跑舊程式。
-# 本機有 main 沒有的 commit 時改用合併（衝突就還原）；更新後用 Agent 自己的 Python 檢查語法，
+# 更新一律拉 origin/main。
+# 本機不在 main（停在別的分支或某個 commit）時自動切回 main（2026-11 Jenny：不用再到終端機手動切）：
+#   - 有 .pyc 以外未存檔的修改 → 不切換，列出檔案後失敗，避免遺失修改
+#   - 目前版本有 main 沒有的 commit → 先另存成 backup-<commit> 分支，再切回 main
+# 本機 main 有 origin/main 沒有的 commit 時改用合併（衝突就還原）；更新後用 Agent 自己的 Python 檢查語法，
 # 有錯就退回更新前的版本且不重啟，避免 Agent 啟動即 SyntaxError。
+# 已追蹤的 .pyc 被本機 Python 改寫屬正常，更新前先還原，避免擋住切換或合併。
 GIT_PULL_SCRIPT = (
     'branch="$(git rev-parse --abbrev-ref HEAD)"; '
     'echo "目前分支：$branch（$(git rev-parse --short HEAD)）"; '
-    'if [ "$branch" != "main" ]; then '
-    'echo "❌ 本機不在 main 分支，不會更新到最新程式。請在 Mac 終端機執行：git -C \"$PWD\" checkout main"; exit 1; fi; '
-    'before="$(git rev-parse HEAD)"; '
+    'git diff --name-only | grep \'\\.pyc$\' | while IFS= read -r f; do git checkout -- "$f"; done; '
     'git fetch origin main || exit 1; '
+    'if [ "$branch" != "main" ]; then '
+    'dirty="$(git status --porcelain --untracked-files=no | grep -v \'\\.pyc$\')"; '
+    'if [ -n "$dirty" ]; then '
+    'echo "❌ 本機不在 main 分支，而且有未存檔的修改，為避免遺失不自動切換："; echo "$dirty"; '
+    'echo "請在 Mac 終端機確認：git -C \"$PWD\" status"; exit 1; fi; '
+    'if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then '
+    'backup="backup-$(git rev-parse --short HEAD)"; '
+    'git branch -f "$backup" HEAD 2>/dev/null || true; '
+    'echo "目前版本有 main 沒有的內容，已另存為分支 $backup（需要時可找回）"; fi; '
+    'if ! git checkout main; then echo "❌ 切換到 main 失敗，請在 Mac 終端機執行 git -C \"$PWD\" status 確認"; exit 1; fi; '
+    'echo "已從 $branch 自動切回 main"; fi; '
+    'before="$(git rev-parse HEAD)"; '
     'if ! git merge --ff-only FETCH_HEAD; then '
     'echo "⚠️ 本機有 main 沒有的 commit，改用合併方式更新"; '
     'if ! git merge --no-edit FETCH_HEAD; then '
