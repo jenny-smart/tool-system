@@ -101,9 +101,18 @@ def test_formula_fixes_only_fill_blank_cells():
               row(B="待退款", S="1000", E="2026/10/15"), row(B="待收款", S="1000")]
     updates = batch.formula_fixes(values)
     assert updates == [
-        {"range": "T2", "values": [['=IF(R2="ATM",IF(P2="012",S2,S2-15),0)']]},
         {"range": "Z2", "values": [["=S2/1.05"]]},
+        {"range": "T2", "values": [['=IF(R2="ATM",IF(P2="012",S2,S2-15),0)']]},
     ]
+
+
+def test_z_formula_when_not_formula_even_without_s():
+    """2026-11 Jenny：待退款 Z 不是公式（空白或手打數字）就帶 =S{n}/1.05；S 還沒填也先帶。"""
+    values = [["header"], row(B="待退款"), row(B="待退款", S="1000", T="985", Z="952"),
+              row(B="待退款", S="1000", T="985", Z="952"), row(B="待收款")]
+    z = [["Z"], [""], ["952"], ["=S4/1.05"], [""]]
+    assert batch.formula_fixes(values, z) == [{"range": "Z2", "values": [["=S2/1.05"]]},
+                                              {"range": "Z3", "values": [["=S3/1.05"]]}]
 
 
 def test_queue_actions_one_task_with_per_region_plan():
@@ -324,7 +333,7 @@ def test_vip_refund_coupon_flow():
 
 def test_formula_fixes_include_vip_refund_coupon():
     updates = batch.formula_fixes([["header"], row(B="VIP待退券", S="1000")])
-    assert [u["range"] for u in updates] == ["T2", "Z2"]
+    assert [u["range"] for u in updates] == ["Z2", "T2"]
 
 
 

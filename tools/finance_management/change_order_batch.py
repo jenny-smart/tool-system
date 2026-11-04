@@ -26,7 +26,7 @@
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
   - 未完全完成也先回寫（2026-10-29 Jenny 確認）：待收款已開發票（O）、待退款／VIP待退券已開折讓單或已退款（AB／AC），且 AE 還不是「更新系統（B欄：同狀態）」→ 以目前狀態回寫已完成的欄位，
     B 欄不變；之後完成時再回寫一次。待扣／待返儲值金回寫會直接改成完成狀態，不做部分回寫。
-  - 盤點時順手補 T（匯款金額）、Z（未稅金額）公式（只補空白格）。
+  - 盤點時順手補公式：待退款／VIP待退券 Z（未稅金額）不是公式就帶 =S{n}/1.05；T（匯款金額）S 有值且空白才補。
 執行（2026-10-29 與 Jenny 確認）：整批只排一筆本機 Agent 任務（change_order.batch_run），
   依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 退款（信用卡登入藍新、ATM 登入富邦）
   ③ 儲值金 → 回寫系統。前一步失敗就不做該區後面的步驟（回寫仍只回寫已完成的列），避免順序錯亂。
@@ -304,19 +304,28 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
     return item
 
 
-def formula_fixes(values: list[list]) -> list[dict[str, Any]]:
-    """S 退款金額有值、T 或 Z 空白的待退款／VIP待退券列 → 補公式（只補空白格）。"""
+def formula_fixes(values: list[list], z_formulas: Optional[list[list]] = None) -> list[dict[str, Any]]:
+    """待退款／VIP待退券列補公式：
+    - Z 未稅金額：只要不是公式（空白或手打數字）就帶 =S{n}/1.05（2026-11 Jenny，S 還沒填也先帶）
+    - T 匯款金額：S 有值且 T 空白才補
+    z_formulas：Z 欄以公式讀出的值（ws.get("Z1:Z", value_render_option="FORMULA")）；沒給時只補空白格。"""
     updates = []
     for row_no, row in enumerate(values[1:], start=2):
-        if _cell(row, "B") not in REFUND_STATUSES or not _amount(_cell(row, "S")):
+        if _cell(row, "B") not in REFUND_STATUSES:
             continue
         reg_date = parse_reg_date(_cell(row, "E"))
         if reg_date is None or reg_date < CUTOFF:
             continue
-        if not _cell(row, "T"):
-            updates.append({"range": f"T{row_no}", "values": [[T_FORMULA.format(n=row_no)]]})
-        if not _cell(row, "Z"):
+        if z_formulas is not None:
+            z = z_formulas[row_no - 1] if row_no - 1 < len(z_formulas) else []
+            z_text = str(z[0]).strip() if z else ""
+            z_missing = not z_text.startswith("=")
+        else:
+            z_missing = not _cell(row, "Z")
+        if z_missing:
             updates.append({"range": f"Z{row_no}", "values": [[Z_FORMULA.format(n=row_no)]]})
+        if _amount(_cell(row, "S")) and not _cell(row, "T"):
+            updates.append({"range": f"T{row_no}", "values": [[T_FORMULA.format(n=row_no)]]})
     return updates
 
 
@@ -330,7 +339,11 @@ def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], Non
     ws = _change_order().get_worksheet(region)
     values = ws.get_all_values()
     if fix_formulas:
-        updates = formula_fixes(values)
+        try:
+            z_formulas = ws.get("Z1:Z", value_render_option="FORMULA")
+        except Exception:
+            z_formulas = None
+        updates = formula_fixes(values, z_formulas)
         if updates:
             ws.batch_update(updates, value_input_option="USER_ENTERED")
             log(f"【{region}】已補 T／Z 公式 {len(updates)} 格")
