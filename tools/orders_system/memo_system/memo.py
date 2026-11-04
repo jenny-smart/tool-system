@@ -417,8 +417,8 @@ def apply_sheet_presentation(ws, updated_rows: List[int]):
 
 
 def login(ui_logger=None):
-    """登入檸檬後台（共用 lemon_backend_login；程式結束時自動登出）。"""
-    from lemon_backend_login import login as backend_login
+    """登入檸檬後台（共用 shared.lemon_backend_login；程式結束時自動登出）。"""
+    from shared.lemon_backend_login import login as backend_login
 
     log = make_logger(ui_logger)
     s = requests.Session()

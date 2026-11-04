@@ -294,10 +294,11 @@ RELOAD_SECONDS = 600  # 常駐程式每 10 分鐘重讀一次，改 K 欄模式�
 
 
 def _get_service_account_info() -> dict:
-    """自帶一份服務帳號憑證解析，不依賴 orders.py（內容與 orders.py 的
-    get_service_account_info 一致）。ATM 本機排程等獨立執行環境沒有部署
-    orders.py，若在這裡 import orders 會讓整段年度根目錄查詢
-    ModuleNotFoundError，連帶讓呼叫方（例如 ATM 待付款複查）整個失敗。"""
+    """自帶一份服務帳號憑證解析，不依賴 orders.py／shared.gsheet（shared.gsheet
+    本身又 import orders，一樣會循環帶到整個 orders.py）。ATM 本機排程等
+    獨立執行環境沒有部署 orders.py，若在這裡 import orders 會讓整段年度
+    根目錄查詢 ModuleNotFoundError，連帶讓呼叫方（例如 ATM 待付款複查）
+    整個失敗。內容與 shared/gsheet.py 的 get_service_account_info 一致。"""
     import json
     import os
 
