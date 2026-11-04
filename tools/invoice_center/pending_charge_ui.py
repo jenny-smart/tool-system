@@ -38,9 +38,9 @@ def _records(value: Any) -> list[dict[str, Any]]:
 
 
 def _fare_amount(row: dict[str, Any]) -> int:
-    text = str(row.get("J 內容") or "")
-    match = re.search(r"車馬費\s*[$＄]?\s*([\d,]+)", text)
-    amount = int(match.group(1).replace(",", "")) if match else 0
+    from .fare import fare_amount
+
+    amount = fare_amount(row.get("J 內容"))
     if amount <= 0:
         raise ValueError(f"第 {row.get('列號')} 列車馬費金額無法辨識")
     return amount
