@@ -191,7 +191,7 @@ def _settings_book(monkeypatch, values=None):
 def test_settings_default_to_taipei_deep_clean_when_sheet_missing(monkeypatch):
     gate_module, _, missing = _settings_book(monkeypatch)
     settings = gate_module.load_settings(None, "台北", missing)
-    assert settings["確認工作表"] == "2026大掃除" and settings["確認欄"] == "V" and settings["已確認欄"] == "B"
+    assert settings["確認工作表"] == "{YYYY}大掃除" and settings["確認欄"] == "V" and settings["已確認欄"] == "B"
     assert gate_module.load_settings(None, "台中", missing)["確認檔案ID"] == ""
 
 
@@ -306,3 +306,54 @@ def test_person_hours_only_checked_inside_deep_clean_period():
     row = schedule(service="1人4小時", start="14:00")
     row[7] = "18:00"
     assert build_gate(rule(short_periods=[]), [confirm_row()])(row)[5] == "可約"
+
+
+def test_season_year_and_sheet_title():
+    from tools.service_management.booking_gate import season_sheet_title, season_year
+
+    assert season_year("2026-12-01") == 2026
+    assert season_year("2027-01-05") == 2026          # 1 月匯出仍是 2026 這一季
+    assert season_year("2027-11-20") == 2027
+    assert season_sheet_title("{YYYY}大掃除", 2027) == "2027大掃除"
+    assert season_sheet_title("2026大掃除", 2027) == "2027大掃除"
+    assert season_sheet_title("台中大掃除", 2027) == "台中大掃除"
+
+
+def test_area_gate_reads_season_year_sheet_from_year_root(monkeypatch):
+    from unittest.mock import MagicMock
+    import tools.common.year_roots as year_roots
+
+    gate_module, _, missing = _settings_book(monkeypatch)
+    monkeypatch.setattr(year_roots, "choose_file_id_for_year",
+                        lambda category, area, configured, year: f"ROOT_{category}_{year}")
+    opened = []
+
+    def open_source(gc, sid):
+        opened.append(sid)
+        book = MagicMock()
+        book.worksheet.return_value.get_all_values.return_value = [["header"], confirm_row()]
+        return book
+
+    monkeypatch.setattr(gate_module, "_open_source", open_source)
+    _gate, descriptions = gate_module.load_area_gate(None, "台北", "2027-12-01", "2028-02-28", worksheet_not_found=missing)
+    assert descriptions == ["2027大掃除 2027-12-01～2028-02-28"]
+    assert opened == ["ROOT_內勤工作表單_2027"]
+
+
+def test_area_gate_falls_back_to_configured_file(monkeypatch):
+    from unittest.mock import MagicMock
+    import tools.common.year_roots as year_roots
+
+    gate_module, _, missing = _settings_book(monkeypatch)
+    monkeypatch.setattr(year_roots, "choose_file_id_for_year", lambda *a: "ROOT_FILE")
+
+    def open_source(gc, sid):
+        if sid == "ROOT_FILE":
+            raise RuntimeError("沒有這個分頁")
+        book = MagicMock()
+        book.worksheet.return_value.get_all_values.return_value = [["header"], confirm_row()]
+        return book
+
+    monkeypatch.setattr(gate_module, "_open_source", open_source)
+    gate, _ = gate_module.load_area_gate(None, "台北", "2026-12-01", "2027-02-28", worksheet_not_found=missing)
+    assert gate(schedule(date="2027/02/26"))[-1] == "可約"
