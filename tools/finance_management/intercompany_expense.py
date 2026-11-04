@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
 from tools.finance_management.execution_log import log_execution
+from tools.finance_management.statement_years import merge_year_results, statement_years
 from tools.finance_management.statement_registry import (
     resolve_marketing_expense_location,
     resolve_statement_location,
@@ -334,7 +335,11 @@ def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) 
     date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
     log_execution("財報富邦更新代墊費用拆分", area, "開始", f"日期區間：{date_range}")
     try:
-        result = _apply_intercompany_expense_rules_impl(area, start_date, end_date)
+        # 區間跨年時（例如 1 月處理 12 月底的明細）各年度的列各自在該年財報拆分
+        result = merge_year_results([
+            _apply_intercompany_expense_rules_impl(area, start_date, end_date, year=year)
+            for year in statement_years(start_date, end_date)
+        ])
     except Exception as exc:
         log_execution("財報富邦更新代墊費用拆分", area, "失敗", str(exc))
         raise
@@ -345,9 +350,10 @@ def apply_intercompany_expense_rules(area: str, start_date=None, end_date=None) 
     return result
 
 
-def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=None) -> dict[str, object]:
+def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=None,
+                                           year: int | None = None) -> dict[str, object]:
     """處理尚未蓋 Q 欄的 ``YYYYMM地區代墊[-科目]`` 標記。"""
-    spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
+    spreadsheet_id, title = resolve_statement_location(area, "富邦更新", year=year)
     statement_values = _read_statement_values(spreadsheet_id, title)
     if len(statement_values) < 2:
         return {
@@ -414,8 +420,17 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
         raise RuntimeError(f"同一財報有重複代墊標記：{', '.join(duplicates)}")
 
     rules = load_expense_rules()
-    marketing_id, marketing_title = resolve_marketing_expense_location("台北")
-    marketing_values = _read_marketing_values(marketing_id, marketing_title)
+    marketing_by_year: dict[str, list[list[object]]] = {}
+
+    def marketing_values_for(month: str) -> list[list[object]]:
+        """代墊標記 YYYYMM 讀該年的「{YYYY}總表」（1 月處理 12 月的標記仍讀去年總表）。"""
+        key = str(month)[:4]
+        if key not in marketing_by_year:
+            marketing_year = int(key) if key.isdigit() else None
+            marketing_id, marketing_title = resolve_marketing_expense_location("台北", year=marketing_year)
+            marketing_by_year[key] = _read_marketing_values(marketing_id, marketing_title)
+        return marketing_by_year[key]
+
     existing_labels = {
         str(_cell(row, COL_L) or "").strip()
         for row in statement_values[1:]
@@ -429,6 +444,7 @@ def _apply_intercompany_expense_rules_impl(area: str, start_date=None, end_date=
     detail_count = 0
 
     for row_idx, source_row, marker, month, payer_area, subject in marker_rows:
+        marketing_values = marketing_values_for(month)
         source_col = _find_source_column(marketing_values, month, payer_area)
         selected_rules = _select_rules(rules, subject)
         control_total = _control_total(marketing_values, source_col) if subject is None else None

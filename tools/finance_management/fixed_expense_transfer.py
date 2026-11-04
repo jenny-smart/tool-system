@@ -103,6 +103,7 @@ def _make_plan(
     descriptions = [_label_subject(source) for _, source, _ in source_items if source != "2%"]
     memo = f"{period[:4]}/{period[4:]}" + "＋".join(descriptions)
     return {
+        "period": period,
         "area": area,
         "report_area": REPORT_AREA_NAMES.get(area, area),
         "source_areas": source_areas,
@@ -161,6 +162,7 @@ def _build_target_plan(values: list[list[object]], period: str, area: str) -> di
     items = [dict(item, source_area=plan["area"]) for plan in parts for item in plan["items"]]
     descriptions = [str(item["subject"]) for item in items if item["subject"] != "2%"]
     return {
+        "period": period,
         "area": "桃園",
         "report_area": "桃園",
         "source_areas": list(TAOYUAN_SOURCE_AREAS),
@@ -228,9 +230,11 @@ def _read_values(spreadsheet_id: str, title: str, range_a1: str) -> list[list[ob
     return result.get("values", [])
 
 
-def _marketing_source_location() -> tuple[str, str]:
-    """固定由 Jenny's Lemonhometools「財報設定」取得來源檔案及分頁。"""
-    return resolve_marketing_expense_location("台北")
+def _marketing_source_location(period: str | None = None) -> tuple[str, str]:
+    """固定由 Jenny's Lemonhometools「財報設定」取得來源檔案及分頁；
+    分頁用期別所屬年度的「{YYYY}總表」（1 月處理 12 月仍讀去年總表）。"""
+    year = int(period[:4]) if period and str(period)[:4].isdigit() else None
+    return resolve_marketing_expense_location("台北", year=year)
 
 
 def _column_letter(column: int) -> str:
@@ -243,7 +247,7 @@ def _column_letter(column: int) -> str:
 
 def write_transfer_date(period: str, area: str, payment_date: str) -> str:
     """把富邦實際匯款日期寫回來源總表該月／該地區的第 74 列。"""
-    spreadsheet_id, title = _marketing_source_location()
+    spreadsheet_id, title = _marketing_source_location(period)
     values = _read_values(spreadsheet_id, title, "A1:ZZ74")
     source_areas = TAOYUAN_SOURCE_AREAS if area in ("桃園", "家電") else (area,)
     cells = [
@@ -375,6 +379,12 @@ def _reorder_statement_rows(
     ).execute()
 
 
+def _plan_year(plan: dict[str, object]) -> int | None:
+    """分錄寫進期別所屬年度的財報（2026 年 12 月的固定費用在 1 月才轉帳，仍寫 2026 年財報）。"""
+    period = str(plan.get("period") or "").strip()
+    return int(period[:4]) if period[:4].isdigit() else None
+
+
 def assert_plan_not_posted(plan: dict[str, object]) -> None:
     """銀行匯款前確認同批固定費用分錄尚未寫入，避免重複匯款。"""
     target = str(plan["area"])
@@ -383,8 +393,9 @@ def assert_plan_not_posted(plan: dict[str, object]) -> None:
         ("台北", plan["taipei_rows"]),
         (report_area, plan["area_rows"]),
     ]
+    year = _plan_year(plan)
     for area, planned_rows in locations:
-        spreadsheet_id, title = resolve_statement_location(area, "富邦更新")
+        spreadsheet_id, title = resolve_statement_location(area, "富邦更新", year=year)
         existing = _read_values(spreadsheet_id, title, "A:L")
         if _fingerprints(existing) & _fingerprints(planned_rows):
             label = f"{target}（{report_area}財報）" if report_area != target else target
@@ -445,7 +456,7 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
     if any(target not in AREAS for target in targets):
         raise ValueError("請選擇台中／桃園／新竹／高雄／全區")
 
-    marketing_id, marketing_title = _marketing_source_location()
+    marketing_id, marketing_title = _marketing_source_location(period)
     values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
     plans = [
         plan
@@ -479,7 +490,7 @@ def transfer_fixed_expenses(
 
     log_execution(TOOL_NAME, area, "開始", f"期別：{period}")
     try:
-        marketing_id, marketing_title = _marketing_source_location()
+        marketing_id, marketing_title = _marketing_source_location(period)
         values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
         plans = [
             plan
@@ -503,8 +514,9 @@ def transfer_fixed_expenses(
         for plan in plans:
             target = str(plan["area"])
             report_area = str(plan["report_area"])
-            tp_id, tp_title = resolve_statement_location("台北", "富邦更新")
-            ar_id, ar_title = resolve_statement_location(report_area, "富邦更新")
+            year = _plan_year(plan) or int(period[:4])
+            tp_id, tp_title = resolve_statement_location("台北", "富邦更新", year=year)
+            ar_id, ar_title = resolve_statement_location(report_area, "富邦更新", year=year)
             tp_existing = _read_values(tp_id, tp_title, "A:L")
             ar_existing = _read_values(ar_id, ar_title, "A:L")
             tp_rows = _missing_statement_rows(tp_existing, plan["taipei_rows"], f"台北／{tp_title}")

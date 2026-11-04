@@ -20,7 +20,7 @@ _stub_module(
 _stub_module("tools.finance_management.execution_log", log_execution=lambda *args, **kwargs: None)
 _stub_module(
     "tools.finance_management.statement_registry",
-    resolve_marketing_expense_location=lambda area: ("marketing", "行銷總表"),
+    resolve_marketing_expense_location=lambda area, year=None: ("marketing", "行銷總表"),
     resolve_statement_location=lambda *args, **kwargs: ("statement", "財務"),
     sheet_title_for_gid=lambda *args, **kwargs: "固定分頁",
 )
@@ -76,7 +76,7 @@ class CashGapMarketingSettingsTest(unittest.TestCase):
             amount = cash_gap.marketing_expense_row("桃園", 7, cash_gap.MARKETING_ROW_AD)
 
         self.assertEqual(amount, 1234)
-        resolve_location.assert_called_once_with("桃園")
+        resolve_location.assert_called_once_with("桃園", year=None)
         request = service.spreadsheets_api.values_api.gets[0]
         self.assertEqual(request["spreadsheetId"], "dynamic-marketing-id")
         self.assertEqual(request["range"], "'dynamic-marketing-title'!AT5")

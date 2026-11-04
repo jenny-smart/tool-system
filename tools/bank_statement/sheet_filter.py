@@ -189,8 +189,39 @@ def _credentials():
     return preferred_credentials(SCOPES, load_google_credentials)
 
 
-def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable:
-    target = load_sheet_target(area, bank)
+def _taipei_year() -> int:
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("Asia/Taipei")).year
+
+
+def _year_of(key: str) -> int | None:
+    return int(key[:4]) if len(key) >= 4 and key[:4].isdigit() else None
+
+
+def row_year(row: list[str], bank: str) -> int | None:
+    """明細這一列的交易年度（富邦：第 2 欄交易時間；元大：第 1 欄交易時間，沒有就用第 2 欄帳務日期）。"""
+    if bank == "yuanta":
+        return (_year_of(_report_transaction_time_key(row[0])) if row else None) or (
+            _year_of(_accounting_date_key(row[1])) if len(row) > 1 else None
+        )
+    return _year_of(transaction_time_key(row))
+
+
+def split_table_by_year(table: CapturedTable, bank: str) -> list[tuple[int | None, CapturedTable]]:
+    """依交易年度把明細分組（舊→新），年度＝今年或看不出年度的用 None（＝今年財報）。
+    1 月初下載到的 12 月底明細，要寫回 12 月所屬年度的財報。"""
+    current = _taipei_year()
+    groups: dict[int | None, list[list[str]]] = {}
+    for row in table.rows:
+        year = row_year(row, bank)
+        groups.setdefault(None if not year or year >= current else year, []).append(row)
+    order = sorted(groups, key=lambda year: current if year is None else year)
+    return [(year, CapturedTable(headers=table.headers, rows=groups[year])) for year in order]
+
+
+def _filter_against_report(table: CapturedTable, area: str, bank: str, year: int | None) -> CapturedTable:
+    target = load_sheet_target(area, bank, year)
     credentials = _credentials()
     client = gspread.authorize(credentials)
     worksheet = client.open_by_key(target.spreadsheet_id).worksheet(target.worksheet_title)
@@ -200,6 +231,14 @@ def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable
     # 富邦財報 B 欄是帳務日期、C 欄是完整交易時間。
     existing_rows = [["", row[0]] for row in worksheet.get("C2:C") if row]
     return filter_existing_rows(table, existing_rows)
+
+
+def read_and_filter(table: CapturedTable, area: str, bank: str) -> CapturedTable:
+    """濾掉財報已登記的明細；每一列跟「交易年度」那一年的財報比對。"""
+    rows: list[list[str]] = []
+    for year, group in split_table_by_year(table, bank):
+        rows.extend(_filter_against_report(group, area, bank, year).rows)
+    return CapturedTable(headers=table.headers, rows=rows)
 
 
 # 財報最後一列的交易時間欄：富邦 C 欄、元大 B 欄
@@ -217,16 +256,34 @@ def last_report_date(values: list[list[str]]) -> date | None:
     return None
 
 
-def query_start_from_report(area: str, bank: str, end: date) -> date:
-    """明細查詢開始日＝要貼入的財報最後一列日期（含當天，已登記的會被比對濾掉）。
-    財報還沒有資料（例如年初新檔）就從當年 1/1 開始。"""
-    target = load_sheet_target(area, bank)
+def _report_last_date(area: str, bank: str, year: int | None) -> tuple[date | None, str]:
+    target = load_sheet_target(area, bank, year)
     credentials = _credentials()
     worksheet = gspread.authorize(credentials).open_by_key(target.spreadsheet_id).worksheet(target.worksheet_title)
     column = REPORT_TIME_COLUMN[bank]
-    last = last_report_date(worksheet.get(f"{column}2:{column}"))
+    return last_report_date(worksheet.get(f"{column}2:{column}")), target.worksheet_title
+
+
+def query_start_from_report(area: str, bank: str, end: date) -> date:
+    """明細查詢開始日＝要貼入的財報最後一列日期（含當天，已登記的會被比對濾掉）。
+    年初新檔還沒有資料時，接續去年財報的最後一列（例如 1 月初才補下載 12/29～12/31），
+    去年財報也讀不到才從當年 1/1 開始。"""
+    current = _taipei_year()
+    end_year = None if end.year >= current else end.year
+    last, title = _report_last_date(area, bank, end_year)
+    if last is None:
+        try:
+            previous, previous_title = _report_last_date(area, bank, end.year - 1)
+        except Exception as exc:  # 去年檔找不到或沒權限：維持從 1/1 開始
+            print(f"讀不到 {end.year - 1} 年財報最後一列（{exc}），從 {end.year}/1/1 開始查詢")
+            previous = None
+        if previous is not None:
+            start = min(previous, end)
+            print(f"{end.year} 年財報「{title}」尚無資料；接續 {end.year - 1} 年「{previous_title}」"
+                  f"最後一列 {previous}；查詢 {start}～{end}")
+            return start
     start = min(last, end) if last else date(end.year, 1, 1)
-    print(f"財報「{target.worksheet_title}」最後一列日期：{last or '（無資料）'}；查詢 {start}～{end}")
+    print(f"財報「{title}」最後一列日期：{last or '（無資料）'}；查詢 {start}～{end}")
     return start
 
 
@@ -382,10 +439,20 @@ def report_cell_updates(bank: str, start_row: int, rows: list[list[Any]],
 
 
 def sync_financial_report(table: CapturedTable, area: str, bank: str) -> int:
-    """將已確認未登記的明細同步追加至對應區域財報。"""
+    """將已確認未登記的明細同步追加至對應區域財報；每一列寫進交易年度那一年的財報
+    （1 月初下載到的 12 月底明細寫回去年財報）。"""
     if not table.rows:
         return 0
-    target = load_sheet_target(area, bank)
+    return sum(
+        _sync_financial_report_year(group, area, bank, year)
+        for year, group in split_table_by_year(table, bank)
+    )
+
+
+def _sync_financial_report_year(table: CapturedTable, area: str, bank: str, year: int | None) -> int:
+    if not table.rows:
+        return 0
+    target = load_sheet_target(area, bank, year)
     credentials = _credentials()
     worksheet = (
         gspread.authorize(credentials)
