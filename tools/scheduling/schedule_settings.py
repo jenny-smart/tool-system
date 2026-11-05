@@ -71,10 +71,15 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "fubon_pending_check": ("scheduled_fubon_pending_check.yml", {}),
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
-    # investment-system（個人投資總帳 Jennyall／總覽）
-    "invest_month_end": ("jenny-smart/investment-system:monthly-roll.yml", {"job": "month-end"}),
-    "invest_fund_freeze": ("jenny-smart/investment-system:monthly-roll.yml", {"job": "fund"}),
-    "invest_month_roll": ("jenny-smart/investment-system:monthly-roll.yml", {"job": "roll"}),
+    # investment-system（個人投資總帳／總覽）
+    "invest_tw_prices": ("jenny-smart/investment-system:tw-stock-prices.yml", {"mode": "auto"}),
+    "invest_us_prices_night": ("jenny-smart/investment-system:us-stock-prices.yml", {"mode": "auto"}),
+    "invest_us_prices_morning": ("jenny-smart/investment-system:us-stock-prices.yml", {"mode": "auto"}),
+    "invest_fund_nav": ("jenny-smart/investment-system:fund-nav.yml", {}),
+    "invest_month_end_ledger": ("jenny-smart/investment-system:month-end-ledger.yml", {"mode": "auto"}),
+    "invest_keepalive": ("jenny-smart/investment-system:keepalive.yml", {}),
+    "invest_snapshot": ("jenny-smart/investment-system:snapshot.yml", {}),
+    "invest_stock_radar": ("jenny-smart/investment-system:stock-radar.yml", {}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -108,6 +113,9 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
 
 # 已停用的功能代號 → 說明（Sheet 裡還有這列時提醒刪除）
 RETIRED_KEYS = {
+    "invest_month_end": "investment-system 月底固定改用 invest_month_end_ledger（month-end-ledger.yml）",
+    "invest_fund_freeze": "investment-system 月底固定改用 invest_month_end_ledger（month-end-ledger.yml）",
+    "invest_month_roll": "investment-system 月初切換總覽改用 invest_month_end_ledger（month-end-ledger.yml）",
     "field_roster_raise": "拆成 field_roster（名冊，每月 1、15 日）與 field_raise（調薪，每月 15 日）",
     "fixed_expense_transfer": "改為 fixed_expense_remit【財報】各區固定費用匯款，每月 10 日 04:00",
 }
@@ -177,14 +185,22 @@ DEFAULT_ROWS: list[list] = [
      MODE_DIRECT, "過了應完成日還沒做完的項目合併成一則提醒"],
     [True, "yuanta_statement", "元大明細下載（排入 Mac）", "11:00", "每月", "25", "提前", MODE_QUEUE, ""],
     [True, "gmail_401", "Gmail 401 歸檔", "00:00", "每月", "20", "照跑", MODE_DIRECT, ""],
-    # investment-system：2026-11-06 Jenny 確認
-    [True, "invest_month_end", "【投資】Jennyall 月底轉值（4～36 列股票＋64～67 列）", "23:50", "每月", "月底", "照跑",
-     MODE_DIRECT, "該月兩欄的公式改成值"],
-    [True, "invest_fund_freeze", "【投資】Jennyall 基金月底淨值到了就轉值（4～36 列基金）", "00:30~23:30 每小時", "每月",
-     "1-7", "照跑", MODE_DIRECT,
-     "總覽 G 欄每檔基金淨值日期都到上月最後一個工作天才轉；7 日 23:00 後仍沒到齊就照當下值轉並提醒"],
-    [True, "invest_month_roll", "【投資】總覽換到本月 Jennyall／細帳欄", "00:10", "每月", "1-7", "照跑", MODE_DIRECT,
-     "已換好就不動，2～7 日是補跑"],
+    # investment-system：2026-11-06 Jenny 確認（台股／美股／基金由每 30 分鐘改成每 10 分鐘）
+    # 預設不啟用：investment-system 的 workflow 要先能接受 scheduled_slot、tool-system 要有
+    # INVESTMENT_SYSTEM_DISPATCH_TOKEN，在「排程設定」勾選啟用，再停用 cron-job.org 的對應工作。
+    [False, "invest_tw_prices", "【投資】台股價格", "08:30~14:30 每10分鐘", "每週", "一,二,三,四,五", "照跑",
+     MODE_DIRECT, "台股休市日程式自己略過"],
+    [False, "invest_us_prices_night", "【投資】美股價格（晚上）", "21:00~23:50 每10分鐘", "每週", "一,二,三,四,五", "照跑",
+     MODE_DIRECT, "美股休市時寫入的是前一交易日收盤"],
+    [False, "invest_us_prices_morning", "【投資】美股價格（凌晨）", "00:00~06:00 每10分鐘", "每週", "二,三,四,五,六", "照跑",
+     MODE_DIRECT, ""],
+    [False, "invest_fund_nav", "【投資】基金淨值＋Richart 匯率", "00:00~23:50 每10分鐘", "每日", "", "照跑", MODE_DIRECT,
+     "只寫有變的格子"],
+    [False, "invest_month_end_ledger", "【投資】總帳月底固定／月初切換總覽", "00:00~23:50 每10分鐘", "每月", "1-10,28-31",
+     "照跑", MODE_DIRECT, "程式依日期判斷：月底後等淨值到了就固定，1 日切換總覽"],
+    [False, "invest_keepalive", "【投資】App 喚醒", "00:00~23:30 每30分鐘", "每日", "", "照跑", MODE_DIRECT, ""],
+    [False, "invest_snapshot", "【投資】資產快照", "08:00,20:00", "每日", "", "照跑", MODE_DIRECT, ""],
+    [False, "invest_stock_radar", "【投資】台股雷達", "14:30", "每週", "一,二,三,四,五", "照跑", MODE_DIRECT, ""],
 ]
 
 

@@ -48,12 +48,30 @@
 
 ### investment-system（2026-11-06 與 Jenny 確認）
 
-派送到 `jenny-smart/investment-system` 的 `monthly-roll.yml`，需要 Secret `INVESTMENT_SYSTEM_DISPATCH_TOKEN`
-（fine-grained token，只給 investment-system 的 Actions: Read and write）。沒設定時這三個功能會略過並讓 Router 失敗，
-其他功能照常派送。說明見 investment-system 的 `MONTHLY_ROLL.md`。
+原本在 cron-job.org 的 investment-system 排程全部併到這裡；台股／美股／基金由每 30 分鐘改成原時段內每 10 分鐘。
+派送到 `jenny-smart/investment-system`，需要 Secret `INVESTMENT_SYSTEM_DISPATCH_TOKEN`
+（fine-grained token，只給 investment-system 的 Actions: Read and write）。沒設定時這些功能會略過並讓 Router 失敗，
+其他功能照常派送。各 workflow 的執行結果由 investment-system 自己寫進它的更新記錄試算表，說明見該 repo 的 `SCHEDULES.md`。
 
-| 功能代號 | 預設時間 | 說明 |
+| 功能代號 | 預設時間 | Workflow |
 |---|---|---|
+| invest_tw_prices | 週一至五 08:30～14:30 每 10 分鐘 | tw-stock-prices.yml（auto；休市日程式略過） |
+| invest_us_prices_night | 週一至五 21:00～23:50 每 10 分鐘 | us-stock-prices.yml（auto） |
+| invest_us_prices_morning | 週二至六 00:00～06:00 每 10 分鐘 | us-stock-prices.yml（auto） |
+| invest_fund_nav | 每日 00:00～23:50 每 10 分鐘 | fund-nav.yml（基金淨值＋Richart 匯率，只寫有變的格子） |
+| invest_month_end_ledger | 每月 1–10、28–31 日 00:00～23:50 每 10 分鐘 | month-end-ledger.yml（auto：月底固定、1 日切換總覽） |
+| invest_keepalive | 每日每 30 分鐘 | keepalive.yml |
+| invest_snapshot | 每日 08:00、20:00 | snapshot.yml |
+| invest_stock_radar | 週一至五 14:30 | stock-radar.yml |
+
+這 8 列**預設不啟用**。等 investment-system 的 workflow 能接受 `scheduled_slot`（investment-system PR #99）、
+tool-system 設好 Secret 之後，在分頁勾選「啟用」；確認派送成功（investment-system 的 Actions 出現 `cloud-…` 的執行）
+後，再停用 cron-job.org 上 investment-system 的對應工作。
+
+先前版本的 `invest_month_end`、`invest_fund_freeze`、`invest_month_roll` 已停用（月底固定改由
+`invest_month_end_ledger` 派送 month-end-ledger.yml），分頁裡這三列請刪除；Router 會在 log 提醒，這三列不會執行。
+
+---|---|---|
 | invest_month_end | 每月月底 23:50 | Jennyall 本月欄：4～36 列的股票區塊（台股、渣打-美股…）＋64～67 列，公式改成值 |
 | invest_fund_freeze | 每月 1～7 日 00:30～23:30 每小時 | 4～36 列的基金區塊：總覽 G 欄每檔基金淨值日期都到上月最後一個工作天才轉值；7 日 23:00 後仍沒到齊就照當下值轉並提醒 |
 | invest_month_roll | 每月 1～7 日 00:10 | 總覽參照 Jennyall／YYYY細帳 的上月欄換到本月欄；已換好就不動 |
