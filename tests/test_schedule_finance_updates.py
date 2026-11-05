@@ -74,10 +74,10 @@ def test_review_only_rewrites_total_column(monkeypatch):
     assert ru.total_formula_column("年度review") == "AB"
 
 
-def test_aggregate_updates_z_date_for_all_rows_of_month(monkeypatch):
-    """2026-11 Jenny：前月／當月重新彙整時，內容沒變的列 Z 欄也蓋成當天日期。"""
+def test_aggregate_keeps_z_date_when_row_unchanged(monkeypatch):
+    """2026-11-05 Jenny：內容完全沒變的列不重寫，Z 欄維持上次的日期。"""
     values = [_row(A="姓名"),
-              _row(A="乙", C="2026/10/05", D="2026/10/05", U="上課：乙＋共1人", V="202610上課", W=2000, X=0, Z="2026-10-31")]
+              _row(A="乙", U="上課：乙＋共1人", V="202610上課", W=2000, X=0, Z="2026/11/04")]
     sent = []
 
     class Svc:
@@ -98,7 +98,5 @@ def test_aggregate_updates_z_date_for_all_rows_of_month(monkeypatch):
     monkeypatch.setattr(dr, "_read_values", lambda *_a: values)
     monkeypatch.setattr(dr, "build_month_entries", lambda v, a, ym: [["上課：乙＋共1人", "202610上課", 2000, 0]])
     monkeypatch.setattr(dr, "get_sheets_service", lambda: Svc())
-    result = dr.aggregate_month_replace("台北", "202610")
-    assert result == {"written": 0, "cleared": 0}
-    ranges = [d["range"] for d in sent[0]]
-    assert ranges == ["'台北'!Z2"]  # U–X 沒變不重寫，但 Z 更新
+    assert dr.aggregate_month_replace("台北", "202610") == {"written": 0, "cleared": 0}
+    assert sent == []  # 什麼都不寫，Z 欄保留 2026/11/04
