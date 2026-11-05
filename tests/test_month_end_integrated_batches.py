@@ -127,7 +127,20 @@ def test_fixed_expense_even_month_and_year_end():
     taichung = [i for i in items if i["area"] == "台中"]
     assert len(taichung) == 1 and not taichung[0]["selectable"]
     january = [i["memo"] for i in fixed.planned_items("202701") if i["area"] == "台中"]
-    assert january == ["2027.01-辦公室租金管理費", "2027.02-辦公室租金管理費"]
+    assert january == ["2027.01-辦公室租金管理費", "2027.02-辦公室租金管理費", "2026.11-電費", "2026.12-電費"]
+
+
+def test_taichung_electricity_on_odd_month():
+    """2026-11-05 Jenny：台中單月加前月＋前前月電費；金額輸入合計後除以 2 拆兩筆，沒填不新增。"""
+    items = fixed.mark_status(fixed.planned_items("202611"), {"台北": set(), "台中": {"2026.09-電費"}})
+    power = {i["memo"]: i for i in items if i.get("electricity")}
+    assert power["2026.09-電費"]["status"] == "已新增過"
+    assert power["2026.10-電費"]["status"] == "待輸入電費" and not power["2026.10-電費"]["default"]
+    filled = {i["memo"]: i for i in fixed.split_electricity(items, 2001) if i.get("electricity")}
+    assert filled["2026.10-電費"]["amount"] == 2001 and filled["2026.10-電費"]["default"]
+    both = fixed.mark_status(fixed.planned_items("202611"), {"台北": set(), "台中": set()})
+    filled = [i["amount"] for i in fixed.split_electricity(both, 87) if i.get("electricity")]
+    assert filled == [43, 44]
 
 
 # ── 會計事務所 ──────────────────────────────────────

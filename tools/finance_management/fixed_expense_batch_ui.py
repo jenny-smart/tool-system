@@ -78,7 +78,8 @@ def render_request_items(prefix: str, items: list[dict], log: Callable[[str], No
 
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
-    st.caption("台北每月 1 日：當月辦公室租金 77,343、管理費 9,392；台中每單月 1 日：當月＋下月租金管理費各 18,000。"
+    st.caption("台北每月 1 日：當月辦公室租金 77,343、管理費 9,392；台中每單月 1 日：當月＋下月租金管理費各 18,000，"
+               "另加前月＋前前月電費（輸入帳單金額）。"
                "每月 1 日 00:30 排程會自動新增；這裡可盤點、補新增。已新增過的不會重複。")
     period = st.text_input("期別（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
                            key=f"{PREFIX}_period").strip()
@@ -88,6 +89,10 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     if not items:
         st.success("沒有要新增的固定費用 🎉")
         return
+    if any(i.get("electricity") and i.get("selectable") for i in items):
+        total = st.number_input("台中電費（前 2 個月合計，會除以 2 拆成兩筆）", min_value=0, step=1, value=0,
+                                key=f"{PREFIX}_electricity")
+        items = batch.split_electricity(items, int(total))
     render_request_items(PREFIX, items, log, tool_name=batch.TOOL_NAME)
 
 
