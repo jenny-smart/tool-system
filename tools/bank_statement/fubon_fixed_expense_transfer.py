@@ -105,10 +105,16 @@ def run(
         )
         paid_on = _payment_date(completed_at)
         try:
-            print(f"開始同步 {bank_area} 富邦明細。")
-            today = datetime.now(TW_TZ).date()
-            run_download(context, page, account, report_query_start(account, today), today)
-            print(f"{bank_area} 富邦更新同步完成，開始寫入原訂固定費用分錄。")
+            from tools.finance_management.fixed_expense_transfer import FIXED_AMOUNT_AREAS
+
+            if area in FIXED_AMOUNT_AREAS and not FIXED_AMOUNT_AREAS[area][2]:
+                # 2026-11-05 Jenny：高雄不跑富邦更新，只寫台北分錄
+                print(f"{bank_area} 不跑富邦更新，直接寫入台北固定費用分錄。")
+            else:
+                print(f"開始同步 {bank_area} 富邦明細。")
+                today = datetime.now(TW_TZ).date()
+                run_download(context, page, account, report_query_start(account, today), today)
+                print(f"{bank_area} 富邦更新同步完成，開始寫入原訂固定費用分錄。")
             result = transfer_fixed_expenses(
                 period,
                 area=area,

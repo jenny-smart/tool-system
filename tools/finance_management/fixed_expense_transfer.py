@@ -18,9 +18,9 @@ from tools.finance_management.statement_registry import (
 TOOL_NAME = "各區固定費用匯款"
 AREAS = ("台中", "桃園", "新竹", "高雄", "學院")
 # 2026-11 Jenny：高雄、學院不看行銷費用總表，每月固定匯給台北（台北內勤薪資的減項）。
-# (金額, 科目, 是否有財報)：高雄財報記內勤薪資加項；學院沒有財報，只記台北。
+# (金額, 科目, 是否寫地區富邦更新)：2026-11-05 Jenny：高雄不跑富邦更新、學院沒有財報 → 都只記台北。
 FIXED_AMOUNT_AREAS: dict[str, tuple[int, str, bool]] = {
-    "高雄": (40000, "內勤薪資", True),
+    "高雄": (40000, "內勤薪資", False),
     "學院": (47911, "內勤薪資", False),
 }
 MARKETING_AREAS = tuple(a for a in AREAS if a not in FIXED_AMOUNT_AREAS)
@@ -159,7 +159,7 @@ def _build_plan(
 
 def fixed_amount_plan(period: str, area: str) -> dict[str, object]:
     """高雄／學院：每月固定金額匯給台北。台北富邦更新 E 欄記 −金額（內勤薪資減項）；
-    高雄富邦更新 E 欄記 +金額（內勤薪資加項）；學院沒有財報，不記地區分錄。"""
+    高雄不跑富邦更新、學院沒有財報，都不記地區分錄。"""
     amount, subject, has_report = FIXED_AMOUNT_AREAS[area]
     ym = f"{period[:4]}.{period[4:]}"
     if area == "學院":
