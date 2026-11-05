@@ -238,7 +238,9 @@ class FixedAmountAreaTests(unittest.TestCase):
         kh = transfer.fixed_amount_plan("202611", "高雄")
         self.assertEqual(kh["total"], 40000)
         self.assertEqual(kh["taipei_rows"], [[False, "", "", "", -40000, "", "", "", "內勤薪資", "", "", "2026.11-內勤薪資-高雄"]])
-        self.assertEqual(kh["area_rows"], [[False, "", "", "", 40000, "", "", "", "內勤薪資", "", "", "2026.11-內勤薪資-高雄"]])
+        # 2026-11-05 Jenny：高雄不跑富邦更新 → 只記台北
+        self.assertEqual(kh["area_rows"], [])
+        self.assertEqual(kh["report_area"], "")
         academy = transfer.fixed_amount_plan("202611", "學院")
         self.assertEqual((academy["total"], academy["area_rows"], academy["report_area"]), (47911, [], ""))
         self.assertIs(transfer.select_plan_rows(academy, [41]), academy)
