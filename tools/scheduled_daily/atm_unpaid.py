@@ -55,8 +55,12 @@ def detail_for_log(detail_text: str, limit: int = 60) -> str:
 
 
 def run(today: str | None = None) -> int:
-    from tools.memo_system import atm
+    from tools.memo_system import atm, memo
 
+    # 一律正式站（比照清潔異動整合）：tools/orders_system/memo_system/env.py 是 ENV="dev"，
+    # Actions 又沒有 Streamlit secrets 的 ENV，不指定會連到測試後台（backend-dev），
+    # 2026-11-05 因此把正式站已付款的訂單當成待付款貼進 ATM 分頁。
+    memo.set_env("prod")
     today = today or datetime.now(TZ).date().isoformat()
     detail = io.StringIO()
     try:

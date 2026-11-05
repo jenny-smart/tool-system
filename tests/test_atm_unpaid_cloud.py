@@ -83,3 +83,16 @@ def test_detail_goes_to_private_log_not_stdout(monkeypatch, capsys):
     assert "黃妙禎" not in out and "LC00219397" not in out
     assert "略過 LC00219397 黃妙禎：單張複查狀態為「已付款」" in logged[0]
     assert "單張複查完成：0／1" in logged[0]
+
+
+def test_scheduled_sync_always_uses_production_backend(monkeypatch):
+    from tools.scheduled_daily import atm_unpaid
+    from tools.memo_system import atm, memo
+
+    seen = {}
+    memo.set_env("dev")
+    monkeypatch.setattr(atm, "run_scheduled_unpaid_sync",
+                        lambda date_until=None, ui_logger=None: seen.setdefault("url", memo.BASE_URL) and {})
+    monkeypatch.setattr(atm_unpaid, "_log", lambda *a: None)
+    assert atm_unpaid.run("2026-11-05") == 0
+    assert seen["url"] == "https://backend.lemonclean.com.tw"
