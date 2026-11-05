@@ -532,8 +532,10 @@ def test_merged_orders_listed_in_j_note():
     assert old["actions"] == ["sync"] and "補回寫 4 張" in old["progress"][0]
     assert plan(B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678",
                 AE="更新系統（B欄：已收款）｜合併4張") is None
-    # G 已列全部訂單的舊列不用重新回寫
-    assert plan(B="已收款", C="異動發票", G="LC00217202 LC00217177", O="AB1", AE="更新系統（B欄：已收款）") is None
+    # G 事後補齊訂單、AE 還是舊標記（當時只回寫一張）→ 也要重新回寫
+    redo = plan(B="已收款", C="異動發票", G="LC00217389\nLC00217386\nLC00217387\nLC00217388", J=j, O="AB1",
+                AE="更新系統（B欄：已收款）")
+    assert redo["actions"] == ["sync"] and "補回寫 4 張" in redo["progress"][0]
     # 不是合併開立：J 沒寫「合併」、G 只有一張 → 只有 G
     assert batch.row_orders(row(G="LC00217389", J="原訂單 LC00217386 改期")) == ["LC00217389"]
     # 合併開立（G 多張）→ G 原訂單＋J／K 所有訂單
