@@ -41,3 +41,31 @@ def test_taichung_electricity_months_cross_year():
 
     rows, _ = build_taichung_rows("202701", 100, set(), "now")
     assert [r[4] for r in rows if r[3] == "電費"] == ["2026.11-電費", "2026.12-電費"]
+
+
+def test_office_rent_is_labelled_current_month(monkeypatch):
+    """2026-11-05 Jenny：11/1（期別 202610）辦公室租金／管理費記 2026.11，不是 2026.10。"""
+    from tools.finance_management import taipei_fixed_expense as tfe
+
+    appended = []
+
+    class Svc:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def append(self, **kwargs):
+            appended.extend(kwargs["body"]["values"])
+            return self
+
+        def execute(self):
+            return {}
+
+    monkeypatch.setattr(tfe, "resolve_report_location", lambda *_a: ("id", "台北"))
+    monkeypatch.setattr(tfe, "get_sheets_service", lambda: Svc())
+    monkeypatch.setattr(tfe, "_existing_memos", lambda *_a: {"2026.11-辦公室管理費"})
+    monkeypatch.setattr(tfe, "log_execution", lambda *_a, **_k: None)
+    tfe.submit_taipei_fixed_expenses("202610", only=set(tfe.RENT_LABELS))
+    assert [r[4] for r in appended] == ["2026.11-辦公室租金"]
