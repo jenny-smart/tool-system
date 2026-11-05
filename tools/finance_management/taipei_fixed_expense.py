@@ -204,7 +204,8 @@ RENT_LABELS = tuple(label for label, *_rest in OFFICE_RENT_ITEMS)
 
 def submit_taipei_fixed_expenses(period: str, run_type: str = "手動", only: set[str] | None = None) -> dict[str, Any]:
     """period＝費用期別（上個月）；查 period 隔月收到的信。
-    台灣連線是付當月費用（2026-11 Jenny）：費用說明記隔月（＝收信的月份），例如期別 202610 記成 2026.11-台灣連線。
+    辦公室租金、辦公室管理費、台灣連線是付當月費用（2026-11 Jenny）：費用說明記隔月（＝執行的月份），
+    例如期別 202610（11/1 執行）記成 2026.11-辦公室租金／2026.11-台灣連線；行銷費用（眾點）、Amazon、震旦行記 2026.10。
     only：只處理這些項目（MAIL_ITEMS／RENT_LABELS 的名稱），None＝全部。"""
     period = (period or "").strip()
     if not re.fullmatch(r"\d{6}", period):
@@ -301,10 +302,12 @@ def submit_taipei_fixed_expenses(period: str, run_type: str = "手動", only: se
             errors.append(f"Gmail：{exc}")
             items.append({"label": "Gmail", "amount": None, "matched": 0, "status": f"失敗：{exc}"})
 
+    # 2026-11-05 Jenny：辦公室租金／管理費跟台灣連線一樣付當月，記隔月（＝執行的月份），
+    # 例如 11/1 執行（期別 202610）記 2026.11-辦公室租金；行銷費用（眾點）、Amazon 記前一月 2026.10。
     for label, category, amount, payee in OFFICE_RENT_ITEMS:
         if not wanted(label):
             continue
-        base = f"{period_label}-{label}"
+        base = f"{next_label}-{label}"
         if _already_submitted(existing, base):
             items.append({"label": label, "amount": None, "matched": None, "status": "略過（本期已新增過）"})
         else:
