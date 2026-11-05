@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from tools.lemon_backend.stored_value_sheet import get_worksheet
 
 
-from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, split_order_numbers  # noqa: E402
+from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, merged_order_numbers  # noqa: E402
 
 
 DISPLAY_COLUMNS = ("列號", "B 狀態", "C 細項", "G 訂單編號", "H 客戶", "J 內容", "K 後台備註", "M 收款時間", "N 收款金額")
@@ -35,7 +35,9 @@ def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
         is_fare_invoice = status == "待處理發票" and detail == "車馬費發票"
         # 合併開立：C 欄寫「合併開立發票」，或 G 欄有兩張以上訂單（例如「異動發票」一次開多張訂單）；改三聯走二聯改三聯
         k_note = str(padded[9] or "")
-        multi = len(split_order_numbers(order_no)) >= 2
+        # G 欄原訂單＋J／K 欄列出的所有訂單（合併開立時）
+        order_nos = merged_order_numbers(order_no, padded[8], k_note, merged=detail in MERGED_INVOICE_DETAILS)
+        multi = len(order_nos) >= 2
         triplicate = bool(re.search(r"(?:改|轉)\s*三聯", f"{detail} {k_note}"))
         # 已收款但還沒開發票的異動發票／合併開立（2026-11 Jenny）
         paid_uninvoiced = status == "已收款" and (detail == "異動發票" or detail in MERGED_INVOICE_DETAILS or multi)
@@ -57,7 +59,7 @@ def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
             "N 收款金額": padded[12],
             "_order_no": order_no,
             "_invoice_flow": "fare" if is_fare_invoice else "merged" if is_merged else "charge",
-            "_order_nos": split_order_numbers(order_no),
+            "_order_nos": order_nos,
         })
     return rows
 

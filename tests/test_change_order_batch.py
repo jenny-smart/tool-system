@@ -450,7 +450,7 @@ def test_merged_invoice_rows_go_to_invoice():
     item = plan(B="待處理發票", C="異動發票", G=multi)
     assert item["actions"] == ["invoice"] and item["amount"] == "3 張訂單"
     assert plan(B="待處理發票", C="合併開立發票", G=multi)["actions"] == ["invoice"]
-    assert plan(B="待處理發票", C="合併開立發票")["missing"] == ["合併開立發票：G 欄要有兩張以上訂單編號"]
+    assert plan(B="待處理發票", C="合併開立發票")["missing"] == ["合併開立發票：G／J／K 欄要有兩張以上訂單編號"]
     # 寫了改三聯的仍走二聯改三聯
     tri = plan(B="待處理發票", C="異動發票", G=multi, K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")
     assert tri["actions"] == ["triplicate"]
@@ -515,3 +515,49 @@ def test_pending_invoice_candidates_merged_for_any_status(monkeypatch):
     monkeypatch.setattr(pending_charge, "get_worksheet", lambda area: WS())
     got = {r["列號"]: r["_invoice_flow"] for r in pending_charge.get_pending_invoice_candidates("高雄")}
     assert got == {1: "merged", 2: "merged", 3: "charge"}
+
+
+def test_merged_orders_listed_in_j_note():
+    """2026-11-05 Jenny：G 只填一張、J 寫「服務訂單合併開立發票$14000 LC…；LC…」→ 合併開立，每張訂單都回寫發票號碼。"""
+    from tools.orders_system.memo_system import change_order as co
+
+    j = "服務訂單合併開立發票$14000  LC00217386 ; LC00217387 ; LC00217388 ; LC00217389"
+    four = ["LC00217389", "LC00217386", "LC00217387", "LC00217388"]
+    assert batch.row_orders(row(G="LC00217389", J=j)) == four
+    # 已收款、還沒發票 → 先合併開立
+    item = plan(B="已收款", C="異動發票", G="LC00217389", J=j)
+    assert item["actions"] == ["invoice"] and "合併開立" in item["progress"][0]
+    # 之前只回寫 G 那一張（AE 是舊標記）→ 重新列出補回寫四張
+    old = plan(B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678", AE="更新系統（B欄：已收款）")
+    assert old["actions"] == ["sync"] and "補回寫 4 張" in old["progress"][0]
+    assert plan(B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678",
+                AE="更新系統（B欄：已收款）｜合併4張") is None
+    # G 已列全部訂單的舊列不用重新回寫
+    assert plan(B="已收款", C="異動發票", G="LC00217202 LC00217177", O="AB1", AE="更新系統（B欄：已收款）") is None
+    # 不是合併開立：J 沒寫「合併」、G 只有一張 → 只有 G
+    assert batch.row_orders(row(G="LC00217389", J="原訂單 LC00217386 改期")) == ["LC00217389"]
+    # 合併開立（G 多張）→ G 原訂單＋J／K 所有訂單
+    g = "LC00217389\nLC00217386\nLC00217387\nLC00217388 \nLC00217389"
+    assert batch.row_orders(row(G=g, K="另有 LC00217400")) == four + ["LC00217400"]
+    # 合併開立一定接回寫，不受「回寫系統」勾選影響
+    item = plan(B="待處理發票", C="異動發票", G=g, J=j)
+    assert item["merged_orders"] == four and "回寫 4 張訂單發票號碼" in item["progress"][-1]
+    assert batch.build_plan([dict(item, row=48)], do_sync=False)[0]["sync_rows"] == [48]
+
+    posted = []
+
+    def fake_post(order_no, session, apply, ui_logger=None):
+        form, controls = {}, {"invoice_no": [{"type": "text", "context": "發票號碼"}],
+                              "memoFinance": [{"type": "textarea", "context": "財務備註"}]}
+        apply(form, controls, {"order_no": order_no})
+        posted.append((order_no, form["invoice_no"]))
+
+    import pytest
+    mp = pytest.MonkeyPatch()
+    mp.setattr(co, "_post_purchase_edit", fake_post)
+    try:
+        raw = row(B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678")
+        co.sync_one_to_purchase_edit({"order_no": raw[6], "raw": raw, "status": "已收款"}, session=None)
+    finally:
+        mp.undo()
+    assert posted == [(o, "AB12345678") for o in four]

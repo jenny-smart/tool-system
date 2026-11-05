@@ -1335,6 +1335,19 @@ def split_order_numbers(text: str) -> list:
     return result
 
 
+def merged_order_numbers(order_text: str, *notes: str, merged: bool = False) -> list:
+    """合併開立要回寫發票號碼的訂單：G 欄原訂單＋J／K 欄列出的所有訂單（2026-11-05 Jenny）。
+    合併開立＝G 欄有兩張以上、C 欄是合併開立發票（merged=True），或 J／K 寫了「合併」。"""
+    result = split_order_numbers(order_text)
+    if not (merged or len(result) >= 2 or any("合併" in str(note or "") for note in notes)):
+        return result
+    for note in notes:
+        for order_no in (m.group(0).upper() for m in _ORDER_NO_RE.finditer(str(note or ""))):
+            if order_no not in result:
+                result.append(order_no)
+    return result
+
+
 def _set_invoice_no(form_data: dict, controls: dict, invoice_no: str, ui_logger=None) -> None:
     """把新發票寫進訂單主發票號碼欄位；找不到欄位就失敗（不標記回寫完成）。"""
     invoice_no = str(invoice_no or "").strip().upper()
@@ -1941,7 +1954,9 @@ def sync_one_to_purchase_edit(item: dict, session: requests.Session, ui_logger=N
     - G 欄有兩張以上訂單（合併開立發票）：每張訂單都寫 發票號碼＝O、財務備註加註，不動加收／退款欄位
     - 細項是異動發票／二聯改三聯：照狀態回填外，新發票（O）也寫進訂單發票號碼
     """
-    orders = split_order_numbers(item["order_no"])
+    raw_row = item.get("raw") or []
+    orders = merged_order_numbers(item["order_no"], _sheet_cell(raw_row, "J"), _sheet_cell(raw_row, "K"),
+                                  merged=_sheet_cell(raw_row, "C").strip() in ("合併開立發票", "合併發票"))
     if len(orders) >= 2:
         for order_no in orders:
             _post_purchase_edit(order_no, session, lambda form, controls, _order: apply_merged_invoice_to_form(
@@ -1960,7 +1975,7 @@ def sync_one_to_purchase_edit(item: dict, session: requests.Session, ui_logger=N
     return True
 
 
-def mark_sheet_row_done(region: str, sheet_row: int, status: str, ui_logger=None):
+def mark_sheet_row_done(region: str, sheet_row: int, status: str, ui_logger=None, merged_count: int = 0):
     """回填成功後標記處理時間；儲值金待處理狀態同步改為完成狀態。"""
     def log(msg):
         if ui_logger:
@@ -1968,7 +1983,7 @@ def mark_sheet_row_done(region: str, sheet_row: int, status: str, ui_logger=None
 
     ws = get_worksheet(region)
     done_status = STATUS_AFTER_SYNC.get(status, status)
-    update_status = f"更新系統（B欄：{done_status}）"
+    update_status = f"更新系統（B欄：{done_status}）" + (f"｜合併{merged_count}張" if merged_count >= 2 else "")
     updated_at = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M:%S")
     updates = [
         {"range": f"AD{sheet_row}", "values": [[updated_at]]},
@@ -2014,7 +2029,11 @@ def sync_pending_rows(region: str, selected_rows: list, session: requests.Sessio
         result["processed"] += 1
         try:
             sync_one_to_purchase_edit(item, session=session, ui_logger=ui_logger)
-            mark_sheet_row_done(region, item["sheet_row"], item["status"], ui_logger=ui_logger)
+            raw_row = item.get("raw") or []
+            merged = merged_order_numbers(item["order_no"], _sheet_cell(raw_row, "J"), _sheet_cell(raw_row, "K"),
+                                          merged=_sheet_cell(raw_row, "C").strip() in ("合併開立發票", "合併發票"))
+            mark_sheet_row_done(region, item["sheet_row"], item["status"], ui_logger=ui_logger,
+                                merged_count=len(merged) if len(merged) >= 2 else 0)
             result["success"] += 1
         except Exception as e:
             result["failed"] += 1
