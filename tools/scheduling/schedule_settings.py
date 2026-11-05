@@ -51,7 +51,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "notify": ("scheduled_daily.yml", {"target": "notify"}),
     "month_end_cleanup": ("scheduled_daily.yml", {"target": "month_end_cleanup"}),
     "field_all": ("scheduled_field.yml", {"target": "field_all"}),
-    "field_roster_raise": ("scheduled_field.yml", {"target": "field_roster_raise"}),
+    "field_roster": ("scheduled_field.yml", {"target": "field_roster"}),
+    "field_raise": ("scheduled_field.yml", {"target": "field_raise"}),
     "field_claim_review": ("scheduled_field.yml", {"target": "field_claim_review"}),
     "field_trainee_fee": ("scheduled_field.yml", {"target": "field_trainee_fee"}),
     "service_all": ("scheduled_service.yml", {"target": "service_all"}),
@@ -99,6 +100,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
 
 # 已停用的功能代號 → 說明（Sheet 裡還有這列時提醒刪除）
 RETIRED_KEYS = {
+    "field_roster_raise": "拆成 field_roster（名冊，每月 1、15 日）與 field_raise（調薪，每月 15 日）",
     "fixed_expense_transfer": "改為 fixed_expense_remit【財報】各區固定費用匯款，每月 10 日 04:00",
 }
 
@@ -111,10 +113,12 @@ DEFAULT_ROWS: list[list] = [
     [True, "orders_report", "訂單資料", "01:20", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "staff_info", "工作人員資料", "01:30", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "field_all", "外場排程", "05:00", "每日", "", "照跑", MODE_DIRECT, ""],
-    [True, "field_roster_raise", "【月排程】新增專員名冊＋新增專員調薪（台北／台中）", "06:00", "每月", "15", "照跑",
+    [True, "field_roster", "【月排程】新增專員名冊（台北／台中）", "06:00", "每月", "1,15", "提前",
+     MODE_DIRECT, "期別＝當月；已存在就略過"],
+    [True, "field_raise", "【月排程】新增專員調薪（台北／台中）", "06:00", "每月", "15", "提前",
      MODE_DIRECT, "期別＝當月（例 11/15 建 202611）；已存在就略過"],
-    [True, "field_claim_review", "【專員請款】請款資料審核（台北／台中）", "06:00", "每月", "15,月底", "照跑",
-     MODE_DIRECT, "處理 AJ 給付期別空白的列；15 日填當月-1、月底填當月-2"],
+    [True, "field_claim_review", "【專員請款】請款資料審核（台北／台中）", "06:00", "每月", "15", "提前",
+     MODE_DIRECT, "處理 AJ 給付期別空白的列，填當月-1"],
     [True, "field_trainee_fee", "【新訓退款】新訓退訓實境費用（台北／台中）", "06:00", "每週", "五", "照跑",
      MODE_DIRECT, ""],
     [True, "service_all", "客服排程", "05:30", "每日", "", "照跑", MODE_DIRECT, ""],
@@ -153,11 +157,11 @@ DEFAULT_ROWS: list[list] = [
      MODE_DIRECT, ""],
     [True, "cash_gap_followup", "現金缺口補算（上游有新數字就重算）＋未完成提醒", "09:00", "每月", "2-10", "照跑",
      MODE_DIRECT, "缺的項目每天提醒到 10 日"],
-    [True, "fixed_expense_mail", "台北固定費用查信（AWS／震旦／眾點／台灣連線）", "09:00", "每月", "5,8,10", "照跑",
+    [True, "fixed_expense_mail", "台北固定費用查信（AWS／震旦／眾點／台灣連線）", "09:00", "每月", "5,8,10", "提前",
      MODE_DIRECT, ""],
-    [True, "fixed_expense_remit", "【整合執行】各區固定費用匯款（台中／桃園／新竹／高雄／學院＋台中請款）", "04:00", "每月", "10", "照跑",
+    [True, "fixed_expense_remit", "【整合執行】各區固定費用匯款（台中／桃園／新竹／高雄／學院＋台中請款）", "04:00", "每月", "10", "提前",
      MODE_QUEUE, "高雄 40000 固定；排入 Mac，需手機核准。學院 47911 自己轉帳，只提醒寫台北分錄"],
-    [True, "accounting_reminder", "會計事務所費用確認提醒", "10:00", "單月", "10", "照跑", MODE_DIRECT, ""],
+    [True, "accounting_reminder", "會計事務所費用確認提醒", "10:00", "單月", "10", "提前", MODE_DIRECT, ""],
     [True, "mof_serial", "【鯨躍發票】財政部字軌下載＋匯入＋配號（下一期）", "10:00", "雙月", "20", "提前", MODE_QUEUE,
      "雙月 20 日做下一期（例如 12 月做隔年 01-02）；需先登入財政部（圖形驗證碼）"],
     [True, "mof_serial_check", "字軌未完成提醒", "10:00", "雙月", "21-25", "照跑", MODE_DIRECT, ""],
@@ -296,18 +300,40 @@ def previous_workday(day: date, is_workday: Callable[[date], bool]) -> date:
     return day
 
 
-def matches_day(rule: Rule, day: date, is_workday: Callable[[date], bool]) -> bool:
+def _month_ok(rule: Rule, month: int) -> bool:
+    if rule.freq == "單月" and month % 2 == 0:
+        return False
+    if rule.freq == "雙月" and month % 2 == 1:
+        return False
+    return True
+
+
+def target_date(rule: Rule, day: date, is_workday: Callable[[date], bool]) -> Optional[date]:
+    """day 要執行時，對應的原訂日期（遇例假日提前時可能是下個月初，例如 11/1 週日 → 10/30 執行、原訂 11/1）。"""
     if rule.freq in ("每日", "每週"):
         hit = rule.freq == "每日" or day.weekday() in _weekdays(rule.days)
-        return hit and (rule.holiday == HOLIDAY_RUN or is_workday(day))
-    if rule.freq == "單月" and day.month % 2 == 0:
-        return False
-    if rule.freq == "雙月" and day.month % 2 == 1:
-        return False
-    targets = month_days(rule.days, day)
+        return day if hit and (rule.holiday == HOLIDAY_RUN or is_workday(day)) else None
     if rule.holiday == HOLIDAY_EARLIER:
-        return any(previous_workday(day.replace(day=d), is_workday) == day for d in targets)
-    return day.day in targets and (rule.holiday == HOLIDAY_RUN or is_workday(day))
+        months = [day.replace(day=1)]
+        nxt = (day.replace(day=28) + timedelta(days=4)).replace(day=1)
+        months.append(nxt)  # 下個月月初的日期遇假日會提前到本月底
+        for first in months:
+            if not _month_ok(rule, first.month):
+                continue
+            for d in month_days(rule.days, first):
+                target = first.replace(day=d)
+                if target >= day and previous_workday(target, is_workday) == day:
+                    return target
+        return None
+    if not _month_ok(rule, day.month):
+        return None
+    if day.day in month_days(rule.days, day) and (rule.holiday == HOLIDAY_RUN or is_workday(day)):
+        return day
+    return None
+
+
+def matches_day(rule: Rule, day: date, is_workday: Callable[[date], bool]) -> bool:
+    return target_date(rule, day, is_workday) is not None
 
 
 def due(rules: Iterable[Rule], when: datetime, is_workday: Callable[[date], bool]) -> list[Rule]:
@@ -344,6 +370,44 @@ def _service_and_id():
     return get_sheets_service(), get_master_spreadsheet_id()
 
 
+# 程式改了預設、Sheet 裡還是舊預設（F 日期、G 假日都沒被改過）的列 → 自動換成新預設（可換功能代號）。
+# 功能代號: (舊 F, 舊 G, 新功能代號)
+OUTDATED_DEFAULTS = {
+    # 2026-11-05 Jenny：名冊改 1、15 日，調薪 15 日，請款只有 15 日，遇例假日提前
+    "field_roster_raise": ("15", "照跑", "field_roster"),
+    "field_claim_review": ("15,月底", "照跑", "field_claim_review"),
+    # 2026-11-05 Jenny：各區固定費用匯款（10 日）、台北固定費用查信、會計事務所費用確認遇例假日提前
+    "fixed_expense_remit": ("10", "照跑", "fixed_expense_remit"),
+    "fixed_expense_mail": ("5,8,10", "照跑", "fixed_expense_mail"),
+    "accounting_reminder": ("10", "照跑", "accounting_reminder"),
+}
+
+
+def _upgrade_outdated_rows(service, spreadsheet_id: str, rows: list[list], log: Callable[[str], None]) -> None:
+    """rows＝B2:G 的值（會就地改成新功能代號，讓後面補列時不重複）。"""
+    defaults = {row[1]: row for row in DEFAULT_ROWS}
+    data = []
+    for offset, row in enumerate(rows):
+        cells = [str(c).strip() for c in row] + [""] * (6 - len(row))
+        key = cells[0]
+        if key not in OUTDATED_DEFAULTS:
+            continue
+        old_days, old_holiday, new_key = OUTDATED_DEFAULTS[key]
+        if (cells[4], cells[5]) != (old_days, old_holiday) or new_key not in defaults:
+            continue
+        new = defaults[new_key]
+        row_no = offset + 2
+        if new_key == key:  # 同一功能：只改 F 日期、G 遇例假日，名稱／時間等其他欄位保留
+            data.append({"range": f"'{SHEET_NAME}'!F{row_no}:G{row_no}", "values": [new[5:7]]})
+        else:  # 換功能代號：整列換成新預設
+            data.append({"range": f"'{SHEET_NAME}'!B{row_no}:I{row_no}", "values": [new[1:9]]})
+            rows[offset] = [new_key]
+        log(f"「{SHEET_NAME}」第 {row_no} 列 {key} 改成新預設：{new_key} {new[4]} {new[5]} 遇例假日{new[6]}")
+    if data:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"valueInputOption": "RAW", "data": data}).execute()
+
+
 def ensure_sheet(service=None, spreadsheet_id: str = "", log: Callable[[str], None] = print) -> bool:
     """沒有「排程設定」分頁就建立並寫入預設值；回傳是否新建。已存在時補上 Sheet 缺少的功能列（不改既有列）。"""
     if service is None:
@@ -363,7 +427,8 @@ def ensure_sheet(service=None, spreadsheet_id: str = "", log: Callable[[str], No
         log(f"已建立「{SHEET_NAME}」分頁（{len(DEFAULT_ROWS)} 個功能）")
         return True
     rows = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!B2:B").execute().get("values", [])
+        spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!B2:G").execute().get("values", [])
+    _upgrade_outdated_rows(service, spreadsheet_id, rows, log)
     have = {str(r[0]).strip() for r in rows if r}
     missing = [row for row in DEFAULT_ROWS if row[1] not in have]
     if missing:

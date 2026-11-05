@@ -40,8 +40,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertIn(('scheduled_daily.yml', {'target':task}),self.jobs('2026-09-30T'+hm))
         self.assertEqual(self.jobs('2026-09-30T05:00'), [('scheduled_field.yml',{'target':'field_all'})])
         self.assertEqual(self.jobs('2026-09-30T05:30'), [('scheduled_service.yml',{'target':'service_all'})])
-        # 月底 06:00 只有專員請款審核（2026-11-05）
-        self.assertEqual(self.jobs('2026-09-30T06:00'), [('scheduled_field.yml', {'target': 'field_claim_review'})])
+        self.assertEqual(self.jobs('2026-09-30T06:00'), [])
         self.assertEqual(self.jobs('2026-09-30T06:01'), [])
 
     def test_month_end_and_leap_year(self):
@@ -77,12 +76,15 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-12-10T10:00'))
 
     def test_fixed_expense_mail_and_transfer(self):
-        for day in (5, 8, 10):
+        # 5、8、10 日，遇例假日提前（2026-11-05 Jenny）：11/8 週日 → 11/6
+        for day in (5, 6, 10):
             self.assertIn('fixed_expense_mail', self.keys('2026-11-%02dT09:00' % day))
-        self.assertNotIn('fixed_expense_mail', self.keys('2026-11-06T09:00'))
-        # 各區固定費用匯款：每月 10 日 04:00
+        self.assertNotIn('fixed_expense_mail', self.keys('2026-11-08T09:00'))
+        self.assertNotIn('fixed_expense_mail', self.keys('2026-11-09T09:00'))
+        # 各區固定費用匯款：每月 10 日 04:00，遇例假日提前（2026/10/9、10/10 連假 → 10/8）
         self.assertIn('fixed_expense_remit', self.keys('2026-11-10T04:00'))
-        self.assertIn('fixed_expense_remit', self.keys('2026-10-10T04:00'))
+        self.assertIn('fixed_expense_remit', self.keys('2026-10-08T04:00'))
+        self.assertNotIn('fixed_expense_remit', self.keys('2026-10-10T04:00'))
         self.assertNotIn('fixed_expense_remit', self.keys('2026-11-09T04:00'))
 
     def test_weekly_change_order_and_fubon(self):
