@@ -63,3 +63,23 @@ def test_run_reports_failure(monkeypatch, capsys):
     monkeypatch.setattr(atm_unpaid, "_log", lambda *a: None)
     assert atm_unpaid.run("2026-11-05") == 1
     assert "登入失敗" in capsys.readouterr().out
+
+
+def test_detail_goes_to_private_log_not_stdout(monkeypatch, capsys):
+    from tools.scheduled_daily import atm_unpaid
+    from tools.memo_system import atm
+
+    def fake_sync(date_until=None, ui_logger=None):
+        print("  - 2026.11　LC00219397　黃妙禎　總金額4800 - 車馬費0 = 4800")
+        print("⚠️ 略過 LC00219397 黃妙禎：單張複查狀態為「已付款」")
+        print("單張複查完成：0／1 筆確認仍待付款")
+        return {"台北": {"pasted": 0, "skipped_duplicates": 0}}
+
+    logged = []
+    monkeypatch.setattr(atm, "run_scheduled_unpaid_sync", fake_sync)
+    monkeypatch.setattr(atm_unpaid, "_log", lambda status, message: logged.append(message))
+    assert atm_unpaid.run("2026-11-05") == 0
+    out = capsys.readouterr().out
+    assert "黃妙禎" not in out and "LC00219397" not in out
+    assert "略過 LC00219397 黃妙禎：單張複查狀態為「已付款」" in logged[0]
+    assert "單張複查完成：0／1" in logged[0]
