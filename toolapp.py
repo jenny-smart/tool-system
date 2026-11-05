@@ -4017,22 +4017,50 @@ def run_vip_full_pipeline(*, month="", start_date=None, end_date=None, area="全
     return text
 
 
+# 整合執行的執行週期：(分組, 下拉選單標示)。時間對應主控表「排程設定」的預設值，
+# 若在排程設定改了時間，這裡的標示要一起改。
+INTEGRATED_CYCLES = {
+    "【整合執行】月度盤點": ("每日", "每日 17:00"),
+    "【整合執行】清潔異動已備妥": ("每週", "每週二、五 09:30 盤點"),
+    "【整合執行】富邦內部請款": ("每週", "每週二、五 10:30 盤點"),
+    "【整合執行】月初（1日所有排程）": ("每月", "每月1日"),
+    "【整合執行】儲值金完整流程（複製＋轉檔＋搬運＋套用公式）": ("每月", "每月1日 01:00"),
+    "【整合執行】財報營收｜⑥–⑩ 金流對帳": ("每月", "每月1日 03:00"),
+    "【整合執行】財報營收｜⑪–⑬ 搬入營收總表＋財報": ("每月", "每月・手動（無排程）"),
+    "【整合執行】工具包押金（彙整＋打勾＋比對異常＋Y／B1）": ("每月", "每月1日 04:00"),
+    "【整合執行】年度review（預估公式調整＋隱藏欄位）": ("每月", "每月1日 04:30"),
+    "【整合執行】固定費用（辦公室租金）": ("每月", "每月1日 06:00"),
+    "【整合執行】各區固定費用匯款（每月10日）": ("每月", "每月10日 04:00"),
+    "【整合執行】會計事務所費用確認": ("每月", "單月10日 10:00"),
+    "【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）": ("每月", "雙月20日 10:00"),
+}
+
+
+def integrated_display(name: str) -> str:
+    """下拉選單顯示：整合執行項目在名稱後加上執行週期（選到的值仍是原名稱）。"""
+    cycle = INTEGRATED_CYCLES.get(name)
+    if not cycle:
+        return name
+    return f"{name.replace('（每月10日）', '')}　〔{cycle[1]}〕"
+
+
 FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
-    # 整合執行：都先「盤點」目前可做的項目（預設打勾、可全選）再執行，集中在同一組
+    # 整合執行：都先「盤點」目前可做的項目（預設打勾、可全選）再執行。
+    # 依執行週期（每日／每週／每月）排列，下拉選單會分組並在名稱後標示排程（見 INTEGRATED_CYCLES）
     {"name": "【整合執行】月度盤點", "handler": None, "enabled": True},
-    {"name": "【整合執行】各區固定費用匯款（每月10日）", "handler": None, "enabled": True},
-    {"name": "【整合執行】月初（1日所有排程）", "handler": None, "enabled": True},
     {"name": "【整合執行】清潔異動已備妥", "handler": None, "enabled": True},
     {"name": "【整合執行】富邦內部請款", "handler": None, "enabled": True},
-    {"name": "【整合執行】固定費用（辦公室租金）", "handler": None, "enabled": True},
-    {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
+    {"name": "【整合執行】月初（1日所有排程）", "handler": None, "enabled": True},
+    {"name": "【整合執行】儲值金完整流程（複製＋轉檔＋搬運＋套用公式）", "handler": run_vip_full_pipeline, "enabled": True},
     {"name": "【整合執行】財報營收｜⑥–⑩ 金流對帳", "handler": None, "enabled": True},
     {"name": "【整合執行】財報營收｜⑪–⑬ 搬入營收總表＋財報", "handler": None, "enabled": True},
-    {"name": "【整合執行】年度review（預估公式調整＋隱藏欄位）", "handler": run_review_monthly, "enabled": True},
-    {"name": "【整合執行】儲值金完整流程（複製＋轉檔＋搬運＋套用公式）", "handler": run_vip_full_pipeline, "enabled": True},
-    {"name": "【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）", "handler": queue_cetustek_full_pipeline, "enabled": True},
     {"name": "【整合執行】工具包押金（彙整＋打勾＋比對異常＋Y／B1）", "handler": run_deposit_report_all, "enabled": True},
+    {"name": "【整合執行】年度review（預估公式調整＋隱藏欄位）", "handler": run_review_monthly, "enabled": True},
+    {"name": "【整合執行】固定費用（辦公室租金）", "handler": None, "enabled": True},
+    {"name": "【整合執行】各區固定費用匯款（每月10日）", "handler": None, "enabled": True},
+    {"name": "【整合執行】會計事務所費用確認", "handler": None, "enabled": True},
+    {"name": "【整合執行】鯨躍字軌完整流程（財政部下載＋匯入＋配號）", "handler": queue_cetustek_full_pipeline, "enabled": True},
     # 雲端執行：盤點（含 VIP待退券歸零金額）→ 勾選 → 執行，不排給 Mac Agent
     {"name": "【檸檬後台】異動儲值金", "handler": None, "enabled": True},
     {"name": "【檸檬後台】預收款金額", "handler": run_lemon_prepaid_amount, "enabled": True},
@@ -4290,6 +4318,8 @@ def _grouped_select_options(names: list[str]) -> tuple[list[str], set[str]]:
     last_group = None
     for name in names:
         group = name[1:name.index("】")] if name.startswith("【") and "】" in name else ""
+        if name in INTEGRATED_CYCLES:
+            group = f"{group}｜{INTEGRATED_CYCLES[name][0]}"
         if group != last_group:
             header = f"── {group} ──" if group else "──"
             display.append(header)
@@ -4481,6 +4511,7 @@ with func_col:
             "執行功能",
             _finance_display_options,
             index=_finance_default_index,
+            format_func=integrated_display,
             label_visibility="collapsed",
             key="selected_function_display",
         )
