@@ -18,6 +18,7 @@
   | 日期／星期 | 每週：`二,五`；每月：`1`、`5,8,10`、`18-25`、`月底` |
   | 遇例假日 | 照跑／略過／提前（每月的日期遇週末或國定假日改到前一個工作日，依政府辦公日曆） |
   | 執行方式 | 直接執行／盤點後自動排入（排給 Mac Agent）／盤點後等確認（只盤點＋行事曆提醒） |
+  | 系統名稱 | 功能屬於哪個系統（tool-system／order-system／investment-system），放在最後一欄（J），程式自動填，空白才填、不改你填過的 |
 - 去重以「時段＋功能代號」為單位（GitHub run 標題 `cloud-YYYYMMDDTHHMM-功能代號`），
   同一時段、同一個 workflow 的不同功能都會派送；同一功能重試不會重複派送。
 - 欄位填錯（時間不是 10 分鐘倍數、代號不認得…）的那一列不會執行，Router log 會列出原因。
@@ -44,6 +45,18 @@
 | mof_serial_check | 雙月 21～25 日 10:00 | 字軌還沒完成就提醒 |
 
 其餘（日排程、外場、客服、業績、富邦／元大明細、月排程、儲值金、⑥–⑩、月初藍新鯨躍、月初檢查…）沿用原本時間，見分頁。
+
+### investment-system（2026-11-06 與 Jenny 確認）
+
+派送到 `jenny-smart/investment-system` 的 `monthly-roll.yml`，需要 Secret `INVESTMENT_SYSTEM_DISPATCH_TOKEN`
+（fine-grained token，只給 investment-system 的 Actions: Read and write）。沒設定時這三個功能會略過並讓 Router 失敗，
+其他功能照常派送。說明見 investment-system 的 `MONTHLY_ROLL.md`。
+
+| 功能代號 | 預設時間 | 說明 |
+|---|---|---|
+| invest_month_end | 每月月底 23:50 | Jennyall 本月欄：4～36 列的股票區塊（台股、渣打-美股…）＋64～67 列，公式改成值 |
+| invest_fund_freeze | 每月 1～7 日 00:30～23:30 每小時 | 4～36 列的基金區塊：總覽 G 欄每檔基金淨值日期都到上月最後一個工作天才轉值；7 日 23:00 後仍沒到齊就照當下值轉並提醒 |
+| invest_month_roll | 每月 1～7 日 00:10 | 總覽參照 Jennyall／YYYY細帳 的上月欄換到本月欄；已換好就不動 |
 
 ---
 
