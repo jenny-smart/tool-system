@@ -4021,6 +4021,7 @@ FINANCE_TASKS = [
     {"name": "【本機 Agent】同步／啟動", "handler": start_local_agent_service, "enabled": True},
     # 整合執行：都先「盤點」目前可做的項目（預設打勾、可全選）再執行，集中在同一組
     {"name": "【整合執行】月度盤點", "handler": None, "enabled": True},
+    {"name": "【整合執行】各區固定費用匯款（每月10日）", "handler": None, "enabled": True},
     {"name": "【整合執行】月初（1日所有排程）", "handler": None, "enabled": True},
     {"name": "【整合執行】清潔異動已備妥", "handler": None, "enabled": True},
     {"name": "【整合執行】富邦內部請款", "handler": None, "enabled": True},
@@ -4565,6 +4566,15 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_fixed_expense_batch = fresh_module("tools.finance_management.fixed_expense_batch_ui").render
 
     render_fixed_expense_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    st.stop()
+
+if system_type == "finance_management" and selected_function == "【整合執行】各區固定費用匯款（每月10日）":
+    st.markdown("</div>", unsafe_allow_html=True)
+    render_fixed_remit_batch = fresh_module("tools.finance_management.fixed_remit_batch_ui").render
+
+    render_fixed_remit_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
     LOG_PLACEHOLDER = st.empty()
     render_log()
     st.stop()

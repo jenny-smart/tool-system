@@ -16,7 +16,14 @@ from tools.finance_management.statement_registry import (
 )
 
 TOOL_NAME = "各區固定費用匯款"
-AREAS = ("台中", "桃園", "新竹", "高雄")
+AREAS = ("台中", "桃園", "新竹", "高雄", "學院")
+# 2026-11 Jenny：高雄、學院不看行銷費用總表，每月固定匯給台北（台北內勤薪資的減項）。
+# (金額, 科目, 是否有財報)：高雄財報記內勤薪資加項；學院沒有財報，只記台北。
+FIXED_AMOUNT_AREAS: dict[str, tuple[int, str, bool]] = {
+    "高雄": (40000, "內勤薪資", True),
+    "學院": (47911, "內勤薪資", False),
+}
+MARKETING_AREAS = tuple(a for a in AREAS if a not in FIXED_AMOUNT_AREAS)
 TAOYUAN_SOURCE_AREAS = ("桃園", "家電")
 REPORT_AREA_NAMES = {"家電": "桃園"}
 
@@ -141,9 +148,34 @@ def _build_plan(
     return _make_plan(period, area, total, transfer_mark, source_items, [area])
 
 
+def fixed_amount_plan(period: str, area: str) -> dict[str, object]:
+    """高雄／學院：每月固定金額匯給台北。台北富邦更新 E 欄記 −金額（內勤薪資減項）；
+    高雄富邦更新 E 欄記 +金額（內勤薪資加項）；學院沒有財報，不記地區分錄。"""
+    amount, subject, has_report = FIXED_AMOUNT_AREAS[area]
+    label = f"{period[:4]}.{period[4:]}-{subject}-{area}"
+    taipei_rows = [[False, "", "", "", -amount, "", "", "", subject, "", "", label]]
+    area_rows = [[False, "", "", "", amount, "", "", "", subject, "", "", label]] if has_report else []
+    return {
+        "period": period,
+        "area": area,
+        "report_area": area if has_report else "",
+        "source_areas": [area],
+        "total": amount,
+        "transfer_mark": "",
+        "eligible": True,
+        "fixed_amount": True,
+        "memo": f"{period[:4]}/{period[4:]}{subject}",
+        "items": [{"row_number": 0, "subject": subject, "amount": amount}],
+        "taipei_rows": taipei_rows,
+        "area_rows": area_rows,
+    }
+
+
 def _build_target_plan(values: list[list[object]], period: str, area: str) -> dict[str, object] | None:
-    """桃園固定費用合併桃園與家電欄位，其餘地區維持單一來源。"""
+    """桃園固定費用合併桃園與家電欄位，其餘地區維持單一來源；高雄／學院是固定金額。"""
     area = "桃園" if area == "家電" else area
+    if area in FIXED_AMOUNT_AREAS:
+        return fixed_amount_plan(period, area)
     if area != "桃園":
         return _build_plan(values, period, area, require_ready=False)
 
@@ -179,7 +211,9 @@ def _build_target_plan(values: list[list[object]], period: str, area: str) -> di
 def select_plan_rows(
     plan: dict[str, object], row_numbers: set[int] | list[int] | tuple[int, ...]
 ) -> dict[str, object]:
-    """只保留使用者勾選的來源列，並以分錄正負號重算實際匯款金額。"""
+    """只保留使用者勾選的來源列，並以分錄正負號重算實際匯款金額。固定金額地區不分科目，原樣回傳。"""
+    if plan.get("fixed_amount"):
+        return plan
     selected = {int(row) for row in row_numbers}
     indexes = [
         index
@@ -235,6 +269,14 @@ def _marketing_source_location(period: str | None = None) -> tuple[str, str]:
     分頁用期別所屬年度的「{YYYY}總表」（1 月處理 12 月仍讀去年總表）。"""
     year = int(period[:4]) if period and str(period)[:4].isdigit() else None
     return resolve_marketing_expense_location("台北", year=year)
+
+
+def _marketing_values(period: str, targets: list[str]) -> list[list[object]]:
+    """只有要跑行銷費用總表的地區（台中／桃園／新竹）才讀來源總表。"""
+    if not any(t in MARKETING_AREAS for t in targets):
+        return []
+    marketing_id, marketing_title = _marketing_source_location(period)
+    return _read_values(marketing_id, marketing_title, "A1:ZZ74")
 
 
 def _column_letter(column: int) -> str:
@@ -389,16 +431,15 @@ def assert_plan_not_posted(plan: dict[str, object]) -> None:
     """銀行匯款前確認同批固定費用分錄尚未寫入，避免重複匯款。"""
     target = str(plan["area"])
     report_area = str(plan["report_area"])
-    locations = [
-        ("台北", plan["taipei_rows"]),
-        (report_area, plan["area_rows"]),
-    ]
+    locations = [("台北", plan["taipei_rows"])]
+    if report_area and plan["area_rows"]:
+        locations.append((report_area, plan["area_rows"]))
     year = _plan_year(plan)
     for area, planned_rows in locations:
         spreadsheet_id, title = resolve_statement_location(area, "富邦更新", year=year)
         existing = _read_values(spreadsheet_id, title, "A:L")
         if _fingerprints(existing) & _fingerprints(planned_rows):
-            label = f"{target}（{report_area}財報）" if report_area != target else target
+            label = f"{target}（{report_area}財報）" if report_area and report_area != target else target
             raise ValueError(f"{label} 已有相同固定費用分錄，未進行銀行匯款")
 
 
@@ -454,10 +495,9 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
     area = "桃園" if area == "家電" else area
     targets = list(AREAS) if area == "全區" else [area]
     if any(target not in AREAS for target in targets):
-        raise ValueError("請選擇台中／桃園／新竹／高雄／全區")
+        raise ValueError("請選擇台中／桃園／新竹／高雄／學院／全區")
 
-    marketing_id, marketing_title = _marketing_source_location(period)
-    values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
+    values = _marketing_values(period, targets)
     plans = [
         plan
         for target in targets
@@ -469,6 +509,28 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
         "plans": plans,
         "skipped_areas": [target for target in targets if target not in processed],
     }
+
+
+def remit_status(period: str) -> list[dict[str, object]]:
+    """每月 10 日盤點：各區（台中／桃園／新竹 行銷費用總表；高雄／學院 固定金額）是否已匯款給台北。
+    已匯款＝行銷總表第 74 列有日期，或台北富邦更新已有同批分錄。"""
+    preview = preview_fixed_expenses(period, "全區")
+    result = []
+    for plan in preview.get("plans") or []:
+        mark = str(plan.get("transfer_mark") or "").strip()
+        posted = ""
+        if not mark:
+            try:
+                assert_plan_not_posted(plan)
+            except ValueError:
+                posted = "財報已有分錄"
+        result.append({"area": plan["area"], "total": int(plan["total"]), "memo": plan.get("memo", ""),
+                       "fixed": bool(plan.get("fixed_amount")), "done": bool(mark or posted),
+                       "detail": mark or posted or "待匯款", "plan": plan})
+    for area in preview.get("skipped_areas") or []:
+        result.append({"area": area, "total": 0, "memo": "", "fixed": False, "done": True,
+                       "detail": "第72列沒有金額", "plan": None})
+    return result
 
 
 def transfer_fixed_expenses(
@@ -486,12 +548,11 @@ def transfer_fixed_expenses(
     area = "桃園" if area == "家電" else area
     targets = list(AREAS) if area == "全區" else [area]
     if any(target not in AREAS for target in targets):
-        raise ValueError("請選擇台中／桃園／新竹／高雄／全區")
+        raise ValueError("請選擇台中／桃園／新竹／高雄／學院／全區")
 
     log_execution(TOOL_NAME, area, "開始", f"期別：{period}")
     try:
-        marketing_id, marketing_title = _marketing_source_location(period)
-        values = _read_values(marketing_id, marketing_title, "A1:ZZ74")
+        values = _marketing_values(period, targets)
         plans = [
             plan
             for target in targets
@@ -516,19 +577,21 @@ def transfer_fixed_expenses(
             report_area = str(plan["report_area"])
             year = _plan_year(plan) or int(period[:4])
             tp_id, tp_title = resolve_statement_location("台北", "富邦更新", year=year)
-            ar_id, ar_title = resolve_statement_location(report_area, "富邦更新", year=year)
             tp_existing = _read_values(tp_id, tp_title, "A:L")
-            ar_existing = _read_values(ar_id, ar_title, "A:L")
             tp_rows = _missing_statement_rows(tp_existing, plan["taipei_rows"], f"台北／{tp_title}")
-            ar_rows = _missing_statement_rows(ar_existing, plan["area_rows"], f"{report_area}／{ar_title}")
             written_rows += _append_statement_rows(tp_id, tp_title, tp_existing, tp_rows)
-            written_rows += _append_statement_rows(ar_id, ar_title, ar_existing, ar_rows)
             tp_after = _read_values(tp_id, tp_title, "A:L")
-            ar_after = _read_values(ar_id, ar_title, "A:L")
             _reorder_statement_rows(tp_id, tp_title, tp_after, plan["taipei_rows"])
-            _reorder_statement_rows(ar_id, ar_title, ar_after, plan["area_rows"])
+            ar_rows: list = []
+            if report_area and plan["area_rows"]:  # 學院沒有財報，只記台北
+                ar_id, ar_title = resolve_statement_location(report_area, "富邦更新", year=year)
+                ar_existing = _read_values(ar_id, ar_title, "A:L")
+                ar_rows = _missing_statement_rows(ar_existing, plan["area_rows"], f"{report_area}／{ar_title}")
+                written_rows += _append_statement_rows(ar_id, ar_title, ar_existing, ar_rows)
+                ar_after = _read_values(ar_id, ar_title, "A:L")
+                _reorder_statement_rows(ar_id, ar_title, ar_after, plan["area_rows"])
 
-            destination = f"（{report_area}財報）" if report_area != target else ""
+            destination = f"（{report_area}財報）" if report_area and report_area != target else ""
             summary = f"{target}{destination}：匯款 {int(plan['total']):,}，富邦分錄新增 {len(tp_rows) + len(ar_rows)} 列"
             summaries.append(summary)
             if on_progress:

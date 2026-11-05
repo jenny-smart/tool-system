@@ -6,7 +6,8 @@
 target：
   fixed_expense           固定費用：台北當月租金／管理費、台中單月當月＋下月租金、台灣連線（記當月）
   fixed_expense_mail      台北查信（AWS／震旦／眾點／台灣連線），期別＝上個月；最後一次（10 日）還缺就建提醒
-  fixed_expense_remit     【財報】各區固定費用匯款：第72列有金額、第74列空白的地區 → 排入 Mac 富邦匯款給台北
+  fixed_expense_remit     【整合執行】各區固定費用匯款：台中／桃園／新竹看行銷總表、高雄 40000／學院 47911 固定，
+                          排入 Mac 富邦匯款給台北；台中單月另外檢查台中固定費用請款
   vip_full_pipeline       【儲值金】完整流程（上個月）
   revenue_reconcile       四區財報營收 ⑥–⑩
   deposit_report          工具包押金：前月（覆蓋）＋當月統計 → 依統計月份打勾 → 比對異常 → 比對 Y／B1
@@ -108,43 +109,49 @@ def run_fixed_expense_mail(today: date) -> int:
 
 
 def run_fixed_expense_remit(today: date) -> int:
-    """【財報】各區固定費用匯款（排程）：盤點台中／桃園／新竹／高雄 行銷費用總表第 72 列 > 0 且第 74 列空白（尚未匯款）
-    的地區 → 排入 Mac 富邦匯款給台北（手機核准；成功後同步富邦明細及原訂分錄），或只建提醒等確認。期別＝當月。"""
-    from tools.finance_management.fixed_expense_transfer import preview_fixed_expenses
+    """每月 10 日【整合執行】各區固定費用匯款：
+    - 台中／桃園／新竹：行銷費用總表第72列有金額、第74列空白；高雄 40000、學院 47911 固定匯給台北（內勤薪資）
+      已匯款（第74列有日期或台北財報已有同批分錄）的略過，其餘排入 Mac 富邦匯款（手機核准）或只提醒
+    - 台中（單月）：另外檢查台中固定費用請款（租金當月＋隔月、電費）是否已新增到請款記錄；電費要輸入金額，缺就提醒
+    期別＝當月。"""
+    from tools.finance_management.fixed_expense_transfer import remit_status
+    from tools.finance_management.taichung_fixed_expense import taichung_status
     from tools.scheduling.schedule_settings import MODE_QUEUE, get_mode
 
     period = today.strftime("%Y%m")
-    preview = preview_fixed_expenses(period, "全區")
-    ready, done = [], []
-    for plan in preview.get("plans") or []:
-        if str(plan.get("transfer_mark") or "").strip():
-            done.append(f"{plan['area']}（已匯款 {plan['transfer_mark']}）")
-        elif int(plan.get("total") or 0) > 0:
-            ready.append(plan)
-    lines = [f"{p['area']}：{int(p['total']):,}（{p.get('memo', '')}）" for p in ready]
-    log(f"{period} 各區固定費用匯款：待匯款 {len(ready)} 區" + (f"；{'、'.join(done)}" if done else "") +
-        (f"；第72列沒有金額：{'、'.join(preview.get('skipped_areas') or [])}" if preview.get("skipped_areas") else ""))
-    for line in lines:
-        log("  " + line)
-    if not ready:
+    status = remit_status(period)
+    ready = [s for s in status if not s["done"]]
+    for s in status:
+        log(f"{s['area']}：{s['detail']}" + (f"（{s['total']:,}）" if s["total"] else ""))
+    lines = [f"{s['area']}：{s['total']:,}（{s['memo']}）" for s in ready]
+    notes = []
+    try:
+        tc = taichung_status(period)
+        if tc["applicable"] and tc["missing"]:
+            notes.append("台中固定費用請款還沒新增：" + "、".join(tc["missing"]) +
+                         ("（電費要輸入金額）" if tc["electricity_missing"] else ""))
+    except Exception as exc:
+        notes.append(f"台中固定費用請款檢查失敗：{exc}")
+    for note in notes:
+        log("⚠️ " + note)
+    if not ready and not notes:
         return 0
-    if get_mode("fixed_expense_remit", MODE_QUEUE) == MODE_QUEUE:
+    queued = 0
+    if ready and get_mode("fixed_expense_remit", MODE_QUEUE) == MODE_QUEUE:
         from tools.local_agent_queue import create_task
 
-        for plan in ready:
+        for s in ready:
             task = create_task("fubon.fixed_expense_transfer",
-                               {"area": plan["area"], "month": period, "cdp_url": "http://127.0.0.1:9222"},
+                               {"area": s["area"], "month": period, "cdp_url": "http://127.0.0.1:9222"},
                                created_by="排程系統")
-            log(f"已排入：{plan['area']} 富邦匯款給台北（{task.get('task_id', '')}）")
-        remind(f"【固定費用匯款】已排入 {len(ready)} 區富邦匯款，請用手機核准", "\n".join(lines),
-               "【固定費用匯款】")
-    else:
-        remind(f"【固定費用匯款】{len(ready)} 區待匯款，請確認後執行",
-               "\n".join(lines) + "\n\n請到 Tools App【財報】各區固定費用匯款勾選「執行富邦銀行匯款給台北」。",
-               "【固定費用匯款】")
+            queued += 1
+            log(f"已排入：{s['area']} 富邦匯款給台北（{task.get('task_id', '')}）")
+    title = (f"【固定費用匯款】已排入 {queued} 區富邦匯款，請用手機核准" if queued
+             else f"【固定費用匯款】{len(ready)} 區待匯款，請確認後執行" if ready
+             else "【固定費用匯款】台中固定費用請款待處理")
+    body = "\n".join(lines + notes) + "\n\n到 Tools App【整合執行】各區固定費用匯款（每月10日）處理。"
+    remind(title, body, "【固定費用匯款】")
     return 0
-
-
 def run_month_start(today: date) -> int:
     """05:00：排入月初整合執行，再做月初檢查（同時段同 workflow 只能派送一次，所以合併）。
     藍新每月 1 日 08:00 才寄手續費發票，所以不在半夜排。"""
