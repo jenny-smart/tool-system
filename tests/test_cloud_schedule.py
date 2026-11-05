@@ -134,13 +134,68 @@ class ScheduleTests(unittest.TestCase):
         jobs=[('scheduled_finance.yml',{'target':'deposit_report'},'deposit_report'),
               ('scheduled_finance.yml',{'target':'month_start_check'},'month_start_check')]
         calls=[]
-        def api(path, payload=None):
+        def api(path, payload=None, repo='', token=''):
             calls.append((path, payload))
             return {'workflow_runs':[{'display_title':'cloud-'+slot+'-deposit_report'}]} if payload is None else {}
         with patch.object(m,'plan',return_value=jobs), patch.object(m,'api',side_effect=api), patch('sys.argv',['cloud_schedule','--timestamp',str(int(when.timestamp()))]):
             m.main()
         dispatched=[p for _path, p in calls if p is not None]
         self.assertEqual(dispatched, [{'ref':'main','inputs':{'target':'month_start_check','scheduled_slot':slot+'-month_start_check'}}])
+
+    def _run_main(self, jobs, api, env=None):
+        now=dt.datetime.now(m.TZ)
+        when=now.replace(minute=(now.minute//10)*10,second=0,microsecond=0)
+        with patch.object(m,'plan',return_value=jobs), patch.object(m,'api',side_effect=api), \
+                patch.dict('os.environ', env or {}, clear=False), \
+                patch('sys.argv',['cloud_schedule','--timestamp',str(int(when.timestamp()))]):
+            m.main()
+        return when.strftime('%Y%m%dT%H%M')
+
+    def test_weekend_reminder_daily_1100_to_order_system(self):
+        for day in ['2026-11-05', '2026-11-06', '2026-11-08']:
+            self.assertIn(('jenny-smart/order-system:weekend-reminder-schedule.yml', {}), self.jobs(day+'T11:00'))
+        self.assertNotIn('weekend_reminder', self.keys('2026-11-05T10:50'))
+        self.assertEqual(ss.split_workflow('jenny-smart/order-system:weekend-reminder-schedule.yml'),
+                         ('jenny-smart/order-system', 'weekend-reminder-schedule.yml'))
+        self.assertEqual(ss.split_workflow('scheduled_daily.yml'), ('', 'scheduled_daily.yml'))
+
+    def test_cross_repo_dispatch_uses_repo_token(self):
+        calls=[]
+        def api(path, payload=None, repo='', token=''):
+            calls.append((path, payload, repo, token))
+            return {'workflow_runs':[]} if payload is None else {}
+        jobs=[('jenny-smart/order-system:weekend-reminder-schedule.yml', {}, 'weekend_reminder'),
+              ('scheduled_daily.yml', {'target':'notify'}, 'notify')]
+        slot=self._run_main(jobs, api, {'ORDER_SYSTEM_DISPATCH_TOKEN':'tok'})
+        sent=[(path, payload, repo, token) for path, payload, repo, token in calls if payload is not None]
+        self.assertEqual(sent[0], ('/actions/workflows/weekend-reminder-schedule.yml/dispatches',
+                                   {'ref':'main','inputs':{'scheduled_slot':slot+'-weekend_reminder'}},
+                                   'jenny-smart/order-system', 'tok'))
+        self.assertEqual(sent[1][2:], ('', ''))
+
+    def test_missing_cross_repo_token_does_not_block_other_jobs(self):
+        calls=[]
+        def api(path, payload=None, repo='', token=''):
+            calls.append((path, payload, repo))
+            return {'workflow_runs':[]} if payload is None else {}
+        jobs=[('jenny-smart/order-system:weekend-reminder-schedule.yml', {}, 'weekend_reminder'),
+              ('scheduled_daily.yml', {'target':'notify'}, 'notify')]
+        with patch.dict('os.environ', {'ORDER_SYSTEM_DISPATCH_TOKEN':''}), self.assertRaises(SystemExit):
+            self._run_main(jobs, api)
+        self.assertEqual([repo for _p, payload, repo in calls if payload is not None], [''])
+
+    def test_cross_repo_failure_does_not_block_other_jobs(self):
+        calls=[]
+        def api(path, payload=None, repo='', token=''):
+            if repo:
+                raise RuntimeError('HTTP 403')
+            calls.append(path)
+            return {'workflow_runs':[]} if payload is None else {}
+        jobs=[('jenny-smart/order-system:weekend-reminder-schedule.yml', {}, 'weekend_reminder'),
+              ('scheduled_daily.yml', {'target':'notify'}, 'notify')]
+        with self.assertRaises(SystemExit):
+            self._run_main(jobs, api, {'ORDER_SYSTEM_DISPATCH_TOKEN':'tok'})
+        self.assertTrue(any(path.endswith('/dispatches') for path in calls))
 
     def test_cloud_clock_skew(self):
         self.assertEqual(m.scheduled_time(1790755153).isoformat(), "2026-09-30T16:00:00+08:00")
