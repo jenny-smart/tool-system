@@ -1,0 +1,31 @@
+2026-11-05 21:32:31 [INFO] === 客服排程系統 run_id=3b4e7aec step=3 台北時間=2026-11-06 05:32:31 ===
+2026-11-05 21:32:31 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-11-05 21:32:31 [INFO] file_cache is only supported with oauth2client<4.0.0
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets.properties.title&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'window_start_time': '1793914306', 'quota_limit_value': '60', 'service': 'sheets.googleapis.com', 'quota_location': 'global', 'quota_unit': '1/min/{project}/{user}', 'consumer': 'projects/1042663213860'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+2026-11-05 21:32:40 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+[unified_log] 寫入統一執行 Log 失敗（不影響主流程）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets.properties.title&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_unit': '1/min/{project}/{user}', 'service': 'sheets.googleapis.com', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'quota_metric': 'sheets.googleapis.com/read_requests', 'window_start_time': '1793914306', 'consumer': 'projects/1042663213860', 'quota_location': 'global', 'quota_limit_value': '60'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+2026-11-05 21:32:41 [INFO] 信件日期（台北時間）：2026-11-05
+2026-11-05 21:32:54 [INFO]   [mail] text/plain 為空，fallback 到 text/html（3386 字元）
+2026-11-05 21:32:57 [INFO]   近三日營業額-台北 → 選中 17:25:04（與17:25差4s）
+2026-11-05 21:32:57 [INFO]   [debug] 行61 repr='2026-11-03：81分'
+2026-11-05 21:32:57 [INFO]   [debug] 行62 repr='2026-11-04：44分'
+2026-11-05 21:32:57 [INFO]   [debug] 行63 repr='2026-11-05：68分'
+2026-11-05 21:32:57 [INFO]   [debug] 行64 repr='【家電清潔】日營業額'
+2026-11-05 21:32:57 [INFO]   [debug] 行65 repr='2026-11-03：0分'
+2026-11-05 21:32:57 [INFO]   [debug] 行66 repr='2026-11-04：0分'
+2026-11-05 21:32:57 [INFO]   [debug] 行67 repr='2026-11-05：0分'
+2026-11-05 21:32:57 [INFO]   [debug] 行68 repr='【儲值金】日營業額'
+2026-11-05 21:33:05 [INFO]   [mail] text/plain 為空，fallback 到 text/html（1567 字元）
+2026-11-05 21:33:07 [INFO]   近三日營業額-台中 → 選中 17:25:07（與17:25差7s）
+2026-11-05 21:33:07 [INFO]   [debug] 行32 repr='2026-11-03：52分'
+2026-11-05 21:33:07 [INFO]   [debug] 行33 repr='2026-11-04：67分'
+2026-11-05 21:33:07 [INFO]   [debug] 行34 repr='2026-11-05：28分'
+2026-11-05 21:33:07 [INFO]   [debug] 行35 repr='【家電清潔】日營業額'
+2026-11-05 21:33:07 [INFO]   [debug] 行36 repr='2026-11-03：0分'
+2026-11-05 21:33:07 [INFO]   [debug] 行37 repr='2026-11-04：0分'
+2026-11-05 21:33:07 [INFO]   [debug] 行38 repr='2026-11-05：0分'
+2026-11-05 21:33:07 [INFO]   [debug] 行39 repr='【儲值金】日營業額'
+2026-11-05 21:33:07 [INFO]   台北：{'daily_value': 68, 'total_count': 295, 'total_amount': 589600}
+2026-11-05 21:33:07 [INFO]   台中：{'daily_value': 28, 'total_count': 152, 'total_amount': 303100}
+2026-11-05 21:33:09 [INFO] Step 3 完成，row=2455（27.5s）
+2026-11-05 21:33:11 [INFO] === 全部完成 run_id=3b4e7aec（29.6s）===
