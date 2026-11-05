@@ -157,11 +157,11 @@ DEFAULT_ROWS: list[list] = [
      MODE_DIRECT, ""],
     [True, "cash_gap_followup", "現金缺口補算（上游有新數字就重算）＋未完成提醒", "09:00", "每月", "2-10", "照跑",
      MODE_DIRECT, "缺的項目每天提醒到 10 日"],
-    [True, "fixed_expense_mail", "台北固定費用查信（AWS／震旦／眾點／台灣連線）", "09:00", "每月", "5,8,10", "照跑",
+    [True, "fixed_expense_mail", "台北固定費用查信（AWS／震旦／眾點／台灣連線）", "09:00", "每月", "5,8,10", "提前",
      MODE_DIRECT, ""],
-    [True, "fixed_expense_remit", "【整合執行】各區固定費用匯款（台中／桃園／新竹／高雄／學院＋台中請款）", "04:00", "每月", "10", "照跑",
+    [True, "fixed_expense_remit", "【整合執行】各區固定費用匯款（台中／桃園／新竹／高雄／學院＋台中請款）", "04:00", "每月", "10", "提前",
      MODE_QUEUE, "高雄 40000 固定；排入 Mac，需手機核准。學院 47911 自己轉帳，只提醒寫台北分錄"],
-    [True, "accounting_reminder", "會計事務所費用確認提醒", "10:00", "單月", "10", "照跑", MODE_DIRECT, ""],
+    [True, "accounting_reminder", "會計事務所費用確認提醒", "10:00", "單月", "10", "提前", MODE_DIRECT, ""],
     [True, "mof_serial", "【鯨躍發票】財政部字軌下載＋匯入＋配號（下一期）", "10:00", "雙月", "20", "提前", MODE_QUEUE,
      "雙月 20 日做下一期（例如 12 月做隔年 01-02）；需先登入財政部（圖形驗證碼）"],
     [True, "mof_serial_check", "字軌未完成提醒", "10:00", "雙月", "21-25", "照跑", MODE_DIRECT, ""],
@@ -376,6 +376,10 @@ OUTDATED_DEFAULTS = {
     # 2026-11-05 Jenny：名冊改 1、15 日，調薪 15 日，請款只有 15 日，遇例假日提前
     "field_roster_raise": ("15", "照跑", "field_roster"),
     "field_claim_review": ("15,月底", "照跑", "field_claim_review"),
+    # 2026-11-05 Jenny：各區固定費用匯款（10 日）、台北固定費用查信、會計事務所費用確認遇例假日提前
+    "fixed_expense_remit": ("10", "照跑", "fixed_expense_remit"),
+    "fixed_expense_mail": ("5,8,10", "照跑", "fixed_expense_mail"),
+    "accounting_reminder": ("10", "照跑", "accounting_reminder"),
 }
 
 
@@ -392,9 +396,13 @@ def _upgrade_outdated_rows(service, spreadsheet_id: str, rows: list[list], log: 
         if (cells[4], cells[5]) != (old_days, old_holiday) or new_key not in defaults:
             continue
         new = defaults[new_key]
-        data.append({"range": f"'{SHEET_NAME}'!B{offset + 2}:I{offset + 2}", "values": [new[1:9]]})
-        rows[offset] = [new_key]
-        log(f"「{SHEET_NAME}」第 {offset + 2} 列 {key} 改成新預設：{new_key} {new[2]} {new[4]} {new[5]}（{new[6]}）")
+        row_no = offset + 2
+        if new_key == key:  # 同一功能：只改 F 日期、G 遇例假日，名稱／時間等其他欄位保留
+            data.append({"range": f"'{SHEET_NAME}'!F{row_no}:G{row_no}", "values": [new[5:7]]})
+        else:  # 換功能代號：整列換成新預設
+            data.append({"range": f"'{SHEET_NAME}'!B{row_no}:I{row_no}", "values": [new[1:9]]})
+            rows[offset] = [new_key]
+        log(f"「{SHEET_NAME}」第 {row_no} 列 {key} 改成新預設：{new_key} {new[4]} {new[5]} 遇例假日{new[6]}")
     if data:
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=spreadsheet_id, body={"valueInputOption": "RAW", "data": data}).execute()

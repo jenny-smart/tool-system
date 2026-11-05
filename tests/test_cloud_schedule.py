@@ -76,12 +76,15 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(('scheduled_finance.yml',{'target':'accounting_reminder'}),self.jobs('2026-12-10T10:00'))
 
     def test_fixed_expense_mail_and_transfer(self):
-        for day in (5, 8, 10):
+        # 5、8、10 日，遇例假日提前（2026-11-05 Jenny）：11/8 週日 → 11/6
+        for day in (5, 6, 10):
             self.assertIn('fixed_expense_mail', self.keys('2026-11-%02dT09:00' % day))
-        self.assertNotIn('fixed_expense_mail', self.keys('2026-11-06T09:00'))
-        # 各區固定費用匯款：每月 10 日 04:00
+        self.assertNotIn('fixed_expense_mail', self.keys('2026-11-08T09:00'))
+        self.assertNotIn('fixed_expense_mail', self.keys('2026-11-09T09:00'))
+        # 各區固定費用匯款：每月 10 日 04:00，遇例假日提前（2026/10/9、10/10 連假 → 10/8）
         self.assertIn('fixed_expense_remit', self.keys('2026-11-10T04:00'))
-        self.assertIn('fixed_expense_remit', self.keys('2026-10-10T04:00'))
+        self.assertIn('fixed_expense_remit', self.keys('2026-10-08T04:00'))
+        self.assertNotIn('fixed_expense_remit', self.keys('2026-10-10T04:00'))
         self.assertNotIn('fixed_expense_remit', self.keys('2026-11-09T04:00'))
 
     def test_weekly_change_order_and_fubon(self):

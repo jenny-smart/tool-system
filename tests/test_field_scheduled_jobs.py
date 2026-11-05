@@ -80,10 +80,39 @@ def test_upgrade_outdated_rows_in_sheet():
             ["field_claim_review", "x", "06:00", "每月", "15,月底", "照跑"],
             ["field_trainee_fee", "x", "06:00", "每週", "五", "照跑"]]
     ss._upgrade_outdated_rows(Svc(), "id", rows, log=lambda *_: None)
-    assert [d["range"] for d in written] == ["'排程設定'!B3:I3", "'排程設定'!B4:I4"]
+    assert [d["range"] for d in written] == ["'排程設定'!B3:I3", "'排程設定'!F4:G4"]
     assert written[0]["values"][0][:6] == ["field_roster", "【月排程】新增專員名冊（台北／台中）", "06:00", "每月", "1,15", "提前"]
-    assert written[1]["values"][0][4:6] == ["15", "提前"]
+    assert written[1]["values"][0] == ["15", "提前"]
     assert rows[1] == ["field_roster"]
     written.clear()
     ss._upgrade_outdated_rows(Svc(), "id", [["field_claim_review", "x", "07:00", "每月", "15", "照跑"]], log=lambda *_: None)
     assert written == []
+
+
+
+def test_finance_rows_advance_on_holiday():
+    rules = {r.key: r for r in ss.default_rules()}
+    for key in ("fixed_expense_remit", "fixed_expense_mail", "accounting_reminder"):
+        assert rules[key].holiday == "提前"
+    written = []
+
+    class Svc:
+        def spreadsheets(self):
+            return self
+
+        def values(self):
+            return self
+
+        def batchUpdate(self, spreadsheetId, body):
+            written.extend(body["data"])
+            return self
+
+        def execute(self):
+            return {}
+
+    rows = [["fixed_expense_remit", "【財報】各區固定費用匯款（富邦匯款給台北）", "04:00", "每月", "10", "照跑"],
+            ["fixed_expense_mail", "x", "09:00", "每月", "5,8,10", "照跑"],
+            ["accounting_reminder", "x", "10:00", "單月", "10", "照跑"]]
+    ss._upgrade_outdated_rows(Svc(), "id", rows, log=lambda *_: None)
+    assert [(d["range"], d["values"][0]) for d in written] == [
+        ("'排程設定'!F2:G2", ["10", "提前"]), ("'排程設定'!F3:G3", ["5,8,10", "提前"]), ("'排程設定'!F4:G4", ["10", "提前"])]
