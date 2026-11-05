@@ -111,10 +111,11 @@ def synced_marker(status: str) -> str:
 
 
 def row_orders(row: list) -> list[str]:
-    """G 欄訂單＋J／K 欄寫「合併開立」時列出的訂單（2026-11-05 Jenny）。"""
-    from tools.invoice_center.merged import merged_order_numbers
+    """合併開立要回寫發票號碼的訂單：G 欄原訂單＋J／K 欄列出的所有訂單（2026-11-05 Jenny）；不是合併開立只有 G 欄。"""
+    from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, merged_order_numbers
 
-    return merged_order_numbers(_cell(row, "G"), _cell(row, "J"), _cell(row, "K"))
+    return merged_order_numbers(_cell(row, "G"), _cell(row, "J"), _cell(row, "K"),
+                                merged=_cell(row, "C") in MERGED_INVOICE_DETAILS)
 
 
 def row_synced_marker(row: list, status: str) -> str:
@@ -133,6 +134,12 @@ def needs_sync(row: list) -> bool:
     if len(row_orders(row)) == len(split_order_numbers(_cell(row, "G"))):
         done.add(synced_marker(status))  # G 欄已列出全部訂單：舊標記也算回寫過
     return _cell(row, "AE") not in done
+
+
+def _mark_merged(item: dict, orders: list[str]) -> None:
+    """合併開立：開完發票一定接著回寫，G 欄原訂單＋J／K 欄所有訂單都寫發票號碼及財務備註。"""
+    item["merged_orders"] = list(orders)
+    item["progress"].append(f"合併開立：開立後回寫 {len(orders)} 張訂單發票號碼（{'、'.join(orders)}）")
 
 
 def needs_invoice_after_paid(row: list) -> bool:
@@ -166,7 +173,7 @@ def ready_target(row: list) -> Optional[str]:
 def partial_sync_due(row: list) -> bool:
     """還沒完成、但已有進度且尚未以目前狀態回寫過的列 → 先回寫目前進度。"""
     status = _cell(row, "B")
-    if status not in PARTIAL_SYNC_STATUSES or _cell(row, "AE") == synced_marker(status):
+    if status not in PARTIAL_SYNC_STATUSES or _cell(row, "AE") in (synced_marker(status), row_synced_marker(row, status)):
         return False
     if status == "待收款":
         return bool(_cell(row, "O"))
@@ -180,7 +187,7 @@ def _add_partial_sync(item: dict, row: list) -> None:
         item["actions"].append("sync")
         item["target_status"] = item["status"]
         item["progress"].append("先回寫目前進度，完成後再回寫一次")
-    elif _cell(row, "AE") == synced_marker(item["status"]):
+    elif _cell(row, "AE") in (synced_marker(item["status"]), row_synced_marker(row, item["status"])):
         when = _cell(row, "AD")
         item["progress"].append(f"已先回寫目前進度{f'（{when}）' if when else ''}，B 欄完成後需再回寫")
 
@@ -228,6 +235,8 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         item["amount"] = _amount(_cell(row, "N")) or (f"{len(orders)} 張訂單" if len(orders) >= 2 else "")
         item["actions"].append("invoice")
         item["progress"].append("已收款、尚未開發票：先開立發票" + ("（合併開立，以第一張訂單資料）" if len(orders) >= 2 else ""))
+        if len(orders) >= 2:
+            _mark_merged(item, orders)
         return item
     if status in DONE_STATUSES:
         if not needs_sync(row):
@@ -306,6 +315,8 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             item["missing"].append("缺收款金額（N）")
         if not _cell(row, "O"):
             item["actions"].append("invoice")
+            if len(orders := row_orders(row)) >= 2:
+                _mark_merged(item, orders)
         else:
             item["progress"].append("發票 ✓")
             if not _cell(row, "AA"):
@@ -340,10 +351,11 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         if item["detail"] in MERGED_INVOICE_DETAILS or (len(orders) >= 2 and not is_triplicate):
             # 2026-11 Jenny：合併開立發票——以第一張訂單的發票資料開一張（品項＝各訂單合計），回寫時每張訂單都寫發票號碼
             if len(orders) < 2:
-                item["missing"].append("合併開立發票：G 欄要有兩張以上訂單編號")
+                item["missing"].append("合併開立發票：G／J／K 欄要有兩張以上訂單編號")
             else:
                 item["amount"] = f"{len(orders)} 張訂單"
                 item["actions"].append("invoice")
+                _mark_merged(item, orders)
             return item
         if item["detail"] in TRIPLICATE_DETAILS:
             # 2026-11 Jenny：二聯改三聯直接執行（作廢或全額折讓原票 → 開新三聯發票），不再到【鯨躍發票】逐筆處理
@@ -433,8 +445,12 @@ def build_plan(items: list[dict], do_sync: bool) -> list[dict[str, Any]]:
                                  if action in item.get("selected", item["actions"]))
             if action_rows:
                 steps[action] = action_rows
-        if steps or do_sync:
-            plan.append({"region": region, "steps": steps, "sync_rows": rows if do_sync else []})
+        # 合併開立發票：開立後一定回寫（每張訂單都寫發票號碼），不受「執行完後回寫系統」勾選影響
+        merged_rows = sorted(int(item["row"]) for item in region_items
+                             if item.get("merged_orders") and "invoice" in item.get("selected", item["actions"]))
+        sync_rows = rows if do_sync else merged_rows
+        if steps or sync_rows:
+            plan.append({"region": region, "steps": steps, "sync_rows": sync_rows})
     return plan
 
 

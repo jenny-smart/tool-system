@@ -450,7 +450,7 @@ def test_merged_invoice_rows_go_to_invoice():
     item = plan(B="待處理發票", C="異動發票", G=multi)
     assert item["actions"] == ["invoice"] and item["amount"] == "3 張訂單"
     assert plan(B="待處理發票", C="合併開立發票", G=multi)["actions"] == ["invoice"]
-    assert plan(B="待處理發票", C="合併開立發票")["missing"] == ["合併開立發票：G 欄要有兩張以上訂單編號"]
+    assert plan(B="待處理發票", C="合併開立發票")["missing"] == ["合併開立發票：G／J／K 欄要有兩張以上訂單編號"]
     # 寫了改三聯的仍走二聯改三聯
     tri = plan(B="待處理發票", C="異動發票", G=multi, K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")
     assert tri["actions"] == ["triplicate"]
@@ -534,8 +534,15 @@ def test_merged_orders_listed_in_j_note():
                 AE="更新系統（B欄：已收款）｜合併4張") is None
     # G 已列全部訂單的舊列不用重新回寫
     assert plan(B="已收款", C="異動發票", G="LC00217202 LC00217177", O="AB1", AE="更新系統（B欄：已收款）") is None
-    # J 沒寫「合併」的訂單編號不算
+    # 不是合併開立：J 沒寫「合併」、G 只有一張 → 只有 G
     assert batch.row_orders(row(G="LC00217389", J="原訂單 LC00217386 改期")) == ["LC00217389"]
+    # 合併開立（G 多張）→ G 原訂單＋J／K 所有訂單
+    g = "LC00217389\nLC00217386\nLC00217387\nLC00217388 \nLC00217389"
+    assert batch.row_orders(row(G=g, K="另有 LC00217400")) == four + ["LC00217400"]
+    # 合併開立一定接回寫，不受「回寫系統」勾選影響
+    item = plan(B="待處理發票", C="異動發票", G=g, J=j)
+    assert item["merged_orders"] == four and "回寫 4 張訂單發票號碼" in item["progress"][-1]
+    assert batch.build_plan([dict(item, row=48)], do_sync=False)[0]["sync_rows"] == [48]
 
     posted = []
 

@@ -1335,14 +1335,14 @@ def split_order_numbers(text: str) -> list:
     return result
 
 
-def merged_order_numbers(order_text: str, *notes: str) -> list:
-    """G 欄訂單，再加上 J／K 欄寫「合併開立」時列出的訂單（2026-11-05 Jenny：G 只填一張、J 寫合併開立也要每張回寫）。"""
+def merged_order_numbers(order_text: str, *notes: str, merged: bool = False) -> list:
+    """合併開立要回寫發票號碼的訂單：G 欄原訂單＋J／K 欄列出的所有訂單（2026-11-05 Jenny）。
+    合併開立＝G 欄有兩張以上、C 欄是合併開立發票（merged=True），或 J／K 寫了「合併」。"""
     result = split_order_numbers(order_text)
+    if not (merged or len(result) >= 2 or any("合併" in str(note or "") for note in notes)):
+        return result
     for note in notes:
-        text = str(note or "")
-        if "合併" not in text:
-            continue
-        for order_no in (m.group(0).upper() for m in _ORDER_NO_RE.finditer(text)):
+        for order_no in (m.group(0).upper() for m in _ORDER_NO_RE.finditer(str(note or ""))):
             if order_no not in result:
                 result.append(order_no)
     return result
@@ -1955,7 +1955,8 @@ def sync_one_to_purchase_edit(item: dict, session: requests.Session, ui_logger=N
     - 細項是異動發票／二聯改三聯：照狀態回填外，新發票（O）也寫進訂單發票號碼
     """
     raw_row = item.get("raw") or []
-    orders = merged_order_numbers(item["order_no"], _sheet_cell(raw_row, "J"), _sheet_cell(raw_row, "K"))
+    orders = merged_order_numbers(item["order_no"], _sheet_cell(raw_row, "J"), _sheet_cell(raw_row, "K"),
+                                  merged=_sheet_cell(raw_row, "C").strip() in ("合併開立發票", "合併發票"))
     if len(orders) >= 2:
         for order_no in orders:
             _post_purchase_edit(order_no, session, lambda form, controls, _order: apply_merged_invoice_to_form(
@@ -2029,7 +2030,8 @@ def sync_pending_rows(region: str, selected_rows: list, session: requests.Sessio
         try:
             sync_one_to_purchase_edit(item, session=session, ui_logger=ui_logger)
             raw_row = item.get("raw") or []
-            merged = merged_order_numbers(item["order_no"], _sheet_cell(raw_row, "J"), _sheet_cell(raw_row, "K"))
+            merged = merged_order_numbers(item["order_no"], _sheet_cell(raw_row, "J"), _sheet_cell(raw_row, "K"),
+                                          merged=_sheet_cell(raw_row, "C").strip() in ("合併開立發票", "合併發票"))
             mark_sheet_row_done(region, item["sheet_row"], item["status"], ui_logger=ui_logger,
                                 merged_count=len(merged) if len(merged) >= 2 else 0)
             result["success"] += 1

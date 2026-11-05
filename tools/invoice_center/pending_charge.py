@@ -35,7 +35,8 @@ def get_pending_invoice_candidates(area: str) -> list[dict[str, Any]]:
         is_fare_invoice = status == "待處理發票" and detail == "車馬費發票"
         # 合併開立：C 欄寫「合併開立發票」，或 G 欄有兩張以上訂單（例如「異動發票」一次開多張訂單）；改三聯走二聯改三聯
         k_note = str(padded[9] or "")
-        order_nos = merged_order_numbers(order_no, padded[8], k_note)  # G 欄＋J／K 欄「合併開立」列出的訂單
+        # G 欄原訂單＋J／K 欄列出的所有訂單（合併開立時）
+        order_nos = merged_order_numbers(order_no, padded[8], k_note, merged=detail in MERGED_INVOICE_DETAILS)
         multi = len(order_nos) >= 2
         triplicate = bool(re.search(r"(?:改|轉)\s*三聯", f"{detail} {k_note}"))
         # 已收款但還沒開發票的異動發票／合併開立（2026-11 Jenny）
