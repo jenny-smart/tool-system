@@ -15,8 +15,10 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
   G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期遇例假日改到前一個工作日）
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
+  J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system），程式自動填，顯示用
 
-功能也可以派送到其他 repo 的 workflow（例如 order-system 的週末提醒），見 EXTERNAL_DISPATCH_TOKENS。
+功能也可以派送到其他 repo 的 workflow（例如 order-system 的週末提醒、investment-system 的
+月底轉值），見 EXTERNAL_DISPATCH_TOKENS。
 """
 from __future__ import annotations
 
@@ -26,7 +28,9 @@ from datetime import date, datetime, timedelta
 from typing import Callable, Iterable, Optional
 
 SHEET_NAME = "排程設定"
-HEADER = ["啟用", "功能代號", "功能名稱", "時間", "頻率", "日期／星期", "遇例假日", "執行方式", "備註"]
+HEADER = ["啟用", "功能代號", "功能名稱", "時間", "頻率", "日期／星期", "遇例假日", "執行方式", "備註", "系統名稱"]
+SYSTEM_COL = "J"  # 系統名稱欄（放最後，前面各欄位置不變）
+THIS_SYSTEM = "tool-system"
 
 MODE_DIRECT = "直接執行"
 MODE_QUEUE = "盤點後自動排入"
@@ -67,6 +71,10 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "fubon_pending_check": ("scheduled_fubon_pending_check.yml", {}),
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
+    # investment-system（個人投資總帳 Jennyall／總覽）
+    "invest_month_end": ("jenny-smart/investment-system:monthly-roll.yml", {"job": "month-end"}),
+    "invest_fund_freeze": ("jenny-smart/investment-system:monthly-roll.yml", {"job": "fund"}),
+    "invest_month_roll": ("jenny-smart/investment-system:monthly-roll.yml", {"job": "roll"}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -169,6 +177,14 @@ DEFAULT_ROWS: list[list] = [
      MODE_DIRECT, "過了應完成日還沒做完的項目合併成一則提醒"],
     [True, "yuanta_statement", "元大明細下載（排入 Mac）", "11:00", "每月", "25", "提前", MODE_QUEUE, ""],
     [True, "gmail_401", "Gmail 401 歸檔", "00:00", "每月", "20", "照跑", MODE_DIRECT, ""],
+    # investment-system：2026-11-06 Jenny 確認
+    [True, "invest_month_end", "【投資】Jennyall 月底轉值（4～36 列股票＋64～67 列）", "23:50", "每月", "月底", "照跑",
+     MODE_DIRECT, "該月兩欄的公式改成值"],
+    [True, "invest_fund_freeze", "【投資】Jennyall 基金月底淨值到了就轉值（4～36 列基金）", "00:30~23:30 每小時", "每月",
+     "1-7", "照跑", MODE_DIRECT,
+     "總覽 G 欄每檔基金淨值日期都到上月最後一個工作天才轉；7 日 23:00 後仍沒到齊就照當下值轉並提醒"],
+    [True, "invest_month_roll", "【投資】總覽換到本月 Jennyall／細帳欄", "00:10", "每月", "1-7", "照跑", MODE_DIRECT,
+     "已換好就不動，2～7 日是補跑"],
 ]
 
 
@@ -345,6 +361,7 @@ def due(rules: Iterable[Rule], when: datetime, is_workday: Callable[[date], bool
 # 派送到其他 repo 時用的 token（GitHub Secret 名稱）；token 需要該 repo 的 Actions: Read and write。
 EXTERNAL_DISPATCH_TOKENS = {
     "jenny-smart/order-system": "ORDER_SYSTEM_DISPATCH_TOKEN",
+    "jenny-smart/investment-system": "INVESTMENT_SYSTEM_DISPATCH_TOKEN",
 }
 
 
@@ -354,6 +371,19 @@ def split_workflow(workflow: str) -> tuple[str, str]:
         repo, name = workflow.split(":", 1)
         return repo.strip(), name.strip()
     return "", workflow
+
+
+def system_name(key: str) -> str:
+    """功能代號 → 系統名稱（派送到哪個 repo），寫進「排程設定」J 欄。"""
+    if key not in FUNCTIONS:
+        return ""
+    repo, _name = split_workflow(FUNCTIONS[key][0])
+    return repo.split("/")[-1] if repo else THIS_SYSTEM
+
+
+def with_system(row: list) -> list:
+    """DEFAULT_ROWS 的一列（A～I）補上 J 系統名稱。"""
+    return list(row) + [""] * (9 - len(row)) + [system_name(str(row[1]))]
 
 
 def dispatch_for(rule: Rule, when: datetime) -> tuple[str, dict]:
@@ -422,7 +452,7 @@ def ensure_sheet(service=None, spreadsheet_id: str = "", log: Callable[[str], No
         ).execute()
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A1", valueInputOption="RAW",
-            body={"values": [HEADER] + DEFAULT_ROWS},
+            body={"values": [HEADER] + [with_system(r) for r in DEFAULT_ROWS]},
         ).execute()
         log(f"已建立「{SHEET_NAME}」分頁（{len(DEFAULT_ROWS)} 個功能）")
         return True
@@ -433,11 +463,35 @@ def ensure_sheet(service=None, spreadsheet_id: str = "", log: Callable[[str], No
     missing = [row for row in DEFAULT_ROWS if row[1] not in have]
     if missing:
         service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A:I", valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS", body={"values": missing},
+            spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A:{SYSTEM_COL}", valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS", body={"values": [with_system(r) for r in missing]},
         ).execute()
         log(f"「{SHEET_NAME}」補上新功能：{'、'.join(r[1] for r in missing)}")
+    _fill_system_column(service, spreadsheet_id, rows, log)
     return False
+
+
+def _fill_system_column(service, spreadsheet_id: str, rows: list[list], log: Callable[[str], None]) -> None:
+    """J 欄沒有標題就補「系統名稱」；既有列 J 欄空白、功能代號認得的就填上（不改有填的）。
+
+    rows＝B2:G 的值（_upgrade_outdated_rows 處理過）；新補上的列 append 時已經帶 J。"""
+    current = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!{SYSTEM_COL}1:{SYSTEM_COL}{len(rows) + 1}",
+    ).execute().get("values", [])
+    current += [[]] * (len(rows) + 1 - len(current))
+    data = []
+    if not (current[0] and str(current[0][0]).strip()):
+        data.append({"range": f"'{SHEET_NAME}'!{SYSTEM_COL}1", "values": [[HEADER[-1]]]})
+    for offset, row in enumerate(rows):
+        key = str(row[0]).strip() if row else ""
+        cell = current[offset + 1]
+        name = system_name(key)
+        if name and not (cell and str(cell[0]).strip()):
+            data.append({"range": f"'{SHEET_NAME}'!{SYSTEM_COL}{offset + 2}", "values": [[name]]})
+    if data:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"valueInputOption": "RAW", "data": data}).execute()
+        log(f"「{SHEET_NAME}」系統名稱欄補上 {len(data)} 格")
 
 
 def load_rules(log: Callable[[str], None] = print) -> tuple[list[Rule], bool]:

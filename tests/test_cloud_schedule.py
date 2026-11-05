@@ -162,6 +162,59 @@ class ScheduleTests(unittest.TestCase):
                          ('jenny-smart/order-system', 'weekend-reminder-schedule.yml'))
         self.assertEqual(ss.split_workflow('scheduled_daily.yml'), ('', 'scheduled_daily.yml'))
 
+    def test_investment_system_month_end_fund_and_roll(self):
+        wf = 'jenny-smart/investment-system:monthly-roll.yml'
+        # 月底 23:50 月底轉值（2026-10-31 週六照跑）
+        self.assertIn((wf, {'job': 'month-end'}), self.jobs('2026-10-31T23:50'))
+        self.assertNotIn('invest_month_end', self.keys('2026-10-30T23:50'))
+        # 1～7 日每小時 :30 基金轉值，8 日就不跑
+        for value in ['2026-11-01T00:30', '2026-11-03T09:30', '2026-11-07T23:30']:
+            self.assertIn((wf, {'job': 'fund'}), self.jobs(value))
+        self.assertNotIn('invest_fund_freeze', self.keys('2026-11-03T09:40'))
+        self.assertNotIn('invest_fund_freeze', self.keys('2026-11-08T09:30'))
+        # 1～7 日 00:10 換欄
+        self.assertIn((wf, {'job': 'roll'}), self.jobs('2026-11-01T00:10'))
+        self.assertIn((wf, {'job': 'roll'}), self.jobs('2027-01-07T00:10'))
+        self.assertNotIn('invest_month_roll', self.keys('2026-11-08T00:10'))
+        self.assertEqual(ss.EXTERNAL_DISPATCH_TOKENS['jenny-smart/investment-system'],
+                         'INVESTMENT_SYSTEM_DISPATCH_TOKEN')
+
+    def test_system_name(self):
+        self.assertEqual(ss.system_name('notify'), 'tool-system')
+        self.assertEqual(ss.system_name('weekend_reminder'), 'order-system')
+        self.assertEqual(ss.system_name('invest_month_roll'), 'investment-system')
+        self.assertEqual(ss.system_name('nope'), '')
+        self.assertEqual(ss.HEADER[9], '系統名稱')
+        self.assertEqual(ss.with_system(ss.DEFAULT_ROWS[0])[9], 'tool-system')
+        # 多一欄不影響解析
+        self.assertEqual(ss.parse_row(ss.with_system(ss.DEFAULT_ROWS[0])).errors, [])
+
+    def test_ensure_sheet_fills_system_column_without_touching_filled_cells(self):
+        from unittest.mock import MagicMock
+        service = MagicMock()
+        values = service.spreadsheets.return_value.values.return_value
+        service.spreadsheets.return_value.get.return_value.execute.return_value = {
+            'sheets': [{'properties': {'title': ss.SHEET_NAME}}]}
+        existing = [[r[1]] + r[2:7] for r in ss.DEFAULT_ROWS]
+        existing.insert(2, [])  # 中間一列空白
+        responses = {
+            f"'{ss.SHEET_NAME}'!B2:G": {'values': existing},
+            f"'{ss.SHEET_NAME}'!J1:J{len(existing) + 1}": {'values': [[], ['自訂名稱']]},
+        }
+        values.get.side_effect = lambda spreadsheetId, range: MagicMock(
+            execute=MagicMock(return_value=responses[range]))
+        logs = []
+        self.assertFalse(ss.ensure_sheet(service, 'sid', log=logs.append))
+        values.append.assert_not_called()
+        data = values.batchUpdate.call_args.kwargs['body']['data']
+        cells = {d['range']: d['values'][0][0] for d in data}
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J1"], '系統名稱')
+        self.assertNotIn(f"'{ss.SHEET_NAME}'!J2", cells)   # 已填「自訂名稱」不改
+        self.assertNotIn(f"'{ss.SHEET_NAME}'!J4", cells)   # 空白列
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J3"], 'tool-system')
+        last = len(existing) + 1
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last}"], 'investment-system')
+
     def test_cross_repo_dispatch_uses_repo_token(self):
         calls=[]
         def api(path, payload=None, repo='', token=''):
