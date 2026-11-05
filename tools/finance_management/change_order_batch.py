@@ -128,12 +128,9 @@ def needs_sync(row: list) -> bool:
     status = _cell(row, "B")
     if status not in DONE_STATUSES:
         return False
-    done = {row_synced_marker(row, status)}
-    from tools.invoice_center.merged import split_order_numbers
-
-    if len(row_orders(row)) == len(split_order_numbers(_cell(row, "G"))):
-        done.add(synced_marker(status))  # G 欄已列出全部訂單：舊標記也算回寫過
-    return _cell(row, "AE") not in done
+    # 合併開立的列（G 多張或 J／K 列出訂單）AE 要有「｜合併N張」才算每張都回寫過；
+    # 舊標記可能是 G 欄補齊訂單前、只回寫一張時留下的，重新列出補回寫（重寫同一發票號碼不影響）
+    return _cell(row, "AE") != row_synced_marker(row, status)
 
 
 def _mark_merged(item: dict, orders: list[str]) -> None:
@@ -245,8 +242,8 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         item["actions"].append("sync")
         item["target_status"] = status
         orders = row_orders(row)
-        if len(orders) >= 2 and _cell(row, "AE") == synced_marker(status) and needs_sync(row):
-            item["progress"].append(f"合併開立：之前只回寫 G 欄訂單，補回寫 {len(orders)} 張訂單的發票號碼")
+        if len(orders) >= 2 and _cell(row, "AE") == synced_marker(status):
+            item["progress"].append(f"合併開立：之前沒有每張訂單都回寫，補回寫 {len(orders)} 張訂單的發票號碼")
         return item
 
     target = ready_target(row)
