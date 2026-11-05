@@ -112,7 +112,7 @@ DEFAULT_ROWS: list[list] = [
     [True, "notify", "寄送日排程結果通知", "07:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "fubon_statement", "富邦明細下載（排入 Mac）", "08:00,11:00,16:30", "每日", "", "照跑", MODE_QUEUE,
      "11:00、16:30 例假日由程式略過"],
-    [False, "atm_unpaid", "ATM 待付款清單同步（台北／台中）", "09:00~18:00 每30分鐘", "每日", "", "略過", MODE_DIRECT,
+    [False, "atm_unpaid", "ATM 待付款清單同步（台北／台中）", "09:00", "每日", "", "略過", MODE_DIRECT,
      "取代 Mac 的 ATM 本機排程：先移除 Mac launchd 再勾選啟用，避免兩邊同時貼上"],
     [True, "change_order_check", "清潔異動每日檢查（未備妥建 11:00 提醒）", "10:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "weekend_reminder", "週末／例假日服務提醒（休假前 2 天產生名單）", "11:00", "每日", "", "照跑", MODE_DIRECT,
