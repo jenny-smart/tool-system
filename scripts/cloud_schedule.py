@@ -39,10 +39,10 @@ def plan(when, rules=None, is_workday=None):
         jobs.append((workflow, inputs, rule.key))
     return jobs
 
-def api(path, payload=None):
-    req = urllib.request.Request('https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY'] + path,
+def api(path, payload=None, repo='', token=''):
+    req = urllib.request.Request('https://api.github.com/repos/' + (repo or os.environ['GITHUB_REPOSITORY']) + path,
         data=None if payload is None else json.dumps(payload).encode(),
-        headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json',
+        headers={'Authorization': 'Bearer ' + (token or os.environ['GH_TOKEN']), 'Accept': 'application/vnd.github+json',
                  'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=30) as response:
         body = response.read()
@@ -73,29 +73,53 @@ def main():
     print('Taipei slot:', when.isoformat(), 'tasks:', jobs)
     if args.dry_run:
         return
+    from tools.scheduling import schedule_settings as ss
+
+    failures = []
     for workflow, inputs, key in jobs:
-        # 每個功能各自去重：同時段同一個 workflow 的不同功能都會派送
-        job_slot = slot + '-' + key
-        title = 'cloud-' + job_slot
-        # One router concurrency group serializes retries. Check every returned page;
-        # any existing run counts, including failed jobs (operator can rerun them).
-        query = urllib.parse.urlencode({'event': 'workflow_dispatch', 'created': '>=' + when.astimezone(dt.timezone.utc).isoformat(), 'per_page': 100})
-        found = False
-        for page in range(1, 101):
-            runs = api('/actions/workflows/' + workflow + '/runs?' + query + '&page=' + str(page))['workflow_runs']
-            if any(run['display_title'] == title for run in runs):
-                found = True
-                break
-            if len(runs) < 100:
-                break
-        else:
-            raise RuntimeError('Run listing exceeded safe pagination limit')
-        if found:
-            print('Already dispatched:', workflow, job_slot)
-            continue
-        api('/actions/workflows/' + workflow + '/dispatches',
-            {'ref': 'main', 'inputs': dict(inputs, scheduled_slot=job_slot)})
-        print('Dispatched:', workflow, job_slot)
+        repo, workflow = ss.split_workflow(workflow)
+        token = ''
+        if repo:
+            secret = ss.EXTERNAL_DISPATCH_TOKENS.get(repo, '')
+            token = os.environ.get(secret, '') if secret else ''
+            if not token:
+                print(f'::error::{key} 要派送到 {repo}，但沒有設定 {secret or "派送 token"}，這次略過')
+                failures.append(key)
+                continue
+        try:
+            dispatch_one(workflow, inputs, slot + '-' + key, when, repo, token)
+        except Exception as exc:
+            if not repo:
+                raise
+            print(f'::error::{key} 派送到 {repo} 失敗：{exc}')
+            failures.append(key)
+    if failures:
+        raise SystemExit('派送失敗：' + '、'.join(failures))
+
+
+def dispatch_one(workflow, inputs, job_slot, when, repo='', token=''):
+    """派送一個功能；同一時段已派送過（含失敗的 run）就不重派。"""
+    # 每個功能各自去重：同時段同一個 workflow 的不同功能都會派送
+    title = 'cloud-' + job_slot
+    # One router concurrency group serializes retries. Check every returned page;
+    # any existing run counts, including failed jobs (operator can rerun them).
+    query = urllib.parse.urlencode({'event': 'workflow_dispatch', 'created': '>=' + when.astimezone(dt.timezone.utc).isoformat(), 'per_page': 100})
+    found = False
+    for page in range(1, 101):
+        runs = api('/actions/workflows/' + workflow + '/runs?' + query + '&page=' + str(page), repo=repo, token=token)['workflow_runs']
+        if any(run['display_title'] == title for run in runs):
+            found = True
+            break
+        if len(runs) < 100:
+            break
+    else:
+        raise RuntimeError('Run listing exceeded safe pagination limit')
+    if found:
+        print('Already dispatched:', repo or 'this repo', workflow, job_slot)
+        return
+    api('/actions/workflows/' + workflow + '/dispatches',
+        {'ref': 'main', 'inputs': dict(inputs, scheduled_slot=job_slot)}, repo=repo, token=token)
+    print('Dispatched:', repo or 'this repo', workflow, job_slot)
 
 if __name__ == '__main__':
     main()

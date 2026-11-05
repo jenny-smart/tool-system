@@ -1,6 +1,8 @@
 *.csv
 *.html
 *.json
+# order-system 同步過來的設定檔（辦公日曆、ATM 排程）要進版控
+!tools/orders_system/config/*.json
 .DS_Store
 
 logs/*

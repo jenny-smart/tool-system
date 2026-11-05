@@ -15,6 +15,8 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
   G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期遇例假日改到前一個工作日）
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
+
+功能也可以派送到其他 repo 的 workflow（例如 order-system 的週末提醒），見 EXTERNAL_DISPATCH_TOKENS。
 """
 from __future__ import annotations
 
@@ -59,6 +61,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "change_order_check": ("scheduled_change_order_check.yml", {"target": "check"}),
     "change_order_scan": ("scheduled_change_order_check.yml", {"target": "batch_scan"}),
     "fubon_pending_check": ("scheduled_fubon_pending_check.yml", {}),
+    # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
+    "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -111,6 +115,8 @@ DEFAULT_ROWS: list[list] = [
     [False, "atm_unpaid", "ATM 待付款清單同步（台北／台中）", "09:00~18:00 每30分鐘", "每日", "", "略過", MODE_DIRECT,
      "取代 Mac 的 ATM 本機排程：先移除 Mac launchd 再勾選啟用，避免兩邊同時貼上"],
     [True, "change_order_check", "清潔異動每日檢查（未備妥建 11:00 提醒）", "10:00", "每日", "", "照跑", MODE_DIRECT, ""],
+    [True, "weekend_reminder", "週末／例假日服務提醒（休假前 2 天產生名單）", "11:00", "每日", "", "照跑", MODE_DIRECT,
+     "每天檢查；程式依辦公日曆判斷是否為休假前 2 天（一般週四，遇國定假日提前），不是就略過。只寫追蹤表，不發 LINE"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,
@@ -299,6 +305,20 @@ def due(rules: Iterable[Rule], when: datetime, is_workday: Callable[[date], bool
     hm = when.strftime("%H:%M")
     return [r for r in rules if r.enabled and not r.errors and hm in r.times
             and matches_day(r, when.date(), is_workday)]
+
+
+# 派送到其他 repo 時用的 token（GitHub Secret 名稱）；token 需要該 repo 的 Actions: Read and write。
+EXTERNAL_DISPATCH_TOKENS = {
+    "jenny-smart/order-system": "ORDER_SYSTEM_DISPATCH_TOKEN",
+}
+
+
+def split_workflow(workflow: str) -> tuple[str, str]:
+    """「owner/repo:檔名」→ (owner/repo, 檔名)；本 repo 的 workflow 回傳 ("", 檔名)。"""
+    if ":" in workflow:
+        repo, name = workflow.split(":", 1)
+        return repo.strip(), name.strip()
+    return "", workflow
 
 
 def dispatch_for(rule: Rule, when: datetime) -> tuple[str, dict]:

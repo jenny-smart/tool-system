@@ -32,6 +32,8 @@ jobs:
       - name: Dispatch scheduled functions（主控表「排程設定」）
         env:
           GH_TOKEN: ${{ github.token }}
+          # 派送到 order-system（週末提醒）用；fine-grained token，order-system 的 Actions: Read and write
+          ORDER_SYSTEM_DISPATCH_TOKEN: ${{ secrets.ORDER_SYSTEM_DISPATCH_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
           GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
