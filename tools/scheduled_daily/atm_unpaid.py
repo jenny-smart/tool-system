@@ -8,7 +8,7 @@
 帳密讀 TAIPEI_／TAICHUNG_EMAIL／PASSWORD，Google 讀 GOOGLE_SERVICE_ACCOUNT。
 
 tool-system 是 public repo，Actions 紀錄任何人都看得到：同步過程的逐筆訊息（客戶、訂單）不印出，
-只印各區筆數；出錯時才印錯誤訊息。
+只印各區筆數；出錯時才印錯誤訊息。逐筆的查到／略過明細只寫進執行 Log 試算表（私人），方便追查。
 """
 from __future__ import annotations
 
@@ -43,6 +43,17 @@ def _log(status: str, message: str) -> None:
         pass
 
 
+def detail_for_log(detail_text: str, limit: int = 60) -> str:
+    """從逐筆訊息挑出查到的訂單（「  - 」開頭）與略過／警告（⚠️），寫進私人的執行 Log。"""
+    picked = [
+        line.strip() for line in str(detail_text or "").splitlines()
+        if line.startswith("  - ") or "⚠️" in line or "單張複查完成" in line
+    ]
+    if len(picked) > limit:
+        picked = picked[:limit] + [f"…另有 {len(picked) - limit} 行"]
+    return "\n".join(picked)
+
+
 def run(today: str | None = None) -> int:
     from tools.memo_system import atm
 
@@ -53,12 +64,14 @@ def run(today: str | None = None) -> int:
             result = atm.run_scheduled_unpaid_sync(date_until=today)
     except Exception as exc:
         print(f"❌ {TOOL_NAME}失敗：{exc}")
-        _log("失敗", str(exc))
+        extra = detail_for_log(detail.getvalue())
+        _log("失敗", str(exc) + (f"\n{extra}" if extra else ""))
         return 1
     lines = summary_lines(result)
     for line in lines:
         print(f"✅ {line}")
-    _log("完成", "；".join(lines))
+    extra = detail_for_log(detail.getvalue())
+    _log("完成", "；".join(lines) + (f"\n{extra}" if extra else ""))
     return 0
 
 
