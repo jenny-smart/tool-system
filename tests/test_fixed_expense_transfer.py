@@ -229,3 +229,36 @@ class FixedExpenseTransferTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FixedAmountAreaTests(unittest.TestCase):
+    """2026-11 Jenny：高雄 40000、學院 47911 每月固定匯給台北（內勤薪資），不看行銷費用總表。"""
+
+    def test_fixed_amount_plans(self):
+        kh = transfer.fixed_amount_plan("202611", "高雄")
+        self.assertEqual(kh["total"], 40000)
+        self.assertEqual(kh["taipei_rows"], [[False, "", "", "", -40000, "", "", "", "內勤薪資", "", "", "2026.11-內勤薪資-高雄"]])
+        self.assertEqual(kh["area_rows"], [[False, "", "", "", 40000, "", "", "", "內勤薪資", "", "", "2026.11-內勤薪資-高雄"]])
+        academy = transfer.fixed_amount_plan("202611", "學院")
+        self.assertEqual((academy["total"], academy["area_rows"], academy["report_area"]), (47911, [], ""))
+        self.assertIs(transfer.select_plan_rows(academy, [41]), academy)
+
+    def test_preview_fixed_areas_do_not_read_marketing_sheet(self):
+        with patch.object(transfer, "_marketing_source_location", side_effect=AssertionError("不應讀行銷總表")):
+            for area in ("高雄", "學院"):
+                plans = transfer.preview_fixed_expenses("202611", area)["plans"]
+                self.assertEqual([p["area"] for p in plans], [area])
+
+    def test_academy_posted_check_only_taipei(self):
+        plan = transfer.fixed_amount_plan("202611", "學院")
+        calls = []
+
+        def fake_location(area, kind, year=None):
+            calls.append(area)
+            return ("id", area)
+
+        with patch.object(transfer, "resolve_statement_location", side_effect=fake_location), \
+                patch.object(transfer, "_read_values", return_value=[plan["taipei_rows"][0]]):
+            with self.assertRaises(ValueError):
+                transfer.assert_plan_not_posted(plan)
+        self.assertEqual(calls, ["台北"])

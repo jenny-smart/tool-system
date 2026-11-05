@@ -59,6 +59,20 @@ def build_taichung_rows(period: str, electricity: int | None, existing: set[str]
     return rows, items
 
 
+def taichung_status(period: str) -> dict[str, Any]:
+    """單月：台中請款記錄是否已有當月＋隔月租金、前 2 個月電費。回傳 {applicable, missing, rent_missing, electricity_missing}。"""
+    if int(period[4:6]) % 2 == 0:
+        return {"applicable": False, "missing": [], "rent_missing": [], "electricity_missing": []}
+    spreadsheet_id, sheet_title = resolve_report_location(PAYMENT_REQUEST_TYPE, AREA)
+    existing = _existing_memos(get_sheets_service(), spreadsheet_id, sheet_title)
+    rent = [f"{_label(p)}-辦公室租金管理費" for p in (period, _next_period(period))]
+    power = [f"{_label(_prev_period(period, n))}-電費" for n in (2, 1)]
+    rent_missing = [m for m in rent if not _already_submitted(existing, m)]
+    power_missing = [m for m in power if not _already_submitted(existing, m)]
+    return {"applicable": True, "missing": rent_missing + power_missing, "rent_missing": rent_missing,
+            "electricity_missing": power_missing}
+
+
 def submit_taichung_fixed_expenses(period: str, electricity: int | None = None, run_type: str = "手動") -> dict[str, Any]:
     period = (period or "").strip()
     if not re.fullmatch(r"\d{6}", period):

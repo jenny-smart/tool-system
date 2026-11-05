@@ -1,7 +1,7 @@
 """月度盤點（2026-11 Jenny）：每個月有哪些該做的事、做完了沒，盤點完可以直接勾選執行。
 
 - 「月份」＝做事的月份（例如 11 月）。月初那批（期別＝上個月）沿用【整合執行】月初的盤點（month_start_check）。
-- 其他每月工作各自檢查：工具包押金、年度review、台北查信、各區固定費用匯款、現金缺口各項數字、
+- 其他每月工作各自檢查：工具包押金、年度review、台北查信、各區固定費用匯款、台中固定費用請款（單月）、現金缺口各項數字、
   會計事務所費用（單月）、鯨躍字軌（雙月）。
 - 結果寫進主控表「月度盤點」分頁：每月每項一列、保留歷史；第一次變成完成時記「完成時間」，可回頭查拖了多久。
   自己加的列（項目代號空白）程式不會動，可當手動項目，在「狀態」欄自己填「✅ 完成」。
@@ -129,19 +129,35 @@ def fixed_expense_mail_item(month: str) -> dict:
 
 
 def fixed_expense_remit_item(month: str) -> dict:
-    from tools.finance_management.fixed_expense_transfer import preview_fixed_expenses
+    from tools.finance_management.fixed_expense_transfer import remit_status
 
+    label = "各區固定費用匯款（台中／桃園／新竹／高雄／學院）"
     try:
-        plans = preview_fixed_expenses(month, "全區").get("plans") or []
+        status = remit_status(month)
     except Exception as exc:
-        return item("fixed_expense_remit", "【財報】各區固定費用匯款", month_day(month, 10), False,
-                    f"讀取行銷費用總表失敗：{str(exc)[:80]}", runnable=False)
-    todo = [p for p in plans if not str(p.get("transfer_mark") or "").strip() and int(p.get("total") or 0) > 0]
-    done = [p["area"] for p in plans if str(p.get("transfer_mark") or "").strip()]
-    detail = ("待匯款：" + "、".join(f"{p['area']} {int(p['total']):,}" for p in todo)) if todo else \
-        ("已匯款：" + "、".join(done) if done else "第72列沒有金額")
-    return item("fixed_expense_remit", "【財報】各區固定費用匯款（富邦匯款給台北）", month_day(month, 10),
-                not todo, detail, plans=todo)
+        return item("fixed_expense_remit", label, month_day(month, 10), False,
+                    f"讀取失敗：{str(exc)[:80]}", runnable=False)
+    todo = [x for x in status if not x["done"]]
+    detail = ("待匯款：" + "、".join(f"{x['area']} {x['total']:,}" for x in todo)) if todo else \
+        "、".join(f"{x['area']} {x['detail']}" for x in status)
+    return item("fixed_expense_remit", label, month_day(month, 10), not todo, detail,
+                plans=[{"area": x["area"]} for x in todo])
+
+
+def taichung_billing_item(month: str) -> dict:
+    from tools.finance_management.taichung_fixed_expense import taichung_status
+
+    label = "台中固定費用請款（租金當月＋隔月、電費）"
+    if int(month[4:]) % 2 == 0:
+        return item("taichung_billing", label, month_day(month, 10), True, "雙月沒有", applicable=False)
+    try:
+        st = taichung_status(month)
+        missing = st["missing"]
+    except Exception as exc:
+        missing = [f"讀取失敗：{str(exc)[:60]}"]
+    return item("taichung_billing", label, month_day(month, 10), not missing,
+                ("還沒新增：" + "、".join(missing)) if missing else "都已新增到請款記錄",
+                runnable=False, page="【整合執行】各區固定費用匯款（每月10日）")
 
 
 def cash_gap_item(month: str) -> dict:
@@ -189,6 +205,7 @@ CHECKS: list[tuple[str, Callable[[str], dict]]] = [
     ("review_monthly", review_item),
     ("fixed_expense_mail", fixed_expense_mail_item),
     ("fixed_expense_remit", fixed_expense_remit_item),
+    ("taichung_billing", taichung_billing_item),
     ("cash_gap_numbers", cash_gap_item),
     ("accounting_fee", accounting_item),
     ("mof_serial", mof_item),

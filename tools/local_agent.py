@@ -668,7 +668,7 @@ def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
     area = str(params.get("area") or "").strip()
     month = str(params.get("month") or "").strip()
     cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
-    if area not in ("台中", "桃園", "新竹", "高雄", "家電"):
+    if area not in ("台中", "桃園", "新竹", "高雄", "學院", "家電"):
         raise ValueError("固定費用富邦匯款請選擇單一地區")
     if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", month):
         raise ValueError("固定費用富邦匯款缺少正確期別（YYYYMM）")

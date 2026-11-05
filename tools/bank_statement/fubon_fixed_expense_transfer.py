@@ -34,14 +34,14 @@ from tools.invoice_center.chrome_cdp import DEFAULT_CDP_URL, connect_existing_ch
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 DESTINATION_NAME = "台北"
-SUPPORTED_AREAS = ("台中", "桃園", "新竹", "高雄")
+SUPPORTED_AREAS = ("台中", "桃園", "新竹", "高雄", "學院")
 
 
 def load_transfer_plan(
     period: str, area: str, selected_rows: set[int] | None = None
 ) -> dict[str, object]:
     if area not in SUPPORTED_AREAS:
-        raise ValueError("固定費用富邦匯款請選擇台中／桃園／新竹／高雄")
+        raise ValueError("固定費用富邦匯款請選擇台中／桃園／新竹／高雄／學院")
     preview = preview_fixed_expenses(period, area)
     plans = preview.get("plans") or []
     if not plans:
@@ -123,8 +123,12 @@ def run(
             ) from exc
 
         try:
-            source_cell = write_transfer_date(period, area, paid_on)
-            print(f"已回填來源總表 {source_cell}：{paid_on}。")
+            if plan.get("fixed_amount"):
+                source_cell = ""
+                print(f"{area} 是每月固定金額，沒有行銷費用總表第74列可回填。")
+            else:
+                source_cell = write_transfer_date(period, area, paid_on)
+                print(f"已回填來源總表 {source_cell}：{paid_on}。")
         except Exception as exc:
             # 匯款、明細及財報已完成時，不可因來源表權限問題讓使用者誤以為
             # 整批失敗而再次匯款；既有財報分錄仍會在下次銀行預檢時擋重複。
