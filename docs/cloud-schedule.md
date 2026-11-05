@@ -64,7 +64,12 @@
 | invest_snapshot | 每日 08:00、20:00 | snapshot.yml |
 | invest_stock_radar | 週一至五 14:30 | stock-radar.yml |
 
-Router 確認派送成功（investment-system 的 Actions 出現 `cloud-…` 的執行）後，再停用 cron-job.org 上 investment-system 的工作。
+這 8 列**預設不啟用**。等 investment-system 的 workflow 能接受 `scheduled_slot`（investment-system PR #99）、
+tool-system 設好 Secret 之後，在分頁勾選「啟用」；確認派送成功（investment-system 的 Actions 出現 `cloud-…` 的執行）
+後，再停用 cron-job.org 上 investment-system 的對應工作。
+
+先前版本的 `invest_month_end`、`invest_fund_freeze`、`invest_month_roll` 已停用（月底固定改由
+`invest_month_end_ledger` 派送 month-end-ledger.yml），分頁裡這三列請刪除；Router 會在 log 提醒，這三列不會執行。
 
 ---|---|---|
 | invest_month_end | 每月月底 23:50 | Jennyall 本月欄：4～36 列的股票區塊（台股、渣打-美股…）＋64～67 列，公式改成值 |

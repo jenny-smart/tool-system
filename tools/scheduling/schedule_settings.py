@@ -113,6 +113,9 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
 
 # 已停用的功能代號 → 說明（Sheet 裡還有這列時提醒刪除）
 RETIRED_KEYS = {
+    "invest_month_end": "investment-system 月底固定改用 invest_month_end_ledger（month-end-ledger.yml）",
+    "invest_fund_freeze": "investment-system 月底固定改用 invest_month_end_ledger（month-end-ledger.yml）",
+    "invest_month_roll": "investment-system 月初切換總覽改用 invest_month_end_ledger（month-end-ledger.yml）",
     "field_roster_raise": "拆成 field_roster（名冊，每月 1、15 日）與 field_raise（調薪，每月 15 日）",
     "fixed_expense_transfer": "改為 fixed_expense_remit【財報】各區固定費用匯款，每月 10 日 04:00",
 }
@@ -183,19 +186,21 @@ DEFAULT_ROWS: list[list] = [
     [True, "yuanta_statement", "元大明細下載（排入 Mac）", "11:00", "每月", "25", "提前", MODE_QUEUE, ""],
     [True, "gmail_401", "Gmail 401 歸檔", "00:00", "每月", "20", "照跑", MODE_DIRECT, ""],
     # investment-system：2026-11-06 Jenny 確認（台股／美股／基金由每 30 分鐘改成每 10 分鐘）
-    [True, "invest_tw_prices", "【投資】台股價格", "08:30~14:30 每10分鐘", "每週", "一,二,三,四,五", "照跑",
+    # 預設不啟用：investment-system 的 workflow 要先能接受 scheduled_slot、tool-system 要有
+    # INVESTMENT_SYSTEM_DISPATCH_TOKEN，在「排程設定」勾選啟用，再停用 cron-job.org 的對應工作。
+    [False, "invest_tw_prices", "【投資】台股價格", "08:30~14:30 每10分鐘", "每週", "一,二,三,四,五", "照跑",
      MODE_DIRECT, "台股休市日程式自己略過"],
-    [True, "invest_us_prices_night", "【投資】美股價格（晚上）", "21:00~23:50 每10分鐘", "每週", "一,二,三,四,五", "照跑",
+    [False, "invest_us_prices_night", "【投資】美股價格（晚上）", "21:00~23:50 每10分鐘", "每週", "一,二,三,四,五", "照跑",
      MODE_DIRECT, "美股休市時寫入的是前一交易日收盤"],
-    [True, "invest_us_prices_morning", "【投資】美股價格（凌晨）", "00:00~06:00 每10分鐘", "每週", "二,三,四,五,六", "照跑",
+    [False, "invest_us_prices_morning", "【投資】美股價格（凌晨）", "00:00~06:00 每10分鐘", "每週", "二,三,四,五,六", "照跑",
      MODE_DIRECT, ""],
-    [True, "invest_fund_nav", "【投資】基金淨值＋Richart 匯率", "00:00~23:50 每10分鐘", "每日", "", "照跑", MODE_DIRECT,
+    [False, "invest_fund_nav", "【投資】基金淨值＋Richart 匯率", "00:00~23:50 每10分鐘", "每日", "", "照跑", MODE_DIRECT,
      "只寫有變的格子"],
-    [True, "invest_month_end_ledger", "【投資】總帳月底固定／月初切換總覽", "00:00~23:50 每10分鐘", "每月", "1-10,28-31",
+    [False, "invest_month_end_ledger", "【投資】總帳月底固定／月初切換總覽", "00:00~23:50 每10分鐘", "每月", "1-10,28-31",
      "照跑", MODE_DIRECT, "程式依日期判斷：月底後等淨值到了就固定，1 日切換總覽"],
-    [True, "invest_keepalive", "【投資】App 喚醒", "00:00~23:30 每30分鐘", "每日", "", "照跑", MODE_DIRECT, ""],
-    [True, "invest_snapshot", "【投資】資產快照", "08:00,20:00", "每日", "", "照跑", MODE_DIRECT, ""],
-    [True, "invest_stock_radar", "【投資】台股雷達", "14:30", "每週", "一,二,三,四,五", "照跑", MODE_DIRECT, ""],
+    [False, "invest_keepalive", "【投資】App 喚醒", "00:00~23:30 每30分鐘", "每日", "", "照跑", MODE_DIRECT, ""],
+    [False, "invest_snapshot", "【投資】資產快照", "08:00,20:00", "每日", "", "照跑", MODE_DIRECT, ""],
+    [False, "invest_stock_radar", "【投資】台股雷達", "14:30", "每週", "一,二,三,四,五", "照跑", MODE_DIRECT, ""],
 ]
 
 

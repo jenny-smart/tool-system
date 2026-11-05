@@ -21,9 +21,15 @@ def workday(day):
 
 class ScheduleTests(unittest.TestCase):
     def full(self, value, rules=None, invest=False):
-        """invest=False 時排除 investment-system 的功能（每 10 分鐘都有，原本的完全比對才不受影響）。"""
+        """invest=False 時排除 investment-system 的功能（每 10 分鐘都有，原本的完全比對才不受影響）；
+        invest=True 時把預設不啟用的 investment-system 列當成已啟用來測時段。"""
         when = dt.datetime.fromisoformat(value).replace(tzinfo=m.TZ)
-        jobs = m.plan(when, rules=rules or ss.default_rules(), is_workday=workday)
+        rules = rules or ss.default_rules()
+        if invest:
+            for r in rules:
+                if r.key.startswith('invest_'):
+                    r.enabled = True
+        jobs = m.plan(when, rules=rules, is_workday=workday)
         return jobs if invest else [j for j in jobs if not j[2].startswith('invest_')]
 
     def jobs(self, value, invest=False):
@@ -190,6 +196,18 @@ class ScheduleTests(unittest.TestCase):
         self.assertIn((repo + 'month-end-ledger.yml', {'mode': 'auto'}), self.jobs('2026-11-01T00:00', invest=True))
         self.assertEqual(ss.EXTERNAL_DISPATCH_TOKENS['jenny-smart/investment-system'],
                          'INVESTMENT_SYSTEM_DISPATCH_TOKEN')
+
+    def test_investment_rows_start_disabled(self):
+        rows = [r for r in ss.DEFAULT_ROWS if r[1].startswith('invest_')]
+        self.assertEqual(len(rows), 8)
+        self.assertFalse(any(r[0] for r in rows))
+        self.assertEqual([k for k in self.keys('2026-11-16T10:00', invest=False) if k.startswith('invest_')], [])
+
+    def test_retired_investment_rows_do_not_run(self):
+        row = [True, 'invest_fund_freeze', '舊', '00:30~23:30 每小時', '每月', '1-7', '照跑', ss.MODE_DIRECT, '']
+        rule = ss.parse_row(row)
+        self.assertTrue(rule.errors and '已停用' in rule.errors[0])
+        self.assertEqual(m.plan(dt.datetime(2026, 11, 6, 1, 30, tzinfo=m.TZ), rules=[rule], is_workday=workday), [])
 
     def test_system_name(self):
         self.assertEqual(ss.system_name('notify'), 'tool-system')
