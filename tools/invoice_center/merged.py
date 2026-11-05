@@ -19,3 +19,17 @@ def split_order_numbers(text: str) -> list[str]:
         if order_no not in result:
             result.append(order_no)
     return result
+
+
+def merged_order_numbers(order_text: str, *notes: str) -> list[str]:
+    """合併開立的訂單清單：G 欄訂單，再加上 J／K 欄寫「合併開立」時列出的訂單。
+    2026-11-05 Jenny：G 欄只填一張、J 欄寫「服務訂單合併開立發票$14000 LC…；LC…」也要合併開立，每張都回寫發票號碼。"""
+    result = split_order_numbers(order_text)
+    for note in notes:
+        text = str(note or "")
+        if "合併" not in text:
+            continue
+        for order_no in (m.group(0).upper() for m in _ORDER_NO_RE.finditer(text)):
+            if order_no not in result:
+                result.append(order_no)
+    return result

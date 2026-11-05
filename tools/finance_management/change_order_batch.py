@@ -110,19 +110,39 @@ def synced_marker(status: str) -> str:
     return f"更新系統（B欄：{status}）"
 
 
+def row_orders(row: list) -> list[str]:
+    """G 欄訂單＋J／K 欄寫「合併開立」時列出的訂單（2026-11-05 Jenny）。"""
+    from tools.invoice_center.merged import merged_order_numbers
+
+    return merged_order_numbers(_cell(row, "G"), _cell(row, "J"), _cell(row, "K"))
+
+
+def row_synced_marker(row: list, status: str) -> str:
+    """合併開立（多張訂單）回寫後 AE 會加「｜合併N張」；舊的只回寫 G 欄那張的列沒有這段，會重新列出補回寫。"""
+    count = len(row_orders(row))
+    return synced_marker(status) + (f"｜合併{count}張" if count >= 2 else "")
+
+
 def needs_sync(row: list) -> bool:
     status = _cell(row, "B")
-    return status in DONE_STATUSES and _cell(row, "AE") != synced_marker(status)
+    if status not in DONE_STATUSES:
+        return False
+    done = {row_synced_marker(row, status)}
+    from tools.invoice_center.merged import split_order_numbers
+
+    if len(row_orders(row)) == len(split_order_numbers(_cell(row, "G"))):
+        done.add(synced_marker(status))  # G 欄已列出全部訂單：舊標記也算回寫過
+    return _cell(row, "AE") not in done
 
 
 def needs_invoice_after_paid(row: list) -> bool:
     """已收款、O 欄還沒有發票，而且是異動發票／合併開立（G 欄多張訂單）→ 要先開發票。"""
-    from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, split_order_numbers
+    from tools.invoice_center.merged import MERGED_INVOICE_DETAILS
 
     if _cell(row, "B") != "已收款" or _cell(row, "O"):
         return False
     detail = _cell(row, "C")
-    return detail == "異動發票" or detail in MERGED_INVOICE_DETAILS or len(split_order_numbers(_cell(row, "G"))) >= 2
+    return detail == "異動發票" or detail in MERGED_INVOICE_DETAILS or len(row_orders(row)) >= 2
 
 
 def ready_target(row: list) -> Optional[str]:
@@ -204,9 +224,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
     }
     if status == "已收款" and needs_invoice_after_paid(row):
         # 2026-11 Jenny：已收款但還沒開發票（O 空白）的異動發票／合併開立 → 先開立發票，開完再回寫
-        from tools.invoice_center.merged import split_order_numbers
-
-        orders = split_order_numbers(order_no)
+        orders = row_orders(row)
         item["amount"] = _amount(_cell(row, "N")) or (f"{len(orders)} 張訂單" if len(orders) >= 2 else "")
         item["actions"].append("invoice")
         item["progress"].append("已收款、尚未開發票：先開立發票" + ("（合併開立，以第一張訂單資料）" if len(orders) >= 2 else ""))
@@ -217,6 +235,9 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         item["amount"] = _amount(_cell(row, "S") or _cell(row, "N"))
         item["actions"].append("sync")
         item["target_status"] = status
+        orders = row_orders(row)
+        if len(orders) >= 2 and _cell(row, "AE") == synced_marker(status) and needs_sync(row):
+            item["progress"].append(f"合併開立：之前只回寫 G 欄訂單，補回寫 {len(orders)} 張訂單的發票號碼")
         return item
 
     target = ready_target(row)
@@ -311,9 +332,9 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             else:
                 item["actions"].append("invoice")
             return item
-        from tools.invoice_center.merged import MERGED_INVOICE_DETAILS, split_order_numbers
+        from tools.invoice_center.merged import MERGED_INVOICE_DETAILS
 
-        orders = split_order_numbers(order_no)
+        orders = row_orders(row)
         is_triplicate = item["detail"] in TRIPLICATE_DETAILS and re.search(
             r"(?:改|轉)\s*三聯", f"{item['detail']} {_cell(row, 'K')}")
         if item["detail"] in MERGED_INVOICE_DETAILS or (len(orders) >= 2 and not is_triplicate):
@@ -526,11 +547,13 @@ def _sync_targets(change_order, ws, region: str, targets: list, session, result:
         # 已處理好但 B 欄仍是待處理的列：以完成狀態回填後台，成功後才把 B 欄改成完成狀態
         sync_item = {"sheet_row": row_no, "kind": "refund" if "退" in status or "返" in status else "charge",
                      "status": status, "order_no": _cell(row, "G"), "raw": row}
+        orders = row_orders(row)
         try:
             change_order.sync_one_to_purchase_edit(sync_item, session=session, ui_logger=log)
             if _cell(row, "B") != status:
                 ws.update_acell(f"B{row_no}", status)
-            change_order.mark_sheet_row_done(region, row_no, status, ui_logger=log)
+            extra = {"merged_count": len(orders)} if len(orders) >= 2 else {}
+            change_order.mark_sheet_row_done(region, row_no, status, ui_logger=log, **extra)
             result["done"].append(row_no)
         except Exception as exc:
             result["failed"].append((row_no, str(exc)))
