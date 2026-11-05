@@ -1,16 +1,17 @@
 """外場排程系統的雲端排程（GitHub Actions scheduled_field.yml）。
 
 2026-11-05 Jenny：
-- 每月 15 日 06:00：【月排程】新增專員名冊、新增專員調薪（台北、台中，期別＝當月，例 11/15 建 202611）
-- 每月 15 日、月底 06:00：【專員請款】請款資料審核（台北、台中）
-  處理 AJ 給付期別空白、有資料的列；15 日填「當月-1」，月底填「當月-2」（例 202611-1／202611-2）
+- 每月 1、15 日 06:00：【月排程】新增專員名冊（台北、台中，期別＝當月；已存在就略過）
+- 每月 15 日 06:00：【月排程】新增專員調薪（期別＝當月，例 11/15 建 202611）
+- 每月 15 日 06:00：【專員請款】請款資料審核（台北、台中）：處理 AJ 給付期別空白、有資料的列，填「當月-1」
+  以上遇例假日提前（排程設定 G 欄「提前」）
 - 每週五 06:00：【新訓退款】新訓退訓實境費用（台北、台中）
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -25,6 +26,13 @@ def _today() -> date:
 def claim_period(day: date) -> str:
     """15 日（含之前）＝當月-1；之後（月底）＝當月-2。"""
     return f"{day:%Y%m}-{1 if day.day <= 15 else 2}"
+
+
+def roster_period(day: date) -> str:
+    """名冊／調薪期別＝當月；1 日遇例假日提前到上個月底執行時（20 日以後），建的是下個月。"""
+    if day.day >= 20:
+        day = (day.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return f"{day:%Y%m}"
 
 
 def pending_claim_blocks(header: list[Any], rows: list[list[Any]], first_row: int = 2) -> list[tuple[int, int]]:
@@ -83,13 +91,14 @@ def run_claim_review(day: date, log: Callable[[str], None] = print) -> int:
     return 1 if failed else 0
 
 
-def run_roster_raise(day: date, log: Callable[[str], None] = print) -> int:
+def run_roster_raise(day: date, log: Callable[[str], None] = print, which: tuple[str, ...] = ("roster", "raise")) -> int:
     from tools.field_management import roster_raise as rr
 
-    ym = f"{day:%Y%m}"
+    ym = roster_period(day)
     failed = 0
+    funcs = {"roster": ("專員名冊", rr.create_roster_sheet), "raise": ("調薪資料", rr.create_raise_sheet)}
     for area in AREAS:
-        for label, func in (("專員名冊", rr.create_roster_sheet), ("調薪資料", rr.create_raise_sheet)):
+        for label, func in (funcs[w] for w in which):
             try:
                 result = func(area, ym, run_type="排程")
                 log(f"✅ {area} {label}：{result.get('source')} → {result.get('new')}"
@@ -119,6 +128,8 @@ def run_trainee_fee(day: date, log: Callable[[str], None] = print) -> int:
 
 
 TARGETS = {
+    "field_roster": lambda day, log=print: run_roster_raise(day, log, ("roster",)),
+    "field_raise": lambda day, log=print: run_roster_raise(day, log, ("raise",)),
     "field_roster_raise": run_roster_raise,
     "field_claim_review": run_claim_review,
     "field_trainee_fee": run_trainee_fee,

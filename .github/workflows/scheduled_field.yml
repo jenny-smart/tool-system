@@ -24,6 +24,8 @@ on:
           - field_staff_schedule
           - field_orders
           - field_staff_profile
+          - field_roster
+          - field_raise
           - field_roster_raise
           - field_claim_review
           - field_trainee_fee
@@ -227,7 +229,7 @@ jobs:
 
           # 2026-11-05：月排程／專員請款／新訓退款（只由排程設定派送，不含在 field_all）
           case "$TASK" in
-            field_roster_raise|field_claim_review|field_trainee_fee)
+            field_roster|field_raise|field_roster_raise|field_claim_review|field_trainee_fee)
               run_one "$TASK" python -u -m tools.field_management.scheduled_jobs --target "$TASK"
               ;;
           esac

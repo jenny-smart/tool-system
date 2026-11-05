@@ -40,8 +40,7 @@ class ScheduleTests(unittest.TestCase):
             self.assertIn(('scheduled_daily.yml', {'target':task}),self.jobs('2026-09-30T'+hm))
         self.assertEqual(self.jobs('2026-09-30T05:00'), [('scheduled_field.yml',{'target':'field_all'})])
         self.assertEqual(self.jobs('2026-09-30T05:30'), [('scheduled_service.yml',{'target':'service_all'})])
-        # 月底 06:00 只有專員請款審核（2026-11-05）
-        self.assertEqual(self.jobs('2026-09-30T06:00'), [('scheduled_field.yml', {'target': 'field_claim_review'})])
+        self.assertEqual(self.jobs('2026-09-30T06:00'), [])
         self.assertEqual(self.jobs('2026-09-30T06:01'), [])
 
     def test_month_end_and_leap_year(self):
