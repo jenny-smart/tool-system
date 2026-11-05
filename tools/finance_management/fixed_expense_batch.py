@@ -3,6 +3,8 @@
 規則（2026-10 與 Jenny 確認）：
   - 台北每月 1 日：當月辦公室租金 77,343、辦公室管理費 9,392（請款記錄／台北）
   - 台中每單月 1 日：當月＋下月館前路租金管理費各 18,000（請款記錄／台中）；雙月不用請款
+  - 台中每單月 1 日也加前月＋前前月電費（2026-11-05 Jenny；例 11 月加 2026.09-電費、2026.10-電費）。
+    電費金額要看帳單輸入（前 2 個月合計，除以 2 拆兩筆），沒填金額不會新增，排程也不會自動新增電費
   - 費用說明跟【財報】台北／台中固定費用請款一樣（例：2026.11-辦公室租金），已新增過的會略過，
     所以之後再跑台北／台中固定費用請款（查信、電費）也不會重複新增租金。
 排程：每月 1 日 00:30 雲端自動新增（auto_submit），結果寫進執行 Log。
@@ -37,7 +39,7 @@ def already_submitted(existing: set[str], memo: str) -> bool:
 
 def planned_items(period: str) -> list[dict[str, Any]]:
     """這個月（period）該有的固定費用；台中雙月回傳一筆不可勾的說明列。"""
-    from tools.finance_management.taichung_fixed_expense import MONTHLY_RENT, RENT_ACCOUNT, RENT_PAYEE
+    from tools.finance_management.taichung_fixed_expense import MONTHLY_RENT, RENT_ACCOUNT, RENT_PAYEE, _prev_period
     from tools.finance_management.taipei_fixed_expense import OFFICE_RENT_ITEMS
 
     items = [{"area": "台北", "memo": f"{label(period)}-{name}", "category": category, "amount": amount,
@@ -46,6 +48,10 @@ def planned_items(period: str) -> list[dict[str, Any]]:
         for p in (period, next_period(period)):
             items.append({"area": "台中", "memo": f"{label(p)}-辦公室租金管理費", "category": "辦公室租金",
                           "amount": MONTHLY_RENT, "payee": RENT_PAYEE, "account": RENT_ACCOUNT})
+        for months in (2, 1):  # 前前月、前月電費：金額要輸入
+            items.append({"area": "台中", "memo": f"{label(_prev_period(period, months))}-電費", "category": "電費",
+                          "amount": "", "payee": RENT_PAYEE, "account": RENT_ACCOUNT, "electricity": True,
+                          "note": "輸入前 2 個月電費合計後才會新增"})
     else:
         items.append({"area": "台中", "memo": f"{label(period)}（雙月）", "category": "", "amount": "",
                       "payee": "", "account": "", "info": "台中單月一次付當月＋下月，雙月不用請款"})
@@ -61,6 +67,8 @@ def mark_status(items: list[dict], existing_by_area: dict[str, set[str]]) -> lis
             item.update(status=item["info"], selectable=False, default=False)
         elif already_submitted(existing_by_area.get(item["area"], set()), item["memo"]):
             item.update(status="已新增過", selectable=False, default=False)
+        elif item.get("electricity") and item.get("amount") in ("", None):
+            item.update(status="待輸入電費", selectable=True, default=False)
         else:
             item.update(status="可新增", selectable=True, default=True)
         result.append(item)
@@ -97,6 +105,17 @@ def scan(period: str, log: Callable[[str], None] = print) -> list[dict]:
     return scan_items(planned_items(period), log=log)
 
 
+def split_electricity(items: list[dict], total: int) -> list[dict]:
+    """電費（前 2 個月合計）除以 2 填到兩筆電費列；除不盡多的 1 元算後面那個月（同台中固定費用請款）。"""
+    power = [i for i in items if i.get("electricity") and i.get("selectable")]
+    if not power or not total:
+        return items
+    half = int(total) // 2
+    amounts = [half, int(total) - half] if len(power) == 2 else [int(total)]
+    filled = {id(item): amount for item, amount in zip(power, amounts)}
+    return [dict(i, amount=filled[id(i)], default=True, status="可新增") if id(i) in filled else i for i in items]
+
+
 def submit(items: list[dict], tool_name: str = TOOL_NAME, run_type: str = "手動",
            log: Callable[[str], None] = print, now: Optional[datetime] = None) -> dict[str, int]:
     """把勾選的列新增到各區請款記錄（新增前再檢查一次已新增過的就略過）。回傳 {地區: 新增筆數}。"""
@@ -115,6 +134,8 @@ def submit(items: list[dict], tool_name: str = TOOL_NAME, run_type: str = "手�
         for item in hit:
             if already_submitted(existing, item["memo"]):
                 skipped.append(item["memo"])
+                continue
+            if item.get("amount") in ("", None):  # 電費沒填金額不新增
                 continue
             rows.append(["待付款", "", now_text, item["category"], item["memo"], int(item["amount"]), "",
                          item["payee"], item.get("account", "")])
