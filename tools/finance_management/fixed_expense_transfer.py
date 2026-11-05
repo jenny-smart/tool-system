@@ -24,6 +24,15 @@ FIXED_AMOUNT_AREAS: dict[str, tuple[int, str, bool]] = {
     "學院": (47911, "內勤薪資", False),
 }
 MARKETING_AREAS = tuple(a for a in AREAS if a not in FIXED_AMOUNT_AREAS)
+# 2026-11-05 Jenny：學院自己轉帳給台北（不經我們的富邦匯款、不需要學院帳號），
+# 台北只記入帳分錄，47911 拆成四個科目（說明欄不加地區）。
+SELF_REMIT_AREAS = ("學院",)
+ACADEMY_ITEMS: tuple[tuple[str, int], ...] = (
+    ("內勤薪資", 38376),
+    ("內勤勞保費", 4611),
+    ("內勤健保費", 2518),
+    ("內勤退休金", 2406),
+)
 TAOYUAN_SOURCE_AREAS = ("桃園", "家電")
 REPORT_AREA_NAMES = {"家電": "桃園"}
 
@@ -152,9 +161,16 @@ def fixed_amount_plan(period: str, area: str) -> dict[str, object]:
     """高雄／學院：每月固定金額匯給台北。台北富邦更新 E 欄記 −金額（內勤薪資減項）；
     高雄富邦更新 E 欄記 +金額（內勤薪資加項）；學院沒有財報，不記地區分錄。"""
     amount, subject, has_report = FIXED_AMOUNT_AREAS[area]
-    label = f"{period[:4]}.{period[4:]}-{subject}-{area}"
-    taipei_rows = [[False, "", "", "", -amount, "", "", "", subject, "", "", label]]
-    area_rows = [[False, "", "", "", amount, "", "", "", subject, "", "", label]] if has_report else []
+    ym = f"{period[:4]}.{period[4:]}"
+    if area == "學院":
+        items = [(name, value) for name, value in ACADEMY_ITEMS]
+        taipei_rows = [[False, "", "", "", -value, "", "", "", name, "", "", f"{ym}-{name}"] for name, value in items]
+        area_rows: list = []
+    else:
+        items = [(subject, amount)]
+        label = f"{ym}-{subject}-{area}"
+        taipei_rows = [[False, "", "", "", -amount, "", "", "", subject, "", "", label]]
+        area_rows = [[False, "", "", "", amount, "", "", "", subject, "", "", label]] if has_report else []
     return {
         "period": period,
         "area": area,
@@ -164,8 +180,9 @@ def fixed_amount_plan(period: str, area: str) -> dict[str, object]:
         "transfer_mark": "",
         "eligible": True,
         "fixed_amount": True,
+        "self_remit": area in SELF_REMIT_AREAS,
         "memo": f"{period[:4]}/{period[4:]}{subject}",
-        "items": [{"row_number": 0, "subject": subject, "amount": amount}],
+        "items": [{"row_number": 0, "subject": name, "amount": value} for name, value in items],
         "taipei_rows": taipei_rows,
         "area_rows": area_rows,
     }
@@ -525,10 +542,11 @@ def remit_status(period: str) -> list[dict[str, object]]:
             except ValueError:
                 posted = "財報已有分錄"
         result.append({"area": plan["area"], "total": int(plan["total"]), "memo": plan.get("memo", ""),
-                       "fixed": bool(plan.get("fixed_amount")), "done": bool(mark or posted),
+                       "fixed": bool(plan.get("fixed_amount")), "self_remit": bool(plan.get("self_remit")),
+                       "done": bool(mark or posted),
                        "detail": mark or posted or "待匯款", "plan": plan})
     for area in preview.get("skipped_areas") or []:
-        result.append({"area": area, "total": 0, "memo": "", "fixed": False, "done": True,
+        result.append({"area": area, "total": 0, "memo": "", "fixed": False, "self_remit": False, "done": True,
                        "detail": "第72列沒有金額", "plan": None})
     return result
 
@@ -592,7 +610,8 @@ def transfer_fixed_expenses(
                 _reorder_statement_rows(ar_id, ar_title, ar_after, plan["area_rows"])
 
             destination = f"（{report_area}財報）" if report_area and report_area != target else ""
-            summary = f"{target}{destination}：匯款 {int(plan['total']):,}，富邦分錄新增 {len(tp_rows) + len(ar_rows)} 列"
+            verb = "入帳" if plan.get("self_remit") else "匯款"
+            summary = f"{target}{destination}：{verb} {int(plan['total']):,}，富邦分錄新增 {len(tp_rows) + len(ar_rows)} 列"
             summaries.append(summary)
             if on_progress:
                 on_progress(summary, "success")

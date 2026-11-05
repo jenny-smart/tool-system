@@ -123,7 +123,8 @@ def run_fixed_expense_remit(today: date) -> int:
     ready = [s for s in status if not s["done"]]
     for s in status:
         log(f"{s['area']}：{s['detail']}" + (f"（{s['total']:,}）" if s["total"] else ""))
-    lines = [f"{s['area']}：{s['total']:,}（{s['memo']}）" for s in ready]
+    lines = [f"{s['area']}：{s['total']:,}（{s['memo']}）" + ("｜學院自己轉帳，收到後寫入台北分錄" if s.get("self_remit") else "")
+             for s in ready]
     notes = []
     try:
         tc = taichung_status(period)
@@ -141,6 +142,8 @@ def run_fixed_expense_remit(today: date) -> int:
         from tools.local_agent_queue import create_task
 
         for s in ready:
+            if s.get("self_remit"):  # 學院自己轉帳；入帳時間不固定，只提醒
+                continue
             task = create_task("fubon.fixed_expense_transfer",
                                {"area": s["area"], "month": period, "cdp_url": "http://127.0.0.1:9222"},
                                created_by="排程系統")

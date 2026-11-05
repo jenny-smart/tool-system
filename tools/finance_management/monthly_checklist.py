@@ -267,11 +267,20 @@ def _run_one(month: str, entry: dict, create_task, log, created_by: str) -> str:
         result = submit_taipei_fixed_expenses(previous_month(month), run_type="月度盤點", only=set(MAIL_ITEMS))
         return (f"⚠️ {label}：{'；'.join(result['errors'])}" if result["errors"] else f"✅ {label}")
     if key == "fixed_expense_remit":
-        for plan in entry.get("plans") or []:
+        plans = entry.get("plans") or []
+        notes = []
+        for plan in plans:
+            if plan.get("self_remit"):
+                from tools.finance_management.fixed_expense_transfer import transfer_fixed_expenses
+
+                res = transfer_fixed_expenses(month, plan["area"])
+                notes.append(f"{plan['area']} 台北分錄新增 {res['statement_rows']} 列")
+                continue
             create_task("fubon.fixed_expense_transfer",
                         {"area": plan["area"], "month": month, "cdp_url": "http://127.0.0.1:9222"},
                         created_by=created_by)
-        return f"⏳ {label}：已排入本機 Agent {len(entry.get('plans') or [])} 區，請用手機核准"
+        queued = sum(1 for p in plans if not p.get("self_remit"))
+        return f"⏳ {label}：已排入本機 Agent {queued} 區，請用手機核准" + (f"；{'；'.join(notes)}" if notes else "")
     if key == "cash_gap_numbers":
         from tools.finance_management.review_monthly import paste_to_review
         from tools.scheduled_finance.runner import run_cash_gap, run_prepaid_amount
