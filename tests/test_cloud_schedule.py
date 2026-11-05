@@ -20,15 +20,17 @@ def workday(day):
 
 
 class ScheduleTests(unittest.TestCase):
-    def full(self, value, rules=None):
+    def full(self, value, rules=None, invest=False):
+        """invest=False 時排除 investment-system 的功能（每 10 分鐘都有，原本的完全比對才不受影響）。"""
         when = dt.datetime.fromisoformat(value).replace(tzinfo=m.TZ)
-        return m.plan(when, rules=rules or ss.default_rules(), is_workday=workday)
+        jobs = m.plan(when, rules=rules or ss.default_rules(), is_workday=workday)
+        return jobs if invest else [j for j in jobs if not j[2].startswith('invest_')]
 
-    def jobs(self, value):
-        return [(w, i) for w, i, _k in self.full(value)]
+    def jobs(self, value, invest=False):
+        return [(w, i) for w, i, _k in self.full(value, invest=invest)]
 
-    def keys(self, value):
-        return [k for _w, _i, k in self.full(value)]
+    def keys(self, value, invest=False):
+        return [k for _w, _i, k in self.full(value, invest=invest)]
 
     def test_defaults_are_valid(self):
         rules = ss.default_rules()
@@ -162,27 +164,37 @@ class ScheduleTests(unittest.TestCase):
                          ('jenny-smart/order-system', 'weekend-reminder-schedule.yml'))
         self.assertEqual(ss.split_workflow('scheduled_daily.yml'), ('', 'scheduled_daily.yml'))
 
-    def test_investment_system_month_end_fund_and_roll(self):
-        wf = 'jenny-smart/investment-system:monthly-roll.yml'
-        # 月底 23:50 月底轉值（2026-10-31 週六照跑）
-        self.assertIn((wf, {'job': 'month-end'}), self.jobs('2026-10-31T23:50'))
-        self.assertNotIn('invest_month_end', self.keys('2026-10-30T23:50'))
-        # 1～7 日每小時 :30 基金轉值，8 日就不跑
-        for value in ['2026-11-01T00:30', '2026-11-03T09:30', '2026-11-07T23:30']:
-            self.assertIn((wf, {'job': 'fund'}), self.jobs(value))
-        self.assertNotIn('invest_fund_freeze', self.keys('2026-11-03T09:40'))
-        self.assertNotIn('invest_fund_freeze', self.keys('2026-11-08T09:30'))
-        # 1～7 日 00:10 換欄
-        self.assertIn((wf, {'job': 'roll'}), self.jobs('2026-11-01T00:10'))
-        self.assertIn((wf, {'job': 'roll'}), self.jobs('2027-01-07T00:10'))
-        self.assertNotIn('invest_month_roll', self.keys('2026-11-08T00:10'))
+    def test_investment_system_rows(self):
+        repo = 'jenny-smart/investment-system:'
+        keys = lambda v: [k for k in self.keys(v, invest=True) if k.startswith('invest_')]
+        # 2026-11-16 週一（月中，沒有月底固定）
+        self.assertEqual(keys('2026-11-16T08:20'), ['invest_fund_nav'])
+        self.assertEqual(sorted(keys('2026-11-16T08:30')),
+                         ['invest_fund_nav', 'invest_keepalive', 'invest_tw_prices'])
+        self.assertIn('invest_tw_prices', keys('2026-11-02T14:30'))
+        self.assertNotIn('invest_tw_prices', keys('2026-11-02T14:40'))
+        self.assertNotIn('invest_tw_prices', keys('2026-11-07T10:00'))       # 週六
+        self.assertIn('invest_stock_radar', keys('2026-11-02T14:30'))
+        # 美股：週一至五晚上、週二至六凌晨
+        self.assertIn('invest_us_prices_night', keys('2026-11-06T23:50'))     # 週五
+        self.assertNotIn('invest_us_prices_night', keys('2026-11-07T21:00'))  # 週六
+        self.assertIn('invest_us_prices_morning', keys('2026-11-07T06:00'))   # 週六清晨
+        self.assertNotIn('invest_us_prices_morning', keys('2026-11-07T06:10'))
+        self.assertNotIn('invest_us_prices_morning', keys('2026-11-02T03:00'))  # 週一凌晨
+        # 月底固定：1–10、28–31 日每 10 分鐘
+        self.assertIn('invest_month_end_ledger', keys('2026-10-31T23:50'))
+        self.assertIn('invest_month_end_ledger', keys('2026-11-10T00:10'))
+        self.assertNotIn('invest_month_end_ledger', keys('2026-11-11T00:10'))
+        self.assertIn('invest_snapshot', keys('2026-11-08T20:00'))
+        self.assertIn((repo + 'tw-stock-prices.yml', {'mode': 'auto'}), self.jobs('2026-11-02T10:00', invest=True))
+        self.assertIn((repo + 'month-end-ledger.yml', {'mode': 'auto'}), self.jobs('2026-11-01T00:00', invest=True))
         self.assertEqual(ss.EXTERNAL_DISPATCH_TOKENS['jenny-smart/investment-system'],
                          'INVESTMENT_SYSTEM_DISPATCH_TOKEN')
 
     def test_system_name(self):
         self.assertEqual(ss.system_name('notify'), 'tool-system')
         self.assertEqual(ss.system_name('weekend_reminder'), 'order-system')
-        self.assertEqual(ss.system_name('invest_month_roll'), 'investment-system')
+        self.assertEqual(ss.system_name('invest_fund_nav'), 'investment-system')
         self.assertEqual(ss.system_name('nope'), '')
         self.assertEqual(ss.HEADER[9], '系統名稱')
         self.assertEqual(ss.with_system(ss.DEFAULT_ROWS[0])[9], 'tool-system')
