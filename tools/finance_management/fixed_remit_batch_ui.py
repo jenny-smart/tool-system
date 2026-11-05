@@ -1,7 +1,8 @@
 """【整合執行】各區固定費用匯款（每月10日）：盤點 → 勾選 → 執行。
 
 - 台中／桃園／新竹：行銷費用總表第72列（第74列空白＝還沒匯）
-- 高雄 40000、學院 47911：每月固定匯給台北（台北內勤薪資減項；高雄財報記內勤薪資加項，學院無財報）
+- 高雄 40000：每月固定匯給台北（台北內勤薪資減項；高雄財報記內勤薪資加項）
+- 學院 47911：學院自己轉帳給台北，這裡只寫台北入帳分錄（內勤薪資／勞保費／健保費／退休金四列）
 - 台中（單月）：台中固定費用請款——當月＋隔月租金、前 2 個月電費新增到請款記錄（電費要輸入金額）
 匯款一律排入本機 Agent，每區一筆，由你在富邦核對後手機核准；完成後同步明細並寫入台北／分店財報分錄。
 """
@@ -33,7 +34,7 @@ def _scan(period: str) -> dict:
 
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
-    st.caption("每月 10 日：台中／桃園／新竹依行銷費用總表、高雄 40000／學院 47911 固定匯給台北，"
+    st.caption("每月 10 日：台中／桃園／新竹依行銷費用總表、高雄 40000 固定匯給台北；學院 47911 自己轉帳，確認收到後勾選寫入台北分錄。"
                "單月另外新增台中固定費用請款（租金、電費）。匯款排入本機 Agent，每區由你在富邦核對後手機核准。"
                "排程（排程設定 fixed_expense_remit）每月 10 日會自動盤點並排入。")
     period = st.text_input("期別（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
@@ -58,8 +59,10 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     table = pd.DataFrame([{
         RUN: checked(not r["done"], override, not r["done"]),
         "地區": r["area"], "金額": f"{r['total']:,}" if r["total"] else "",
-        "來源": "固定金額（內勤薪資）" if r["fixed"] else "行銷費用總表",
-        "狀態": "✅ " + r["detail"] if r["done"] else "❌ 待匯款", "說明": r["memo"],
+        "來源": ("學院自己轉帳（只寫台北分錄）" if r.get("self_remit") else
+                 "固定金額（內勤薪資）" if r["fixed"] else "行銷費用總表"),
+        "狀態": "✅ " + r["detail"] if r["done"] else ("❌ 待寫分錄" if r.get("self_remit") else "❌ 待匯款"),
+        "說明": r["memo"],
     } for r in remit])
     edited = st.data_editor(table, hide_index=True, width="stretch", key=editor_key,
                             disabled=[c for c in table.columns if c != RUN])
@@ -94,6 +97,15 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                 st.success(f"台中固定費用請款：新增 {res['rows_added']} 筆")
             except Exception as exc:
                 st.error(f"台中固定費用請款失敗：{exc}")
+        for r in [r for r in selected if r.get("self_remit")]:
+            from tools.finance_management.fixed_expense_transfer import transfer_fixed_expenses
+
+            try:
+                res = transfer_fixed_expenses(period, r["area"])
+                st.success(f"{r['area']}：台北分錄新增 {res['statement_rows']} 列")
+            except Exception as exc:
+                st.error(f"{r['area']} 台北分錄寫入失敗：{exc}")
+        selected = [r for r in selected if not r.get("self_remit")]
         for r in selected:
             task = create_task("fubon.fixed_expense_transfer",
                                {"area": r["area"], "month": period, "cdp_url": "http://127.0.0.1:9222"},

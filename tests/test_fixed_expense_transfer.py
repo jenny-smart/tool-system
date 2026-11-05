@@ -242,6 +242,15 @@ class FixedAmountAreaTests(unittest.TestCase):
         academy = transfer.fixed_amount_plan("202611", "學院")
         self.assertEqual((academy["total"], academy["area_rows"], academy["report_area"]), (47911, [], ""))
         self.assertIs(transfer.select_plan_rows(academy, [41]), academy)
+        # 2026-11-05 Jenny：學院自己轉帳，台北拆四個科目，說明欄不加地區
+        self.assertTrue(academy["self_remit"])
+        self.assertEqual([(r[4], r[8], r[11]) for r in academy["taipei_rows"]], [
+            (-38376, "內勤薪資", "2026.11-內勤薪資"),
+            (-4611, "內勤勞保費", "2026.11-內勤勞保費"),
+            (-2518, "內勤健保費", "2026.11-內勤健保費"),
+            (-2406, "內勤退休金", "2026.11-內勤退休金"),
+        ])
+        self.assertFalse(kh.get("self_remit"))
 
     def test_preview_fixed_areas_do_not_read_marketing_sheet(self):
         with patch.object(transfer, "_marketing_source_location", side_effect=AssertionError("不應讀行銷總表")):
