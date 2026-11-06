@@ -755,6 +755,16 @@ def scheduled_scan(log: Callable[[str], None] = print) -> int:
     log(report or "沒有可執行的清潔異動")
     if not ready:
         return 0
+    from tools.scheduling.schedule_settings import MODE_CONFIRM as _CONFIRM, MODE_QUEUE as _QUEUE, get_mode as _mode
+
+    if _mode("change_order_scan", _CONFIRM) != _QUEUE:
+        try:  # 2026-11-06 Jenny：存盤點結果，Tools App 跳視窗、停在這次盤點結果接著執行
+            from tools.scheduling import scan_results
+
+            scan_results.save("change_order_scan", items, f"可執行 {len(ready)} 筆（共 {len(items)} 列）")
+            log("已存盤點結果，Tools App 會跳視窗")
+        except Exception as exc:
+            log(f"⚠️ 盤點結果存檔失敗：{exc}")
     from tools.orders_system import calendar_notify
 
     now = datetime.now(TW_TZ)
@@ -767,7 +777,7 @@ def scheduled_scan(log: Callable[[str], None] = print) -> int:
         report += "\n\n開立發票需在 Tools App【整合執行】清潔異動執行（要先組發票資料）。"
     else:
         title = f"【清潔異動】盤點：可執行 {len(ready)} 筆，請確認後執行"
-        report += "\n\n請到 Tools App【整合執行】清潔異動 → 盤點 → 勾選 → 執行。"
+        report += "\n\n打開 Tools App 會跳視窗，按「前往處理」直接停在這次盤點結果，勾選後執行（不用重新盤點）。"
     from datetime import timedelta
 
     event = calendar_notify.create_notify_event(summary=title, description=report, start=now + timedelta(minutes=30),
@@ -777,7 +787,7 @@ def scheduled_scan(log: Callable[[str], None] = print) -> int:
     try:  # 2026-11-06 Jenny：盤點完 Mac 跳視窗提醒去確認及執行
         from tools.local_agent_queue import queue_popup
 
-        queue_popup(title, report, system="財務管理", function="【整合執行】清潔異動已備妥")
+        queue_popup(title, report, system="財務管理", function="【整合執行】清潔異動已備妥", scan_key="change_order_scan")
         log("已排入 Mac 提醒視窗")
     except Exception as exc:
         log(f"⚠️ Mac 提醒視窗排入失敗：{exc}")

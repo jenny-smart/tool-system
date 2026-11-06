@@ -37,12 +37,17 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     areas = st.multiselect("地區", batch.AREAS, default=batch.AREAS, key="internal_payment_batch_areas")
     if st.button("🔍 盤點", key="internal_payment_batch_scan", type="primary"):
         with st.spinner("讀取待付款資料中…"):
+            st.session_state.pop(f"{STATE_KEY}_from", None)
             st.session_state[STATE_KEY] = batch.scan(areas, log=log)
         reset_select_all("internal_payment_batch")
 
     items = st.session_state.get(STATE_KEY)
     if items is None:
+        _offer_scheduled_result()
         return
+    source = st.session_state.get(f"{STATE_KEY}_from")
+    if source:
+        st.info(f"📋 以下是 {source} 排程盤點的結果，可直接勾選執行；要最新資料請按「盤點」重新讀取。")
     if not items:
         st.success("沒有待付款資料 🎉")
         return
@@ -72,3 +77,20 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                             merge_rows=merge_keys, split_supply=split_supply)
         st.success("已排入本機 Agent，請到下方查看執行進度。")
         st.session_state.pop(STATE_KEY, None)
+
+
+def _offer_scheduled_result() -> None:
+    """今天有排程盤點結果時，可直接載入接著執行（不用重新盤點）。"""
+    try:
+        from tools.scheduling import scan_results
+
+        entry = scan_results.latest_today("fubon_pending_check")
+    except Exception:
+        return
+    if not entry:
+        return
+    if st.button(f"📋 載入今天 {entry['time'][-5:]} 排程盤點結果（{entry['summary']}）", key="fubon_pending_check_load_scheduled"):
+        st.session_state[STATE_KEY] = scan_results.load_items("fubon_pending_check")
+        st.session_state[f"{STATE_KEY}_from"] = entry["time"]
+        scan_results.mark("fubon_pending_check", scan_results.OPENED)
+        st.rerun()

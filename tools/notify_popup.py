@@ -1,7 +1,7 @@
 """本機 Agent：在 Mac 跳出提醒視窗（排程盤點完請你確認及執行）。
 
 2026-11-06 Jenny：【整合執行】清潔異動盤點、富邦內部請款盤點完要跳視窗提醒去確認及執行。
-視窗按「前往執行」會用瀏覽器開 Tools App 並直接選好該功能（網址：Mac secrets.toml／環境變數 TOOLS_APP_URL）。
+視窗按「前往執行」會用瀏覽器開 Tools App，直接選好該功能並載入那次排程盤點結果（網址：Mac secrets.toml／環境變數 TOOLS_APP_URL）。
 視窗另外開一個程序顯示，Agent 不必等你按（不會卡住後面的工作）；1 小時沒按會自動關閉。
 """
 from __future__ import annotations
@@ -34,10 +34,10 @@ def tools_app_url() -> str:
     return ""
 
 
-def deep_link(base: str, system: str = "", function: str = "") -> str:
+def deep_link(base: str, system: str = "", function: str = "", scan: str = "") -> str:
     if not base:
         return ""
-    query = {k: v for k, v in (("system", system), ("fn", function)) if v}
+    query = {k: v for k, v in (("system", system), ("fn", function), ("scan", scan)) if v}
     return base.rstrip("/") + ("/?" + urlencode(query) if query else "")
 
 
@@ -59,8 +59,8 @@ def build_script(title: str, message: str, url: str) -> str:
     return "\n".join(lines)
 
 
-def show(title: str, message: str, system: str = "", function: str = "") -> int:
-    url = deep_link(tools_app_url(), system, function)
+def show(title: str, message: str, system: str = "", function: str = "", scan: str = "") -> int:
+    url = deep_link(tools_app_url(), system, function, scan)
     script = build_script(title, message, url)
     print(f"跳出提醒視窗：{title}", flush=True)
     if not url:
@@ -79,8 +79,9 @@ def main(argv=None) -> int:
     parser.add_argument("--message", default="")
     parser.add_argument("--system", default="")
     parser.add_argument("--function", default="")
+    parser.add_argument("--scan", default="", help="排程盤點結果的功能代號；Tools App 直接載入那次盤點結果")
     args = parser.parse_args(argv)
-    return show(args.title, args.message, args.system, args.function)
+    return show(args.title, args.message, args.system, args.function, args.scan)
 
 
 if __name__ == "__main__":

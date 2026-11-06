@@ -846,7 +846,8 @@ def build_notify_popup(params: dict[str, Any]) -> list[str]:
         raise ValueError("提醒視窗缺少標題")
     return [sys.executable, "-m", "tools.notify_popup", "--title", title,
             "--message", str(params.get("message") or ""),
-            "--system", str(params.get("system") or ""), "--function", str(params.get("function") or "")]
+            "--system", str(params.get("system") or ""), "--function", str(params.get("function") or ""),
+            "--scan", str(params.get("scan") or "")]
 
 
 def build_git_pull(_params: dict[str, Any]) -> list[str]:
