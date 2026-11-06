@@ -174,9 +174,11 @@ class ScheduleTests(unittest.TestCase):
         repo = 'jenny-smart/investment-system:'
         keys = lambda v: [k for k in self.keys(v, invest=True) if k.startswith('invest_')]
         # 2026-11-16 週一（月中，沒有月底固定）
-        self.assertEqual(keys('2026-11-16T08:20'), ['invest_fund_nav'])
+        self.assertEqual(sorted(keys('2026-11-16T08:20')),
+                         ['invest_fund_nav', 'invest_keepalive', 'invest_stock_dividends'])
         self.assertEqual(sorted(keys('2026-11-16T08:30')),
-                         ['invest_fund_nav', 'invest_keepalive', 'invest_tw_prices'])
+                         ['invest_fund_nav', 'invest_keepalive', 'invest_stock_dividends', 'invest_tw_prices'])
+        self.assertIn('invest_keepalive', keys('2026-11-16T08:40'))   # 每 10 分鐘
         self.assertIn('invest_tw_prices', keys('2026-11-02T14:30'))
         self.assertNotIn('invest_tw_prices', keys('2026-11-02T14:40'))
         self.assertNotIn('invest_tw_prices', keys('2026-11-07T10:00'))       # 週六
@@ -199,7 +201,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_investment_rows_start_disabled(self):
         rows = [r for r in ss.DEFAULT_ROWS if r[1].startswith('invest_')]
-        self.assertEqual(len(rows), 8)
+        self.assertEqual(len(rows), 9)
         self.assertFalse(any(r[0] for r in rows))
         self.assertEqual([k for k in self.keys('2026-11-16T10:00', invest=False) if k.startswith('invest_')], [])
 

@@ -60,11 +60,12 @@
 | invest_us_prices_morning | 週二至六 00:00～06:00 每 10 分鐘 | us-stock-prices.yml（auto） |
 | invest_fund_nav | 每日 00:00～23:50 每 10 分鐘 | fund-nav.yml（基金淨值＋Richart 匯率，只寫有變的格子） |
 | invest_month_end_ledger | 每月 1–10、28–31 日 00:00～23:50 每 10 分鐘 | month-end-ledger.yml（auto：月底固定、1 日切換總覽） |
-| invest_keepalive | 每日每 30 分鐘 | keepalive.yml |
+| invest_keepalive | 每日每 10 分鐘 | keepalive.yml（也觸發依總覽自動確認基金配息） |
+| invest_stock_dividends | 每日每 10 分鐘 | stock-dividends-from-ledger.yml（台股股利：應入帳→細帳備註確認入帳） |
 | invest_snapshot | 每日 08:00、20:00 | snapshot.yml |
 | invest_stock_radar | 週一至五 14:30 | stock-radar.yml |
 
-這 8 列**預設不啟用**。等 investment-system 的 workflow 能接受 `scheduled_slot`（investment-system PR #99）、
+這幾列**預設不啟用**。等 investment-system 的 workflow 能接受 `scheduled_slot`（investment-system PR #99）、
 tool-system 設好 Secret 之後，在分頁勾選「啟用」；確認派送成功（investment-system 的 Actions 出現 `cloud-…` 的執行）
 後，再停用 cron-job.org 上 investment-system 的對應工作。
 

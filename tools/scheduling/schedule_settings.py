@@ -81,6 +81,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "invest_keepalive": ("jenny-smart/investment-system:keepalive.yml", {}),
     "invest_snapshot": ("jenny-smart/investment-system:snapshot.yml", {}),
     "invest_stock_radar": ("jenny-smart/investment-system:stock-radar.yml", {}),
+    "invest_stock_dividends": ("jenny-smart/investment-system:stock-dividends-from-ledger.yml", {}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -202,9 +203,12 @@ DEFAULT_ROWS: list[list] = [
      "只寫有變的格子"],
     [False, "invest_month_end_ledger", "【投資】總帳月底固定／月初切換總覽", "00:00~23:50 每10分鐘", "每月", "1-10,28-31",
      "照跑", MODE_DIRECT, "程式依日期判斷：月底後等淨值到了就固定，1 日切換總覽"],
-    [False, "invest_keepalive", "【投資】App 喚醒", "00:00~23:30 每30分鐘", "每日", "", "照跑", MODE_DIRECT, ""],
+    [False, "invest_keepalive", "【投資】App 喚醒", "00:00~23:50 每10分鐘", "每日", "", "照跑", MODE_DIRECT,
+     "也觸發依總覽自動確認基金配息"],
     [False, "invest_snapshot", "【投資】資產快照", "08:00,20:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [False, "invest_stock_radar", "【投資】台股雷達", "14:30", "每週", "一,二,三,四,五", "照跑", MODE_DIRECT, ""],
+    [False, "invest_stock_dividends", "【投資】台股股利入帳（比對細帳備註）", "00:00~23:50 每10分鐘", "每日", "", "照跑",
+     MODE_DIRECT, "掃描除權息公告建立應入帳，再用 YYYY細帳 股利-台股備註確認入帳"],
 ]
 
 
