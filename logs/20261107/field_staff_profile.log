@@ -1,0 +1,25 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場專員個資 / running
+Command: /opt/hostedtoolcache/Python/3.11.18/x64/bin/python -u -m tools.field_management.staff_profile --date 20261107 --system-name 外場排程系統 --run-type 排程
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠ 讀取「年度根目錄設定」失敗，沿用原設定：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8/values/%27%E5%B9%B4%E5%BA%A6%E6%A0%B9%E7%9B%AE%E9%8C%84%E8%A8%AD%E5%AE%9A%27%21A1%3AL?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_unit': '1/min/{project}/{user}', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'consumer': 'projects/1042663213860', 'quota_limit_value': '60', 'quota_metric': 'sheets.googleapis.com/read_requests', 'service': 'sheets.googleapis.com', 'window_start_time': '1793999032', 'quota_location': 'global'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[2026-11-07 05:04:51] 開始處理專員個資：20261107專員個資-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1UqijX0XM9mfB2EeBEUZbu3xbZXtk6f7jXC7nAgzLv4Q
+🗑️ 已刪除來源暫存 Google Sheet：1UqijX0XM9mfB2EeBEUZbu3xbZXtk6f7jXC7nAgzLv4Q
+[2026-11-07 05:05:01] 完成專員個資：20261107專員個資-台北.xlsx → 專員個人資料!A4:C / rows=93
+[2026-11-07 05:05:02] 開始處理訂單截取：20261107訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Bbrw0JZBIg2BwmfSy-2299T8IW2p7xxg8UUxetAkflg
+🗑️ 已刪除來源暫存 Google Sheet：1Bbrw0JZBIg2BwmfSy-2299T8IW2p7xxg8UUxetAkflg
+[2026-11-07 05:05:16] 完成訂單截取：20261107訂單-台北.xls → 專員個人資料!G1:N / rows=890
+[2026-11-07 05:05:17] 開始處理專員個資：20261107專員個資-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1-Q-4jjbSLTwP_LQKJyXliZZy5vToUVxCTt1Qn_I8fKQ
+🗑️ 已刪除來源暫存 Google Sheet：1-Q-4jjbSLTwP_LQKJyXliZZy5vToUVxCTt1Qn_I8fKQ
+[2026-11-07 05:05:25] 完成專員個資：20261107專員個資-台中.xlsx → 專員個人資料!A4:C / rows=16
+[2026-11-07 05:05:26] 開始處理訂單截取：20261107訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：15hZWJEjDPVp6rYYkRsRfIoMKW8X1SVdwgDcZdQ0ew-0
+🗑️ 已刪除來源暫存 Google Sheet：15hZWJEjDPVp6rYYkRsRfIoMKW8X1SVdwgDcZdQ0ew-0
+[2026-11-07 05:05:36] 完成訂單截取：20261107訂單-台中.xls → 專員個人資料!G1:N / rows=91
+[2026-11-07 05:05:37] staff_profile.py 全部完成
+
+📝 外場排程打卡：外場專員個資 / success
+field_management scheduler 全部完成
