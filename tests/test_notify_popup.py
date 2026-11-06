@@ -15,3 +15,8 @@ def test_agent_builds_popup_command():
     cmd = local_agent.command_for({"action": "notify.popup",
                                    "params_json": '{"title":"【清潔異動】盤點","message":"可執行 1 筆","function":"x"}'})
     assert cmd[1:3] == ["-m", "tools.notify_popup"] and "【清潔異動】盤點" in cmd and "x" in cmd
+
+
+
+def test_url_found_under_section():
+    assert np._find_key({"a": 1, "gcp": {"TOOLS_APP_URL": " https://x.app "}}, "TOOLS_APP_URL") == "https://x.app"
