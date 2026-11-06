@@ -3581,6 +3581,20 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
     return result_text
 
 
+def run_statement_maintenance_audit(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    """盤點（只讀）：各區富邦／元大更新缺公式、對應分頁 A–I 沒對齊、未標記待確認。"""
+    from tools.finance_management.statement_alignment import run_statement_maintenance
+
+    return run_statement_maintenance(area, dry_run=True, on_progress=on_progress)
+
+
+def run_statement_maintenance_apply(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
+    """執行：補公式 → 富邦更新套篩選規則 → 對應分頁 A–I 下拉對齊 → 列出待確認。"""
+    from tools.finance_management.statement_alignment import run_statement_maintenance
+
+    return run_statement_maintenance(area, dry_run=False, on_progress=on_progress)
+
+
 def run_fubon_intercompany_expense_split(*, month="", start_date=None, end_date=None, area="全區", selected_rows=None, on_progress=None):
     from tools.finance_management.intercompany_expense import apply_intercompany_expense_rules
 
@@ -4101,6 +4115,8 @@ FINANCE_TASKS = [
     {"name": "【財報】工具包押金｜比對異常標記（N欄）", "handler": run_deposit_report_flag_discrepancies, "enabled": True},
     {"name": "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）", "handler": run_fubon_statement_lc_filter, "enabled": True},
     {"name": "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）", "handler": run_fubon_intercompany_expense_split, "enabled": True},
+    {"name": "【財報】財報更新整理｜盤點（缺公式、對應分頁對齊、待確認）", "handler": run_statement_maintenance_audit, "enabled": True},
+    {"name": "【財報】財報更新整理｜執行（補公式→套規則→對應分頁A–I下拉）", "handler": run_statement_maintenance_apply, "enabled": True},
     {"name": "【財報】All財報現金缺口｜試算並寫入現金缺口試算表", "handler": run_cash_gap_worksheet, "enabled": True},
     {"name": "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事", "handler": run_cash_gap_and_prepaid_amount, "enabled": True},
     {"name": "【儲值金】複製期別檔案", "handler": run_vip_copy_period_file, "enabled": True},
@@ -6638,6 +6654,8 @@ if run_clicked:
                 "【檸檬後台】預收款金額",
                 "【財報】財報富邦更新｜套用篩選規則（財報篩選規則分頁）",
                 "【財報】財報富邦更新｜代墊費用拆分（代墊費用設定分頁）",
+                "【財報】財報更新整理｜盤點（缺公式、對應分頁對齊、待確認）",
+                "【財報】財報更新整理｜執行（補公式→套規則→對應分頁A–I下拉）",
                 "【財報】各區固定費用匯款",
                 "【財報】All財報現金缺口｜試算並寫入現金缺口試算表",
                 "【財報】All財報現金缺口＋預收款金額｜一次完成兩件事",
