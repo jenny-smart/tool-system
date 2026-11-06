@@ -34,7 +34,10 @@
   O 條件關係（且／或，留空當「或」——例如 H含新訓 或 L含新訓；要「且」就填「且」，
            只有同時有條件1和條件2時才有意義）
   P L欄年月來源（K＝依 K 欄日期；J＝讀取 J 欄開頭的 YYYYMM，亦接受
-           YYYY.MM／YYYY-MM／YYYY/MM；留空時若 J 有 YYYYMM 就優先用 J，否則用 K）
+           YYYY.MM／YYYY-MM／YYYY/MM；H＝讀取 H 欄附註裡的年月，例如勞保費
+           「11月013870040T」→ 11 月（沒寫年份時取不晚於 K 欄日期的最近一個 11 月），
+           也接受 202611、2026.11、115年11月；附註裡找不到年月時不改 L 欄，留給人工確認；
+           留空時若 J 有 YYYYMM 就優先用 J，否則用 K）
   Q 設定E欄固定金額（例如 -2406；留空表示保留原金額。可用於新增固定費用列）
 
 新增欄位一律加在既有欄位最後面（不要插在中間），避免手動插入分頁欄位時
@@ -197,6 +200,42 @@ def _month_from_j(row: list[object]) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
+_NOTE_ROC_MONTH = re.compile(r"(?<!\d)(1\d{2})年(0?[1-9]|1[0-2])月")
+_NOTE_YEAR_MONTH = re.compile(r"(?<!\d)(20\d{2})[./-]?(0[1-9]|1[0-2])(?!\d)")
+_NOTE_MONTH = re.compile(r"(?<!\d)(0?[1-9]|1[0-2])月")
+
+
+def _month_from_note(row: list[object]) -> tuple[int, int] | None:
+    """H 欄附註裡的年月。只有「11月」沒有年份時，取不晚於 K 欄（記帳）日期的最近一個
+    11 月：例如 2026/01/02 扣的勞保費附註「11月」→ 2025.11。"""
+    note = str(_cell_by_letter(row, "H") or "")
+    match = _NOTE_ROC_MONTH.search(note)
+    if match:
+        return int(match.group(1)) + 1911, int(match.group(2))
+    match = _NOTE_YEAR_MONTH.search(note)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    match = _NOTE_MONTH.search(note)
+    if match is None:
+        return None
+    month = int(match.group(1))
+    reference = _parse_date(_cell_by_letter(row, "K")) or _statement_row_date(row)
+    if reference is None:
+        return None
+    year = reference.year if month <= reference.month else reference.year - 1
+    return year, month
+
+
+_LABEL_MISSING = re.compile(r"^(\d{4}\.\d{2}[- ]?|-+,*|#N/A|#REF!|#VALUE!)?$")
+
+
+def _row_is_labeled(row: list[object]) -> bool:
+    """I 欄有科目、L 欄也不是空白／#N/A／只有「2026.05-」→ 已經標好。"""
+    category = str(_cell(row, 9) or "").strip()
+    label = str(_cell(row, 12) or "").strip()
+    return bool(category) and not _LABEL_MISSING.match(label)
+
+
 def _split_integer_amount(total: float, parts: int) -> list[float]:
     """把整數金額分成指定份數，總和保持不變；非整數則平均分配到各份。"""
     if parts < 2:
@@ -308,6 +347,11 @@ class Rule:
         base_year = base_month = None
         if self.month_source == "J":
             parsed_month = _month_from_j(row)
+            if parsed_month:
+                base_year, base_month = parsed_month
+        elif self.month_source == "H":
+            # 附註沒有年月就不猜（不退回 K 欄），留給人工確認
+            parsed_month = _month_from_note(row)
             if parsed_month:
                 base_year, base_month = parsed_month
         elif self.month_source == "K":
@@ -442,43 +486,57 @@ def _sheet_id_for_title(service, spreadsheet_id: str, title: str) -> int:
     raise RuntimeError(f"試算表 {spreadsheet_id} 找不到分頁「{title}」")
 
 
-def apply_rules(area: str, start_date=None, end_date=None) -> dict[str, int]:
+def apply_rules(area: str, start_date=None, end_date=None, only_unlabeled: bool = False) -> dict[str, int]:
     """套用所有啟用規則到指定地區的財報「富邦更新」分頁。
 
     目標位置一律透過「財報設定」解析：例如執行地區＝台北，就只讀寫台北財報
     的富邦更新；台中則讀寫台中財報，不共用或寫死任何試算表 ID/GID。
+
+    only_unlabeled＝True：只處理還沒標好的列（I 空白或 L 是空白／#N/A／「2026.05-」），
+    已經標好的列不動，避免改到已經結帳月份的標記（財報更新整理用這個模式）。
     """
     date_range = f"{start_date or ''}~{end_date or ''}" if (start_date or end_date) else "全部"
     log_execution("財報富邦更新套用規則", area, "開始", f"日期區間：{date_range}")
     try:
         # 區間跨年時（例如 1 月處理 12 月底的明細）各年度的列各自套用在該年財報
         result = merge_year_results([
-            _apply_rules_impl(area, start_date, end_date, year=year)
+            _apply_rules_impl(area, start_date, end_date, year=year, only_unlabeled=only_unlabeled)
             for year in statement_years(start_date, end_date)
         ])
     except Exception as exc:
         log_execution("財報富邦更新套用規則", area, "失敗", str(exc))
         raise
-    log_execution(
-        "財報富邦更新套用規則", area, "完成",
-        f"更新 {result['updated_rows']} 格，插入 {result['inserted_rows']} 列",
-    )
+    detail = f"更新 {result['updated_rows']} 格，插入 {result['inserted_rows']} 列"
+    if result.get("conflict_rows"):
+        detail += f"；規則衝突略過 {result['conflict_rows']} 列：{result.get('diagnostics', '')}"
+    log_execution("財報富邦更新套用規則", area, "完成", detail)
     return result
 
 
-def _apply_rules_impl(area: str, start_date=None, end_date=None, year: int | None = None) -> dict[str, int]:
+def _conflicting_rules(row: list[object], in_place_rules: list["Rule"]) -> list["Rule"]:
+    """同一列命中多條「更新原列」規則、而且要寫的 I／L 不一樣 → 回傳這些規則；
+    結果一樣（或只命中一條）回傳空清單。"""
+    outcomes = {(rule.set_i, rule.l_value(row)) for rule in in_place_rules}
+    return in_place_rules if len(outcomes) > 1 else []
+
+
+def _apply_rules_impl(area: str, start_date=None, end_date=None, year: int | None = None,
+                      only_unlabeled: bool = False) -> dict[str, int]:
     rules = [r for r in load_rules() if r.enabled]
     spreadsheet_id, title = resolve_statement_location(area, "富邦更新", year=year)
     values = _read_values(spreadsheet_id, title)
     if len(values) < 2:
-        return {"updated_rows": 0, "inserted_rows": 0}
+        return {"updated_rows": 0, "inserted_rows": 0, "conflict_rows": 0, "diagnostics": ""}
 
     service = get_sheets_service()
     value_updates: list[dict[str, object]] = []
     pending_inserts: list[tuple[int, list[list[object]]]] = []
+    conflicts: list[str] = []
 
     for row_idx, row in enumerate(values[1:], start=2):
         if str(_cell(row, COL_Q)).strip():
+            continue
+        if only_unlabeled and _row_is_labeled(row):
             continue
 
         if start_date or end_date:
@@ -491,6 +549,7 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None, year: int | Non
                 continue
 
         in_place_rule = None
+        in_place_matches = []
         insert_rules = []
         for rule in rules:
             if not rule.matches(row):
@@ -499,6 +558,14 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None, year: int | Non
                 insert_rules.append(rule)
             else:
                 in_place_rule = rule
+                in_place_matches.append(rule)
+
+        # 兩條以上「更新原列」規則同時命中、結果又不同（例如勞退同時命中「內勤退休金」
+        # 和「內勤薪資」）：以前是後面的蓋掉前面的，現在整列跳過、回報給人工確認。
+        clashing = _conflicting_rules(row, in_place_matches)
+        if clashing:
+            conflicts.append(f"第{row_idx}列（{'／'.join(r.name for r in clashing)}）")
+            continue
 
         # 分攤規則：新版 N 欄填份數（2／6），固定分攤 E 欄；舊版 N=E 仍依欄位代號處理。
         split_targets: list[tuple[str, int | None]] = []
@@ -660,4 +727,9 @@ def _apply_rules_impl(area: str, start_date=None, end_date=None, year: int | Non
             ).execute()
             inserted_rows += len(new_rows)
 
-    return {"updated_rows": len(value_updates), "inserted_rows": inserted_rows}
+    return {
+        "updated_rows": len(value_updates),
+        "inserted_rows": inserted_rows,
+        "conflict_rows": len(conflicts),
+        "diagnostics": "、".join(conflicts[:20]) + ("…" if len(conflicts) > 20 else ""),
+    }

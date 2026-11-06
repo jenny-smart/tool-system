@@ -3565,9 +3565,10 @@ def run_fubon_statement_lc_filter(*, month="", start_date=None, end_date=None, a
             time.sleep(3)  # 地區之間稍微間隔，避免瞬間打太多 Sheets API 請求觸發配額限制
         try:
             result = apply_rules(city, start_date=start_date, end_date=end_date)
-            messages.append(
-                f"{city}：更新 {result['updated_rows']} 格，插入 {result['inserted_rows']} 列"
-            )
+            message = f"{city}：更新 {result['updated_rows']} 格，插入 {result['inserted_rows']} 列"
+            if result.get("conflict_rows"):
+                message += f"；⚠ 規則衝突略過 {result['conflict_rows']} 列：{result.get('diagnostics', '')}"
+            messages.append(message)
             if on_progress:
                 on_progress(messages[-1], "success")
         except Exception as exc:

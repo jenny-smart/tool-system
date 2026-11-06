@@ -457,7 +457,8 @@ def _formula_rows(update_sheet: str, row_number: int, atm_id: str) -> List[str]:
 
 def maintain_sheet(area: str, update_sheet: str, *, dry_run: bool, year: Optional[int] = None,
                    service=None, apply_rules_fn: Optional[Callable[[str], Dict[str, int]]] = None,
-                   atm_lookup: Optional[Callable[[str, int], str]] = None) -> List[str]:
+                   atm_lookup: Optional[Callable[[str, int], str]] = None,
+                   rules_loader: Optional[Callable[[], list]] = None) -> List[str]:
     """一個地區、一個更新分頁：補公式 →（富邦）套規則 → 對齊對應分頁 → 盤點未標記。"""
     from tools.common.config_loader import get_sheets_service
     from tools.finance_management.statement_registry import resolve_statement_location
@@ -498,10 +499,14 @@ def maintain_sheet(area: str, update_sheet: str, *, dry_run: bool, year: Optiona
             lines.append(f"{prefix}：補公式 {len(backfill)} 列")
 
     # 2. 套篩選規則（只有富邦更新有規則引擎；會插列，所以排在對齊前面）
+    #    只補還沒標好的列，已經標好的歷史月份不動
     if update_sheet == "富邦更新" and not dry_run and apply_rules_fn is not None:
         result = apply_rules_fn(area)
         lines.append(f"{prefix}：套用篩選規則，更新 {result.get('updated_rows', 0)} 格、"
                      f"插入 {result.get('inserted_rows', 0)} 列")
+        if result.get("conflict_rows"):
+            lines.append(f"{prefix}：⚠ 規則衝突略過 {result['conflict_rows']} 列（請到「財報篩選規則」"
+                         f"把條件分開）：{result.get('diagnostics', '')}")
 
     if not dry_run:
         values = _read(service, spreadsheet_id, f"'{title}'!A:Z", "FORMATTED_VALUE")
@@ -547,7 +552,41 @@ def maintain_sheet(area: str, update_sheet: str, *, dry_run: bool, year: Optiona
             lines.append(f"    …另有 {len(unlabeled) - 30} 筆")
     else:
         lines.append(f"{prefix}：沒有未標記的列")
+
+    # 5. 已標好、但月份跟附註寫的不一樣（例如勞保費附註「07月」卻標成 2026.09）——只回報不改
+    if update_sheet == "富邦更新" and rules_loader is not None:
+        mismatches = find_month_mismatches(values, rules_loader(), year, from_row=audit_from)
+        if mismatches:
+            lines.append(f"{prefix}：月份可能標錯 {len(mismatches)} 筆（依附註年月，只提醒不修改）")
+            lines.extend("    " + text for text in mismatches[:30])
+            if len(mismatches) > 30:
+                lines.append(f"    …另有 {len(mismatches) - 30} 筆")
     return lines
+
+
+def find_month_mismatches(values: List[List[object]], rules, year: int, from_row: int = 2) -> List[str]:
+    """已標好的列裡，命中「L欄年月來源＝H」規則、科目一樣、但 L 欄月份跟附註年月推出來的不同。"""
+    note_rules = [r for r in rules if getattr(r, "enabled", True)
+                  and getattr(r, "month_source", "") == "H" and getattr(r, "action", "") != "插入新列"]
+    result = []
+    for row_number, row in enumerate(values[1:], start=2):
+        if row_number < from_row or row_year(row) != year:
+            continue
+        category = _cell(row, 9)
+        label = _cell(row, 12)
+        if not category or label_missing(label):
+            continue
+        for rule in note_rules:
+            if rule.set_i != category or not rule.matches(row):
+                continue
+            expected = rule.l_value(row)
+            # 只比年月（桃園／新竹有的寫「2026.03 內勤勞保費」用空格，月份一樣就不算錯）
+            if expected and label[:7] != expected[:7]:
+                result.append(f"第 {row_number} 列 {_cell(row, 2)[:10]} {_cell(row, 4)} "
+                              f"附註「{_cell(row, 8).splitlines()[0] if _cell(row, 8) else ''}」："
+                              f"現在 {label[:20]}，應為 {expected}")
+            break
+    return result
 
 
 def _ranges(rows: List[int]) -> str:
@@ -576,11 +615,19 @@ def run_statement_maintenance(area: str, *, dry_run: bool,
     targets = list(AREAS) if area == "全區" else [area]
     if any(a not in AREAS for a in targets):
         raise ValueError("請選擇台北／台中／桃園／新竹／高雄／全區")
+    from tools.finance_management.statement_rules import apply_rules, load_rules
+
     apply_rules_fn = None
     if not dry_run:
-        from tools.finance_management.statement_rules import apply_rules
+        def apply_rules_fn(city: str) -> Dict[str, int]:
+            return apply_rules(city, only_unlabeled=True)
 
-        apply_rules_fn = apply_rules
+    rules_cache: Dict[str, list] = {}
+
+    def rules_loader() -> list:
+        if "rules" not in rules_cache:  # 主控表規則一次執行只讀一次
+            rules_cache["rules"] = load_rules()
+        return rules_cache["rules"]
     tool_name = "財報更新盤點" if dry_run else "財報更新補公式＋對齊"
     lines: List[str] = []
     for i, city in enumerate(targets):
@@ -588,7 +635,8 @@ def run_statement_maintenance(area: str, *, dry_run: bool,
             if lines:
                 time.sleep(2)  # 避免短時間打太多 Sheets API
             try:
-                result = maintain_sheet(city, update_sheet, dry_run=dry_run, apply_rules_fn=apply_rules_fn)
+                result = maintain_sheet(city, update_sheet, dry_run=dry_run, apply_rules_fn=apply_rules_fn,
+                                        rules_loader=rules_loader)
                 lines.extend(result)
                 if on_progress:
                     on_progress(result[0] if result else f"{city}｜{update_sheet}：完成", "success")

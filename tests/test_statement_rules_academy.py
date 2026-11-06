@@ -181,7 +181,7 @@ class AcademyStatementRulesTest(unittest.TestCase):
         ):
             result = statement_rules._apply_rules_impl("台北")
 
-        self.assertEqual(result, {"updated_rows": 0, "inserted_rows": 0})
+        self.assertEqual((result["updated_rows"], result["inserted_rows"]), (0, 0))
         self.assertEqual(fake_service.spreadsheets_api.values_api.updates, [])
 
 
