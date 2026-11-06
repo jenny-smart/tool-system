@@ -1121,6 +1121,86 @@ def sync_view_from_query_params() -> None:
     if view in ["report", "oauth", "agent_help", "log"]:
         st.session_state.view = view
 
+    # Mac 提醒視窗「前往執行」：?system=財務管理&fn=【整合執行】…&scan=change_order_scan
+    # 直接選好功能、載入那次排程盤點結果（只套用一次）
+    try:
+        system = st.query_params.get("system")
+        fn = st.query_params.get("fn")
+        scan = st.query_params.get("scan")
+    except Exception:
+        system = fn = scan = None
+    link = (system or "", fn or "", scan or "")
+    if any(link) and st.session_state.get("_deep_link_applied") != link:
+        st.session_state["_deep_link_applied"] = link
+        if scan:
+            open_scan_result(scan)
+        else:
+            _select_function(system or "", fn or "")
+
+
+def _select_function(system: str, fn: str) -> None:
+    if system:
+        st.session_state.selected_system_name = system
+        st.session_state["system_name"] = system
+    if fn:
+        st.session_state["selected_function_display"] = fn
+        st.session_state["selected_function"] = fn
+
+
+def open_scan_result(key: str, entry: dict | None = None) -> None:
+    """載入排程盤點結果到該功能頁面（停在盤點結果，勾選後接著執行）。"""
+    from tools.scheduling import scan_results
+
+    page = scan_results.PAGES.get(key)
+    if not page:
+        return
+    system, fn, state_key, _title = page
+    try:
+        items = scan_results.load_items(key)
+        scan_results.mark(key, scan_results.OPENED)
+    except Exception as exc:
+        st.session_state["_scan_popup_error"] = f"讀取排程盤點結果失敗：{exc}"
+        return
+    _select_function(system, fn)
+    st.session_state[state_key] = items
+    st.session_state[f"{state_key}_from"] = (entry or {}).get("time") or "最近一次"
+    st.session_state.setdefault("_scan_popup_dismissed", set()).add(key)
+    st.session_state.pop("_scan_popup", None)
+
+
+@st.fragment(run_every="60s")
+def watch_scan_results():
+    """2026-11-06 Jenny：排程盤點完跳視窗（像富邦明細下載跳驗證碼），讓我直接接續作業。"""
+    from tools.scheduling import scan_results
+
+    if st.session_state.get("_scan_popup"):
+        return
+    try:
+        entries = scan_results.pending()
+    except Exception:
+        return
+    dismissed = st.session_state.get("_scan_popup_dismissed", set())
+    fresh = [e for e in entries if e["key"] not in dismissed]
+    if fresh:
+        st.session_state["_scan_popup"] = fresh[0]
+        st.rerun(scope="app")
+
+
+@st.dialog("📋 排程盤點完成，請確認後執行", width="large")
+def scan_result_dialog(entry: dict):
+    from tools.scheduling import scan_results
+
+    _system, fn, _state_key, title = scan_results.PAGES[entry["key"]]
+    st.markdown(f"**{title}**｜{entry['time']} 盤點")
+    st.write(entry.get("summary") or f"{entry.get('count')} 筆")
+    st.caption(f"按「前往處理」會開啟 {fn}，畫面停在這次盤點結果，勾選後直接執行（不用重新盤點）。")
+    go, later = st.columns(2)
+    if go.button("▶️ 前往處理", type="primary", use_container_width=True):
+        open_scan_result(entry["key"], entry)
+        st.rerun()
+    if later.button("稍後", use_container_width=True):
+        st.rerun()
+
 
 # ═══════════════════════════════════════════════════════════
 # 工具函式
@@ -4469,6 +4549,17 @@ with head_log:
             st.rerun()
     else:
         st.caption("無 Log 權限")
+
+# 排程盤點完成的跳窗（財務管理權限才看得到）
+if can_access_system("finance_management"):
+    watch_scan_results()
+    if st.session_state.get("_scan_popup_error"):
+        st.error(st.session_state.pop("_scan_popup_error"))
+    if st.session_state.get("_scan_popup"):
+        # 只跳一次：關掉（X）或按「稍後」，這次登入不會再跳同一個功能
+        _scan_entry = st.session_state.pop("_scan_popup")
+        st.session_state.setdefault("_scan_popup_dismissed", set()).add(_scan_entry["key"])
+        scan_result_dialog(_scan_entry)
 
 sys_col, func_col = st.columns([1, 1])
 

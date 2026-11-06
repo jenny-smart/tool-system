@@ -840,6 +840,16 @@ GIT_PULL_SCRIPT = (
 )
 
 
+def build_notify_popup(params: dict[str, Any]) -> list[str]:
+    title = str(params.get("title") or "").strip()
+    if not title:
+        raise ValueError("提醒視窗缺少標題")
+    return [sys.executable, "-m", "tools.notify_popup", "--title", title,
+            "--message", str(params.get("message") or ""),
+            "--system", str(params.get("system") or ""), "--function", str(params.get("function") or ""),
+            "--scan", str(params.get("scan") or "")]
+
+
 def build_git_pull(_params: dict[str, Any]) -> list[str]:
     """Update this checkout from origin/main without rewriting local commits or modifications."""
     return [
@@ -887,6 +897,7 @@ register_action("newebpay.refund_pending", build_newebpay_refund_pending)
 register_action("lemon.stored_value_adjustment", build_lemon_stored_value_adjustment)
 register_action("change_order.sync", build_change_order_sync)
 register_action("change_order.batch_run", build_change_order_batch_run)
+register_action("notify.popup", build_notify_popup)
 register_action("internal_payment.record", build_internal_payment_record)
 register_action("month_start.batch_run", build_month_start_batch_run)
 register_action("newebpay.month_close", build_newebpay_month_close)
@@ -953,6 +964,7 @@ ACTION_LABELS = {
     "lemon.stored_value_adjustment": "【檸檬後台】異動儲值金",
     "change_order.sync": "【清潔異動】回寫系統",
     "change_order.batch_run": "【清潔異動】整合執行（逐區依序）",
+    "notify.popup": "【提醒】Mac 跳出提醒視窗",
     "internal_payment.record": "【富邦銀行】內部請款留紀錄",
     "month_start.batch_run": "【整合執行】月初藍新／鯨躍／現金缺口（本機 Agent）",
     "newebpay.month_close": "【藍新金流】藍新收退款＋發票金額＋帳務（指定地區）",

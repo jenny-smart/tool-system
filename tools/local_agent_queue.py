@@ -485,3 +485,10 @@ def claim_next_task(
     )
     task.update({"status": "running", "agent_id": agent_id, "started_at": now_text()})
     return task
+
+
+def queue_popup(title: str, message: str, *, system: str = "", function: str = "", scan_key: str = "",
+                created_by: str = "排程系統") -> dict:
+    """排入本機 Agent：Mac 跳出提醒視窗（按「前往執行」開 Tools App 該功能；有 scan_key 就直接載入那次排程盤點結果）。"""
+    return create_task("notify.popup", {"title": title, "message": message, "system": system, "function": function,
+                                        "scan": scan_key}, created_by=created_by)

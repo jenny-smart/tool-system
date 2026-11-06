@@ -33,7 +33,7 @@ def build_report(items: list[dict]) -> str:
             detail = "、".join(f"{i['row']}（{i['memo']}）" if i.get("memo") else str(i["row"]) for i in hit)
             lines.append(f"　{label}：{len(hit)} 筆（{detail}）")
         lines.append("")
-    lines.append("請到 Tools App【整合執行】富邦內部請款勾選後執行。")
+    lines.append("打開 Tools App 會跳視窗，按「前往處理」直接停在這次盤點結果，勾選後執行（不用重新盤點）。")
     return "\n".join(lines).strip()
 
 
@@ -46,6 +46,14 @@ def main() -> None:
     if not items:
         print("沒有待處理資料，不建立日曆提醒。", flush=True)
         return
+    if get_mode("fubon_pending_check", MODE_CONFIRM) != MODE_QUEUE:
+        try:  # 2026-11-06 Jenny：存盤點結果，Tools App 跳視窗、停在這次盤點結果接著執行
+            from tools.scheduling import scan_results
+
+            scan_results.save("fubon_pending_check", items, f"待付款 {len(items)} 筆")
+            print("已存盤點結果，Tools App 會跳視窗", flush=True)
+        except Exception as exc:
+            print(f"⚠️ 盤點結果存檔失敗：{exc}", flush=True)
     if get_mode("fubon_pending_check", MODE_CONFIRM) == MODE_QUEUE:
         from tools.local_agent_queue import create_task
 
@@ -58,6 +66,13 @@ def main() -> None:
                                                 calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
                                                 replace_prefix="【富邦銀行】待處理提醒")
     print(f"已在 {(event or {}).get('_calendar_id', REMIND_CALENDAR_ID)} 建立日曆提醒。", flush=True)
+    try:  # 2026-11-06 Jenny：盤點完 Mac 跳視窗提醒去確認及執行
+        from tools.local_agent_queue import queue_popup
+
+        queue_popup(subject, report, system="財務管理", function="【整合執行】富邦內部請款", scan_key="fubon_pending_check")
+        print("已排入 Mac 提醒視窗", flush=True)
+    except Exception as exc:
+        print(f"⚠️ Mac 提醒視窗排入失敗：{exc}", flush=True)
 
 
 if __name__ == "__main__":
