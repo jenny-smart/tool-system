@@ -45,17 +45,118 @@ def _row(**cols):
 
 
 def test_rows_ready_for_reconcile_only_confirmed_matches():
+    b = "2026/11/06 09:28:58"
     rows = [
         _row(),  # 標題
-        _row(E="4800", J="LC00219084", T="已配對"),
-        _row(E="4800", J="LC00219085", T="需確認"),
-        _row(E="2000", J="", T="已配對"),                       # 非訂單（新訓費）
-        _row(E="4800", J="LC00219086", T="已更新系統"),
-        _row(E="", J="LC00219087", T="已配對"),                  # 下方待配對區
-        _row(E="4800", J="LC00219088", M="取消訂單", T="已配對"),
-        _row(E="9600", J="LC00219089", T="已配對（多訂單加總）"),
+        _row(B=b, E="4800", J="LC00219084", T="已配對"),
+        _row(B=b, E="4800", J="LC00219085", T="需確認"),
+        _row(B=b, E="2000", J="", T="已配對"),                       # 非訂單（新訓費）
+        _row(B=b, E="4800", J="LC00219086", T="已更新系統"),
+        _row(E="", J="LC00219087", T="已配對"),                      # 下方待配對區
+        _row(B=b, E="4800", J="LC00219088", M="取消訂單", T="已配對"),
+        _row(B=b, E="9600", J="LC00219089", T="已配對（多訂單加總）"),
     ]
     assert atm.rows_ready_for_reconcile(rows) == [2, 8]
+
+
+def test_rows_before_1106_are_never_reconciled_by_schedule():
+    rows = [
+        _row(),
+        _row(B="2026/11/05 19:22:28", E="1200", J="LC00218244", T="已配對"),
+        _row(B="2026/11/06 00:00:01", E="4800", J="LC00219084", T="已配對"),
+        _row(B="", E="4800", J="LC00219085", T="已配對"),           # 讀不到日期也不處理
+        _row(B="2026-11-07 10:00", E="4800", J="LC00219086", T="已配對"),
+    ]
+    assert atm.rows_ready_for_reconcile(rows) == [3, 5]
+
+
+# ── ③ 已付款不再發信、未開發票不發信並列出 ───────────
+class _ReconWS:
+    def __init__(self, rows):
+        self.rows = rows
+        self.cells = {}
+
+    def get_all_values(self):
+        return self.rows
+
+    def update_cell(self, r, c, v):
+        self.cells[(r, c)] = v
+
+
+def _setup_reconcile(monkeypatch, status, invoice_after_issue):
+    ws = _ReconWS([_row(), _row(B="2026/11/06 09:00", E="4800", J="LC00219084", K="許文菁", L="4800", T="已配對")])
+    state = {"status": status, "invoice": "", "mail": 0, "issued": 0}
+
+    def find(session, order_no):
+        return {"purchase_id": 9, "order_no": order_no, "total": 4800, "fare": 0, "payway": "2",
+                "purchase_status": state["status"], "paid_at": "2026-11-06 09:00:00" if state["status"] == "1" else "",
+                "invoice_no": state["invoice"]}
+
+    def mark(session, pid):
+        state["status"] = "1"
+        return True
+
+    def issue(session, pid):
+        state["issued"] += 1
+        state["invoice"] = invoice_after_issue
+        return True
+
+    def mail(session, order_no):
+        state["mail"] += 1
+        return {}
+
+    monkeypatch.setattr(atm, "get_atm_worksheet", lambda region: ws)
+    monkeypatch.setattr(atm, "find_purchase_by_order_no", find)
+    monkeypatch.setattr(atm, "mark_paid", mark)
+    monkeypatch.setattr(atm, "issue_invoice", issue)
+    monkeypatch.setattr(atm, "send_confirmation_mail", mail)
+    monkeypatch.setattr(atm, "_clear_data_validation", lambda *a, **k: None)
+    return ws, state
+
+
+def test_already_paid_order_never_gets_confirmation_mail(monkeypatch):
+    ws, state = _setup_reconcile(monkeypatch, status="1", invoice_after_issue="AB12345678")
+    result = atm.process_atm_rows("台北", "2", session=object())
+    assert state["mail"] == 0
+    assert result["success"] == 1 and result["completed"][0]["already_paid"] is True
+    assert ws.cells[(2, atm.COL_MAIL_STATUS)] == "原已付款，未發信"
+    assert ws.cells[(2, atm.COL_INVOICE_NO)] == "AB12345678"
+
+
+def test_unpaid_order_gets_paid_invoice_and_mail(monkeypatch):
+    ws, state = _setup_reconcile(monkeypatch, status="0", invoice_after_issue="AB12345678")
+    result = atm.process_atm_rows("台北", "2", session=object())
+    assert state["mail"] == 1 and result["no_invoice"] == []
+    assert ws.cells[(2, atm.COL_RECON_STATUS)] == "已更新系統"
+
+
+def test_invoice_not_issued_skips_mail_and_is_listed(monkeypatch):
+    ws, state = _setup_reconcile(monkeypatch, status="0", invoice_after_issue="")
+    result = atm.process_atm_rows("台北", "2", session=object())
+    assert state["mail"] == 0 and state["issued"] == 1
+    assert result["success"] == 1
+    assert [d["order_no"] for d in result["no_invoice"]] == ["LC00219084"]
+    assert ws.cells[(2, atm.COL_RECON_STATUS)] == "已更新系統（未開發票）"
+    assert ws.cells[(2, atm.COL_PAID_AT)] == "2026-11-06 09:00:00"
+
+
+# ── 行事曆 ───────────────────────────────────────────
+def test_calendar_events_for_completed_and_missing_invoice():
+    from tools.scheduled_daily import atm_match_reconcile as job
+
+    done = {"region": "台北", "row": 5, "order_no": "LC1", "name": "甲", "amount": 4800,
+            "invoice_no": "AB1", "already_paid": False, "mail_sent": True}
+    miss = dict(done, order_no="LC2", invoice_no="", mail_sent=False, reason="後台尚未回覆發票號碼")
+    result = {"台北": {"reconcile": {"completed": [done, miss], "no_invoice": [miss]}},
+              "台中": {"reconcile": {}}}
+    now = datetime(2026, 11, 6, 8, 12, tzinfo=TZ)
+    events = job.build_calendar_events(result, now)
+    assert events[0]["summary"].startswith("【ATM對帳】今日完成 2 筆")
+    assert events[0]["start"] == now and events[0]["reminder_minutes"] == []
+    assert "LC1" in events[0]["description"] and "已發確認信" in events[0]["description"]
+    assert events[1]["summary"].startswith("【ATM對帳】未開立發票 1 筆")
+    assert events[1]["reminder_minutes"] == [20, 10] and "LC2" in events[1]["description"]
+    assert job.build_calendar_events({"台北": {"reconcile": {}}}, now) == []
 
 
 # ── G 公式／下拉選單 ─────────────────────────────────

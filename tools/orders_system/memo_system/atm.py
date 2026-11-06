@@ -416,6 +416,8 @@ def process_atm_rows(
     result = {
         "processed": 0, "success": 0, "failed": 0,
         "skipped": 0, "errors": [],
+        # 逐筆結果（給排程寫行事曆）：completed＝完成對帳；no_invoice＝已付款但未開立發票
+        "completed": [], "no_invoice": [],
     }
 
     row_nums = memo.parse_row_spec(row_spec)
@@ -506,6 +508,12 @@ def process_atm_rows(
             log(f"找到 purchase_id={purchase_id}")
 
             updates = []
+            # 2026-11-06 Jenny：訂單本來就已付款時，千萬不要再發確認信
+            already_paid = status_code == "1"
+            send_mail = do_send_mail and not already_paid
+            if do_send_mail and already_paid:
+                log("（訂單本來就已付款，不再發確認信）")
+            invoice_missing_reason = ""
 
             if do_mark_paid:
                 if str(purchase.get("purchase_status") or "") == "1":
@@ -531,16 +539,22 @@ def process_atm_rows(
                 if purchase.get("invoice_no"):
                     log(f"（已有發票號碼 {purchase['invoice_no']}，略過開立發票）")
                 else:
-                    issue_invoice(session, purchase_id)
-                    log("✅ 已按下「開立發票」")
+                    # 開立發票失敗不再整列中止：付款狀態照樣回寫，但不發確認信，並列入「未開立發票」
+                    try:
+                        issue_invoice(session, purchase_id)
+                        log("✅ 已按下「開立發票」")
+                    except Exception as exc:
+                        invoice_missing_reason = f"開立發票失敗：{exc}"
                     refreshed = find_purchase_by_order_no(session, order_no)
                     if not refreshed:
                         raise ValueError(f"開立發票後無法重新查到同一訂單 {order_no}")
                     purchase = refreshed
                     if not str(purchase.get("invoice_no") or "").strip():
-                        raise ValueError(f"後台尚未回覆訂單 {order_no} 的發票號碼，停止 Sheet 回填")
+                        invoice_missing_reason = invoice_missing_reason or "後台尚未回覆發票號碼"
+                        log(f"⚠️ 第{r}列（{order_no}）：未開立發票（{invoice_missing_reason}），不發確認信")
+                        send_mail = False
 
-            if do_send_mail:
+            if send_mail:
                 mail_resp = send_confirmation_mail(session, order_no)
                 log(f"✅ 已發確認信，回應：{mail_resp}")
 
@@ -560,9 +574,11 @@ def process_atm_rows(
                 updates.append((COL_PAID_AT, paid_at))
             if invoice_no:
                 updates.append((COL_INVOICE_NO, invoice_no))
-            if do_send_mail:
+            if send_mail:
                 updates.append((COL_MAIL_STATUS, "已發送"))
-            updates.append((COL_RECON_STATUS, "已更新系統"))
+            elif do_send_mail and already_paid:
+                updates.append((COL_MAIL_STATUS, "原已付款，未發信"))
+            updates.append((COL_RECON_STATUS, "已更新系統（未開發票）" if invoice_missing_reason else "已更新系統"))
 
             _clear_data_validation(ws, r, COL_RECONCILED_AT, COL_RECON_STATUS)
 
@@ -572,6 +588,14 @@ def process_atm_rows(
 
             result["processed"] += 1
             result["success"] += 1
+            detail = {
+                "region": region, "row": r, "order_no": order_no, "name": customer_name,
+                "amount": sheet_order_amount, "invoice_no": invoice_no,
+                "already_paid": already_paid, "mail_sent": send_mail,
+            }
+            result["completed"].append(detail)
+            if invoice_missing_reason:
+                result["no_invoice"].append(dict(detail, reason=invoice_missing_reason))
 
         except Exception as e:
             msg = f"❌ 第{r}列 失敗：{e}"
@@ -1547,15 +1571,32 @@ def run_scheduled_unpaid_sync(ui_logger=None, date_until: Optional[str] = None) 
 
 
 AUTO_RECONCILE_STATUSES = ("已配對", "已配對（多訂單加總）")
+# 2026-11-06 Jenny：排程 ③ 不處理 11/6 之前（B 欄銀行入帳日）的資料
+AUTO_RECONCILE_FROM = _date(2026, 11, 6)
 
 
-def rows_ready_for_reconcile(rows: List[List[str]]) -> List[int]:
-    """③ 排程只處理 ② 確定配對（T＝已配對）、左側有銀行明細、J 有訂單編號、M 不是取消訂單的列。
+def _bank_date(value) -> Optional[_date]:
+    m = re.search(r"(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})", str(value or ""))
+    if not m:
+        return None
+    try:
+        return _date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def rows_ready_for_reconcile(rows: List[List[str]], from_date: Optional[_date] = AUTO_RECONCILE_FROM) -> List[int]:
+    """③ 排程只處理 ② 確定配對（T＝已配對）、左側有銀行明細、J 有訂單編號、M 不是取消訂單的列，
+    而且 B 欄入帳日不早於 from_date（讀不到日期也不處理）。
     需確認／疑似拆單／非訂單收入一律留給人工。"""
     ready = []
     for idx, row in enumerate(rows, start=1):
         if memo.safe_cell(row, COL_RECON_STATUS) not in AUTO_RECONCILE_STATUSES:
             continue
+        if from_date:
+            bank_day = _bank_date(memo.safe_cell(row, COL_BANK_TIME))
+            if bank_day is None or bank_day < from_date:
+                continue
         if _to_int_amount(memo.safe_cell(row, COL_BANK_INCOME)) is None:
             continue
         if not re.fullmatch(r"[A-Za-z]{2}\d{6,}", memo.safe_cell(row, COL_ORDER_NO)):
