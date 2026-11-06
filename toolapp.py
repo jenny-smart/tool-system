@@ -1121,6 +1121,22 @@ def sync_view_from_query_params() -> None:
     if view in ["report", "oauth", "agent_help", "log"]:
         st.session_state.view = view
 
+    # Mac 提醒視窗「前往執行」：?system=財務管理&fn=【整合執行】… 直接選好功能（只套用一次）
+    try:
+        system = st.query_params.get("system")
+        fn = st.query_params.get("fn")
+    except Exception:
+        system = fn = None
+    link = (system or "", fn or "")
+    if any(link) and st.session_state.get("_deep_link_applied") != link:
+        st.session_state["_deep_link_applied"] = link
+        if system:
+            st.session_state.selected_system_name = system
+            st.session_state.pop("system_name", None)
+        if fn:
+            st.session_state["selected_function_display"] = fn
+            st.session_state["selected_function"] = fn
+
 
 # ═══════════════════════════════════════════════════════════
 # 工具函式

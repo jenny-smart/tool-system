@@ -485,3 +485,9 @@ def claim_next_task(
     )
     task.update({"status": "running", "agent_id": agent_id, "started_at": now_text()})
     return task
+
+
+def queue_popup(title: str, message: str, *, system: str = "", function: str = "", created_by: str = "排程系統") -> dict:
+    """排入本機 Agent：Mac 跳出提醒視窗（按「前往執行」開 Tools App 該功能）。"""
+    return create_task("notify.popup", {"title": title, "message": message, "system": system, "function": function},
+                       created_by=created_by)

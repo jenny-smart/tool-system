@@ -58,6 +58,13 @@ def main() -> None:
                                                 calendar_id=REMIND_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
                                                 replace_prefix="【富邦銀行】待處理提醒")
     print(f"已在 {(event or {}).get('_calendar_id', REMIND_CALENDAR_ID)} 建立日曆提醒。", flush=True)
+    try:  # 2026-11-06 Jenny：盤點完 Mac 跳視窗提醒去確認及執行
+        from tools.local_agent_queue import queue_popup
+
+        queue_popup(subject, report, system="財務管理", function="【整合執行】富邦內部請款")
+        print("已排入 Mac 提醒視窗", flush=True)
+    except Exception as exc:
+        print(f"⚠️ Mac 提醒視窗排入失敗：{exc}", flush=True)
 
 
 if __name__ == "__main__":

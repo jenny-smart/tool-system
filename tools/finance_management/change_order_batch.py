@@ -774,6 +774,13 @@ def scheduled_scan(log: Callable[[str], None] = print) -> int:
                                                 calendar_id=RECORD_CALENDAR_ID, attendee="", reminder_minutes=[20, 10],
                                                 replace_prefix="【清潔異動】")
     log(f"已在 {(event or {}).get('_calendar_id', RECORD_CALENDAR_ID)} 建立提醒：{title}")
+    try:  # 2026-11-06 Jenny：盤點完 Mac 跳視窗提醒去確認及執行
+        from tools.local_agent_queue import queue_popup
+
+        queue_popup(title, report, system="財務管理", function="【整合執行】清潔異動已備妥")
+        log("已排入 Mac 提醒視窗")
+    except Exception as exc:
+        log(f"⚠️ Mac 提醒視窗排入失敗：{exc}")
     return 0
 
 
