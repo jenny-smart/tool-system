@@ -65,6 +65,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "yuanta_statement": ("scheduled_yuanta_statement.yml", {}),
     "gmail_401": ("Scheduled_gmail_401.yml", {}),
     "atm_unpaid": ("scheduled_atm_unpaid.yml", {}),
+    "atm_match_reconcile": ("jenny-smart/order-system:atm-match-reconcile-schedule.yml", {}),
     # 清潔異動／富邦請款
     "change_order_check": ("scheduled_change_order_check.yml", {"target": "check"}),
     "change_order_scan": ("scheduled_change_order_check.yml", {"target": "batch_scan"}),
@@ -143,6 +144,9 @@ DEFAULT_ROWS: list[list] = [
      "11:00、16:30 例假日由程式略過"],
     [False, "atm_unpaid", "ATM 待付款清單同步（台北／台中）", "09:00~18:00 每30分鐘", "每日", "", "略過", MODE_DIRECT,
      "取代 Mac 的 ATM 本機排程：先移除 Mac launchd 再勾選啟用，避免兩邊同時貼上"],
+    # 2026-11-06 Jenny：每日 08:10 跑 ATM 對帳 ② 配對銀行明細＋③ 更新系統對帳
+    [True, "atm_match_reconcile", "ATM 對帳 ② 配對銀行明細＋③ 更新系統對帳（台北／台中）", "08:10", "每日", "", "照跑",
+     MODE_DIRECT, "程式在 order-system（atm-match-reconcile-schedule.yml）；③ 只處理 T 欄「已配對」且 11/6 後入帳的列"],
     [True, "change_order_check", "清潔異動每日檢查（未備妥建 11:00 提醒）", "10:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "weekend_reminder", "週末／例假日服務提醒（休假前 2 天產生名單）", "11:00", "每日", "", "照跑", MODE_DIRECT,
      "每天檢查；程式依辦公日曆判斷是否為休假前 2 天（一般週四，遇國定假日提前），不是就略過。只寫追蹤表，不發 LINE"],
