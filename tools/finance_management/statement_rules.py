@@ -12,8 +12,8 @@
   A 啟用（TRUE/FALSE）
   B 規則名稱（純備註用）
   C 條件1欄位（例如 D／H／L）
-  D 條件1比對（包含／等於／小於／小於等於／大於／大於等於／介於，也接受
-           </></=/>= 這種寫法）
+  D 條件1比對（包含／等於／不等於／小於／小於等於／大於／大於等於／介於，也接受
+           </></=/>=/!= 這種寫法；等於、不等於遇到數字時比數值，7,902＝7902）
   E 條件1值（逗號分隔＝多值 OR，比對 C 欄那個財報欄位；比對是小於/大於類時，
            值可以填「10日」這種格式，比對 C 欄那個日期欄位的「日」，也可以
            直接填日期；比對是「介於」時，值填「15日-20日」這種區間，
@@ -94,7 +94,30 @@ _COMPARATOR_ALIASES = {
     ">": "大於", "＞": "大於",
     ">=": "大於等於", "≧": "大於等於", "=>": "大於等於",
     "=": "等於", "==": "等於",
+    "!=": "不等於", "<>": "不等於", "≠": "不等於",
 }
+
+_NUMBER = re.compile(r"^-?[\d,]+(\.\d+)?$")
+
+
+def _as_number(value: str) -> float | None:
+    value = value.strip()
+    if not _NUMBER.match(value):
+        return None
+    try:
+        return float(value.replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _equals_any(text: str, values: list[str]) -> bool:
+    """文字相等；兩邊都是數字時比數值（「7,902」＝7902＝7902.0）。"""
+    if text in values:
+        return True
+    number = _as_number(text)
+    if number is None:
+        return False
+    return any(_as_number(v) == number for v in values)
 
 
 def _letter_to_index(letter: str) -> int:
@@ -288,7 +311,10 @@ class Rule:
         text = str(_cell_by_letter(row, col) or "").strip()
         op = _COMPARATOR_ALIASES.get(cmp_.strip(), cmp_.strip())
         if op == "等於":
-            return text in values
+            return _equals_any(text, values)
+        if op == "不等於":
+            # 例：勞退 且 E 不等於 7902 → 內勤退休金（7,902 是員工自提，另一條標內勤薪資）
+            return not _equals_any(text, values)
         if op in ("小於", "小於等於", "大於", "大於等於"):
             row_date = _parse_date(text)
             if row_date is None:

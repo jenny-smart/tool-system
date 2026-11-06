@@ -108,3 +108,33 @@ class MonthMismatchAuditTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PensionSelfContributionTest(unittest.TestCase):
+    """台北勞退一次扣兩筆：大的是退休金，固定 7,902 是員工自提（算內勤薪資）。"""
+
+    def _rules(self):
+        pension = Rule([True, "內勤退休金", "D", "等於", "勞退", "E", "不等於", "7902", "內勤退休金", 0,
+                        "內勤退休金", False, "更新原列", "", "且", "H", ""])
+        self_paid = Rule([True, "內勤退休金", "D", "等於", "勞退", "E", "等於", "7902", "內勤薪資", 0,
+                          "內勤薪資", False, "更新原列", "", "且", "H", ""])
+        return pension, self_paid
+
+    def test_split_by_amount_without_conflict(self):
+        pension, self_paid = self._rules()
+        big = _row(d="勞退", h="07月013870040T", k="2026/10/02", out=34628)
+        small = _row(d="勞退", h="07月013870040T", k="2026/10/02", out=7902)
+        self.assertTrue(pension.matches(big))
+        self.assertFalse(self_paid.matches(big))
+        self.assertTrue(self_paid.matches(small))
+        self.assertFalse(pension.matches(small))
+        self.assertEqual(pension.l_value(big), "2026.07-內勤退休金")
+        self.assertEqual(self_paid.l_value(small), "2026.07-內勤薪資")
+
+    def test_numeric_equality_ignores_formatting(self):
+        _, self_paid = self._rules()
+        for amount in (7902, 7902.0, "7,902"):
+            self.assertTrue(self_paid.matches(_row(d="勞退", out=amount)), amount)
+        # 桃園、新竹只有一筆，金額不是 7902 → 都算退休金
+        pension, _ = self._rules()
+        self.assertTrue(pension.matches(_row(d="勞退", out=3816)))
