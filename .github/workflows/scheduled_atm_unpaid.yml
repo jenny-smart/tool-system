@@ -1,8 +1,6 @@
 name: Scheduled ATM Unpaid Sync
 
-# ATM 對帳（台北／台中）：
-#   target=unpaid（預設）① 待付款清單同步，取代 Mac launchd 的 ATM 本機排程。
-#   target=match_reconcile ② 配對銀行明細＋③ 更新系統對帳（排程設定 atm_match_reconcile，每日 08:10）。
+# ATM 待付款清單同步（台北／台中）：取代 Mac launchd 的 ATM 本機排程。
 # 時段由主控表「排程設定」的 atm_unpaid 決定（預設工作日 09:00～18:00 每 30 分鐘），
 # 由 Cloud Schedule Router 派送；這裡不設 GitHub cron，避免重複執行。
 run-name: ${{ inputs.scheduled_slot && format('cloud-{0}', inputs.scheduled_slot) || github.workflow }}
@@ -15,12 +13,6 @@ on:
         required: false
         type: string
         default: ""
-      target:
-        description: "unpaid＝① 待付款清單同步；match_reconcile＝② 配對銀行明細＋③ 更新系統對帳"
-        required: false
-        type: choice
-        options: [unpaid, match_reconcile]
-        default: unpaid
 
 permissions:
   contents: read
@@ -42,11 +34,6 @@ jobs:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      # ② ＋③ 完成／未開立發票記入 jenny@hers.com.tw 行事曆
-      GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
-      GOOGLE_HERS_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_HERS_CALENDAR_REFRESH_TOKEN }}
-      GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
-      GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
       TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
       MASTER_SPREADSHEET_ID: ${{ secrets.MASTER_SPREADSHEET_ID }}
       TAIPEI_EMAIL: ${{ secrets.TAIPEI_EMAIL }}
@@ -76,11 +63,5 @@ jobs:
           done
 
       - name: Sync ATM unpaid list
-        if: ${{ (inputs.target || 'unpaid') == 'unpaid' }}
         # 逐筆訊息（客戶、訂單）不印進公開的 Actions 紀錄，只印各區筆數
         run: python -u -m tools.scheduled_daily.atm_unpaid
-
-      - name: Match bank rows and update system (② + ③)
-        if: ${{ inputs.target == 'match_reconcile' }}
-        # 每日 08:10（主控表「排程設定」atm_match_reconcile）；同 concurrency group，不會與 ① 同時寫 ATM 分頁
-        run: python -u -m tools.scheduled_daily.atm_match_reconcile
