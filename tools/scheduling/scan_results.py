@@ -95,6 +95,12 @@ def save(key: str, items: list[dict], summary: str, *, now: Optional[datetime] =
     service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A{row_no}", valueInputOption="RAW",
         body={"values": [values]}).execute()
+    # 2026-11-06 Jenny：排程盤點也記到執行 Log，才看得出有跑
+    from tools.common import unified_log
+
+    page = PAGES.get(key)
+    unified_log.write(system=page[0] if page else "", function=(page[1] if page else key) + "（排程盤點）",
+                      run_type="排程", status="成功", message=f"{summary}；等你在 Tools App 確認後執行")
 
 
 def pending(*, today: Optional[str] = None, service=None, spreadsheet_id: str = "") -> list[dict]:
