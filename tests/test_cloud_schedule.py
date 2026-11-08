@@ -183,6 +183,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn('invest_tw_prices', keys('2026-11-02T14:40'))
         self.assertNotIn('invest_tw_prices', keys('2026-11-07T10:00'))       # 週六
         self.assertIn('invest_stock_radar', keys('2026-11-02T14:30'))
+        self.assertIn('invest_night_futures', keys('2026-11-08T07:00'))      # 每天 07:00（含週日）
+        self.assertNotIn('invest_night_futures', keys('2026-11-08T07:10'))
         # 美股：週一至五晚上、週二至六凌晨
         self.assertIn('invest_us_prices_night', keys('2026-11-06T23:50'))     # 週五
         self.assertNotIn('invest_us_prices_night', keys('2026-11-07T21:00'))  # 週六
@@ -201,7 +203,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_investment_rows_start_disabled(self):
         rows = [r for r in ss.DEFAULT_ROWS if r[1].startswith('invest_')]
-        self.assertEqual(len(rows), 9)
+        self.assertEqual(len(rows), 10)
         self.assertFalse(any(r[0] for r in rows))
         self.assertEqual([k for k in self.keys('2026-11-16T10:00', invest=False) if k.startswith('invest_')], [])
 
