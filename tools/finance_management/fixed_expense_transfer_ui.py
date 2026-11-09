@@ -12,6 +12,7 @@
                     - ▶️ 新增分錄：盤點列出的地區照勾選科目寫分錄（不匯款）
                     - 💸 富邦匯款給台北：另外勾選地區（預設台中；第74列已有匯款日期的不能選），各排一筆本機 Agent
                       匯款；分錄已先新增也能匯（只靠第74列擋重複），匯完補缺的分錄、回填第74列、台中寫請款記錄
+  2026-11-10 Jenny：期別預設改成上個月（10 日匯上個月那欄）。
 """
 from __future__ import annotations
 
@@ -66,7 +67,10 @@ def _signed_total(items: list[dict]) -> int:
 
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
-    period = st.text_input("期別（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
+    from tools.finance_management.monthly_checklist import previous_month
+
+    this_month = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m")
+    period = st.text_input("期別（YYYYMM，預設上個月）", value=previous_month(this_month),
                            key=f"{PREFIX}_period").strip()
     st.caption("勾選地區按「盤點」→ 勾選科目 → 「新增分錄」只寫台北／各區富邦更新分錄；"
                "「富邦匯款給台北」另外勾地區（預設台中），匯完自動同步明細、補分錄、回填第74列。")
