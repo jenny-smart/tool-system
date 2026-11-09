@@ -72,6 +72,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "fubon_pending_check": ("scheduled_fubon_pending_check.yml", {}),
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
+    "customer_memo_daily": ("jenny-smart/order-system:customer-memo-schedule.yml", {}),
     # investment-system（個人投資總帳／總覽）
     "invest_tw_prices": ("jenny-smart/investment-system:tw-stock-prices.yml", {"mode": "auto"}),
     "invest_us_prices_night": ("jenny-smart/investment-system:us-stock-prices.yml", {"mode": "auto"}),
@@ -152,6 +153,10 @@ DEFAULT_ROWS: list[list] = [
     [True, "change_order_check", "清潔異動每日檢查（未備妥建 11:00 提醒）", "10:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "weekend_reminder", "週末／例假日服務提醒（休假前 2 天產生名單）", "11:00", "每日", "", "照跑", MODE_DIRECT,
      "每天檢查；程式依辦公日曆判斷是否為休假前 2 天（一般週四，遇國定假日提前），不是就略過。只寫追蹤表，不發 LINE"],
+    # 2026-11-10 Jenny：上班日 10:00 貼客人備註非空白訂單到台北／台中內勤工作表單＋記行事曆
+    [True, "customer_memo_daily", "客人備註非空白（台北／台中內勤工作表單）", "10:00", "每日", "", "略過", MODE_DIRECT,
+     "程式在 order-system（customer-memo-schedule.yml）；區間＝前一上班日 10:00～今天 10:00（訂購時間），"
+     "貼到「客人備註」分頁後記 jenny@hers.com.tw 行事曆"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,
