@@ -229,7 +229,8 @@ DEFAULT_ROWS: list[list] = [
     # salary-system：2026-11-10 Jenny，每月 10、25 日的期別排程改由這裡派送（原 salary-system GAS Trigger）。
     # 預設不啟用：tool-system 設好 SALARY_SYSTEM_DISPATCH_TOKEN、salary-system 合併 scheduled_slot 版 scheduler.yml 後，
     # 在「排程設定」勾選啟用，再停用 salary-system 主控表的 GAS Trigger（避免同一天跑兩次）。
-    [False, "salary_create_period", "【薪資】建立期別資料夾與檔案（五區，不含新北）", "17:10", "每月", "10,25", "照跑",
+    # 2026-11-09 Jenny：時間統一改成 10:00（原 GAS 是 10:00；17:10 是殘留的舊觸發器）。
+    [False, "salary_create_period", "【薪資】建立期別資料夾與檔案（五區，不含新北）", "10:00", "每月", "10,25", "照跑",
      MODE_DIRECT, "程式在 salary-system（scheduler.yml）；期別＝執行日的半月（10 日→-1、25 日→-2）"],
 ]
 

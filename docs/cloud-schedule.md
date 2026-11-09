@@ -18,7 +18,7 @@
   | 日期／星期 | 每週：`二,五`；每月：`1`、`5,8,10`、`18-25`、`月底` |
   | 遇例假日 | 照跑／略過／提前（每月的日期遇週末或國定假日改到前一個工作日，依政府辦公日曆） |
   | 執行方式 | 直接執行／盤點後自動排入（排給 Mac Agent）／盤點後等確認（只盤點＋行事曆提醒） |
-  | 系統名稱 | 功能屬於哪個系統（tool-system／order-system／investment-system），放在最後一欄（J），程式自動填，空白才填、不改你填過的 |
+  | 系統名稱 | 功能屬於哪個系統（tool-system／order-system／investment-system／salary-system），放在最後一欄（J），程式自動填，空白才填、不改你填過的 |
 - 去重以「時段＋功能代號」為單位（GitHub run 標題 `cloud-YYYYMMDDTHHMM-功能代號`），
   同一時段、同一個 workflow 的不同功能都會派送；同一功能重試不會重複派送。
 - 欄位填錯（時間不是 10 分鐘倍數、代號不認得…）的那一列不會執行，Router log 會列出原因。
@@ -78,7 +78,7 @@ Actions: Read and write）。
 
 | 功能代號 | 預設時間 | Workflow |
 |---|---|---|
-| salary_create_period | 每月 10、25 日 17:10 | scheduler.yml（action=create_period；期別＝執行日的半月：10 日→YYYYMM-1、25 日→YYYYMM-2；地區留空＝五區，不含新北） |
+| salary_create_period | 每月 10、25 日 10:00 | scheduler.yml（action=create_period；期別＝執行日的半月：10 日→YYYYMM-1、25 日→YYYYMM-2；地區留空＝五區，不含新北） |
 
 這列**預設不啟用**。切換步驟：
 1. salary-system 合併讓 `scheduler.yml` 接受 `scheduled_slot` 的改動。
@@ -86,6 +86,9 @@ Actions: Read and write）。
 3. 在「排程設定」勾選 `salary_create_period` 的「啟用」（時間要改就直接改 D 欄）。
 4. 到 salary-system 主控表「排程設定」把 `enabled` 改成 FALSE，再執行一次 GAS 的 `syncScheduleTriggers`（或 Web App `?action=syncTriggers`），
    刪掉舊的 GAS Trigger，避免同一天派送兩次。
+5. 到 https://script.google.com/home/triggers 確認沒有殘留的 `runScheduledGithubAction`（例如 17:10 的舊觸發器）。
+
+> 「排程設定」分頁若已用舊預設（17:10）補上這一列，Router 不會改既有列，請直接把 D 欄時間改成 `10:00`。
 
 先前版本的 `invest_month_end`、`invest_fund_freeze`、`invest_month_roll` 已停用（月底固定改由
 `invest_month_end_ledger` 派送 month-end-ledger.yml），分頁裡這三列請刪除；Router 會在 log 提醒，這三列不會執行。

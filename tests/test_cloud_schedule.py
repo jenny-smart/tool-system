@@ -219,14 +219,14 @@ class ScheduleTests(unittest.TestCase):
                 r.enabled = True
         plan = lambda v: [(w, i) for w, i, k in self.full(v, rules=rules) if k == 'salary_create_period']
         wf = 'jenny-smart/salary-system:scheduler.yml'
-        self.assertEqual(plan('2026-11-10T17:10'),
+        self.assertEqual(plan('2026-11-10T10:00'),
                          [(wf, {'period': '202611-1', 'region': '', 'action': 'create_period'})])
-        self.assertEqual(plan('2026-11-25T17:10'),
+        self.assertEqual(plan('2026-11-25T10:00'),
                          [(wf, {'period': '202611-2', 'region': '', 'action': 'create_period'})])
-        self.assertEqual(plan('2026-10-10T17:10'),  # 國定假日照跑
+        self.assertEqual(plan('2026-10-10T10:00'),  # 國定假日照跑
                          [(wf, {'period': '202610-1', 'region': '', 'action': 'create_period'})])
-        self.assertEqual(plan('2026-11-10T17:00'), [])
-        self.assertEqual(plan('2026-11-11T17:10'), [])
+        self.assertEqual(plan('2026-11-10T17:10'), [])
+        self.assertEqual(plan('2026-11-11T10:00'), [])
 
     def test_retired_investment_rows_do_not_run(self):
         row = [True, 'invest_fund_freeze', '舊', '00:30~23:30 每小時', '每月', '1-7', '照跑', ss.MODE_DIRECT, '']
