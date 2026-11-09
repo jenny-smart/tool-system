@@ -3,8 +3,8 @@
 render_request_items() 也給【整合執行】會計事務所費用確認共用（可編輯金額）。
 
 更新紀錄：
-  2026-11-09 Jenny：render_request_items() 加 on_run／run_label：會計事務所費用確認改成按下去直接排富邦轉帳
-                    （轉完才寫請款記錄）；固定費用（辦公室租金）不變，照樣新增到請款記錄。
+  2026-11-09 Jenny：render_request_items() 加 on_run／run_label：會計事務所費用確認按下去改成
+                    「寫請款記錄＋直接排富邦轉帳」；固定費用（辦公室租金）不變。
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def render_request_items(prefix: str, items: list[dict], log: Callable[[str], No
                          tool_name: str, editable_amount: bool = False,
                          on_run: Optional[Callable[[list[dict]], None]] = None, run_label: str = "") -> None:
     """盤點結果表格：可新增的預設打勾；editable_amount 時金額可改（空白的要填才會新增）。
-    on_run 有傳：按鈕改做 on_run(勾選的列)（例：直接排富邦轉帳），不新增到請款記錄。"""
+    on_run 有傳：按鈕改做 on_run(勾選的列)（例：寫請款記錄＋排富邦轉帳）。"""
     runnable = [i for i in items if i["default"]]
     st.markdown(f"共 **{len(items)}** 筆：目前可新增 **{len(runnable)}** 筆（已預設打勾）。")
     override, editor_key = select_all_controls(prefix)
@@ -75,14 +75,11 @@ def render_request_items(prefix: str, items: list[dict], log: Callable[[str], No
         st.warning("請先填金額：" + "、".join(blank))
     if selected:
         st.write(f"本次新增：{len(selected)} 筆，合計 NT$ {sum(i['amount'] for i in selected):,}")
-    button = f"▶️ {run_label or '新增勾選的 {n} 筆到請款記錄'}".replace("{n}", str(len(selected)))
+    button = "▶️ " + (run_label or "新增勾選的 {n} 筆到請款記錄").replace("{n}", str(len(selected)))
     if on_run is not None:
         if st.button(button, key=f"{prefix}_run", disabled=not selected or bool(blank)):
-            try:
-                on_run(selected)
-                st.session_state.pop(f"{prefix}_items", None)
-            except ValueError as exc:
-                st.error(str(exc))
+            on_run(selected)
+            st.session_state.pop(f"{prefix}_items", None)
         return
     if st.button(button, key=f"{prefix}_run", disabled=not selected or bool(blank)):
         with st.spinner("新增請款記錄中…"):

@@ -691,31 +691,6 @@ def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
     return command
 
 
-def build_fubon_accounting_fee_transfer(params: dict[str, Any]) -> list[str]:
-    """2026-11-09 Jenny：會計事務所費用確認 → 台北富邦合併一筆轉給勤信，轉完寫請款記錄。"""
-    area = str(params.get("area") or "").strip()
-    period = str(params.get("period") or "").strip()
-    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
-    items = params.get("items") or []
-    if area != "台北":
-        raise ValueError("會計事務所費用轉帳只從台北富邦付款")
-    if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", period):
-        raise ValueError("會計事務所費用轉帳缺少正確期別（YYYYMM）")
-    if not items:
-        raise ValueError("請先勾選要轉帳的會計事務所費用")
-    return [
-        sys.executable,
-        "-m",
-        "tools.bank_statement.fubon_accounting_fee_transfer",
-        "--period",
-        period,
-        "--cdp-url",
-        cdp_url,
-        "--items",
-        json.dumps(items, ensure_ascii=False),
-    ]
-
-
 def _fubon_mobile_download_args(area: str, params: dict[str, Any], *, required: bool) -> list[str]:
     """手機驗證後接續下載：start_from=sheet 時開始日由 Agent 讀財報最後一列決定。"""
     from_sheet = params.get("start_from") == "sheet"
@@ -935,7 +910,6 @@ register_action("fubon.deposit_refund", build_fubon_deposit_refund)
 register_action("fubon.supply_purchase", build_fubon_supply_purchase)
 register_action("fubon.internal_payment", build_fubon_internal_payment)
 register_action("fubon.fixed_expense_transfer", build_fubon_fixed_expense_transfer)
-register_action("fubon.accounting_fee_transfer", build_fubon_accounting_fee_transfer)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
 register_action("yuanta.login", build_yuanta_login)
@@ -1003,7 +977,6 @@ ACTION_LABELS = {
     "fubon.supply_purchase": "【富邦銀行】清潔用品採購",
     "fubon.internal_payment": "【整合執行】富邦內部請款",
     "fubon.fixed_expense_transfer": "【財報】各區固定費用匯款",
-    "fubon.accounting_fee_transfer": "【整合執行】會計事務所費用轉帳",
     "fubon.captcha": "【富邦銀行】擷取驗證碼",
     "fubon.verify": "【富邦銀行】送出驗證碼",
     "yuanta.login": "【元大銀行】元大登入",
