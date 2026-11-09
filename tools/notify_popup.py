@@ -26,11 +26,24 @@ def tools_app_url() -> str:
 
         for path in (PROJECT_ROOT / ".streamlit" / "secrets.toml", Path.home() / ".streamlit" / "secrets.toml"):
             if path.exists():
-                url = str(tomllib.loads(path.read_text(encoding="utf-8")).get("TOOLS_APP_URL", "")).strip()
+                url = _find_key(tomllib.loads(path.read_text(encoding="utf-8")), "TOOLS_APP_URL")
                 if url:
                     return url
     except Exception:
         pass
+    return ""
+
+
+def _find_key(data: dict, key: str) -> str:
+    """secrets.toml 裡的 key；加在檔尾時可能落在某個 [區段] 底下，也一併找。"""
+    value = data.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    for section in data.values():
+        if isinstance(section, dict):
+            found = _find_key(section, key)
+            if found:
+                return found
     return ""
 
 
