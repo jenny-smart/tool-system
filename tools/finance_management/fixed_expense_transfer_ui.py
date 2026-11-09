@@ -8,6 +8,10 @@
                     - 先把「現金缺口試算」總營收（日期是該月時）寫進行銷費用總表該月各區第30列（營業額）
                     - 第74列已有匯款日期的地區只顯示已匯款；其餘 41～71 列有值的都列入（第72列沒金額也列）
                     - 表格多一欄「L欄」：寫進富邦更新的分類標籤
+  2026-11-09 Jenny：拿掉「執行富邦銀行匯款給台北」勾選，盤點後分兩個動作：
+                    - ▶️ 新增分錄：盤點列出的地區照勾選科目寫分錄（不匯款）
+                    - 💸 富邦匯款給台北：另外勾選地區（預設台中；第74列已有匯款日期的不能選），各排一筆本機 Agent
+                      匯款；分錄已先新增也能匯（只靠第74列擋重複），匯完補缺的分錄、回填第74列、台中寫請款記錄
 """
 from __future__ import annotations
 
@@ -22,7 +26,8 @@ import streamlit as st
 
 PREFIX = "fixed_expense_transfer"
 RUN = "執行"
-FUBON_AREAS = ("台中",)  # 2026-11-09 Jenny：目前只有台中用富邦匯給台北，其他地區只新增分錄
+FUBON_AREAS = ("台中", "桃園", "新竹", "高雄")  # 本機 Agent 富邦匯款支援的地區（學院自己轉帳）
+FUBON_DEFAULT = ("台中",)  # 2026-11-09 Jenny：富邦匯款給台北預設只勾台中
 
 
 def _areas() -> tuple[str, ...]:
@@ -63,13 +68,8 @@ def _signed_total(items: list[dict]) -> int:
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     period = st.text_input("期別（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
                            key=f"{PREFIX}_period").strip()
-    execute_fubon = st.checkbox("執行富邦銀行匯款給台北", value=False, key=f"{PREFIX}_fubon",
-                                help="銀行端仍需人工核對並按確認；成功後才會同步明細與原訂分錄。")
-    if execute_fubon:
-        st.caption("富邦匯款只有台中（其他地區照樣只新增分錄）；第74列空白才會匯。"
-                   "順序：富邦匯款 → 該區富邦更新 → 原訂分錄。")
-    else:
-        st.caption("篩選第72列 > 0，新增台北／各區富邦更新分錄及各區請款記錄。")
+    st.caption("勾選地區按「盤點」→ 勾選科目 → 「新增分錄」只寫台北／各區富邦更新分錄；"
+               "「富邦匯款給台北」另外勾地區（預設台中），匯完自動同步明細、補分錄、回填第74列。")
     st.caption("每月 10 日 04:00 排程（排程設定 fixed_expense_remit）會自動盤點高雄以外各區並排入富邦匯款。")
 
     st.markdown("**地區**")
@@ -132,41 +132,57 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     if result["skipped"]:
         st.caption("未符合條件：" + "、".join(result["skipped"]))
 
-    fubon = [a for a in selected if execute_fubon and a in FUBON_AREAS]
-    entries = [a for a in selected if a not in fubon]
-    label = "▶️ 執行：" + "＋".join(part for part in (
-        f"富邦匯款 {'、'.join(fubon)}" if fubon else "", f"新增分錄 {len(entries)} 區" if entries else "") if part)
-    if st.button(label if selected else "▶️ 執行", key=f"{PREFIX}_run", disabled=not selected):
-        _run(period, selected, execute_fubon, create_task, log, username)
+    if st.button(f"▶️ 新增分錄 {len(selected)} 區", key=f"{PREFIX}_run", disabled=not selected):
+        _write_entries(period, selected, log)
+        st.session_state.pop(f"{PREFIX}_result", None)
+        return
+
+    remittable = [a for a in selected if a in FUBON_AREAS]
+    st.markdown("**💸 富邦匯款給台北**")
+    if not remittable:
+        st.caption("盤點結果沒有可富邦匯款的地區（第74列已有匯款日期的不列）。")
+        return
+    st.caption("銀行端停在確認頁，請核對後在電腦上按確認；成功後同步該區富邦明細、補寫缺的分錄、回填第74列"
+               "（台中另外逐科目寫請款記錄／台中，已付款）。分錄已先新增也可以匯。")
+    columns = st.columns(len(remittable))
+    remit = {area: selected[area] for area, column in zip(remittable, columns)
+             if column.checkbox(area, value=area in FUBON_DEFAULT, key=f"{PREFIX}_remit_{period}_{area}")}
+    if st.button("💸 富邦匯款給台北：" + ("、".join(remit) or "請勾選地區"), key=f"{PREFIX}_remit_run",
+                 disabled=not remit):
+        _queue_remit(period, remit, create_task, log, username)
         st.session_state.pop(f"{PREFIX}_result", None)
 
 
-def _run(period: str, selected: dict[str, list[int]], execute_fubon: bool, create_task: Callable,
-         log: Callable[[str], None], username: str) -> None:
-    from tools.finance_management.fixed_expense_transfer import (
-        preview_fixed_expenses,
-        require_fubon_not_transferred,
-        transfer_fixed_expenses,
-    )
+def _write_entries(period: str, selected: dict[str, list[int]], log: Callable[[str], None]) -> None:
+    from tools.finance_management.fixed_expense_transfer import transfer_fixed_expenses
 
     for area, rows in selected.items():
         try:
-            if execute_fubon and area in FUBON_AREAS:
-                plans = preview_fixed_expenses(period, area, lenient=True).get("plans") or []
-                if not plans:
-                    raise ValueError(f"{period}／{area} 第72列沒有可匯款金額")
-                require_fubon_not_transferred(plans[0], period, area)
-                task = create_task("fubon.fixed_expense_transfer",
-                                   {"area": area, "month": period, "selected_rows": rows,
-                                    "cdp_url": "http://127.0.0.1:9222"},
-                                   created_by=username or "各區固定費用匯款")
-                log(f"已排入：{area} 富邦匯款給台北（{task.get('task_id', '')}）")
-                st.success(f"{area}：富邦匯款任務已建立，請在富邦核對後按確認；成功後會同步明細及原訂分錄。")
-            else:
-                res = transfer_fixed_expenses(period, area=area, on_progress=log, selected_rows={area: rows})
-                lines = res["summaries"] or ["沒有第72列 > 0 的資料"]
-                log("；".join(lines))
-                st.success("；".join(lines))
+            res = transfer_fixed_expenses(period, area=area, on_progress=log, selected_rows={area: rows})
+            lines = res["summaries"] or ["沒有第72列 > 0 的資料"]
+            log("；".join(lines))
+            st.success("；".join(lines))
         except Exception as exc:
-            log(f"{area} 執行失敗：{exc}")
-            st.error(f"{area} 執行失敗：{exc}")
+            log(f"{area} 新增分錄失敗：{exc}")
+            st.error(f"{area} 新增分錄失敗：{exc}")
+
+
+def _queue_remit(period: str, remit: dict[str, list[int]], create_task: Callable, log: Callable[[str], None],
+                 username: str) -> None:
+    from tools.finance_management.fixed_expense_transfer import preview_fixed_expenses, require_fubon_not_transferred
+
+    for area, rows in remit.items():
+        try:
+            plans = preview_fixed_expenses(period, area, lenient=True).get("plans") or []
+            if not plans:
+                raise ValueError(f"{period}／{area} 沒有可匯款的固定費用")
+            require_fubon_not_transferred(plans[0], period, area)
+            task = create_task("fubon.fixed_expense_transfer",
+                               {"area": area, "month": period, "selected_rows": rows, "allow_posted": True,
+                                "cdp_url": "http://127.0.0.1:9222"},
+                               created_by=username or "各區固定費用匯款")
+            log(f"已排入：{area} 富邦匯款給台北（{task.get('task_id', '')}）")
+            st.success(f"{area}：富邦匯款任務已建立，請在富邦核對後按確認；進度看下方。")
+        except Exception as exc:
+            log(f"{area} 富邦匯款排入失敗：{exc}")
+            st.error(f"{area} 富邦匯款排入失敗：{exc}")

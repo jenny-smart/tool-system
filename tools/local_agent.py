@@ -688,6 +688,8 @@ def build_fubon_fixed_expense_transfer(params: dict[str, Any]) -> list[str]:
         if not selected_rows:
             raise ValueError("請至少勾選一個固定費用科目")
         command.extend(["--rows", ",".join(str(int(row)) for row in selected_rows)])
+    if params.get("allow_posted"):  # 2026-11-09：分錄已先新增時也能匯款（只靠第74列擋重複）
+        command.append("--allow-posted")
     return command
 
 

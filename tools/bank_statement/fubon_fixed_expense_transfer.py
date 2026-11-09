@@ -3,6 +3,8 @@
 更新紀錄：
   2026-11-09 Jenny：台中匯款完成後，逐科目記到請款記錄／台中（已付款＋付款日期，收款對象檸檬台北；
                     D＝富邦更新 I 欄、E＝L 欄）。寫入失敗只警告，不影響已完成的匯款與分錄。
+  2026-11-09 Jenny：--allow-posted：分錄已先用「新增分錄」寫好時也能匯款（只靠第74列擋重複匯款）；
+                    匯款後補寫分錄照樣只補缺的列。
 """
 from __future__ import annotations
 
@@ -89,11 +91,15 @@ def run(
     accounts_file: Path,
     cdp_url: str,
     selected_rows: set[int] | None = None,
+    allow_posted: bool = False,
 ) -> int:
     plan = load_transfer_plan(period, area, selected_rows)
     amount = int(plan["total"])
     require_fubon_not_transferred(plan, period, area)
-    assert_plan_not_posted(plan)
+    if allow_posted:
+        print("分錄可能已先新增，只靠第74列（匯款日期）擋重複匯款。")
+    else:
+        assert_plan_not_posted(plan)
     bank_area = REPORT_AREA_NAMES.get(area, area)
     account = load_account("fubon", bank_area, accounts_file.expanduser())
 
@@ -167,6 +173,7 @@ def main() -> int:
     parser.add_argument("--accounts-file", type=Path, default=DEFAULT_ACCOUNTS_FILE)
     parser.add_argument("--cdp-url", default=DEFAULT_CDP_URL)
     parser.add_argument("--rows", help="勾選的來源列號，以逗號分隔；未提供時全選")
+    parser.add_argument("--allow-posted", action="store_true", help="分錄已先新增時仍可匯款（只看第74列擋重複）")
     args = parser.parse_args()
     selected_rows = None
     if args.rows is not None:
@@ -175,7 +182,7 @@ def main() -> int:
         }
         if not selected_rows:
             raise ValueError("請至少勾選一個固定費用科目")
-    return run(args.area, args.month, args.accounts_file, args.cdp_url, selected_rows)
+    return run(args.area, args.month, args.accounts_file, args.cdp_url, selected_rows, args.allow_posted)
 
 
 if __name__ == "__main__":
