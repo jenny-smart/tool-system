@@ -95,5 +95,6 @@ def merge_by_payee(items: list[dict[str, object]]) -> list[dict[str, object]]:
             "rows": rows,
             "amount": str(int(total)) if total == total.to_integral() else format(total, "f"),
             "memo": f"合併 {len(rows)} 筆（第 {'、'.join(map(str, rows))} 列）",
+            "members": members,  # 2026-11-09：轉完拆財報富邦更新用（會計事務所費用）
         })
     return sorted(merged, key=lambda m: int(m["sheet_row"]))
