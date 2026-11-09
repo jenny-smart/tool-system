@@ -4738,6 +4738,7 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_accounting_fee_batch(create_local_agent_task, add_log, st.session_state.get("username", ""))
     LOG_PLACEHOLDER = st.empty()
     render_log()
+    render_agent_task_progress(("fubon.",))  # 2026-11-09：直接排富邦轉帳，顯示 Agent 進度
     st.stop()
 
 if system_type == "finance_management" and selected_function in (
