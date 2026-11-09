@@ -69,6 +69,24 @@
 tool-system 設好 Secret 之後，在分頁勾選「啟用」；確認派送成功（investment-system 的 Actions 出現 `cloud-…` 的執行）
 後，再停用 cron-job.org 上 investment-system 的對應工作。
 
+### salary-system（2026-11-10 與 Jenny 確認）
+
+salary-system 每月 10、25 日的「建立期別資料夾與檔案」原本由 salary-system 主控表的「排程設定」分頁＋GAS Trigger
+（`gas_central/ScheduleTrigger.gs`）觸發 `scheduler.yml`，現在改成這張分頁的一列，由 Router 派送到
+`jenny-smart/salary-system`，需要 Secret `SALARY_SYSTEM_DISPATCH_TOKEN`（fine-grained token，只給 salary-system 的
+Actions: Read and write）。
+
+| 功能代號 | 預設時間 | Workflow |
+|---|---|---|
+| salary_create_period | 每月 10、25 日 17:10 | scheduler.yml（action=create_period；期別＝執行日的半月：10 日→YYYYMM-1、25 日→YYYYMM-2；地區留空＝五區，不含新北） |
+
+這列**預設不啟用**。切換步驟：
+1. salary-system 合併讓 `scheduler.yml` 接受 `scheduled_slot` 的改動。
+2. tool-system 新增 Secret `SALARY_SYSTEM_DISPATCH_TOKEN`。
+3. 在「排程設定」勾選 `salary_create_period` 的「啟用」（時間要改就直接改 D 欄）。
+4. 到 salary-system 主控表「排程設定」把 `enabled` 改成 FALSE，再執行一次 GAS 的 `syncScheduleTriggers`（或 Web App `?action=syncTriggers`），
+   刪掉舊的 GAS Trigger，避免同一天派送兩次。
+
 先前版本的 `invest_month_end`、`invest_fund_freeze`、`invest_month_roll` 已停用（月底固定改由
 `invest_month_end_ledger` 派送 month-end-ledger.yml），分頁裡這三列請刪除；Router 會在 log 提醒，這三列不會執行。
 

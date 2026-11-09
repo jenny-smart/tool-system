@@ -207,6 +207,27 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(any(r[0] for r in rows))
         self.assertEqual([k for k in self.keys('2026-11-16T10:00', invest=False) if k.startswith('invest_')], [])
 
+    def test_salary_system_create_period(self):
+        rows = [r for r in ss.DEFAULT_ROWS if r[1] == 'salary_create_period']
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0][0])  # 預設不啟用：設好 token、停掉 GAS Trigger 後才勾選
+        self.assertEqual(ss.system_name('salary_create_period'), 'salary-system')
+        self.assertEqual(ss.EXTERNAL_DISPATCH_TOKENS['jenny-smart/salary-system'], 'SALARY_SYSTEM_DISPATCH_TOKEN')
+        rules = ss.default_rules()
+        for r in rules:
+            if r.key == 'salary_create_period':
+                r.enabled = True
+        plan = lambda v: [(w, i) for w, i, k in self.full(v, rules=rules) if k == 'salary_create_period']
+        wf = 'jenny-smart/salary-system:scheduler.yml'
+        self.assertEqual(plan('2026-11-10T17:10'),
+                         [(wf, {'period': '202611-1', 'region': '', 'action': 'create_period'})])
+        self.assertEqual(plan('2026-11-25T17:10'),
+                         [(wf, {'period': '202611-2', 'region': '', 'action': 'create_period'})])
+        self.assertEqual(plan('2026-10-10T17:10'),  # 國定假日照跑
+                         [(wf, {'period': '202610-1', 'region': '', 'action': 'create_period'})])
+        self.assertEqual(plan('2026-11-10T17:00'), [])
+        self.assertEqual(plan('2026-11-11T17:10'), [])
+
     def test_retired_investment_rows_do_not_run(self):
         row = [True, 'invest_fund_freeze', '舊', '00:30~23:30 每小時', '每月', '1-7', '照跑', ss.MODE_DIRECT, '']
         rule = ss.parse_row(row)
@@ -247,7 +268,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(f"'{ss.SHEET_NAME}'!J4", cells)   # 空白列
         self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J3"], 'tool-system')
         last = len(existing) + 1
-        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last}"], 'investment-system')
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last - 1}"], 'investment-system')
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last}"], 'salary-system')
 
     def test_cross_repo_dispatch_uses_repo_token(self):
         calls=[]
