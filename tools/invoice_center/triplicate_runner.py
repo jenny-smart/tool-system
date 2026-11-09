@@ -132,13 +132,20 @@ def cancel_original(page, plan, before_submit) -> None:
         page.remove_listener("dialog", on_dialog)
 
 
+def _label(plan) -> str:
+    return "修正發票金額" if plan["source"].get("kind") == "correction" else "二聯改三聯"
+
+
 def allowance_original(page, plan, before_submit):
     from .allowance_create import _create_one, _open_allowance
     from .cetustek_invoice_paste import _clear_dialog_handlers
     _clear_dialog_handlers(page)
     _open_allowance(page)
-    return _create_one(page, plan["source"]["old_invoice"], plan["total"],
-                       invoice_year=int(plan["paid_date"][:4]), require_full=True,
+    # 修正發票金額：折讓原票全額（S 欄換算），新票是修正後金額；鯨躍可折讓額與它不符就停
+    amount = plan.get("allowance_amount") or plan["total"]
+    year = int(plan["paid_date"][:4]) if plan.get("paid_date") else None
+    return _create_one(page, plan["source"]["old_invoice"], amount,
+                       invoice_year=year, require_full=True,
                        before_save=before_submit)
 
 
@@ -243,7 +250,7 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
         # Persist before filling: a crash must not cause an unnoticed second issue.
         save({"stage": "awaiting_save"})
         _paste_one(page, json.dumps(plan["payload"], ensure_ascii=False))
-        print("原票處理完成；三聯已填入，請按下一步及儲存", flush=True)
+        print(f"原票處理完成；{_label(plan)}新發票已填入，請按下一步及儲存", flush=True)
         number = _wait_for_manual_save(page, plan["payload"]["orderid"])
     else:
         raise RuntimeError(f"未知處理狀態：{stage}")
@@ -252,7 +259,7 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
     save({"invoice_no": number, "stage": "issued"})
     complete(ws, plan, number)
     save({"stage": "completed"})
-    print(f"完成二聯改三聯：{source['old_invoice']} → {number}；已回填 O／AA", flush=True)
+    print(f"完成{_label(plan)}：{source['old_invoice']} → {number}；已回填 O／AA", flush=True)
 
 
 def run(area: str, plan: dict, cdp_url: str) -> None:

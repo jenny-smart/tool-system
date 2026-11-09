@@ -20,7 +20,9 @@
             但仍列為未備妥讓每日檢查提醒收款
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
   - 待處理發票（2026-11 Jenny：不再需人工）：車馬費發票 → 開立發票（同待收款，金額取 J 欄「車馬費 $金額」）；
-    異動發票／二聯改三聯（C 或 K 有「改三聯」）→ 二聯改三聯（作廢或全額折讓原票＋開新三聯，同【鯨躍發票】二聯改三聯）
+    異動發票／二聯改三聯（C 或 K 有「改三聯」）→ 二聯改三聯（作廢或全額折讓原票＋開新三聯，同【鯨躍發票】二聯改三聯）；
+    K 有「修正發票金額$金額」（不論 C 欄）→ 修正發票金額（同二聯改三聯流程：原票全額折讓＋開新發票，
+    原發票設定照舊、只改金額；舊金額以鯨躍原發票可折讓額核對 S 欄，新金額＝K 欄並核對後台訂單金額）
   - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
     且 AE 欄還不是「更新系統（B欄：同狀態）」→ 回填檸檬後台，成功後寫 AD／AE。
     B 欄還是待處理、但已在別處處理好的列（見 ready_target）也直接回寫，成功後 B 欄改成完成狀態。
@@ -66,12 +68,14 @@ ACTIONS = {
     "credit_refund": ("藍新信用卡退款", "newebpay.refund_pending"),
     "stored_value": ("異動儲值金", "lemon.stored_value_adjustment"),
     "triplicate": ("二聯改三聯", "cetustek.triplicate"),
+    "correction": ("修正發票金額", "cetustek.triplicate"),  # 同二聯改三聯 runner（原票全額折讓→開新票）
     "sync": ("回寫系統", ""),
 }
 # 每區依序執行：鯨躍（折讓單＋發票＋二聯改三聯）→ 退款（藍新信用卡、富邦 ATM）→ 儲值金，最後回寫系統
-ACTION_ORDER = ("allowance", "invoice", "triplicate", "credit_refund", "atm_refund", "stored_value")
+ACTION_ORDER = ("allowance", "invoice", "triplicate", "correction", "credit_refund", "atm_refund", "stored_value")
 # 鯨躍步驟：同一區沿用同一次登入，全部做完才登出（2026-11 Jenny：不要登出再登入）
-CETUSTEK_ACTIONS = ("allowance", "invoice", "triplicate")
+CETUSTEK_ACTIONS = ("allowance", "invoice", "triplicate", "correction")
+REISSUE_ACTIONS = ("triplicate", "correction")  # 原票處理＋開新票，每列各一個計畫
 CETUSTEK_LOGOUT = "cetustek_logout"
 TRIPLICATE_DETAILS = ("異動發票", "二聯轉三聯", "二聯改三聯")
 BATCH_ACTION = "change_order.batch_run"
@@ -341,7 +345,19 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
                 item["actions"].append("invoice")
             return item
         from tools.invoice_center.merged import MERGED_INVOICE_DETAILS
+        from tools.invoice_center.triplicate import correction_blocker, correction_candidate, is_correction
 
+        if is_correction(row):
+            # 2026-11 Jenny：修正發票金額＝原票全額折讓 → 以原發票設定開修正金額的新發票（同二聯改三聯流程）
+            source = correction_candidate(row, row_no)
+            item["amount"] = (source or {}).get("new_total", "")
+            reason = correction_blocker(source)
+            if reason:
+                item["missing"].append(reason)
+            else:
+                item["actions"].append("correction")
+                item["progress"].append(f"原發票 {source['old_invoice']} 全額折讓 ${source['old_total']} → 新發票 ${source['new_total']}")
+            return item
         orders = row_orders(row)
         is_triplicate = item["detail"] in TRIPLICATE_DETAILS and re.search(
             r"(?:改|轉)\s*三聯", f"{item['detail']} {_cell(row, 'K')}")
@@ -458,26 +474,30 @@ def queue_actions(items: list[dict], do_sync: bool, create_task: Callable, creat
     """整批只排一筆本機 Agent 任務（逐區依序執行，見 run_plan），不再每種動作各排一筆讓 Agent 同時跑。
 
     開立發票要先在網頁端組好發票資料（同【鯨躍發票】開立發票），由 prepare_invoices(地區, 列號) 排入 Payload。
-    二聯改三聯要先讀檸檬後台組好新發票資料，由 prepare_triplicates(地區, 列號) 回傳 {列號: 計畫}。"""
+    二聯改三聯要先讀檸檬後台組好新發票資料，由 prepare_triplicates(地區, 列號) 回傳 {列號: 計畫}；
+    修正發票金額同樣用 prepare_triplicates(地區, 列號, kind="correction")。"""
     plan = build_plan(items, do_sync)
-    for entry in plan:
-        rows = entry["steps"].get("triplicate")
-        if not rows:
-            continue
-        try:
-            if prepare_triplicates is None:
-                raise RuntimeError("需在 Tools App 執行（要先讀檸檬後台組新發票資料）")
-            plans = prepare_triplicates(entry["region"], rows)
-            entry["triplicate_plans"] = {str(r): plans[r] for r in rows if r in plans}
-            skipped = [r for r in rows if r not in plans]
-            if skipped:
-                log(f"⚠️ {entry['region']} 二聯改三聯第 {'、'.join(map(str, skipped))} 列未排入")
-            entry["steps"]["triplicate"] = [r for r in rows if r in plans]
-            if not entry["steps"]["triplicate"]:
-                entry["steps"].pop("triplicate")
-        except Exception as exc:
-            entry["steps"].pop("triplicate")
-            log(f"⚠️ {entry['region']} 二聯改三聯未排入（{len(rows)} 筆）：{exc}")
+    for action in REISSUE_ACTIONS:
+        label = ACTIONS[action][0]
+        for entry in plan:
+            rows = entry["steps"].get(action)
+            if not rows:
+                continue
+            try:
+                if prepare_triplicates is None:
+                    raise RuntimeError("需在 Tools App 執行（要先讀檸檬後台組新發票資料）")
+                plans = (prepare_triplicates(entry["region"], rows) if action == "triplicate"
+                         else prepare_triplicates(entry["region"], rows, kind=action))
+                entry[f"{action}_plans"] = {str(r): plans[r] for r in rows if r in plans}
+                skipped = [r for r in rows if r not in plans]
+                if skipped:
+                    log(f"⚠️ {entry['region']} {label}第 {'、'.join(map(str, skipped))} 列未排入")
+                entry["steps"][action] = [r for r in rows if r in plans]
+                if not entry["steps"][action]:
+                    entry["steps"].pop(action)
+            except Exception as exc:
+                entry["steps"].pop(action)
+                log(f"⚠️ {entry['region']} {label}未排入（{len(rows)} 筆）：{exc}")
     for entry in plan:
         rows = entry["steps"].get("invoice")
         if not rows:
@@ -637,14 +657,15 @@ def _run_step(action: str, region: str, rows: list[int], cdp_url: str) -> int:
 
 
 def run_triplicates(region: str, rows: list[int], plans: dict, cdp_url: str,
-                    run: Callable[[list[str]], int] = lambda cmd: subprocess.run(cmd).returncode) -> int:
-    """二聯改三聯逐列執行（每列一張新發票，人工按下一步及儲存）；一列失敗就停。"""
+                    run: Callable[[list[str]], int] = lambda cmd: subprocess.run(cmd).returncode,
+                    label: str = "二聯改三聯") -> int:
+    """二聯改三聯／修正發票金額逐列執行（每列一張新發票，人工按下一步及儲存）；一列失敗就停。"""
     from tools.local_agent import ACTION_HANDLERS
 
     for row in rows:
         plan = plans.get(str(row))
         if not plan:
-            print(f"❌ 第 {row} 列沒有二聯改三聯資料", flush=True)
+            print(f"❌ 第 {row} 列沒有{label}資料", flush=True)
             return 1
         sys.stdout.flush()
         code = run(ACTION_HANDLERS[ACTIONS["triplicate"][1]]({"area": region, "plan": plan, "cdp_url": cdp_url}))
@@ -698,8 +719,9 @@ def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str 
                 if action in CETUSTEK_ACTIONS:
                     logged_in = True
                     with keep_login():
-                        if action == "triplicate":
-                            code = run_triplicates(region, rows, entry.get("triplicate_plans") or {}, cdp_url)
+                        if action in REISSUE_ACTIONS:
+                            code = run_triplicates(region, rows, entry.get(f"{action}_plans") or {}, cdp_url,
+                                                   label=ACTIONS[action][0])
                         else:
                             code = run_step(action, region, rows, cdp_url)
                 else:
