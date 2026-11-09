@@ -82,6 +82,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "invest_snapshot": ("jenny-smart/investment-system:snapshot.yml", {}),
     "invest_stock_radar": ("jenny-smart/investment-system:stock-radar.yml", {}),
     "invest_stock_dividends": ("jenny-smart/investment-system:stock-dividends-from-ledger.yml", {}),
+    "invest_night_futures": ("jenny-smart/investment-system:night-futures.yml", {}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -209,6 +210,8 @@ DEFAULT_ROWS: list[list] = [
     [False, "invest_stock_radar", "【投資】台股雷達", "14:30", "每週", "一,二,三,四,五", "照跑", MODE_DIRECT, ""],
     [False, "invest_stock_dividends", "【投資】台股股利入帳（比對細帳備註）", "00:00~23:50 每10分鐘", "每日", "", "照跑",
      MODE_DIRECT, "掃描除權息公告建立應入帳，再用 YYYY細帳 股利-台股備註確認入帳"],
+    [False, "invest_night_futures", "【投資】台指期夜盤", "07:00", "每日", "", "照跑", MODE_DIRECT,
+     "夜盤漲跌／量佔比／外資夜盤淨額／四種劇本 → investment-system「台指期夜盤」頁籤；週二至六未公布最多等 20 分鐘"],
 ]
 
 
