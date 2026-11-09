@@ -563,3 +563,36 @@ def test_merged_orders_listed_in_j_note():
     finally:
         mp.undo()
     assert posted == [(o, "AB12345678") for o in four]
+
+
+def test_invoice_amount_correction_rows():
+    # 2026-11 Jenny：K「原發票開立折讓單，重新開立修正發票金額$9000」→ 原票全額折讓＋開修正金額新發票（不論 C 欄）
+    k = "原發票開立折讓單，重新開立修正發票金額$9,000"
+    item = plan(B="待處理發票", C="專員異動", K=k, X="AB12345678", S="8000")
+    assert item["actions"] == ["correction"] and not item["missing"] and not item["manual"]
+    assert item["amount"] == "9000"
+    assert plan(B="待處理發票", C="專員異動", K=k, S="8000")["missing"] == ["缺原發票號碼（X）"]
+    assert "S" in plan(B="待處理發票", C="專員異動", K=k, X="AB12345678")["missing"][0]
+    two = plan(B="待處理發票", K="修正發票金額$9000；修正發票金額$9500", X="AB12345678", S="8000")
+    assert "唯一" in two["missing"][0] and not two["actions"]
+    # 2026-11-08 台北：沒寫「修正」也算
+    plain = plan(B="待處理發票", C="專員異動", K="原發票開立折讓單，重新開立發票金額$18000", X="AB12345678", S="16000")
+    assert plain["actions"] == ["correction"] and plain["amount"] == "18000"
+    assert plan(B="待處理發票", C="車馬費發票", J="車馬費發票$200")["actions"] == ["invoice"]
+    # 已開新發票（O）就只回寫
+    assert plan(B="待處理發票", K=k, X="AB12345678", S="8000", O="CD12345678")["actions"] == ["sync"]
+
+
+def test_queue_actions_prepares_correction_plans():
+    items = [{"region": "台北", "row": 7, "actions": ["correction"]}]
+    calls, tasks = [], []
+
+    def prepare(region, rows, kind="triplicate"):
+        calls.append((region, rows, kind))
+        return {7: {"p": 7}}
+
+    batch.queue_actions(items, False, lambda action, params, created_by: tasks.append(params) or {"task_id": "t"},
+                        log=lambda _m: None, prepare_triplicates=prepare)
+    assert calls == [("台北", [7], "correction")]
+    entry = tasks[0]["plan"][0]
+    assert entry["steps"] == {"correction": [7]} and entry["correction_plans"] == {"7": {"p": 7}}

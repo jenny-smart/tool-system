@@ -414,3 +414,63 @@ def test_completion_appends_invoice_audit_note_only_once(source, backend):
     row[10], row[14], row[1] = note, 'AA12345678', '已處理發票'
     complete(ws, plan, 'AA12345678')
     assert not any(x['range']=='K303' for x in ws.batch_update.call_args.args[0])
+
+
+def correction_row(note="原發票開立折讓單，重新開立修正發票金額$9000", s="8000", y=""):
+    row = [""] * 27
+    for i, value in {1: "待處理發票", 2: "專員異動", 6: "LC00219894", 7: "梁小姐", 10: note,
+                     18: s, 23: "AB12345678", 24: y}.items():
+        row[i] = value
+    return row
+
+
+@pytest.fixture
+def correction_backend():
+    backend = MagicMock()
+    backend.get_order.return_value = BackendOrder(
+        order_no="LC00219894", invoice_no="AB12345678", invoice_type="二聯式",
+        paid_status="已付款", amount="9000", address="地址", service_date="2026-11-01",
+        extra={"paid_at": "2026-11-02 10:00:00"})
+    return backend
+
+
+def test_correction_keeps_two_copy_and_allows_old_amount(correction_backend):
+    from tools.invoice_center.triplicate import correction_candidate
+    item = correction_candidate(correction_row(), 12)
+    assert candidates([correction_row()]) == []  # 不會出現在二聯改三聯清單
+    plan = prepare("taipei", item, correction_backend)
+    p = plan["payload"]
+    assert plan["original_action"] == "allowance"
+    assert plan["allowance_amount"] == "8000" and plan["total"] == "9000"
+    assert p["buyer_identifier"] == "" and p["totalamount"] == "9000" and p["orderdate"] == ""
+    assert prepare("taipei", item, correction_backend, original_action="cancel")["original_action"] == "allowance"
+
+
+def test_correction_three_copy_allowance_is_untaxed(correction_backend):
+    from tools.invoice_center.triplicate import correction_candidate
+    order = correction_backend.get_order.return_value
+    order.invoice_type, order.buyer_identifier, order.buyer_name = "三聯式", "12345678", "檸檬清潔有限公司"
+    plan = prepare("taipei", correction_candidate(correction_row(s="8400"), 12), correction_backend)
+    assert plan["allowance_amount"] == "8000"
+    p = plan["payload"]
+    assert (p["saleamount"], p["taxamount"], p["totalamount"]) == ("8571", "429", "9000")
+
+
+def test_correction_new_amount_must_match_backend(correction_backend):
+    from tools.invoice_center.triplicate import correction_candidate
+    correction_backend.get_order.return_value.amount = "8000"  # 後台還沒改金額
+    with pytest.raises(ValueError, match="不符"):
+        prepare("taipei", correction_candidate(correction_row(), 12), correction_backend)
+
+
+def test_correction_allowance_uses_old_amount(monkeypatch):
+    from tools.invoice_center import allowance_create, cetustek_invoice_paste
+    calls = {}
+    monkeypatch.setattr(cetustek_invoice_paste, "_clear_dialog_handlers", lambda page: None)
+    monkeypatch.setattr(allowance_create, "_open_allowance", lambda page: None)
+    monkeypatch.setattr(allowance_create, "_create_one",
+                        lambda page, no, amount, **kw: calls.update(no=no, amount=amount, **kw) or "AL12345678")
+    plan = {"source": {"kind": "correction", "old_invoice": "AB12345678"}, "total": "9000",
+            "allowance_amount": "8000", "paid_date": ""}
+    assert runner.allowance_original(object(), plan, lambda: None) == "AL12345678"
+    assert calls["amount"] == "8000" and calls["invoice_year"] is None and calls["require_full"]

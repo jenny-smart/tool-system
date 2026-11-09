@@ -1,4 +1,8 @@
-"""二聯改三聯：來源核對、買方覆寫與獨立完成回填。"""
+"""二聯改三聯／修正發票金額：來源核對、買方覆寫與獨立完成回填。
+
+修正發票金額（2026-11 Jenny）：K 欄「重新開立（修正）發票金額$9000」→ 原發票全額折讓（只能折讓、不作廢），
+再以訂單原發票設定（二聯／三聯、載具照舊）開立修正金額的新發票。原發票金額可能有誤，所以舊金額不核對後台，
+改由鯨躍原發票可折讓金額與清潔異動 S 欄（退款金額）核對；新金額取 K 欄並核對後台訂單金額。"""
 from __future__ import annotations
 
 import re
@@ -9,6 +13,49 @@ from typing import Any
 from .models import format_amount, round_money, to_decimal
 
 INVOICE_RE = re.compile(r"[A-Z]{2}\d{8}\Z")
+# 「重新開立修正發票金額$9000」「重新開立發票金額$18000」「修正發票金額$9000」都算
+CORRECTION_RE = re.compile(r"(?:重新開立\s*(?:修正)?|修正)\s*發票金額\s*[：:]?\s*(?:NT)?\s*\$\s*([\d,]+(?:\.\d+)?)")
+TRIPLICATE_KIND, CORRECTION_KIND = "triplicate", "correction"
+
+
+def correction_amounts(note: str) -> list[str]:
+    """K 欄所有「修正發票金額$金額」（去重、保留順序）。"""
+    found = [format_amount(m) for m in CORRECTION_RE.findall(str(note or ""))]
+    return list(dict.fromkeys(found))
+
+
+def is_correction(row: list) -> bool:
+    r = list(row) + [""] * 27
+    return bool(CORRECTION_RE.search(str(r[10]))) and not re.search(r"(?:改|轉)\s*三聯", f"{r[2]} {r[10]}")
+
+
+def correction_candidate(row: list, row_no: int) -> dict[str, Any] | None:
+    r = list(row) + [""] * 27
+    if str(r[1]).strip() != "待處理發票" or not is_correction(r) or not str(r[6]).strip() or str(r[14]).strip():
+        return None
+    amounts = correction_amounts(r[10])
+    return {"kind": CORRECTION_KIND, "source_row": row_no, "order_no": str(r[6]).strip(),
+            "customer": str(r[7]).strip(), "note": str(r[10]).strip(),
+            "old_invoice": str(r[23]).strip().upper(), "old_type": str(r[24]).strip(),
+            "old_total": format_amount(str(r[18]).strip()) if str(r[18]).strip() else "",
+            "new_total": amounts[0] if len(amounts) == 1 else ""}
+
+
+def correction_blocker(item: dict[str, Any] | None) -> str:
+    """修正發票金額還不能執行的原因（空字串＝可以執行）。"""
+    if item is None:
+        return "K 欄沒有「修正發票金額$金額」，或 O 欄已有新發票"
+    if not item["new_total"] or to_decimal(item["new_total"]) <= 0:
+        return "K 欄要有唯一的「修正發票金額$金額」"
+    if not INVOICE_RE.fullmatch(item["old_invoice"]):
+        return "缺原發票號碼（X）"
+    if not item["old_total"] or to_decimal(item["old_total"]) <= 0:
+        return "缺原發票金額（S 退款金額），無法核對鯨躍原發票"
+    return ""
+
+
+def source_candidate(row: list, row_no: int, kind: str = TRIPLICATE_KIND) -> dict[str, Any] | None:
+    return correction_candidate(row, row_no) if kind == CORRECTION_KIND else candidate(row, row_no)
 
 
 def parse_requirements(note: str) -> dict[str, Any]:
@@ -45,7 +92,7 @@ def candidates(values: list[list]) -> list[dict[str, Any]]:
 def validate_source(ws: Any, expected: dict[str, Any]) -> None:
     n = int(expected["source_row"])
     rows = ws.get(f"A{n}:AA{n}")
-    current = candidate(rows[0] if rows else [], n)
+    current = source_candidate(rows[0] if rows else [], n, expected.get("kind", TRIPLICATE_KIND))
     if current != expected:
         raise ValueError(f"清潔異動第 {n} 列已變更或已有新發票，請重新讀取")
 
@@ -62,6 +109,8 @@ def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: s
 
     if original_action not in {"cancel", "allowance"}:
         raise ValueError("不支援的原發票處理方式")
+    if item.get("kind") == CORRECTION_KIND:
+        return prepare_correction(area, item, backend)  # 修正發票金額一律全額折讓，不作廢
     requirements = parse_requirements(item["note"])
     old = item["old_invoice"]
     if not INVOICE_RE.fullmatch(old) or "二聯" not in item["old_type"]:
@@ -104,6 +153,64 @@ def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: s
     return {"source": item, "paid_date": paid_date, "total": format_amount(total),
             "payload": build_add_invoice_payload(payload),
             **({"original_action": "allowance"} if original_action == "allowance" else {})}
+
+
+def _original_untaxed(item: dict[str, Any], order: Any) -> Decimal:
+    """鯨躍折讓頁「應稅」銷售額：二聯是含稅總額，三聯是未稅額。"""
+    total = to_decimal(item["old_total"])
+    kind = item.get("old_type") or getattr(order, "invoice_type", "")
+    if "三聯" in str(kind):
+        return round_money(total / Decimal("1.05"))
+    if "二聯" in str(kind):
+        return total
+    raise ValueError("無法判斷原發票是二聯或三聯（Y 欄空白、後台也沒有發票類型）")
+
+
+def prepare_correction(area: str, item: dict[str, Any], backend: Any, *, original_action: str = "allowance") -> dict[str, Any]:
+    from .bridge import build_invoice_payload_from_backend_order
+    from .invoice import build_add_invoice_payload
+
+    if original_action != "allowance":
+        raise ValueError("修正發票金額只能全額折讓原發票，不作廢")
+    reason = correction_blocker(item)
+    if reason:
+        raise ValueError(reason)
+    old = item["old_invoice"]
+    order = backend.get_order(item["order_no"])
+    if order is None or order.order_no != item["order_no"]:
+        raise ValueError("檸檬後台找不到相同訂單")
+    if order.invoice_no.strip().upper() != old:
+        raise ValueError(f"原發票號碼不符：後台 {order.invoice_no or '空白'}／清潔異動表 {old}")
+    total = to_decimal(item["new_total"])
+    backend_total = to_decimal(order.amount)
+    if backend_total != total:
+        raise ValueError(f"K 欄修正金額 ${format_amount(total)} 與後台訂單金額 ${format_amount(backend_total)} 不符")
+    # 原發票年度：有付款日期用付款日期，沒有就讓折讓頁搜尋近年度
+    paid = str((order.extra or {}).get("paid_at") or "")
+    if not paid:
+        match = re.search(r"付款日期\s*[：:]\s*(\d{4}[-/]\d{2}[-/]\d{2})", order.raw_text or "")
+        paid = match[1] if match else ""
+    try:
+        paid_date = datetime.strptime(paid[:10].replace("/", "-"), "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        paid_date = ""
+    allowance_amount = _original_untaxed(item, order)
+    # 沿用訂單原發票設定（二聯／三聯、載具、捐贈照舊），只改金額；不帶服務日期，開立當日。
+    payload = build_invoice_payload_from_backend_order(area, order, suffix=f"-R{old}")
+    payload.orderdate = ""
+    if str(payload.buyer_identifier or "").strip():
+        payload.hastax = "2"
+        payload.saleamount = round_money(total / Decimal("1.05"))
+        payload.taxamount = total - payload.saleamount
+    else:
+        payload.saleamount = total
+        payload.taxamount = Decimal("0")
+    payload.totalamount = total
+    for line in payload.items or []:
+        line.unitprice = line.amount = total
+    return {"source": item, "paid_date": paid_date, "total": format_amount(total),
+            "allowance_amount": format_amount(allowance_amount),
+            "payload": build_add_invoice_payload(payload), "original_action": "allowance"}
 
 
 def complete(ws: Any, plan: dict[str, Any], invoice_no: str) -> None:
