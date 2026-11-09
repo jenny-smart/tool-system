@@ -1,0 +1,24 @@
+from datetime import date
+
+from tools.finance_management import fixed_expense_transfer, taichung_fixed_expense
+from tools.scheduled_finance import runner
+from tools.scheduling import schedule_settings
+from tools import local_agent_queue
+
+
+def test_schedule_skips_kaohsiung(monkeypatch):
+    status = [
+        {"area": "台中", "total": 10000, "memo": "", "fixed": False, "self_remit": False, "done": False, "detail": "待匯款"},
+        {"area": "高雄", "total": 40000, "memo": "", "fixed": True, "self_remit": False, "done": False, "detail": "待匯款"},
+    ]
+    monkeypatch.setattr(fixed_expense_transfer, "remit_status", lambda period: status)
+    monkeypatch.setattr(taichung_fixed_expense, "taichung_status", lambda period: {"applicable": False, "missing": []})
+    monkeypatch.setattr(schedule_settings, "get_mode", lambda key, default: schedule_settings.MODE_QUEUE)
+    queued = []
+    monkeypatch.setattr(local_agent_queue, "create_task",
+                        lambda action, params, created_by="": queued.append(params["area"]) or {"task_id": "T"})
+    reminders = []
+    monkeypatch.setattr(runner, "remind", lambda title, body, prefix: reminders.append(body))
+    assert runner.run_fixed_expense_remit(date(2026, 11, 10)) == 0
+    assert queued == ["台中"]
+    assert "高雄" not in reminders[0]
