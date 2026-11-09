@@ -18,7 +18,7 @@
   | 日期／星期 | 每週：`二,五`；每月：`1`、`5,8,10`、`18-25`、`月底` |
   | 遇例假日 | 照跑／略過／提前（每月的日期遇週末或國定假日改到前一個工作日，依政府辦公日曆） |
   | 執行方式 | 直接執行／盤點後自動排入（排給 Mac Agent）／盤點後等確認（只盤點＋行事曆提醒） |
-  | 系統名稱 | 功能屬於哪個系統（tool-system／order-system／investment-system），放在最後一欄（J），程式自動填，空白才填、不改你填過的 |
+  | 系統名稱 | 功能屬於哪個系統（tool-system／order-system／investment-system／salary-system），放在最後一欄（J），程式自動填，空白才填、不改你填過的 |
 - 去重以「時段＋功能代號」為單位（GitHub run 標題 `cloud-YYYYMMDDTHHMM-功能代號`），
   同一時段、同一個 workflow 的不同功能都會派送；同一功能重試不會重複派送。
 - 欄位填錯（時間不是 10 分鐘倍數、代號不認得…）的那一列不會執行，Router log 會列出原因。
@@ -45,6 +45,19 @@
 | mof_serial_check | 雙月 21～25 日 10:00 | 字軌還沒完成就提醒 |
 
 其餘（日排程、外場、客服、業績、富邦／元大明細、月排程、儲值金、⑥–⑩、月初藍新鯨躍、月初檢查…）沿用原本時間，見分頁。
+
+### salary-system（2026-11-09 與 Jenny 確認）
+
+| 功能代號 | 預設時間 | Workflow |
+|---|---|---|
+| salary_create_period | 每月 10、25 日 10:00（遇例假日照跑） | `jenny-smart/salary-system:scheduler.yml`（`action=create_period`；期別自動判斷：10 日＝當月-1、25 日＝當月-2；地區留空＝台北／台中／桃園／新竹／高雄，不含新北） |
+
+原本由 salary-system 的 GAS Trigger（salary 主控表「排程設定」）觸發，改到這裡統一管理。
+需要 Secret `SALARY_SYSTEM_DISPATCH_TOKEN`（fine-grained token，只給 salary-system 的 Actions: Read and write），
+沒設定時這一列會略過並讓 Router 失敗。salary-system 的 `scheduler.yml` 要先能接受 `scheduled_slot`。
+確認派送成功（salary-system 的 Actions 出現 `cloud-…-salary_create_period` 的執行）後，到 salary-system App
+「排程設定」按「停用 GAS 排程」，並到 Apps Script「觸發條件」確認沒有殘留的 `runScheduledGithubAction`（例如 17:10 的舊觸發器）。
+建立期別遇到已存在的資料夾／檔案會略過，新舊排程重疊一次不會重複建立。
 
 ### investment-system（2026-11-06 與 Jenny 確認）
 

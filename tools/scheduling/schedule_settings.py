@@ -15,7 +15,7 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
   G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期遇例假日改到前一個工作日）
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
-  J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system），程式自動填，顯示用
+  J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system／salary-system），程式自動填，顯示用
 
 功能也可以派送到其他 repo 的 workflow（例如 order-system 的週末提醒、investment-system 的
 月底轉值），見 EXTERNAL_DISPATCH_TOKENS。
@@ -73,6 +73,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
     "customer_memo_daily": ("jenny-smart/order-system:customer-memo-schedule.yml", {}),
+    # salary-system（金流對帳／清潔承攬）：期別自動判斷（1–15 日＝當月-1、16 日起＝當月-2），地區留空＝五區
+    "salary_create_period": ("jenny-smart/salary-system:scheduler.yml", {"action": "create_period"}),
     # investment-system（個人投資總帳／總覽）
     "invest_tw_prices": ("jenny-smart/investment-system:tw-stock-prices.yml", {"mode": "auto"}),
     "invest_us_prices_night": ("jenny-smart/investment-system:us-stock-prices.yml", {"mode": "auto"}),
@@ -157,6 +159,10 @@ DEFAULT_ROWS: list[list] = [
     [True, "customer_memo_daily", "客人備註非空白＋客服備註需註記（VIP 非儲值金／**N- 已非首次）（台北／台中內勤工作表單）", "10:00", "每日", "", "略過", MODE_DIRECT,
      "程式在 order-system（customer-memo-schedule.yml）；區間＝前一上班日 10:00～今天 10:00（訂購時間），"
      "貼到「客人備註」分頁後記 jenny@hers.com.tw 行事曆"],
+    # 2026-11-09 Jenny：salary-system 建立期別改由這裡排程（原本 GAS Trigger），每月 10、25 日 10:00
+    [True, "salary_create_period", "【金流對帳】建立期別資料夾與檔案（台北／台中／桃園／新竹／高雄）", "10:00", "每月", "10,25",
+     "照跑", MODE_DIRECT,
+     "程式在 salary-system（scheduler.yml）；10 日建當月-1、25 日建當月-2。取代 salary-system 的 GAS 排程（要停用）"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,
@@ -394,6 +400,7 @@ def due(rules: Iterable[Rule], when: datetime, is_workday: Callable[[date], bool
 EXTERNAL_DISPATCH_TOKENS = {
     "jenny-smart/order-system": "ORDER_SYSTEM_DISPATCH_TOKEN",
     "jenny-smart/investment-system": "INVESTMENT_SYSTEM_DISPATCH_TOKEN",
+    "jenny-smart/salary-system": "SALARY_SYSTEM_DISPATCH_TOKEN",
 }
 
 
