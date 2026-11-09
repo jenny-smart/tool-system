@@ -342,27 +342,17 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
                 continue
 
             invoice_no = str(item["invoice_no"])
-            # 開立前：鯨躍已有這張發票的折讓單（上次開了但沒回填）就補回，不重開
-            match_args = {"untaxed": str(item["untaxed_amount"]), "not_before": str(item.get("registered_on") or "")}
-            found = find_existing_allowance(page, invoice_no, **match_args)
-            if found:
-                allowance_date, number = found
+            # 共用：開立前先查鯨躍（上次開了沒回填就補回）、開立、存檔後讀不到單號再查一次
+            from tools.invoice_center.ei_issue import issue_allowance
+            result = issue_allowance(
+                page, invoice_no, str(item["untaxed_amount"]),
+                invoice_year=_invoice_year(backend, str(item["order_no"]), invoice_no),
+                not_before=str(item.get("registered_on") or ""),
+            )
+            number, allowance_date = result.number, result.date
+            if result.reused:
                 print(f"第 {sheet_row} 列：鯨躍已有 {invoice_no} 的折讓單 {number}，不重開，補回 AA／AB")
-            else:
-                invoice_year = _invoice_year(backend, str(item["order_no"]), invoice_no)
-                _open_allowance(page)
-                try:
-                    number = _create_one(page, invoice_no, str(item["untaxed_amount"]), invoice_year=invoice_year)
-                except Exception as exc:
-                    # 開立後讀不到單號：再查一次，有就補回；查不到才算開立失敗
-                    found = find_existing_allowance(page, invoice_no, **match_args)
-                    if not found:
-                        raise RuntimeError(f"第 {sheet_row} 列 {invoice_no} 折讓單未開立成功：{exc}") from exc
-                    allowance_date, number = found
-                    print(f"第 {sheet_row} 列：存檔後未讀到單號，查詢確認已開立 {number}，補回 AA／AB")
-                else:
-                    allowance_date = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
-                _open_allowance(page)
+            _open_allowance(page)
             allowance_date = allowance_date or datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d")
 
             # One final read before writing, so a concurrent/manual update always wins.

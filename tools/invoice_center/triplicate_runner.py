@@ -137,23 +137,25 @@ def _label(plan) -> str:
 
 
 def allowance_original(page, plan, before_submit):
-    from .allowance_create import _create_one, _open_allowance
-    from .cetustek_invoice_paste import _clear_dialog_handlers
-    _clear_dialog_handlers(page)
-    _open_allowance(page)
+    """原發票全額折讓（共用 ei_issue.issue_allowance：先查鯨躍是否已折讓過，有就沿用不重開）。"""
+    from .ei_issue import issue_allowance
     # 修正發票金額：折讓原票全額（S 欄換算），新票是修正後金額；鯨躍可折讓額與它不符就停
     amount = plan.get("allowance_amount") or plan["total"]
     year = int(plan["paid_date"][:4]) if plan.get("paid_date") else None
-    return _create_one(page, plan["source"]["old_invoice"], amount,
-                       invoice_year=year, require_full=True,
-                       before_save=before_submit)
+    return issue_allowance(page, plan["source"]["old_invoice"], amount, invoice_year=year,
+                           require_full=True, before_save=before_submit).number
+
+
+def issue_new_invoice(page, plan, before_fill):
+    """新發票（共用 ei_issue.issue_invoice）。進度檔已確保不重開，所以不再另查已開立。"""
+    from .ei_issue import issue_invoice
+    return issue_invoice(page, plan["payload"], lookup_order_no=plan["payload"]["orderid"],
+                         check_existing=False, before_fill=before_fill).number
 
 
 def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="",
             retry_unissued=False):
-    from .cetustek_invoice_paste import (
-        _extract_invoice_no_for_order, _open_invoice_create, _paste_one, _wait_for_manual_save,
-    )
+    from .cetustek_invoice_paste import _extract_invoice_no_for_order
     source = plan["source"]
     action = plan.get("original_action", "cancel")
     stage = state.get("stage", "new")
@@ -246,12 +248,9 @@ def process(page, ws, plan, state, save, backend, area, *, resume_allowance_no="
         if not number or number == source["old_invoice"]:
             raise RuntimeError("已填入三聯表單，請完成儲存並停留查詢結果，再重試回填；不會重開")
     elif stage in {"cancelled", "allowed"}:
-        _open_invoice_create(page)
         # Persist before filling: a crash must not cause an unnoticed second issue.
-        save({"stage": "awaiting_save"})
-        _paste_one(page, json.dumps(plan["payload"], ensure_ascii=False))
-        print(f"原票處理完成；{_label(plan)}新發票已填入，請按下一步及儲存", flush=True)
-        number = _wait_for_manual_save(page, plan["payload"]["orderid"])
+        print(f"原票處理完成；{_label(plan)}新發票填入中，填好請按下一步及儲存", flush=True)
+        number = issue_new_invoice(page, plan, lambda: save({"stage": "awaiting_save"}))
     else:
         raise RuntimeError(f"未知處理狀態：{stage}")
     if number == source["old_invoice"]:

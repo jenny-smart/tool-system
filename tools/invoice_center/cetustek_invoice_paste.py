@@ -567,27 +567,26 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         if not payload_json:
             update_payload_status(row_no, "failed", "Payload 空白")
             continue
-        # 開立前：到鯨躍查詢這筆是否已開過（同訂單、登記日後、金額相符），有就回填不重開；
+        # 共用開立：先到鯨躍查詢這筆是否已開過（同訂單、登記日後、金額相符），有就回填不重開；
         # 查詢失敗直接停止，不在不確定時開立
+        from tools.invoice_center.ei_issue import LookupFailed, issue_invoice
+
         registered_on, amount = _source_row_values(area, source_row)
-        existing = find_existing_invoice(page, order_no, amount=amount, not_before=registered_on)
-        if existing:
-            write_invoice_result(area, source_row, order_no, existing)
-            update_payload_status(row_no, "completed", f"鯨躍已有發票，回填 O/AA：{existing}")
-            completed += 1
-            print(f"[{area}] {order_no}：鯨躍已開立發票 {existing}，已回填，未重複開立", flush=True)
-            continue
         try:
-            # 每張發票按「否」後會回到查詢頁；下一筆必須重新進入開立頁。
-            _open_invoice_create(page)
-            _clear_dialog_handlers(page)
-            _paste_one(page, payload_json)
-            update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存")
-            invoice_no = _wait_for_manual_save(page, order_no, new_order=True)
-            write_invoice_result(area, source_row, order_no, invoice_no)
-            update_payload_status(row_no, "completed", f"已回填 O/AA：{invoice_no}")
+            result = issue_invoice(
+                page, payload_json, lookup_order_no=order_no, amount=amount, not_before=registered_on,
+                after_fill=lambda: update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存"),
+            )
+            write_invoice_result(area, source_row, order_no, result.number)
+            if result.reused:
+                update_payload_status(row_no, "completed", f"鯨躍已有發票，回填 O/AA：{result.number}")
+                print(f"[{area}] {order_no}：鯨躍已開立發票 {result.number}，已回填，未重複開立", flush=True)
+            else:
+                update_payload_status(row_no, "completed", f"已回填 O/AA：{result.number}")
+                print(f"[{area}] {order_no}：已回填 O 欄 {result.number}、AA 欄開立時間", flush=True)
             completed += 1
-            print(f"[{area}] {order_no}：已回填 O 欄 {invoice_no}、AA 欄開立時間", flush=True)
+        except LookupFailed:
+            raise  # 查詢失敗：沒開立，Payload 保持待處理，下次重試
         except Exception as exc:
             update_payload_status(row_no, "failed", str(exc))
             raise RuntimeError(f"{order_no} 匯入發票資料失敗：{exc}") from exc

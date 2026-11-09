@@ -468,6 +468,7 @@ def test_correction_allowance_uses_old_amount(monkeypatch):
     calls = {}
     monkeypatch.setattr(cetustek_invoice_paste, "_clear_dialog_handlers", lambda page: None)
     monkeypatch.setattr(allowance_create, "_open_allowance", lambda page: None)
+    monkeypatch.setattr(allowance_create, "find_existing_allowance", lambda *a, **k: None)
     monkeypatch.setattr(allowance_create, "_create_one",
                         lambda page, no, amount, **kw: calls.update(no=no, amount=amount, **kw) or "AL12345678")
     plan = {"source": {"kind": "correction", "old_invoice": "AB12345678"}, "total": "9000",
