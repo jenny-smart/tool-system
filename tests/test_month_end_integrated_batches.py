@@ -154,7 +154,44 @@ def test_accounting_november():
     assert "2026.09～10-台北營業稅" in memos and "2026.09～10-台中營業稅" in memos
     assert "2026.11-辦公室租金代扣繳" in memos and "2026.12-辦公室租金代扣繳" in memos
     assert "2026.12-辦公室二代健保" in memos
-    assert not any("營所稅" in m or "記帳費" in m for m in memos)
+    assert not any("營所稅" in m for m in memos)
+    # 2026-11-09：記帳費每個單月都列出，1、7 月以外預設不勾（參考金額用最近一次 7 月）
+    items = {i["memo"]: i for i in acc.apply_defaults(fixed.mark_status(acc.planned_items("202611"), {"台北": set()}))}
+    assert items["2026.11-台北半年度記帳費"]["amount"] == 21000 and not items["2026.11-台北半年度記帳費"]["default"]
+    assert items["2026.11-台中半年度記帳費"]["amount"] == 21000 and not items["2026.11-台中半年度記帳費"]["default"]
+
+
+def test_accounting_request_rows_after_transfer():
+    items = [{"memo": "2026.09～10-台北營業稅", "category": "營業稅", "amount": 352626},
+             {"memo": "2026.09～10-台中營業稅", "category": "營業稅", "amount": 29185},
+             {"memo": "2026.11-台中半年度記帳費", "category": "記帳費", "amount": 21000}]
+    rows = acc.request_rows(items, "2026/11/09", "2026/11/09 16:30:00")
+    assert [r[4] for r in rows["台北"]] == [i["memo"] for i in items]
+    assert all(r[0] == "已付款" and r[1] == "2026/11/09" and r[7] == "勤信" and r[8] == "013-0000240035015567"
+               for r in rows["台北"])
+    assert [r[4] for r in rows["台中"]] == ["2026.09～10-台中營業稅", "2026.11-台中半年度記帳費"]
+    assert all(r[0] == "待付款" and r[1] == "" and r[7] == "台北" and r[8] == "" for r in rows["台中"])
+    assert "台中" not in acc.request_rows(items[:1], "2026/11/09", "x")
+
+
+def test_accounting_queue_transfer_merges_into_one_task():
+    calls = []
+    task = acc.queue_transfer("202611", [{"memo": "a", "category": "營業稅", "amount": 100},
+                                         {"memo": "b", "category": "辦公室租金", "amount": 8800}],
+                              lambda action, params, created_by="": calls.append((action, params)) or {"task_id": "T1"},
+                              log=lambda _t: None)
+    assert task == {"task_id": "T1"} and len(calls) == 1
+    action, params = calls[0]
+    assert action == "fubon.accounting_fee_transfer" and params["area"] == "台北"
+    assert sum(i["amount"] for i in params["items"]) == 8900
+
+
+def test_accounting_transfer_agent_command():
+    from tools import local_agent
+
+    command = local_agent.build_fubon_accounting_fee_transfer(
+        {"area": "台北", "period": "202611", "items": [{"memo": "a", "amount": 100}]})
+    assert "tools.bank_statement.fubon_accounting_fee_transfer" in command and "202611" in command
 
 
 def test_accounting_january_bookkeeping_and_tax_span():
