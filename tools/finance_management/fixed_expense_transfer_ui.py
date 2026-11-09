@@ -165,8 +165,8 @@ def _run(period: str, selected: dict[str, list[int]], execute_fubon: bool, creat
             else:
                 res = transfer_fixed_expenses(period, area=area, on_progress=log, selected_rows={area: rows})
                 lines = res["summaries"] or ["沒有第72列 > 0 的資料"]
-                log(f"{area}：" + "；".join(lines))
-                st.success(f"{area}：" + "；".join(lines))
+                log("；".join(lines))
+                st.success("；".join(lines))
         except Exception as exc:
             log(f"{area} 執行失敗：{exc}")
             st.error(f"{area} 執行失敗：{exc}")
