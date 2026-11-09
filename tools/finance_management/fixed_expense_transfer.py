@@ -1,4 +1,12 @@
-"""各區固定費用匯款：由行銷費用總表產生台北／分店富邦分錄。"""
+"""各區固定費用匯款：由行銷費用總表產生台北／分店富邦分錄。
+
+更新紀錄：
+  2026-11-09 Jenny：
+    - 盤點（lenient）：第74列沒有匯款日期時，41～71 列有值（≠0）的都列入，第72列沒金額或明細合計
+      與第72列不符也照列（標 mismatch 提醒）；有勾選科目執行時依勾選列重算金額。沒勾選的整批執行維持原本嚴格檢查。
+    - sync_revenue_row()：「現金缺口試算」總營收有數字、且日期是該期別月份時，寫進行銷費用總表
+      「YYYY總表」該月各區第30列（各區營業額）。
+"""
 from __future__ import annotations
 
 import re
@@ -93,6 +101,7 @@ def _make_plan(
     transfer_mark: str,
     source_items: list[tuple[int, str, int]],
     source_areas: list[str],
+    lenient: bool = False,
 ) -> dict[str, object]:
     if not source_items:
         raise RuntimeError(f"{period[:4]}.{period[4:]}／{area} 第72列有金額但找不到固定費用明細")
@@ -111,10 +120,11 @@ def _make_plan(
 
     signed_total = sum(int(row[5] or 0) - int(row[4] or 0) for row in taipei_rows)
     tolerance = max(2, len(taipei_rows))
+    mismatch = ""
     if abs(signed_total - total) > tolerance:
-        raise RuntimeError(
-            f"{period_label}／{area} 固定費用明細 {signed_total:,} 與第72列 {total:,} 不符，未寫入"
-        )
+        mismatch = f"{period_label}／{area} 固定費用明細 {signed_total:,} 與第72列 {total:,} 不符"
+        if not lenient:
+            raise RuntimeError(mismatch + "，未寫入")
 
     descriptions = [_label_subject(source) for _, source, _ in source_items if source != "2%"]
     memo = f"{period[:4]}/{period[4:]}" + "＋".join(descriptions)
@@ -133,16 +143,18 @@ def _make_plan(
         ],
         "taipei_rows": taipei_rows,
         "area_rows": area_rows,
+        "mismatch": mismatch,
     }
 
 
 def _build_plan(
-    values: list[list[object]], period: str, area: str, *, require_ready: bool = True
+    values: list[list[object]], period: str, area: str, *, require_ready: bool = True, lenient: bool = False
 ) -> dict[str, object] | None:
+    """lenient（盤點／勾選執行）：41～71 列有值（≠0）的都列入，第72列沒金額或對不上也照列（標 mismatch）。"""
     col = _find_source_column(values, period, area)
     total = _amount(_cell(values[71], col)) if len(values) >= 72 else 0
     transfer_mark = str(_cell(values[73], col) or "").strip() if len(values) >= 74 else ""
-    if total <= 0:
+    if total <= 0 and not lenient:
         return None
 
     source_items: list[tuple[int, str, int]] = []
@@ -150,11 +162,15 @@ def _build_plan(
         row = values[row_number - 1] if row_number <= len(values) else []
         source = str(_cell(row, 2) or "").strip()
         amount = _amount(_cell(row, col))
-        if source and amount > 0:
+        if source and (amount != 0 if lenient else amount > 0):
             source_items.append((row_number, source, amount))
     if not source_items:
-        raise RuntimeError(f"{period[:4]}.{period[4:]}／{area} 第72列有金額但找不到固定費用明細")
-    return _make_plan(period, area, total, transfer_mark, source_items, [area])
+        if total <= 0:
+            return None
+        if not lenient:
+            raise RuntimeError(f"{period[:4]}.{period[4:]}／{area} 第72列有金額但找不到固定費用明細")
+        return None
+    return _make_plan(period, area, total, transfer_mark, source_items, [area], lenient=lenient)
 
 
 def fixed_amount_plan(period: str, area: str) -> dict[str, object]:
@@ -188,18 +204,19 @@ def fixed_amount_plan(period: str, area: str) -> dict[str, object]:
     }
 
 
-def _build_target_plan(values: list[list[object]], period: str, area: str) -> dict[str, object] | None:
+def _build_target_plan(values: list[list[object]], period: str, area: str,
+                       lenient: bool = False) -> dict[str, object] | None:
     """桃園固定費用合併桃園與家電欄位，其餘地區維持單一來源；高雄／學院是固定金額。"""
     area = "桃園" if area == "家電" else area
     if area in FIXED_AMOUNT_AREAS:
         return fixed_amount_plan(period, area)
     if area != "桃園":
-        return _build_plan(values, period, area, require_ready=False)
+        return _build_plan(values, period, area, require_ready=False, lenient=lenient)
 
     parts = [
         plan
         for source_area in TAOYUAN_SOURCE_AREAS
-        if (plan := _build_plan(values, period, source_area, require_ready=False))
+        if (plan := _build_plan(values, period, source_area, require_ready=False, lenient=lenient))
     ]
     if not parts:
         return None
@@ -222,6 +239,7 @@ def _build_target_plan(values: list[list[object]], period: str, area: str) -> di
         "items": items,
         "taipei_rows": [row for plan in parts for row in plan["taipei_rows"]],
         "area_rows": [row for plan in parts for row in plan["area_rows"]],
+        "mismatch": "；".join(str(plan.get("mismatch") or "") for plan in parts if plan.get("mismatch")),
     }
 
 
@@ -332,6 +350,71 @@ def write_transfer_date(period: str, area: str, payment_date: str) -> str:
 
         update(get_oauth_sheets_service())
     return "、".join(cells)
+
+
+REVENUE_ROW = 30  # 行銷費用總表「服務基礎 Total」＝各區營業額
+REVENUE_AREAS = ("台北", "桃園", "新竹", "台中", "高雄")  # 現金缺口試算有的地區（家電沒有）
+
+
+def cash_gap_revenue(period: str) -> dict[str, int]:
+    """「現金缺口試算」第2列日期是該期別月份時，回傳各區「總營收」有數字的 {地區: 金額}；否則 {}。"""
+    from tools.common.config_loader import get_master_spreadsheet_id
+    from tools.finance_management.cash_gap import CASH_GAP_SHEET_NAME
+
+    values = get_sheets_service().spreadsheets().values().get(
+        spreadsheetId=get_master_spreadsheet_id(), range=f"'{CASH_GAP_SHEET_NAME}'!A1:H20",
+        valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="FORMATTED_STRING",
+    ).execute().get("values", [])
+    return parse_cash_gap_revenue(values, period)
+
+
+def parse_cash_gap_revenue(values: list[list[object]], period: str) -> dict[str, int]:
+    if len(values) < 3:
+        return {}
+    header = [str(v).strip() for v in values[0]]
+    dates = values[1]
+    revenue = next((row for row in values[2:] if row and str(row[0]).strip() == "總營收"), [])
+    result = {}
+    for area in REVENUE_AREAS:
+        if area not in header:
+            continue
+        col = header.index(area)
+        date_text = str(dates[col] if col < len(dates) else "").strip().replace("-", "/")
+        if _normalize_month(date_text) != period:
+            continue
+        value = revenue[col] if col < len(revenue) else ""
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            result[area] = int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return result
+
+
+def sync_revenue_row(period: str, log: Callable[[str], None] | None = None) -> dict[str, int]:
+    """現金缺口試算「總營收」有數字時，寫進行銷費用總表「YYYY總表」該月各區第30列。回傳寫入的 {地區: 金額}。"""
+    revenue = cash_gap_revenue(period)
+    if not revenue:
+        if log:
+            log(f"現金缺口試算沒有 {period[:4]}.{period[4:]} 的總營收，第30列不更新")
+        return {}
+    spreadsheet_id, title = _marketing_source_location(period)
+    values = _read_values(spreadsheet_id, title, "A1:ZZ2")
+    data = [{"range": f"'{title}'!{_column_letter(_find_source_column(values, period, area))}{REVENUE_ROW}",
+             "values": [[amount]]} for area, amount in revenue.items()]
+
+    def update(service) -> None:
+        service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"valueInputOption": "USER_ENTERED", "data": data}).execute()
+
+    try:
+        update(get_sheets_service())
+    except HttpError as exc:
+        if getattr(exc.resp, "status", None) != 403:
+            raise
+        from services.google_auth import get_sheets_service as get_oauth_sheets_service
+
+        update(get_oauth_sheets_service())
+    if log:
+        log("行銷費用總表第30列（營業額）已更新：" + "、".join(f"{a} {v:,}" for a, v in revenue.items()))
+    return revenue
 
 
 def _sheet_properties(service, spreadsheet_id: str, title: str) -> dict[str, object]:
@@ -504,8 +587,9 @@ def _append_statement_rows(spreadsheet_id: str, title: str, existing: list[list[
     return len(rows)
 
 
-def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, object]:
-    """唯讀預覽符合條件的地區、來源科目、金額與第 72 列匯款總額。"""
+def preview_fixed_expenses(period: str, area: str = "全區", lenient: bool = False) -> dict[str, object]:
+    """唯讀預覽符合條件的地區、來源科目、金額與第 72 列匯款總額。
+    lenient＝盤點用：41～71 列有值的都列入（見 _build_plan）。"""
     period = (period or "").strip()
     if not re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", period):
         raise ValueError("請輸入 6 位數期別（YYYYMM），例如 202608")
@@ -518,7 +602,7 @@ def preview_fixed_expenses(period: str, area: str = "全區") -> dict[str, objec
     plans = [
         plan
         for target in targets
-        if (plan := _build_target_plan(values, period, target))
+        if (plan := _build_target_plan(values, period, target, lenient=lenient))
     ]
     processed = {str(plan["area"]) for plan in plans}
     return {
@@ -575,7 +659,8 @@ def transfer_fixed_expenses(
             plan
             for target in targets
             if (
-                plan := _build_target_plan(values, period, target)
+                # 有勾選科目＝照勾選列重算金額（盤點時列出的都能選）；沒勾選＝整批嚴格檢查
+                plan := _build_target_plan(values, period, target, lenient=selected_rows is not None)
             )
         ]
         if selected_rows is not None:

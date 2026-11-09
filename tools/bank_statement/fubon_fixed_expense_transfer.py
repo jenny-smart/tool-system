@@ -42,7 +42,8 @@ def load_transfer_plan(
 ) -> dict[str, object]:
     if area not in SUPPORTED_AREAS:
         raise ValueError("固定費用富邦匯款請選擇台中／桃園／新竹／高雄（學院自己轉帳，只要寫台北分錄）")
-    preview = preview_fixed_expenses(period, area)
+    # 2026-11-09：有勾選科目時照勾選列重算（盤點列出的 41～71 列都能選）
+    preview = preview_fixed_expenses(period, area, lenient=selected_rows is not None)
     plans = preview.get("plans") or []
     if not plans:
         raise ValueError(f"{period}／{area} 第72列沒有可匯款金額")
