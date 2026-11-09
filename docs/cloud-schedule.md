@@ -46,19 +46,6 @@
 
 其餘（日排程、外場、客服、業績、富邦／元大明細、月排程、儲值金、⑥–⑩、月初藍新鯨躍、月初檢查…）沿用原本時間，見分頁。
 
-### salary-system（2026-11-09 與 Jenny 確認）
-
-| 功能代號 | 預設時間 | Workflow |
-|---|---|---|
-| salary_create_period | 每月 10、25 日 10:00（遇例假日照跑） | `jenny-smart/salary-system:scheduler.yml`（`action=create_period`；期別自動判斷：10 日＝當月-1、25 日＝當月-2；地區留空＝台北／台中／桃園／新竹／高雄，不含新北） |
-
-原本由 salary-system 的 GAS Trigger（salary 主控表「排程設定」）觸發，改到這裡統一管理。
-需要 Secret `SALARY_SYSTEM_DISPATCH_TOKEN`（fine-grained token，只給 salary-system 的 Actions: Read and write），
-沒設定時這一列會略過並讓 Router 失敗。salary-system 的 `scheduler.yml` 要先能接受 `scheduled_slot`。
-確認派送成功（salary-system 的 Actions 出現 `cloud-…-salary_create_period` 的執行）後，到 salary-system App
-「排程設定」按「停用 GAS 排程」，並到 Apps Script「觸發條件」確認沒有殘留的 `runScheduledGithubAction`（例如 17:10 的舊觸發器）。
-建立期別遇到已存在的資料夾／檔案會略過，新舊排程重疊一次不會重複建立。
-
 ### investment-system（2026-11-06 與 Jenny 確認）
 
 原本在 cron-job.org 的 investment-system 排程全部併到這裡；台股／美股／基金由每 30 分鐘改成原時段內每 10 分鐘。
@@ -81,6 +68,27 @@
 這幾列**預設不啟用**。等 investment-system 的 workflow 能接受 `scheduled_slot`（investment-system PR #99）、
 tool-system 設好 Secret 之後，在分頁勾選「啟用」；確認派送成功（investment-system 的 Actions 出現 `cloud-…` 的執行）
 後，再停用 cron-job.org 上 investment-system 的對應工作。
+
+### salary-system（2026-11-10 與 Jenny 確認）
+
+salary-system 每月 10、25 日的「建立期別資料夾與檔案」原本由 salary-system 主控表的「排程設定」分頁＋GAS Trigger
+（`gas_central/ScheduleTrigger.gs`）觸發 `scheduler.yml`，現在改成這張分頁的一列，由 Router 派送到
+`jenny-smart/salary-system`，需要 Secret `SALARY_SYSTEM_DISPATCH_TOKEN`（fine-grained token，只給 salary-system 的
+Actions: Read and write）。
+
+| 功能代號 | 預設時間 | Workflow |
+|---|---|---|
+| salary_create_period | 每月 10、25 日 10:00 | scheduler.yml（action=create_period；期別＝執行日的半月：10 日→YYYYMM-1、25 日→YYYYMM-2；地區留空＝五區，不含新北） |
+
+這列**預設不啟用**。切換步驟：
+1. salary-system 合併讓 `scheduler.yml` 接受 `scheduled_slot` 的改動。
+2. tool-system 新增 Secret `SALARY_SYSTEM_DISPATCH_TOKEN`。
+3. 在「排程設定」勾選 `salary_create_period` 的「啟用」（時間要改就直接改 D 欄）。
+4. 到 salary-system 主控表「排程設定」把 `enabled` 改成 FALSE，再執行一次 GAS 的 `syncScheduleTriggers`（或 Web App `?action=syncTriggers`），
+   刪掉舊的 GAS Trigger，避免同一天派送兩次。
+5. 到 https://script.google.com/home/triggers 確認沒有殘留的 `runScheduledGithubAction`（例如 17:10 的舊觸發器）。
+
+> 「排程設定」分頁若已用舊預設（17:10）補上這一列，Router 不會改既有列，請直接把 D 欄時間改成 `10:00`。
 
 先前版本的 `invest_month_end`、`invest_fund_freeze`、`invest_month_roll` 已停用（月底固定改由
 `invest_month_end_ledger` 派送 month-end-ledger.yml），分頁裡這三列請刪除；Router 會在 log 提醒，這三列不會執行。

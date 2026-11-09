@@ -45,6 +45,11 @@ def _prev_period(when: datetime) -> str:
     return (when.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
 
 
+def _half_period(when: datetime) -> str:
+    """執行日的半月期別：1～15 日 → YYYYMM-1，16 日起 → YYYYMM-2（同 salary-system 的 get_auto_period）。"""
+    return when.strftime("%Y%m") + ("-1" if when.day <= 15 else "-2")
+
+
 # 功能代號 → (workflow 檔, 參數)。參數是 dict 或 when→dict 的函式（期別依執行日算）。
 FUNCTIONS: dict[str, tuple[str, object]] = {
     # 日排程
@@ -73,8 +78,6 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
     "customer_memo_daily": ("jenny-smart/order-system:customer-memo-schedule.yml", {}),
-    # salary-system（金流對帳／清潔承攬）：期別自動判斷（1–15 日＝當月-1、16 日起＝當月-2），地區留空＝五區
-    "salary_create_period": ("jenny-smart/salary-system:scheduler.yml", {"action": "create_period"}),
     # investment-system（個人投資總帳／總覽）
     "invest_tw_prices": ("jenny-smart/investment-system:tw-stock-prices.yml", {"mode": "auto"}),
     "invest_us_prices_night": ("jenny-smart/investment-system:us-stock-prices.yml", {"mode": "auto"}),
@@ -86,6 +89,10 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "invest_stock_radar": ("jenny-smart/investment-system:stock-radar.yml", {}),
     "invest_stock_dividends": ("jenny-smart/investment-system:stock-dividends-from-ledger.yml", {}),
     "invest_night_futures": ("jenny-smart/investment-system:night-futures.yml", {}),
+    # salary-system（薪資／承攬期別）：原本由 salary-system 主控表「排程設定」＋GAS Trigger 觸發，2026-11-10 併到這裡
+    # region 留空＝workflow 預設五區（台北,台中,桃園,新竹,高雄，不含新北）
+    "salary_create_period": ("jenny-smart/salary-system:scheduler.yml",
+                             lambda w: {"period": _half_period(w), "region": "", "action": "create_period"}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -159,10 +166,6 @@ DEFAULT_ROWS: list[list] = [
     [True, "customer_memo_daily", "客人備註非空白＋客服備註需註記（VIP 非儲值金／**N- 已非首次）（台北／台中內勤工作表單）", "10:00", "每日", "", "略過", MODE_DIRECT,
      "程式在 order-system（customer-memo-schedule.yml）；區間＝前一上班日 10:00～今天 10:00（訂購時間），"
      "貼到「客人備註」分頁後記 jenny@hers.com.tw 行事曆"],
-    # 2026-11-09 Jenny：salary-system 建立期別改由這裡排程（原本 GAS Trigger），每月 10、25 日 10:00
-    [True, "salary_create_period", "【金流對帳】建立期別資料夾與檔案（台北／台中／桃園／新竹／高雄）", "10:00", "每月", "10,25",
-     "照跑", MODE_DIRECT,
-     "程式在 salary-system（scheduler.yml）；10 日建當月-1、25 日建當月-2。取代 salary-system 的 GAS 排程（要停用）"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,
@@ -223,6 +226,12 @@ DEFAULT_ROWS: list[list] = [
      MODE_DIRECT, "掃描除權息公告建立應入帳，再用 YYYY細帳 股利-台股備註確認入帳"],
     [False, "invest_night_futures", "【投資】台指期夜盤", "07:00", "每日", "", "照跑", MODE_DIRECT,
      "夜盤漲跌／量佔比／外資夜盤淨額／四種劇本 → investment-system「台指期夜盤」頁籤；週二至六未公布最多等 20 分鐘"],
+    # salary-system：2026-11-10 Jenny，每月 10、25 日的期別排程改由這裡派送（原 salary-system GAS Trigger）。
+    # 預設不啟用：tool-system 設好 SALARY_SYSTEM_DISPATCH_TOKEN、salary-system 合併 scheduled_slot 版 scheduler.yml 後，
+    # 在「排程設定」勾選啟用，再停用 salary-system 主控表的 GAS Trigger（避免同一天跑兩次）。
+    # 2026-11-09 Jenny：時間統一改成 10:00（原 GAS 是 10:00；17:10 是殘留的舊觸發器）。
+    [False, "salary_create_period", "【薪資】建立期別資料夾與檔案（五區，不含新北）", "10:00", "每月", "10,25", "照跑",
+     MODE_DIRECT, "程式在 salary-system（scheduler.yml）；期別＝執行日的半月（10 日→-1、25 日→-2）"],
 ]
 
 
