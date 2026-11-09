@@ -8,10 +8,14 @@
   - 費用說明跟【財報】台北／台中固定費用請款一樣（例：2026.11-辦公室租金），已新增過的會略過，
     所以之後再跑台北／台中固定費用請款（查信、電費）也不會重複新增租金。
 排程：每月 1 日 00:30 雲端自動新增（auto_submit），結果寫進執行 Log。
+
+更新紀錄：
+  2026-11-09 Jenny：新增 submit_rows()／appended_rows()，回傳新增的請款記錄列號（會計事務所費用確認排富邦轉帳用）。
 """
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import date, datetime
 from typing import Any, Callable, Optional
@@ -119,18 +123,36 @@ def split_electricity(items: list[dict], total: int) -> list[dict]:
 def submit(items: list[dict], tool_name: str = TOOL_NAME, run_type: str = "手動",
            log: Callable[[str], None] = print, now: Optional[datetime] = None) -> dict[str, int]:
     """把勾選的列新增到各區請款記錄（新增前再檢查一次已新增過的就略過）。回傳 {地區: 新增筆數}。"""
+    return {area: len(rows) for area, rows in
+            submit_rows(items, tool_name=tool_name, run_type=run_type, log=log, now=now).items()}
+
+
+def appended_rows(response: dict, count: int) -> list[int]:
+    """從 append 回傳的 updatedRange（例：'請款記錄'!A120:I125）取出新增的列號；讀不到回傳 []。"""
+    found = re.search(r"!\D*(\d+)(?::\D*(\d+))?$", str((response or {}).get("updates", {}).get("updatedRange", "")))
+    if not found:
+        return []
+    start = int(found.group(1))
+    rows = list(range(start, int(found.group(2) or start) + 1))
+    return rows if len(rows) == count else []
+
+
+def submit_rows(items: list[dict], tool_name: str = TOOL_NAME, run_type: str = "手動",
+                log: Callable[[str], None] = print, now: Optional[datetime] = None) -> dict[str, list[dict]]:
+    """同 submit()，回傳 {地區: [新增的項目＋"row" 列號]}（只含真的新增的；列號讀不到時 row＝0）。
+    2026-11-09 Jenny：給會計事務所費用確認「新增後直接排富邦轉帳」用。"""
     from tools.common.config_loader import get_sheets_service
     from tools.finance_management.execution_log import log_execution
 
     service = get_sheets_service()
     now_text = (now or datetime.now(TW_TZ)).strftime("%Y/%m/%d %H:%M:%S")
-    added: dict[str, int] = {}
+    added: dict[str, list[dict]] = {}
     for area in AREAS:
         hit = [i for i in items if i["area"] == area and not i.get("info")]
         if not hit:
             continue
         spreadsheet_id, sheet_title, existing = _existing(service, area)
-        rows, skipped = [], []
+        rows, skipped, kept = [], [], []
         for item in hit:
             if already_submitted(existing, item["memo"]):
                 skipped.append(item["memo"])
@@ -139,12 +161,15 @@ def submit(items: list[dict], tool_name: str = TOOL_NAME, run_type: str = "手�
                 continue
             rows.append(["待付款", "", now_text, item["category"], item["memo"], int(item["amount"]), "",
                          item["payee"], item.get("account", "")])
+            kept.append(item)
+        row_numbers: list[int] = []
         if rows:
-            service.spreadsheets().values().append(
+            response = service.spreadsheets().values().append(
                 spreadsheetId=spreadsheet_id, range=f"'{sheet_title}'!{REQUEST_SHEET_RANGE}",
                 valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={"values": rows},
             ).execute()
-        added[area] = len(rows)
+            row_numbers = appended_rows(response, len(rows))
+        added[area] = [dict(item, row=row) for item, row in zip(kept, row_numbers or [0] * len(kept))]
         detail = "\n".join([f"{r[4]}：{r[5]}" for r in rows] + [f"{m}：略過（已新增過）" for m in skipped])
         log_execution(tool_name, area, "成功", f"{run_type}｜新增 {len(rows)} 筆\n{detail}")
         log(f"【{area}】請款記錄新增 {len(rows)} 筆" + (f"，略過 {len(skipped)} 筆（已新增過）" if skipped else ""))
