@@ -3,6 +3,10 @@
 依序：請款記錄 → 工具包押金退款 → 清潔用品採購（依月份），最後下載一次富邦明細、登出。
 進銀行前先把每一類的報表讀好、驗證好；某一類讀取失敗只跳過那一類（其他照做），
 全部都失敗就不登入富邦。
+
+更新紀錄：
+  2026-11-09 Jenny：下載明細後，會計事務所費用那筆在財報富邦更新拆成逐項列
+                    （台北轉勤信會計事務所；台中轉檸檬台北的台中營業稅／台中記帳費）。
 """
 from __future__ import annotations
 
@@ -75,6 +79,9 @@ def run(
         print(f"【{area}】轉帳全部完成，開始下載富邦明細（財報最後一列日期～今天）。")
         today = datetime.now(ZoneInfo("Asia/Taipei")).date()
         run_download(context, page, account, report_query_start(account, today), today)
+    for _label, module, prepared in ready:
+        if hasattr(module, "after_download") and isinstance(prepared, dict):  # 2026-11-09：會計事務所費用在富邦更新拆列
+            module.after_download(area, prepared)
     return 1 if errors else 0
 
 

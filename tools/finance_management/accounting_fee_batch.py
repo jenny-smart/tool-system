@@ -11,10 +11,11 @@
 
 更新紀錄：
   2026-11-09 Jenny：按下去先寫請款記錄（待付款），再直接排【整合執行】富邦內部請款同一套轉帳：
-                    - 請款記錄／台北：全部項目，收款對象＝勤信、帳號 013-0000240035015567；
+                    - 請款記錄／台北：全部項目，收款對象＝勤信會計事務所、I 欄空白（富邦選約定轉入帳號
+                      「勤信會計事務所」013 國泰世華 0000240035015567，不自行輸入）；
                       本機 Agent 從台北富邦合併成一筆轉給勤信，轉完這幾列自動回填已付款＋付款日期
-                    - 請款記錄／台中：台中的費用（台中營業稅、台中記帳費）另記一列待付款，收款對象＝台北
-                      （富邦常用轉入帳號「台北」，尾數 3320）；這筆不自動轉，到【整合執行】富邦內部請款付
+                    - 請款記錄／台中：台中的費用（台中營業稅、台中記帳費）另記一列待付款，收款對象＝檸檬台北
+                      （富邦常用轉入帳號「檸檬台北」，尾數 3320）；這筆不自動轉，到【整合執行】富邦內部請款付
                     已新增過的（同費用說明）不會重複新增、也不會重複轉。
   2026-11-09 Jenny：台北／台中記帳費每個單月都列出（比照會計師簽證費）：1、7 月預設打勾；
                     其他月份預設不勾，事務所調整收費月份時再勾、改金額。
@@ -32,14 +33,14 @@ from tools.finance_management.fixed_expense_batch import label, next_period
 TW_TZ = ZoneInfo("Asia/Taipei")
 AREA = "台北"
 TOOL_NAME = "會計事務所費用確認"
-# 2026-11-09 Jenny：會計事務所＝勤信，富邦自行輸入帳號
-PAYEE = "勤信"
+# 2026-11-09 Jenny：會計事務所＝勤信，富邦選約定轉入帳號「勤信會計事務所」（I 欄留空才會用常用帳號，不自行輸入）
+PAYEE = "勤信會計事務所"
 PAYEE_BANK_CODE = "013"  # 國泰世華
 PAYEE_ACCOUNT = "0000240035015567"
 PAYEE_ACCOUNT_TEXT = f"{PAYEE_BANK_CODE}-{PAYEE_ACCOUNT}"  # 請款記錄 I 欄格式「銀行代碼-帳號」
 # 台中的費用另外記在請款記錄／台中，台中付給台北（富邦常用轉入帳號「台北」，尾數 3320）
 TAICHUNG = "台中"
-TAICHUNG_PAYEE = "台北"
+TAICHUNG_PAYEE = "檸檬台北"  # 2026-11-09 Jenny：富邦常用轉入帳號名稱
 REMIND_CALENDAR_ID = "jenny@hers.com.tw"
 
 RENT_WITHHOLDING = 8800  # 辦公室租金代扣繳，每月
@@ -62,7 +63,7 @@ def bookkeeping_for(month: int) -> dict[str, tuple[int, int]]:
 
 def _item(memo: str, category: str, amount, note: str = "", default: bool = True) -> dict[str, Any]:
     return {"area": AREA, "memo": memo, "category": category, "amount": amount, "payee": PAYEE,
-            "account": PAYEE_ACCOUNT_TEXT, "note": note, "default_hint": default}
+            "account": "", "note": note, "default_hint": default}
 
 
 def is_taichung(item: dict) -> bool:
@@ -71,7 +72,7 @@ def is_taichung(item: dict) -> bool:
 
 
 def with_taichung(selected: list[dict]) -> list[dict]:
-    """勾選的項目（請款記錄／台北，付勤信）＋台中的費用另一列（請款記錄／台中，付台北）。"""
+    """勾選的項目（請款記錄／台北，付勤信）＋台中的費用另一列（請款記錄／台中，付檸檬台北）。"""
     return list(selected) + [dict(i, area=TAICHUNG, payee=TAICHUNG_PAYEE, account="")
                              for i in selected if is_taichung(i)]
 

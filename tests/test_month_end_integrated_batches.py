@@ -163,12 +163,12 @@ def test_accounting_november():
 
 def test_accounting_with_taichung_rows():
     items = acc.planned_items("202611")
-    assert all(i["payee"] == "勤信" and i["account"] == "013-0000240035015567" for i in items)
+    assert all(i["payee"] == "勤信會計事務所" and i["account"] == "" for i in items)
     picked = [i for i in items if "營業稅" in i["memo"] or "記帳費" in i["memo"]]
     rows = acc.with_taichung(picked)
     taichung = [i for i in rows if i["area"] == "台中"]
     assert [i["memo"] for i in taichung] == ["2026.09～10-台中營業稅", "2026.11-台中半年度記帳費"]
-    assert all(i["payee"] == "台北" and i["account"] == "" for i in taichung)
+    assert all(i["payee"] == "檸檬台北" and i["account"] == "" for i in taichung)
     assert len([i for i in rows if i["area"] == "台北"]) == len(picked)
 
 

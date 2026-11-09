@@ -1,3 +1,4 @@
+# 更新紀錄：2026-11-09 Jenny：新增 after_download()（由 fubon_internal_payment 下載明細後呼叫）：會計事務所費用在財報富邦更新拆列。
 from __future__ import annotations
 
 from contextlib import ExitStack
@@ -120,9 +121,30 @@ def pay(context, page: Page, area: str, account, prepared: dict) -> Page:
                 body={"values": [["已付款", payment_date]]},
             ).execute()
         print(f"已回填第 {'、'.join(map(str, paid_rows))} 列：已付款／{payment_date}")
+        item["paid_on"] = payment_date
         page = current_fubon_page(context, page) or page
     print("全部勾選的請款記錄均已完成付款並回填 A/B 欄。")
     return page
+
+
+def after_download(area: str, prepared: dict) -> None:
+    """【整合執行】富邦內部請款下載明細後：會計事務所費用那筆在財報富邦更新拆成逐項列（2026-11-09 Jenny）。
+    台北：轉給勤信會計事務所的那筆；台中：轉給檸檬台北、且全部是台中營業稅／台中記帳費的那筆。
+    拆列失敗只印出提醒，不影響已完成的轉帳與回填。"""
+    from tools.finance_management import accounting_fee_statement
+
+    if not isinstance(prepared, dict):
+        return
+    for item in prepared.get("selected", []):
+        if not isinstance(item, dict) or not item.get("paid_on"):
+            continue
+        members = item.get("members") or [item]
+        if not accounting_fee_statement.should_split(area, str(item.get("name", "")), members):
+            continue
+        try:
+            accounting_fee_statement.split_after_payment(area, members, item["paid_on"])
+        except Exception as exc:
+            print(f"⚠ 會計事務所費用富邦更新拆列失敗，請人工處理：{exc}")
 
 
 def run(area: str, rows: set[int], accounts_file: Path, cdp_url: str, merge: bool | set[int] = False) -> int:
