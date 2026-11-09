@@ -22,3 +22,11 @@ def test_schedule_skips_kaohsiung(monkeypatch):
     assert runner.run_fixed_expense_remit(date(2026, 11, 10)) == 0
     assert queued == ["台中"]
     assert "高雄" not in reminders[0]
+
+
+def test_agent_command_allow_posted():
+    from tools import local_agent
+
+    base = {"area": "台中", "month": "202611", "selected_rows": [41, 47]}
+    assert "--allow-posted" not in local_agent.build_fubon_fixed_expense_transfer(base)
+    assert "--allow-posted" in local_agent.build_fubon_fixed_expense_transfer(dict(base, allow_posted=True))
