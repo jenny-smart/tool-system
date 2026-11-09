@@ -15,7 +15,7 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
   G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期遇例假日改到前一個工作日）
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
-  J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system），程式自動填，顯示用
+  J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system／salary-system），程式自動填，顯示用
 
 功能也可以派送到其他 repo 的 workflow（例如 order-system 的週末提醒、investment-system 的
 月底轉值），見 EXTERNAL_DISPATCH_TOKENS。
@@ -43,6 +43,11 @@ WEEKDAYS = "一二三四五六日"
 
 def _prev_period(when: datetime) -> str:
     return (when.replace(day=1) - timedelta(days=1)).strftime("%Y%m")
+
+
+def _half_period(when: datetime) -> str:
+    """執行日的半月期別：1～15 日 → YYYYMM-1，16 日起 → YYYYMM-2（同 salary-system 的 get_auto_period）。"""
+    return when.strftime("%Y%m") + ("-1" if when.day <= 15 else "-2")
 
 
 # 功能代號 → (workflow 檔, 參數)。參數是 dict 或 when→dict 的函式（期別依執行日算）。
@@ -84,6 +89,10 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "invest_stock_radar": ("jenny-smart/investment-system:stock-radar.yml", {}),
     "invest_stock_dividends": ("jenny-smart/investment-system:stock-dividends-from-ledger.yml", {}),
     "invest_night_futures": ("jenny-smart/investment-system:night-futures.yml", {}),
+    # salary-system（薪資／承攬期別）：原本由 salary-system 主控表「排程設定」＋GAS Trigger 觸發，2026-11-10 併到這裡
+    # region 留空＝workflow 預設五區（台北,台中,桃園,新竹,高雄，不含新北）
+    "salary_create_period": ("jenny-smart/salary-system:scheduler.yml",
+                             lambda w: {"period": _half_period(w), "region": "", "action": "create_period"}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -217,6 +226,11 @@ DEFAULT_ROWS: list[list] = [
      MODE_DIRECT, "掃描除權息公告建立應入帳，再用 YYYY細帳 股利-台股備註確認入帳"],
     [False, "invest_night_futures", "【投資】台指期夜盤", "07:00", "每日", "", "照跑", MODE_DIRECT,
      "夜盤漲跌／量佔比／外資夜盤淨額／四種劇本 → investment-system「台指期夜盤」頁籤；週二至六未公布最多等 20 分鐘"],
+    # salary-system：2026-11-10 Jenny，每月 10、25 日的期別排程改由這裡派送（原 salary-system GAS Trigger）。
+    # 預設不啟用：tool-system 設好 SALARY_SYSTEM_DISPATCH_TOKEN、salary-system 合併 scheduled_slot 版 scheduler.yml 後，
+    # 在「排程設定」勾選啟用，再停用 salary-system 主控表的 GAS Trigger（避免同一天跑兩次）。
+    [False, "salary_create_period", "【薪資】建立期別資料夾與檔案（五區，不含新北）", "17:10", "每月", "10,25", "照跑",
+     MODE_DIRECT, "程式在 salary-system（scheduler.yml）；期別＝執行日的半月（10 日→-1、25 日→-2）"],
 ]
 
 
@@ -394,6 +408,7 @@ def due(rules: Iterable[Rule], when: datetime, is_workday: Callable[[date], bool
 EXTERNAL_DISPATCH_TOKENS = {
     "jenny-smart/order-system": "ORDER_SYSTEM_DISPATCH_TOKEN",
     "jenny-smart/investment-system": "INVESTMENT_SYSTEM_DISPATCH_TOKEN",
+    "jenny-smart/salary-system": "SALARY_SYSTEM_DISPATCH_TOKEN",
 }
 
 
