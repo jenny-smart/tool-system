@@ -4,6 +4,8 @@
   2026-11-09 Jenny：
     - 盤點（lenient）：第74列沒有匯款日期時，41～71 列有值（≠0）的都列入，第72列沒金額或明細合計
       與第72列不符也照列（標 mismatch 提醒）；有勾選科目執行時依勾選列重算金額。沒勾選的整批執行維持原本嚴格檢查。
+    - 台中富邦匯給台北完成後，逐科目記一列到請款記錄／台中（已付款＋付款日期，收款對象檸檬台北）：
+      D＝富邦更新 I 欄（科目）、E＝富邦更新 L 欄（分類標籤）、F＝台中富邦更新該列金額。
     - sync_revenue_row()：「現金缺口試算」總營收有數字、且日期是該期別月份時，寫進行銷費用總表
       「YYYY總表」該月各區第30列（各區營業額）。
 """
@@ -350,6 +352,39 @@ def write_transfer_date(period: str, area: str, payment_date: str) -> str:
 
         update(get_oauth_sheets_service())
     return "、".join(cells)
+
+
+REQUEST_AREAS = ("台中",)  # 富邦匯給台北後要記請款記錄的地區
+REQUEST_PAYEE = "檸檬台北"
+
+
+def request_rows_for_plan(plan: dict[str, object], paid_on: str, now_text: str) -> list[list[object]]:
+    """請款記錄 A:I：已付款／付款日期／建立時間／D＝I 欄科目／E＝L 欄標籤／F＝金額／G／H＝檸檬台北／I。"""
+    return [["已付款", paid_on, now_text, row[8], row[11], int(row[4] or 0) - int(row[5] or 0), "", REQUEST_PAYEE, ""]
+            for row in plan.get("area_rows") or []]
+
+
+def write_request_rows(plan: dict[str, object], paid_on: str) -> int:
+    """台中富邦匯款完成後寫請款記錄／台中（同費用說明已有的略過）。回傳新增筆數。"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from tools.finance_management.fixed_expense_batch import REQUEST_SHEET_RANGE, _existing, already_submitted
+
+    area = str(plan["area"])
+    if area not in REQUEST_AREAS:
+        return 0
+    service = get_sheets_service()
+    spreadsheet_id, sheet_title, existing = _existing(service, area)
+    now_text = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y/%m/%d %H:%M:%S")
+    rows = [r for r in request_rows_for_plan(plan, paid_on, now_text) if not already_submitted(existing, str(r[4]))]
+    if rows:
+        service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id, range=f"'{sheet_title}'!{REQUEST_SHEET_RANGE}",
+            valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS", body={"values": rows},
+        ).execute()
+    log_execution(TOOL_NAME, area, "成功", f"{plan['period']} 富邦匯給台北 {paid_on}｜請款記錄新增 {len(rows)} 筆")
+    return len(rows)
 
 
 REVENUE_ROW = 30  # 行銷費用總表「服務基礎 Total」＝各區營業額

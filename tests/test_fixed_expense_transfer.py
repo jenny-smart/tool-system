@@ -301,3 +301,14 @@ class FixedExpenseScanTest(unittest.TestCase):
         self.assertEqual(transfer.parse_cash_gap_revenue(values, "202611"),
                          {"台北": 1000, "台中": 2000, "高雄": 5000})
         self.assertEqual(transfer.parse_cash_gap_revenue(values, "202610"), {"新竹": 4000})
+
+
+class FixedExpenseRequestRowsTest(unittest.TestCase):
+    def test_taichung_request_rows_use_i_and_l(self):
+        plan = transfer._build_plan(_values(), "202608", "台中")
+        rows = transfer.request_rows_for_plan(plan, "2026/08/10", "now")
+        self.assertEqual(rows[0], ["已付款", "2026/08/10", "now", "google行銷費", "2026.08-google行銷費-台中", 11179,
+                                   "", "檸檬台北", ""])
+        self.assertEqual(rows[2][3:6], ["分店支出2%", "2026.08-2%-台中", 4401])
+        self.assertEqual(rows[-1][3:6], ["稅捐", "2026.08-稅捐-台中", -586])
+        self.assertEqual(sum(r[5] for r in rows), 36112)
