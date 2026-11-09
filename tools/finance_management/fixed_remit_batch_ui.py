@@ -6,6 +6,7 @@
 - 台中（單月）：台中固定費用請款——當月＋隔月租金、前 2 個月電費新增到請款記錄（電費要輸入金額）
 匯款一律排入本機 Agent，每區一筆，由你在富邦核對後按確認；完成後同步明細並寫入台北／分店財報分錄。
 排程（每月 10 日 04:00）不跑高雄（2026-11-09 Jenny）。
+2026-11-10 Jenny：匯款期別改成上個月（例 11 月匯 202610）；台中固定費用請款仍看當月。
 """
 from __future__ import annotations
 
@@ -17,42 +18,45 @@ import pandas as pd
 import streamlit as st
 
 from tools.finance_management.batch_ui_common import checked, reset_select_all, select_all_controls
+from tools.finance_management.monthly_checklist import previous_month
 
 PREFIX = "fixed_remit_batch"
 RUN = "執行"
 
 
-def _scan(period: str) -> dict:
+def _scan(period: str, month: str = "") -> dict:
     from tools.finance_management.fixed_expense_transfer import remit_status
     from tools.finance_management.taichung_fixed_expense import taichung_status
 
     rows = remit_status(period)
     try:
-        taichung = taichung_status(period)
+        taichung = taichung_status(month or period)
     except Exception as exc:
         taichung = {"applicable": True, "missing": [f"讀取失敗：{exc}"], "rent_missing": [], "electricity_missing": []}
-    return {"period": period, "remit": rows, "taichung": taichung}
+    return {"period": period, "month": month or period, "remit": rows, "taichung": taichung}
 
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption("每月 10 日：台中／桃園／新竹依行銷費用總表、高雄 40000 固定匯給台北；學院 47911 自己轉帳，確認收到後勾選寫入台北分錄。"
                "單月另外新增台中固定費用請款（租金、電費）。匯款排入本機 Agent，每區由你在富邦核對後按確認。"
                "排程（排程設定 fixed_expense_remit）每月 10 日 04:00 會自動盤點高雄以外各區並排入。")
-    period = st.text_input("期別（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
+    period = st.text_input("月份（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
                            key=f"{PREFIX}_period").strip()
+    remit_period = previous_month(period) if len(period) == 6 and period.isdigit() else period
+    st.caption(f"匯款期別：{remit_period}（上個月那欄）；台中固定費用請款：{period}")
     if st.button("🔍 盤點", key=f"{PREFIX}_scan", type="primary"):
         if len(period) != 6 or not period.isdigit():
             st.error("期別請輸入 YYYYMM，例如 202611")
             return
         with st.spinner("讀取行銷費用總表、台北財報、台中請款記錄…"):
             try:
-                st.session_state[f"{PREFIX}_result"] = _scan(period)
+                st.session_state[f"{PREFIX}_result"] = _scan(remit_period, period)
             except Exception as exc:
                 st.error(f"盤點失敗：{exc}")
                 return
         reset_select_all(PREFIX)
     result = st.session_state.get(f"{PREFIX}_result")
-    if not result or result["period"] != period:
+    if not result or result.get("month") != period:
         return
 
     remit = result["remit"]
@@ -102,14 +106,14 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
             from tools.finance_management.fixed_expense_transfer import transfer_fixed_expenses
 
             try:
-                res = transfer_fixed_expenses(period, r["area"])
+                res = transfer_fixed_expenses(remit_period, r["area"])
                 st.success(f"{r['area']}：台北分錄新增 {res['statement_rows']} 列")
             except Exception as exc:
                 st.error(f"{r['area']} 台北分錄寫入失敗：{exc}")
         selected = [r for r in selected if not r.get("self_remit")]
         for r in selected:
             task = create_task("fubon.fixed_expense_transfer",
-                               {"area": r["area"], "month": period, "cdp_url": "http://127.0.0.1:9222"},
+                               {"area": r["area"], "month": remit_period, "cdp_url": "http://127.0.0.1:9222"},
                                created_by=username or "各區固定費用匯款")
             log(f"已排入：{r['area']} 富邦匯款給台北 {r['total']:,}（{task.get('task_id', '')}）")
         if selected:

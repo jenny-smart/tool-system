@@ -133,7 +133,7 @@ def fixed_expense_remit_item(month: str) -> dict:
 
     label = "各區固定費用匯款（台中／桃園／新竹／高雄／學院）"
     try:
-        status = remit_status(month)
+        status = remit_status(previous_month(month))  # 2026-11-10 Jenny：10 日匯上個月那欄
     except Exception as exc:
         return item("fixed_expense_remit", label, month_day(month, 10), False,
                     f"讀取失敗：{str(exc)[:80]}", runnable=False)

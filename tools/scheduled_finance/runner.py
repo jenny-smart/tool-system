@@ -118,22 +118,26 @@ def run_fixed_expense_remit(today: date) -> int:
     - 台中／桃園／新竹：行銷費用總表第72列有金額、第74列空白；高雄 40000、學院 47911 固定匯給台北（內勤薪資）
       已匯款（第74列有日期或台北財報已有同批分錄）的略過，其餘排入 Mac 富邦匯款（在富邦核對後按確認）或只提醒
     - 台中（單月）：另外檢查台中固定費用請款（租金當月＋隔月、電費）是否已新增到請款記錄；電費要輸入金額，缺就提醒
-    期別＝當月。"""
+    期別：匯款＝上個月（2026-11-09 Jenny：10 日匯上個月那欄，例 11/10 匯 202610）；台中固定費用請款＝當月。"""
     from tools.finance_management.fixed_expense_transfer import remit_status
+    from tools.finance_management.monthly_checklist import previous_month
     from tools.finance_management.taichung_fixed_expense import taichung_status
     from tools.scheduling.schedule_settings import MODE_QUEUE, get_mode
 
-    period = today.strftime("%Y%m")
+    month = today.strftime("%Y%m")
+    period = previous_month(month)
+    log(f"匯款期別：{period}（上個月）；台中固定費用請款期別：{month}")
     status = [s for s in remit_status(period) if s["area"] not in SCHEDULE_SKIP_AREAS]
     log("排程不跑：" + "、".join(SCHEDULE_SKIP_AREAS))
     ready = [s for s in status if not s["done"]]
     for s in status:
         log(f"{s['area']}：{s['detail']}" + (f"（{s['total']:,}）" if s["total"] else ""))
-    lines = [f"{s['area']}：{s['total']:,}（{s['memo']}）" + ("｜學院自己轉帳，收到後寫入台北分錄" if s.get("self_remit") else "")
+    lines = [f"匯款期別 {period[:4]}.{period[4:]}"] if ready else []
+    lines += [f"{s['area']}：{s['total']:,}（{s['memo']}）" + ("｜學院自己轉帳，收到後寫入台北分錄" if s.get("self_remit") else "")
              for s in ready]
     notes = []
     try:
-        tc = taichung_status(period)
+        tc = taichung_status(month)
         if tc["applicable"] and tc["missing"]:
             notes.append("台中固定費用請款還沒新增：" + "、".join(tc["missing"]) +
                          ("（電費要輸入金額）" if tc["electricity_missing"] else ""))
