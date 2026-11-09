@@ -4718,6 +4718,18 @@ if system_type == "finance_management" and selected_function == "【整合執行
     render_log()
     st.stop()
 
+if system_type == "finance_management" and selected_function == "【財報】各區固定費用匯款":
+    # 2026-11-09 Jenny：地區改勾選，先盤點再執行（原本下拉＋預覽＋共用執行鈕的流程不再走到）
+    st.markdown("</div>", unsafe_allow_html=True)
+    fresh_module("tools.finance_management.fixed_expense_transfer")
+    render_fixed_expense_transfer = fresh_module("tools.finance_management.fixed_expense_transfer_ui").render
+
+    render_fixed_expense_transfer(create_local_agent_task, add_log, st.session_state.get("username", ""))
+    LOG_PLACEHOLDER = st.empty()
+    render_log()
+    render_agent_task_progress(("fubon.",))
+    st.stop()
+
 if system_type == "finance_management" and selected_function == "【整合執行】月度盤點":
     st.markdown("</div>", unsafe_allow_html=True)
     fresh_module("tools.finance_management.monthly_checklist")

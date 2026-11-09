@@ -1,4 +1,9 @@
-"""各區固定費用：富邦匯款給台北後，同步明細並完成財報分錄。"""
+"""各區固定費用：富邦匯款給台北後，同步明細並完成財報分錄。
+
+更新紀錄：
+  2026-11-09 Jenny：台中匯款完成後，逐科目記到請款記錄／台中（已付款＋付款日期，收款對象檸檬台北；
+                    D＝富邦更新 I 欄、E＝L 欄）。寫入失敗只警告，不影響已完成的匯款與分錄。
+"""
 from __future__ import annotations
 
 from contextlib import ExitStack
@@ -42,7 +47,8 @@ def load_transfer_plan(
 ) -> dict[str, object]:
     if area not in SUPPORTED_AREAS:
         raise ValueError("固定費用富邦匯款請選擇台中／桃園／新竹／高雄（學院自己轉帳，只要寫台北分錄）")
-    preview = preview_fixed_expenses(period, area)
+    # 2026-11-09：有勾選科目時照勾選列重算（盤點列出的 41～71 列都能選）
+    preview = preview_fixed_expenses(period, area, lenient=selected_rows is not None)
     plans = preview.get("plans") or []
     if not plans:
         raise ValueError(f"{period}／{area} 第72列沒有可匯款金額")
@@ -139,6 +145,14 @@ def run(
             # 匯款、明細及財報已完成時，不可因來源表權限問題讓使用者誤以為
             # 整批失敗而再次匯款；既有財報分錄仍會在下次銀行預檢時擋重複。
             print(f"警告：匯款及後續分錄已完成，但第74列日期回填失敗：{exc}")
+
+        try:
+            from tools.finance_management.fixed_expense_transfer import REQUEST_AREAS, write_request_rows
+
+            if area in REQUEST_AREAS:
+                print(f"請款記錄／{area} 新增 {write_request_rows(plan, paid_on)} 筆（已付款 {paid_on}）。")
+        except Exception as exc:
+            print(f"警告：匯款及分錄已完成，但請款記錄／{area} 寫入失敗，請手動補：{exc}")
 
     for summary in result.get("summaries") or []:
         print(summary)

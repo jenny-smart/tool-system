@@ -4,7 +4,8 @@
 - 高雄 40000：每月固定匯給台北（台北富邦更新記內勤薪資減項；高雄不跑富邦更新）
 - 學院 47911：學院自己轉帳給台北，這裡只寫台北入帳分錄（內勤薪資／勞保費／健保費／退休金四列）
 - 台中（單月）：台中固定費用請款——當月＋隔月租金、前 2 個月電費新增到請款記錄（電費要輸入金額）
-匯款一律排入本機 Agent，每區一筆，由你在富邦核對後手機核准；完成後同步明細並寫入台北／分店財報分錄。
+匯款一律排入本機 Agent，每區一筆，由你在富邦核對後按確認；完成後同步明細並寫入台北／分店財報分錄。
+排程（每月 10 日 04:00）不跑高雄（2026-11-09 Jenny）。
 """
 from __future__ import annotations
 
@@ -35,8 +36,8 @@ def _scan(period: str) -> dict:
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption("每月 10 日：台中／桃園／新竹依行銷費用總表、高雄 40000 固定匯給台北；學院 47911 自己轉帳，確認收到後勾選寫入台北分錄。"
-               "單月另外新增台中固定費用請款（租金、電費）。匯款排入本機 Agent，每區由你在富邦核對後手機核准。"
-               "排程（排程設定 fixed_expense_remit）每月 10 日會自動盤點並排入。")
+               "單月另外新增台中固定費用請款（租金、電費）。匯款排入本機 Agent，每區由你在富邦核對後按確認。"
+               "排程（排程設定 fixed_expense_remit）每月 10 日 04:00 會自動盤點高雄以外各區並排入。")
     period = st.text_input("期別（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
                            key=f"{PREFIX}_period").strip()
     if st.button("🔍 盤點", key=f"{PREFIX}_scan", type="primary"):
@@ -112,5 +113,5 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                                created_by=username or "各區固定費用匯款")
             log(f"已排入：{r['area']} 富邦匯款給台北 {r['total']:,}（{task.get('task_id', '')}）")
         if selected:
-            st.success(f"已排入本機 Agent {len(selected)} 區，請依序在富邦核對後手機核准。完成後再按一次「盤點」確認。")
+            st.success(f"已排入本機 Agent {len(selected)} 區，請依序在富邦核對後按確認。完成後再按一次「盤點」確認。")
         st.session_state.pop(f"{PREFIX}_result", None)
