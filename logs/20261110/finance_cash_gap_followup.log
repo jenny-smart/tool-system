@@ -1,0 +1,200 @@
+每月財務排程：cash_gap_followup｜執行日 2026-11-10
+===== 現金缺口 =====
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台北：試算中...
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+Google API 暫時失敗，準備重試（1/6）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1AUoTzmZe6wkDpfTOcPYAOvgEWtD48I4MO1ZRcK4Dibs/values/%27%E5%AF%8C%E9%82%A6%E6%9B%B4%E6%96%B0%27%21A%3AZ?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'service': 'sheets.googleapis.com', 'quota_location': 'global', 'quota_limit_value': '60', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_unit': '1/min/{project}/{user}', 'window_start_time': '1794281444', 'consumer': 'projects/1042663213860', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+Google API 暫時失敗，準備重試（2/6）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1AUoTzmZe6wkDpfTOcPYAOvgEWtD48I4MO1ZRcK4Dibs/values/%27%E5%AF%8C%E9%82%A6%E6%9B%B4%E6%96%B0%27%21A%3AZ?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'service': 'sheets.googleapis.com', 'quota_location': 'global', 'quota_limit_value': '60', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_unit': '1/min/{project}/{user}', 'window_start_time': '1794281444', 'consumer': 'projects/1042663213860', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+Google API 暫時失敗，準備重試（3/6）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1AUoTzmZe6wkDpfTOcPYAOvgEWtD48I4MO1ZRcK4Dibs/values/%27%E5%AF%8C%E9%82%A6%E6%9B%B4%E6%96%B0%27%21A%3AZ?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_location': 'global', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'consumer': 'projects/1042663213860', 'service': 'sheets.googleapis.com', 'window_start_time': '1794281444', 'quota_unit': '1/min/{project}/{user}', 'quota_limit_value': '60', 'quota_metric': 'sheets.googleapis.com/read_requests'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台北：試算完成
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台中：試算中...
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台中：試算完成
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+桃園：試算中...
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+桃園：試算完成
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+新竹：試算中...
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+新竹：試算完成
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+高雄：試算中...
+Google API 暫時失敗，準備重試（1/6）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4/values/%272026%E7%B8%BD%E8%A1%A8%27%21BS8?valueRenderOption=UNFORMATTED_VALUE&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'consumer': 'projects/1042663213860', 'quota_unit': '1/min/{project}/{user}', 'quota_limit_value': '60', 'service': 'sheets.googleapis.com', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_location': 'global', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'window_start_time': '1794281564'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+Google API 暫時失敗，準備重試（2/6）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4/values/%272026%E7%B8%BD%E8%A1%A8%27%21BS8?valueRenderOption=UNFORMATTED_VALUE&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'consumer': 'projects/1042663213860', 'quota_unit': '1/min/{project}/{user}', 'quota_limit_value': '60', 'service': 'sheets.googleapis.com', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_location': 'global', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'window_start_time': '1794281564'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+Google API 暫時失敗，準備重試（3/6）：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/18KlxjxtbyjKGrmczSH3Eg3J8rem1JskhMjDE4M560m4/values/%272026%E7%B8%BD%E8%A1%A8%27%21BS8?valueRenderOption=UNFORMATTED_VALUE&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_limit_value': '60', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_unit': '1/min/{project}/{user}', 'service': 'sheets.googleapis.com', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'window_start_time': '1794281564', 'quota_location': 'global', 'consumer': 'projects/1042663213860'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+高雄：試算完成
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【review 現金缺口】2026/10 現金缺口（CC～CI）已貼上
+===== 預收款金額 =====
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台北：開始登入後台
+✅ 登入成功：jenny@lemonclean.com.tw
+台北：登入成功，開始查詢 202610
+查詢中：藍新ATM服務金額
+台北：查詢中：藍新ATM服務金額
+藍新ATM服務金額：12,000
+台北：藍新ATM服務金額：12,000
+查詢中：信用卡服務金額
+台北：查詢中：信用卡服務金額
+信用卡服務金額：728,550
+台北：信用卡服務金額：728,550
+查詢中：ATM服務金額
+台北：查詢中：ATM服務金額
+ATM服務金額：212,200
+台北：ATM服務金額：212,200
+查詢中：家電服務金額
+台北：查詢中：家電服務金額
+家電服務金額：0
+台北：家電服務金額：0
+查詢中：水洗服務金額
+台北：查詢中：水洗服務金額
+水洗服務金額：24,200
+台北：水洗服務金額：24,200
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台北：已寫入「現金缺口試算」分頁
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+完成：台北 202610（2026/10/31）已寫入「現金缺口試算」分頁。藍新ATM服務金額=12,000、信用卡服務金額=728,550、ATM服務金額=212,200、家電服務金額=0、水洗服務金額=24,200
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台中：開始登入後台
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+台中：登入成功，開始查詢 202610
+查詢中：藍新ATM服務金額
+台中：查詢中：藍新ATM服務金額
+藍新ATM服務金額：0
+台中：藍新ATM服務金額：0
+查詢中：信用卡服務金額
+台中：查詢中：信用卡服務金額
+信用卡服務金額：35,800
+台中：信用卡服務金額：35,800
+查詢中：ATM服務金額
+台中：查詢中：ATM服務金額
+ATM服務金額：12,600
+台中：ATM服務金額：12,600
+查詢中：家電服務金額
+台中：查詢中：家電服務金額
+家電服務金額：0
+台中：家電服務金額：0
+查詢中：水洗服務金額
+台中：查詢中：水洗服務金額
+水洗服務金額：0
+台中：水洗服務金額：0
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+台中：已寫入「現金缺口試算」分頁
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+完成：台中 202610（2026/10/31）已寫入「現金缺口試算」分頁。藍新ATM服務金額=0、信用卡服務金額=35,800、ATM服務金額=12,600、家電服務金額=0、水洗服務金額=0
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+桃園：開始登入後台
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+桃園：登入成功，開始查詢 202610
+查詢中：藍新ATM服務金額
+桃園：查詢中：藍新ATM服務金額
+藍新ATM服務金額：19,200
+桃園：藍新ATM服務金額：19,200
+查詢中：信用卡服務金額
+桃園：查詢中：信用卡服務金額
+信用卡服務金額：243,700
+桃園：信用卡服務金額：243,700
+查詢中：ATM服務金額
+桃園：查詢中：ATM服務金額
+ATM服務金額：222,819
+桃園：ATM服務金額：222,819
+查詢中：家電服務金額
+桃園：查詢中：家電服務金額
+家電服務金額：20,500
+桃園：家電服務金額：20,500
+查詢中：水洗服務金額
+桃園：查詢中：水洗服務金額
+水洗服務金額：0
+桃園：水洗服務金額：0
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+桃園：已寫入「現金缺口試算」分頁
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+完成：桃園 202610（2026/10/31）已寫入「現金缺口試算」分頁。藍新ATM服務金額=19,200、信用卡服務金額=243,700、ATM服務金額=222,819、家電服務金額=20,500、水洗服務金額=0
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+新竹：開始登入後台
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+新竹：登入成功，開始查詢 202610
+查詢中：藍新ATM服務金額
+新竹（關鍵字：新竹）：查詢中：藍新ATM服務金額
+藍新ATM服務金額：0
+新竹（關鍵字：新竹）：藍新ATM服務金額：0
+查詢中：信用卡服務金額
+新竹（關鍵字：新竹）：查詢中：信用卡服務金額
+信用卡服務金額：26,850
+新竹（關鍵字：新竹）：信用卡服務金額：26,850
+查詢中：ATM服務金額
+新竹（關鍵字：新竹）：查詢中：ATM服務金額
+ATM服務金額：28,330
+新竹（關鍵字：新竹）：ATM服務金額：28,330
+查詢中：家電服務金額
+新竹（關鍵字：新竹）：查詢中：家電服務金額
+家電服務金額：0
+新竹（關鍵字：新竹）：家電服務金額：0
+查詢中：水洗服務金額
+新竹（關鍵字：新竹）：查詢中：水洗服務金額
+水洗服務金額：0
+新竹（關鍵字：新竹）：水洗服務金額：0
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+新竹：已寫入「現金缺口試算」分頁
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+完成：新竹 202610（2026/10/31）已寫入「現金缺口試算」分頁。藍新ATM服務金額=0、信用卡服務金額=26,850、ATM服務金額=28,330、家電服務金額=0、水洗服務金額=0
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+高雄：開始登入後台
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+高雄：登入成功，開始查詢 202610
+查詢中：藍新ATM服務金額
+高雄（關鍵字：高雄）：查詢中：藍新ATM服務金額
+藍新ATM服務金額：0
+高雄（關鍵字：高雄）：藍新ATM服務金額：0
+查詢中：信用卡服務金額
+高雄（關鍵字：高雄）：查詢中：信用卡服務金額
+信用卡服務金額：0
+高雄（關鍵字：高雄）：信用卡服務金額：0
+查詢中：ATM服務金額
+高雄（關鍵字：高雄）：查詢中：ATM服務金額
+ATM服務金額：6,200
+高雄（關鍵字：高雄）：ATM服務金額：6,200
+查詢中：家電服務金額
+高雄（關鍵字：高雄）：查詢中：家電服務金額
+家電服務金額：0
+高雄（關鍵字：高雄）：家電服務金額：0
+查詢中：水洗服務金額
+高雄（關鍵字：高雄）：查詢中：水洗服務金額
+水洗服務金額：0
+高雄（關鍵字：高雄）：水洗服務金額：0
+查詢中：藍新ATM服務金額
+高雄（關鍵字：台南）：查詢中：藍新ATM服務金額
+藍新ATM服務金額：0
+高雄（關鍵字：台南）：藍新ATM服務金額：0
+查詢中：信用卡服務金額
+高雄（關鍵字：台南）：查詢中：信用卡服務金額
+信用卡服務金額：0
+高雄（關鍵字：台南）：信用卡服務金額：0
+查詢中：ATM服務金額
+高雄（關鍵字：台南）：查詢中：ATM服務金額
+ATM服務金額：5,400
+高雄（關鍵字：台南）：ATM服務金額：5,400
+查詢中：家電服務金額
+高雄（關鍵字：台南）：查詢中：家電服務金額
+家電服務金額：0
+高雄（關鍵字：台南）：家電服務金額：0
+查詢中：水洗服務金額
+高雄（關鍵字：台南）：查詢中：水洗服務金額
+水洗服務金額：0
+高雄（關鍵字：台南）：水洗服務金額：0
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+高雄：已寫入「現金缺口試算」分頁
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+完成：高雄 202610（2026/10/31）已寫入「現金缺口試算」分頁。藍新ATM服務金額=0、信用卡服務金額=0、ATM服務金額=11,600、家電服務金額=0、水洗服務金額=0
+===== review 現金缺口區塊 =====
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【review 現金缺口】2026/10 儲值金＋現金缺口（CC～CI）已貼上
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠️ 現金缺口還沒有數字（0／錯誤）：富邦餘額：高雄；行銷費用(廣告)：高雄；總營收：高雄；營業稅：高雄；藍新發票金額：高雄
+已在 jenny@hers.com.tw 建立提醒：【現金缺口】2026/10 還有 5 項沒有數字
