@@ -1,0 +1,14 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+【台北】已補 T／Z 公式 1 格
+【台北】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【桃園】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+❌ 【高雄】讀取清潔異動失敗：APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+沒有未備妥的列，不建提醒
+{'todo': [], 'failed': ['高雄']}
