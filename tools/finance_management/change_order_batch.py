@@ -536,8 +536,9 @@ def _purchase_state(co, session, order: dict) -> dict:
 
 
 def fill_from_backend(region: str, ws, values: list[list], log: Callable[[str], None] = print,
-                      session_factory: Optional[Callable] = None) -> int:
-    """盤點時補齊可自檸檬後台查詢的空白欄位；回傳補了幾格。登入或查詢失敗只提醒，不影響盤點。"""
+                      session_factory: Optional[Callable] = None, dry_run: bool = False) -> int:
+    """盤點時補齊可自檸檬後台查詢的空白欄位；回傳補了幾格。登入或查詢失敗只提醒，不影響盤點。
+    dry_run：只查詢、列出會補的內容，不寫入試算表。"""
     targets = [(row_no, row, wanted) for row_no, row in enumerate(values[1:], start=2)
                if _fill_due(row) and (wanted := _wanted(row))]
     if not targets:
@@ -578,10 +579,12 @@ def fill_from_backend(region: str, ws, values: list[list], log: Callable[[str], 
                     row_values.append("")
                 row_values[COL[letter]] = str(value)
             if fills:
-                filled_rows.append(f"第{row_no}列 {'、'.join(fills)}")
+                filled_rows.append(f"第{row_no}列 {_cell(row, 'G')} " + "、".join(f"{k}={v}" for k, v in fills.items()))
     finally:
         _logout_session(co, session, region, log)
-    if updates:
+    if updates and dry_run:
+        log(f"【{region}】〔預覽〕會自檸檬後台補齊 {len(updates)} 格：\n　" + "\n　".join(filled_rows))
+    elif updates:
         ws.batch_update(updates, value_input_option="USER_ENTERED")
         log(f"【{region}】已自檸檬後台補齊 {len(updates)} 格：{'；'.join(filled_rows)}")
     return len(updates)
@@ -653,8 +656,10 @@ def new_atm_rows(candidates: list[dict], atm_values: list[list]) -> list[dict]:
     return result
 
 
-def sync_atm_sheet(region: str, values: list[list], log: Callable[[str], None] = print) -> int:
-    """盤點時把 ATM 待退款／待收款補進同地區 ATM 工作表；回傳新增筆數。失敗只提醒，不影響盤點。"""
+def sync_atm_sheet(region: str, values: list[list], log: Callable[[str], None] = print,
+                   dry_run: bool = False) -> int:
+    """盤點時把 ATM 待退款／待收款補進同地區 ATM 工作表；回傳新增筆數。失敗只提醒，不影響盤點。
+    dry_run：只列出會新增的資料，不寫入。"""
     candidates = atm_candidates(values)
     if not candidates:
         return 0
@@ -671,6 +676,11 @@ def sync_atm_sheet(region: str, values: list[list], log: Callable[[str], None] =
                            if any(str(value).strip() for value in row[8:12])), default=0)
     start_row = max(last_a_row + 5, last_unpaid_row + 1)
     end_row = start_row + len(rows) - 1
+    if dry_run:
+        log(f"【{region}】〔預覽〕會新增 ATM 工作表 I{start_row}:O{end_row}：\n　" + "\n　".join(
+            f"{r['year_month']} {r['order_no']} {r['name']} {r['amount']} {'／'.join(_atm_service_fee(r['kind'], r['change_text']))}"
+            for r in rows))
+        return len(rows)
     row_count = int(getattr(ws, "row_count", 0) or len(atm_values))
     if end_row > row_count:
         memo.with_retry(ws.add_rows, end_row - row_count)
@@ -691,12 +701,15 @@ def sync_atm_sheet(region: str, values: list[list], log: Callable[[str], None] =
 
 
 def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], None] = print,
-                fill_backend: bool = True, sync_atm: bool = True) -> list[dict]:
+                fill_backend: bool = True, sync_atm: bool = True, dry_run: bool = False) -> list[dict]:
+    """dry_run：只預覽會補的資料／會新增的 ATM 列，不寫入任何試算表（也不補 T／Z 公式）。"""
     ws = _change_order().get_worksheet(region)
     values = ws.get_all_values()
+    if dry_run:
+        fix_formulas = False
     if fill_backend:
         try:
-            if fill_from_backend(region, ws, values, log):
+            if fill_from_backend(region, ws, values, log, dry_run=dry_run) and not dry_run:
                 values = ws.get_all_values()
         except Exception as exc:
             log(f"⚠️ 【{region}】自檸檬後台補齊失敗：{exc}")
@@ -712,7 +725,7 @@ def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], Non
             values = ws.get_all_values()
     if sync_atm:
         try:
-            sync_atm_sheet(region, values, log)
+            sync_atm_sheet(region, values, log, dry_run=dry_run)
         except Exception as exc:
             log(f"⚠️ 【{region}】同步 ATM 工作表失敗：{exc}")
     items = []
@@ -1103,14 +1116,57 @@ def scheduled_scan(log: Callable[[str], None] = print) -> int:
     return 0
 
 
+def fill_and_sync(regions=None, log: Callable[[str], None] = print, dry_run: bool = False) -> list[dict]:
+    """【整合執行】清潔異動「補齊＋同步 ATM」按鈕（2026-11-12 Jenny）：自後台補齊＋補 T／Z 公式＋同步 ATM 工作表；
+    dry_run 只列出會補的內容／會新增的 ATM 列，不寫入。回傳盤點結果（給畫面顯示仍未備妥的列）。"""
+    items = []
+    for region in regions or REGIONS:
+        try:
+            items.extend(scan_region(region, log=log, dry_run=dry_run))
+        except Exception as exc:
+            log(f"❌ 【{region}】讀取清潔異動失敗：{exc}")
+    return items
+
+
+def scheduled_fill(regions=None, log: Callable[[str], None] = print) -> int:
+    """排程（排程設定 change_order_fill，2026-11-12 Jenny）：只做盤點前置——自檸檬後台補齊缺資料、
+    補 T／Z 公式、ATM 待退款／待收款同步 ATM 工作表；不建提醒、不排 Agent、不回寫系統。
+    排在 08:10 ATM 對帳前，讓新同步的 ATM 待配對列當天早上就能配對。"""
+    items = scan(regions, log=log)
+    missing = [i for i in items if i["missing"]]
+    log(f"清潔異動補齊完成：盤點 {len(items)} 列，仍未備妥 {len(missing)} 列（每日 10:00 檢查會提醒）")
+    try:
+        from tools.finance_management.execution_log import log_execution
+
+        log_execution(function_name="清潔異動補齊＋同步ATM工作表", status="成功", run_type="排程",
+                      area="、".join(regions or REGIONS),
+                      message=f"盤點 {len(items)} 列，仍未備妥 {len(missing)} 列")
+    except Exception as exc:  # 記錄失敗不影響排程結果
+        log(f"⚠️ 執行 Log 寫入失敗：{exc}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="清潔異動整合執行：逐區依序執行／回寫系統")
-    parser.add_argument("command", choices=["sync", "run", "scan"])
+    parser.add_argument("command", choices=["sync", "run", "scan", "preview", "fill"],
+                        help="preview：試跑盤點（自後台補齊、同步 ATM 工作表），只列出結果不寫入")
     parser.add_argument("--regions", default=",".join(REGIONS))
     parser.add_argument("--rows", default="", help='JSON：{"台北": [238, 389]}，只回寫這些列')
     parser.add_argument("--plan", default="", help="run 用：build_plan 產生的 JSON")
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     args = parser.parse_args(argv)
+    if args.command == "fill":
+        regions = [r for r in args.regions.split(",") if r]
+        return scheduled_fill(regions, log=lambda text: print(text, flush=True))
+    if args.command == "preview":
+        log = lambda text: print(text, flush=True)  # noqa: E731
+        for region in [r for r in args.regions.split(",") if r]:
+            log(f"===== 【{region}】預覽 =====")
+            try:
+                scan_region(region, log=log, dry_run=True)
+            except Exception as exc:
+                log(f"❌ 【{region}】讀取清潔異動失敗：{exc}")
+        return 0
     if args.command == "scan":
         return scheduled_scan(log=lambda text: print(text, flush=True))
     if args.command == "run":
