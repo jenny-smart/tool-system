@@ -1,4 +1,4 @@
-"""【整合執行】月度盤點：選月份 → 盤點這個月所有該做的事 → 沒完成的預設打勾（可全選）→ 執行。"""
+"""【整合執行】月度盤點：選資料月份（預設上個月）→ 盤點那批資料所有該做的事 → 沒完成的預設打勾（可全選）→ 執行。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -16,15 +16,18 @@ RUN_COLUMN = "執行"
 
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
-    st.caption("這個月所有該做的事：月初工作（期別＝上個月）、工具包押金、年度review、台北查信、各區固定費用匯款、"
-               "現金缺口各項數字、會計事務所費用（單月）、鯨躍字軌（雙月）。"
+    st.caption("資料月份（預設上個月）的所有該做的事，多半在下個月做：月初工作、工具包押金、年度review、台北查信、"
+               "各區固定費用匯款、現金缺口各項數字、會計事務所費用（單月）、鯨躍字軌（下一期）。"
                "✅ 完成　❌ 未完成（已過應完成日）　⏳ 未到期　🕒 已排入本機 Agent／執行中　✋ 要到功能頁處理　— 本月不用。"
                "結果會寫進主控表「月度盤點」分頁（保留每月紀錄）；在分頁自己加的列（項目代號空白）是手動項目。")
-    month = st.text_input("月份（YYYYMM，預設本月）", value=datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m"),
-                          key=f"{PREFIX}_month").strip()
+    this_month = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m")
+    data = st.text_input("資料月份（YYYYMM，預設上個月）", value=mc.previous_month(this_month),
+                         key=f"{PREFIX}_month").strip()
+    valid = len(data) == 6 and data.isdigit() and 1 <= int(data[4:]) <= 12
+    month = mc.next_month(data) if valid else ""  # 做事的月份
     if st.button("🔍 盤點", key=f"{PREFIX}_scan", type="primary"):
-        if len(month) != 6 or not month.isdigit() or not 1 <= int(month[4:]) <= 12:
-            st.error("月份請輸入 YYYYMM，例如 202611")
+        if not valid:
+            st.error("資料月份請輸入 YYYYMM，例如 202610")
             return
         with st.spinner("盤點中（月初工作、押金、review、請款記錄、行銷費用總表、現金缺口、字軌 Log）…"):
             items = mc.collect(month, log=log)
@@ -41,9 +44,9 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     items = result[1]
     todo = [i for i in items if i["status"] in (mc.TODO, mc.MANUAL)]
     if todo:
-        st.warning(f"{month[:4]}/{month[4:]}：{len(items)} 項，還有 **{len(todo)}** 項過了應完成日沒做完（可直接執行的已預設打勾）。")
+        st.warning(f"{data[:4]}/{data[4:]} 資料：{len(items)} 項，還有 **{len(todo)}** 項過了應完成日沒做完（可直接執行的已預設打勾）。")
     else:
-        st.success(f"✅ {month[:4]}/{month[4:]}：目前沒有過期未完成的項目")
+        st.success(f"✅ {data[:4]}/{data[4:]} 資料：目前沒有過期未完成的項目")
     override, editor_key = select_all_controls(PREFIX)
     table = pd.DataFrame([{
         RUN_COLUMN: checked(i["runnable"] and i["status"] == mc.TODO, override, i["runnable"]),

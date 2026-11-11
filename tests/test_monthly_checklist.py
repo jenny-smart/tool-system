@@ -35,18 +35,28 @@ def test_mof_skip_month_follows_schedule_frequency(monkeypatch):
 
 def test_merge_rows_keeps_done_time_note_and_manual_rows():
     existing = [mc.HEADER,
-                ["202611", "deposit_report", "押金", "2026-11-01", mc.DONE, "ok", "t0", "2026-11-01 04:01", "我的備註"],
-                ["202611", "", "手動：寄資料給會計", "2026-11-10", "", "", "", "", ""],
-                ["202610", "review_monthly", "review", "2026-10-01", mc.TODO, "x", "t0", "", ""]]
+                ["202610", "deposit_report", "押金", "2026-11-01", mc.DONE, "ok", "t0", "2026-11-01 04:01", "我的備註"],
+                ["202610", "", "手動：寄資料給會計", "2026-11-10", "", "", "", "", ""],
+                ["202609", "review_monthly", "review", "2026-10-01", mc.TODO, "x", "t0", "", ""]]
     items = [mc.item("deposit_report", "押金", date(2026, 11, 1), True, "ok"),
              mc.item("review_monthly", "review", date(2026, 11, 1), True, "done"),
              mc.item("fixed_expense_mail", "查信", date(2026, 11, 10), False, "還沒新增")]
     updates, appends = mc.merge_rows(existing, "202611", items, "NOW")
-    assert updates == [[2, ["202611", "deposit_report", "押金", "2026-11-01", mc.DONE, "ok", "NOW",
+    # 11 月做的事記資料月份 202610
+    assert updates == [[2, ["202610", "deposit_report", "押金", "2026-11-01", mc.DONE, "ok", "NOW",
                             "2026-11-01 04:01", "我的備註"]]]
-    # 202611 的 review 是新的一列（202610 那列不動）；第一次完成記完成時間；未完成沒有完成時間
-    assert appends[0][:2] == ["202611", "review_monthly"] and appends[0][7] == "NOW"
-    assert appends[1][:2] == ["202611", "fixed_expense_mail"] and appends[1][7] == ""
+    # 202610 的 review 是新的一列（202609 那列不動）；第一次完成記完成時間；未完成沒有完成時間
+    assert appends[0][:2] == ["202610", "review_monthly"] and appends[0][7] == "NOW"
+    assert appends[1][:2] == ["202610", "fixed_expense_mail"] and appends[1][7] == ""
+
+
+def test_migrate_old_work_month_to_data_month():
+    old = [["月份", "項目代號"], ["202611", "deposit_report"], ["202610", "review_monthly"], [], ["", "x"]]
+    new = mc.migrate_rows(old)
+    assert [r[:2] for r in new] == [["資料月份", "項目代號"], ["202610", "deposit_report"],
+                                    ["202609", "review_monthly"], [], ["", "x"]]
+    assert mc.migrate_rows(new) == []  # 已是新版不再換
+    assert mc.next_month("202612") == "202701" and mc.data_month("202611") == "202610"
 
 
 def test_overdue_only_past_due_unfinished():
