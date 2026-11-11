@@ -7,14 +7,14 @@ from tools.local_agent_queue import create_task
 
 TZ = ZoneInfo("Asia/Taipei")
 AREAS = ["台北", "台中"]
-# 排程時間依主控表「排程設定」fubon_statement（2026-11-12 起 10:00,11:00,16:30）：
+# 排程時間依主控表「排程設定」fubon_statement（2026-11-12 起 08:00,11:00,16:30；08:00 要先下載，ATM ①②③ 才能對帳）：
 # 第一個時間每天都排（例假日 Mac 有開機就跑，沒開機就等開機），之後的時間只在工作日排。
 # 讀不到排程設定時，以這個鐘點前算「每天都排」的那次。
 MORNING_CUTOFF_HOUR = 11
 
 
 def morning_cutoff_hour() -> int:
-    """排程設定第二個時間的鐘點（例 10:00,11:00,16:30 → 11）：這個鐘點前的那次每天都排。"""
+    """排程設定第二個時間的鐘點（例 08:00,11:00,16:30 → 11）：這個鐘點前的那次每天都排。"""
     try:
         from tools.scheduling.schedule_settings import get_rule
 

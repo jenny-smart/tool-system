@@ -10,8 +10,8 @@ TZ = ZoneInfo("Asia/Taipei")
 
 def test_morning_always_other_slots_only_workdays(monkeypatch):
     monkeypatch.setattr("tools.common.tw_holidays.is_workday", lambda day, **kw: day.weekday() < 5)
-    monkeypatch.setattr(fsq, "morning_cutoff_hour", lambda: 11)  # 排程設定 10:00,11:00,16:30
-    assert fsq.should_queue(datetime(2026, 10, 24, 10, 0, tzinfo=TZ))       # 週六 10:00（Mac 開機才跑）
+    monkeypatch.setattr(fsq, "morning_cutoff_hour", lambda: 11)  # 排程設定 08:00,11:00,16:30
+    assert fsq.should_queue(datetime(2026, 10, 24, 10, 0, tzinfo=TZ))       # 週六 08:00 延遲到 10 點（Mac 開機才跑）
     assert fsq.should_queue(datetime(2026, 10, 24, 8, 0, tzinfo=TZ))        # 週六 08:00
     assert not fsq.should_queue(datetime(2026, 10, 24, 11, 0, tzinfo=TZ))   # 週六 11:00
     assert not fsq.should_queue(datetime(2026, 10, 25, 16, 30, tzinfo=TZ))  # 週日 16:30
@@ -209,7 +209,7 @@ def test_query_start_continues_from_last_year_when_new_report_empty(monkeypatch)
 def test_morning_cutoff_reads_second_schedule_time(monkeypatch):
     from tools.scheduling import schedule_settings as ss
 
-    rule = ss.parse_row([True, "fubon_statement", "x", "10:00,11:00,16:30", "每日", "", "照跑", ss.MODE_QUEUE])
+    rule = ss.parse_row([True, "fubon_statement", "x", "08:00,11:00,16:30", "每日", "", "照跑", ss.MODE_QUEUE])
     monkeypatch.setattr(ss, "get_rule", lambda *_a, **_k: rule)
     assert fsq.morning_cutoff_hour() == 11
     rule.times = ["10:00"]
