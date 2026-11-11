@@ -570,6 +570,21 @@ def load_rules(log: Callable[[str], None] = print) -> tuple[list[Rule], bool]:
     return rules, True
 
 
+def get_rule(key: str, log: Callable[[str], None] = lambda _t: None) -> Optional[Rule]:
+    """執行中的功能查自己在「排程設定」的那一列（時間／頻率／日期／遇例假日）。讀不到 Sheet 時用預設值。"""
+    rules, _ok = load_rules(log=log)
+    return next((r for r in rules if r.key == key), None)
+
+
+def last_target_date(rule: Rule, day: date, is_workday: Callable[[date], bool]) -> Optional[date]:
+    """day 那個月「日期」欄的最後一天，遇例假日提前時改成實際執行的那個工作日（例：10 日週日 → 8 日）。"""
+    days = month_days(rule.days, day)
+    if not days:
+        return None
+    last = day.replace(day=days[-1])
+    return previous_workday(last, is_workday) if rule.holiday == HOLIDAY_EARLIER else last
+
+
 def get_mode(key: str, default: str = MODE_DIRECT, log: Callable[[str], None] = print) -> str:
     """執行中的功能查自己的執行方式（盤點後自動排入／盤點後等確認）。讀不到用預設。"""
     import os

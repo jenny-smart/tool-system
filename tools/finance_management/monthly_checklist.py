@@ -2,7 +2,7 @@
 
 - 「月份」＝做事的月份（例如 11 月）。月初那批（期別＝上個月）沿用【整合執行】月初的盤點（month_start_check）。
 - 其他每月工作各自檢查：工具包押金、年度review、台北查信、各區固定費用匯款、台中固定費用請款（單月）、現金缺口各項數字、
-  會計事務所費用（單月）、鯨躍字軌（雙月）。
+  會計事務所費用（單月）、鯨躍字軌（頻率依「排程設定」mof_serial，目前每月）。
 - 結果寫進主控表「月度盤點」分頁：每月每項一列、保留歷史；第一次變成完成時記「完成時間」，可回頭查拖了多久。
   自己加的列（項目代號空白）程式不會動，可當手動項目，在「狀態」欄自己填「✅ 完成」。
 - 排程（排程設定 monthly_checklist）每天更新分頁；超過應完成日還沒做完的項目合併成一則行事曆提醒。
@@ -186,10 +186,23 @@ def accounting_item(month: str) -> dict:
                 page="【整合執行】會計事務所費用確認")
 
 
-def mof_item(month: str) -> dict:
+def _mof_skip_month(month: str) -> bool:
+    """依主控表「排程設定」mof_serial 的頻率判斷這個月要不要做（2026-11-11 排程設定是每月）；讀不到用預設。"""
+    from tools.scheduling.schedule_settings import get_rule
+
+    try:
+        rule = get_rule("mof_serial")
+    except Exception:
+        rule = None
+    freq = rule.freq if rule else "雙月"
+    odd = int(month[4:]) % 2 == 1
+    return (freq == "雙月" and odd) or (freq == "單月" and not odd)
+
+
+def mof_item(month: str, skip_month: Optional[bool] = None) -> dict:
     due = _earlier_workday(month_day(month, 20))
-    if int(month[4:]) % 2 == 1:
-        return item("mof_serial", "鯨躍字軌下載＋匯入＋配號（下一期）", due, True, "單月不用", applicable=False)
+    if _mof_skip_month(month) if skip_month is None else skip_month:
+        return item("mof_serial", "鯨躍字軌下載＋匯入＋配號（下一期）", due, True, "這個月不用", applicable=False)
     from tools.scheduled_finance.runner import mof_status
 
     try:

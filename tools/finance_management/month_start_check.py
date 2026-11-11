@@ -54,9 +54,23 @@ PDF_AREAS = ("台中",)
 STATEMENT_REPORTS = [("fubon", "富邦明細", "富邦更新", "fubon.download"),
                      ("yuanta", "元大明細", "元大更新", "yuanta.download")]
 AGENT_STATEMENT_AREAS = ("台北", "台中")
-# 要人工驗證碼、05:00 才排入的列：05:00 前排程不提醒
+# 要人工驗證碼、月初整合執行（month_start_queue）才排入的列：排入的鐘點前排程不提醒
 AGENT_ROW_KEYS = {"newebpay_files", "newebpay_invoice", "newebpay_balance", "paper", "prize", "pdf"}
-MONTH_START_QUEUE_HOUR = 5
+# 排入的鐘點以主控表「排程設定」month_start_queue 的時間為準；讀不到時用這個（2026-11-11 排程設定是 09:00）
+MONTH_START_QUEUE_HOUR = 9
+
+
+def queue_hour(log: Callable[[str], None] = lambda _t: None) -> int:
+    """month_start_queue 在「排程設定」的第一個時間（鐘點）。"""
+    try:
+        from tools.scheduling.schedule_settings import get_rule
+
+        rule = get_rule("month_start_queue", log=log)
+        if rule and rule.times:
+            return int(rule.times[0][:2])
+    except Exception as exc:
+        log(f"⚠️ 讀不到 month_start_queue 的排程時間，用 {MONTH_START_QUEUE_HOUR}:00：{exc}")
+    return MONTH_START_QUEUE_HOUR
 
 
 # ── 讀資料 ────────────────────────────────────────────
@@ -698,10 +712,10 @@ REMINDER_PREFIX = "月初工作未完成"
 AUTO_MAX_ATTEMPTS = 2  # 儲值金彙整自動補做最多試 2 次，避免每小時一直失敗重跑
 
 
-def problems(rows: list[dict], hour: int = 23) -> list[dict]:
-    """排程要提醒的列：沒完成、會提醒；05:00 前不看藍新／鯨躍（還沒排入）。"""
+def problems(rows: list[dict], hour: int = 23, start_hour: int = MONTH_START_QUEUE_HOUR) -> list[dict]:
+    """排程要提醒的列：沒完成、會提醒；月初整合執行排入（start_hour）前不看藍新／鯨躍等 Agent 項目（還沒排入）。"""
     return [r for r in rows if not r["done"] and r["remind"] and r.get("remind_todo", r["todo"])
-            and (hour >= MONTH_START_QUEUE_HOUR or r["key"] not in AGENT_ROW_KEYS)]
+            and (hour >= start_hour or r["key"] not in AGENT_ROW_KEYS)]
 
 
 def build_reminder(day: date, now: datetime, todo: list[dict]) -> tuple[str, str]:
@@ -709,7 +723,7 @@ def build_reminder(day: date, now: datetime, todo: list[dict]) -> tuple[str, str
     lines += [f"・{r['label']}：未完成：" + "、".join(f"{a}{r['cells'][a][0]}" for a in r.get("remind_todo", r["todo"]))
               for r in todo]
     lines += ["", f"處理方式：{PAGE}", "",
-              "1 日每小時會再檢查一次（到 23:00），行事曆只留最新一則；全部完成後提醒會自動刪除。"]
+              "1 日每小時會再檢查一次（時段依主控表「排程設定」），行事曆只留最新一則；全部完成後提醒會自動刪除。"]
     return f"{REMINDER_PREFIX} {len(todo)} 項（{day:%m/%d}）", "\n".join(lines)
 
 
@@ -793,7 +807,7 @@ def check(now: Optional[datetime] = None, log: Callable[[str], None] = print) ->
     if fixed_up:  # 有補做才重新盤點（少讀一輪，避免 429）
         log("自動補做：" + "；".join(fixed_up))
         rows = collect_rows(now.date(), log=log)
-    todo = problems(rows, now.hour)
+    todo = problems(rows, now.hour, queue_hour(log=log))
     try:
         clear_reminders(now.date(), log=log)
     except Exception as exc:

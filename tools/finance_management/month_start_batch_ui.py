@@ -18,7 +18,7 @@ RUN_COLUMN = "執行"
 
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption("每月 1 日要做的事：藍新收退款＋發票金額、鯨躍發票下載（本機 Agent，藍新每區需人工輸入驗證碼）、"
-               "全區現金缺口。每月 1 日 05:00 排程會自動排入（藍新約 08:00 寄手續費發票，太早查不到會算失敗、可再補做）；這裡可盤點目前狀態、補排沒做到的步驟。")
+               "全區現金缺口。每月 1 日依「排程設定」的時間（目前 09:00）自動排入（藍新約 08:00 寄手續費發票，太早查不到會算失敗、可再補做）；這裡可盤點目前狀態、補排沒做到的步驟。")
     today = datetime.now(ZoneInfo("Asia/Taipei")).date()
     period = st.text_input("期別（YYYYMM，預設上個月）", value=batch.previous_period(today),
                            key=f"{PREFIX}_period").strip()
