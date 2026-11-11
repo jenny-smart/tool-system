@@ -757,3 +757,11 @@ def test_scheduled_fill_scans_without_reminders(monkeypatch):
     logs = []
     assert batch.scheduled_fill(["台北"], log=logs.append) == 0
     assert calls == [["台北"]] and any("仍未備妥 1 列" in line for line in logs)
+
+
+def test_fill_and_sync_passes_dry_run_to_each_region(monkeypatch):
+    calls = []
+    monkeypatch.setattr(batch, "scan_region", lambda region, log, dry_run: calls.append((region, dry_run)) or [
+        {"region": region, "missing": []}])
+    items = batch.fill_and_sync(["台北", "台中"], log=lambda *_: None, dry_run=True)
+    assert calls == [("台北", True), ("台中", True)] and len(items) == 2

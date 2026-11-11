@@ -44,11 +44,32 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         "二聯改三聯請到【鯨躍發票】對應功能處理。"
     )
     regions = st.multiselect("地區", batch.REGIONS, default=batch.REGIONS, key="change_order_batch_regions")
-    if st.button("🔍 盤點", key="change_order_batch_scan", type="primary"):
+    c_scan, c_preview, c_fill = st.columns([1, 1, 1])
+    if c_scan.button("🔍 盤點", key="change_order_batch_scan", type="primary", use_container_width=True):
         with st.spinner("讀取各區清潔異動中…"):
             st.session_state.pop(f"{STATE_KEY}_from", None)
             st.session_state[STATE_KEY] = batch.scan(regions, log=log)
         reset_select_all("change_order_batch")
+    # 2026-11-12 Jenny：只做「自後台補齊＋同步 ATM 工作表」（不列盤點清單、不排 Agent）；每日 07:50 排程也會跑
+    preview = c_preview.button("👀 補齊＋同步 ATM 預覽", key="change_order_fill_preview", use_container_width=True,
+                               help="只列出會補的欄位及會新增的 ATM 列，不寫入")
+    run_fill = c_fill.button("🧩 補齊＋同步 ATM", key="change_order_fill_run", use_container_width=True,
+                             help="自檸檬後台補齊空白格（P／Q 除外）、補 T／Z 公式、ATM 待退款／待收款同步 ATM 工作表")
+    if preview or run_fill:
+        lines: list[str] = []
+
+        def fill_log(text: str) -> None:
+            lines.append(str(text))
+            log(text)
+
+        with st.spinner("讀取清潔異動並查詢檸檬後台中…"):
+            filled_items = batch.fill_and_sync(regions, log=fill_log, dry_run=bool(preview))
+        missing = sum(1 for i in filled_items if i["missing"])
+        result = [line for line in lines if "補齊" in line or "ATM 工作表" in line or "〔預覽〕" in line
+                  or line.startswith(("⚠️", "❌", "　"))]
+        st.info(("預覽（尚未寫入）" if preview else "已完成") + f"：仍未備妥 {missing} 列"
+                + ("；確認後請按「🧩 補齊＋同步 ATM」" if preview else "；要看最新清單請按「盤點」"))
+        st.code("\n".join(result) or "沒有需要補齊或同步的資料", language=None)
 
     items = st.session_state.get(STATE_KEY)
     if items is None:

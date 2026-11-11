@@ -1116,6 +1116,18 @@ def scheduled_scan(log: Callable[[str], None] = print) -> int:
     return 0
 
 
+def fill_and_sync(regions=None, log: Callable[[str], None] = print, dry_run: bool = False) -> list[dict]:
+    """【整合執行】清潔異動「補齊＋同步 ATM」按鈕（2026-11-12 Jenny）：自後台補齊＋補 T／Z 公式＋同步 ATM 工作表；
+    dry_run 只列出會補的內容／會新增的 ATM 列，不寫入。回傳盤點結果（給畫面顯示仍未備妥的列）。"""
+    items = []
+    for region in regions or REGIONS:
+        try:
+            items.extend(scan_region(region, log=log, dry_run=dry_run))
+        except Exception as exc:
+            log(f"❌ 【{region}】讀取清潔異動失敗：{exc}")
+    return items
+
+
 def scheduled_fill(regions=None, log: Callable[[str], None] = print) -> int:
     """排程（排程設定 change_order_fill，2026-11-12 Jenny）：只做盤點前置——自檸檬後台補齊缺資料、
     補 T／Z 公式、ATM 待退款／待收款同步 ATM 工作表；不建提醒、不排 Agent、不回寫系統。
