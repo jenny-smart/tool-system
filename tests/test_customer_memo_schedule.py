@@ -20,3 +20,17 @@ def test_rule_runs_workdays_at_1000_and_dispatches_to_order_system():
     assert ss.split_workflow(workflow) == ("jenny-smart/order-system", "customer-memo-schedule.yml")
     assert inputs == {}
     assert ss.system_name("customer_memo_daily") == "order-system"
+
+
+def test_stored_value_notice_runs_workdays_at_0820_and_dispatches_to_order_system():
+    row = next(r for r in ss.DEFAULT_ROWS if r[1] == "stored_value_notice_daily")
+    rule = ss.parse_row(row)
+    assert rule.enabled and rule.errors == []
+    workday = lambda d: d.weekday() < 5
+    due = lambda when: [r.key for r in ss.due([rule], when, workday)]
+    assert due(datetime(2026, 11, 10, 8, 20, tzinfo=TZ)) == ["stored_value_notice_daily"]
+    assert due(datetime(2026, 11, 8, 8, 20, tzinfo=TZ)) == []  # 週日略過
+    assert due(datetime(2026, 11, 10, 8, 10, tzinfo=TZ)) == []
+    workflow, inputs = ss.dispatch_for(rule, datetime(2026, 11, 10, 8, 20, tzinfo=TZ))
+    assert ss.split_workflow(workflow) == ("jenny-smart/order-system", "stored-value-notice-schedule.yml")
+    assert ss.system_name("stored_value_notice_daily") == "order-system"
