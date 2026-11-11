@@ -1,0 +1,39 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.18/x64/bin/python -u -m tools.field_management.schedule_stats --date 20261112 --system-name 外場排程系統 --run-type 排程
+[2026-11-12 02:11:18] 開始處理排班統計表：20261112排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1z4b9m-36xtWz2EOpPsF8cSKJ308Ft7m_slHicYwfxgw
+🗑️ 已刪除來源暫存 Google Sheet：1z4b9m-36xtWz2EOpPsF8cSKJ308Ft7m_slHicYwfxgw
+[2026-11-12 02:11:30] 完成：20261112排班統計表-台北.xlsx → 2026排班統計表!EH4 / rows=82
+[2026-11-12 02:11:40] 開始處理排班統計表：20261212排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1bzzAdWBi0iHHF9V7h7DpUzSa08OA1jaxxwLl_EDQ_5M
+🗑️ 已刪除來源暫存 Google Sheet：1bzzAdWBi0iHHF9V7h7DpUzSa08OA1jaxxwLl_EDQ_5M
+[2026-11-12 02:11:48] 完成：20261212排班統計表-台北.xlsx → 2026排班統計表!ET4 / rows=52
+[2026-11-12 02:11:49] 開始處理排班統計表：20270112排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1RniJd-dokRQEqn74u7_lnw1XPGaFBmtzy8v3lsUVpyk
+🗑️ 已刪除來源暫存 Google Sheet：1RniJd-dokRQEqn74u7_lnw1XPGaFBmtzy8v3lsUVpyk
+[2026-11-12 02:11:58] 完成：20270112排班統計表-台北.xlsx → 2026排班統計表!FF4 / rows=42
+[2026-11-12 02:12:00] 開始處理排班統計表：20270212排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1nObiSaqjtCt6C3m2HDvMzy3nYFoq_bUDo1Bkpj9tZJA
+🗑️ 已刪除來源暫存 Google Sheet：1nObiSaqjtCt6C3m2HDvMzy3nYFoq_bUDo1Bkpj9tZJA
+[2026-11-12 02:12:08] 完成：20270212排班統計表-台北.xlsx → 2026排班統計表!FR4 / rows=36
+[2026-11-12 02:12:10] 開始處理排班統計表：20261112排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1w3HLW_8MdmJQFdU5wRwbBHQWmcxezTdZgCL2Drq7W1g
+🗑️ 已刪除來源暫存 Google Sheet：1w3HLW_8MdmJQFdU5wRwbBHQWmcxezTdZgCL2Drq7W1g
+[2026-11-12 02:12:20] 完成：20261112排班統計表-台中.xlsx → 2026排班統計表!EH4 / rows=15
+[2026-11-12 02:12:22] 開始處理排班統計表：20261212排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1rNkF33ovjDGiAotAM7AvvtIZVGbFKbBo4KHPWSMOv9s
+🗑️ 已刪除來源暫存 Google Sheet：1rNkF33ovjDGiAotAM7AvvtIZVGbFKbBo4KHPWSMOv9s
+[2026-11-12 02:12:30] 完成：20261212排班統計表-台中.xlsx → 2026排班統計表!ET4 / rows=9
+[2026-11-12 02:12:32] 開始處理排班統計表：20270112排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1eotox-jRB9KvzBP-8IUFhlQKIgR-XHB8vlBh0qMtrwA
+🗑️ 已刪除來源暫存 Google Sheet：1eotox-jRB9KvzBP-8IUFhlQKIgR-XHB8vlBh0qMtrwA
+[2026-11-12 02:12:39] 完成：20270112排班統計表-台中.xlsx → 2026排班統計表!FF4 / rows=9
+[2026-11-12 02:12:41] 開始處理排班統計表：20270212排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1ubidARouuawS53ZHoNrXTXCSxSQR4Xm7JdiuxOFxI4M
+🗑️ 已刪除來源暫存 Google Sheet：1ubidARouuawS53ZHoNrXTXCSxSQR4Xm7JdiuxOFxI4M
+[2026-11-12 02:12:49] 完成：20270212排班統計表-台中.xlsx → 2026排班統計表!FR4 / rows=9
+[2026-11-12 02:12:50] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成
