@@ -1,6 +1,9 @@
 """月度盤點（2026-11 Jenny）：每個月有哪些該做的事、做完了沒，盤點完可以直接勾選執行。
 
-- 「月份」＝做事的月份（例如 11 月）。月初那批（期別＝上個月）沿用【整合執行】月初的盤點（month_start_check）。
+- 分頁「資料月份」＝盤點的資料月份＝做事月份的上個月（2026-11-12 Jenny：例如 11 月做的事記 202610）。
+  程式內部的 month 參數仍是做事的月份（應完成日依它算）；寫分頁時換成 data_month(month)。
+  台灣連線（當月）、台中租金（當月＋隔月）、鯨躍字軌（下一期）等例外在項目名稱／檢查結果寫明。
+  月初那批（期別＝上個月）沿用【整合執行】月初的盤點（month_start_check）。
 - 其他每月工作各自檢查：工具包押金、年度review、台北查信、各區固定費用匯款、台中固定費用請款（單月）、現金缺口各項數字、
   會計事務所費用（單月）、鯨躍字軌（頻率依「排程設定」mof_serial，目前每月）。
 - 結果寫進主控表「月度盤點」分頁：每月每項一列、保留歷史；第一次變成完成時記「完成時間」，可回頭查拖了多久。
@@ -15,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 SHEET_NAME = "月度盤點"
-HEADER = ["月份", "項目代號", "項目", "應完成日", "狀態", "檢查結果", "最後檢查", "完成時間", "備註"]
+HEADER = ["資料月份", "項目代號", "項目", "應完成日", "狀態", "檢查結果", "最後檢查", "完成時間", "備註"]
 REMIND_PREFIX = "【月度盤點】"
 
 DONE, TODO, NOT_DUE, RUNNING, SKIP, MANUAL = "✅ 完成", "❌ 未完成", "⏳ 未到期", "🕒 執行中", "— 本月不用", "✋ 到功能頁處理"
@@ -25,6 +28,16 @@ DEPOSIT_AREAS = ("台北", "台中")
 def previous_month(month: str) -> str:
     first = date(int(month[:4]), int(month[4:]), 1)
     return (first - timedelta(days=1)).strftime("%Y%m")
+
+
+def next_month(month: str) -> str:
+    first = date(int(month[:4]), int(month[4:]), 28) + timedelta(days=4)
+    return first.strftime("%Y%m")
+
+
+def data_month(month: str) -> str:
+    """做事的月份 → 分頁記的資料月份（上個月）。"""
+    return previous_month(month)
 
 
 def month_day(month: str, day: int) -> date:
@@ -334,14 +347,29 @@ def _ensure_sheet(service, spreadsheet_id: str) -> None:
                                            valueInputOption="RAW", body={"values": [HEADER]}).execute()
 
 
+def migrate_rows(existing: list[list]) -> list[list]:
+    """舊版分頁 A 欄是「月份」（做事的月份）：全部換成資料月份（上個月）、標題改「資料月份」。已是新版就不動。"""
+    if not existing or str(existing[0][0]).strip() != "月份":
+        return []
+    rows = [[HEADER[0]] + list(existing[0][1:])]
+    for row in existing[1:]:
+        row = list(row)
+        if row and len(str(row[0]).strip()) == 6 and str(row[0]).strip().isdigit():
+            row[0] = previous_month(str(row[0]).strip())
+        rows.append(row)
+    return rows
+
+
 def merge_rows(existing: list[list], month: str, items: list[dict], now_text: str) -> tuple[list[list], list[list]]:
-    """回傳 (要更新的 [列號, 列內容] 清單, 要新增的列)。只動同月份、程式產生的項目；手動列與備註不動。"""
+    """回傳 (要更新的 [列號, 列內容] 清單, 要新增的列)。month＝做事的月份，分頁記資料月份（上個月）。
+    只動同資料月份、程式產生的項目；手動列與備註不動。"""
+    label = data_month(month)
     index = {(str(r[0]).strip(), str(r[1]).strip()): n for n, r in enumerate(existing[1:], start=2)
              if len(r) > 1 and str(r[1]).strip()}
     updates, appends = [], []
     for it in items:
-        key = (month, it["key"])
-        values = [month, it["key"], it["label"], it["due"].strftime("%Y-%m-%d"), it["status"], it["detail"], now_text]
+        key = (label, it["key"])
+        values = [label, it["key"], it["label"], it["due"].strftime("%Y-%m-%d"), it["status"], it["detail"], now_text]
         if key in index:
             old = existing[index[key] - 1] + [""] * len(HEADER)
             done_at = old[7] or (now_text if it["status"] == DONE else "")
@@ -358,6 +386,13 @@ def save(month: str, items: list[dict], log: Callable[[str], None] = print) -> N
     _ensure_sheet(service, spreadsheet_id)
     existing = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A:I"
                                                    ).execute().get("values", [])
+    migrated = migrate_rows(existing)
+    if migrated:  # 舊版「月份」（做事月份）一次換成資料月份
+        service.spreadsheets().values().update(spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A1",
+                                               valueInputOption="RAW",
+                                               body={"values": [[r[0] if r else ""] for r in migrated]}).execute()
+        existing = [list(m[:1]) + list(e[1:]) for m, e in zip(migrated, existing)]
+        log(f"「{SHEET_NAME}」A 欄已改成資料月份（上個月），共 {len(migrated) - 1} 列")
     now_text = datetime.now(TW_TZ).strftime("%Y-%m-%d %H:%M")
     updates, appends = merge_rows(existing or [HEADER], month, items, now_text)
     data = [{"range": f"'{SHEET_NAME}'!A{n}:I{n}", "values": [row]} for n, row in updates]
@@ -368,18 +403,18 @@ def save(month: str, items: list[dict], log: Callable[[str], None] = print) -> N
         service.spreadsheets().values().append(spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A:I",
                                                valueInputOption="RAW", insertDataOption="INSERT_ROWS",
                                                body={"values": appends}).execute()
-    log(f"「{SHEET_NAME}」{month}：更新 {len(updates)} 列、新增 {len(appends)} 列")
+    log(f"「{SHEET_NAME}」資料月份 {data_month(month)}：更新 {len(updates)} 列、新增 {len(appends)} 列")
 
 
 def manual_rows(month: str) -> list[dict]:
-    """自己加在分頁上的手動項目（項目代號空白）。"""
+    """自己加在分頁上的手動項目（項目代號空白；A 欄資料月份＝做事月份的上個月）。"""
     service, spreadsheet_id = _service_and_id()
     values = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A:I"
                                                  ).execute().get("values", [])
     result = []
     for row in values[1:]:
         row = list(row) + [""] * len(HEADER)
-        if str(row[0]).strip() == month and not str(row[1]).strip() and str(row[2]).strip():
+        if str(row[0]).strip() == data_month(month) and not str(row[1]).strip() and str(row[2]).strip():
             result.append({"label": row[2], "due": row[3], "status": row[4] or TODO, "detail": row[8]})
     return result
 
@@ -410,7 +445,7 @@ def scheduled_run(today: Optional[date] = None, log: Callable[[str], None] = pri
     lines = [f"・{i['label']}（應完成 {i['due']:%m/%d}）：{i['detail']}" for i in late]
     lines += [f"・{m['label']}（手動項目，應完成 {m['due']}）" for m in late_manual]
     calendar_notify.create_notify_event(
-        summary=f"{REMIND_PREFIX}{month[:4]}/{month[4:]} 還有 {len(lines)} 項沒做完",
+        summary=f"{REMIND_PREFIX}{data_month(month)[:4]}/{data_month(month)[4:]} 資料還有 {len(lines)} 項沒做完",
         description="\n".join(lines) + "\n\n到 Tools App【整合執行】月度盤點 → 盤點 → 勾選 → 執行。",
         start=datetime.now(TW_TZ) + timedelta(minutes=30), calendar_id="jenny@hers.com.tw", attendee="",
         reminder_minutes=[20, 10], replace_prefix=REMIND_PREFIX)
