@@ -65,7 +65,7 @@ def test_notify_skips_without_todo(monkeypatch):
 def test_run_never_syncs(monkeypatch):
     from tools.finance_management import change_order_batch as batch
 
-    monkeypatch.setattr(batch, "scan_region", lambda region, fix_formulas, log: [
+    monkeypatch.setattr(batch, "scan_region", lambda region, fix_formulas, log, *a, **k: [
         {**TODO[0], "region": region}, {**TODO[0], "region": region, "actions": ["sync"], "missing": []}])
     monkeypatch.setattr(batch, "sync_region", lambda *a, **k: pytest.fail("每日檢查不應回寫"))
     monkeypatch.setattr(chk, "log_execution", lambda *a, **k: None)

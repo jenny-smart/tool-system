@@ -596,3 +596,125 @@ def test_queue_actions_prepares_correction_plans():
     assert calls == [("台北", [7], "correction")]
     entry = tasks[0]["plan"][0]
     assert entry["steps"] == {"correction": [7]} and entry["correction_plans"] == {"7": {"p": 7}}
+
+
+# ---- 盤點自動補齊（自檸檬後台）／同步 ATM 工作表（2026-11-12）----
+
+ORDER = {"purchase_id": "9", "order_no": "LC001", "customer_name": "王小明", "line_url": "https://chat.line.biz/x",
+         "invoice_no": "AB12345678", "carrier_type": "二聯式", "payway": "ATM", "travel_fee": 300}
+
+
+def test_backend_fill_refund_row_only_fills_blanks():
+    fills = batch.backend_fill_values(row(B="待退款", H="手打姓名"), ORDER, {"refundAmount": "1,000"},
+                                      customer_type="一般客", service_text="2026-11-20 (五) 09:00 - 12:00")
+    assert fills == {"D": "https://chat.line.biz/x", "F": "一般客", "I": "2026-11-20 (五) 09:00 - 12:00",
+                     "R": "ATM", "S": 1000, "X": "AB12345678", "Y": "二聯"}  # H 已有值不覆蓋；P／Q 不補
+
+
+def test_backend_fill_skips_unknown_values():
+    order = {**ORDER, "invoice_no": "儲值金", "payway": "非儲值金"}
+    fills = batch.backend_fill_values(row(B="待退款", D="x", F="x", H="x", I="x"), order, {})
+    assert fills == {}  # 發票號碼不標準、付款方式不確定、後台沒退款金額 → 都不猜
+    vip = batch.backend_fill_values(row(B="VIP待退券", D="x", F="x", H="x", I="x", X="AB1", Y="二聯"),
+                                    {**ORDER, "payway": "信用卡"}, {"refundAmount": "5000"})
+    assert vip == {"R": "信用卡", "S": 5000}
+
+
+def test_backend_fill_charge_row_needs_paid_flag_for_m():
+    base = dict(B="待收款", D="x", F="x", H="x", I="x")
+    unpaid = batch.backend_fill_values(row(**base), ORDER, {"isCharge": "1", "chargeDate": "2026-11-10",
+                                                             "chargeAmount": "600", "chargePayment": "ATM"})
+    assert unpaid == {"N": 600, "R": "ATM"}
+    paid = batch.backend_fill_values(row(**base), ORDER, {"isCharge": "2", "chargeDate": "2026-11-10"})
+    assert paid == {"M": "2026/11/10"}
+    assert batch.backend_fill_values(row(B="待扣儲值金", D="x", F="x", H="x", I="x"), ORDER,
+                                     {"chargeAmount": "800"}) == {"N": 800}
+    fare = batch.backend_fill_values(row(B="待處理發票", C="車馬費發票", D="x", F="x", H="x", I="x"), ORDER, {})
+    assert fare == {"J": "車馬費 $300", "X": "AB12345678", "Y": "二聯"}
+
+
+def test_fill_due_only_pending_rows_after_cutoff():
+    assert batch._fill_due(row(B="待退款"))
+    assert not batch._fill_due(row(B="已退款"))
+    assert not batch._fill_due(row(B="待退款", E="2026/10/15"))
+    assert not batch._fill_due(row(B="待退款", G=""))
+
+
+class FakeWs:
+    def __init__(self):
+        self.updates = []
+
+    def batch_update(self, updates, value_input_option=None):
+        self.updates.extend(updates)
+
+
+class FakeChangeOrder:
+    BASE_URL = "https://backend"
+
+    @staticmethod
+    def fetch_order_basic(order_no, session=None, by=None):
+        return {**ORDER, "order_no": order_no}
+
+    @staticmethod
+    def _extract_purchase_state(soup):
+        return {"refundAmount": "1000"}
+
+    @staticmethod
+    def _customer_type_from_order(order):
+        return "一般客"
+
+    @staticmethod
+    def _format_service_datetime(service_date, period_text):
+        return "2026-11-20 (五)"
+
+
+def test_fill_from_backend_writes_blank_cells_and_logs_out(monkeypatch):
+    class Session:
+        def get(self, url, timeout=None):
+            self.last = url
+            return type("R", (), {"text": "", "raise_for_status": lambda self: None})()
+
+    logged_out = []
+    monkeypatch.setattr(batch, "_change_order", lambda: FakeChangeOrder)
+    monkeypatch.setattr(batch, "_logout_session", lambda co, session, region, log: logged_out.append(region))
+    values = [["header"], row(B="待退款", P="700", Q="123"), row(B="已退款", G="LC002")]
+    ws = FakeWs()
+    count = batch.fill_from_backend("台北", ws, values, log=lambda *_: None,
+                                    session_factory=lambda region, ui_logger=None: Session())
+    assert {u["range"] for u in ws.updates} == {"D2", "F2", "H2", "I2", "R2", "S2", "X2", "Y2"} and count == 8
+    assert logged_out == ["台北"] and batch._cell(values[1], "S") == "1000"
+
+
+def test_fill_from_backend_login_failure_does_not_break_scan():
+    def boom(region, ui_logger=None):
+        raise RuntimeError("帳密未設定")
+    logs = []
+    assert batch.fill_from_backend("台北", FakeWs(), [["h"], row(B="待退款")], log=logs.append,
+                                   session_factory=boom) == 0
+    assert "登入檸檬後台失敗" in logs[0]
+
+
+def test_atm_candidates_refund_negative_and_charge():
+    values = [["h"],
+              row(B="待退款", R="ATM", S="1000", H="王", I="2026-11-20 (五)", C="異動服務退款"),
+              row(B="待收款", R="ATM", N="600", G="LC002", I="2026/12/01", C="異動服務收款", J="加購工具組"),
+              row(B="待退款", R="信用卡", S="500", G="LC003"),          # 非 ATM
+              row(B="待退款", R="ATM", S="500", G="LC004", AC="2026/11/11"),  # 已退款
+              row(B="待收款", R="ATM", N="600", G="LC005", M="2026/11/11"),   # 已收款
+              row(B="VIP待退券", R="ATM", S="500", G="LC006"),           # 只看待退款／待收款
+              row(B="待退款", R="ATM", G="LC007")]                       # 沒金額
+    rows = batch.atm_candidates(values)
+    assert [(r["order_no"], r["amount"], r["kind"], r["year_month"]) for r in rows] == [
+        ("LC001", -1000, "refund", "2026.11"), ("LC002", 600, "charge", "2026.12")]
+    assert batch._atm_service_fee("refund", "") == ("清潔", "退款")
+    assert batch._atm_service_fee("charge", rows[1]["change_text"]) == ("清潔", "工具組")
+    assert batch._atm_service_fee("charge", "異動服務收款 加時") == ("清潔", "異動費")
+
+
+def test_new_atm_rows_dedupes_by_order_and_amount():
+    candidates = [{"order_no": "LC001", "amount": -1000}, {"order_no": "LC002", "amount": 600},
+                  {"order_no": "LC003", "amount": 600}]
+    atm_values = [[""] * 12 for _ in range(2)]
+    atm_values[0][9], atm_values[0][11] = "LC001", "-1,000"   # 建立異動時已同步過
+    atm_values[1][9], atm_values[1][11] = "LC002", "3200"     # 同訂單原付款，金額不同 → 仍要補
+    assert [r["order_no"] for r in batch.new_atm_rows(candidates, atm_values)] == ["LC002", "LC003"]

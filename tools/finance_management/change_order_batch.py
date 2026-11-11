@@ -29,6 +29,8 @@
   - 未完全完成也先回寫（2026-10-29 Jenny 確認）：待收款已開發票（O）、待退款／VIP待退券已開折讓單或已退款（AB／AC），且 AE 還不是「更新系統（B欄：同狀態）」→ 以目前狀態回寫已完成的欄位，
     B 欄不變；之後完成時再回寫一次。待扣／待返儲值金回寫會直接改成完成狀態，不做部分回寫。
   - 盤點時順手補公式：待退款／VIP待退券 Z（未稅金額）不是公式就帶 =S{n}/1.05；T（匯款金額）S 有值且空白才補。
+  - 盤點時自動補齊（2026-11-12 Jenny）：除 ATM 待退款的 P／Q 外，缺的資料自檸檬後台查詢補上空白格（見 fill_from_backend）；
+    待退款／待收款且 R＝ATM → 同步補進同地區 ATM 工作表待配對區（同訂單同金額不重複，見 sync_atm_sheet）。
 執行（2026-10-29 與 Jenny 確認）：整批只排一筆本機 Agent 任務（change_order.batch_run），
   依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 退款（信用卡登入藍新、ATM 登入富邦）
   ③ 儲值金 → 回寫系統。前一步失敗就不做該區後面的步驟（回寫仍只回寫已完成的列），避免順序錯亂。
@@ -416,9 +418,288 @@ def _change_order():
     return change_order
 
 
-def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], None] = print) -> list[dict]:
+# ============================================================
+# 盤點自動補齊（2026-11-12 Jenny）：除 ATM 待退款的 P／Q（銀行代碼／帳號）外，
+# 缺的資料都可自檸檬後台查詢 → 盤點時只補空白格（不覆蓋人工資料），欄位對照 order-system 建立異動：
+#   後台訂單列表：D LINE 連結、F 客戶類別、H 客人姓名、I 服務時間、
+#                X 原發票號碼＋Y 二聯／三聯（退款類、待處理發票）、
+#                R 付款方式（待退款／VIP待退券，訂單付款方式為 ATM 或信用卡時）、
+#                J 車馬費金額（車馬費發票且 J 空白）
+#   後台訂單編輯頁（purchase JSON）：
+#                待收款／待扣儲值金 N＝加收金額；待收款 M＝加收日期（後台已標記已收款才補）、R＝加收金流
+#                待退款／VIP待退券／待返儲值金 S＝退款金額
+# ============================================================
+FILL_STATUSES = REFUND_STATUSES | STORED_VALUE_STATUSES | {"待收款", "待處理發票"}
+INVOICE_NO_RE = re.compile(r"[A-Z]{2}\d{8}")
+FILL_LETTERS = ("D", "F", "H", "I", "J", "M", "N", "R", "S", "X", "Y")
+
+
+def _fill_due(row: list) -> bool:
+    """這列要補齊：G 有訂單、登記日期在起算日後、狀態還沒完成。"""
+    if not _cell(row, "G") or _cell(row, "B") not in FILL_STATUSES:
+        return False
+    reg_date = parse_reg_date(_cell(row, "E"))
+    return reg_date is not None and reg_date >= CUTOFF
+
+
+def _wanted(row: list) -> set[str]:
+    """這列有哪些空白欄位可以從後台補（只看空白格）。"""
+    status, detail = _cell(row, "B"), _cell(row, "C")
+    letters = {"D", "F", "H", "I"}
+    if status in REFUND_STATUSES or status == "待處理發票":
+        letters |= {"X", "Y"}
+    if status in REFUND_STATUSES:
+        letters |= {"R", "S"}
+    if status == "待返儲值金":
+        letters.add("S")
+    if status in ("待收款", "待扣儲值金"):
+        letters.add("N")
+    if status == "待收款":
+        letters |= {"M", "R"}
+    if status == "待處理發票" and detail == "車馬費發票":
+        letters.add("J")
+    return {letter for letter in letters if not _cell(row, letter)}
+
+
+def _needs_purchase_state(row: list, letters: set[str]) -> bool:
+    """S／N／M（及待收款的 R 加收金流）要讀訂單編輯頁；其他欄位訂單列表就有。"""
+    return bool(letters & {"M", "N", "S"} or ("R" in letters and _cell(row, "B") == "待收款"))
+
+
+def _sheet_date(value: str) -> str:
+    match = re.search(r"(\d{4})\D(\d{1,2})\D(\d{1,2})", str(value or ""))
+    return f"{match.group(1)}/{int(match.group(2)):02d}/{int(match.group(3)):02d}" if match else ""
+
+
+def _money(value) -> Optional[int]:
+    amount = _amount(str(value or ""))
+    if not amount:
+        return None
+    number = float(amount)
+    return int(number) if number == int(number) else None
+
+
+def backend_fill_values(row: list, order: Optional[dict], state: Optional[dict],
+                        customer_type: str = "", service_text: str = "") -> dict[str, Any]:
+    """依狀態決定要補的欄位 → {欄: 值}；只補空白格，後台沒有值就不補（不猜）。
+    order＝後台訂單列表（fetch_order_basic），state＝訂單編輯頁 purchase JSON。"""
+    wanted = _wanted(row)
+    order, state = order or {}, state or {}
+    status = _cell(row, "B")
+    found: dict[str, Any] = {
+        "D": str(order.get("line_url") or "").strip(),
+        "F": customer_type,
+        "H": str(order.get("customer_name") or "").strip(),
+        "I": service_text,
+    }
+    invoice_no = str(order.get("invoice_no") or "").strip().upper()
+    if INVOICE_NO_RE.fullmatch(invoice_no):  # 只認標準發票號碼，避免寫入「儲值金」等文字
+        found["X"] = invoice_no
+        found["Y"] = "三聯" if order.get("carrier_type") == "三聯式" else "二聯"
+    payway = str(order.get("payway") or "")
+    if status in REFUND_STATUSES:
+        # 退款方式＝原訂單付款方式；只認 ATM／信用卡（儲值金、非儲值金不確定，不補）
+        if "ATM" in payway.upper():
+            found["R"] = "ATM"
+        elif payway == "信用卡":
+            found["R"] = "信用卡"
+    if status in REFUND_STATUSES or status == "待返儲值金":
+        refund = _money(state.get("refundAmount"))
+        if refund and refund > 0:
+            found["S"] = refund
+    if status in ("待收款", "待扣儲值金"):
+        charge = _money(state.get("chargeAmount"))
+        if charge and charge > 0:
+            found["N"] = charge
+    if status == "待收款":
+        # 後台「加收」已標記已收款（isCharge＝2）才補收款時間，避免把未付款當已付款
+        if str(state.get("isCharge") or "") == "2":
+            found["M"] = _sheet_date(state.get("chargeDate"))
+        found["R"] = str(state.get("chargePayment") or "").strip()
+    if status == "待處理發票":
+        fare = _money(order.get("travel_fee"))
+        if fare and fare > 0:
+            found["J"] = f"車馬費 ${fare}"
+    return {letter: found[letter] for letter in FILL_LETTERS
+            if letter in wanted and found.get(letter) not in (None, "")}
+
+
+def _purchase_state(co, session, order: dict) -> dict:
+    from bs4 import BeautifulSoup
+
+    purchase_id = str(order.get("purchase_id") or "")
+    if not purchase_id:
+        return {}
+    resp = session.get(f"{co.BASE_URL}/purchase/edit/{purchase_id}", timeout=20)
+    resp.raise_for_status()
+    return co._extract_purchase_state(BeautifulSoup(resp.text, "html.parser"))
+
+
+def fill_from_backend(region: str, ws, values: list[list], log: Callable[[str], None] = print,
+                      session_factory: Optional[Callable] = None) -> int:
+    """盤點時補齊可自檸檬後台查詢的空白欄位；回傳補了幾格。登入或查詢失敗只提醒，不影響盤點。"""
+    targets = [(row_no, row, wanted) for row_no, row in enumerate(values[1:], start=2)
+               if _fill_due(row) and (wanted := _wanted(row))]
+    if not targets:
+        return 0
+    from tools.invoice_center.merged import split_order_numbers
+
+    co = _change_order()
+    try:
+        session = (session_factory or _login_session)(region, ui_logger=None)
+    except Exception as exc:
+        log(f"⚠️ 【{region}】登入檸檬後台失敗，略過自動補齊 {len(targets)} 列：{exc}")
+        return 0
+    updates, filled_rows = [], []
+    try:
+        for row_no, row, wanted in targets:
+            orders = split_order_numbers(_cell(row, "G"))
+            order_no = orders[0] if orders else _cell(row, "G")  # 合併開立以第一張訂單為準
+            try:
+                order = co.fetch_order_basic(order_no, session=session, by="orderNo")
+                if not order:
+                    log(f"⚠️ 【{region}】第 {row_no} 列 {order_no} 後台查無訂單，未補齊")
+                    continue
+                state = _purchase_state(co, session, order) if _needs_purchase_state(row, wanted) else {}
+                try:
+                    customer_type = co._customer_type_from_order(order) if "F" in wanted else ""
+                except Exception:
+                    customer_type = ""
+                service_text = (co._format_service_datetime(order.get("service_date"), order.get("period_text", ""))
+                                if "I" in wanted else "")
+                fills = backend_fill_values(row, order, state, customer_type, service_text)
+            except Exception as exc:
+                log(f"⚠️ 【{region}】第 {row_no} 列 {order_no} 後台查詢失敗：{exc}")
+                continue
+            for letter, value in fills.items():
+                updates.append({"range": f"{letter}{row_no}", "values": [[value]]})
+                row_values = values[row_no - 1]
+                while len(row_values) <= COL[letter]:
+                    row_values.append("")
+                row_values[COL[letter]] = str(value)
+            if fills:
+                filled_rows.append(f"第{row_no}列 {'、'.join(fills)}")
+    finally:
+        _logout_session(co, session, region, log)
+    if updates:
+        ws.batch_update(updates, value_input_option="USER_ENTERED")
+        log(f"【{region}】已自檸檬後台補齊 {len(updates)} 格：{'；'.join(filled_rows)}")
+    return len(updates)
+
+
+# ============================================================
+# 盤點同步 ATM 工作表（2026-11-12 Jenny）：待退款／待收款且 R 付款方式為 ATM → 補進同地區 ATM 工作表待配對區
+# 寫法同 order-system 建立異動（I 年月、J 訂單、K 姓名、L 金額；待退款金額負數＝S，N/O＝清潔／退款；
+# 待收款 L＝N，N/O 依異動內容＝清潔／異動費或工具組）。已退款（AC）／已收款（M）不補。
+# 去重：ATM 工作表整欄 J 已有同訂單、同金額（不分正負）的列就不再新增（建立異動時已同步過的不會重複）。
+# ============================================================
+ATM_REFUND_FEE = ("清潔", "退款")
+
+
+def _atm_service_fee(kind: str, change_text: str) -> tuple:
+    if kind == "refund":
+        return ATM_REFUND_FEE
+    text = str(change_text or "")
+    return ("清潔", "工具組") if ("工具組" in text or "工具包" in text) else ("清潔", "異動費")
+
+
+def atm_candidates(values: list[list]) -> list[dict]:
+    """清潔異動待退款／待收款、R＝ATM、金額有值且尚未退款／收款的列 → ATM 工作表要有的資料。"""
+    rows = []
+    for row in values[1:]:
+        status = _cell(row, "B")
+        if status not in ("待退款", "待收款") or "ATM" not in _cell(row, "R").upper() or not _cell(row, "G"):
+            continue
+        reg_date = parse_reg_date(_cell(row, "E"))
+        if reg_date is None or reg_date < CUTOFF:
+            continue
+        is_refund = status == "待退款"
+        if _cell(row, "AC" if is_refund else "M"):
+            continue  # 已退款／已收款，不再列待配對
+        amount = _money(_cell(row, "S" if is_refund else "N"))
+        if not amount:
+            continue
+        month = re.search(r"(\d{4})\D(\d{1,2})", _cell(row, "I"))
+        rows.append({
+            "year_month": f"{month.group(1)}.{int(month.group(2)):02d}" if month else "",
+            "order_no": _cell(row, "G"), "name": _cell(row, "H"),
+            "amount": -abs(amount) if is_refund else amount,
+            "kind": "refund" if is_refund else "charge",
+            "change_text": f"{_cell(row, 'C')} {_cell(row, 'J')}",
+        })
+    return rows
+
+
+def _atm_existing_keys(atm_values: list[list]) -> set[tuple[str, int]]:
+    keys = set()
+    for row in atm_values:
+        order_no = str(row[9] if len(row) > 9 else "").strip().upper()
+        amount = _money(row[11] if len(row) > 11 else "")
+        if order_no and amount is not None:
+            keys.add((order_no, abs(amount)))
+    return keys
+
+
+def new_atm_rows(candidates: list[dict], atm_values: list[list]) -> list[dict]:
+    """去掉 ATM 工作表已有（同訂單、同金額）的資料。"""
+    seen = _atm_existing_keys(atm_values)
+    result = []
+    for row in candidates:
+        key = (str(row["order_no"]).strip().upper(), abs(int(row["amount"])))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(row)
+    return result
+
+
+def sync_atm_sheet(region: str, values: list[list], log: Callable[[str], None] = print) -> int:
+    """盤點時把 ATM 待退款／待收款補進同地區 ATM 工作表；回傳新增筆數。失敗只提醒，不影響盤點。"""
+    candidates = atm_candidates(values)
+    if not candidates:
+        return 0
+    from tools.memo_system import atm, memo
+
+    ws = atm.get_atm_worksheet(region)
+    atm_values = memo.with_retry(ws.get_all_values)
+    rows = new_atm_rows(candidates, atm_values)
+    if not rows:
+        return 0
+    # 新增位置同 order-system：A 欄最後一筆＋5 列，且接在待配對區（I:L 有值）最後一列之後
+    last_a_row = max((idx for idx, row in enumerate(atm_values, start=1) if row and str(row[0]).strip()), default=0)
+    last_unpaid_row = max((idx for idx, row in enumerate(atm_values, start=1)
+                           if any(str(value).strip() for value in row[8:12])), default=0)
+    start_row = max(last_a_row + 5, last_unpaid_row + 1)
+    end_row = start_row + len(rows) - 1
+    row_count = int(getattr(ws, "row_count", 0) or len(atm_values))
+    if end_row > row_count:
+        memo.with_retry(ws.add_rows, end_row - row_count)
+    memo.with_retry(ws.update, values=[[r["year_month"], r["order_no"], r["name"], r["amount"]] for r in rows],
+                    range_name=f"I{start_row}:L{end_row}", value_input_option="RAW")
+    memo.with_retry(ws.update, values=[list(_atm_service_fee(r["kind"], r["change_text"])) for r in rows],
+                    range_name=f"N{start_row}:O{end_row}", value_input_option="RAW")
+    ensure_format = getattr(atm, "ensure_candidate_row_format", None)
+    if ensure_format:  # order-system 同步後才有：補 G 公式、I/N/O 下拉選單
+        try:
+            ensure_format(ws, list(range(start_row, end_row + 1)), log=log)
+        except Exception as exc:
+            log(f"⚠️ 【{region}】ATM 工作表補 G 欄公式／下拉選單失敗：{exc}")
+    refunds = sum(1 for r in rows if r["kind"] == "refund")
+    log(f"【{region}】已同步 ATM 工作表 I{start_row}:O{end_row}：待收款 {len(rows) - refunds} 筆、待退款 {refunds} 筆"
+        f"（{'、'.join(r['order_no'] for r in rows)}）")
+    return len(rows)
+
+
+def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], None] = print,
+                fill_backend: bool = True, sync_atm: bool = True) -> list[dict]:
     ws = _change_order().get_worksheet(region)
     values = ws.get_all_values()
+    if fill_backend:
+        try:
+            if fill_from_backend(region, ws, values, log):
+                values = ws.get_all_values()
+        except Exception as exc:
+            log(f"⚠️ 【{region}】自檸檬後台補齊失敗：{exc}")
     if fix_formulas:
         try:
             z_formulas = ws.get("Z1:Z", value_render_option="FORMULA")
@@ -429,6 +710,11 @@ def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], Non
             ws.batch_update(updates, value_input_option="USER_ENTERED")
             log(f"【{region}】已補 T／Z 公式 {len(updates)} 格")
             values = ws.get_all_values()
+    if sync_atm:
+        try:
+            sync_atm_sheet(region, values, log)
+        except Exception as exc:
+            log(f"⚠️ 【{region}】同步 ATM 工作表失敗：{exc}")
     items = []
     for row_no, row in enumerate(values[1:], start=2):
         item = plan_row(region, row_no, row)
@@ -437,11 +723,12 @@ def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], Non
     return items
 
 
-def scan(regions=None, fix_formulas: bool = True, log: Callable[[str], None] = print) -> list[dict]:
+def scan(regions=None, fix_formulas: bool = True, log: Callable[[str], None] = print,
+         fill_backend: bool = True, sync_atm: bool = True) -> list[dict]:
     items = []
     for region in regions or REGIONS:
         try:
-            items.extend(scan_region(region, fix_formulas, log))
+            items.extend(scan_region(region, fix_formulas, log, fill_backend, sync_atm))
         except Exception as exc:
             log(f"❌ 【{region}】讀取清潔異動失敗：{exc}")
     return items
