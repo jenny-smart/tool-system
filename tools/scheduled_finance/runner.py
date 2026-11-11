@@ -61,6 +61,12 @@ def run_month_start_queue(today: date) -> int:
         log(f"{period} 月初四個步驟都已完成或已排入，不重複排")
         return 0
     batch.queue_steps(period, steps, create_task, created_by="排程系統", log=log)
+    try:
+        remind(f"【月初整合執行】{period} 已排入 Mac，請開機輸入驗證碼",
+               "已排入：" + "、".join(batch.STEPS.get(x, (x,))[0] for x in steps) + "\n藍新／鯨躍要人工驗證碼，Mac 開機後 Agent 才會執行。",
+               "【月初整合執行】")
+    except Exception as exc:
+        log(f"⚠️ 行事曆提醒失敗：{exc}")
     return 0
 
 

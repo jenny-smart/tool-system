@@ -7,13 +7,28 @@ from tools.local_agent_queue import create_task
 
 TZ = ZoneInfo("Asia/Taipei")
 AREAS = ["台北", "台中"]
-# 排程：每天 08:00；11:00、16:30 只在工作日（例假日只跑 08:00）
-MORNING_CUTOFF_HOUR = 10
+# 排程時間依主控表「排程設定」fubon_statement（2026-11-12 起 08:00,11:00,16:30；08:00 要先下載，ATM ①②③ 才能對帳）：
+# 第一個時間每天都排（例假日 Mac 有開機就跑，沒開機就等開機），之後的時間只在工作日排。
+# 讀不到排程設定時，以這個鐘點前算「每天都排」的那次。
+MORNING_CUTOFF_HOUR = 11
 
 
-def should_queue(now: datetime) -> bool:
-    """08:00 那次（含延遲到 10 點前）每天都排；其他時段只有工作日才排。"""
-    if now.hour < MORNING_CUTOFF_HOUR:
+def morning_cutoff_hour() -> int:
+    """排程設定第二個時間的鐘點（例 08:00,11:00,16:30 → 11）：這個鐘點前的那次每天都排。"""
+    try:
+        from tools.scheduling.schedule_settings import get_rule
+
+        rule = get_rule("fubon_statement")
+        if rule and rule.times:
+            return int(rule.times[1][:2]) if len(rule.times) > 1 else 24
+    except Exception as exc:
+        print(f"⚠️ 讀不到 fubon_statement 的排程時間，用 {MORNING_CUTOFF_HOUR}:00：{exc}", flush=True)
+    return MORNING_CUTOFF_HOUR
+
+
+def should_queue(now: datetime, cutoff_hour: int | None = None) -> bool:
+    """第一個時間那次（含延遲到下一個時間前）每天都排；其他時段只有工作日才排。"""
+    if now.hour < (morning_cutoff_hour() if cutoff_hour is None else cutoff_hour):
         return True
     from tools.common.tw_holidays import is_workday
 
@@ -35,7 +50,7 @@ def download_params(area: str, now: datetime) -> dict:
 def main() -> None:
     now = datetime.now(TZ)
     if not should_queue(now):
-        print(f"{now:%Y-%m-%d %H:%M} 為例假日，例假日只在 08:00 下載富邦明細；本次不排任務", flush=True)
+        print(f"{now:%Y-%m-%d %H:%M} 為例假日，例假日只排每天第一次的富邦明細下載；本次不排任務", flush=True)
         return
     for area in AREAS:
         task = create_task("fubon.download", download_params(area, now), created_by="排程系統")
