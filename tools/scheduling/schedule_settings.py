@@ -78,6 +78,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
     "customer_memo_daily": ("jenny-smart/order-system:customer-memo-schedule.yml", {}),
+    # 2026-11-12 Jenny：上班日 08:20 儲值金訂單客服備註空白 → 訂購人姓名記入行事曆
+    "stored_value_notice_daily": ("jenny-smart/order-system:stored-value-notice-schedule.yml", {}),
     # 2026-11-11 Jenny：官網評價不滿意→清潔客訴（07:00）、預約下次服務→評價預約（07:20）
     "rating_complaint_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "complaint"}),
     "rating_booking_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "booking"}),
@@ -169,6 +171,10 @@ DEFAULT_ROWS: list[list] = [
     [True, "customer_memo_daily", "客人備註非空白＋客服備註需註記（VIP 非儲值金／**N- 已非首次）（台北／台中內勤工作表單）", "10:00", "每日", "", "略過", MODE_DIRECT,
      "程式在 order-system（customer-memo-schedule.yml）；區間＝前一上班日 10:00～今天 10:00（訂購時間），"
      "貼到「客人備註」分頁後記 jenny@hers.com.tw 行事曆"],
+    # 2026-11-12 Jenny：上班日 08:20 盤點台北／台中儲值金訂單客服備註空白，訂購人姓名記入行事曆
+    [True, "stored_value_notice_daily", "儲值金訂單客服備註空白→訂購人姓名記行事曆（台北／台中）", "08:20", "每日", "", "略過",
+     MODE_DIRECT, "程式在 order-system（stored-value-notice-schedule.yml）；區間＝前一上班日 08:00～今天 08:00（訂購時間），"
+     "待付款＋已付款，記 jenny@hers.com.tw 行事曆"],
     # 2026-11-11 Jenny：上班日 07:00 官網評價服務滿意度非滿意（尚可／不滿意）→ 台北／台中內勤工作表單「清潔客訴」＋記行事曆
     [True, "rating_complaint_daily", "官網評價非滿意→清潔客訴（台北／台中內勤工作表單）", "07:00", "每日", "", "略過", MODE_DIRECT,
      "程式在 order-system（rating-schedule.yml job=complaint）；區間＝前一上班日 07:00～今天 07:00（評價時間），"
