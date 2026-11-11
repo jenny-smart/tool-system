@@ -38,6 +38,8 @@ def _rows(items: list[dict], override=None) -> pd.DataFrame:
 def render(create_task: Callable, log: Callable[[str], None], username: str = "") -> None:
     st.caption(
         "只處理登記日期 2026/10/16 以後的列。盤點時會補 T（匯款金額）、Z（未稅金額）公式；"
+        "缺的資料（ATM 退款銀行代碼／帳號 P／Q 除外）自檸檬後台補齊空白格；"
+        "待退款／待收款付款方式為 ATM 會同步補進 ATM 工作表（同訂單同金額不重複）；"
         "待收款開立發票同【鯨躍發票】開立發票（沿用訂單發票設定，需人工按下一步及儲存）；"
         "二聯改三聯請到【鯨躍發票】對應功能處理。"
     )
