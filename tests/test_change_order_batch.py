@@ -718,3 +718,16 @@ def test_new_atm_rows_dedupes_by_order_and_amount():
     atm_values[0][9], atm_values[0][11] = "LC001", "-1,000"   # 建立異動時已同步過
     atm_values[1][9], atm_values[1][11] = "LC002", "3200"     # 同訂單原付款，金額不同 → 仍要補
     assert [r["order_no"] for r in batch.new_atm_rows(candidates, atm_values)] == ["LC002", "LC003"]
+
+
+def test_fill_from_backend_dry_run_does_not_write(monkeypatch):
+    class Session:
+        def get(self, url, timeout=None):
+            return type("R", (), {"text": "", "raise_for_status": lambda self: None})()
+
+    monkeypatch.setattr(batch, "_change_order", lambda: FakeChangeOrder)
+    monkeypatch.setattr(batch, "_logout_session", lambda *a: None)
+    ws, logs = FakeWs(), []
+    count = batch.fill_from_backend("台北", ws, [["h"], row(B="待退款")], log=logs.append,
+                                    session_factory=lambda region, ui_logger=None: Session(), dry_run=True)
+    assert count == 8 and ws.updates == [] and "〔預覽〕" in logs[0] and "S=1000" in logs[0]
