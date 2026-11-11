@@ -15,11 +15,11 @@ on:
         type: string
         default: ""
       target:
-        description: "check＝每日檢查（未備妥建提醒）；batch_scan＝【整合執行】清潔異動盤點（依排程設定排入或等確認）；preview＝試跑盤點（自後台補齊、同步 ATM 工作表），只列出結果不寫入"
+        description: "check＝每日檢查（未備妥建提醒）；batch_scan＝【整合執行】清潔異動盤點（依排程設定排入或等確認）；preview＝試跑盤點（自後台補齊、同步 ATM 工作表），只列出結果不寫入；fill＝自後台補齊＋同步 ATM 工作表（不建提醒）"
         required: false
         type: choice
         default: check
-        options: [check, batch_scan, preview]
+        options: [check, batch_scan, preview, fill]
       regions:
         description: "preview 用：地區（逗號分隔，空白＝全部）"
         required: false
@@ -128,7 +128,7 @@ jobs:
           TODAY=$(TZ=Asia/Taipei date +"%Y%m%d")
           LOG_DIR="logs/$TODAY"
           TARGET="${{ inputs.target || 'check' }}"
-          if [ "$TARGET" = "batch_scan" ]; then NAME="change_order_batch_scan"; elif [ "$TARGET" = "preview" ]; then NAME="change_order_preview"; else NAME="change_order_daily_check"; fi
+          if [ "$TARGET" = "batch_scan" ]; then NAME="change_order_batch_scan"; elif [ "$TARGET" = "preview" ]; then NAME="change_order_preview"; elif [ "$TARGET" = "fill" ]; then NAME="change_order_fill"; else NAME="change_order_daily_check"; fi
           mkdir -p "$LOG_DIR"
 
           echo "========================================"
@@ -142,6 +142,8 @@ jobs:
 
           if [ "$TARGET" = "batch_scan" ]; then
             python -u -m tools.finance_management.change_order_batch scan > "$LOG_FILE" 2>&1
+          elif [ "$TARGET" = "fill" ]; then
+            python -u -m tools.finance_management.change_order_batch fill > "$LOG_FILE" 2>&1
           elif [ "$TARGET" = "preview" ]; then
             REGIONS="${{ inputs.regions }}"
             python -u -m tools.finance_management.change_order_batch preview ${REGIONS:+--regions "$REGIONS"} > "$LOG_FILE" 2>&1

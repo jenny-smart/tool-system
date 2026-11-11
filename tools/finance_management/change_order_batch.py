@@ -1116,15 +1116,36 @@ def scheduled_scan(log: Callable[[str], None] = print) -> int:
     return 0
 
 
+def scheduled_fill(regions=None, log: Callable[[str], None] = print) -> int:
+    """排程（排程設定 change_order_fill，2026-11-12 Jenny）：只做盤點前置——自檸檬後台補齊缺資料、
+    補 T／Z 公式、ATM 待退款／待收款同步 ATM 工作表；不建提醒、不排 Agent、不回寫系統。
+    排在 08:10 ATM 對帳前，讓新同步的 ATM 待配對列當天早上就能配對。"""
+    items = scan(regions, log=log)
+    missing = [i for i in items if i["missing"]]
+    log(f"清潔異動補齊完成：盤點 {len(items)} 列，仍未備妥 {len(missing)} 列（每日 10:00 檢查會提醒）")
+    try:
+        from tools.finance_management.execution_log import log_execution
+
+        log_execution(function_name="清潔異動補齊＋同步ATM工作表", status="成功", run_type="排程",
+                      area="、".join(regions or REGIONS),
+                      message=f"盤點 {len(items)} 列，仍未備妥 {len(missing)} 列")
+    except Exception as exc:  # 記錄失敗不影響排程結果
+        log(f"⚠️ 執行 Log 寫入失敗：{exc}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="清潔異動整合執行：逐區依序執行／回寫系統")
-    parser.add_argument("command", choices=["sync", "run", "scan", "preview"],
+    parser.add_argument("command", choices=["sync", "run", "scan", "preview", "fill"],
                         help="preview：試跑盤點（自後台補齊、同步 ATM 工作表），只列出結果不寫入")
     parser.add_argument("--regions", default=",".join(REGIONS))
     parser.add_argument("--rows", default="", help='JSON：{"台北": [238, 389]}，只回寫這些列')
     parser.add_argument("--plan", default="", help="run 用：build_plan 產生的 JSON")
     parser.add_argument("--cdp-url", default="http://127.0.0.1:9222")
     args = parser.parse_args(argv)
+    if args.command == "fill":
+        regions = [r for r in args.regions.split(",") if r]
+        return scheduled_fill(regions, log=lambda text: print(text, flush=True))
     if args.command == "preview":
         log = lambda text: print(text, flush=True)  # noqa: E731
         for region in [r for r in args.regions.split(",") if r]:

@@ -731,3 +731,29 @@ def test_fill_from_backend_dry_run_does_not_write(monkeypatch):
     count = batch.fill_from_backend("台北", ws, [["h"], row(B="待退款")], log=logs.append,
                                     session_factory=lambda region, ui_logger=None: Session(), dry_run=True)
     assert count == 8 and ws.updates == [] and "〔預覽〕" in logs[0] and "S=1000" in logs[0]
+
+
+def test_fill_schedule_runs_daily_0750_before_atm_match():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from tools.scheduling import schedule_settings as ss
+
+    tz = ZoneInfo("Asia/Taipei")
+    rule = ss.parse_row(next(r for r in ss.DEFAULT_ROWS if r[1] == "change_order_fill"))
+    assert rule.enabled and rule.errors == []
+    due = lambda when: [r.key for r in ss.due([rule], when, lambda d: d.weekday() < 5)]
+    assert due(datetime(2026, 11, 15, 7, 50, tzinfo=tz)) == ["change_order_fill"]  # 週日照跑
+    assert due(datetime(2026, 11, 15, 8, 10, tzinfo=tz)) == []
+    workflow, inputs = ss.dispatch_for(rule, datetime(2026, 11, 15, 7, 50, tzinfo=tz))
+    assert workflow == "scheduled_change_order_check.yml" and inputs == {"target": "fill"}
+
+
+def test_scheduled_fill_scans_without_reminders(monkeypatch):
+    calls = []
+    monkeypatch.setattr(batch, "scan", lambda regions, log: calls.append(regions) or [
+        {"missing": ["缺退款銀行代碼／帳號（P／Q）"]}, {"missing": []}])
+    monkeypatch.setattr(batch, "scan_report", lambda *a: (_ for _ in ()).throw(AssertionError("補齊排程不建提醒")))
+    logs = []
+    assert batch.scheduled_fill(["台北"], log=logs.append) == 0
+    assert calls == [["台北"]] and any("仍未備妥 1 列" in line for line in logs)

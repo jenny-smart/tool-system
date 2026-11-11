@@ -74,6 +74,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # 清潔異動／富邦請款
     "change_order_check": ("scheduled_change_order_check.yml", {"target": "check"}),
     "change_order_scan": ("scheduled_change_order_check.yml", {"target": "batch_scan"}),
+    "change_order_fill": ("scheduled_change_order_check.yml", {"target": "fill"}),
     "fubon_pending_check": ("scheduled_fubon_pending_check.yml", {}),
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
@@ -162,6 +163,10 @@ DEFAULT_ROWS: list[list] = [
     # 2026-11-06 Jenny：每日 08:10 跑 ATM 對帳 ② 配對銀行明細＋③ 更新系統對帳
     [True, "atm_match_reconcile", "ATM 對帳 ② 配對銀行明細＋③ 更新系統對帳（台北／台中）", "08:10", "每日", "", "照跑",
      MODE_DIRECT, "程式在 order-system（atm-match-reconcile-schedule.yml）；③ 只處理 T 欄「已配對」且 11/6 後入帳的列"],
+    # 2026-11-12 Jenny：清潔異動自檸檬後台補齊缺資料＋ATM 待退款／待收款同步 ATM 工作表；
+    # 排在 08:10 ATM 對帳前，新同步的待配對列當天早上就能配對
+    [True, "change_order_fill", "清潔異動自後台補齊＋同步 ATM 工作表（五區）", "07:50", "每日", "", "照跑", MODE_DIRECT,
+     "只補空白格（ATM 退款 P／Q 除外），不建提醒、不回寫系統；10:00 每日檢查、盤點時也會再補一次"],
     [True, "change_order_check", "清潔異動每日檢查（未備妥建 11:00 提醒）", "10:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "weekend_reminder", "週末／例假日服務提醒（休假前 2 天產生名單）", "11:00", "每日", "", "照跑", MODE_DIRECT,
      "每天檢查；程式依辦公日曆判斷是否為休假前 2 天（一般週四，遇國定假日提前），不是就略過。只寫追蹤表，不發 LINE"],
