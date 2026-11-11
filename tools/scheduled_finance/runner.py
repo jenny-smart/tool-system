@@ -18,7 +18,7 @@ target：
   cash_gap_followup       同上（2～10 日重算；上游晚做的數字會補進來），還缺就建提醒
   month_start_check       月初檢查
   accounting_reminder     會計事務所費用確認提醒
-  mof_serial              鯨躍字軌（下一期）：盤點各區是否已配號 → 排入財政部登入＋完整流程，提醒登入
+  mof_serial              鯨躍字軌（下個月要用的那期，每月執行）：盤點各區是否已配號 → 排入財政部登入＋完整流程，提醒登入
   mof_serial_check        字軌未完成提醒
   monthly_checklist       月度盤點：更新主控表「月度盤點」分頁，過期沒做完的合併成一則提醒
   其他：month_start（排入＋檢查）、cash_gap、prepaid_amount
@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 TW_TZ = ZoneInfo("Asia/Taipei")
@@ -94,19 +94,33 @@ def run_fixed_expense(today: date) -> int:
     return 0
 
 
+def fixed_expense_mail_is_last_run(today: date, rule=None, is_workday=None) -> bool:
+    """今天是不是這個月最後一次台北查信：主控表「排程設定」fixed_expense_mail 日期欄的最後一天
+    （目前 5,8,10 → 10 日），遇例假日提前時以實際執行的工作日為準（例：2027/1/10 週日 → 1/8 就算最後一次）。"""
+    from tools.scheduling.schedule_settings import get_rule, last_target_date
+
+    if is_workday is None:
+        from tools.common.tw_holidays import is_workday
+    if rule is None:
+        rule = get_rule("fixed_expense_mail", log=log)
+    last = last_target_date(rule, today, is_workday) if rule else None
+    return today >= last if last else today.day >= 10
+
+
 def run_fixed_expense_mail(today: date) -> int:
-    """台北查信（AWS／震旦／眾點／台灣連線）；已新增過的會略過。10 日以後還有沒查到的就建提醒。"""
+    """台北查信（AWS／震旦／眾點／台灣連線）；已新增過的會略過。最後一次（見 fixed_expense_mail_is_last_run）還有沒查到的就建提醒。"""
     from tools.finance_management.taipei_fixed_expense import MAIL_ITEMS, submit_taipei_fixed_expenses
 
     period = previous_period(today)
     result = submit_taipei_fixed_expenses(period, run_type="排程", only=set(MAIL_ITEMS))
     for item in result["items"]:
         log(f"{item['label']}：{item['status']}" + (f"（{item['amount']}）" if item["amount"] is not None else ""))
-    if result["errors"] and today.day >= 10:
+    last_run = fixed_expense_mail_is_last_run(today)
+    if result["errors"] and last_run:
         remind(f"【固定費用】台北查信還有 {len(result['errors'])} 項沒查到",
                "\n".join(result["errors"]) + "\n\n請確認信件後到 Tools App【財報】台北固定費用請款補做。",
                "【固定費用】台北查信")
-    return 1 if result["errors"] and today.day >= 10 else 0
+    return 1 if result["errors"] and last_run else 0
 
 
 # 2026-11-09 Jenny：每月 10 日排程的各區固定費用匯款不跑高雄
@@ -365,10 +379,13 @@ MOF_ALLOCATE_FUNCTION = "電子發票字軌號碼配號"
 
 
 def mof_target(today: date) -> tuple[str, str, str]:
-    """下一期字軌 → (財政部期別 YYYYMM, 鯨躍查詢年份（民國）, 查詢月份 MM-MM)。"""
-    from tools.invoice_center.mof_serial import next_period, period_of
+    """下個月要用的字軌 → (財政部期別 YYYYMM, 鯨躍查詢年份（民國）, 查詢月份 MM-MM)。
+    主控表「排程設定」mof_serial／mof_serial_check 是每月執行：雙月（例 12/20）→ 下一期（01-02）；
+    單月（例 11/20）→ 本期（11-12，上個月已配號就不會再排入或提醒，等於補做檢查）。"""
+    from tools.invoice_center.mof_serial import period_of
 
-    year, label = next_period(*period_of(today))
+    next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+    year, label = period_of(next_month)
     return f"{year}{label[:2]}", str(year - 1911), label
 
 

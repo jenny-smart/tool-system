@@ -18,7 +18,19 @@ def test_item_status():
 
 def test_odd_even_month_items():
     assert mc.accounting_item("202612")["status"] == mc.SKIP  # 雙月沒有會計事務所費用
-    assert mc.mof_item("202611")["status"] == mc.SKIP  # 字軌雙月才做
+    assert mc.mof_item("202611", skip_month=True)["status"] == mc.SKIP  # 排程設定不是這個月做
+
+
+def test_mof_skip_month_follows_schedule_frequency(monkeypatch):
+    from tools.scheduling import schedule_settings as ss
+
+    def rule(freq):
+        return ss.parse_row([True, "mof_serial", "x", "10:00", freq, "20", "提前", ss.MODE_QUEUE])
+
+    monkeypatch.setattr(ss, "get_rule", lambda *_a, **_k: rule("每月"))
+    assert not mc._mof_skip_month("202611") and not mc._mof_skip_month("202612")
+    monkeypatch.setattr(ss, "get_rule", lambda *_a, **_k: rule("雙月"))
+    assert mc._mof_skip_month("202611") and not mc._mof_skip_month("202612")
 
 
 def test_merge_rows_keeps_done_time_note_and_manual_rows():
