@@ -78,6 +78,9 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
     "customer_memo_daily": ("jenny-smart/order-system:customer-memo-schedule.yml", {}),
+    # 2026-11-11 Jenny：官網評價不滿意→清潔客訴（07:00）、預約下次服務→評價預約（07:20）
+    "rating_complaint_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "complaint"}),
+    "rating_booking_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "booking"}),
     # investment-system（個人投資總帳／總覽）
     "invest_tw_prices": ("jenny-smart/investment-system:tw-stock-prices.yml", {"mode": "auto"}),
     "invest_us_prices_night": ("jenny-smart/investment-system:us-stock-prices.yml", {"mode": "auto"}),
@@ -166,6 +169,13 @@ DEFAULT_ROWS: list[list] = [
     [True, "customer_memo_daily", "客人備註非空白＋客服備註需註記（VIP 非儲值金／**N- 已非首次）（台北／台中內勤工作表單）", "10:00", "每日", "", "略過", MODE_DIRECT,
      "程式在 order-system（customer-memo-schedule.yml）；區間＝前一上班日 10:00～今天 10:00（訂購時間），"
      "貼到「客人備註」分頁後記 jenny@hers.com.tw 行事曆"],
+    # 2026-11-11 Jenny：上班日 07:00 官網評價服務滿意度非滿意（尚可／不滿意）→ 台北／台中內勤工作表單「清潔客訴」＋記行事曆
+    [True, "rating_complaint_daily", "官網評價非滿意→清潔客訴（台北／台中內勤工作表單）", "07:00", "每日", "", "略過", MODE_DIRECT,
+     "程式在 order-system（rating-schedule.yml job=complaint）；區間＝前一上班日 07:00～今天 07:00（評價時間），"
+     "未登記的才插入，記 jenny@hers.com.tw 行事曆"],
+    # 2026-11-11 Jenny：上班日 07:20 有勾預約下次服務的評價 → 「評價預約」主名單後插入＋記行事曆
+    [True, "rating_booking_daily", "官網評價預約下次服務→評價預約（台北／台中內勤工作表單）", "07:20", "每日", "", "略過", MODE_DIRECT,
+     "程式在 order-system（rating-schedule.yml job=booking）；區間同 07:00，插在主名單最後一筆之後，記行事曆"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,
