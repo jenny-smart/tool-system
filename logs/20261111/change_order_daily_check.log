@@ -1,0 +1,14 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+【台北】已補 T／Z 公式 1 格
+【台北】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【桃園】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已建立 11:00 提醒（jenny@hers.com.tw）
+{'todo': [{'region': '台北', 'row': 357, 'status': '待退款', 'detail': '其他', 'order_no': 'LC00220149', 'customer': '廖濰䭲', 'payway': 'ATM', 'amount': '200', 'progress': [], 'actions': [], 'missing': ['缺原發票號碼（X）'], 'manual': [], 'note': '2026/11/10 LC00220149 其他--客戶使用客訴優惠卷$200，多匯$200'}], 'failed': []}
