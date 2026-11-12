@@ -1,0 +1,30 @@
+2026-11-12 18:32:45 [INFO] === 客服排程系統 run_id=93764b17 step=3 台北時間=2026-11-13 02:32:45 ===
+2026-11-12 18:32:45 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-11-12 18:32:45 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-12 18:32:51 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-11-12 18:32:52 [INFO] 信件日期（台北時間）：2026-11-12
+2026-11-12 18:33:07 [INFO]   [mail] text/plain 為空，fallback 到 text/html（11783 字元）
+2026-11-12 18:33:14 [INFO]   近三日營業額-台北 → 選中 17:25:03（與17:25差3s）
+2026-11-12 18:33:14 [INFO]   [debug] 行195 repr='2026-11-10：56分'
+2026-11-12 18:33:14 [INFO]   [debug] 行196 repr='2026-11-11：311分'
+2026-11-12 18:33:14 [INFO]   [debug] 行197 repr='2026-11-12：181分'
+2026-11-12 18:33:14 [INFO]   [debug] 行198 repr='【家電清潔】日營業額'
+2026-11-12 18:33:14 [INFO]   [debug] 行199 repr='2026-11-10：0分'
+2026-11-12 18:33:14 [INFO]   [debug] 行200 repr='2026-11-11：0分'
+2026-11-12 18:33:14 [INFO]   [debug] 行201 repr='2026-11-12：0分'
+2026-11-12 18:33:14 [INFO]   [debug] 行202 repr='【儲值金】日營業額'
+2026-11-12 18:33:28 [INFO]   [mail] text/plain 為空，fallback 到 text/html（1643 字元）
+2026-11-12 18:33:32 [INFO]   近三日營業額-台中 → 選中 17:25:07（與17:25差7s）
+2026-11-12 18:33:32 [INFO]   [debug] 行33 repr='2026-11-10：10分'
+2026-11-12 18:33:32 [INFO]   [debug] 行34 repr='2026-11-11：28分'
+2026-11-12 18:33:32 [INFO]   [debug] 行35 repr='2026-11-12：5分'
+2026-11-12 18:33:32 [INFO]   [debug] 行36 repr='【家電清潔】日營業額'
+2026-11-12 18:33:32 [INFO]   [debug] 行37 repr='2026-11-10：0分'
+2026-11-12 18:33:32 [INFO]   [debug] 行38 repr='2026-11-11：0分'
+2026-11-12 18:33:32 [INFO]   [debug] 行39 repr='2026-11-12：0分'
+2026-11-12 18:33:32 [INFO]   [debug] 行40 repr='【儲值金】日營業額'
+2026-11-12 18:33:32 [INFO]   台北：{'daily_value': 181, 'total_count': 1028, 'total_amount': 2056000}
+2026-11-12 18:33:32 [INFO]   台中：{'daily_value': 5, 'total_count': 201, 'total_amount': 402100}
+2026-11-12 18:33:33 [INFO] Step 3 完成，row=2462（41.1s）
+2026-11-12 18:33:34 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-11-12 18:33:34 [INFO] === 全部完成 run_id=93764b17（42.1s）===
