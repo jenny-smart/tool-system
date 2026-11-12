@@ -1,0 +1,5 @@
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+✅ 台北：退款金額 H 欄更新 1 列；新訓退訓實境費用新增 0 人，身分證打勾 0 人
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+❌ 台中 新訓退訓實境費用失敗：<HttpError 400 when requesting https://sheets.googleapis.com/v4/spreadsheets/1MKadGGTkIefcbPpEVCEPo0SS_wnqsmZSfqjcdhxg6Gk/values/%27%E5%9F%BA%E6%9C%AC%E8%B3%87%E6%96%99%E3%80%81%E5%8D%94%E8%AD%B0%E8%A6%8F%E7%AB%A0%27%21A%3AG?valueRenderOption=FORMATTED_VALUE&alt=json returned "Unable to parse range: '基本資料、協議規章'!A:G". Details: "Unable to parse range: '基本資料、協議規章'!A:G">
