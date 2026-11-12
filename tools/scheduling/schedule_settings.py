@@ -79,6 +79,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # 其他 repo 的 workflow：寫成「owner/repo:檔名」，Router 用 EXTERNAL_DISPATCH_TOKENS 對應的 token 派送
     "weekend_reminder": ("jenny-smart/order-system:weekend-reminder-schedule.yml", {}),
     "customer_memo_daily": ("jenny-smart/order-system:customer-memo-schedule.yml", {}),
+    # 2026-11-12 Jenny：週末提醒「確認收到」連結的確認結果，同步回追蹤表／內勤工作表單（10:00 起每小時）
+    "weekend_reminder_confirm_sync": ("jenny-smart/order-system:weekend-reminder-confirm-sync.yml", {}),
     # 2026-11-12 Jenny：上班日 08:20 儲值金訂單客服備註空白 → 訂購人姓名記入行事曆
     "stored_value_notice_daily": ("jenny-smart/order-system:stored-value-notice-schedule.yml", {}),
     # 2026-11-11 Jenny：官網評價不滿意→清潔客訴（07:00）、預約下次服務→評價預約（07:20）
@@ -172,6 +174,10 @@ DEFAULT_ROWS: list[list] = [
     [True, "change_order_check", "清潔異動每日檢查（未備妥建 11:00 提醒）", "10:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "weekend_reminder", "週末／例假日服務提醒（休假前 2 天產生名單）", "11:00", "每日", "", "照跑", MODE_DIRECT,
      "每天檢查；程式依辦公日曆判斷是否為休假前 2 天（一般週四，遇國定假日提前），不是就略過。只寫追蹤表，不發 LINE"],
+    # 2026-11-12 Jenny：週末提醒連結確認同步，10:00 起每小時；程式沒有待確認的提醒就直接結束
+    [True, "weekend_reminder_confirm_sync", "週末提醒連結確認同步（回覆狀態寫回追蹤表／內勤工作表單）", "10:00~18:00 每小時", "每日", "",
+     "照跑", MODE_DIRECT, "程式在 order-system（weekend-reminder-confirm-sync.yml）；客人點提醒訊息的「確認收到」連結後，"
+     "追蹤表改已回覆、內勤工作表單「週末提醒」I 欄空白時填 OK。只想在提醒發送日跑可把頻率改成每週並填星期"],
     # 2026-11-10 Jenny：上班日 10:00 貼客人備註非空白訂單到台北／台中內勤工作表單＋記行事曆
     [True, "customer_memo_daily", "客人備註非空白＋客服備註需註記（VIP 非儲值金／**N- 已非首次）（台北／台中內勤工作表單）", "10:00", "每日", "", "略過", MODE_DIRECT,
      "程式在 order-system（customer-memo-schedule.yml）；區間＝前一上班日 10:00～今天 10:00（訂購時間），"

@@ -56,7 +56,9 @@ class ScheduleTests(unittest.TestCase):
             jobs=self.jobs(date+'T12:00')
             self.assertIn(('scheduled_monthly.yml',{'target':'half_month_orders_2','period':date[:7].replace('-','')+'-2'}),jobs)
             self.assertIn(('scheduled_daily.yml',{'target':'month_end_cleanup'}),self.jobs(date+'T22:00'))
-        self.assertEqual(self.jobs('2028-02-28T12:00'),[('performance_report.yml',{})])
+        # 12:00 平日只有業績報表＋每小時的週末提醒連結確認同步（10:00~18:00）
+        self.assertEqual(self.jobs('2028-02-28T12:00'),[('performance_report.yml',{}),
+                                                        ('jenny-smart/order-system:weekend-reminder-confirm-sync.yml',{})])
         self.assertIn(('scheduled_monthly.yml',{'target':'half_month_orders_1','period':'202611-1'}),self.jobs('2026-11-15T12:00'))
         self.assertEqual(self.jobs('2026-09-29T22:00'),[])
 
