@@ -1,0 +1,4 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+⚠️ 【桃園】同步 ATM 工作表失敗：
+清潔異動補齊完成：盤點 2 列，仍未備妥 0 列（每日 10:00 檢查會提醒）
+⚠️ 執行 Log 寫入失敗：log_execution() got an unexpected keyword argument 'function_name'
