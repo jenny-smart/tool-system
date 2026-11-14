@@ -23,6 +23,7 @@ def test_tool_host_config_registered(monkeypatch):
     monkeypatch.setattr(year_roots, "root_file_id", lambda cat, area, file_index=0: f"ROOT-{cat}-{area}-{file_index}")
     assert atm._atm_sheet_config("台北")["spreadsheet_id"] == "ROOT-內勤工作表單-台北-0"
     assert atm._atm_sheet_config("新竹")["spreadsheet_id"] == "ROOT-名冊薪資-新竹-1"
+    assert atm._atm_sheet_config("高雄")["spreadsheet_id"] == "ROOT-名冊薪資-高雄-1"
 
 
 def test_scheduled_jobs_import():
