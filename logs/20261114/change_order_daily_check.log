@@ -1,0 +1,18 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+[登入] 已登入
+【台北】檸檬後台已登出
+【台北】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[登入] 已登入
+【桃園】檸檬後台已登出
+【桃園】未備妥 1 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠️ 【新竹】同步 ATM 工作表失敗：
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+非工作日或已過 11:00，不建提醒
+{'todo': [{'region': '台北', 'row': 362, 'status': '待收款', 'detail': '異動服務收款', 'order_no': 'LC00220170', 'customer': '施宥全', 'payway': '', 'amount': '1800', 'progress': [], 'actions': ['invoice'], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/11/13 LC00220170 異動服務收款--11/13(五)異動：服務當天異動，收50%異動費$1800'}, {'region': '桃園', 'row': 89, 'status': '待收款', 'detail': '異動服務收款', 'order_no': 'LC00220560', 'customer': '邱佩儀', 'payway': '', 'amount': '', 'progress': [], 'actions': ['invoice'], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/11/13 LC00220560 異動服務收款--原服務2026-12-02 (三) 09:00-16:00 (7200元)改至 ，需補差額1800元'}], 'failed': []}
