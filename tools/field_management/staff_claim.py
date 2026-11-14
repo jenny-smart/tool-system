@@ -14,7 +14,8 @@ from __future__ import annotations
 # 與原 GAS 的差異：
 #   - 選定列範圍執行時，AJ 給付期別必填，範圍內每列有資料的列都寫入。
 #   - 車馬費且 N=案場到案場 時，AN 請款備註帶兩位顧客：MM/DD + E + "-" + O + 請款項目 + "-"。
-#   - AD/AE 查不到地址時保留原值並列出列號，不再退回「只比日期」或寫入 D+E+F 文字。
+#   - AD/AE 在「專員個人資料」查不到地址時，改到檸檬後台「訂單管理」用電話（再用姓名）＋服務日期查訂單地址；
+#     兩邊都查不到才保留原值，並在儲存格備註寫明查不到的原因，不再退回「只比日期」或寫入 D+E+F 文字。
 #   - N 欄沒有跨區類型的列不改 AF/AG。
 #   - 整段讀取，只寫有變動的儲存格。
 # ============================================================
@@ -97,6 +98,8 @@ ADDRESS_PATTERN = re.compile(rf"^{CITY_PATTERN}[\u4e00-\u9fff]{{1,4}}?[區鄉鎮
 ISSUE_TYPES = {
     "short_addr": ("#F4CCCC", "地址少字或格式不完整（應以縣市＋區開頭）"),
     "no_addr": ("#D9D2E9", "查無地址，請手動補上"),
+    "unverified_addr": ("#CFE2F3", "查無訂單地址，保留原地址，請確認"),
+    "backend_addr": ("#D9EAD3", "地址取自檸檬後台訂單"),
     "map": ("#FCE5CD", "無法產生地圖連結"),
     "same_customer": ("#FFF2CC", "第二位顧客與顧客相同，請確認"),
     "duplicate": ("#E6B8AF", "重複請款（專員＋請款備註＋審核補貼相同）"),
@@ -288,6 +291,7 @@ class AddressBook:
         self.by_name: dict[tuple[str, str], str] = {}
         self.by_phone: dict[tuple[str, str], str] = {}
         self.staff_addresses: dict[str, str] = {}
+        self.dates: set[str] = set()
         self.count = 0
         cleaned = [_clean(h) for h in headers]
         if "專員姓名" in cleaned and "地址" in cleaned:
@@ -308,6 +312,7 @@ class AddressBook:
             if not date or not address or not (name or phone):
                 continue
             self.count += 1
+            self.dates.add(date)
             self.exact.setdefault((date, name, phone), address)
             if name:
                 self.by_name.setdefault((date, name), address)
@@ -325,6 +330,86 @@ class AddressBook:
             or (self.by_phone.get((date, phone)) if phone else "")
             or ""
         )
+
+    def miss_reason(self, service_date: Any, name: Any, phone: Any) -> str:
+        """lookup 查不到時的原因（寫進儲存格備註）。"""
+        date = normalize_date(service_date)
+        if not re.match(r"^\d{4}/\d{2}/\d{2}$", date):
+            return "服務日期空白或格式錯誤"
+        if self.dates and date not in self.dates:
+            return f"「{STAFF_SHEET_TITLE}」沒有 {date} 的訂單（只有 {min(self.dates)}～{max(self.dates)}）"
+        return f"「{STAFF_SHEET_TITLE}」{date} 沒有 {_who(name, phone)} 的訂單"
+
+
+def _who(name: Any, phone: Any) -> str:
+    phone = normalize_phone(phone)
+    return "／".join(part for part in (_clean(name), f"0{phone}" if phone else "") if part) or "（姓名電話空白）"
+
+
+class BackendAddressLookup:
+    """「專員個人資料」查不到時，到檸檬後台「訂單管理」查同一服務日期的訂單地址。
+
+    先用電話＋服務日期查，查不到再用姓名＋服務日期查；都查不到時再用電話查全部訂單，
+    把同電話其他訂單的服務日寫進原因（常見是請款單日期填錯）。
+    回傳 (地址, 說明)：查到時說明是訂單編號，查不到時說明是原因。
+    帳密或連線失敗時不再逐列重試，之後每列都回傳同一個失敗原因。
+    """
+
+    def __init__(self, area: str, client: Any = None):
+        self.area = area
+        self.client = client
+        self.error = ""
+        self.cache: dict[tuple[str, str, str], tuple[str, str]] = {}
+
+    def _client(self):
+        if self.client is None:
+            from tools.lemon_backend.client import BackendClient
+            self.client = BackendClient(self.area)
+        return self.client
+
+    def _search(self, **params) -> list[Any]:
+        from tools.lemon_backend.orders import parse_purchase_list_page, purchase_params
+        response = self._client().get_purchase_page(purchase_params(**params))
+        return parse_purchase_list_page(response.text, getattr(self._client().session, "base_url", ""))
+
+    def lookup(self, service_date: Any, name: Any, phone: Any) -> tuple[str, str]:
+        date, name, digits = normalize_date(service_date), _clean(name), normalize_phone(phone)
+        if not re.match(r"^\d{4}/\d{2}/\d{2}$", date):
+            return "", "服務日期空白或格式錯誤，無法查檸檬後台"
+        if self.error:
+            return "", self.error
+        key = (date, name, digits)
+        if key not in self.cache:
+            try:
+                self.cache[key] = self._lookup(date, name, digits)
+            except Exception as exc:
+                self.error = f"檸檬後台查詢失敗：{exc}"
+                return "", self.error
+        return self.cache[key]
+
+    def _lookup(self, date: str, name: str, digits: str) -> tuple[str, str]:
+        day = date.replace("/", "-")
+        phone = f"0{digits}" if digits else ""
+
+        def on_date(orders: list[Any]) -> list[Any]:
+            return [o for o in orders if normalize_date(o.service_date) == date and _clean(o.address)]
+
+        candidates = on_date(self._search(phone=phone, clean_date_s=day, clean_date_e=day)) if phone else []
+        if not candidates and name:
+            candidates = on_date(self._search(name=name, clean_date_s=day, clean_date_e=day))
+        if candidates:
+            order = next((o for o in candidates if _clean(o.customer_name) == name), candidates[0])
+            return _clean(order.address), f"檸檬後台訂單 {order.order_no}（{date}）"
+
+        reason = f"檸檬後台 {date} 查無 {_who(name, digits)} 的訂單"
+        if phone:
+            others = sorted({normalize_date(o.service_date) for o in self._search(phone=phone)
+                             if normalize_date(o.service_date)}, reverse=True)
+            if others:
+                reason += f"；同電話訂單服務日：{'、'.join(others[:5])}（請確認服務日期）"
+            else:
+                reason += "；後台也沒有這支電話的訂單（請確認電話）"
+        return "", reason
 
 
 # ---------------------------------------------------------------- 試算表存取
@@ -358,10 +443,12 @@ def _read(service, spreadsheet_id: str, a1_range: str) -> list[list[Any]]:
 
 
 def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], start_row: int,
-                       period: str, address_book: AddressBook) -> dict[str, Any]:
+                       period: str, address_book: AddressBook,
+                       backend: Optional[BackendAddressLookup] = None) -> dict[str, Any]:
     """計算要寫回的儲存格（不碰試算表，方便測試）。
 
     claim_rows 對應試算表第 start_row 列起的資料。
+    backend：「專員個人資料」查不到地址時改查檸檬後台（None＝不查）。
     回傳 {"updates": [(A1, value)], "missing_addr1": [...], "missing_addr2": [...], "rows": n}
     """
     idx = {key: _header_index(claim_header, name, CLAIM_SHEET_TITLE) for key, name in CLAIM_HEADERS.items()}
@@ -375,6 +462,7 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
     counts = {"addr1": 0, "addr2": 0, "area_pair": 0, "map_link": 0, "period": 0, "remark": 0,
               "staff_addr": 0, "check1": 0, "check2": 0, "staff_dup": 0, "item_display": 0, "subsidy": 0}
     issues: list[dict[str, Any]] = []
+    backend_rows: dict[str, list[int]] = {}
     data_rows: list[int] = []
     map_links: dict[int, str] = {}
 
@@ -402,14 +490,43 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
         def check_address(key: str, value: str, required: bool, label: str) -> None:
             if value and not address_is_complete(value):
                 flag(key, "short_addr", f"{label}：{value}")
+            elif key in miss_reasons:
+                # 專員個人資料、檸檬後台都查不到：寫明原因（有原值時保留原值）
+                flag(key, "unverified_addr" if value else "no_addr", miss_reasons[key])
             elif not value and required:
                 flag(key, "no_addr", label)
+
+        def find_address(key: str, name: str, phone: str, missing: list[int]) -> str:
+            """先查「專員個人資料」，查不到再查檸檬後台；都查不到保留原值並記下原因。"""
+            address = address_book.lookup(get("date"), name, phone)
+            if address:
+                put(key, address)
+                return address
+            reason = address_book.miss_reason(get("date"), name, phone)
+            if backend is not None:
+                address, detail = backend.lookup(get("date"), name, phone)
+                if address:
+                    original = get(key)
+                    put(key, address)
+                    note = f"「{STAFF_SHEET_TITLE}」查無，改用{detail}"
+                    if original and original != address:
+                        note += f"；原值：{original}"
+                    flag(key, "backend_addr", note)
+                    backend_rows.setdefault(key, []).append(row_no)
+                    return address
+                reason += f"；{detail}"
+            else:
+                reason += "；未查檸檬後台"
+            miss_reasons[key] = reason
+            missing.append(row_no)
+            return get(key)
 
         # 空白列（沒有服務日期也沒有顧客）整列不動，避免範圍選太大時把期別寫進空列
         if not get("date") and not get("customer"):
             continue
 
         data_rows.append(row_no)
+        miss_reasons: dict[str, str] = {}
 
         # AJ 給付期別：範圍內每列都寫
         put("period", period)
@@ -433,21 +550,11 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
             fill_blank("staff_addr", staff_addr)
 
         # AD 顧客地址1
-        addr1 = address_book.lookup(get("date"), get("customer"), get("phone"))
-        if addr1:
-            put("addr1", addr1)
-        else:
-            addr1 = get("addr1")
-            missing_addr1.append(row_no)
+        addr1 = find_address("addr1", get("customer"), get("phone"), missing_addr1)
 
         # AE 顧客地址2：O、P 都空就清空
         if get("customer2") or get("phone2"):
-            addr2 = address_book.lookup(get("date"), get("customer2"), get("phone2"))
-            if addr2:
-                put("addr2", addr2)
-            else:
-                addr2 = get("addr2")
-                missing_addr2.append(row_no)
+            addr2 = find_address("addr2", get("customer2"), get("phone2"), missing_addr2)
         else:
             addr2 = ""
             put("addr2", "")
@@ -481,6 +588,7 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
         "updates": updates,
         "missing_addr1": missing_addr1,
         "missing_addr2": missing_addr2,
+        "backend_rows": backend_rows,
         "issues": issues,
         "data_rows": data_rows,
         "map_links": map_links,
@@ -493,8 +601,11 @@ def plan_claim_updates(claim_header: list[Any], claim_rows: list[list[Any]], sta
 
 def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
                     service=None, on_progress: Optional[Callable[[str], None]] = None,
-                    claim_gid: Optional[int] = None) -> dict[str, Any]:
-    """批次設定專員請款第 start_row～end_row 列的 AD/AE/AF/AG/AJ/AN 欄。"""
+                    claim_gid: Optional[int] = None,
+                    backend: Optional[BackendAddressLookup] = None) -> dict[str, Any]:
+    """批次設定專員請款第 start_row～end_row 列的 AD/AE/AF/AG/AJ/AN 欄。
+
+    backend 沒給時用該地區的檸檬後台帳號（只有查不到地址的列才會登入查詢）。"""
     log = on_progress or (lambda msg: None)
     period = _clean(period)
     if not PERIOD_PATTERN.match(period):
@@ -520,7 +631,8 @@ def run_claim_batch(area: str, start_row: int, end_row: int, period: str,
     log(f"{area}｜{claim_title} 第 {start_row}～{end_row} 列")
     log(describe_columns(claim_header, staff_rows, address_book))
 
-    plan = plan_claim_updates(claim_header, claim_rows, start_row, period, address_book)
+    backend = backend if backend is not None else BackendAddressLookup(area)
+    plan = plan_claim_updates(claim_header, claim_rows, start_row, period, address_book, backend)
     updates = plan["updates"]
     if updates:
         service.spreadsheets().values().batchUpdate(
@@ -709,8 +821,13 @@ def format_batch_result(result: dict[str, Any]) -> str:
               "AK": counts["staff_dup"], "AL": counts["item_display"], "AM": counts["subsidy"]}
     if any(filled.values()):
         lines.append("🧩 補上空白欄位（GAS 漏算）：" + "｜".join(f"{k}：{v}" for k, v in filled.items() if v))
+    for key, label in (("addr1", "AD"), ("addr2", "AE")):
+        rows = result.get("backend_rows", {}).get(key)
+        if rows:
+            lines.append(f"🍋 {label} 由檸檬後台訂單補上地址：第 {'、'.join(map(str, rows))} 列")
     if result["missing_addr1"]:
-        lines.append(f"⚠️ AD 查無顧客地址（保留原值）：第 {'、'.join(map(str, result['missing_addr1']))} 列")
+        lines.append(f"⚠️ AD 專員個人資料與檸檬後台都查無顧客地址（保留原值，原因寫在儲存格備註）："
+                     f"第 {'、'.join(map(str, result['missing_addr1']))} 列")
     issue_counts: dict[str, int] = {}
     for issue in result.get("issues", []):
         issue_counts[issue["type"]] = issue_counts.get(issue["type"], 0) + 1
@@ -718,7 +835,8 @@ def format_batch_result(result: dict[str, Any]) -> str:
         lines.append("🎨 已上底色並加備註：" + "｜".join(
             f"{ISSUE_TYPES[t][1].split('（')[0]} {n} 格" for t, n in issue_counts.items()))
     if result["missing_addr2"]:
-        lines.append(f"⚠️ AE 查無第二位顧客地址（保留原值）：第 {'、'.join(map(str, result['missing_addr2']))} 列")
+        lines.append(f"⚠️ AE 專員個人資料與檸檬後台都查無第二位顧客地址（保留原值，原因寫在儲存格備註）："
+                     f"第 {'、'.join(map(str, result['missing_addr2']))} 列")
     return "\n".join(lines)
 
 

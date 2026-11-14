@@ -1,6 +1,8 @@
 import sys
 import types
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 
 registry_stub = types.ModuleType("tools.bank_statement.internal_payment_registry")
@@ -179,19 +181,63 @@ class MapTests(unittest.TestCase):
         self.assertEqual(staff_claim.build_map_link("家到案場", "", "A", ""), "❌ 地址不完整")
 
 
-class RunClaimBatchTests(unittest.TestCase):
-    def _run(self, claim_rows, start_row=2, end_row=None, notes=None, formulas=None):
+def backend_order(order_no, date, name, phone, address):
+    return SimpleNamespace(order_no=order_no, service_date=date, customer_name=name, phone=phone, address=address)
+
+
+class _FakeBackend(staff_claim.BackendAddressLookup):
+    """假的檸檬後台：依查詢條件（電話／姓名／服務日期）篩訂單，記下每次查詢。"""
+
+    def __init__(self, orders=(), error=None):
+        super().__init__("台北", client=object())
+        self.orders, self.raise_error, self.queries = list(orders), error, []
+
+    def _search(self, **params):
+        self.queries.append(params)
+        if self.raise_error:
+            raise self.raise_error
+        day = params.get("clean_date_s", "")
+        return [o for o in self.orders
+                if (not params.get("phone") or o.phone == params["phone"])
+                and (not params.get("name") or o.customer_name == params["name"])
+                and (not day or o.service_date == day)]
+
+
+class _ClaimBatchCase(unittest.TestCase):
+    def setUp(self):
+        # 整批跑測試時，staff_claim 可能已被其他測試用真的登記表模組載入，上面的假模組沒套到；
+        # 直接換掉模組裡的 find_registry_row，才不會去讀真的主控表
+        patcher = mock.patch.object(staff_claim, "find_registry_row",
+                                    lambda report_type, area: {"試算表ID": f"sheet-{area}"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _run(self, claim_rows, start_row=2, end_row=None, notes=None, formulas=None, backend=None):
         sheets = {"專員請款": [CLAIM_HEADER] + claim_rows, "專員個人資料": STAFF_ROWS}
         service = _Service(sheets, notes, formulas)
         self.service = service
+        self.backend = backend or _FakeBackend()
         end_row = end_row or start_row + len(claim_rows) - 1
-        result = staff_claim.run_claim_batch("台北", start_row, end_row, "202601-1", service=service)
+        result = staff_claim.run_claim_batch("台北", start_row, end_row, "202601-1", service=service,
+                                             backend=self.backend)
         written = {}
         for body in service.values_api.batch_bodies:
             for item in body["data"]:
                 written[item["range"].split("!")[1]] = item["values"][0][0]
         return result, written
 
+    def _marks(self):
+        marks = {}
+        for req in self.service.format_requests:
+            if "repeatCell" not in req:
+                continue
+            cell = req["repeatCell"]
+            rng = cell["range"]
+            marks[(rng["startRowIndex"] + 1, rng["startColumnIndex"])] = cell["cell"]
+        return marks
+
+
+class RunClaimBatchTests(_ClaimBatchCase):
     def test_site_to_site_row_updates_addresses_period_and_remark(self):
         row = claim_row(
             服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638", 請款項目="跨區車馬費",
@@ -230,16 +276,6 @@ class RunClaimBatchTests(unittest.TestCase):
         service = _Service({"專員請款": [CLAIM_HEADER], "專員個人資料": STAFF_ROWS})
         with self.assertRaises(RuntimeError):
             staff_claim.run_claim_batch("台北", 2, 3, "202601-1", service=service, claim_gid=123)
-
-    def _marks(self):
-        marks = {}
-        for req in self.service.format_requests:
-            if "repeatCell" not in req:
-                continue
-            cell = req["repeatCell"]
-            rng = cell["range"]
-            marks[(rng["startRowIndex"] + 1, rng["startColumnIndex"])] = cell["cell"]
-        return marks
 
     def test_short_address_is_coloured_with_reason(self):
         row = claim_row(
@@ -382,3 +418,60 @@ class RunClaimBatchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackendAddressTests(_ClaimBatchCase):
+    """「專員個人資料」查不到地址時改查檸檬後台訂單管理，查不到就在備註寫原因。"""
+
+    def _row(self, **values):
+        base = dict(服務日期="2026/01/03", 顧客姓名="彭惠美", 顧客電話="936538928", 請款項目="跨區車馬費",
+                    跨區類型="家到案場", 專員地址="新北市樹林區保安街1號")
+        base.update(values)
+        return claim_row(**base)
+
+    def test_backend_address_by_phone_and_date_is_written_with_source_note(self):
+        backend = _FakeBackend([backend_order("LC001", "2026-01-03", "彭惠美", "0936538928", "台北市南港區興華路117號8樓")])
+        result, written = self._run([self._row(顧客地址1="舊地址")], backend=backend)
+        self.assertEqual(written["AD2"], "台北市南港區興華路117號8樓")
+        self.assertEqual(backend.queries[0], {"phone": "0936538928", "clean_date_s": "2026-01-03",
+                                              "clean_date_e": "2026-01-03"})
+        mark = self._marks()[(2, COL["顧客地址1"])]
+        self.assertIn("檸檬後台訂單 LC001", mark["note"])
+        self.assertIn("原值：舊地址", mark["note"])
+        self.assertEqual(result["missing_addr1"], [])
+        self.assertEqual(result["backend_rows"], {"addr1": [2]})
+        self.assertIn("由檸檬後台訂單補上地址：第 2 列", staff_claim.format_batch_result(dict(result, area="台北")))
+
+    def test_backend_falls_back_to_name_when_phone_is_wrong(self):
+        backend = _FakeBackend([backend_order("LC002", "2026-01-03", "黃美惠", "0934151052", "台北市內湖區民權東路六段123巷")])
+        _, written = self._run([self._row(顧客姓名="黃美惠", 顧客電話="934051052")], backend=backend)
+        self.assertEqual(written["AD2"], "台北市內湖區民權東路六段123巷")
+        self.assertEqual(backend.queries[1]["name"], "黃美惠")
+
+    def test_reason_lists_other_service_dates_and_keeps_existing_address(self):
+        backend = _FakeBackend([backend_order("LC003", "2026-01-04", "彭惠美", "0936538928", "台北市南港區興華路117號8樓")])
+        result, written = self._run([self._row(顧客地址1="台北市南港區興華路117號8樓")], backend=backend)
+        self.assertNotIn("AD2", written)
+        self.assertEqual(result["missing_addr1"], [2])
+        note = self._marks()[(2, COL["顧客地址1"])]["note"]
+        self.assertIn("「專員個人資料」沒有 2026/01/03 的訂單（只有 2026/01/02～2026/01/02）", note)
+        self.assertIn("檸檬後台 2026/01/03 查無 彭惠美／0936538928 的訂單", note)
+        self.assertIn("同電話訂單服務日：2026/01/04（請確認服務日期）", note)
+        self.assertIn("保留原地址", note)
+
+    def test_blank_address_reason_when_phone_unknown(self):
+        self._run([self._row(顧客電話="900000000")])
+        note = self._marks()[(2, COL["顧客地址1"])]["note"]
+        self.assertTrue(note.startswith("⚠️ 查無地址，請手動補上"))
+        self.assertIn("後台也沒有這支電話的訂單（請確認電話）", note)
+
+    def test_sheet_hit_does_not_query_backend(self):
+        self._run([self._row(服務日期="2026/01/02", 顧客姓名="廖士捷", 顧客電話="937064638")])
+        self.assertEqual(self.backend.queries, [])
+
+    def test_backend_failure_is_reported_once_and_not_retried(self):
+        backend = _FakeBackend(error=RuntimeError("台北 後台帳密未設定"))
+        result, _ = self._run([self._row(), self._row(顧客姓名="陳世湟", 顧客電話="915563957")], backend=backend)
+        self.assertEqual(len(backend.queries), 1)
+        self.assertEqual(result["missing_addr1"], [2, 3])
+        self.assertIn("檸檬後台查詢失敗：台北 後台帳密未設定", self._marks()[(3, COL["顧客地址1"])]["note"])
