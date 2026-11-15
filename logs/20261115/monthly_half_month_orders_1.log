@@ -1,0 +1,192 @@
+⚠️ 月排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+📁 月排程年度資料夾：2026專員承攬服務費 (1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK)
+📂 月排程總根目錄：1t0B8BdUKBvaS6TM40-hpodUnxeZr3eWe
+📂 本次使用年度：2026
+📂 本次年度 folder_id：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+📝 月排程打卡：上半月訂單 / running
+⚠️ 月排程 secrets TOML 注入失敗：No module named 'toml'
+⚠️ 月排程 secrets env 注入失敗：No secrets found. Valid paths for a secrets.toml file or secret directories are: /home/runner/.streamlit/secrets.toml, /home/runner/work/tool-system/tool-system/.streamlit/secrets.toml
+OAuth env ready = True
+OAuth bootstrap forced = True
+Command: Python bootstrap -> /home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+📌 期別：202611-1
+📌 日期：2026-11-01 ~ 2026-11-15
+📌 執行區域：all
+📌 月排程總根目錄：1TnV_tpDnaSwPDDvjq8AtGL6uRC0OwGUK
+
+=== 處理 台北 ===
+✅ 登入成功：jenny@lemonclean.com.tw
+📁 使用既有資料夾：01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 區域資料夾：台北 / 01.台北專員 / 1kJTGZYpgXBPlyR4SjRKoP0-sK30MhAfW
+📁 使用既有資料夾：202611-1 / 1Vae0N9vnQQzBunlwEkw-TUnQ4k7LJlvA
+📁 期別資料夾：202611-1 / 1Vae0N9vnQQzBunlwEkw-TUnQ4k7LJlvA
+⚠️ 台北 已付款未開發票／加收、退款資料待補 6 筆：
+   [台北] 已付款未開發票 LC00220191（Christin，服務日 2026/11/11，ATM 4,800）
+   [台北] 已加收資料不完整 LC00216380（鄭慕尼，服務日 2026/11/5，儲值金 900，缺 加收發票日期、加收發票號碼）
+   [台北] 已加收資料不完整 LC00216380-1（鄭慕尼，服務日 2026/11/5，0 900，缺 加收發票日期、加收發票號碼）
+   [台北] 已加收資料不完整 LC00217565（陳薏絜，服務日 2026/11/3，儲值金 900，缺 加收發票日期、加收發票號碼）
+   [台北] 已加收資料不完整 LC00217565-1（陳薏絜，服務日 2026/11/3，0 900，缺 加收發票日期、加收發票號碼）
+   [台北] 已付款未開發票 LC00217092（劉毓晴，服務日 2026/11/2，儲值金 200）
+🎨 台北 訂單檔已標底色 33 列（加收／退款狀態、缺的欄位）
+☁️ 已上傳新檔：202611-1訂單-台北.xlsx → folder_id=1Vae0N9vnQQzBunlwEkw-TUnQ4k7LJlvA https://docs.google.com/spreadsheets/d/1HYFwhISEcuAEXaawA6o7aTBAje7eqnlQ/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202611-1/202611-1訂單-台北.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202611-1 / 1COJZIDjXYd8w3JnJB5XrKXDkXOgMpPlH
+📁 期別資料夾：202611-1 / 1COJZIDjXYd8w3JnJB5XrKXDkXOgMpPlH
+✅ 台中 沒有未開發票、加收／退款資料待補的訂單
+☁️ 已上傳新檔：202611-1訂單-台中.xlsx → folder_id=1COJZIDjXYd8w3JnJB5XrKXDkXOgMpPlH https://docs.google.com/spreadsheets/d/1c47OQuOAHzGeiyxztVsmnmecxz-6afKU/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202611-1/202611-1訂單-台中.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202611-1 / 1mcmYutYnWubnNzaBzsOB7SZV2yPcizD5
+📁 期別資料夾：202611-1 / 1mcmYutYnWubnNzaBzsOB7SZV2yPcizD5
+⚠️ 桃園 已付款未開發票／加收、退款資料待補 10 筆：
+   [桃園] 已付款未開發票 LC00217130（星和診所，服務日 2026/11/12，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217112（星和診所，服務日 2026/11/12，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217111（星和診所，服務日 2026/11/10，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217129（星和診所，服務日 2026/11/9，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217110（星和診所，服務日 2026/11/9，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217128（星和診所，服務日 2026/11/5，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217109（星和診所，服務日 2026/11/5，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217108（星和診所，服務日 2026/11/3，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217126（星和診所，服務日 2026/11/2，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217107（星和診所，服務日 2026/11/2，ATM 1,410）
+🎨 桃園 訂單檔已標底色 12 列（加收／退款狀態、缺的欄位）
+☁️ 已上傳新檔：202611-1訂單-桃園.xlsx → folder_id=1mcmYutYnWubnNzaBzsOB7SZV2yPcizD5 https://docs.google.com/spreadsheets/d/1Z-Azy4ueZrk9gR093fDsv_mBdT9_Dp3p/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202611-1/202611-1訂單-桃園.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202611-1 / 1mVIxgCMuk63vkguMzHDnH3g0ONh77uyC
+📁 期別資料夾：202611-1 / 1mVIxgCMuk63vkguMzHDnH3g0ONh77uyC
+✅ 已寫入月排程 Log
+❌ 新竹 失敗：儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202611-1 / 1h1SUexvWQ22Rs_02GSwp2vzk2MFxtrHc
+📁 期別資料夾：202611-1 / 1h1SUexvWQ22Rs_02GSwp2vzk2MFxtrHc
+✅ 已寫入月排程 Log
+❌ 高雄 失敗：儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+
+✅ 成功地區：台北, 台中, 桃園
+已建行事曆提醒：上下半月訂單資料待補：202611-1 16 筆
+- 新竹: 儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+- 高雄: 儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<frozen runpy>", line 291, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py", line 675, in <module>
+    main()
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py", line 670, in main
+    raise RuntimeError(f"上下半月訂單有失敗地區：{failed}")
+RuntimeError: 上下半月訂單有失敗地區：[('新竹', "儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']"), ('高雄', "儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']")]
+
+📝 月排程打卡：上半月訂單 / failed
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 325, in <module>
+    main(target=args.target, folder_id=args.folder_id, area=args.area, period=args.period, start=args.start, end=args.end)
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 303, in main
+    results.append(run_job(job_name, folder_id=job_folder_id, area=area, period=period, start=start, end=end))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/scheduler.py", line 271, in run_job
+    raise RuntimeError(message)
+RuntimeError: 上半月訂單 執行失敗，exit=1
+STDOUT:
+發票號碼）
+   [台北] 已付款未開發票 LC00217092（劉毓晴，服務日 2026/11/2，儲值金 200）
+🎨 台北 訂單檔已標底色 33 列（加收／退款狀態、缺的欄位）
+☁️ 已上傳新檔：202611-1訂單-台北.xlsx → folder_id=1Vae0N9vnQQzBunlwEkw-TUnQ4k7LJlvA https://docs.google.com/spreadsheets/d/1HYFwhISEcuAEXaawA6o7aTBAje7eqnlQ/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202611-1/202611-1訂單-台北.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 台中 ===
+✅ 登入成功：jenny.tc@lemonclean.com.tw
+📁 使用既有資料夾：02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 區域資料夾：台中 / 02.台中專員 / 1peMrCBDFJ2-sSKUzuc0X5p0Mc3g0VPrG
+📁 使用既有資料夾：202611-1 / 1COJZIDjXYd8w3JnJB5XrKXDkXOgMpPlH
+📁 期別資料夾：202611-1 / 1COJZIDjXYd8w3JnJB5XrKXDkXOgMpPlH
+✅ 台中 沒有未開發票、加收／退款資料待補的訂單
+☁️ 已上傳新檔：202611-1訂單-台中.xlsx → folder_id=1COJZIDjXYd8w3JnJB5XrKXDkXOgMpPlH https://docs.google.com/spreadsheets/d/1c47OQuOAHzGeiyxztVsmnmecxz-6afKU/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202611-1/202611-1訂單-台中.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 桃園 ===
+✅ 登入成功：jenny.tyc@lemonclean.com.tw
+📁 使用既有資料夾：03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 區域資料夾：桃園 / 03.桃園專員 / 18Patt1SGG_6CWCqSaNgYNoDC4O0p5Vpm
+📁 使用既有資料夾：202611-1 / 1mcmYutYnWubnNzaBzsOB7SZV2yPcizD5
+📁 期別資料夾：202611-1 / 1mcmYutYnWubnNzaBzsOB7SZV2yPcizD5
+⚠️ 桃園 已付款未開發票／加收、退款資料待補 10 筆：
+   [桃園] 已付款未開發票 LC00217130（星和診所，服務日 2026/11/12，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217112（星和診所，服務日 2026/11/12，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217111（星和診所，服務日 2026/11/10，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217129（星和診所，服務日 2026/11/9，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217110（星和診所，服務日 2026/11/9，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217128（星和診所，服務日 2026/11/5，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217109（星和診所，服務日 2026/11/5，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217108（星和診所，服務日 2026/11/3，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217126（星和診所，服務日 2026/11/2，ATM 1,410）
+   [桃園] 已付款未開發票 LC00217107（星和診所，服務日 2026/11/2，ATM 1,410）
+🎨 桃園 訂單檔已標底色 12 列（加收／退款狀態、缺的欄位）
+☁️ 已上傳新檔：202611-1訂單-桃園.xlsx → folder_id=1mcmYutYnWubnNzaBzsOB7SZV2yPcizD5 https://docs.google.com/spreadsheets/d/1Z-Azy4ueZrk9gR093fDsv_mBdT9_Dp3p/edit?usp=drivesdk&ouid=101667783075862487943&rtpof=true&sd=true
+🧾 已更新 GitHub snapshot：snapshots/monthly_orders/202611-1/202611-1訂單-桃園.xlsx
+✅ 已寫入月排程 Log
+
+=== 處理 新竹 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 區域資料夾：新竹 / 04.新竹專員 / 1rnCtWrw3AUvn1PCj1NKsLtbM5UrWKuiI
+📁 使用既有資料夾：202611-1 / 1mVIxgCMuk63vkguMzHDnH3g0ONh77uyC
+📁 期別資料夾：202611-1 / 1mVIxgCMuk63vkguMzHDnH3g0ONh77uyC
+✅ 已寫入月排程 Log
+❌ 新竹 失敗：儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+
+=== 處理 高雄 ===
+✅ 登入成功：jenny.hc@lemonclean.com.tw
+📁 使用既有資料夾：05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 區域資料夾：高雄 / 05.高雄專員 / 1nq6vgxVd1DNna72SSoa08L_DkiTSqLpF
+📁 使用既有資料夾：202611-1 / 1h1SUexvWQ22Rs_02GSwp2vzk2MFxtrHc
+📁 期別資料夾：202611-1 / 1h1SUexvWQ22Rs_02GSwp2vzk2MFxtrHc
+✅ 已寫入月排程 Log
+❌ 高雄 失敗：儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+
+✅ 成功地區：台北, 台中, 桃園
+已建行事曆提醒：上下半月訂單資料待補：202611-1 16 筆
+- 新竹: 儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+- 高雄: 儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']
+
+STDERR:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<frozen runpy>", line 291, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py", line 675, in <module>
+    main()
+  File "/home/runner/work/tool-system/tool-system/tools/scheduled_monthly/half_month_orders.py", line 670, in main
+    raise RuntimeError(f"上下半月訂單有失敗地區：{failed}")
+RuntimeError: 上下半月訂單有失敗地區：[('新竹', "儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']"), ('高雄', "儲值金訂單 LC00219543（徐婕琳）地址無法唯一分區：['其他', '新竹']")]
+
