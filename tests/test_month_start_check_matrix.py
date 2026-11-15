@@ -418,3 +418,13 @@ def test_cash_gap_keeps_previous_value_when_read_fails():
     kept = cash_gap.keep_previous_values(Svc(), "x", results, ["新竹", "高雄"], "2026/10/31")
     assert results["新竹"]["富邦餘額"] == 136198 and kept == ["新竹 富邦餘額"]
     assert isinstance(results["高雄"]["富邦餘額"], str)  # 舊值是 9/30 的，不沿用
+
+
+def test_refundable_amount_from_transaction_page():
+    from tools.newebpay.account_balance import parse_refundable
+
+    columns = ("退款\n可提領餘額\n367,058 元\n+\n退款準備金\n0 元\n+\n藍新保留\n0 元\n+\n待撥款\n1,291,470 元\n"
+               "=\n可退款金額\n1,634,420 元")
+    rows = "可提領餘額\t退款準備金\t藍新保留\t待撥款\t可退款金額\n367,058 元\t0 元\t0 元\t1,291,470 元\t1,634,420 元"
+    assert parse_refundable(columns) == parse_refundable(rows) == 1634420
+    assert parse_refundable("收款統計查詢") is None
