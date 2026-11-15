@@ -1,0 +1,30 @@
+2026-11-15 18:32:44 [INFO] === 客服排程系統 run_id=4d242c8b step=3 台北時間=2026-11-16 02:32:44 ===
+2026-11-15 18:32:44 [INFO] 目標試算表 ID 來源：環境變數 SERVICE_TARGET_SPREADSHEET_ID
+2026-11-15 18:32:44 [INFO] file_cache is only supported with oauth2client<4.0.0
+2026-11-15 18:32:55 [INFO] --- Step3_更新前一天營業分數及營業額 ---
+2026-11-15 18:32:56 [INFO] 信件日期（台北時間）：2026-11-15
+2026-11-15 18:33:07 [INFO]   [mail] text/plain 為空，fallback 到 text/html（5528 字元）
+2026-11-15 18:33:14 [INFO]   近三日營業額-台北 → 選中 17:25:03（與17:25差3s）
+2026-11-15 18:33:14 [INFO]   [debug] 行95 repr='2026-11-13：147分'
+2026-11-15 18:33:14 [INFO]   [debug] 行96 repr='2026-11-14：41分'
+2026-11-15 18:33:14 [INFO]   [debug] 行97 repr='2026-11-15：30分'
+2026-11-15 18:33:14 [INFO]   [debug] 行98 repr='【家電清潔】日營業額'
+2026-11-15 18:33:14 [INFO]   [debug] 行99 repr='2026-11-13：0分'
+2026-11-15 18:33:14 [INFO]   [debug] 行100 repr='2026-11-14：0分'
+2026-11-15 18:33:14 [INFO]   [debug] 行101 repr='2026-11-15：0分'
+2026-11-15 18:33:14 [INFO]   [debug] 行102 repr='【儲值金】日營業額'
+2026-11-15 18:33:21 [INFO]   [mail] text/plain 為空，fallback 到 text/html（1268 字元）
+2026-11-15 18:33:25 [INFO]   近三日營業額-台中 → 選中 17:25:06（與17:25差6s）
+2026-11-15 18:33:25 [INFO]   [debug] 行27 repr='2026-11-13：14分'
+2026-11-15 18:33:25 [INFO]   [debug] 行28 repr='2026-11-14：11分'
+2026-11-15 18:33:25 [INFO]   [debug] 行29 repr='2026-11-15：1分'
+2026-11-15 18:33:25 [INFO]   [debug] 行30 repr='【家電清潔】日營業額'
+2026-11-15 18:33:25 [INFO]   [debug] 行31 repr='2026-11-13：0分'
+2026-11-15 18:33:25 [INFO]   [debug] 行32 repr='2026-11-14：0分'
+2026-11-15 18:33:25 [INFO]   [debug] 行33 repr='2026-11-15：0分'
+2026-11-15 18:33:25 [INFO]   [debug] 行34 repr='【儲值金】日營業額'
+2026-11-15 18:33:25 [INFO]   台北：{'daily_value': 30, 'total_count': 1274, 'total_amount': 2547050}
+2026-11-15 18:33:25 [INFO]   台中：{'daily_value': 1, 'total_count': 227, 'total_amount': 453700}
+2026-11-15 18:33:26 [WARNING] [執行檔打卡失敗（非致命）] APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+2026-11-15 18:33:26 [INFO] Step 3 完成，row=2465（30.5s）
+2026-11-15 18:33:27 [INFO] === 全部完成 run_id=4d242c8b（31.3s）===
