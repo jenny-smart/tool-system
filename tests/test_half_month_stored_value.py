@@ -74,6 +74,17 @@ class StoredValueTests(unittest.TestCase):
             ns['purchase_records'] = Mock(side_effect=lambda session, **f: [] if 'phone' in f else items)
             with self.assertRaises(RuntimeError): ns['stored_value_customer_city'](object(), order)
 
+    def test_one_south_city_plus_other_goes_to_that_city(self):
+        ns = functions()
+        order = {'order_no':'LC00219543','name':'客戶','member_id':12,'phone':'0912345678'}
+        calls = []
+        def fetch(session, **f):
+            calls.append(f)
+            return [dict(order, address='竹北市測試路1號'), dict(order, address='新竹市測試路1號')]  # ['其他', '新竹']
+        ns['purchase_records'] = fetch
+        self.assertEqual(ns['stored_value_customer_city'](object(), order), '新竹')
+        self.assertFalse(any('phone' in c for c in calls))  # 不用查手機
+
     def test_ambiguous_address_falls_back_to_recent_order_by_phone(self):
         ns = functions()
         order = {'order_no':'LC1','name':'客戶','member_id':12,'phone':'912345678'}

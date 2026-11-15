@@ -4234,6 +4234,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "預收",
         "儲值金結算",
         "儲值金預收",
+        "儲值金結算＋儲值金預收",
         "一鍵執行月排程",
     ],
     "field_daily_schedule": [
@@ -4307,11 +4308,15 @@ MONTHLY_SCRIPT_MAP = {
     "預收": ["tools/scheduled_monthly/prepaid_report.py"],
     "儲值金結算": ["tools/scheduled_monthly/stored_value_settlement.py"],
     "儲值金預收": ["tools/scheduled_monthly/stored_value_prepaid.py"],
+    # 依序跑儲值金結算、儲值金預收（同期別、同區域），見 STORED_VALUE_COMBO_STEPS
+    "儲值金結算＋儲值金預收": ["tools/scheduled_monthly/stored_value_settlement.py"],
 }
+STORED_VALUE_COMBO = "儲值金結算＋儲值金預收"
+STORED_VALUE_COMBO_STEPS = ("儲值金結算", "儲值金預收")
 
 # 儲值金結算／儲值金預收不套用「月排程系統」的承攬費總根目錄，
 # 而是存在財務自己的根目錄（YYYY/YYYYMM，無地區子資料夾）。
-STORED_VALUE_FUNCTIONS = {"儲值金結算", "儲值金預收"}
+STORED_VALUE_FUNCTIONS = {"儲值金結算", "儲值金預收", "儲值金結算＋儲值金預收"}
 STORED_VALUE_ROOT_FOLDER_ID = os.getenv("STORED_VALUE_ROOT_FOLDER_ID", "").strip() or "15GQ7eUqUrxS95JKOaO6W_qV0g6OBXRPv"
 
 DAILY_TARGET_MAP = {
@@ -5386,7 +5391,9 @@ with date_col:
             label_visibility="collapsed",
             key="period",
         )
-        if system_type == "monthly_scheduler" and selected_function in {"預收", "儲值金預收"}:
+        if system_type == "monthly_scheduler" and selected_function == "儲值金結算＋儲值金預收":
+            st.caption("同一個期別、區域，先跑儲值金結算、再跑儲值金預收（兩個都放財務的儲值金根目錄）。")
+        if system_type == "monthly_scheduler" and selected_function in {"預收", "儲值金預收", "儲值金結算＋儲值金預收"}:
             st.caption(
                 "服務日期固定為期別次月起 4 個完整月份；例如 202610＝"
                 "2026/11/01～2027/02/28，202611＝2026/12/01～2027/03/31。"
@@ -7165,7 +7172,20 @@ if run_clicked:
                         add_log(f"實際傳入區域 --area：{area_arg}")
                         add_log(f"實際執行參數：{' '.join(args)}")
 
-                        result = run_script(script, args)
+                        if selected_function == STORED_VALUE_COMBO:
+                            # 儲值金結算＋儲值金預收：同參數依序跑兩支（結算失敗也照跑預收，各自回報）
+                            result, failed_steps = [], []
+                            for step in STORED_VALUE_COMBO_STEPS:
+                                add_log(f"▶ {step}")
+                                try:
+                                    result.append(run_script(MONTHLY_SCRIPT_MAP[step][0], args))
+                                except Exception as step_exc:
+                                    failed_steps.append(f"{step}：{step_exc}")
+                                    add_log(f"❌ {step} 失敗：{step_exc}", "error")
+                            if failed_steps:
+                                raise RuntimeError("；".join(failed_steps))
+                        else:
+                            result = run_script(script, args)
 
             elif system_type == "field_daily_schedule":
                 cmd = FIELD_SCRIPT_MAP.get(selected_function)
