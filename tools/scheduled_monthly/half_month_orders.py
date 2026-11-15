@@ -483,6 +483,42 @@ def export_stored_value(session: requests.Session, city: str, start: str, end: s
     return result
 
 
+def clear_period_files(service, folder_id: str, city: str, tag: str, snapshot_root: str, skip_snapshot: bool) -> None:
+    """開跑前先清掉該地區這一期在 Drive 期別資料夾與 snapshot 的舊檔，
+    避免本期查不到資料（或中途失敗）時，前一次執行遺留的檔案被當成本期資料。"""
+    page_token = None
+    removed = 0
+    while True:
+        res = service.files().list(
+            q=f"'{folder_id}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'",
+            fields="nextPageToken,files(id,name)", supportsAllDrives=True, includeItemsFromAllDrives=True,
+            pageSize=200, pageToken=page_token,
+        ).execute()
+        for item in res.get("files", []):
+            if delete_drive_file(service, item["id"], item.get("name", "")):
+                removed += 1
+        page_token = res.get("nextPageToken")
+        if not page_token:
+            break
+    log(f"🧹 {city} {tag} 期別資料夾已先清除舊檔 {removed} 個")
+    if skip_snapshot:
+        return
+    snapshot_dir = Path(snapshot_root) / tag
+    if not snapshot_dir.is_dir():
+        return
+    for meta_path in snapshot_dir.glob("*.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if meta.get("city") != city:
+            continue
+        for stale in (meta_path, *snapshot_dir.glob(meta_path.stem + ".*")):
+            if stale.exists() and stale.suffix != ".py":
+                stale.unlink()
+                log(f"🧹 已清除舊 snapshot：{stale}")
+
+
 def save_snapshot(local_path: str, snapshot_root: str, tag: str, meta: dict[str, Any]) -> None:
     snapshot_dir = Path(snapshot_root) / tag
     snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -549,6 +585,7 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
     area_folder_id = resolve_area_folder(service, args.folder_id, city)
     tag_folder_id = get_or_create_single_child_folder(service, area_folder_id, tag)
     log(f"📁 期別資料夾：{tag} / {tag_folder_id}")
+    clear_period_files(service, tag_folder_id, city, tag, args.snapshot_dir, args.skip_snapshot)
 
     status, message, source_files = "失敗", "", []
     uninvoiced: list[dict[str, str]] = []
