@@ -50,3 +50,22 @@ jobs:
           args=()
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/cloud_schedule.py --timestamp "$SLOT_TIMESTAMP" "${args[@]}"
+      - name: 排程完成記行事曆（jenny@hers.com.tw，依「排程設定」K 欄）
+        if: always() && !inputs.dry_run
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORDER_SYSTEM_DISPATCH_TOKEN: ${{ secrets.ORDER_SYSTEM_DISPATCH_TOKEN }}
+          INVESTMENT_SYSTEM_DISPATCH_TOKEN: ${{ secrets.INVESTMENT_SYSTEM_DISPATCH_TOKEN }}
+          SALARY_SYSTEM_DISPATCH_TOKEN: ${{ secrets.SALARY_SYSTEM_DISPATCH_TOKEN }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          GOOGLE_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_CALENDAR_REFRESH_TOKEN }}
+          GOOGLE_HERS_CALENDAR_REFRESH_TOKEN: ${{ secrets.GOOGLE_HERS_CALENDAR_REFRESH_TOKEN }}
+          GOOGLE_CALENDAR_CLIENT_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
+          GOOGLE_CALENDAR_CLIENT_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
+          TOOLS_APP_LOG_SPREADSHEET_ID: ${{ secrets.TOOLS_APP_LOG_SPREADSHEET_ID || secrets.MASTER_SPREADSHEET_ID }}
+        run: python3 -m tools.scheduling.calendar_record

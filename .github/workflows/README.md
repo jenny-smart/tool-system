@@ -59,6 +59,15 @@
 
 所有【整合執行】功能都在財務管理選單的「整合執行」同一組，先按「盤點」列出目前可做的項目（預設打勾，可全選／全不選）再執行。
 
+## 排程完成記行事曆（jenny@hers.com.tw）
+
+- 主控表「排程設定」K 欄 **完成記行事曆**（2026-11-16 起）：勾選的功能由 Router 派送、跑完後，會在 jenny@hers.com.tw 行事曆留一則紀錄（不跳提醒）。
+  - 標題：`【排程】功能名稱 ✅`／`❌ 失敗`／`⚠️ 取消`；時間＝完成時間。
+  - 內容：功能代號與系統、排程時段（頻率／執行方式）、開始～完成時間、執行內容（各步驟 ✅／❌）、備註（I 欄）、GitHub 執行連結。
+  - K 欄空白＝預設：時間欄有「每 N 分鐘／每小時」的高頻功能（ATM 待付款同步、週末提醒確認同步、月初檢查、投資即時價格等）預設不記，其他都記；要改直接勾／取消勾選。
+- 由 Cloud Schedule Router 每 10 分鐘的最後一步執行（`tools/scheduling/calendar_record.py`）：查最近 6 小時 Router 派送且已結束的 run，用事件的 `schedule_run` 屬性去重，不會重複記。涵蓋 tool-system、order-system、investment-system、salary-system（用各自的派送 token 讀 run）。
+- 需要 Secret `GOOGLE_HERS_CALENDAR_REFRESH_TOKEN`；沒設時先記在 jenny@lemonclean.com.tw。記錄失敗不影響派送。
+
 ## 共通
 
 - 各排程的執行結果會寫入主控表的執行 Log（`TOOLS_APP_LOG_SPREADSHEET_ID`）；詳細 log 在 GitHub Actions 該次執行裡。
