@@ -2,9 +2,12 @@
 import datetime as dt
 from unittest.mock import MagicMock
 
+from pathlib import Path
+
 from tools.scheduling import calendar_record as cr
 from tools.scheduling import schedule_settings as ss
 
+FIXTURES = Path(__file__).parent / "fixtures"
 NOW = dt.datetime(2026, 11, 16, 7, 30, tzinfo=cr.TZ)
 
 
@@ -88,16 +91,26 @@ def test_record_creates_events_once_and_skips_disabled_rows(monkeypatch):
     events = service.events.return_value
     events.list.return_value.execute.return_value = {"items": [
         {"extendedProperties": {"private": {"schedule_run": "jenny-smart/order-system#9"}}}]}
+    jobs[0]["id"] = 77
+    fetched = []
+
+    def fetch_log(job_id, repo="", token=""):
+        fetched.append((job_id, repo, token))
+        return (FIXTURES / "calendar_record_rating.log").read_text(encoding="utf-8")
+
     count = cr.record(now=NOW, rules=rules, api=api, service=service, calendar_id="jenny@hers.com.tw",
-                      log=lambda _t: None)
+                      log=lambda _t: None, fetch_log=fetch_log)
+    assert fetched == [(77, "", "t")]
     assert count == 1  # notify；schedule_report K 欄關、#9 已記過、#3 不是 Router 派送的
     body = events.insert.call_args.kwargs["body"]
     assert events.insert.call_args.kwargs["calendarId"] == "jenny@hers.com.tw"
     assert body["summary"] == "【排程】寄送日排程結果通知 ✅"
-    assert "✅ Run daily task" in body["description"]
-    assert "Checkout" not in body["description"]
-    assert "備註：說明" in body["description"]
-    assert "07:00～07:04" in body["description"]
+    desc = body["description"]
+    assert desc.startswith("執行結果：\nWINDOW 2026-11-16 07:00")  # 結果放最前面
+    assert "SAVE 台北 清潔客訴新增 0 筆（已登記略過 0 筆）" in desc
+    assert "Checkout" not in desc and "Run daily task" not in desc  # 成功的步驟不列
+    assert "備註" not in desc
+    assert "07:00～07:04" in desc
     assert body["reminders"] == {"useDefault": False, "overrides": []}
     assert body["extendedProperties"]["private"]["schedule_run"] == "jenny-smart/tool-system#1"
 
@@ -113,4 +126,34 @@ def test_failed_run_title_and_missing_token(monkeypatch):
                           "20261116T0700", "", [{"name": "run", "conclusion": "failure", "steps": [
                               {"name": "Run daily task", "conclusion": "failure"}]}])
     assert body["summary"] == "【排程】通知 ❌ 失敗"
-    assert "❌ Run daily task" in body["description"]
+    assert "失敗的步驟：\n❌ Run daily task" in body["description"]
+    assert "程式沒有印出結果訊息" in body["description"]
+
+
+def test_result_lines_keep_program_messages_only():
+    rating = cr.result_lines((FIXTURES / "calendar_record_rating.log").read_text(encoding="utf-8"))
+    assert rating[0] == "WINDOW 2026-11-16 07:00 ～ 2026-11-17 07:00"
+    assert "FINISH 11/16 07:00～11/17 07:00：台北 符合 0 筆新增 0 筆；台中 符合 0 筆新增 0 筆" in rating
+    joined = "\n".join(rating)
+    for noise in ("Using cached", "ScriptRunContext", "Traceback", "File \"", "版本：", "已初始化", "清理中",
+                  "RUN_REGIONS", "APIError"):
+        assert noise not in joined
+    change = cr.result_lines((FIXTURES / "calendar_record_change_order.log").read_text(encoding="utf-8"))
+    assert change == [
+        "【台北】已自檸檬後台補齊 1 格：第367列 LC00218565 D=https://chat.line.biz/x/chat/y",
+        "【台北】已補 T／Z 公式 2 格",
+        "【桃園】已補 T／Z 公式 1 格",
+        "⚠️ 【新竹】同步 ATM 工作表失敗：",
+        "⚠️ 【高雄】登入檸檬後台失敗，略過自動補齊 1 列：高雄 後台帳密未設定（需要對應的 *_EMAIL / *_PASSWORD）",
+        "清潔異動補齊完成：盤點 10 列，仍未備妥 3 列（每日 10:00 檢查會提醒）",
+        "⚠️ 執行 Log 寫入失敗：log_execution() got an unexpected keyword argument 'function_name'",
+        "✅ 清潔異動每日檢查執行成功",
+    ]
+
+
+def test_result_lines_truncates_long_output_and_keeps_errors():
+    log = "\n".join(f"2026-11-17T00:00:00Z 第 {i} 筆已新增" for i in range(100)) + "\n##[error]Process completed with exit code 1."
+    lines = cr.result_lines(log)
+    assert len(lines) == cr.MAX_RESULT_LINES
+    assert lines[0] == "第 0 筆已新增" and "中間略過" in lines[5]
+    assert lines[-1] == "❌ Process completed with exit code 1."
