@@ -1,0 +1,27 @@
+2026-11-17T00:01:08.0000000Z ##[group]Run actions/checkout@v4
+2026-11-17T00:01:08.0000000Z with:
+2026-11-17T00:01:08.0000000Z ##[endgroup]
+2026-11-17T00:01:09.0000000Z 已初始化空的 Git 版本庫
+2026-11-17T00:01:14.0000000Z ##[group]Run pip install -r requirements.txt
+2026-11-17T00:01:14.0000000Z pip install -r requirements.txt
+2026-11-17T00:01:14.0000000Z ##[endgroup]
+2026-11-17T00:01:19.0243842Z Using cached cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl (4.8 MB)
+2026-11-17T00:01:35.1724157Z ##[group]Run python -u -m shared.rating_schedule --job "$RUN_JOB"
+2026-11-17T00:01:35.1725361Z [36;1mpython -u -m shared.rating_schedule[0m
+2026-11-17T00:01:35.1796982Z   RUN_REGIONS: 台北,台中
+2026-11-17T00:01:35.1797804Z ##[endgroup]
+2026-11-17T00:01:36.9411693Z === 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+2026-11-17T00:01:36.9598905Z WINDOW 2026-11-16 07:00 ～ 2026-11-17 07:00
+2026-11-17T00:01:38.4296984Z 2026-11-17 00:01:38.429 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-11-17T00:01:44.7806175Z QUERY 台北 評價 0 筆，區間內要登記 0 筆（尚可／不滿意 0）
+2026-11-17T00:01:44.7806794Z SAVE 台北 清潔客訴新增 0 筆（已登記略過 0 筆）
+2026-11-17T00:01:51.5319870Z QUERY 台中 評價 0 筆，區間內要登記 0 筆（尚可／不滿意 0）
+2026-11-17T00:01:51.5320585Z SAVE 台中 清潔客訴新增 0 筆（已登記略過 0 筆）
+2026-11-17T00:01:52.5489729Z ⚠️ 記入行事曆失敗：<HttpError 404 when requesting https://www.googleapis.com/calendar/v3/calendars/***/events returned "Not Found">
+2026-11-17T00:01:52.5491899Z FINISH 11/16 07:00～11/17 07:00：台北 符合 0 筆新增 0 筆；台中 符合 0 筆新增 0 筆
+2026-11-17T00:01:55.3047080Z [execution_log_service] 寫入執行 Log 失敗（不影響主流程）: 
+2026-11-17T00:01:55.3057357Z Traceback (most recent call last):
+2026-11-17T00:01:55.3065122Z   File "/opt/x/gspread/client.py", line 168, in open_by_key
+2026-11-17T00:01:55.3077933Z gspread.exceptions.APIError: APIError: [403]: The caller does not have permission
+2026-11-17T00:01:59.3834108Z Post job cleanup.
+2026-11-17T00:01:59.6113983Z 清理中

@@ -5,7 +5,8 @@ Cloud Schedule Router 每 10 分鐘跑一次，派送完這個時段的功能後
   2. 到各 repo 查最近 LOOKBACK_HOURS 小時內由 Router 派送（run 標題 cloud-<時段>-<功能代號>）且已結束的 run。
   3. 還沒記過的（用事件的 extendedProperties.private.schedule_run 去重）就建一則行事曆事件：
        標題  【排程】功能名稱 ✅／❌ 失敗／⚠️ 取消
-       內容  功能代號／系統、排程時段、開始～完成、執行內容（各 job 的步驟，失敗的標 ❌）、備註、GitHub 連結
+       內容  執行結果（從 GitHub 執行日誌挑出程式印的結果行：新增幾筆、略過、⚠️／❌ 訊息…，濾掉安裝套件、
+           警告、Traceback 等雜訊）；最後附排程時段、執行時間、失敗的步驟、GitHub 連結
      時間＝run 完成的時間，30 分鐘，不跳提醒（只留紀錄；要處理的事各功能本來就會另建提醒）。
 
 一個功能記失敗不影響其他功能；讀不到某 repo（沒設 token）就略過那個 repo。
@@ -15,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -47,6 +49,65 @@ def github_api(path: str, repo: str = "", token: str = "") -> dict:
     with urllib.request.urlopen(req, timeout=30) as response:
         body = response.read()
         return json.loads(body) if body else {}
+
+
+MAX_RESULT_LINES = 30
+_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z ?")
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# 有中日文、全形符號或狀態符號的行才當成「結果」（程式給人看的訊息）
+_RESULT_RE = re.compile(r"[\u3000-\u9fff\uff00-\uffef✅❌⚠️⏭🔁📌]")
+# 準備環境的步驟（##[group]Run 後面的指令）整段略過
+_SETUP_RUN_RE = re.compile(r"^(actions/|pip |python -m pip|git |apt|sudo |npm |playwright install|echo |mkdir )")
+_NOISE_RE = re.compile(
+    r"missing ScriptRunContext|Session state does not function|DeprecationWarning|^\s*(File \"|\^|Traceback)"
+    r"|^\s{2,}|^\[command\]|Requirement already|^Using cached|^Collecting|^Downloading|^Successfully installed"
+    r"|^[=\-─━*#~]{3,}\s*$|版本：|^(GitHub 事件|GitHub cron|Log 目錄|Drive 根目錄|台北時間|執行任務|開始時間|結束時間|執行秒數)："
+    r"|Log 已提交|沒有新的 Log 需要提交|沒有 logs 目錄|^\[登入\] 已登入|檸檬後台已登出$")
+
+
+def fetch_job_log(job_id, repo: str = "", token: str = "") -> str:
+    """下載一個 job 的純文字日誌（GitHub 會轉址到暫存網址，Authorization 不能跟著轉過去）。"""
+    req = urllib.request.Request(
+        "https://api.github.com/repos/" + (repo or os.environ["GITHUB_REPOSITORY"]) + f"/actions/jobs/{job_id}/logs",
+        headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
+    req.add_unredirected_header("Authorization", "Bearer " + (token or os.environ["GH_TOKEN"]))
+    with urllib.request.urlopen(req, timeout=60) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def result_lines(log_text: str, limit: int = MAX_RESULT_LINES) -> list[str]:
+    """從 job 日誌挑出程式印的結果行：只看主要步驟（略過 checkout、安裝套件、git commit、Post 清理），
+    略過指令回顯／env 區塊與雜訊，保留有中文或 ✅❌⚠️ 的行與 ##[error]。太長時留前 5 行＋最後幾行。"""
+    lines, skip_step, in_group = [], False, False
+    for raw in str(log_text or "").splitlines():
+        line = _ANSI_RE.sub("", _TS_RE.sub("", raw)).rstrip()
+        if line.startswith("Post job cleanup") or line.startswith("##[group]Post "):
+            break
+        if line.startswith("##[group]"):
+            in_group = True
+            cmd = line[len("##[group]"):]
+            if cmd.startswith("Run "):
+                skip_step = bool(_SETUP_RUN_RE.match(cmd[4:].strip()))
+            continue
+        if line.startswith("##[endgroup]"):
+            in_group = False
+            continue
+        if in_group or skip_step:
+            continue
+        if line.startswith("##[error]"):
+            line = "❌ " + line[len("##[error]"):]
+        elif line.startswith("##["):
+            continue
+        text = line.strip()
+        if not text or _NOISE_RE.search(line) or not _RESULT_RE.search(text):
+            continue
+        text = text[:200]
+        if not lines or lines[-1] != text:
+            lines.append(text)
+    if len(lines) > limit:
+        tail = limit - 6
+        lines = lines[:5] + [f"…（中間略過 {len(lines) - 5 - tail} 行，完整內容見 GitHub）"] + lines[-tail:]
+    return lines
 
 
 def parse_title(title: str) -> Optional[tuple[str, str]]:
@@ -88,25 +149,27 @@ def step_lines(jobs: Iterable[dict]) -> list[str]:
     return lines
 
 
-def build_event(rule: ss.Rule, run: dict, slot: str, repo: str, jobs: list[dict]) -> dict:
+def failed_steps(jobs: Iterable[dict]) -> list[str]:
+    return [line for line in step_lines(jobs) if not line.startswith("✅")]
+
+
+def build_event(rule: ss.Rule, run: dict, slot: str, repo: str, jobs: list[dict],
+                results: Optional[list[str]] = None) -> dict:
     conclusion = run.get("conclusion") or "neutral"
     mark = CONCLUSION_MARK.get(conclusion, conclusion)
     started, finished = _local(run.get("run_started_at") or run.get("created_at")), _local(run.get("updated_at"))
     finished = finished or dt.datetime.now(TZ)
-    lines = [f"功能：{rule.name}（{rule.key}）",
-             f"系統：{ss.system_name(rule.key) or repo}",
-             f"結果：{mark}",
-             f"排程時段：{_slot_text(slot)}（{rule.freq}{(' ' + rule.days) if rule.days else ''}，{rule.mode}）"]
+    lines = ["執行結果："] + (results or ["（程式沒有印出結果訊息，詳見 GitHub 執行紀錄）"])
+    failed = failed_steps(jobs)
+    if failed:
+        lines += ["", "失敗的步驟："] + failed
+    lines += ["", f"{mark}　{rule.key}（{ss.system_name(rule.key) or repo}）",
+              f"排程時段：{_slot_text(slot)}"]
     if started:
         minutes = max(0, round((finished - started).total_seconds() / 60))
         lines.append(f"執行：{started:%H:%M}～{finished:%H:%M}（約 {minutes} 分鐘）")
-    steps = step_lines(jobs)
-    if steps:
-        lines += ["", "執行內容："] + steps
-    if rule.note:
-        lines += ["", f"備註：{rule.note}"]
     if run.get("html_url"):
-        lines += ["", f"GitHub：{run['html_url']}"]
+        lines.append(f"GitHub：{run['html_url']}")
     start = finished
     return {
         "summary": f"{TITLE_PREFIX}{rule.name} {mark}",
@@ -175,8 +238,25 @@ def completed_runs(rules: list[ss.Rule], since: dt.datetime, api: Callable = git
     return found
 
 
+def run_results(jobs: list[dict], repo: str, fetch_log: Callable = fetch_job_log,
+                log: Callable[[str], None] = print) -> list[str]:
+    results = []
+    for job in jobs:
+        try:
+            text = fetch_log(job["id"], repo=repo, token=_repo_token(repo))
+        except Exception as exc:  # 讀不到日誌就只記步驟
+            log(f"::warning::完成記行事曆：讀不到 job {job.get('id')} 日誌：{exc}")
+            continue
+        found = result_lines(text)
+        if found and len(jobs) > 1:
+            found = [f"【{job.get('name', '')}】"] + found
+        results += found
+    return results[:MAX_RESULT_LINES + 10]
+
+
 def record(now: Optional[dt.datetime] = None, rules: Optional[list[ss.Rule]] = None, api: Callable = github_api,
-           service=None, calendar_id: str = "", log: Callable[[str], None] = print) -> int:
+           service=None, calendar_id: str = "", log: Callable[[str], None] = print,
+           fetch_log: Callable = fetch_job_log) -> int:
     now = (now or dt.datetime.now(TZ)).astimezone(TZ)
     since = now - dt.timedelta(hours=LOOKBACK_HOURS)
     if rules is None:
@@ -203,7 +283,8 @@ def record(now: Optional[dt.datetime] = None, rules: Optional[list[ss.Rule]] = N
             log(f"::warning::完成記行事曆：讀不到 {rule.key} 的步驟：{exc}")
             jobs = []
         try:
-            body = build_event(rule, run, slot, repo, jobs)
+            results = run_results(jobs, repo, fetch_log=fetch_log, log=log)
+            body = build_event(rule, run, slot, repo, jobs, results)
             service.events().insert(calendarId=calendar_id, body=body, sendUpdates="none").execute()
         except Exception as exc:
             log(f"::warning::完成記行事曆：{rule.key} 建立事件失敗：{exc}")
