@@ -176,3 +176,16 @@ def test_result_lines_skip_secret_checks_and_keep_todo_details():
     assert cr.result_lines(log) == [
         "【台北】未備妥 1 筆", "【台北】未備妥：第367列 LC00218565（待退款）缺退款銀行代碼／帳號（P／Q）",
         "✅ 清潔異動每日檢查執行成功"]
+
+
+def test_result_lines_prefer_one_line_per_region():
+    """2026-11-17 Jenny：地區／備註各一行；有這種行時不再重複列 SAVE／FINISH。"""
+    log = "\n".join("2026-11-17T00:31:00Z " + t for t in [
+        "SAVE 台北 客人備註貼入 6 筆（重複略過 0 筆）",
+        "FINISH 11/16 08:00～11/17 08:00：台北 客人備註 6 筆貼入 6 筆、客服備註①②③ 8 筆貼入 8 筆；台中 …",
+        "台北／客人備註：貼入 6 筆（符合 6 筆）", "台北／客服備註：貼入 8 筆（符合 8 筆）",
+        "台中／客人備註：貼入 1 筆（符合 1 筆）", "台中／客服備註：沒有資料",
+        "⚠️ 記入行事曆失敗：<HttpError 404 when requesting https://www.googleapis.com/x returned>"])
+    assert cr.result_lines(log) == [
+        "台北／客人備註：貼入 6 筆（符合 6 筆）", "台北／客服備註：貼入 8 筆（符合 8 筆）",
+        "台中／客人備註：貼入 1 筆（符合 1 筆）", "台中／客服備註：沒有資料", "⚠️ 記入行事曆失敗：HttpError 404"]
