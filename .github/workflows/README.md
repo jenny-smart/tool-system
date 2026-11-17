@@ -29,6 +29,7 @@
 | **Scheduled Finance Jobs**（`scheduled_finance.yml`） | 1 日 00:30 固定費用；01:00 【儲值金】完整流程；02:00 全區現金缺口＋預收款金額＋年度review 整理／現金缺口區塊；05:00 排入月初藍新／鯨躍／現金缺口；02:00～23:00 每小時月初檢查；單月 10 日 10:00 會計事務所費用確認提醒 | GitHub（月初藍新／鯨躍由 **本機 Agent（Mac）** 執行） | 見下方「每月 1 日財務」。手動可選 target 與模擬執行日。 |
 | **Scheduled Gmail 401 Archive**（`Scheduled_gmail_401.yml`） | 每月 20 日 00:00 | GitHub | 把 Gmail 主旨含「401」信件的 401 PDF 附件，依檔名關鍵字存到各區雲端資料夾的西元年子資料夾（設定在 `systems.yaml` 的 `gmail_401`），處理過的信加上「401已歸檔」標籤。 |
 | **salary-system 建立期別**（`jenny-smart/salary-system` 的 `scheduler.yml`） | 每月 10、25 日 10:00（主控表「排程設定」`salary_create_period`） | GitHub（salary-system） | 由 Cloud Schedule Router 派送（原 salary-system GAS Trigger）；建立五區（不含新北）當期期別資料夾與檔案。需 Secret `SALARY_SYSTEM_DISPATCH_TOKEN`。 |
+| **op-system 業績報表更新**（`jenny-smart/op-system` 的 `performance-report.yml`） | 每日 00:20、08:10、18:10（主控表「排程設定」`op_performance_report`） | GitHub（op-system） | 由 Cloud Schedule Router 派送（原 op-system 自己的 cron 00:15／08:07／18:07）；更新 op-system.streamlit.app 讀的 dashboard_data。需 Secret `OP_SYSTEM_DISPATCH_TOKEN`；預設不啟用，切換步驟見 `docs/cloud-schedule.md`。 |
 | **New Year Generate**（`new_year_generate.yml`） | 只能手動 | GitHub | 年度切換：依主控表「生成新年度」產生新年度資料夾／檔案。參數：年度、列、`dry_run`（預設只預覽）、`fresh`。 |
 
 ## 富邦明細下載（唯一經過 Mac 的排程）

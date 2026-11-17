@@ -91,6 +91,26 @@ Actions: Read and write）。
 
 > 「排程設定」分頁若已用舊預設（17:10）補上這一列，Router 不會改既有列，請直接把 D 欄時間改成 `10:00`。
 
+### op-system（2026-11-17 與 Jenny 確認）
+
+op-system（業績報表 app：op-system.streamlit.app）的資料更新原本是它自己 `performance-report.yml` 的 GitHub cron
+（台北 08:07／18:07／00:15），現在改成這張分頁的一列，由 Router 派送到 `jenny-smart/op-system`，
+需要 Secret `OP_SYSTEM_DISPATCH_TOKEN`（fine-grained token，只給 op-system 的 Actions: Read and write）。
+
+| 功能代號 | 預設時間 | Workflow |
+|---|---|---|
+| op_performance_report | 每日 00:20、08:10、18:10 | performance-report.yml（時間要是 10 分鐘的倍數，原 00:15／08:07／18:07 順延到最近的整十分） |
+
+這列**預設不啟用**。切換步驟：
+1. op-system 合併讓 `performance-report.yml` 接受 `scheduled_slot` 的改動。
+2. tool-system 新增 Secret `OP_SYSTEM_DISPATCH_TOKEN`。
+3. 在「排程設定」勾選 `op_performance_report` 的「啟用」（時間要改就直接改 D 欄）。
+4. 到 op-system 新增 repository variable `EXTERNAL_SCHEDULER_ENABLED=true`，讓它自己的 cron 略過，避免同一時段跑兩次。
+   確認 Actions 出現 `cloud-…` 的執行後，op-system 原本的 cron 就不會再觸發。
+5. 回復：把這個 variable 設成 false（或刪掉），原 cron 隨即恢復。
+
+和 tool-system 自己的 `performance_report`（寫進 tool-system 的 dashboard_data）是兩條不同的資料線，互不影響。
+
 先前版本的 `invest_month_end`、`invest_fund_freeze`、`invest_month_roll` 已停用（月底固定改由
 `invest_month_end_ledger` 派送 month-end-ledger.yml），分頁裡這三列請刪除；Router 會在 log 提醒，這三列不會執行。
 
