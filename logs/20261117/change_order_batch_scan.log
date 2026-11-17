@@ -1,0 +1,26 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+[登入] 已登入
+【台北】檸檬後台已登出
+[登入] 已登入
+【桃園】檸檬後台已登出
+【台北】4 筆
+　第364列 待收款 異動服務收款 LC00220170 1800：開立發票
+　第365列 待返儲值金 物損退款 LC00217063 3000：異動儲值金
+　第366列 待退款 異動服務退款 LC00220698 4275：開立折讓單、藍新信用卡退款
+　第367列 待退款 異動服務退款 LC00218565 3990：開立折讓單、藍新信用卡退款
+【桃園】3 筆
+　第89列 待收款 異動服務收款 LC00220560 1800：開立發票
+　第90列 待收款 異動服務收款 LC00220688 ：開立發票
+　第91列 待退款 異動服務退款 LC002205902 2945：開立折讓單、藍新信用卡退款
+【新竹】2 筆
+　第16列 待退款 其他 LC00220603 3600：回寫系統
+　第17列 待退款 其他 LC002206691 4050：開立折讓單、藍新信用卡退款
+
+未備妥／需人工 1 筆（每日 10:00 檢查會另外提醒）
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已存盤點結果，Tools App 會跳視窗
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已在 jenny@hers.com.tw 建立提醒：【清潔異動】盤點：可執行 9 筆，請確認後執行
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已排入 Mac 提醒視窗
