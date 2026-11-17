@@ -16,10 +16,11 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
   J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system／salary-system），程式自動填，顯示用
-  K 完成記行事曆 TRUE／FALSE：Router 派送的這個功能跑完後，在 jenny@hers.com.tw 行事曆留一則紀錄
-                （功能名稱、成功／失敗、執行內容摘要、備註、GitHub 連結；不跳提醒）。空白＝預設：
-                一天只跑幾次的功能 TRUE；時間是「每 N 分鐘／每小時」的高頻功能 FALSE（避免洗版）
-                見 tools/scheduling/calendar_record.py
+  J 欄之後是你自己加的欄位（程式限制、排在這個時段的原因…），程式不讀也不寫。
+  「完成記行事曆」TRUE／FALSE：依標題找欄位（不固定在哪一欄）；分頁沒有這欄時加在最後一個有標題的欄位後面。
+                Router 派送的這個功能跑完後，在 jenny@hers.com.tw 行事曆留一則紀錄（功能名稱、成功／失敗、
+                執行內容摘要、備註、GitHub 連結；不跳提醒）。空白＝預設：一天只跑幾次的功能 TRUE；
+                時間是「每 N 分鐘／每小時」的高頻功能 FALSE（避免洗版）。見 tools/scheduling/calendar_record.py
 
 功能也可以派送到其他 repo 的 workflow（例如 order-system 的週末提醒、investment-system 的
 月底轉值），見 EXTERNAL_DISPATCH_TOKENS。
@@ -32,10 +33,30 @@ from datetime import date, datetime, timedelta
 from typing import Callable, Iterable, Optional
 
 SHEET_NAME = "排程設定"
-HEADER = ["啟用", "功能代號", "功能名稱", "時間", "頻率", "日期／星期", "遇例假日", "執行方式", "備註", "系統名稱",
-          "完成記行事曆"]
+HEADER = ["啟用", "功能代號", "功能名稱", "時間", "頻率", "日期／星期", "遇例假日", "執行方式", "備註", "系統名稱"]
 SYSTEM_COL = "J"  # 系統名稱欄（前面各欄位置不變）
-RECORD_COL = "K"  # 完成記行事曆欄（2026-11-16 Jenny：排程完成都記 jenny@hers.com.tw 行事曆）
+# 完成記行事曆欄（2026-11-16 Jenny：排程完成都記 jenny@hers.com.tw 行事曆）。
+# 依標題找欄位：J 欄之後 Jenny 自己加了「程式限制」「排在這個時段的原因」等欄，不能用固定欄位。
+RECORD_HEADER = "完成記行事曆"
+
+
+def col_letter(index: int) -> str:
+    """0 起算的欄位序號 → A1 欄名（0→A、10→K、26→AA）。"""
+    letters = ""
+    index += 1
+    while index:
+        index, rem = divmod(index - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
+def record_col_index(header_row: list) -> tuple[int, bool]:
+    """(「完成記行事曆」欄的序號, 是否已存在)。沒有這欄時用最後一個有標題的欄位之後那一欄（不蓋掉任何既有欄位）。"""
+    cells = [str(c).strip() for c in header_row]
+    if RECORD_HEADER in cells:
+        return cells.index(RECORD_HEADER), True
+    last = max((i for i, c in enumerate(cells) if c), default=len(HEADER) - 1)
+    return max(last + 1, len(HEADER)), False
 THIS_SYSTEM = "tool-system"
 
 MODE_DIRECT = "直接執行"
@@ -335,7 +356,8 @@ def default_record_calendar(time_text) -> bool:
     return "每" not in str(time_text or "")
 
 
-def parse_row(row: list) -> Optional[Rule]:
+def parse_row(row: list, record=None) -> Optional[Rule]:
+    """row＝A～J；record＝「完成記行事曆」欄的值（None／空白＝依時間欄給預設）。"""
     cells = [row[i] if i < len(row) else "" for i in range(len(HEADER))]
     key = str(cells[1] or "").strip()
     if not key:
@@ -345,7 +367,8 @@ def parse_row(row: list) -> Optional[Rule]:
                 freq=str(cells[4] or "").strip() or "每日", days=str(cells[5] or "").strip(),
                 holiday=str(cells[6] or "").strip() or HOLIDAY_RUN, mode=str(cells[7] or "").strip() or MODE_DIRECT,
                 errors=errors, note=str(cells[8] or "").strip(),
-                record_calendar=(_truthy(cells[10]) if str(cells[10]).strip() else default_record_calendar(cells[3])))
+                record_calendar=(_truthy(record) if str(record if record is not None else "").strip()
+                                 else default_record_calendar(cells[3])))
     if key in RETIRED_KEYS:
         rule.errors.append(f"這個功能已停用（{RETIRED_KEYS[key]}），請刪除這列")
     elif key not in FUNCTIONS:
@@ -471,8 +494,14 @@ def system_name(key: str) -> str:
 
 
 def with_system(row: list) -> list:
-    """DEFAULT_ROWS 的一列（A～I）補上 J 系統名稱、K 完成記行事曆（預設值）。"""
-    return list(row) + [""] * (9 - len(row)) + [system_name(str(row[1])), default_record_calendar(row[3])]
+    """DEFAULT_ROWS 的一列（A～I）補上 J 系統名稱。"""
+    return list(row) + [""] * (9 - len(row)) + [system_name(str(row[1]))]
+
+
+def with_record(row: list, record_index: int) -> list:
+    """DEFAULT_ROWS 的一列補上 J 系統名稱，並在「完成記行事曆」欄填預設值（中間的自訂欄位留 None＝不寫）。"""
+    full = with_system(row)
+    return full + [None] * (record_index - len(full)) + [default_record_calendar(row[3])]
 
 
 def dispatch_for(rule: Rule, when: datetime) -> tuple[str, dict]:
@@ -541,23 +570,26 @@ def ensure_sheet(service=None, spreadsheet_id: str = "", log: Callable[[str], No
         ).execute()
         service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A1", valueInputOption="RAW",
-            body={"values": [HEADER] + [with_system(r) for r in DEFAULT_ROWS]},
+            body={"values": [HEADER + [RECORD_HEADER]] + [with_record(r, len(HEADER)) for r in DEFAULT_ROWS]},
         ).execute()
         log(f"已建立「{SHEET_NAME}」分頁（{len(DEFAULT_ROWS)} 個功能）")
         return True
     rows = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!B2:G").execute().get("values", [])
+    header_row = (service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!1:1").execute().get("values") or [[]])[0]
+    record_index, _exists = record_col_index(header_row)
     _upgrade_outdated_rows(service, spreadsheet_id, rows, log)
     have = {str(r[0]).strip() for r in rows if r}
     missing = [row for row in DEFAULT_ROWS if row[1] not in have]
     if missing:
         service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A:{RECORD_COL}", valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS", body={"values": [with_system(r) for r in missing]},
+            spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A:{col_letter(record_index)}", valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS", body={"values": [with_record(r, record_index) for r in missing]},
         ).execute()
         log(f"「{SHEET_NAME}」補上新功能：{'、'.join(r[1] for r in missing)}")
     _fill_system_column(service, spreadsheet_id, rows, log)
-    _fill_record_column(service, spreadsheet_id, rows, log)
+    _fill_record_column(service, spreadsheet_id, rows, header_row, log)
     return False
 
 
@@ -584,22 +616,25 @@ def _fill_system_column(service, spreadsheet_id: str, rows: list[list], log: Cal
         log(f"「{SHEET_NAME}」系統名稱欄補上 {len(data)} 格")
 
 
-def _fill_record_column(service, spreadsheet_id: str, rows: list[list], log: Callable[[str], None]) -> None:
-    """K 欄沒有標題就補「完成記行事曆」；既有列 K 欄空白的填預設（D 欄有「每」＝高頻→FALSE，其他 TRUE），
-    已勾選／取消的不改。rows＝B2:G 的值；新補上的列 append 時已經帶 K。"""
+def _fill_record_column(service, spreadsheet_id: str, rows: list[list], header_row: list,
+                        log: Callable[[str], None]) -> None:
+    """依標題找「完成記行事曆」欄（沒有就加在最後一個有標題的欄位後面）；空白的格子填預設
+    （D 欄有「每」＝高頻→FALSE，其他 TRUE），已勾選／取消的不改。rows＝B2:G 的值；新補上的列 append 時已經帶值。"""
+    index, exists = record_col_index(header_row)
+    col = col_letter(index)
     current = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!{RECORD_COL}1:{RECORD_COL}{len(rows) + 1}",
-    ).execute().get("values", [])
+        spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!{col}1:{col}{len(rows) + 1}",
+    ).execute().get("values", []) if exists else []
     current += [[]] * (len(rows) + 1 - len(current))
     data = []
-    if not (current[0] and str(current[0][0]).strip()):
-        data.append({"range": f"'{SHEET_NAME}'!{RECORD_COL}1", "values": [[HEADER[10]]]})
+    if not exists:
+        data.append({"range": f"'{SHEET_NAME}'!{col}1", "values": [[RECORD_HEADER]]})
     for offset, row in enumerate(rows):
         key = str(row[0]).strip() if row else ""
         cell = current[offset + 1]
         if key and not (cell and str(cell[0]).strip()):
             time_text = row[2] if len(row) > 2 else ""
-            data.append({"range": f"'{SHEET_NAME}'!{RECORD_COL}{offset + 2}",
+            data.append({"range": f"'{SHEET_NAME}'!{col}{offset + 2}",
                          "values": [[default_record_calendar(time_text)]]})
     if data:
         service.spreadsheets().values().batchUpdate(
@@ -613,12 +648,14 @@ def load_rules(log: Callable[[str], None] = print) -> tuple[list[Rule], bool]:
         service, spreadsheet_id = _service_and_id()
         ensure_sheet(service, spreadsheet_id, log=log)
         values = service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A2:{RECORD_COL}",
+            spreadsheetId=spreadsheet_id, range=f"'{SHEET_NAME}'!A1:ZZ",
             valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
     except Exception as exc:
         log(f"::warning::讀不到「{SHEET_NAME}」，改用程式內建的預設排程：{exc}")
         return default_rules(), False
-    rules = [r for r in (parse_row(row) for row in values) if r]
+    index, exists = record_col_index(values[0] if values else [])
+    rules = [r for r in (parse_row(row[:len(HEADER)], row[index] if exists and index < len(row) else None)
+                         for row in values[1:]) if r]
     for r in rules:
         for err in r.errors:
             log(f"::warning::「{SHEET_NAME}」{r.key}：{err}（這列不會執行）")

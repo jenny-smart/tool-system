@@ -9,17 +9,42 @@ NOW = dt.datetime(2026, 11, 16, 7, 30, tzinfo=cr.TZ)
 
 
 def _rule(key, name="名稱", times="07:00", record=""):
-    return ss.parse_row([True, key, name, times, "每日", "", "照跑", ss.MODE_DIRECT, "說明", "", record])
+    return ss.parse_row([True, key, name, times, "每日", "", "照跑", ss.MODE_DIRECT, "說明", ""], record)
 
 
 def test_record_column_default_and_override():
-    assert ss.HEADER[10] == "完成記行事曆"
     assert _rule("notify").record_calendar is True
     assert _rule("atm_unpaid", times="09:00~18:00 每30分鐘").record_calendar is False
     assert _rule("notify", record=False).record_calendar is False
     assert _rule("atm_unpaid", times="09:00~18:00 每30分鐘", record=True).record_calendar is True
     assert _rule("notify").note == "說明"
-    assert ss.with_system(ss.DEFAULT_ROWS[0])[10] is True
+    assert _rule("notify", record="order-system shared/x.py").record_calendar is False  # 只認 TRUE
+
+
+def test_record_column_found_by_header_never_overwrites_custom_columns():
+    custom = list(ss.HEADER) + ["程式限制（改時間要同步改的程式）", "排在這個時段的原因"]
+    assert ss.record_col_index(custom) == (12, False)  # 加在 M 欄，不蓋 K、L
+    assert ss.record_col_index(custom + ["", ss.RECORD_HEADER]) == (13, True)
+    assert ss.record_col_index(list(ss.HEADER)) == (10, False)
+    assert ss.record_col_index([]) == (10, False)
+    assert ss.col_letter(12) == "M" and ss.col_letter(26) == "AA"
+    row = ss.with_record(ss.DEFAULT_ROWS[0], 12)
+    assert row[10] is None and row[11] is None and row[12] is True
+
+
+def test_load_rules_reads_record_column_by_header(monkeypatch):
+    header = list(ss.HEADER) + ["程式限制", "原因", ss.RECORD_HEADER]
+    rows = [header,
+            [True, "notify", "通知", "07:00", "每日", "", "照跑", ss.MODE_DIRECT, "", "tool-system", "TRUE", "x", False],
+            [True, "gmail_401", "401", "00:00", "每月", "20", "照跑", ss.MODE_DIRECT, "", "tool-system", "說明"]]
+    service = MagicMock()
+    service.spreadsheets.return_value.values.return_value.get.return_value.execute.return_value = {"values": rows}
+    monkeypatch.setattr(ss, "_service_and_id", lambda: (service, "sid"))
+    monkeypatch.setattr(ss, "ensure_sheet", lambda *a, **k: False)
+    rules, ok = ss.load_rules(log=lambda _t: None)
+    assert ok
+    by_key = {r.key: r.record_calendar for r in rules}
+    assert by_key == {"notify": False, "gmail_401": True}  # K 欄「TRUE」是程式限制欄，不採用
 
 
 def test_parse_title():
