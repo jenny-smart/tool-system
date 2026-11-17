@@ -40,17 +40,19 @@ def _month_display(month: str) -> str:
 
 
 def _choose_supply_purchase_destination(page: Page, item: dict[str, object]) -> None:
-    """優先使用與廠商同名的常用轉入帳號，找不到才依報表自行輸入。"""
+    """常用轉入帳號先找與廠商同名的，再找與報表 O 欄相同帳號的；都找不到才依報表自行輸入。"""
     supplier = str(item.get("supplier") or "").strip()
-    if supplier:
+    account_number = str(item.get("account_number") or "").strip()
+    if supplier or account_number:
         try:
-            choose_saved_destination(page, supplier)
-            print(f"已找到同名常用轉入帳號：{supplier}")
+            choose_saved_destination(page, supplier or account_number, account_number=account_number)
+            print(f"已選擇常用轉入帳號：{supplier or account_number}")
             return
         except SavedAccountNotFound:
-            print(f"常用轉入帳號找不到同名廠商「{supplier}」，改用報表帳號自行輸入。")
+            print(f"常用轉入帳號找不到同名廠商「{supplier}」或相同帳號「{account_number}」，"
+                  "改用報表銀行代碼＋帳號自行輸入。")
     else:
-        print("廠商名稱空白，改用報表帳號自行輸入。")
+        print("廠商名稱與帳號都空白，改用報表帳號自行輸入。")
 
     choose_manual_destination(page)
     # 點「自行輸入」後，富邦會以 AJAX 建立銀行代碼下拉元件；稍候再填值，

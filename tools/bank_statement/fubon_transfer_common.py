@@ -242,12 +242,53 @@ def _has_duplicate_warning(page: Page) -> bool:
     return False
 
 
+def close_account_popup(page: Page) -> None:
+    """關閉帳號選擇彈出視窗（form1:inAccountList_popup_com 等）。
+
+    Escape 關不掉這個視窗；留著會蓋住「自行輸入」的帳號欄位，點擊一直被擋到逾時。
+    先點視窗裡的關閉鈕，點不到就直接把視窗（和遮罩）隱藏。"""
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    for context in _all_fubon_contexts(page):
+        try:
+            popups = context.locator('[id$="_popup_com"]:visible, .popup_com:visible')
+            for i in range(popups.count()):
+                popup = popups.nth(i)
+                closer = popup.locator(
+                    '.close, .btn_close, [class*="close"], a:has-text("關閉"), '
+                    'button:has-text("關閉"), a:has-text("取消"), button:has-text("取消"), '
+                    'a:has-text("×"), span:has-text("×")'
+                )
+                clicked = False
+                for j in range(closer.count()):
+                    try:
+                        if closer.nth(j).is_visible():
+                            closer.nth(j).click(timeout=2_000)
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+                page.wait_for_timeout(300)
+                if not clicked or popup.is_visible():
+                    popup.evaluate("el => { el.style.display = 'none'; }")
+            context.evaluate(
+                """() => document.querySelectorAll('.popup_mask, .ui-widget-overlay, .mask, .overlay')
+                     .forEach(el => { if (el.offsetParent !== null) el.style.display = 'none'; })"""
+            )
+        except Exception:
+            continue
+    page.wait_for_timeout(300)
+
+
 def _select_account_card(
-    page: Page, row_label: str, target_text: str, *, success_label: str | None = None
+    page: Page, row_label: str, target_text: str, *, success_label: str | None = None,
+    alt_texts: tuple[str, ...] = (),
 ) -> None:
     """點開富邦的帳號選擇彈出視窗（轉出帳號／轉入帳號皆用同一套元件：
     點擊「==請選擇==」會跳出「共找到 N 筆帳號」的卡片清單），並點選文字
-    符合 target_text 的帳號卡片。"""
+    符合 target_text 的帳號卡片；找不到時依序找 alt_texts（例如帳號）。"""
     label = success_label or target_text
     row = _row_for_label(page, row_label)
     row_text = row.inner_text()
@@ -278,15 +319,23 @@ def _select_account_card(
     click_nearest_control(trigger)
 
     card = None
+    targets = [t for t in (target_text, *alt_texts) if t]
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and card is None:
-        for context in _all_fubon_contexts(page):
-            try:
-                node = _visible(context.get_by_text(target_text, exact=False))
-            except Exception:
-                node = None
-            if node is not None:
-                card = node
+        # 卡片清單是 AJAX 載入的，每輪依序找名字、再找帳號，第一個找到的就用
+        for text in targets:
+            for context in _all_fubon_contexts(page):
+                try:
+                    node = _visible(context.get_by_text(text, exact=False))
+                except Exception:
+                    node = None
+                if node is not None:
+                    card = node
+                    break
+            if card is not None:
+                if text != target_text:
+                    print(f"{row_label}找不到「{target_text}」，改用相同帳號「{text}」的常用帳號。")
+                    target_text, label = text, f"{label}（帳號 {text}）"
                 break
         if card is None:
             page.wait_for_timeout(200)
@@ -296,13 +345,10 @@ def _select_account_card(
         # 還開著，沒有卡片可點也不會自己關閉。若放著不管，「自行輸入」與
         # 銀行代碼下拉框後續的文字/元件查詢，可能會誤抓到還留在畫面上的
         # 這個舊彈出視窗，導致找不到『自行輸入』後續產生的銀行代碼下拉框。
-        # 用 Escape 關閉，讓畫面回到乾淨狀態再交給自行輸入流程。
-        try:
-            page.keyboard.press("Escape")
-        except Exception:
-            pass
-        page.wait_for_timeout(300)
-        raise SavedAccountNotFound(f"{row_label}的帳號選擇視窗找不到「{target_text}」")
+        # 關閉後畫面回到乾淨狀態再交給自行輸入流程（只按 Escape 關不掉，
+        # 視窗會一直蓋住帳號欄位，自行輸入時點擊被擋到逾時）。
+        close_account_popup(page)
+        raise SavedAccountNotFound(f"{row_label}的帳號選擇視窗找不到「{'／'.join(targets)}」")
     # 富邦帳號卡片需要可信任的滑鼠事件才會觸發 AJAX；直接執行 DOM click
     # 偶爾只會關閉清單，卻不會把選擇帶回表單。
     try:
@@ -356,12 +402,14 @@ def select_account_card_with_retry(
     *,
     success_label: str | None = None,
     max_attempts: int = 3,
+    alt_texts: tuple[str, ...] = (),
 ) -> None:
     # 富邦這個「重覆交易」提示本身就是指示使用者重新執行一次；
     # 依畫面指示忽略警告、重新選一次即可，不需要整頁重新載入。
     for attempt in range(1, max_attempts + 1):
         try:
-            _select_account_card(page, row_label, target_text, success_label=success_label)
+            _select_account_card(page, row_label, target_text, success_label=success_label,
+                                 alt_texts=alt_texts)
             return
         except DuplicateTransactionWarning:
             if attempt == max_attempts:
@@ -377,10 +425,7 @@ def select_account_card_with_retry(
                     f"已嘗試選擇「{target_text}」{max_attempts} 次，富邦畫面仍未更新。"
                 )
             print(f"{row_label}點選後未更新，重新開啟帳號清單（第 {attempt + 1} 次嘗試）。")
-            try:
-                page.keyboard.press("Escape")
-            except Exception:
-                pass
+            close_account_popup(page)
             page.wait_for_timeout(1_000)
 
 
@@ -392,9 +437,12 @@ def choose_source_account(
     select_account_card_with_retry(page, "轉出帳號", "松高分行", max_attempts=max_attempts)
 
 
-def choose_saved_destination(page: Page, name: str, max_attempts: int = 3) -> None:
-    """轉入帳號點第一個框（已使用過的常用轉入帳號），依名字選卡片。"""
-    select_account_card_with_retry(page, "轉入帳號", name, max_attempts=max_attempts)
+def choose_saved_destination(page: Page, name: str, max_attempts: int = 3,
+                             account_number: str = "") -> None:
+    """轉入帳號點第一個框（已使用過的常用轉入帳號），依名字選卡片；
+    給了 account_number 時，名字找不到再找相同帳號的卡片。"""
+    alt = (account_number,) if account_number and account_number != name else ()
+    select_account_card_with_retry(page, "轉入帳號", name, max_attempts=max_attempts, alt_texts=alt)
 
 
 def choose_manual_destination(page: Page) -> None:
