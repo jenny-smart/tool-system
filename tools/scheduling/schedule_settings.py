@@ -15,7 +15,7 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
   G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期遇例假日改到前一個工作日）
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
-  J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system／salary-system），程式自動填，顯示用
+  J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system／salary-system／op-system），程式自動填，顯示用
   J 欄之後是你自己加的欄位（程式限制、排在這個時段的原因…），程式不讀也不寫。
   「完成記行事曆」TRUE／FALSE：依標題找欄位（不固定在哪一欄）；分頁沒有這欄時加在最後一個有標題的欄位後面。
                 Router 派送的這個功能跑完後，在 jenny@hers.com.tw 行事曆留一則紀錄（功能名稱、成功／失敗、
@@ -128,6 +128,9 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     # region 留空＝workflow 預設五區（台北,台中,桃園,新竹,高雄，不含新北）
     "salary_create_period": ("jenny-smart/salary-system:scheduler.yml",
                              lambda w: {"period": _half_period(w), "region": "", "action": "create_period"}),
+    # op-system（業績報表 Streamlit app：op-system.streamlit.app 讀的 dashboard_data）：原本是 op-system 自己的 GitHub cron，
+    # 2026-11-17 Jenny：併到這裡的「排程設定」。時間要是 10 分鐘的倍數，原 08:07／18:07／00:15 改成 08:10／18:10／00:20。
+    "op_performance_report": ("jenny-smart/op-system:performance-report.yml", {}),
     # 月排程
     "half_month_orders_1": ("scheduled_monthly.yml",
                             lambda w: {"target": "half_month_orders_1", "period": w.strftime("%Y%m") + "-1"}),
@@ -286,6 +289,11 @@ DEFAULT_ROWS: list[list] = [
     # 2026-11-09 Jenny：時間統一改成 10:00（原 GAS 是 10:00；17:10 是殘留的舊觸發器）。
     [False, "salary_create_period", "【薪資】建立期別資料夾與檔案（五區，不含新北）", "10:00", "每月", "10,25", "照跑",
      MODE_DIRECT, "程式在 salary-system（scheduler.yml）；期別＝執行日的半月（10 日→-1、25 日→-2）"],
+    # op-system：2026-11-17 Jenny，業績報表 app（op-system.streamlit.app）的更新排程改由這裡派送（原 op-system 自己的 cron 08:07／18:07／00:15）。
+    # 預設不啟用：tool-system 設好 OP_SYSTEM_DISPATCH_TOKEN、op-system 合併 scheduled_slot 版 performance-report.yml 後勾選啟用，
+    # 再把 repository variable EXTERNAL_SCHEDULER_ENABLED=true 設在 op-system，讓它自己的 cron 略過（避免同一時段跑兩次）。
+    [False, "op_performance_report", "【OP】業績報表更新（op-system app）", "00:20,08:10,18:10", "每日", "", "照跑",
+     MODE_DIRECT, "程式在 op-system（performance-report.yml）；原 cron 台北 00:15／08:07／18:07，改成 10 分鐘的倍數"],
 ]
 
 
@@ -474,6 +482,7 @@ EXTERNAL_DISPATCH_TOKENS = {
     "jenny-smart/order-system": "ORDER_SYSTEM_DISPATCH_TOKEN",
     "jenny-smart/investment-system": "INVESTMENT_SYSTEM_DISPATCH_TOKEN",
     "jenny-smart/salary-system": "SALARY_SYSTEM_DISPATCH_TOKEN",
+    "jenny-smart/op-system": "OP_SYSTEM_DISPATCH_TOKEN",
 }
 
 
