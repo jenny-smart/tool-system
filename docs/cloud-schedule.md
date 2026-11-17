@@ -19,7 +19,7 @@
   | 遇例假日 | 照跑／略過／提前（每月的日期遇週末或國定假日改到前一個工作日，依政府辦公日曆） |
   | 執行方式 | 直接執行／盤點後自動排入（排給 Mac Agent）／盤點後等確認（只盤點＋行事曆提醒） |
   | 系統名稱 | 功能屬於哪個系統（tool-system／order-system／investment-system／salary-system），放在 J 欄，程式自動填，空白才填、不改你填過的 |
-  | 完成記行事曆 | K 欄，TRUE／FALSE。勾選的功能跑完後在 jenny@hers.com.tw 行事曆留一則紀錄（`【排程】功能名稱 ✅／❌ 失敗`，內容含執行步驟、備註、GitHub 連結，不跳提醒）。空白＝預設：時間有「每 N 分鐘／每小時」的高頻功能不記，其他都記。由 Router 最後一步 `tools/scheduling/calendar_record.py` 處理 |
+  | 完成記行事曆 | 依標題找欄位（目前在「排在這個時段的原因」後面，M 欄），TRUE／FALSE；J 欄之後你自己加的欄位程式不讀也不寫。勾選的功能跑完後在 jenny@hers.com.tw 行事曆留一則紀錄（`【排程】功能名稱 ✅／❌ 失敗`，內容含執行步驟、備註、GitHub 連結，不跳提醒）。空白＝預設：時間有「每 N 分鐘／每小時」的高頻功能不記，其他都記。由 Router 最後一步 `tools/scheduling/calendar_record.py` 處理 |
 - 去重以「時段＋功能代號」為單位（GitHub run 標題 `cloud-YYYYMMDDTHHMM-功能代號`），
   同一時段、同一個 workflow 的不同功能都會派送；同一功能重試不會重複派送。
 - 欄位填錯（時間不是 10 分鐘倍數、代號不認得…）的那一列不會執行，Router log 會列出原因。

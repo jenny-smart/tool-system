@@ -255,7 +255,8 @@ class ScheduleTests(unittest.TestCase):
         responses = {
             f"'{ss.SHEET_NAME}'!B2:G": {'values': existing},
             f"'{ss.SHEET_NAME}'!J1:J{len(existing) + 1}": {'values': [[], ['自訂名稱']]},
-            f"'{ss.SHEET_NAME}'!K1:K{len(existing) + 1}": {'values': [['完成記行事曆'], [False]]},
+            f"'{ss.SHEET_NAME}'!1:1": {'values': [ss.HEADER + ['程式限制', '原因', ss.RECORD_HEADER]]},
+            f"'{ss.SHEET_NAME}'!M1:M{len(existing) + 1}": {'values': [[ss.RECORD_HEADER], [False]]},
         }
         values.get.side_effect = lambda spreadsheetId, range: MagicMock(
             execute=MagicMock(return_value=responses[range]))
@@ -265,10 +266,11 @@ class ScheduleTests(unittest.TestCase):
         cells = {d['range']: d['values'][0][0] for call in values.batchUpdate.call_args_list
                  for d in call.kwargs['body']['data']}
         record = cells
-        self.assertNotIn(f"'{ss.SHEET_NAME}'!K1", record)  # 已有標題
-        self.assertNotIn(f"'{ss.SHEET_NAME}'!K2", record)  # 已取消勾選不改
-        self.assertNotIn(f"'{ss.SHEET_NAME}'!K4", record)  # 空白列
-        self.assertIs(record[f"'{ss.SHEET_NAME}'!K3"], True)
+        self.assertFalse([r for r in record if '!K' in r or '!L' in r])  # 自訂欄位不動
+        self.assertNotIn(f"'{ss.SHEET_NAME}'!M1", record)  # 已有標題
+        self.assertNotIn(f"'{ss.SHEET_NAME}'!M2", record)  # 已取消勾選不改
+        self.assertNotIn(f"'{ss.SHEET_NAME}'!M4", record)  # 空白列
+        self.assertIs(record[f"'{ss.SHEET_NAME}'!M3"], True)
         self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J1"], '系統名稱')
         self.assertNotIn(f"'{ss.SHEET_NAME}'!J2", cells)   # 已填「自訂名稱」不改
         self.assertNotIn(f"'{ss.SHEET_NAME}'!J4", cells)   # 空白列
