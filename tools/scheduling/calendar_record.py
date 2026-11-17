@@ -72,7 +72,8 @@ _NOISE_RE = re.compile(
     r"missing ScriptRunContext|Session state does not function|DeprecationWarning|^\s*(File \"|\^|Traceback)"
     r"|^\s{2,}|^\[command\]|Requirement already|^Using cached|^Collecting|^Downloading|^Successfully installed"
     r"|^[=\-─━*#~]{3,}\s*$|版本：|^(GitHub 事件|GitHub cron|Log 目錄|Drive 根目錄|台北時間|執行任務|開始時間|結束時間|執行秒數)："
-    r"|Log 已提交|沒有新的 Log 需要提交|沒有 logs 目錄|^\[登入\] 已登入|檸檬後台已登出$")
+    r"|Log 已提交|沒有新的 Log 需要提交|沒有 logs 目錄|^\[登入\] 已登入|檸檬後台已登出$"
+    r"|已設定：|^(✅\s*)?已設定")
 
 
 def fetch_job_log(job_id, repo: str = "", token: str = "") -> str:
@@ -115,7 +116,7 @@ def result_lines(log_text: str, limit: int = MAX_RESULT_LINES) -> list[str]:
         if not text or _NOISE_RE.search(text) or _PROCESS_RE.search(text):
             continue
         text = _HTTP_ERROR_RE.sub(r"HttpError \1", text)
-        text = _URL_RE.sub("", text).strip()[:150]
+        text = _URL_RE.sub("", text).strip()[:200]
         if text and (not lines or lines[-1] != text):
             lines.append(text)
     outcomes = [t for t in lines if _OUTCOME_RE.search(t)]
