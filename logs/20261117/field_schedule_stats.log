@@ -1,0 +1,31 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.18/x64/bin/python -u -m tools.field_management.schedule_stats --date 20261117 --system-name 外場排程系統 --run-type 排程
+[2026-11-17 03:18:20] 開始處理排班統計表：20261117排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261117排班統計表-台北 (1wFVLq1pyhajnWw1T7rvFtHoANK7zGX7GYVD7mRDBArM)
+[2026-11-17 03:18:25] 完成：20261117排班統計表-台北 → 2026排班統計表!EH4 / rows=82
+[2026-11-17 03:18:36] 開始處理排班統計表：20261217排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261217排班統計表-台北 (1FA4F6U6ou1XIyUTl8U3iw-0tv7TkrD9O57WfCjjZvDc)
+[2026-11-17 03:18:38] 完成：20261217排班統計表-台北 → 2026排班統計表!ET4 / rows=55
+[2026-11-17 03:18:39] 開始處理排班統計表：20270117排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270117排班統計表-台北 (14ioLRmvB8j6mqhkm4msZxdJGX207VZomgXULG5Y9TKY)
+[2026-11-17 03:18:41] 完成：20270117排班統計表-台北 → 2026排班統計表!FF4 / rows=41
+[2026-11-17 03:18:43] 開始處理排班統計表：20270217排班統計表-台北
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270217排班統計表-台北 (1k_NqdG_tpCEEyrZr7gcgRaJxoGssGjMtODLHrCv3kes)
+[2026-11-17 03:18:44] 完成：20270217排班統計表-台北 → 2026排班統計表!FR4 / rows=35
+[2026-11-17 03:18:46] 開始處理排班統計表：20261117排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261117排班統計表-台中 (1tF3xIN2p2YJ83Fc-8VhtDWftpwj9W9duT-mxbVOmPLE)
+[2026-11-17 03:18:49] 完成：20261117排班統計表-台中 → 2026排班統計表!EH4 / rows=15
+[2026-11-17 03:18:50] 開始處理排班統計表：20261217排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20261217排班統計表-台中 (1n1g3Z5ZwXFdw24XmCG5pf3UK6Ow8iNkef_N1I6SVVOA)
+[2026-11-17 03:18:52] 完成：20261217排班統計表-台中 → 2026排班統計表!ET4 / rows=10
+[2026-11-17 03:18:53] 開始處理排班統計表：20270117排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270117排班統計表-台中 (1_6p-H0eJFgkTJ7v5jhfyy48MM2bdOksFP2EusrbnBsY)
+[2026-11-17 03:18:55] 完成：20270117排班統計表-台中 → 2026排班統計表!FF4 / rows=9
+[2026-11-17 03:18:56] 開始處理排班統計表：20270217排班統計表-台中
+📖 使用 Jenny OAuth 讀取來源 Google Sheet：20270217排班統計表-台中 (1yExzqej556d0dtcHr9E22d3XbbF1IIzMSdK0okrAB4A)
+[2026-11-17 03:18:58] 完成：20270217排班統計表-台中 → 2026排班統計表!FR4 / rows=9
+[2026-11-17 03:18:59] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成

@@ -765,3 +765,30 @@ def test_fill_and_sync_passes_dry_run_to_each_region(monkeypatch):
         {"region": region, "missing": []}])
     items = batch.fill_and_sync(["台北", "台中"], log=lambda *_: None, dry_run=True)
     assert calls == [("台北", True), ("台中", True)] and len(items) == 2
+
+
+def test_kaohsiung_is_not_filled_from_backend():
+    """2026-11-17 Jenny：高雄不用自檸檬後台補齊（不登入、不提醒）。"""
+    def boom(*_a, **_k):
+        raise AssertionError("不應登入")
+    logs = []
+    assert batch.fill_from_backend("高雄", object(), [["h"], ["x"] * 30], log=logs.append, session_factory=boom) == 0
+    assert logs == []
+
+
+def test_permission_error_message_is_readable():
+    assert "沒有權限" in batch._error_text(PermissionError())
+    assert batch._error_text(KeyError()) == "KeyError"
+    assert batch._error_text(ValueError("壞了")) == "壞了"
+
+
+def test_scheduled_fill_writes_execution_log(monkeypatch):
+    calls = []
+    monkeypatch.setattr(batch, "scan", lambda regions, log: [{"missing": []}, {"missing": ["x"]}])
+    import tools.finance_management.execution_log as el
+    monkeypatch.setattr(el, "log_execution", lambda **kw: calls.append(kw))
+    logs = []
+    assert batch.scheduled_fill(["台北"], log=logs.append) == 0
+    assert calls == [{"tool": "清潔異動補齊＋同步ATM工作表", "area": "台北", "status": "成功",
+                      "message": "盤點 2 列，仍未備妥 1 列"}]
+    assert not [t for t in logs if "執行 Log 寫入失敗" in t]

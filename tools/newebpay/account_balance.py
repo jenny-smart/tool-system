@@ -1,4 +1,5 @@
-"""藍新帳務查詢（帳務中心 → 帳戶明細查詢）：取查詢結果第一列（最新一筆）的處理日期與「本次剩餘金額」，
+"""藍新帳務查詢：銷售中心「交易查詢」頁上方退款統計的「可退款金額」（2026-11-15 Jenny 改；
+原本是帳務中心「帳戶明細查詢」第一筆的本次剩餘金額），連同查詢時間
 寫進主控表「現金缺口試算」的「藍新帳務日期」「藍新帳務金額」兩列（各地區一欄），之後隨現金缺口貼到 review。
 
 月初跟藍新收退款／發票同一次登入做（tools.newebpay.month_close --part balance）；
@@ -56,40 +57,63 @@ class SessionExpired(RuntimeError):
     """藍新登入已過期（沿用的登入狀態開帳務中心被導回登入頁）：要重新登入再查。"""
 
 
-def query_balance(page, period: str) -> Optional[tuple[str, int]]:
-    """在已登入的藍新頁面查帳戶明細，回傳第一筆 (處理日期, 本次剩餘金額)。"""
-    from tools.newebpay.invoice_amounts import visible_date_inputs, write_date
+REFUNDABLE_URL = "https://www.newebpay.com/sale/Sell_center/search_transaction?count=1"
+REFUND_LABELS = ("可提領餘額", "退款準備金", "藍新保留", "待撥款", "可退款金額")
+REFUNDABLE_LABEL = "可退款金額"
 
-    page.goto(BALANCE_URL, wait_until="domcontentloaded")
+# 找「退款統計查詢」那一塊：同時有「可提領餘額」「可退款金額」、文字最短的元素
+_REFUND_BLOCK_JS = """() => {
+  const all = [...document.querySelectorAll('div,section,table,ul,form')]
+    .filter(e => (e.innerText || '').includes('可退款金額') && (e.innerText || '').includes('可提領餘額'));
+  all.sort((a, b) => a.innerText.length - b.innerText.length);
+  return all.length ? all[0].innerText : '';
+}"""
+
+
+def parse_refundable(text: str) -> Optional[int]:
+    """退款統計那一塊的文字 → 可退款金額。兩種排法都可以：
+    一欄一欄（「可退款金額 1,634,420 元」相鄰）或先一列標題、再一列金額（照標題順序對金額）。"""
+    if REFUNDABLE_LABEL not in text:
+        return None
+    labels = sorted((text.find(label), label) for label in REFUND_LABELS if label in text)
+    amounts = re.findall(r"(-?[\d,]+)\s*元", text)
+    order = [label for _pos, label in labels]
+    if len(amounts) >= len(order) and len(order) == len(REFUND_LABELS):
+        return parse_amount(amounts[order.index(REFUNDABLE_LABEL)])
+    match = re.search(REFUNDABLE_LABEL + r"[^\d-]*(-?[\d,]+)\s*元", text)
+    return parse_amount(match.group(1)) if match else None
+
+
+def query_balance(page, period: str) -> Optional[tuple[str, int]]:
+    """藍新帳務＝銷售中心「交易查詢」頁上方退款統計的「可退款金額」（2026-11-15 Jenny 改；
+    原本是帳務中心「帳戶明細查詢」第一筆的本次剩餘金額）。這是即時數字，日期記查詢當下的時間，
+    所以每月 1 日要跟收退款／發票一起查。回傳 (查詢時間, 可退款金額)。"""
+    from datetime import datetime, timedelta, timezone
+
+    page.goto(REFUNDABLE_URL, wait_until="domcontentloaded")
     if "login_center" in page.url or "single_login" in page.url:
         raise SessionExpired(f"藍新登入已過期，被導回登入頁（{page.url[:80]}）")
-    dates = visible_date_inputs(page)
-    if len(dates) < 2:
-        raise RuntimeError(f"找不到帳戶明細查詢的日期起訖欄位（頁面：{page.url}）")
-    start, end = query_range(period)
-    write_date(dates[0], start)
-    write_date(dates[1], end)
-    search = page.locator('input[value="開始查詢"], button:has-text("開始查詢")')
-    visible = [search.nth(i) for i in range(search.count()) if search.nth(i).is_visible()]
-    if not visible:
-        raise RuntimeError("找不到「開始查詢」按鈕")
-    visible[0].click()
-    page.wait_for_timeout(1500)
-    try:
-        page.get_by_text(re.compile("總查詢筆數")).first.wait_for(timeout=30_000)
-    except Exception:
-        pass
-    tables = page.locator("table")
-    for index in range(tables.count()):
-        table = tables.nth(index)
-        if "本次剩餘金額" not in (table.inner_text() or ""):
-            continue
-        trs = table.locator("tr")
-        rows = [trs.nth(i).locator("th,td").all_inner_texts() for i in range(min(trs.count(), 12))]
-        return parse_first_balance(rows)
-    if "查無資料" in (page.content() or ""):
-        return None
-    raise RuntimeError("查詢後找不到帳戶明細表格；藍新頁面可能已改版")
+    text = ""
+    for attempt in range(2):
+        try:
+            page.get_by_text(REFUNDABLE_LABEL).first.wait_for(state="visible", timeout=10_000)
+        except Exception:
+            # 退款統計收起來了：按「退款統計查詢」旁的「展開統計資料」
+            toggles = page.locator("a:has-text('展開統計資料'), span:has-text('展開統計資料')")
+            for i in range(toggles.count()):
+                try:
+                    toggles.nth(i).click()
+                except Exception:
+                    pass
+            page.wait_for_timeout(1500)
+        text = page.evaluate(_REFUND_BLOCK_JS) or ""
+        if REFUNDABLE_LABEL in text:
+            break
+    amount = parse_refundable(text)
+    if amount is None:
+        raise RuntimeError("交易查詢頁找不到「可退款金額」；藍新頁面可能已改版")
+    now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+    return now, amount
 
 
 def write_balances(balances: dict[str, tuple[str, int]], service=None, spreadsheet_id: str = "") -> int:

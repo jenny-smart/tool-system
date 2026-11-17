@@ -57,6 +57,15 @@ REFUND_STATUSES = {"待退款", "VIP待退券"}
 MISSING_BANK = "缺退款銀行代碼／帳號（P／Q）"  # 只擋退款，不擋折讓單
 STORED_VALUE_STATUSES = {"待扣儲值金", "待返儲值金"}
 ATM_REFUND_REGIONS = {"台北", "台中"}
+# 不自檸檬後台補齊的地區（2026-11-17 Jenny：高雄不用補齊）
+NO_BACKEND_FILL_REGIONS = {"高雄"}
+
+
+def _error_text(exc: Exception) -> str:
+    """例外訊息；gspread 沒權限時拋的 PermissionError 沒有訊息，改成看得懂的說明。"""
+    if isinstance(exc, PermissionError):
+        return "沒有權限開啟試算表（請把 tool-system 服務帳號加為編輯者）" + (f"：{exc}" if str(exc) else "")
+    return str(exc) or type(exc).__name__
 # 只列出、不自動處理的狀態（已完成或不需處理）
 IGNORED_STATUSES = {"異動不處理", ""}
 # 未完全完成也可先回寫目前進度的狀態（回寫後 B 欄不變）
@@ -539,6 +548,8 @@ def fill_from_backend(region: str, ws, values: list[list], log: Callable[[str], 
                       session_factory: Optional[Callable] = None, dry_run: bool = False) -> int:
     """盤點時補齊可自檸檬後台查詢的空白欄位；回傳補了幾格。登入或查詢失敗只提醒，不影響盤點。
     dry_run：只查詢、列出會補的內容，不寫入試算表。"""
+    if region in NO_BACKEND_FILL_REGIONS:
+        return 0
     targets = [(row_no, row, wanted) for row_no, row in enumerate(values[1:], start=2)
                if _fill_due(row) and (wanted := _wanted(row))]
     if not targets:
@@ -549,7 +560,7 @@ def fill_from_backend(region: str, ws, values: list[list], log: Callable[[str], 
     try:
         session = (session_factory or _login_session)(region, ui_logger=None)
     except Exception as exc:
-        log(f"⚠️ 【{region}】登入檸檬後台失敗，略過自動補齊 {len(targets)} 列：{exc}")
+        log(f"⚠️ 【{region}】登入檸檬後台失敗，略過自動補齊 {len(targets)} 列：{_error_text(exc)}")
         return 0
     updates, filled_rows = [], []
     try:
@@ -712,7 +723,7 @@ def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], Non
             if fill_from_backend(region, ws, values, log, dry_run=dry_run) and not dry_run:
                 values = ws.get_all_values()
         except Exception as exc:
-            log(f"⚠️ 【{region}】自檸檬後台補齊失敗：{exc}")
+            log(f"⚠️ 【{region}】自檸檬後台補齊失敗：{_error_text(exc)}")
     if fix_formulas:
         try:
             z_formulas = ws.get("Z1:Z", value_render_option="FORMULA")
@@ -727,7 +738,7 @@ def scan_region(region: str, fix_formulas: bool = True, log: Callable[[str], Non
         try:
             sync_atm_sheet(region, values, log, dry_run=dry_run)
         except Exception as exc:
-            log(f"⚠️ 【{region}】同步 ATM 工作表失敗：{exc}")
+            log(f"⚠️ 【{region}】同步 ATM 工作表失敗：{_error_text(exc)}")
     items = []
     for row_no, row in enumerate(values[1:], start=2):
         item = plan_row(region, row_no, row)
@@ -1138,8 +1149,7 @@ def scheduled_fill(regions=None, log: Callable[[str], None] = print) -> int:
     try:
         from tools.finance_management.execution_log import log_execution
 
-        log_execution(function_name="清潔異動補齊＋同步ATM工作表", status="成功", run_type="排程",
-                      area="、".join(regions or REGIONS),
+        log_execution(tool="清潔異動補齊＋同步ATM工作表", area="、".join(regions or REGIONS), status="成功",
                       message=f"盤點 {len(items)} 列，仍未備妥 {len(missing)} 列")
     except Exception as exc:  # 記錄失敗不影響排程結果
         log(f"⚠️ 執行 Log 寫入失敗：{exc}")

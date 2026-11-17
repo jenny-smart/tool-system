@@ -1,0 +1,12 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+[登入] 已登入
+【台北】檸檬後台已登出
+【台北】已自檸檬後台補齊 1 格：第367列 LC00218565 D=https://chat.line.biz/U70866032f75cbfed9c32ce87366562ce/chat/Ue60b032aee0a1ae68e8eeeb7ba4471ff
+【台北】已補 T／Z 公式 2 格
+[登入] 已登入
+【桃園】檸檬後台已登出
+【桃園】已補 T／Z 公式 1 格
+⚠️ 【新竹】同步 ATM 工作表失敗：
+⚠️ 【高雄】登入檸檬後台失敗，略過自動補齊 1 列：高雄 後台帳密未設定（需要對應的 *_EMAIL / *_PASSWORD）
+清潔異動補齊完成：盤點 10 列，仍未備妥 3 列（每日 10:00 檢查會提醒）
+⚠️ 執行 Log 寫入失敗：log_execution() got an unexpected keyword argument 'function_name'

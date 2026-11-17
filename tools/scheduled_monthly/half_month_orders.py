@@ -435,6 +435,12 @@ def stored_value_customer_city(session: requests.Session, order: dict[str, Any])
         if city:
             cities.add(city)
     south = cities & {"新竹", "高雄"}
+    if len(south) == 1:
+        # 歷史地址只出現新竹或高雄其中一區，另外的是「其他」（例如地址沒寫「新竹縣」的竹北、或曾經訂過別區）：
+        # 歸那一區（2026-11-15 LC00219543 徐婕琳 ['其他', '新竹'] 讓新竹／高雄整份上半月訂單失敗）
+        if len(cities) > 1:
+            log(f"📍 {name}（{order.get('order_no')}）歷史地址 {sorted(cities)}，只有一區是新竹／高雄，歸 {next(iter(south))}")
+        return south.pop()
     if len(south) != 1:
         by_phone = area_by_phone(session, phone)
         if by_phone:
