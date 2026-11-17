@@ -106,7 +106,7 @@ def test_record_creates_events_once_and_skips_disabled_rows(monkeypatch):
     assert events.insert.call_args.kwargs["calendarId"] == "jenny@hers.com.tw"
     assert body["summary"] == "【排程】寄送日排程結果通知 ✅"
     desc = body["description"]
-    assert desc.startswith("執行結果：\nWINDOW 2026-11-16 07:00")  # 結果放最前面
+    assert desc.startswith("執行結果：\nSAVE 台北 清潔客訴新增 0 筆")  # 結果放最前面
     assert "SAVE 台北 清潔客訴新增 0 筆（已登記略過 0 筆）" in desc
     assert "Checkout" not in desc and "Run daily task" not in desc  # 成功的步驟不列
     assert "備註" not in desc
@@ -132,15 +132,16 @@ def test_failed_run_title_and_missing_token(monkeypatch):
 
 def test_result_lines_keep_program_messages_only():
     rating = cr.result_lines((FIXTURES / "calendar_record_rating.log").read_text(encoding="utf-8"))
-    assert rating[0] == "WINDOW 2026-11-16 07:00 ～ 2026-11-17 07:00"
+    assert rating[0] == "SAVE 台北 清潔客訴新增 0 筆（已登記略過 0 筆）"  # WINDOW／QUERY 是過程，不列
+    assert "⚠️ 記入行事曆失敗：HttpError 404" in rating
     assert "FINISH 11/16 07:00～11/17 07:00：台北 符合 0 筆新增 0 筆；台中 符合 0 筆新增 0 筆" in rating
     joined = "\n".join(rating)
     for noise in ("Using cached", "ScriptRunContext", "Traceback", "File \"", "版本：", "已初始化", "清理中",
-                  "RUN_REGIONS", "APIError"):
+                  "RUN_REGIONS", "APIError", "WINDOW", "QUERY", "googleapis"):
         assert noise not in joined
     change = cr.result_lines((FIXTURES / "calendar_record_change_order.log").read_text(encoding="utf-8"))
     assert change == [
-        "【台北】已自檸檬後台補齊 1 格：第367列 LC00218565 D=https://chat.line.biz/x/chat/y",
+        "【台北】已自檸檬後台補齊 1 格：第367列 LC00218565",
         "【台北】已補 T／Z 公式 2 格",
         "【桃園】已補 T／Z 公式 1 格",
         "⚠️ 【新竹】同步 ATM 工作表失敗：",
@@ -151,9 +152,17 @@ def test_result_lines_keep_program_messages_only():
     ]
 
 
+def test_result_lines_hide_process_details():
+    """2026-11-17 Jenny：業績報表只顯示結果，不顯示抓取網址、parse_html、除錯輸出、段落標題。"""
+    lines = cr.result_lines((FIXTURES / "calendar_record_performance.log").read_text(encoding="utf-8"))
+    assert lines == ["✅ 本月統計報表完成，筆數 = 718", "✅ 次月統計報表完成，筆數 = 718", "✅ 已寄出：***"]
+
+
 def test_result_lines_truncates_long_output_and_keeps_errors():
-    log = "\n".join(f"2026-11-17T00:00:00Z 第 {i} 筆已新增" for i in range(100)) + "\n##[error]Process completed with exit code 1."
+    log = ("2026-11-17T00:00:00Z ⚠️ 第 0 筆失敗\n"
+           + "\n".join(f"2026-11-17T00:00:00Z 第 {i} 筆已新增" for i in range(1, 100))
+           + "\n##[error]Process completed with exit code 1.")
     lines = cr.result_lines(log)
     assert len(lines) == cr.MAX_RESULT_LINES
-    assert lines[0] == "第 0 筆已新增" and "中間略過" in lines[5]
+    assert lines[0].startswith("…（另有") and lines[1] == "⚠️ 第 0 筆失敗"
     assert lines[-1] == "❌ Process completed with exit code 1."

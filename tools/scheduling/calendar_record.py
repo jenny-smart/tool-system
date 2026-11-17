@@ -51,7 +51,17 @@ def github_api(path: str, repo: str = "", token: str = "") -> dict:
         return json.loads(body) if body else {}
 
 
-MAX_RESULT_LINES = 30
+MAX_RESULT_LINES = 15
+# 程式自己印的時間戳「[2026-11-17 08:01:21] 」
+_INLINE_TS_RE = re.compile(r"^\[?\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?\]?\s*")
+_URL_RE = re.compile(r"\s*(\S+=)?https?://\S+")
+_HTTP_ERROR_RE = re.compile(r"<HttpError (\d+).*")
+# 過程細節（抓取、解析、除錯輸出、段落標題）不算結果（2026-11-17 Jenny：只顯示結果）
+_PROCESS_RE = re.compile(
+    r"抓取|parse_html|columns|前\s*\d+\s*筆\s*=|開始|^=+.*=+$|^(QUERY|WINDOW|DEBUG|INFO)\b|讀取中|查詢中|下載中|登入中"
+    r"|=\s*[\[{]|\*\*\*'")
+# 結果行：有狀態符號或「完成／新增／失敗…」等字
+_OUTCOME_RE = re.compile(r"✅|❌|⚠️|完成|新增|成功|失敗|錯誤|略過|已|寄出|貼入|補齊|未備妥|FINISH|SAVE|筆數|沒有")
 _TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z ?")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # 有中日文、全形符號或狀態符號的行才當成「結果」（程式給人看的訊息）
@@ -101,12 +111,25 @@ def result_lines(log_text: str, limit: int = MAX_RESULT_LINES) -> list[str]:
         text = line.strip()
         if not text or _NOISE_RE.search(line) or not _RESULT_RE.search(text):
             continue
-        text = text[:200]
-        if not lines or lines[-1] != text:
+        text = _INLINE_TS_RE.sub("", text)
+        if not text or _NOISE_RE.search(text) or _PROCESS_RE.search(text):
+            continue
+        text = _HTTP_ERROR_RE.sub(r"HttpError \1", text)
+        text = _URL_RE.sub("", text).strip()[:150]
+        if text and (not lines or lines[-1] != text):
             lines.append(text)
+    outcomes = [t for t in lines if _OUTCOME_RE.search(t)]
+    lines = outcomes or lines[-3:]
     if len(lines) > limit:
-        tail = limit - 6
-        lines = lines[:5] + [f"…（中間略過 {len(lines) - 5 - tail} 行，完整內容見 GitHub）"] + lines[-tail:]
+        # 太多時：❌／⚠️ 全留（最多 limit 行），其餘留最後幾行，順序不變
+        keep = {i for i, t in enumerate(lines) if t.startswith(("❌", "⚠️"))}
+        keep = set(sorted(keep)[:limit])
+        for i in range(len(lines) - 1, -1, -1):
+            if len(keep) >= limit - 1:
+                break
+            keep.add(i)
+        skipped = len(lines) - len(keep)
+        lines = [f"…（另有 {skipped} 行，見 GitHub）"] + [t for i, t in enumerate(lines) if i in keep]
     return lines
 
 
