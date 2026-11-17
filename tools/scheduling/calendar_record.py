@@ -60,8 +60,9 @@ _HTTP_ERROR_RE = re.compile(r"<HttpError (\d+).*")
 _PROCESS_RE = re.compile(
     r"抓取|parse_html|columns|前\s*\d+\s*筆\s*=|開始|^=+.*=+$|^(QUERY|WINDOW|DEBUG|INFO)\b|讀取中|查詢中|下載中|登入中"
     r"|=\s*[\[{]|\*\*\*'")
+_REGION_LINE_RE = re.compile(r"^[^\s／：]{1,6}／[^：]+：")
 # 結果行：有狀態符號或「完成／新增／失敗…」等字
-_OUTCOME_RE = re.compile(r"✅|❌|⚠️|完成|新增|成功|失敗|錯誤|略過|已|寄出|貼入|補齊|未備妥|FINISH|SAVE|筆數|沒有")
+_OUTCOME_RE = re.compile(r"✅|❌|⚠️|完成|新增|成功|失敗|錯誤|略過|已|寄出|貼入|補齊|未備妥|FINISH|SAVE|筆數|沒有|找到")
 _TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z ?")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 # 有中日文、全形符號或狀態符號的行才當成「結果」（程式給人看的訊息）
@@ -119,6 +120,9 @@ def result_lines(log_text: str, limit: int = MAX_RESULT_LINES) -> list[str]:
         text = _URL_RE.sub("", text).strip()[:200]
         if text and (not lines or lines[-1] != text):
             lines.append(text)
+    # 程式有印「台北／客人備註：…」這種每區每種一行的結果時，SAVE／FINISH 摘要行就不重複列
+    if any(_REGION_LINE_RE.match(t) for t in lines):
+        lines = [t for t in lines if not t.startswith(("SAVE ", "FINISH "))]
     outcomes = [t for t in lines if _OUTCOME_RE.search(t)]
     lines = outcomes or lines[-3:]
     if len(lines) > limit:
