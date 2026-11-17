@@ -49,6 +49,11 @@ def _todo_text(item: dict) -> str:
     return "、".join(item["missing"])
 
 
+def todo_log_text(item: dict) -> str:
+    """執行紀錄／【排程】行事曆用：第幾列、訂單編號、狀態、缺什麼（不含客戶姓名）。"""
+    return f"第{item['row']}列 {item['order_no']}（{item['status']}）{_todo_text(item)}"
+
+
 def build_notify_text(todo: list, today: date) -> tuple:
     lines = [f"{today:%Y/%m/%d} 清潔異動未備妥 {len(todo)} 筆", ""]
     for item in todo:
@@ -99,6 +104,8 @@ def run(regions=None, ui_logger=None) -> dict:
             continue
         todo.extend(region_todo)
         log(f"【{region}】未備妥 {len(region_todo)} 筆")
+        for item in region_todo:  # 2026-11-17 Jenny：標示缺少什麼（不印客戶姓名）
+            log(f"【{region}】未備妥：{todo_log_text(item)}")
         log_execution("清潔異動每日檢查", region, "成功", f"未備妥 {len(region_todo)} 筆")
     _notify(todo, log=log)
     return {"todo": todo, "failed": failed}

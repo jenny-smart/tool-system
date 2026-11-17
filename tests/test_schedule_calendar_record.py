@@ -166,3 +166,13 @@ def test_result_lines_truncates_long_output_and_keeps_errors():
     assert len(lines) == cr.MAX_RESULT_LINES
     assert lines[0].startswith("…（另有") and lines[1] == "⚠️ 第 0 筆失敗"
     assert lines[-1] == "❌ Process completed with exit code 1."
+
+
+def test_result_lines_skip_secret_checks_and_keep_todo_details():
+    log = "\n".join("2026-11-17T01:30:00Z " + t for t in [
+        "✅ 已設定：TAOYUAN_PASSWORD", "✅ 已設定：TOOLS_APP_LOG_SPREADSHEET_ID 或 MASTER_SPREADSHEET_ID",
+        "【台北】未備妥 1 筆", "【台北】未備妥：第367列 LC00218565（待退款）缺退款銀行代碼／帳號（P／Q）",
+        "✅ 清潔異動每日檢查執行成功"])
+    assert cr.result_lines(log) == [
+        "【台北】未備妥 1 筆", "【台北】未備妥：第367列 LC00218565（待退款）缺退款銀行代碼／帳號（P／Q）",
+        "✅ 清潔異動每日檢查執行成功"]

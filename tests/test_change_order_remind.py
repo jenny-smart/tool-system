@@ -72,3 +72,11 @@ def test_run_never_syncs(monkeypatch):
     monkeypatch.setattr(chk, "_notify", lambda todo, log: None)
     outcome = chk.run(regions=["台北", "高雄"])
     assert len(outcome["todo"]) == 2 and outcome["failed"] == []
+
+
+def test_todo_log_text_shows_what_is_missing():
+    item = {"region": "台北", "row": 367, "order_no": "LC00218565", "status": "待退款", "customer": "王小明",
+            "missing": ["缺退款銀行代碼／帳號（P／Q）", "缺退款金額（S）"]}
+    text = chk.todo_log_text(item)
+    assert text == "第367列 LC00218565（待退款）缺退款銀行代碼／帳號（P／Q）、缺退款金額（S）"
+    assert "王小明" not in text
