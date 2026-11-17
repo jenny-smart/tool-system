@@ -41,12 +41,12 @@ def test_supply_purchase_prefers_saved_account_with_same_supplier_name():
 
     ns['_choose_supply_purchase_destination'](page, item)
 
-    ns['choose_saved_destination'].assert_called_once_with(page, 'LINE酵素')
+    ns['choose_saved_destination'].assert_called_once_with(page, 'LINE酵素', account_number='11601800014602')
     ns['choose_manual_destination'].assert_not_called()
     ns['fill_manual_destination'].assert_not_called()
 
 
-def test_supply_purchase_falls_back_to_report_account_when_same_name_is_missing():
+def test_supply_purchase_falls_back_to_report_account_when_name_and_account_are_missing():
     ns = load_destination_helper()
     page = MagicMock()
     item = dict(supplier='新廠商', bank_code='013', account_number='214502127659')
@@ -54,7 +54,7 @@ def test_supply_purchase_falls_back_to_report_account_when_same_name_is_missing(
 
     ns['_choose_supply_purchase_destination'](page, item)
 
-    ns['choose_saved_destination'].assert_called_once_with(page, '新廠商')
+    ns['choose_saved_destination'].assert_called_once_with(page, '新廠商', account_number='214502127659')
     ns['choose_manual_destination'].assert_called_once_with(page)
     page.wait_for_timeout.assert_called_once_with(800)
     ns['fill_manual_destination'].assert_called_once_with(page, '013', '214502127659')
@@ -112,3 +112,18 @@ def test_write_failure_stops_with_paid_warning():
         ns['run']('台北', '202609', {2}, Path('.'), 'cdp')
     ns['current_fubon_page'].assert_not_called()
     ns['run_download'].assert_not_called()
+
+
+def test_select_card_falls_back_to_same_account_and_closes_popup_when_nothing_matches():
+    """常用帳號清單先找名字、再找帳號；都沒有時要關掉帳號清單視窗（Escape 關不掉）再自行輸入。"""
+    import ast as _ast
+    from pathlib import Path as _Path
+
+    source = _Path("tools/bank_statement/fubon_transfer_common.py").read_text(encoding="utf-8")
+    tree = _ast.parse(source)
+    select = next(n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name == "_select_account_card")
+    body = _ast.get_source_segment(source, select)
+    assert "targets = [t for t in (target_text, *alt_texts) if t]" in body
+    assert "close_account_popup(page)" in body
+    choose = next(n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name == "choose_saved_destination")
+    assert "alt_texts=alt" in _ast.get_source_segment(source, choose)
