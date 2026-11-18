@@ -57,11 +57,12 @@ def test_group_only_contains_and_sums_rows_without_payment_date():
     ]
 
 
-def test_request_date_in_s_means_paid_and_na_account_is_skipped():
+def test_request_date_in_s_alone_is_still_pending_and_na_account_is_skipped():
+    # S 欄請款日期是提出請款就填，Q 欄匯款日期空白代表還沒匯款（2026/11 福吉生活百貨即此情況）
     values = [[""] * 19, _row(request_date="2026/02/10"), _row(bank="#N/A", account="#N/A"), _row(amount="500")]
 
     result = pending_supply_purchases(values, "202610")
-    assert [item["rows"] for item in result] == [[4]]
+    assert [(item["rows"], item["amount"]) for item in result] == [([2, 4], "2810")]
 
 
 def test_split_groups_only_splits_unmerged_groups():
