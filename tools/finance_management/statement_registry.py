@@ -40,7 +40,21 @@ def _review_row(year: int | None = None) -> list[str]:
     try:
         return _find_row(str(year or taipei_year()))
     except RuntimeError:
-        return _find_row(REVIEW_SPREADSHEET_AREA)
+        pass
+    area = _review_fallback_area()
+    if area != REVIEW_SPREADSHEET_AREA:
+        try:
+            return _find_row(area)
+        except RuntimeError:
+            pass
+    return _find_row(REVIEW_SPREADSHEET_AREA)
+
+
+def _review_fallback_area() -> str:
+    """找不到今年列時用哪一列：主控表「參數設定」年度彙總列代號，讀不到才用 2026。"""
+    from tools.annual_rollover.new_year_console import read_param
+
+    return read_param("財務管理", "年度review", "年度彙總列代號", REVIEW_SPREADSHEET_AREA)
 
 
 def _cell(row: list[str], col: int) -> str:

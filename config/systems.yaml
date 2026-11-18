@@ -20,7 +20,7 @@ systems:
   - name: 外場排程系統
     type: field_daily_schedule
     enabled: true
-    roster_default_year: 2026
+    roster_default_year: 2026  # 備用值；實際以主控表「參數設定」名冊預設年度為準（新年度盤點與切換可一鍵更新）
     log_spreadsheet_id: "1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8"
 
     folder_ids:
