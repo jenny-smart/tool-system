@@ -386,6 +386,14 @@ def _address_city(address: Any) -> str:
     return "其他" if text else ""
 
 
+class CityUnresolved(RuntimeError):
+    """儲值金訂單地址無法歸類到新竹／高雄：只略過該筆並事後通知，不中斷整個排程。"""
+
+
+# 本次執行中無法歸類而被略過的儲值金訂單，跑完後統一告知
+UNRESOLVED_STORED_VALUE: list[dict[str, str]] = []
+
+
 def _order_recency(item: dict[str, Any]) -> tuple[str, str, str]:
     """訂單新舊排序用：服務日期、付款日期、建立日期（後台日期字串可直接比大小）。"""
     return tuple(str(item.get(k) or "")[:19] for k in ("date_clean", "paid_at", "created_at"))
@@ -419,7 +427,7 @@ def stored_value_customer_city(session: requests.Session, order: dict[str, Any])
     歷史地址分不出新竹或高雄（都沒有、或兩邊都有）時，改用手機號碼查近期訂單決定。"""
     name = str(order.get("name") or "").strip()
     if not name:
-        raise RuntimeError(f"儲值金訂單 {order.get('order_no')} 缺少客戶姓名")
+        raise CityUnresolved(f"儲值金訂單 {order.get('order_no')} 缺少客戶姓名")
     member_id = str(order.get("member_id") or "")
     phone = re.sub(r"\D", "", str(order.get("phone") or ""))
     cities = set()
@@ -436,19 +444,19 @@ def stored_value_customer_city(session: requests.Session, order: dict[str, Any])
             cities.add(city)
     south = cities & {"新竹", "高雄"}
     if len(south) == 1:
-        # 歷史地址只出現新竹或高雄其中一區，另外的是「其他」（例如地址沒寫「新竹縣」的竹北、或曾經訂過別區）：
+        # 歷史地址只出現新竹或高雄（台南歸高雄）其中一區，另外的是「其他」（例如地址沒寫「新竹縣」的竹北、或曾經訂過別區）：
         # 歸那一區（2026-11-15 LC00219543 徐婕琳 ['其他', '新竹'] 讓新竹／高雄整份上半月訂單失敗）
         if len(cities) > 1:
             log(f"📍 {name}（{order.get('order_no')}）歷史地址 {sorted(cities)}，只有一區是新竹／高雄，歸 {next(iter(south))}")
         return south.pop()
-    if len(south) != 1:
-        by_phone = area_by_phone(session, phone)
-        if by_phone:
-            log(f"📞 {name}（{order.get('order_no')}）地址分不出新竹／高雄 {sorted(cities)}，依手機近期訂單歸 {by_phone}")
-            return by_phone
-    if len(cities) != 1:
-        raise RuntimeError(f"儲值金訂單 {order.get('order_no')}（{name}）地址無法唯一分區：{sorted(cities)}")
-    return cities.pop()
+    # 新竹、高雄兩邊都有或都沒有 → 用手機號碼查訂單管理近期訂單確認
+    by_phone = area_by_phone(session, phone)
+    if by_phone:
+        log(f"📞 {name}（{order.get('order_no')}）地址分不出新竹／高雄 {sorted(cities)}，依手機近期訂單歸 {by_phone}")
+        return by_phone
+    if len(cities) != 1:  # 新竹＋高雄都有、或完全查不到地址：無法歸類，略過並事後通知
+        raise CityUnresolved(f"儲值金訂單 {order.get('order_no')}（{name}）地址無法唯一分區：{sorted(cities)}，請至訂單管理確認")
+    return cities.pop()  # 只有「其他」：屬其他地區，不併入新竹／高雄
 
 
 def export_stored_value(session: requests.Session, city: str, start: str, end: str) -> pd.DataFrame:
@@ -462,7 +470,22 @@ def export_stored_value(session: requests.Session, city: str, start: str, end: s
     for order in records:
         key = (_customer_key(order.get("name")), str(order.get("member_id") or ""), str(order.get("phone") or ""))
         if key not in cache:
-            cache[key] = stored_value_customer_city(session, order)
+            try:
+                cache[key] = stored_value_customer_city(session, order)
+            except CityUnresolved as exc:
+                cache[key] = ""
+                log(f"⚠️ {exc}；先略過，跑完後再通知")
+                reason = str(exc)
+                cache[key + ("reason",)] = reason
+        if not cache[key]:
+            UNRESOLVED_STORED_VALUE.append({
+                "city": city,
+                "order_no": str(order.get("order_no") or "").strip(),
+                "name": str(order.get("name") or "").strip(),
+                "phone": str(order.get("phone") or "").strip(),
+                "reason": cache.get(key + ("reason",), ""),
+            })
+            continue
         if cache[key] == city:
             order_no = str(order.get("order_no") or "").strip()
             if not order_no:
@@ -547,6 +570,32 @@ def notify_uninvoiced(tag: str, found: dict[str, list[dict[str, str]]]) -> None:
         log(f"⚠️ 建立未開發票提醒失敗：{exc}")
 
 
+def unresolved_lines(items: list[dict[str, str]]) -> list[str]:
+    return [f"- {i['order_no']}（{i['name']} {i['phone']}）{i['reason']}" for i in items]
+
+
+def notify_unresolved(tag: str, items: list[dict[str, str]]) -> None:
+    """儲值金訂單地址無法歸類：log 列出，並在 Jenny 行事曆建提醒。"""
+    if not items:
+        return
+    lines = unresolved_lines(items)
+    log(f"\n⚠️ 儲值金訂單地址無法歸類 {len(items)} 筆，已略過未併入任何地區，請到訂單管理確認後手動處理：")
+    for line in lines:
+        log("   " + line)
+    prefix = "儲值金地址待確認"
+    title = f"{prefix}：{tag} {len(items)} 筆"
+    body = "\n".join([f"{tag} 上下半月訂單：以下儲值金訂單在訂單管理查不出是新竹或高雄（含台南），已先略過", ""] + lines +
+                      ["", "請到後台訂單管理確認客戶地址，再手動歸入正確地區。"])
+    try:
+        from tools.orders_system import calendar_notify
+
+        calendar_notify.create_notify_event(summary=title, description=body, start=tw_now() + timedelta(minutes=30),
+                                            attendee="", reminder_minutes=[20, 10], replace_prefix=prefix)
+        log(f"已建行事曆提醒：{title}")
+    except Exception as exc:
+        log(f"⚠️ 建立儲值金地址待確認提醒失敗：{exc}")
+
+
 def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], service, start: str, end: str, tag: str) -> list[dict[str, str]]:
     session = requests.Session()
     acc = accounts[city]
@@ -624,6 +673,10 @@ def process_city(city: str, args: RunArgs, accounts: dict[str, dict[str, str]], 
             source_files.append(os.path.basename(final_path))
             status = "成功"
             message = "已上傳：" + "、".join(source_files)
+            city_unresolved = [i for i in UNRESOLVED_STORED_VALUE if i["city"] == city]
+            if city_unresolved:
+                message += f"；⚠️ 儲值金地址無法歸類已略過 {len(city_unresolved)} 筆：" + "、".join(
+                    i["order_no"] for i in city_unresolved[:20])
             if uninvoiced:
                 message += f"；⚠️ 未開發票／加收、退款資料待補 {len(uninvoiced)} 筆：" + "、".join(
                     i["訂單編號"] for i in uninvoiced[:20])
@@ -670,6 +723,8 @@ def main() -> None:
                 raise
     log(f"\n✅ 成功地區：{', '.join(succeeded) if succeeded else '無'}")
     notify_uninvoiced(tag, uninvoiced)
+    unique_unresolved = list({i["order_no"]: i for i in UNRESOLVED_STORED_VALUE}.values())
+    notify_unresolved(tag, unique_unresolved)
     if failed:
         for city, message in failed:
             log(f"- {city}: {message}")

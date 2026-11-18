@@ -1,0 +1,22 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+[登入] 已登入
+【台北】檸檬後台已登出
+【台北】已自檸檬後台補齊 1 格：第368列 LC002175131 D=https://chat.line.biz/U70866032f75cbfed9c32ce87366562ce/chat/Uefc79a0d37abfcd0277a8b2672f1a904
+【台北】已補 T／Z 公式 1 格
+【台北】未備妥 1 筆
+【台北】未備妥：第364列 LC00220170（待收款）客人尚未付款（M 收款時間空白）
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[登入] 已登入
+【桃園】檸檬後台已登出
+【桃園】未備妥 1 筆
+【桃園】未備妥：第90列 LC00220688（待收款）客人尚未付款（M 收款時間空白）
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 1 筆
+【高雄】未備妥：第57列 LC00220718（待扣儲值金）缺儲值金金額（N）
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已建立 11:00 提醒（jenny@hers.com.tw）
+{'todo': [{'region': '台北', 'row': 364, 'status': '待收款', 'detail': '異動服務收款', 'order_no': 'LC00220170', 'customer': '施宥全', 'payway': '', 'amount': '1800', 'progress': [], 'actions': ['invoice'], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/11/13 LC00220170 異動服務收款--11/13(五)異動：服務當天異動，收50%異動費$1800'}, {'region': '桃園', 'row': 90, 'status': '待收款', 'detail': '異動服務收款', 'order_no': 'LC00220688', 'customer': '彭楚芸', 'payway': '', 'amount': '', 'progress': [], 'actions': ['invoice'], 'missing': ['客人尚未付款（M 收款時間空白）'], 'manual': [], 'note': '2026/11/16 LC00220688 異動服務收款--原2026-12-13 (日) 14:00-17:00的服務改期至2027-01-02 (六)09:00 - 12:00 ，須補年節加價450元'}, {'region': '高雄', 'row': 57, 'status': '待扣儲值金', 'detail': '其他', 'order_no': 'LC00220718', 'customer': '官紀暄', 'payway': '', 'amount': '', 'progress': [], 'actions': [], 'missing': ['缺儲值金金額（N）'], 'manual': [], 'note': '2026/11/15 LC00220718 其他--扣除購物金$2500'}], 'failed': []}

@@ -207,6 +207,22 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(any(r[0] for r in rows))
         self.assertEqual([k for k in self.keys('2026-11-16T10:00', invest=False) if k.startswith('invest_')], [])
 
+    def test_op_system_performance_report(self):
+        rows = [r for r in ss.DEFAULT_ROWS if r[1] == 'op_performance_report']
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0][0])  # 預設不啟用：設好 token、op-system 合併 scheduled_slot 版 workflow 後才勾選
+        self.assertEqual(ss.system_name('op_performance_report'), 'op-system')
+        self.assertEqual(ss.EXTERNAL_DISPATCH_TOKENS['jenny-smart/op-system'], 'OP_SYSTEM_DISPATCH_TOKEN')
+        rules = ss.default_rules()
+        for r in rules:
+            if r.key == 'op_performance_report':
+                r.enabled = True
+        plan = lambda v: [(w, i) for w, i, k in self.full(v, rules=rules) if k == 'op_performance_report']
+        wf = 'jenny-smart/op-system:performance-report.yml'
+        for slot in ('2026-11-18T00:20', '2026-11-18T08:10', '2026-11-18T18:10'):
+            self.assertEqual(plan(slot), [(wf, {})])
+        self.assertEqual(plan('2026-11-18T12:00'), [])
+
     def test_salary_system_create_period(self):
         rows = [r for r in ss.DEFAULT_ROWS if r[1] == 'salary_create_period']
         self.assertEqual(len(rows), 1)
@@ -276,8 +292,9 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn(f"'{ss.SHEET_NAME}'!J4", cells)   # 空白列
         self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J3"], 'tool-system')
         last = len(existing) + 1
-        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last - 1}"], 'investment-system')
-        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last}"], 'salary-system')
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last - 2}"], 'investment-system')
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last - 1}"], 'salary-system')
+        self.assertEqual(cells[f"'{ss.SHEET_NAME}'!J{last}"], 'op-system')
 
     def test_cross_repo_dispatch_uses_repo_token(self):
         calls=[]

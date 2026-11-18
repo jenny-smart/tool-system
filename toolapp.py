@@ -3836,6 +3836,58 @@ def run_year_root_check(action, year, on_progress=None):
     raise ValueError(f"未知動作：{action}")
 
 
+# 新年度盤點與切換：整合盤點、一鍵更新年度參數、一鍵切換根目錄
+NEW_YEAR_CONSOLE_FUNCTION = "新年度盤點與切換"
+NEW_YEAR_CONSOLE_ACTIONS = [
+    "新年度盤點",
+    "一鍵更新年度參數（參數設定改為新年度）",
+    "一鍵切換根目錄（新年度檔都找得到的列）",
+]
+
+
+def run_new_year_console(action, year, on_progress=None):
+    import importlib
+
+    from tools.common import year_roots
+    from tools.annual_rollover import new_year_console
+
+    year_roots = importlib.reload(year_roots)
+    new_year_console = importlib.reload(new_year_console)
+    from tools.common.config_loader import get_master_spreadsheet_id, get_sheets_service
+    from tools.common.google_auth import get_drive_service
+
+    year_text = str(year or "").strip()
+    if not re.fullmatch(r"20\d{2}", year_text):
+        raise ValueError("請輸入 4 位數年度，例如 2027")
+    year = int(year_text)
+    log = (lambda msg: on_progress(msg, "info")) if on_progress else print
+    master_id = get_master_spreadsheet_id()
+    sheets = get_sheets_service()
+
+    if action.startswith("一鍵更新年度參數"):
+        rows = new_year_console.update_year_params(sheets, master_id, year)
+        changed = [r for r in rows if "→" in r.get("結果", "")]
+        return f"參數設定已更新 {len(changed)} 項為 {year}（共 {len(rows)} 項）", rows
+
+    values = sheets.spreadsheets().values().get(
+        spreadsheetId=master_id, range=f"'{year_roots.ROOT_SHEET}'!A1:L"
+    ).execute().get("values", [])
+    roots = year_roots.YearRoots(values, get_drive_service, writer=None, log=log)
+
+    if action == "新年度盤點":
+        return new_year_console.inventory(sheets, master_id, roots, year)
+
+    if action.startswith("一鍵切換根目錄"):
+        plan = new_year_console.plan_root_switch(roots, year)
+        switched = new_year_console.switch_ready_rows(sheets, master_id, plan)
+        skipped = [p for p in plan if p["判斷"] == "不切換"]
+        message = (f"已切換為根目錄 {len(switched)} 列" + (f"：第 {'、'.join(map(str, switched))} 列" if switched else "")
+                   + f"；未切換 {len(skipped)} 列（原因見結果表）")
+        return message, plan
+
+    raise ValueError(f"未知動作：{action}")
+
+
 def run_new_year_generate(year, function_name, *, dry_run, fresh=False, tidy=False, area="全區",
                           spring_event=None, gift_threshold=None, on_progress=None):
     from config.vip_config import MASTER_SPREADSHEET_ID
@@ -4290,7 +4342,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "內勤薪資單通知信",
         "內勤元大帳戶",
     ],
-    "new_year_rollover": list(NEW_YEAR_FUNCTION_ROWS) + [YEAR_ROOT_CHECK_FUNCTION],
+    "new_year_rollover": list(NEW_YEAR_FUNCTION_ROWS) + [NEW_YEAR_CONSOLE_FUNCTION, YEAR_ROOT_CHECK_FUNCTION],
 }
 
 DAILY_SCRIPT_MAP = {
@@ -5727,6 +5779,28 @@ with date_col:
             st.markdown('<div class="field-label">📆 執行日期</div>', unsafe_allow_html=True)
             st.info("功能開發中，尚未接上實際執行邏輯。", icon="🚧")
 
+    elif system_type == "new_year_rollover" and selected_function == NEW_YEAR_CONSOLE_FUNCTION:
+        st.markdown('<div class="field-label">📆 新年度</div>', unsafe_allow_html=True)
+        period = st.text_input(
+            "新年度",
+            value=str(datetime.now(TW_TZ).year + (1 if datetime.now(TW_TZ).month >= 7 else 0)),
+            placeholder="例如：2027",
+            label_visibility="collapsed",
+            key="new_year_console_year",
+        )
+        st.radio("動作", NEW_YEAR_CONSOLE_ACTIONS, key="new_year_console_action")
+        st.caption(
+            "建議順序：①「新年度盤點」看參數設定、年度根目錄每列新年度檔是否都找得到、換年檢查清單未完成項目"
+            "（找檔結果寫入「年度根目錄設定」M 欄，不改設定）；"
+            "② 1/1 執行「一鍵更新年度參數」，把參數設定的年度彙總列代號、名冊預設年度改成新年度；"
+            "③ 全部確認後執行「一鍵切換根目錄」：K 欄是「比對」、新年度檔都找得到、L 欄沒有不一致的列改為「根目錄」，"
+            "其餘列不動並列出原因。要改回可用「年度根目錄檢查與切換」→「全部改回原設定」。"
+        )
+        last_rows = st.session_state.get("new_year_console_rows")
+        if last_rows:
+            with st.expander(f"上次結果（{len(last_rows)} 筆）", expanded=True):
+                st.dataframe(last_rows, use_container_width=True, hide_index=True)
+
     elif system_type == "new_year_rollover" and selected_function == YEAR_ROOT_CHECK_FUNCTION:
         st.markdown('<div class="field-label">📆 檢查年度</div>', unsafe_allow_html=True)
         period = st.text_input(
@@ -6856,6 +6930,21 @@ if run_clicked:
                 add_log(f"執行失敗：{e}", "error")
                 add_log(traceback.format_exc(), "error")
 
+        st.rerun()
+
+    if system_type == "new_year_rollover" and selected_function == NEW_YEAR_CONSOLE_FUNCTION:
+        action = st.session_state.get("new_year_console_action", NEW_YEAR_CONSOLE_ACTIONS[0])
+        add_log(f"開始執行：{system_name} / {selected_function} / {period} / {action}")
+        with st.spinner(f"⏳ 執行中：{action}，請稍候..."):
+            try:
+                message, rows = run_new_year_console(
+                    action, period, on_progress=lambda msg, level="info": add_log(msg, level),
+                )
+                add_log(message, "success")
+                st.session_state["new_year_console_rows"] = rows
+            except Exception as e:
+                add_log(f"執行失敗：{e}", "error")
+                add_log(traceback.format_exc(), "error")
         st.rerun()
 
     if system_type == "new_year_rollover" and selected_function == YEAR_ROOT_CHECK_FUNCTION:
