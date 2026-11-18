@@ -220,8 +220,8 @@ def test_agent_commands_pass_merge_and_split_rows():
     assert cmd[-2:] == ["--supply-split", '{"202610": [4]}']
 
 
-def test_supply_items_are_listed_per_row_and_merge_defaults_off():
-    """清潔用品採購大多是不同廠商：盤點每列各自一筆，畫面「合併」預設不勾。"""
+def test_supply_same_vendor_is_one_item_and_merge_box_does_not_apply():
+    """清潔用品採購：同一廠商（同銀行帳號）彙整成一筆，不同廠商分開；「合併」預設不勾、也不影響清潔用品採購。"""
     from tools.finance_management import internal_payment_batch as batch
     from tools.finance_management import internal_payment_batch_ui as ui
 
@@ -234,11 +234,16 @@ def test_supply_items_are_listed_per_row_and_merge_defaults_off():
               row("1680", "福吉生活百貨", "808(玉山銀行)", "0129940051707"),
               row("4800", "檸檬嚴選", "806(元大銀行)", "20342008886999")]
     items = batch._items_for("supply", "台北", values)
-    assert [(i["row"], i["rows"], i["amount"]) for i in items] == [(2, [2], "780"), (3, [3], "1680"), (4, [4], "4800")]
-    assert list(ui._rows(items)[ui.MERGE_COLUMN]) == [False, False, False]
+    assert [(i["payee"], i["rows"], i["amount"]) for i in items] == [
+        ("福吉生活百貨", [2, 3], "2460"), ("檸檬嚴選", [4], "4800")]
+    assert list(ui._rows(items)[ui.MERGE_COLUMN]) == [False, False]
 
-    preview = batch.merge_preview(items, set(), {("台北", "202611", 2), ("台北", "202611", 3), ("台北", "202611", 4)})
-    assert preview == [{"area": "台北", "payee": "福吉生活百貨", "rows": [2, 3], "amount": "2460"}]
+    created = []
+    batch.queue_actions(items, lambda action, params, created_by="": created.append((action, params)) or {},
+                        log=lambda *_: None)
+    params = created[0][1]
+    assert params["supply"] == {"202611": [2, 3, 4]}
+    assert params["supply_merge"] == {"202611": [2, 3, 4]}  # Agent 依帳號彙整：福吉一筆、檸檬嚴選一筆
 
 
 def test_queue_sends_supply_merge_rows_and_agent_flag():
