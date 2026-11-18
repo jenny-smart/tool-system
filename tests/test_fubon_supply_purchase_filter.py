@@ -80,3 +80,12 @@ def test_split_groups_only_splits_unmerged_groups():
     split = split_groups(values, "202610", groups, {2})
     assert [(g["rows"], g["amount"]) for g in split] == [([2], "100"), ([3], "200"), ([4, 5], "120")]
     assert split_groups(values, "202610", groups, set()) is groups
+
+
+def test_merge_by_account_sums_only_same_account():
+    from tools.bank_statement.fubon_supply_purchase_filter import merge_by_account
+
+    singles = pending_supply_purchases(
+        [[""] * 19, _row(amount="780"), _row(amount="1680"), _row(amount="4800", bank="806", account="203")],
+        "202610", merge=False)
+    assert [(m["rows"], m["amount"]) for m in merge_by_account(singles)] == [([2, 3], "2460"), ([4], "4800")]

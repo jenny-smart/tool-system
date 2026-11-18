@@ -62,12 +62,14 @@ def _items_for(kind: str, area: str, values: list[list[str]]) -> list[dict]:
                           "month": "", "payee": str(c.get("name", "")), "amount": str(c["amount"]),
                           "memo": str(c.get("memo", ""))})
     else:
+        # 每列各自一筆（大多是不同廠商）；同帳號要合併時在畫面勾「合併」
         for month in _supply_months(values):
-            for c in pending_supply_purchases(values, month):
+            for c in pending_supply_purchases(values, month, merge=False):
                 items.append({"kind": kind, "area": area, "row": int(c["sheet_row"]),
-                              "rows": [int(r) for r in c["rows"]], "month": month,
+                              "rows": [int(c["sheet_row"])], "month": month,
                               "payee": str(c.get("supplier", "")), "amount": str(c["amount"]),
-                              "memo": f"{month} 採購（第{'、'.join(map(str, c['rows']))}列）"})
+                              "memo": f"{month} 採購",
+                              "account": f"{c.get('bank_code', '')}-{c.get('account_number', '')}"})
     return items
 
 
@@ -95,14 +97,20 @@ def _key(item: dict) -> tuple:
     return item["kind"], item["area"], int(item["row"]), item.get("month", "")
 
 
-def merge_preview(items: list[dict], merge_rows) -> list[dict]:
-    """勾了「合併」的請款記錄裡，同地區、同收款對象＋收款帳號、超過一列的會合併成一筆（跟 merge_by_payee 同規則）。"""
+def merge_preview(items: list[dict], merge_rows, merge_supply=()) -> list[dict]:
+    """勾了「合併」的列裡會合併成一筆的組（超過一列才算）：
+
+    請款記錄：同地區、同收款對象＋收款帳號（跟 merge_by_payee 同規則）；
+    清潔用品採購：同地區、同採購月份、同銀行代碼＋帳號（跟 merge_by_account 同規則）。"""
     groups: dict[tuple, list[dict]] = {}
     for i in items:
         if i["kind"] == "payment" and (i["area"], int(i["row"])) in merge_rows:
-            groups.setdefault((i["area"], i.get("payee", ""), i.get("account", "")), []).append(i)
+            groups.setdefault((i["area"], "payment", i.get("payee", ""), i.get("account", "")), []).append(i)
+        elif i["kind"] == "supply" and (i["area"], i.get("month", ""), int(i["row"])) in merge_supply:
+            groups.setdefault((i["area"], i.get("month", ""), "", i.get("account", "")), []).append(i)
     result = []
-    for (area, payee, _account), members in groups.items():
+    for (area, _kind, _payee, _account), members in groups.items():
+        payee = "、".join(dict.fromkeys(m.get("payee", "") for m in members))
         if len(members) < 2:
             continue
         total = sum(Decimal(str(m.get("amount") or 0)) for m in members)
@@ -112,11 +120,13 @@ def merge_preview(items: list[dict], merge_rows) -> list[dict]:
 
 
 def queue_actions(items: list[dict], create_task: Callable, created_by: str = "內部請款整合執行",
-                  log: Callable[[str], None] = print, merge_rows=(), split_supply=()) -> list[dict]:
+                  log: Callable[[str], None] = print, merge_rows=(), split_supply=(),
+                  merge_supply=None) -> list[dict]:
     """每區排一筆本機 Agent 任務：登入一次、轉帳全部做完才下載明細；最後排一筆「留紀錄」。
 
     merge_rows：勾了「合併」的請款記錄 {(地區, 列號)}；其中同一收款對象的列合併成一筆轉帳，沒勾的照單筆轉。
-    split_supply：取消「合併」的清潔用品採購 {(地區, 月份, 列號)}；同帳號的各列改成各自轉帳。"""
+    merge_supply：勾了「合併」的清潔用品採購 {(地區, 月份, 列號)}；給了（可為空）就每列各自轉帳，
+    只有這些列裡同一銀行帳號的合併成一筆。沒給時沿用舊做法（依帳號合併，split_supply 的筆拆開）。"""
     tasks = []
     for area in AREAS:
         hit = [i for i in items if i["area"] == area]
@@ -125,14 +135,23 @@ def queue_actions(items: list[dict], create_task: Callable, created_by: str = "�
         rows: dict[str, list[int]] = {"payment": [], "deposit": []}
         supply: dict[str, list[int]] = {}
         for i in hit:
-            target = supply.setdefault(i.get("month", ""), []) if i["kind"] == "supply" else rows[i["kind"]]
-            target.append(int(i["row"]))
+            if i["kind"] == "supply":
+                # 清潔用品採購帶上每一列（舊的排程盤點結果一筆可能涵蓋好幾列）
+                supply.setdefault(i.get("month", ""), []).extend(int(r) for r in i.get("rows") or [i["row"]])
+            else:
+                rows[i["kind"]].append(int(i["row"]))
         params = {"area": area, "payment_rows": sorted(rows["payment"]), "deposit_rows": sorted(rows["deposit"]),
                   "supply": {month: sorted(r) for month, r in sorted(supply.items())},
                   "cdp_url": "http://127.0.0.1:9222"}
         merge = sorted(r for r in params["payment_rows"] if (area, r) in merge_rows)
         if merge:
             params["merge_rows"] = merge
+        if merge_supply is not None and params["supply"]:
+            merged = {(i.get("month", ""), int(r)) for i in hit if i["kind"] == "supply"
+                      and (area, i.get("month", ""), int(i["row"])) in merge_supply
+                      for r in i.get("rows") or [i["row"]]}
+            params["supply_merge"] = {month: sorted(r for r in rows if (month, r) in merged)
+                                      for month, rows in params["supply"].items()}
         split = {month: sorted(r for r in rows if (area, month, r) in split_supply)
                  for month, rows in params["supply"].items()}
         if any(split.values()):

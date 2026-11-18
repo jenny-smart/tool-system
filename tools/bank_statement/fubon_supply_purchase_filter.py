@@ -103,6 +103,24 @@ def pending_supply_purchases(values: list[list[str]], month: str, merge: bool = 
     return result
 
 
+def merge_by_account(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    """各列各自一筆的清單（pending_supply_purchases(merge=False)），同一銀行代碼＋帳號的合併成一筆，金額加總。"""
+    groups: dict[tuple[str, str], dict[str, object]] = {}
+    for item in sorted(items, key=lambda m: int(m["sheet_row"])):
+        key = (str(item["bank_code"]), str(item["account_number"]))
+        if key not in groups:
+            groups[key] = {**item, "rows": list(item["rows"]), "amount": Decimal(str(item["amount"]))}
+        else:
+            groups[key]["rows"] += list(item["rows"])
+            groups[key]["amount"] += Decimal(str(item["amount"]))
+    result = []
+    for group in groups.values():
+        amount = group["amount"]
+        group["amount"] = str(int(amount)) if amount == amount.to_integral() else format(amount, "f")
+        result.append(group)
+    return sorted(result, key=lambda m: int(m["sheet_row"]))
+
+
 def split_groups(values: list[list[str]], month: str, groups: list[dict[str, object]],
                  split_rows) -> list[dict[str, object]]:
     """把 sheet_row 在 split_rows 裡的合併筆拆回每一列各自轉帳（取消勾選「合併」）；其他維持原樣。"""

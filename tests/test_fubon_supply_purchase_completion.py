@@ -127,3 +127,32 @@ def test_select_card_falls_back_to_same_account_and_closes_popup_when_nothing_ma
     assert "close_account_popup(page)" in body
     choose = next(n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name == "choose_saved_destination")
     assert "alt_texts=alt" in _ast.get_source_segment(source, choose)
+
+
+def test_prepare_pays_each_row_and_merges_only_marked_same_account_rows():
+    from tools.bank_statement import fubon_supply_purchase_filter as flt
+
+    tree = ast.parse(SOURCE.read_text())
+    future = next(n for n in tree.body if isinstance(n, ast.ImportFrom) and n.module == '__future__')
+    prepare = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'prepare')
+
+    def row(amount, supplier, bank, account):
+        r = [""] * 19
+        r[1], r[5], r[10], r[13], r[14] = "2026.11", supplier, amount, bank, account
+        return r
+
+    values = [["h"], row("780", "福吉", "808(玉山銀行)", "0129"), row("1680", "福吉", "808(玉山銀行)", "0129"),
+              row("4800", "檸檬嚴選", "806(元大銀行)", "2034")]
+    ns = dict(read_report_values=lambda *_: values, SUPPLY_PURCHASE_TYPE='清潔用品採購',
+              pending_supply_purchases=flt.pending_supply_purchases, merge_by_account=flt.merge_by_account,
+              split_groups=flt.split_groups, resolve_report_location=lambda *_: ('sid', 'title'),
+              get_sheets_service=lambda: None)
+    exec(compile(ast.Module(body=[future, prepare], type_ignores=[]), str(SOURCE), 'exec'), ns)
+
+    picked = ns['prepare']('台北', '202611', {2, 3, 4}, merge_rows=set())['selected']
+    assert [(m['rows'], m['amount']) for m in picked] == [([2], '780'), ([3], '1680'), ([4], '4800')]
+    picked = ns['prepare']('台北', '202611', {2, 3, 4}, merge_rows={2, 3})['selected']
+    assert [(m['rows'], m['amount']) for m in picked] == [([2, 3], '2460'), ([4], '4800')]
+    # 單獨頁面（沒給 merge_rows）沿用依帳號合併後的筆
+    picked = ns['prepare']('台北', '202611', {2, 4})['selected']
+    assert [(m['rows'], m['amount']) for m in picked] == [([2, 3], '2460'), ([4], '4800')]

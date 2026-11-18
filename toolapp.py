@@ -6339,7 +6339,7 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             pd.DataFrame([
                 {
                     "執行": False,
-                    "合併": True,
+                    "合併": False,
                     "列數": item["sheet_row"],
                     "涵蓋列": "、".join(str(r) for r in item["rows"]),
                     "廠商": item["supplier"],
@@ -6355,7 +6355,7 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             column_config={
                 "執行": st.column_config.CheckboxColumn("執行"),
                 "合併": st.column_config.CheckboxColumn(
-                    "合併", help="預設同一銀行帳號的列合併成一筆轉帳（金額加總）；取消勾選就涵蓋列各自轉帳。"),
+                    "合併", help="勾選＝同一銀行帳號的列合併成一筆轉帳（金額加總）；沒勾＝涵蓋列各自轉帳（預設）。"),
             },
             key=f"fubon_supply_purchase_editor_{selected_area_value}_{period}",
         )
