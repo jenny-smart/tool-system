@@ -36,6 +36,18 @@ SCOPES = [
 TZ = timezone(timedelta(hours=8))
 
 
+def _roster_default_year(cfg) -> int:
+    """檔名沒有年份時的名冊年度：主控表「參數設定」名冊預設年度優先，讀不到才用 systems.yaml。"""
+    from tools.annual_rollover.new_year_console import read_param
+
+    fallback = str(cfg.get("roster_default_year", 0) or 0)
+    value = read_param("外場排程系統", "外場排班統計表", "名冊預設年度", fallback)
+    try:
+        return int(value)
+    except ValueError:
+        return int(fallback)
+
+
 def today_yyyymmdd() -> str:
     return datetime.now(TZ).strftime("%Y%m%d")
 
@@ -183,7 +195,7 @@ def get_yearly_roster_spreadsheet_id(
     ).execute()
     base_name = str(metadata.get("name", ""))
     year_match = re.search(r"(?<!\d)(20\d{2})(?!\d)", base_name)
-    base_year = int(year_match.group(1)) if year_match else int(cfg.get("roster_default_year", 0) or 0)
+    base_year = int(year_match.group(1)) if year_match else _roster_default_year(cfg)
     if run_year == base_year:
         return base_id
     if not year_match:
