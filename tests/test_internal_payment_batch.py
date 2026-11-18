@@ -180,7 +180,7 @@ def test_area_batch_logs_in_once_and_downloads_after_all_transfers(monkeypatch):
         ("pay", "fubon_supply_purchase"), ("pay", "fubon_supply_purchase"), ("download",), ("logout",)]
     assert events[0] == ("prepare", "fubon_payment_request", True)
     assert [e[2] for e in events if e[:2] == ("prepare", "fubon_supply_purchase")] == [
-        ("202609", {2}, set()), ("202610", {4}, set())]
+        ("202609", {2}, set(), None), ("202610", {4}, set(), None)]
 
 
 def test_area_batch_skips_kind_that_fails_before_login(monkeypatch):
@@ -218,3 +218,44 @@ def test_agent_commands_pass_merge_and_split_rows():
                                         "split_rows": [4]})[-2:] == ["--split-rows", "4"]
     cmd = build_fubon_internal_payment({"area": "台北", "supply": {"202610": [4]}, "supply_split": {"202610": [4]}})
     assert cmd[-2:] == ["--supply-split", '{"202610": [4]}']
+
+
+def test_supply_items_are_listed_per_row_and_merge_defaults_off():
+    """清潔用品採購大多是不同廠商：盤點每列各自一筆，畫面「合併」預設不勾。"""
+    from tools.finance_management import internal_payment_batch as batch
+    from tools.finance_management import internal_payment_batch_ui as ui
+
+    def row(amount, supplier, bank, account):
+        r = [""] * 19
+        r[1], r[5], r[10], r[13], r[14] = "2026.11", supplier, amount, bank, account
+        return r
+
+    values = [["h"], row("780", "福吉生活百貨", "808(玉山銀行)", "0129940051707"),
+              row("1680", "福吉生活百貨", "808(玉山銀行)", "0129940051707"),
+              row("4800", "檸檬嚴選", "806(元大銀行)", "20342008886999")]
+    items = batch._items_for("supply", "台北", values)
+    assert [(i["row"], i["rows"], i["amount"]) for i in items] == [(2, [2], "780"), (3, [3], "1680"), (4, [4], "4800")]
+    assert list(ui._rows(items)[ui.MERGE_COLUMN]) == [False, False, False]
+
+    preview = batch.merge_preview(items, set(), {("台北", "202611", 2), ("台北", "202611", 3), ("台北", "202611", 4)})
+    assert preview == [{"area": "台北", "payee": "福吉生活百貨", "rows": [2, 3], "amount": "2460"}]
+
+
+def test_queue_sends_supply_merge_rows_and_agent_flag():
+    from tools.finance_management import internal_payment_batch as batch
+    from tools.local_agent import build_fubon_internal_payment
+
+    created = []
+    items = [{"kind": "supply", "area": "台北", "row": r, "rows": [r], "month": "202611"} for r in (148, 149, 154)]
+    batch.queue_actions(items, lambda action, params, created_by="": created.append((action, params)) or {},
+                        log=lambda *_: None, merge_supply={("台北", "202611", 148), ("台北", "202611", 149)})
+    params = created[0][1]
+    assert params["supply"] == {"202611": [148, 149, 154]}
+    assert params["supply_merge"] == {"202611": [148, 149]}
+    cmd = build_fubon_internal_payment(params)
+    assert cmd[cmd.index("--supply-merge") + 1] == '{"202611": [148, 149]}'
+
+    created.clear()  # 沒勾合併也要帶 supply_merge（空），Agent 才知道要每列各自轉帳
+    batch.queue_actions(items, lambda action, params, created_by="": created.append((action, params)) or {},
+                        log=lambda *_: None, merge_supply=set())
+    assert created[0][1]["supply_merge"] == {"202611": []}

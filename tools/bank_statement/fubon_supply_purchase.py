@@ -11,7 +11,7 @@ from playwright.sync_api import Page, sync_playwright
 
 from tools.bank_statement.accounts import DEFAULT_ACCOUNTS_FILE, load_account
 from tools.bank_statement.fubon_agent import ensure_login, logout_quietly, run_download, report_query_start
-from tools.bank_statement.fubon_supply_purchase_filter import pending_supply_purchases, split_groups
+from tools.bank_statement.fubon_supply_purchase_filter import merge_by_account, pending_supply_purchases, split_groups
 from tools.bank_statement.fubon_transfer_common import (
     SavedAccountNotFound,
     choose_immediate_date,
@@ -88,16 +88,28 @@ def fill_supply_purchase(
     print("欄位已填寫完成，請人工核對後自行按「確認」送出（不會自動送出）。")
 
 
-def prepare(area: str, month: str, rows: set[int], split_rows: set[int] = frozenset()) -> dict:
+def prepare(area: str, month: str, rows: set[int], split_rows: set[int] = frozenset(),
+            merge_rows: set[int] | None = None) -> dict:
     """進銀行前先讀報表、挑出該月份勾選的待付款（失敗就不登入富邦）。
 
-    split_rows：取消「合併」的筆（以第一列列號表示），同帳號的各列改成各自轉帳。"""
+    merge_rows 沒給（單獨頁面）：rows 是依帳號合併後每筆的第一列，split_rows 是取消「合併」的筆。
+    merge_rows 有給（整合執行，可為空集合）：rows 是各自的列號，預設每列各自轉帳，
+    只有 merge_rows 裡同一銀行帳號的列合併成一筆。"""
     values = read_report_values(SUPPLY_PURCHASE_TYPE, area)
-    candidates = pending_supply_purchases(values, month)
-    selected = [item for item in candidates if int(item["sheet_row"]) in rows]
+    if merge_rows is not None:
+        singles = [item for item in pending_supply_purchases(values, month, merge=False)
+                   if int(item["sheet_row"]) in rows]
+        selected = sorted(
+            merge_by_account([item for item in singles if int(item["sheet_row"]) in merge_rows])
+            + [item for item in singles if int(item["sheet_row"]) not in merge_rows],
+            key=lambda m: int(m["sheet_row"]),
+        )
+    else:
+        candidates = pending_supply_purchases(values, month)
+        selected = [item for item in candidates if int(item["sheet_row"]) in rows]
+        selected = split_groups(values, month, selected, split_rows) if selected else selected
     if not selected:
         raise ValueError("勾選列中沒有符合採購月份、且 N/O 欄皆非空白的資料")
-    selected = split_groups(values, month, selected, split_rows)
     spreadsheet_id, sheet_title = resolve_report_location(SUPPLY_PURCHASE_TYPE, area)
     return {"selected": selected, "month": month, "spreadsheet_id": spreadsheet_id,
             "sheet_title": sheet_title, "service": get_sheets_service()}

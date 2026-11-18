@@ -661,6 +661,11 @@ def build_fubon_internal_payment(params: dict[str, Any]) -> list[str]:
         json.dumps(supply, ensure_ascii=False),
     ] + (["--merge"] if params.get("merge") else []) + _rows_flag("--merge-rows", params.get("merge_rows")) + (
         ["--supply-split", json.dumps(supply_split, ensure_ascii=False)] if supply_split else []
+    ) + (
+        # 有帶 supply_merge（整合執行）：清潔用品採購各列各自轉帳，只合併勾了「合併」的同帳號列
+        ["--supply-merge", json.dumps({str(m): [int(r) for r in rows] for m, rows in params["supply_merge"].items()},
+                                      ensure_ascii=False)]
+        if "supply_merge" in params else []
     )
 
 
