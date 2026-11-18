@@ -25,17 +25,19 @@ def _is_blank(value: str) -> bool:
 
 
 def is_paid(row: list[str]) -> bool:
-    """Q 欄（匯款日期）或 S 欄（請款日期）有值＝已付款。"""
-    return bool(_cell(row, 16) or _cell(row, 18))
+    """Q 欄（匯款日期）有值＝已付款。
+
+    S 欄（請款日期）是提出請款的日期，通常比匯款日期早幾天就填好，不代表已匯款，所以不看。"""
+    return bool(_cell(row, 16))
 
 
 def pending_supply_purchases(values: list[list[str]], month: str, merge: bool = True) -> list[dict[str, object]]:
     """Return 清潔用品採購 rows for the given 採購月份 (B 欄), grouped by 匯款銀行＋帳號（N／O 欄）.
 
-    篩選 B 欄符合指定月份、Q 欄（匯款日期）與 S 欄（請款日期）都空白、
+    篩選 B 欄符合指定月份、Q 欄（匯款日期）空白、
     且 N／O 欄皆有實際內容（不是空白或 #N/A）的列；N／O 欄相同的未匯款列
     會合併成一筆轉帳，金額為這些列 K 欄（進貨總金額）加總。
-    Q 或 S 欄已有日期的列視為已付款，一律不再放入匯款名單。
+    Q 欄已有日期的列視為已付款，一律不再放入匯款名單（S 欄請款日期不算付款）。
     merge=False 時不合併，每一列各自一筆。
     """
     target_month = _normalize_month(month)

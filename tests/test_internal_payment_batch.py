@@ -6,9 +6,11 @@ from tools.scheduled_daily import fubon_pending_notify as notify
 
 
 def test_supply_months_only_unpaid():
+    # Q 欄（index 16）有匯款日期＝已付款；只有 S 欄（index 18）請款日期的列還沒付款
     values = [["h"], ["", "2026/09", *[""] * 17], ["", "2026/10"] + [""] * 14 + ["2026/10/05"],
-              ["", "2026.10", *[""] * 17], ["", "2026.02"] + [""] * 16 + ["2026/02/10"]]
-    assert batch._supply_months(values) == ["202609", "202610"]
+              ["", "2026.10", *[""] * 17], ["", "2026.02"] + [""] * 14 + ["2026/02/10"],
+              ["", "2026.11"] + [""] * 16 + ["2026/11/18"]]
+    assert batch._supply_months(values) == ["202609", "202610", "202611"]
 
 
 def test_payment_items_from_real_filter():
