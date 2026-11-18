@@ -18,7 +18,7 @@ def _rows(items: list[dict], override=None) -> pd.DataFrame:
     return pd.DataFrame([
         {
             RUN_COLUMN: checked(True, override),
-            MERGE_COLUMN: False,  # 預設各自轉帳；要合併再勾
+            MERGE_COLUMN: False,  # 預設各自轉帳；清潔用品採購不適用（同廠商已自動彙整）
             "地區": item["area"],
             "類型": batch.KINDS[item["kind"]][0],
             "列號": "、".join(map(str, item["rows"])),
@@ -59,22 +59,19 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                             column_config={MERGE_COLUMN: st.column_config.CheckboxColumn(
                                 MERGE_COLUMN,
                                 help="請款記錄：勾了「合併」且收款對象與收款帳號都相同的列合併成一筆轉帳（金額加總）；"
-                                     "清潔用品採購：勾了「合併」且銀行帳號相同的列合併成一筆轉帳，沒勾的各自轉帳。"
+                                     "清潔用品採購不適用：同一廠商（同銀行帳號）已自動彙整成一筆，不同廠商一律分開轉帳。"
                                      "完成後每一列都回填已付款。工具包押金退款不合併。")},
                             key=editor_key)
     selected = [item for item, flag in zip(items, edited[RUN_COLUMN]) if flag]
     merge_keys = {(item["area"], int(item["row"])) for item, run, merge in
                   zip(items, edited[RUN_COLUMN], edited[MERGE_COLUMN]) if run and merge and item["kind"] == "payment"}
-    merge_supply = {(item["area"], item.get("month", ""), int(item["row"])) for item, run, merge in
-                    zip(items, edited[RUN_COLUMN], edited[MERGE_COLUMN])
-                    if run and merge and item["kind"] == "supply"}
-    for group in batch.merge_preview(selected, merge_keys, merge_supply):
+    for group in batch.merge_preview(selected, merge_keys):
         st.caption(f"將合併：{group['area']} {group['payee']} 第 {'、'.join(map(str, group['rows']))} 列，"
                    f"合計 NT$ {group['amount']}")
     st.caption("同一地區登入一次，依序轉帳：請款記錄 → 工具包押金退款 → 清潔用品採購；全部轉完才查詢明細（財報最後一列日期～今天）→ 留紀錄。")
     if st.button(f"▶️ 執行勾選的 {len(selected)} 筆", key="internal_payment_batch_run", disabled=not selected):
         batch.queue_actions(selected, create_task, created_by=username or "內部請款整合執行", log=log,
-                            merge_rows=merge_keys, merge_supply=merge_supply)
+                            merge_rows=merge_keys)
         st.success("已排入本機 Agent，請到下方查看執行進度。")
         st.session_state.pop(STATE_KEY, None)
 

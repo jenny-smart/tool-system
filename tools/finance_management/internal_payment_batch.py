@@ -62,13 +62,13 @@ def _items_for(kind: str, area: str, values: list[list[str]]) -> list[dict]:
                           "month": "", "payee": str(c.get("name", "")), "amount": str(c["amount"]),
                           "memo": str(c.get("memo", ""))})
     else:
-        # 每列各自一筆（大多是不同廠商）；同帳號要合併時在畫面勾「合併」
+        # 同一廠商（同銀行帳號）自動彙整成一筆；不同廠商一律分開，「合併」不適用
         for month in _supply_months(values):
-            for c in pending_supply_purchases(values, month, merge=False):
+            for c in pending_supply_purchases(values, month):
                 items.append({"kind": kind, "area": area, "row": int(c["sheet_row"]),
-                              "rows": [int(c["sheet_row"])], "month": month,
+                              "rows": [int(r) for r in c["rows"]], "month": month,
                               "payee": str(c.get("supplier", "")), "amount": str(c["amount"]),
-                              "memo": f"{month} 採購",
+                              "memo": f"{month} 採購（第{'、'.join(map(str, c['rows']))}列）",
                               "account": f"{c.get('bank_code', '')}-{c.get('account_number', '')}"})
     return items
 
@@ -125,8 +125,8 @@ def queue_actions(items: list[dict], create_task: Callable, created_by: str = "�
     """每區排一筆本機 Agent 任務：登入一次、轉帳全部做完才下載明細；最後排一筆「留紀錄」。
 
     merge_rows：勾了「合併」的請款記錄 {(地區, 列號)}；其中同一收款對象的列合併成一筆轉帳，沒勾的照單筆轉。
-    merge_supply：勾了「合併」的清潔用品採購 {(地區, 月份, 列號)}；給了（可為空）就每列各自轉帳，
-    只有這些列裡同一銀行帳號的合併成一筆。沒給時沿用舊做法（依帳號合併，split_supply 的筆拆開）。"""
+    清潔用品採購一律帶 supply_merge＝全部列：同一廠商（同銀行帳號）彙整成一筆，不同廠商分開轉。
+    merge_supply 保留給相容用（給了就只彙整這些列）。"""
     tasks = []
     for area in AREAS:
         hit = [i for i in items if i["area"] == area]
@@ -146,9 +146,9 @@ def queue_actions(items: list[dict], create_task: Callable, created_by: str = "�
         merge = sorted(r for r in params["payment_rows"] if (area, r) in merge_rows)
         if merge:
             params["merge_rows"] = merge
-        if merge_supply is not None and params["supply"]:
+        if params["supply"]:
             merged = {(i.get("month", ""), int(r)) for i in hit if i["kind"] == "supply"
-                      and (area, i.get("month", ""), int(i["row"])) in merge_supply
+                      and (merge_supply is None or (area, i.get("month", ""), int(i["row"])) in merge_supply)
                       for r in i.get("rows") or [i["row"]]}
             params["supply_merge"] = {month: sorted(r for r in rows if (month, r) in merged)
                                       for month, rows in params["supply"].items()}

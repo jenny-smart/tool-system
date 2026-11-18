@@ -6339,7 +6339,6 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             pd.DataFrame([
                 {
                     "執行": False,
-                    "合併": False,
                     "列數": item["sheet_row"],
                     "涵蓋列": "、".join(str(r) for r in item["rows"]),
                     "廠商": item["supplier"],
@@ -6352,11 +6351,7 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             hide_index=True,
             use_container_width=True,
             disabled=["列數", "涵蓋列", "廠商", "銀行代碼", "帳號", "合計金額"],
-            column_config={
-                "執行": st.column_config.CheckboxColumn("執行"),
-                "合併": st.column_config.CheckboxColumn(
-                    "合併", help="勾選＝同一銀行帳號的列合併成一筆轉帳（金額加總）；沒勾＝涵蓋列各自轉帳（預設）。"),
-            },
+            column_config={"執行": st.column_config.CheckboxColumn("執行")},
             key=f"fubon_supply_purchase_editor_{selected_area_value}_{period}",
         )
         fubon_supply_purchase_selected_rows = [
@@ -6364,18 +6359,10 @@ if system_type == "finance_management" and selected_function == "【富邦銀行
             for _, row in _supply_purchase_editor.iterrows()
             if bool(row["執行"])
         ]
-        fubon_supply_purchase_split_rows = [
-            int(row["列數"])
-            for _, row in _supply_purchase_editor.iterrows()
-            if bool(row["執行"]) and not bool(row["合併"]) and "、" in str(row["涵蓋列"])
-        ]
         st.caption(
-            f"待匯款採購（依銀行帳號合併）：{len(_supply_purchase_candidates)} 筆；"
+            f"待匯款採購（同一廠商／銀行帳號自動彙整成一筆，不同廠商不會合併）：{len(_supply_purchase_candidates)} 筆；"
             f"已勾選：{len(fubon_supply_purchase_selected_rows)} 筆"
         )
-        for item in _supply_purchase_candidates:
-            if int(item["sheet_row"]) in fubon_supply_purchase_split_rows:
-                st.caption(f"不合併：{item['supplier']} 第 {'、'.join(map(str, item['rows']))} 列各自轉帳")
     except Exception as exc:
         st.error(f"讀取清潔用品採購資料失敗：{exc}")
 
