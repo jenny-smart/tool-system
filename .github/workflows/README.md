@@ -22,6 +22,7 @@
 | **Scheduled Service Jobs**（`scheduled_service.yml`） | 每日 05:30 | GitHub | 客服排程：排班統計、每日回報、營收。手動可選 `service_all` 或單項。 |
 | **Performance Report**（`performance_report.yml`） | 每日 00:00、08:00、12:00、18:00 | GitHub | 業績報表。 |
 | **Scheduled Change Order Daily Check**（`scheduled_change_order_check.yml`） | 每日 10:00 | GitHub | 清潔異動每日檢查：有未備妥的列時在 jenny@lemonclean.com.tw 行事曆建提醒。 |
+| **order-system 清空檸檬人**（`jenny-smart/order-system` 的 `lemon-ren-clear-schedule.yml`） | 每日 12:30、18:00（主控表「排程設定」`lemon_ren_clear`） | GitHub（order-system） | 由 Cloud Schedule Router 派送；等同 order-system【排班管理】→ 清空排班 →「掃描並清空未配班清單」，五區（沒帳密的略過），清空範圍＝當月 1 日～＋4 個月的月底。 |
 | **Scheduled Fubon Pending Check**（`scheduled_fubon_pending_check.yml`） | 每週二、五 10:00 | GitHub | 富邦待辦通知：盤點台北／台中待付款的請款記錄、工具包押金退款、清潔用品採購，在行事曆提醒。 |
 | **Scheduled Fubon Statement Download**（`scheduled_fubon_statement.yml`） | 每日 08:00；工作日另加 11:00、16:30（週六日與國定假日只跑 08:00） | **本機 Agent（Mac）** | 見下方說明。 |
 | **Scheduled Yuanta Statement Download**（`scheduled_yuanta_statement.yml`） | 每月 25 日 11:00；遇例假日提前到前一個工作日 | **本機 Agent（Mac）** | 見下方說明。 |

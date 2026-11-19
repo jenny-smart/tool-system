@@ -110,6 +110,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "weekend_reminder_confirm_sync": ("jenny-smart/order-system:weekend-reminder-confirm-sync.yml", {}),
     # 2026-11-12 Jenny：上班日 08:20 儲值金訂單客服備註空白 → 訂購人姓名記入行事曆
     "stored_value_notice_daily": ("jenny-smart/order-system:stored-value-notice-schedule.yml", {}),
+    # 2026-11-20 Jenny：每日 12:30、18:00 order-system 排班管理「清空檸檬人」（五區，當月～＋4 個月月底）
+    "lemon_ren_clear": ("jenny-smart/order-system:lemon-ren-clear-schedule.yml", {}),
     # 2026-11-11 Jenny：官網評價不滿意→清潔客訴（07:00）、預約下次服務→評價預約（07:20）
     "rating_complaint_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "complaint"}),
     "rating_booking_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "booking"}),
@@ -192,7 +194,7 @@ DEFAULT_ROWS: list[list] = [
     [True, "notify", "寄送日排程結果通知", "07:00", "每日", "", "照跑", MODE_DIRECT, ""],
     [True, "fubon_statement", "富邦明細下載（排入 Mac）", "08:00,11:00,16:30", "每日", "", "照跑", MODE_QUEUE,
      "11:00、16:30 例假日由程式略過"],
-    [False, "atm_unpaid", "ATM 待付款清單同步（台北／台中）", "09:00~18:00 每30分鐘", "每日", "", "略過", MODE_DIRECT,
+    [False, "atm_unpaid", "ATM 待付款清單同步（台北／台中）", "06:00~23:00 每30分鐘", "每日", "", "略過", MODE_DIRECT,
      "取代 Mac 的 ATM 本機排程：先移除 Mac launchd 再勾選啟用，避免兩邊同時貼上"],
     # 2026-11-06 Jenny：每日 08:10 跑 ATM 對帳 ② 配對銀行明細＋③ 更新系統對帳
     [True, "atm_match_reconcile", "ATM 對帳 ② 配對銀行明細＋③ 更新系統對帳（台北／台中）", "08:10", "每日", "", "照跑",
@@ -223,6 +225,9 @@ DEFAULT_ROWS: list[list] = [
     # 2026-11-11 Jenny：上班日 07:20 有勾預約下次服務的評價 → 「評價預約」主名單後插入＋記行事曆
     [True, "rating_booking_daily", "官網評價預約下次服務→評價預約（台北／台中內勤工作表單）", "07:20", "每日", "", "略過", MODE_DIRECT,
      "程式在 order-system（rating-schedule.yml job=booking）；區間同 07:00，插在主名單最後一筆之後，記行事曆"],
+    # 2026-11-20 Jenny：每日 12:30、18:00 清空未配班清單中的檸檬人（= order-system 排班管理 → 清空排班 → 掃描並清空未配班清單）
+    [True, "lemon_ren_clear", "清空未配班清單中的檸檬人（五區）", "12:30,18:00", "每日", "", "照跑", MODE_DIRECT,
+     "程式在 order-system（lemon-ren-clear-schedule.yml）；清空範圍＝當月 1 日～＋4 個月的月底（例 11 月→隔年 3/31）；沒設後台帳密的地區略過"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,
