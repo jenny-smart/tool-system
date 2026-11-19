@@ -1,0 +1,40 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場排班統計表 / running
+Command: /opt/hostedtoolcache/Python/3.11.18/x64/bin/python -u -m tools.field_management.schedule_stats --date 20261120 --system-name 外場排程系統 --run-type 排程
+[2026-11-20 02:11:22] 開始處理排班統計表：20261120排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1UwFtiz6PFOF1cxjKLNSJgOg5Vo6MXIYZvESHWNyukzI
+🗑️ 已刪除來源暫存 Google Sheet：1UwFtiz6PFOF1cxjKLNSJgOg5Vo6MXIYZvESHWNyukzI
+[2026-11-20 02:11:46] 完成：20261120排班統計表-台北.xlsx → 2026排班統計表!EH4 / rows=82
+[2026-11-20 02:11:49] 開始處理排班統計表：20261220排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1ndut8lSZCR7G7uqS2kCAj8pGPI6GS7iWenUjbCh9VDQ
+🗑️ 已刪除來源暫存 Google Sheet：1ndut8lSZCR7G7uqS2kCAj8pGPI6GS7iWenUjbCh9VDQ
+[2026-11-20 02:11:54] 完成：20261220排班統計表-台北.xlsx → 2026排班統計表!ET4 / rows=58
+[2026-11-20 02:11:56] 開始處理排班統計表：20270120排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1eayVL3L3waTt13p-VUl6x-bS8H6W-CVUqIUP1PRP-uA
+🗑️ 已刪除來源暫存 Google Sheet：1eayVL3L3waTt13p-VUl6x-bS8H6W-CVUqIUP1PRP-uA
+[2026-11-20 02:12:00] 完成：20270120排班統計表-台北.xlsx → 2026排班統計表!FF4 / rows=41
+[2026-11-20 02:12:02] 開始處理排班統計表：20270220排班統計表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1wCwpxauTDueLUyUL5im2NLIbiBCnKam_EvNcDhibiI4
+🗑️ 已刪除來源暫存 Google Sheet：1wCwpxauTDueLUyUL5im2NLIbiBCnKam_EvNcDhibiI4
+[2026-11-20 02:12:08] 完成：20270220排班統計表-台北.xlsx → 2026排班統計表!FR4 / rows=35
+[2026-11-20 02:12:10] 開始處理排班統計表：20261120排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1EaveuYQ8fqHK-Aerf-VEu5b8x6Ul7VspT5VeyLinVdg
+🗑️ 已刪除來源暫存 Google Sheet：1EaveuYQ8fqHK-Aerf-VEu5b8x6Ul7VspT5VeyLinVdg
+[2026-11-20 02:12:16] 完成：20261120排班統計表-台中.xlsx → 2026排班統計表!EH4 / rows=15
+[2026-11-20 02:12:18] 開始處理排班統計表：20261220排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：18rdAP-veHVvM_4uYnJ2be_MhAM4zf7OtwG6FBbiXh7A
+🗑️ 已刪除來源暫存 Google Sheet：18rdAP-veHVvM_4uYnJ2be_MhAM4zf7OtwG6FBbiXh7A
+[2026-11-20 02:12:23] 完成：20261220排班統計表-台中.xlsx → 2026排班統計表!ET4 / rows=10
+[2026-11-20 02:12:25] 開始處理排班統計表：20270120排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1Awr84r5iq_3oPLYdi8SoyceruQK6zlAFiI3686HKUpY
+🗑️ 已刪除來源暫存 Google Sheet：1Awr84r5iq_3oPLYdi8SoyceruQK6zlAFiI3686HKUpY
+[2026-11-20 02:12:30] 完成：20270120排班統計表-台中.xlsx → 2026排班統計表!FF4 / rows=9
+[2026-11-20 02:12:31] 開始處理排班統計表：20270220排班統計表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1h2ms7Cu3l1AQgHCdLoKW-4cO5jl0R_bfFME1PUH9LnM
+🗑️ 已刪除來源暫存 Google Sheet：1h2ms7Cu3l1AQgHCdLoKW-4cO5jl0R_bfFME1PUH9LnM
+[2026-11-20 02:12:35] 完成：20270220排班統計表-台中.xlsx → 2026排班統計表!FR4 / rows=9
+[write_target_log] 目標執行檔打卡失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1MKadGGTkIefcbPpEVCEPo0SS_wnqsmZSfqjcdhxg6Gk/values/%E5%A4%96%E5%A0%B4%E6%8E%92%E7%A8%8B%E7%B3%BB%E7%B5%B1%E5%9F%B7%E8%A1%8CLog%21A1%3AZ1?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_limit': 'ReadRequestsPerMinutePerUser', 'quota_limit_value': '60', 'quota_metric': 'sheets.googleapis.com/read_requests', 'consumer': 'projects/1042663213860', 'quota_unit': '1/min/{project}/{user}', 'window_start_time': '1795111910', 'service': 'sheets.googleapis.com', 'quota_location': 'global'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[2026-11-20 02:12:36] schedule_stats.py 全部完成
+
+📝 外場排程打卡：外場排班統計表 / success
+field_management scheduler 全部完成

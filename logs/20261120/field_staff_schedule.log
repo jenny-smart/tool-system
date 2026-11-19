@@ -1,0 +1,36 @@
+📋 log_spreadsheet_id 已從設定檔載入
+⚠️ 外場排程打卡失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'quota_unit': '1/min/{project}/{user}', 'quota_location': 'global', 'quota_limit_value': '60', 'service': 'sheets.googleapis.com', 'quota_metric': 'sheets.googleapis.com/read_requests', 'consumer': 'projects/1042663213860', 'window_start_time': '1795111910', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+Command: /opt/hostedtoolcache/Python/3.11.18/x64/bin/python -u -m tools.field_management.staff_schedule --date 20261120 --system-name 外場排程系統 --run-type 排程
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠ 讀取「年度根目錄設定」失敗，沿用原設定：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8/values/%27%E5%B9%B4%E5%BA%A6%E6%A0%B9%E7%9B%AE%E9%8C%84%E8%A8%AD%E5%AE%9A%27%21A1%3AL?alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'window_start_time': '1795111910', 'quota_unit': '1/min/{project}/{user}', 'consumer': 'projects/1042663213860', 'quota_location': 'global', 'service': 'sheets.googleapis.com', 'quota_limit_value': '60', 'quota_limit': 'ReadRequestsPerMinutePerUser', 'quota_metric': 'sheets.googleapis.com/read_requests'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[2026-11-20 02:12:39] 開始處理專員班表：20261120專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1NEb35vBila4O74zDdQCR8YB6HQItyNyp7WuUy0Eha_A
+⚠️ Google API 暫時限流/忙碌，等待 5.4 秒後重試 (1/6)
+⚠️ Google API 暫時限流/忙碌，等待 10.2 秒後重試 (2/6)
+⚠️ Google API 暫時限流/忙碌，等待 21.2 秒後重試 (3/6)
+🗑️ 已刪除來源暫存 Google Sheet：1NEb35vBila4O74zDdQCR8YB6HQItyNyp7WuUy0Eha_A
+[2026-11-20 02:13:25] 更新專員班表分頁名稱：專員班表查詢本月_1119 → 專員班表查詢本月_1120
+[2026-11-20 02:13:27] 專員班表分頁名稱更新完成：專員班表查詢本月_1120
+[2026-11-20 02:13:30] 完成：20261120專員班表-台北.xls → '專員班表查詢本月_1120'!A:G / rows=1573
+[2026-11-20 02:13:34] 開始處理專員班表：20261220專員班表-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1YJP_-A0OoE_-edqw2rRrIL_0klaii2onPXK0GOJaYL0
+🗑️ 已刪除來源暫存 Google Sheet：1YJP_-A0OoE_-edqw2rRrIL_0klaii2onPXK0GOJaYL0
+[2026-11-20 02:13:39] 更新專員班表分頁名稱：專員班表查詢次月_1119 → 專員班表查詢次月_1120
+[2026-11-20 02:13:40] 專員班表分頁名稱更新完成：專員班表查詢次月_1120
+[2026-11-20 02:13:41] 完成：20261220專員班表-台北.xls → '專員班表查詢次月_1120'!A:G / rows=1247
+[2026-11-20 02:13:43] 開始處理專員班表：20261120專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1nrz5eUHvkjWRIgbSOvMVNIdqjFH8UdqilifiBQDChNs
+🗑️ 已刪除來源暫存 Google Sheet：1nrz5eUHvkjWRIgbSOvMVNIdqjFH8UdqilifiBQDChNs
+[2026-11-20 02:13:48] 更新專員班表分頁名稱：專員班表查詢本月_1119 → 專員班表查詢本月_1120
+[2026-11-20 02:13:48] 專員班表分頁名稱更新完成：專員班表查詢本月_1120
+[2026-11-20 02:13:49] 完成：20261120專員班表-台中.xls → '專員班表查詢本月_1120'!A:G / rows=222
+[2026-11-20 02:13:51] 開始處理專員班表：20261220專員班表-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1BZL0zqV6UFbjl1_IhPlsjl2XTk1avqN5vbVGcSBkgk4
+🗑️ 已刪除來源暫存 Google Sheet：1BZL0zqV6UFbjl1_IhPlsjl2XTk1avqN5vbVGcSBkgk4
+[2026-11-20 02:13:56] 更新專員班表分頁名稱：專員班表查詢次月_1119 → 專員班表查詢次月_1120
+[2026-11-20 02:13:57] 專員班表分頁名稱更新完成：專員班表查詢次月_1120
+[2026-11-20 02:13:57] 完成：20261220專員班表-台中.xls → '專員班表查詢次月_1120'!A:G / rows=223
+[2026-11-20 02:13:58] staff_schedule.py 全部完成
+
+📝 外場排程打卡：外場專員班表 / success
+field_management scheduler 全部完成

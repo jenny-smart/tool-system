@@ -1,0 +1,20 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.18/x64/bin/python -u -m tools.field_management.orders --date 20261120 --system-name 外場排程系統 --run-type 排程
+[2026-11-20 02:14:13] 開始處理訂單資料：20261120訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1LehQs7pmKgUuydaPzq05wwHi4wHmfnrho3CvI7RAJyQ
+🗑️ 已刪除來源暫存 Google Sheet：1LehQs7pmKgUuydaPzq05wwHi4wHmfnrho3CvI7RAJyQ
+[2026-11-20 02:14:26] 完成：20261120訂單-台北.xls → 訂單資料!A:ZZ / rows=1219
+[write_target_log] 目標執行檔打卡失敗：<HttpError 429 when requesting https://sheets.googleapis.com/v4/spreadsheets/1AvoUGlFCxaKsPOPavgBmqHoyn-_t4c0I82bIth7SvRQ?fields=sheets%28properties%28sheetId%2Ctitle%29%29&alt=json returned "Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.". Details: "[{'@type': 'type.googleapis.com/google.rpc.ErrorInfo', 'reason': 'RATE_LIMIT_EXCEEDED', 'domain': 'googleapis.com', 'metadata': {'window_start_time': '1795112030', 'quota_unit': '1/min/{project}/{user}', 'quota_metric': 'sheets.googleapis.com/read_requests', 'quota_limit_value': '60', 'consumer': 'projects/1042663213860', 'quota_location': 'global', 'service': 'sheets.googleapis.com', 'quota_limit': 'ReadRequestsPerMinutePerUser'}}, {'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Request a higher quota limit.', 'url': 'https://cloud.google.com/docs/quotas/help/request_increase'}]}]">
+[2026-11-20 02:14:27] 開始處理訂單資料：20261120訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1O35iAkkkQN1zjbog7Ffwm0B9XzVXPfob4DjBDRsgY94
+⚠️ Google API 暫時限流/忙碌，等待 5.8 秒後重試 (1/6)
+⚠️ Google API 暫時限流/忙碌，等待 10.8 秒後重試 (2/6)
+⚠️ Google API 暫時限流/忙碌，等待 20.9 秒後重試 (3/6)
+⚠️ Google API 暫時限流/忙碌，等待 40.2 秒後重試 (4/6)
+🗑️ 已刪除來源暫存 Google Sheet：1O35iAkkkQN1zjbog7Ffwm0B9XzVXPfob4DjBDRsgY94
+[2026-11-20 02:15:51] 完成：20261120訂單-台中.xls → 訂單資料!A:ZZ / rows=113
+[2026-11-20 02:15:53] orders.py 全部完成
+
+📝 外場排程打卡：外場訂單 / success
+field_management scheduler 全部完成
