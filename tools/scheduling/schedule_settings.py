@@ -112,7 +112,7 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "stored_value_notice_daily": ("jenny-smart/order-system:stored-value-notice-schedule.yml", {}),
     # 2026-11-20 Jenny：每日 12:30、18:00 order-system 排班管理「清空檸檬人」（台北／台中，當月～＋4 個月月底）
     "lemon_ren_clear": ("jenny-smart/order-system:lemon-ren-clear-schedule.yml", {}),
-    # 2026-11-20 Jenny：每日 11:00 order-system「檸檬人統計」（台北，當月～＋3 個月月底）→ tpe／jenny 行事曆
+    # 2026-11-20 Jenny：每日 11:00 order-system「檸檬人統計」（台北，明天～＋3 個月月底）→ tpe／jenny 行事曆
     "lemon_ren_count": ("jenny-smart/order-system:lemon-ren-count-schedule.yml", {}),
     # 2026-11-11 Jenny：官網評價不滿意→清潔客訴（07:00）、預約下次服務→評價預約（07:20）
     "rating_complaint_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "complaint"}),
@@ -232,7 +232,7 @@ DEFAULT_ROWS: list[list] = [
      "程式在 order-system（lemon-ren-clear-schedule.yml）；只跑台北／台中；清空範圍＝當月 1 日～＋4 個月的月底（例 11 月→隔年 3/31）"],
     # 2026-11-20 Jenny：每日 11:00 檸檬人統計（待換專員進度）→ tpe@lemonclean.com.tw、jenny@lemonclean.com.tw 行事曆
     [True, "lemon_ren_count", "檸檬人統計：待換專員進度（台北）", "11:00", "每日", "", "照跑", MODE_DIRECT,
-     "程式在 order-system（lemon-ren-count-schedule.yml）；統計範圍＝當月 1 日～＋3 個月的月底；"
+     "程式在 order-system（lemon-ren-count-schedule.yml）；統計範圍＝明天～＋3 個月的月底；"
      "不含檸檬保留單、未配班、合併訂單（檸檬人勿動）；結果記 tpe@／jenny@lemonclean.com.tw 行事曆"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
