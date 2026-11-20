@@ -18,7 +18,7 @@ target：
   cash_gap_followup       同上（2～10 日重算；上游晚做的數字會補進來），還缺就建提醒
   month_start_check       月初檢查
   accounting_reminder     會計事務所費用確認提醒
-  mof_serial              鯨躍字軌（下個月要用的那期，每月執行）：盤點各區是否已配號 → 排入財政部登入＋完整流程，提醒登入
+  mof_serial              鯨躍字軌（下個月要用的那期，雙月 18 日執行）：盤點各區是否已配號 → 排入財政部登入＋完整流程，提醒登入
   mof_serial_check        字軌未完成提醒
   monthly_checklist       月度盤點：更新主控表「月度盤點」分頁，過期沒做完的合併成一則提醒
   其他：month_start（排入＋檢查）、cash_gap、prepaid_amount
@@ -386,8 +386,8 @@ MOF_ALLOCATE_FUNCTION = "電子發票字軌號碼配號"
 
 def mof_target(today: date) -> tuple[str, str, str]:
     """下個月要用的字軌 → (財政部期別 YYYYMM, 鯨躍查詢年份（民國）, 查詢月份 MM-MM)。
-    主控表「排程設定」mof_serial／mof_serial_check 是每月執行：雙月（例 12/20）→ 下一期（01-02）；
-    單月（例 11/20）→ 本期（11-12，上個月已配號就不會再排入或提醒，等於補做檢查）。"""
+    主控表「排程設定」mof_serial 是雙月 18 日、mof_serial_check 是雙月 19–25 日：雙月（例 12/18）→ 下一期（01-02）。
+    若排程設定改成每月，單月（例 11/18）→ 本期（11-12，上個月已配號就不會再排入或提醒，等於補做檢查）。"""
     from tools.invoice_center.mof_serial import period_of
 
     next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
