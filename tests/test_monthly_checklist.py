@@ -25,7 +25,7 @@ def test_mof_skip_month_follows_schedule_frequency(monkeypatch):
     from tools.scheduling import schedule_settings as ss
 
     def rule(freq):
-        return ss.parse_row([True, "mof_serial", "x", "10:00", freq, "20", "提前", ss.MODE_QUEUE])
+        return ss.parse_row([True, "mof_serial", "x", "10:00", freq, "18", "提前", ss.MODE_QUEUE])
 
     monkeypatch.setattr(ss, "get_rule", lambda *_a, **_k: rule("每月"))
     assert not mc._mof_skip_month("202611") and not mc._mof_skip_month("202612")

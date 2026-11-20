@@ -5,7 +5,7 @@
   台灣連線（當月）、台中租金（當月＋隔月）、鯨躍字軌（下一期）等例外在項目名稱／檢查結果寫明。
   月初那批（期別＝上個月）沿用【整合執行】月初的盤點（month_start_check）。
 - 其他每月工作各自檢查：工具包押金、年度review、台北查信、各區固定費用匯款、台中固定費用請款（單月）、現金缺口各項數字、
-  會計事務所費用（單月）、鯨躍字軌（頻率依「排程設定」mof_serial，目前每月）。
+  會計事務所費用（單月）、鯨躍字軌（頻率／日期依「排程設定」mof_serial，目前雙月 18 日）。
 - 結果寫進主控表「月度盤點」分頁：每月每項一列、保留歷史；第一次變成完成時記「完成時間」，可回頭查拖了多久。
   自己加的列（項目代號空白）程式不會動，可當手動項目，在「狀態」欄自己填「✅ 完成」。
 - 排程（排程設定 monthly_checklist）每天更新分頁；超過應完成日還沒做完的項目合併成一則行事曆提醒。
@@ -200,7 +200,7 @@ def accounting_item(month: str) -> dict:
 
 
 def _mof_skip_month(month: str) -> bool:
-    """依主控表「排程設定」mof_serial 的頻率判斷這個月要不要做（2026-11-11 排程設定是每月）；讀不到用預設。"""
+    """依主控表「排程設定」mof_serial 的頻率判斷這個月要不要做（2026-11-20 改成雙月 18 日）；讀不到用預設。"""
     from tools.scheduling.schedule_settings import get_rule
 
     try:
@@ -212,14 +212,30 @@ def _mof_skip_month(month: str) -> bool:
     return (freq == "雙月" and odd) or (freq == "單月" and not odd)
 
 
+MOF_DEFAULT_DAY = 18  # 2026-11-20 Jenny：每雙月 18 日
+
+
+def _mof_day() -> int:
+    """應完成日：「排程設定」mof_serial 的日期欄（單一日期才用），讀不到或不是單一日期用 18 日。"""
+    from tools.scheduling.schedule_settings import get_rule
+
+    try:
+        rule = get_rule("mof_serial")
+        text = str(rule.days).strip() if rule else ""
+        return int(text) if text.isdigit() and 1 <= int(text) <= 28 else MOF_DEFAULT_DAY
+    except Exception:
+        return MOF_DEFAULT_DAY
+
+
 def mof_item(month: str, skip_month: Optional[bool] = None) -> dict:
-    due = _earlier_workday(month_day(month, 20))
+    day = _mof_day()
+    due = _earlier_workday(month_day(month, day))
     if _mof_skip_month(month) if skip_month is None else skip_month:
         return item("mof_serial", "鯨躍字軌下載＋匯入＋配號（下一期）", due, True, "這個月不用", applicable=False)
     from tools.scheduled_finance.runner import mof_status
 
     try:
-        done, todo, period_text = mof_status(month_day(month, 20))
+        done, todo, period_text = mof_status(month_day(month, day))
         detail = (f"{period_text} 未完成：" + "、".join(todo)) if todo else f"{period_text} 各區已配號"
     except Exception as exc:
         todo, detail = ["?"], f"讀取配號 Log 失敗：{str(exc)[:60]}"
