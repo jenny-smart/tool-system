@@ -512,7 +512,103 @@ def _source_row_values(area: str, source_row: int) -> tuple[str, str]:
     return str(row[0] or "").strip(), str(row[9] or "").strip()
 
 
+def _source_row_invoice(area: str, source_row: int) -> str:
+    """清潔異動該列 O 欄（已回填的發票號碼）；讀不到回傳空字串。"""
+    from tools.lemon_backend.stored_value_sheet import get_worksheet
+
+    values = get_worksheet(area).get(f"O{source_row}") if source_row >= 2 else []
+    return str(values[0][0] if values and values[0] else "").strip().upper()
+
+
+def _payload(item: dict[str, Any]) -> dict[str, Any]:
+    try:
+        data = json.loads(str(item.get("payload_json") or "") or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def lookup_order_no(item: dict[str, Any]) -> str:
+    """查鯨躍用的訂單編號（單一張）：Payload orderid 去掉 -N；沒有就取佇列訂單的第一張。
+
+    2026-11-21：合併開立的佇列訂單是 G 欄原文（多張訂單），拿它查鯨躍永遠查不到 →
+    開過的發票被當成沒開、重複開立；等儲存時也一直讀不到發票號碼而卡住。"""
+    from .merged import split_order_numbers
+
+    orderid = str(_payload(item).get("orderid") or "").strip().upper()
+    base = re.sub(r"-\d+$", "", orderid)
+    if base:
+        return base
+    orders = split_order_numbers(str(item.get("order_no") or ""))
+    return orders[0] if orders else str(item.get("order_no") or "").strip()
+
+
+def payload_amount(item: dict[str, Any], fallback: str = "") -> str:
+    """查已開立用的金額：Payload 含稅總額（就是這張發票的金額）；沒有才用清潔異動 N 欄。
+    合併開立／車馬費的 N 欄不一定等於發票金額，用 N 會查不到已開立的發票。"""
+    total = str(_payload(item).get("totalamount") or "").strip()
+    return total if _money(total) else fallback
+
+
+MERGED_REMARK_RE = re.compile(r"合併開立：([^；;]+)")
+
+
+def merged_orders(item: dict[str, Any]) -> list[str]:
+    """合併開立的所有訂單（Payload 備註「合併開立：A、B、C」）；不是合併開立回傳空清單。"""
+    from .merged import split_order_numbers
+
+    match = MERGED_REMARK_RE.search(str(_payload(item).get("mainremark") or ""))
+    orders = split_order_numbers(match.group(1)) if match else []
+    return orders if len(orders) >= 2 else []
+
+
+def allowance_merged_originals(page: Any, area: str, orders: list[str], *, skip_invoices: set[str],
+                               not_before: str = "") -> list[str]:
+    """合併開立前，每張原訂單的發票全額折讓（2026-11-21 Jenny）。
+
+    原發票號碼讀檸檬後台訂單；沒有發票的訂單不需折讓；skip_invoices（合併發票本身、O 欄）不折讓。
+    每張都先查鯨躍是否已折讓（登記日後），有就沿用不重開；任何一張失敗就停，不開合併發票。"""
+    from tools.lemon_backend.client import BackendClient
+
+    from .ei_issue import issue_allowance
+
+    backend = BackendClient(area)
+    done: list[str] = []
+    for order_no in orders:
+        order = backend.get_order(order_no)
+        if order is None:
+            raise RuntimeError(f"合併開立：檸檬後台找不到訂單 {order_no}，未開立折讓單及合併發票")
+        invoice_no = str(order.invoice_no or "").strip().upper()
+        if not invoice_no:
+            print(f"[{area}] 合併開立：{order_no} 沒有原發票，不需折讓", flush=True)
+            continue
+        if invoice_no in skip_invoices:
+            print(f"[{area}] 合併開立：{order_no} 的發票 {invoice_no} 就是合併發票，不折讓", flush=True)
+            continue
+        result = issue_allowance(page, invoice_no, "", require_full=True, not_before=not_before)
+        verb = "已有折讓單" if result.reused else "已開立折讓單"
+        print(f"[{area}] 合併開立：{order_no} 原發票 {invoice_no} {verb} {result.number}", flush=True)
+        done.append(f"{order_no} {invoice_no}→{result.number}")
+    return done
+
+
+def _write_allowance_numbers(area: str, source_row: int, done: list[str]) -> None:
+    """合併開立的折讓單號寫入清潔異動 AB 欄（AB 空白才寫，不覆蓋）。"""
+    if not done or source_row < 2:
+        return
+    from tools.lemon_backend.stored_value_sheet import get_worksheet
+
+    ws = get_worksheet(area)
+    current = ws.get(f"AB{source_row}")
+    if current and current[0] and str(current[0][0]).strip():
+        print(f"[{area}] 第 {source_row} 列 AB 已有值，折讓單號只記在日誌：{'；'.join(done)}", flush=True)
+        return
+    ws.update_acell(f"AB{source_row}", "；".join(done))
+
+
 def process_pending_invoice_payloads(page: Any, area: str) -> int:
+    from tools.invoice_center.ei_issue import LookupFailed, issue_invoice
+
     pending = list_pending_payloads(area)
     if not pending:
         print(f"[{area}] 沒有待貼入的發票 Payload")
@@ -525,10 +621,12 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
     recovered_rows: set[int] = set()
     completed = 0
     for item in pending:
+        if merged_orders(item):
+            continue  # 合併開立：原訂單折讓單也要檢查，交給下面逐筆流程（同樣先查是否已開立）
         row_no = int(item.get("_row") or 0)
         source_row = int(item.get("source_row") or 0)
         order_no = str(item.get("order_no") or "").strip()
-        invoice_no = _extract_invoice_no_for_order(page, order_no)
+        invoice_no = _extract_invoice_no_for_order(page, lookup_order_no(item))
         if not invoice_no:
             continue
         write_invoice_result(area, source_row, order_no, invoice_no)
@@ -548,17 +646,6 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         print(f"[{area}] 本次發票資料匯入：{completed} 筆")
         return completed
 
-    awaiting_orders = [
-        str(item.get("order_no") or "").strip()
-        for item in pending
-        if str(item.get("status") or "").strip() == "awaiting_save"
-    ]
-    if awaiting_orders:
-        raise RuntimeError(
-            f"{'、'.join(awaiting_orders)} 已在等待儲存結果，"
-            "但目前查詢頁找不到同訂單發票；為避免重複開立，已停止"
-        )
-
     for item in pending:
         row_no = int(item.get("_row") or 0)
         source_row = int(item.get("source_row") or 0)
@@ -567,28 +654,54 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         if not payload_json:
             update_payload_status(row_no, "failed", "Payload 空白")
             continue
-        # 共用開立：先到鯨躍查詢這筆是否已開過（同訂單、登記日後、金額相符），有就回填不重開；
-        # 查詢失敗直接停止，不在不確定時開立
-        from tools.invoice_center.ei_issue import LookupFailed, issue_invoice
-
-        registered_on, amount = _source_row_values(area, source_row)
+        lookup = lookup_order_no(item)
+        registered_on, sheet_amount = _source_row_values(area, source_row)
+        amount = payload_amount(item, sheet_amount)
+        orders = merged_orders(item)
+        awaiting = str(item.get("status") or "").strip() == "awaiting_save"
         try:
-            result = issue_invoice(
-                page, payload_json, lookup_order_no=order_no, amount=amount, not_before=registered_on,
-                after_fill=lambda: update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存"),
-            )
-            write_invoice_result(area, source_row, order_no, result.number)
-            if result.reused:
-                update_payload_status(row_no, "completed", f"鯨躍已有發票，回填 O/AA：{result.number}")
-                print(f"[{area}] {order_no}：鯨躍已開立發票 {result.number}，已回填，未重複開立", flush=True)
+            # 合併開立（2026-11-21 Jenny 順序）：① 原訂單發票全額折讓 → ② 查合併發票是否已開立 → ③ 開立或回填
+            allowances: list[str] = []
+            if orders:
+                skip = {invoice for invoice in (_source_row_invoice(area, source_row),) if invoice}
+                allowances = allowance_merged_originals(page, area, orders, skip_invoices=skip,
+                                                        not_before=registered_on)
+                _write_allowance_numbers(area, source_row, allowances)
+            # 共用開立：先到鯨躍查詢這筆是否已開過（同訂單、登記日後、金額相符），有就回填不重開；
+            # 查詢失敗直接停止，不在不確定時開立
+            try:
+                existing = find_existing_invoice(page, lookup, amount=amount, not_before=registered_on) \
+                    if (awaiting or orders) else None
+            except Exception as exc:
+                raise LookupFailed(str(exc)) from exc
+            if awaiting and not existing:
+                # 上次已貼入、可能已按儲存（中止或卡住）：查不到也不重開，請人工確認
+                raise RuntimeError(
+                    f"{order_no} 上次已貼入發票資料、等待儲存，但鯨躍查不到 {lookup} 的發票；"
+                    "為避免重複開立，已停止。請到鯨躍確認：已開立就把發票號碼填入 O 欄；沒開立就把佇列狀態改為 pending 再執行"
+                )
+            if existing:
+                result_number, reused = existing, True
             else:
-                update_payload_status(row_no, "completed", f"已回填 O/AA：{result.number}")
-                print(f"[{area}] {order_no}：已回填 O 欄 {result.number}、AA 欄開立時間", flush=True)
+                result = issue_invoice(
+                    page, payload_json, lookup_order_no=lookup, amount=amount, not_before=registered_on,
+                    after_fill=lambda: update_payload_status(row_no, "awaiting_save", "已貼入；等待人工按下一步及儲存"),
+                )
+                result_number, reused = result.number, result.reused
+            write_invoice_result(area, source_row, order_no, result_number)
+            note = f"；折讓 {'、'.join(allowances)}" if allowances else ""
+            if reused:
+                update_payload_status(row_no, "completed", f"鯨躍已有發票，回填 O/AA：{result_number}{note}")
+                print(f"[{area}] {order_no}：鯨躍已開立發票 {result_number}，已回填，未重複開立", flush=True)
+            else:
+                update_payload_status(row_no, "completed", f"已回填 O/AA：{result_number}{note}")
+                print(f"[{area}] {order_no}：已回填 O 欄 {result_number}、AA 欄開立時間", flush=True)
             completed += 1
         except LookupFailed:
             raise  # 查詢失敗：沒開立，Payload 保持待處理，下次重試
         except Exception as exc:
-            update_payload_status(row_no, "failed", str(exc))
+            if not awaiting:
+                update_payload_status(row_no, "failed", str(exc))
             raise RuntimeError(f"{order_no} 匯入發票資料失敗：{exc}") from exc
 
     print(f"[{area}] 本次發票資料匯入：{completed} 筆")

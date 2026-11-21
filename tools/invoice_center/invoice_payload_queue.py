@@ -128,6 +128,12 @@ def list_pending_payloads(area: str) -> list[dict[str, Any]]:
             continue
         previous = latest_by_order.get(order_no)
         if previous is not None:
+            # 2026-11-21：上次已貼入等待儲存（可能已開立）的那筆優先，不被重新排入的新 pending 蓋掉，
+            # 否則等待儲存的防重複檢查會被略過，重新開一張
+            if str(previous.get("status", "")).strip() == "awaiting_save" and \
+                    str(item.get("status", "")).strip() != "awaiting_save":
+                duplicates.append(int(item.get("_row") or 0))
+                continue
             duplicates.append(int(previous.get("_row") or 0))
         latest_by_order[order_no] = item
 
