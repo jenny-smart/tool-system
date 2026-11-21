@@ -44,6 +44,8 @@ def issue_allowance(page: Any, invoice_no: str, untaxed: str, *, invoice_year: O
     """原發票 invoice_no 開立折讓單（untaxed＝鯨躍折讓頁「應稅」金額；二聯為含稅、三聯為未稅）。
 
     require_full：一定要全額折讓（金額需等於原票可折讓額、明細只能一筆），不符就停。
+      require_full 且 untaxed 空白：折讓金額取鯨躍原票可折讓額（合併開立的原訂單發票用）；
+      查已開立時同張原發票登記日（not_before）後的任何折讓單都算已折讓。
     before_save：按存檔前呼叫（呼叫端記錄進度用；之後若失敗不可自動重試）。
     """
     from . import allowance_create as allowance

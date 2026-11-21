@@ -171,6 +171,11 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
     available_text = page.locator("body").inner_text()
     sales_match = re.search(r"銷售額[\s\S]*?應稅:\$\s*([\d,]+(?:\.\d+)?)", available_text)
     sales_amount = _money(sales_match.group(1)) if sales_match else Decimal("-1")
+    if require_full and not str(untaxed or "").strip():
+        # 2026-11-21 Jenny：合併開立的原訂單發票全額折讓——金額直接取鯨躍原票可折讓銷售額
+        if sales_amount <= 0:
+            raise RuntimeError("讀不到原票可折讓銷售額，禁止全額折讓")
+        untaxed = format(sales_amount.normalize(), "f")
     if require_full and (sales_amount <= 0 or _money(untaxed) != sales_amount):
         raise RuntimeError("原票可折讓銷售額與全額折讓金額不符，禁止重複或部分折讓")
     full_refund = _money(untaxed) == sales_amount

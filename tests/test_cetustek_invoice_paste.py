@@ -216,6 +216,8 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             paste,
             "_extract_invoice_no_for_order",
             return_value="",
+        ), patch.object(paste, "_source_row_values", return_value=("2026/11/21", "")), patch.object(
+            paste, "find_existing_invoice", return_value=None
         ), patch.object(paste, "_open_invoice_create") as open_invoice:
             with self.assertRaisesRegex(RuntimeError, "為避免重複開立"):
                 paste.process_pending_invoice_payloads(page, "台北")
@@ -390,6 +392,57 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         page.locator("input").evaluate_all.return_value = []
 
         self.assertEqual(paste._extract_invoice_no(page), "AB12345678")
+
+
+    # 2026-11-21 台北 LC00221068-1 合併開立：G 欄多張訂單、查不到已開立 → 重複開立；原訂單也沒折讓
+    MERGED_ITEM = {
+        "_row": 9, "source_row": 40, "status": "pending",
+        "order_no": "LC00221068\nLC00221069、LC00221070",
+        "payload_json": json.dumps({"orderid": "LC00221068-1", "totalamount": "10800",
+                                    "mainremark": "合併開立：LC00221068、LC00221069、LC00221070"}),
+    }
+
+    def test_lookup_uses_single_base_order_and_payload_total(self) -> None:
+        self.assertEqual(paste.lookup_order_no(self.MERGED_ITEM), "LC00221068")
+        self.assertEqual(paste.lookup_order_no({"order_no": "LC001 LC002", "payload_json": "{}"}), "LC001")
+        self.assertEqual(paste.payload_amount(self.MERGED_ITEM, "3600"), "10800")
+        self.assertEqual(paste.payload_amount({"payload_json": "{}"}, "3600"), "3600")
+        self.assertEqual(paste.merged_orders(self.MERGED_ITEM), ["LC00221068", "LC00221069", "LC00221070"])
+        self.assertEqual(paste.merged_orders({"payload_json": json.dumps({"mainremark": "車馬費發票"})}), [])
+
+    def test_merged_rerun_reuses_invoice_and_allowances_originals(self) -> None:
+        with patch.object(paste, "list_pending_payloads", return_value=[dict(self.MERGED_ITEM)]), patch.object(
+            paste, "_extract_invoice_no_for_order", return_value=""
+        ), patch.object(paste, "_source_row_values", return_value=("2026/11/21", "3600")), patch.object(
+            paste, "find_existing_invoice", return_value="HR60354608"
+        ) as find, patch.object(
+            paste, "allowance_merged_originals", return_value=["LC00221068 HR11111111→HR22222222"]
+        ) as allowances, patch.object(paste, "_write_allowance_numbers"), patch.object(
+            paste, "_paste_one"
+        ) as paste_one, patch.object(paste, "write_invoice_result") as write_result, patch.object(
+            paste, "update_payload_status"
+        ):
+            self.assertEqual(paste.process_pending_invoice_payloads(MagicMock(), "台北"), 1)
+        find.assert_called_once_with(unittest.mock.ANY, "LC00221068", amount="10800", not_before="2026/11/21")
+        allowances.assert_called_once()
+        self.assertEqual(allowances.call_args.kwargs["skip_invoices"], {"HR60354608"})
+        paste_one.assert_not_called()
+        write_result.assert_called_once_with("台北", 40, self.MERGED_ITEM["order_no"], "HR60354608")
+
+    def test_merged_allowance_skips_merged_invoice_and_orders_without_invoice(self) -> None:
+        orders = {"LC1": types.SimpleNamespace(invoice_no="HR60354608"),
+                  "LC2": types.SimpleNamespace(invoice_no=""),
+                  "LC3": types.SimpleNamespace(invoice_no="HR11111111")}
+        backend = MagicMock()
+        backend.get_order.side_effect = orders.get
+        from tools.invoice_center import ei_issue
+        with patch("tools.lemon_backend.client.BackendClient", return_value=backend), patch.object(
+            ei_issue, "issue_allowance", return_value=ei_issue.AllowanceResult("HR22222222", "2026/11/21", False)
+        ) as issue:
+            done = paste.allowance_merged_originals(MagicMock(), "台北", ["LC1", "LC2", "LC3"],
+                                                    skip_invoices={"HR60354608"}, not_before="2026/11/21")
+        issue.assert_called_once_with(unittest.mock.ANY, "HR11111111", "", require_full=True, not_before="2026/11/21")
+        self.assertEqual(done, ["LC3 HR11111111→HR22222222"])
 
 
 if __name__ == "__main__":

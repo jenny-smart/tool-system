@@ -143,6 +143,22 @@ class InvoiceResultWriteTest(unittest.TestCase):
         self.assertEqual([item["order_no"] for item in result], ["LC001", "LC002"])
 
 
+    def test_awaiting_save_is_not_superseded_by_new_pending(self) -> None:
+        # 2026-11-21：中止後重新排入同訂單，不能讓新 pending 蓋掉等待儲存那筆（會重開發票）
+        rows = [
+            {"_row": 2, "area": "台北", "order_no": "LC001", "status": "awaiting_save"},
+            {"_row": 3, "area": "台北", "order_no": "LC001", "status": "pending"},
+        ]
+        with patch.object(queue, "get_sheets_service", return_value=MagicMock()), patch.object(
+            queue, "_ensure_sheet"
+        ), patch.object(queue, "_all_rows", return_value=rows), patch.object(
+            queue, "update_payload_status"
+        ) as update_status:
+            result = queue.list_pending_payloads("台北")
+
+        self.assertEqual([item["_row"] for item in result], [2])
+        update_status.assert_called_once_with(3, "superseded", "同訂單有較新的待處理 Payload，已略過")
+
     def test_list_auto_completes_old_payload_when_source_has_invoice(self) -> None:
         service = MagicMock()
         worksheet = MagicMock()
