@@ -282,6 +282,35 @@ def clear_and_write_values(
 TARGET_SHEET_NAME = "訂單資料"
 
 
+def update_staff_orders(cfg, area, date_key, drive, sheets, source_folder_id, this_month_values) -> str:
+    """在當年度「內勤工作表單」重寫「專員訂單」（上個月 1 日～今天）。"""
+    try:
+        from .staff_orders import build_staff_orders, previous_month_file_dates, write_staff_orders
+    except ImportError:
+        from staff_orders import build_staff_orders, previous_month_file_dates, write_staff_orders
+    from tools.common.year_roots import choose_file_id
+
+    prev_values = None
+    for d in previous_month_file_dates(date_key):
+        base = f"{d}訂單-{area}"
+        try:
+            prev_file = find_file_by_possible_names(drive, source_folder_id,
+                                                    [base, f"{base}.xlsx", f"{base}.xls", f"{base}.csv"])
+        except Exception:
+            continue
+        prev_values = read_file_values(drive, sheets, prev_file)
+        log(f"專員訂單：上個月資料取自 {prev_file.get('name', base)}")
+        break
+    if prev_values is None:
+        log("⚠ 專員訂單：找不到上個月最後幾天的匯出檔，只列本月訂單")
+
+    office_id = choose_file_id("內勤工作表單", area, get_spreadsheet_id(cfg, "office", area),
+                               year=int(date_key[:4]))
+    values = build_staff_orders(this_month_values, prev_values, date_key)
+    n = write_staff_orders(sheets, office_id, values, log)
+    return f"專員訂單 {n} 筆" + ("" if prev_values is not None else "（缺上個月）")
+
+
 def normalize_date_sort_value(value: Any) -> Any:
     if value is None or str(value).strip() == "":
         return 999999999999
@@ -379,6 +408,13 @@ def run_orders_for_area(
         status = "成功"                                               # ★
         message = f"rows={len(values)}"                             # ★
         log(f"完成：{source_file_name} → {target_location} / {message}")
+
+        # 專員訂單（給專員作業系統加減時選訂單）；失敗不影響外場訂單
+        try:
+            message += "；" + update_staff_orders(cfg, area, date_key, drive, sheets, source_folder_id, raw_values)
+        except Exception as e:
+            message += f"；專員訂單失敗：{e}"
+            log(f"⚠ 專員訂單失敗：{e}")
 
     except Exception as e:
         status = "失敗"                                              # ★
