@@ -303,9 +303,13 @@ def login_second(page: Page, credentials: EICredentials) -> None:
             if message and message != last_message:
                 last_message = message
                 print(f"[{credentials.label}] 登入訊息：{message}", file=sys.stderr)
-        if not login_field.first.input_value().strip():
+        # 2026-11-21：登入失敗後鯨躍常只清空密碼、帳號還在——密碼空白也要補，否則之後每次都會失敗
+        password_field = page.locator("#pwd")
+        if not login_field.first.input_value().strip() or (
+            password_field.count() and not password_field.first.input_value()
+        ):
             login_field.first.fill(credentials.userid)
-            page.locator("#pwd").fill(credentials.password)
+            password_field.first.fill(credentials.password)
             print(f"[{credentials.label}] 已重新填入帳密，請輸入新的網頁驗證碼。")
         page.wait_for_timeout(500)
     raise RuntimeError(f"{credentials.label} 第二層登入等待逾時，目前頁面：{page.url}；{last_message}")
