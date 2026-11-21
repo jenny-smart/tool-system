@@ -67,7 +67,7 @@ _FOLDER_ID = re.compile(r"/folders/([A-Za-z0-9_-]+)")
 FINANCE_ROW_NAMES = {"財務報表"}
 # 「內勤表單」：新建立的內勤工作表單整理（取代 H 欄的通用清除）
 OFFICE_ROW_NAMES = {"內勤表單"}
-OFFICE_CLEAR_RANGES = ["'信用卡'!A2:J", "'專員收現'!A2:P", "'專員回報'!A2:P",
+OFFICE_CLEAR_RANGES = ["'信用卡'!A2:J", "'專員收現'!A2:U", "'專員回報'!A2:P",
                        "'專員請款'!A2:AS", "'清潔客訴'!A3:AN",
                        "'清潔異動'!A2:J", "'清潔異動'!L2:AE"]   # 清潔異動 K 欄公式保留
 OFFICE_CLEAR_WITH_FILL = [("清潔異動", "A2:AE")]  # 底色清除
