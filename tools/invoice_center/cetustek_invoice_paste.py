@@ -439,7 +439,9 @@ def parse_invoice_rows(rows_text: list[str], order_no: str, *, amount: str = "",
         return None
     order_re = re.compile(rf"(?<![A-Z0-9]){re.escape(expected)}(?:-\d+)?(?![0-9])")
     floor = _parse_date(not_before)
-    total = _money(amount)
+    # amount 可給多個候選金額（"10800|11340" 或 list）：任一個相符就算
+    parts = amount if isinstance(amount, (list, tuple, set)) else str(amount or "").split("|")
+    totals = [t for t in (_money(str(part)) for part in parts) if t is not None]
     for text in rows_text:
         compact = re.sub(r"\s+", " ", str(text or "")).upper()
         if not order_re.search(compact) or "作廢" in compact:
@@ -450,9 +452,9 @@ def parse_invoice_rows(rows_text: list[str], order_no: str, *, amount: str = "",
         dates = [d for d in (_parse_date(m) for m in re.findall(r"\d{3,4}/\d{1,2}/\d{1,2}", compact)) if d]
         if floor and dates and max(dates) < floor:
             continue
-        if total is not None:
+        if totals:
             numbers = {_money(m) for m in re.findall(r"\d[\d,]*(?:\.\d+)?", compact)}
-            if not any(n is not None and abs(n - total) <= 1 for n in numbers):
+            if not any(n is not None and abs(n - total) <= 1 for n in numbers for total in totals):
                 continue
         return invoice.group(1) + invoice.group(2)
     return None
@@ -544,10 +546,26 @@ def lookup_order_no(item: dict[str, Any]) -> str:
 
 
 def payload_amount(item: dict[str, Any], fallback: str = "") -> str:
-    """查已開立用的金額：Payload 含稅總額（就是這張發票的金額）；沒有才用清潔異動 N 欄。
-    合併開立／車馬費的 N 欄不一定等於發票金額，用 N 會查不到已開立的發票。"""
-    total = str(_payload(item).get("totalamount") or "").strip()
-    return total if _money(total) else fallback
+    """查已開立用的金額（可能多個，用 | 分隔）：明細含稅合計、Payload 總額；都沒有才用清潔異動 N 欄。
+
+    合併開立／車馬費的 N 欄不一定等於發票金額。三聯（hastax=2 單價含稅）時 Payload totalamount
+    可能被多加一次稅（2026-11-21 LC00221068：明細 10,800、Payload 11,340，鯨躍實開 10,800），
+    所以明細合計也要算。"""
+    import base64
+
+    payload = _payload(item)
+    candidates: list[str] = []
+    try:
+        lines = base64.b64decode(str(payload.get("detaildata") or "")).decode("utf-8").splitlines()
+        line_total = sum((_money(line.split("|")[5]) or Decimal(0)) for line in lines if line.count("|") >= 5)
+        if line_total > 0:
+            candidates.append(format(line_total.normalize(), "f"))
+    except Exception:
+        pass
+    total = str(payload.get("totalamount") or "").strip()
+    if _money(total):
+        candidates.append(total)
+    return "|".join(dict.fromkeys(candidates)) or fallback
 
 
 MERGED_REMARK_RE = re.compile(r"合併開立：([^；;]+)")
