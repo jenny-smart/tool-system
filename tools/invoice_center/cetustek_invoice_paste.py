@@ -512,6 +512,14 @@ def _source_row_values(area: str, source_row: int) -> tuple[str, str]:
     return str(row[0] or "").strip(), str(row[9] or "").strip()
 
 
+def _source_row_invoice(area: str, source_row: int) -> str:
+    """清潔異動該列 O 欄（已回填的發票號碼）；讀不到回傳空字串。"""
+    from tools.lemon_backend.stored_value_sheet import get_worksheet
+
+    values = get_worksheet(area).get(f"O{source_row}") if source_row >= 2 else []
+    return str(values[0][0] if values and values[0] else "").strip().upper()
+
+
 def _payload(item: dict[str, Any]) -> dict[str, Any]:
     try:
         data = json.loads(str(item.get("payload_json") or "") or "{}")
@@ -651,26 +659,27 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
         amount = payload_amount(item, sheet_amount)
         orders = merged_orders(item)
         awaiting = str(item.get("status") or "").strip() == "awaiting_save"
-        # 共用開立：先到鯨躍查詢這筆是否已開過（同訂單、登記日後、金額相符），有就回填不重開；
-        # 查詢失敗直接停止，不在不確定時開立
         try:
-            existing = find_existing_invoice(page, lookup, amount=amount, not_before=registered_on) \
-                if (awaiting or orders) else None
-        except Exception as exc:
-            raise LookupFailed(str(exc)) from exc
-        if awaiting and not existing:
-            # 上次已貼入、可能已按儲存（中止或卡住）：查不到也不重開，請人工確認
-            raise RuntimeError(
-                f"{order_no} 上次已貼入發票資料、等待儲存，但鯨躍查不到 {lookup} 的發票；"
-                "為避免重複開立，已停止。請到鯨躍確認：已開立就把發票號碼填入 O 欄；沒開立就把佇列狀態改為 pending 再執行"
-            )
-        try:
+            # 合併開立（2026-11-21 Jenny 順序）：① 原訂單發票全額折讓 → ② 查合併發票是否已開立 → ③ 開立或回填
             allowances: list[str] = []
             if orders:
-                skip = {existing} if existing else set()
+                skip = {invoice for invoice in (_source_row_invoice(area, source_row),) if invoice}
                 allowances = allowance_merged_originals(page, area, orders, skip_invoices=skip,
                                                         not_before=registered_on)
                 _write_allowance_numbers(area, source_row, allowances)
+            # 共用開立：先到鯨躍查詢這筆是否已開過（同訂單、登記日後、金額相符），有就回填不重開；
+            # 查詢失敗直接停止，不在不確定時開立
+            try:
+                existing = find_existing_invoice(page, lookup, amount=amount, not_before=registered_on) \
+                    if (awaiting or orders) else None
+            except Exception as exc:
+                raise LookupFailed(str(exc)) from exc
+            if awaiting and not existing:
+                # 上次已貼入、可能已按儲存（中止或卡住）：查不到也不重開，請人工確認
+                raise RuntimeError(
+                    f"{order_no} 上次已貼入發票資料、等待儲存，但鯨躍查不到 {lookup} 的發票；"
+                    "為避免重複開立，已停止。請到鯨躍確認：已開立就把發票號碼填入 O 欄；沒開立就把佇列狀態改為 pending 再執行"
+                )
             if existing:
                 result_number, reused = existing, True
             else:

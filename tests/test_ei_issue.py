@@ -83,3 +83,17 @@ def test_invoice_lookup_failure_never_opens(monkeypatch, invoice):
     with pytest.raises(ei_issue.LookupFailed):
         ei_issue.issue_invoice(MagicMock(), {"orderid": "LC1-1"})
     assert invoice == []
+
+
+def test_full_allowance_takes_every_detail_line_in_one_allowance(monkeypatch):
+    # 2026-11-21 Jenny：全額折讓直接折整筆，原票多筆明細也全部加入同一張折讓單
+    page, products, saved = MagicMock(), MagicMock(), []
+    products.count.return_value = 3
+    page.locator.side_effect = lambda sel: products if "setInvoiceDetail" in sel else (
+        MagicMock(inner_text=MagicMock(return_value="銷售額 應稅:$ 3,000")) if sel == "body" else MagicMock())
+    monkeypatch.setattr(allowance_create, "_search_recent_years", lambda *a: None)
+    monkeypatch.setattr(allowance_create, "_select_allowance_reason", lambda p, full_refund: saved.append(full_refund))
+    monkeypatch.setattr(allowance_create, "_finish_allowance_save", lambda p: "HR22222222")
+    assert allowance_create._create_one(page, "HR11111111", "", require_full=True) == "HR22222222"
+    assert saved == [True]
+    assert [c.args[0] for c in products.nth.call_args_list] == [0, 1, 2]

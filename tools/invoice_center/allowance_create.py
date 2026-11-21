@@ -181,23 +181,29 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
     full_refund = _money(untaxed) == sales_amount
     _select_allowance_reason(page, full_refund=full_refund)
 
-    page.locator("img[title='發票明細查詢']").click()
-    products = page.locator("#processresult a[onclick^='setInvoiceDetail']")
-    select_product = products.first
-    select_product.wait_for(state="visible")
-    if require_full and products.count() != 1:
-        raise RuntimeError("原票有多筆明細，請先人工核對全額折讓，未送出")
-    select_product.click()
-    page.locator("#unitprice").wait_for(state="visible")
-
-    # Full allowance uses the invoice detail exactly as EI populated it.
-    # Editing unit price triggers recalculation of amount/tax on old two-copy invoices.
-    if not full_refund:
-        page.locator("#unitprice").fill(untaxed)
-    page.locator("a[onclick='goDetail();']").click()
-    confirm = page.get_by_text("確定", exact=True)
-    confirm.wait_for(state="visible")
-    confirm.click()
+    # 2026-11-21 Jenny：全額折讓直接折整張發票——原票每一筆明細都照鯨躍帶出的金額加入同一張折讓單，
+    # 不再因多筆明細停下；部分折讓仍只折第一筆明細、改單價
+    count = 1
+    index = 0
+    while index < count:
+        page.locator("img[title='發票明細查詢']").click()
+        products = page.locator("#processresult a[onclick^='setInvoiceDetail']")
+        products.first.wait_for(state="visible")
+        if index == 0:
+            count = products.count() if full_refund else 1
+        elif products.count() != count:
+            raise RuntimeError(f"原票明細查詢第 {index + 1} 次筆數變了（{count}→{products.count()}），未送出折讓單")
+        products.nth(index).click()
+        page.locator("#unitprice").wait_for(state="visible")
+        # Full allowance uses the invoice detail exactly as EI populated it.
+        # Editing unit price triggers recalculation of amount/tax on old two-copy invoices.
+        if not full_refund:
+            page.locator("#unitprice").fill(untaxed)
+        page.locator("a[onclick='goDetail();']").click()
+        confirm = page.get_by_text("確定", exact=True)
+        confirm.wait_for(state="visible")
+        confirm.click()
+        index += 1
     page.locator("#save2").wait_for(state="visible")
     if before_save is not None:
         before_save()

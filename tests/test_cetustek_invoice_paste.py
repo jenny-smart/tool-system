@@ -410,24 +410,41 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         self.assertEqual(paste.merged_orders(self.MERGED_ITEM), ["LC00221068", "LC00221069", "LC00221070"])
         self.assertEqual(paste.merged_orders({"payload_json": json.dumps({"mainremark": "車馬費發票"})}), [])
 
-    def test_merged_rerun_reuses_invoice_and_allowances_originals(self) -> None:
+    def test_merged_allowances_originals_before_checking_invoice(self) -> None:
+        calls: list[str] = []
         with patch.object(paste, "list_pending_payloads", return_value=[dict(self.MERGED_ITEM)]), patch.object(
             paste, "_extract_invoice_no_for_order", return_value=""
         ), patch.object(paste, "_source_row_values", return_value=("2026/11/21", "3600")), patch.object(
-            paste, "find_existing_invoice", return_value="HR60354608"
+            paste, "_source_row_invoice", return_value=""
+        ), patch.object(
+            paste, "find_existing_invoice", side_effect=lambda *a, **k: calls.append("find") or "HR60354608"
         ) as find, patch.object(
-            paste, "allowance_merged_originals", return_value=["LC00221068 HR11111111→HR22222222"]
+            paste, "allowance_merged_originals",
+            side_effect=lambda *a, **k: calls.append("allowance") or ["LC00221069 HR11111111→HR22222222"],
         ) as allowances, patch.object(paste, "_write_allowance_numbers"), patch.object(
             paste, "_paste_one"
         ) as paste_one, patch.object(paste, "write_invoice_result") as write_result, patch.object(
             paste, "update_payload_status"
         ):
             self.assertEqual(paste.process_pending_invoice_payloads(MagicMock(), "台北"), 1)
+        self.assertEqual(calls, ["allowance", "find"])  # 先折讓原訂單，再查合併發票
         find.assert_called_once_with(unittest.mock.ANY, "LC00221068", amount="10800", not_before="2026/11/21")
-        allowances.assert_called_once()
-        self.assertEqual(allowances.call_args.kwargs["skip_invoices"], {"HR60354608"})
+        self.assertEqual(allowances.call_args.kwargs["skip_invoices"], set())
         paste_one.assert_not_called()
         write_result.assert_called_once_with("台北", 40, self.MERGED_ITEM["order_no"], "HR60354608")
+
+    def test_merged_skips_invoice_already_in_column_o(self) -> None:
+        with patch.object(paste, "list_pending_payloads", return_value=[dict(self.MERGED_ITEM)]), patch.object(
+            paste, "_extract_invoice_no_for_order", return_value=""
+        ), patch.object(paste, "_source_row_values", return_value=("2026/11/21", "")), patch.object(
+            paste, "_source_row_invoice", return_value="HR60354608"
+        ), patch.object(paste, "find_existing_invoice", return_value="HR60354608"), patch.object(
+            paste, "allowance_merged_originals", return_value=[]
+        ) as allowances, patch.object(paste, "_write_allowance_numbers"), patch.object(
+            paste, "write_invoice_result"
+        ), patch.object(paste, "update_payload_status"):
+            paste.process_pending_invoice_payloads(MagicMock(), "台北")
+        self.assertEqual(allowances.call_args.kwargs["skip_invoices"], {"HR60354608"})
 
     def test_merged_allowance_skips_merged_invoice_and_orders_without_invoice(self) -> None:
         orders = {"LC1": types.SimpleNamespace(invoice_no="HR60354608"),
