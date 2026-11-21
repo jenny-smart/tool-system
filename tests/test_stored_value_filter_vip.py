@@ -25,16 +25,10 @@ def test_parse_balances_from_history_page():
 
 
 def test_zero_out_steps():
-    # 退款金額大於儲值金：先扣退款金額（不足由購物金扣），再扣剩下的餘額
-    assert zero_out_steps(17600, 2500, "18000") == [("VIP退券扣退款金額", 18000), ("VIP退券剩餘餘額歸零", 2100)]
-    assert zero_out_steps(17600, 2500, "20100") == [("VIP退券扣退款金額", 20100)]
-    assert zero_out_steps(17600, 2500, "25000") == [("VIP退券扣退款金額", 20100)]  # 最多扣到 0
-    # 退款金額不大於儲值金：儲值金、購物金各扣一筆
-    assert zero_out_steps(17600, 2500, "17600") == [("VIP退券儲值金歸零", 17600), ("VIP退券剩餘餘額歸零", 2500)]
+    # 2026-11-21：一次歸零，跟退款金額無關
+    assert zero_out_steps(24526, 8674, "25950") == [("VIP退券儲值金歸零", 33200)]
     assert zero_out_steps(17600, 0, "15000") == [("VIP退券儲值金歸零", 17600)]
-    assert zero_out_steps(0, 2500, "") == [("VIP退券剩餘餘額歸零", 2500)]
-    # 重跑：上次已扣退款金額 17,600，只剩購物金 → 只扣剩餘餘額（人工確認）
-    assert zero_out_steps(0, 2500, "17600") == [("VIP退券剩餘餘額歸零", 2500)]
+    assert zero_out_steps(0, 2500, "") == [("VIP退券儲值金歸零", 2500)]
     assert zero_out_steps(0, 0, "1000") == []
 
 
@@ -69,7 +63,7 @@ def test_manual_submit_waits_until_record_appears(monkeypatch):
         adj._wait_manual_submit(Page(), "LC001", "2100", "10/21VIP退券剩餘餘額歸零")
 
 
-def test_zero_out_first_step_auto_rest_manual(monkeypatch):
+def test_zero_out_single_manual_step(monkeypatch):
     import pytest
 
     adj = pytest.importorskip("tools.lemon_backend.stored_value_adjustment")
@@ -80,7 +74,7 @@ def test_zero_out_first_step_auto_rest_manual(monkeypatch):
                         lambda page, step, date_text, manual_submit=False: calls.append((step["amount"], manual_submit)) or True)
     item = {"order_no": "LC001983201", "note": "", "refund_amount": "17600"}
     assert adj._zero_out(object(), item, "10/21") is True
-    assert calls == [("17600", False), ("2500", True)]
+    assert calls == [("20100", True)]  # 一次扣到 0，人工確認送出
 
 
 def test_rerun_with_only_remainder_waits_for_manual(monkeypatch):

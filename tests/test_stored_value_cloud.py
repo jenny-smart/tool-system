@@ -64,7 +64,7 @@ def test_plan_lists_exact_zero_out_amounts(backend):
     by_order = {p["order_no"]: p for p in planned}
     assert by_order["A1"]["steps"] == [["已扣", 1200]]
     assert by_order["V1"]["balances"] == [17600, 2500]
-    assert by_order["V1"]["steps"] == [["VIP退券儲值金歸零", 17600], [sva.REMAINDER_SUFFIX, 2500]]
+    assert by_order["V1"]["steps"] == [[sva.REMAINDER_SUFFIX, 20100]]
     assert state["submitted"] == []           # 盤點不送出
 
 
@@ -73,7 +73,7 @@ def test_execute_submits_confirmed_steps_and_writes_back(backend):
     planned = sva.plan_adjustments("台北", log=lambda m: None)
     result = sva.execute_plan("台北", planned, log=lambda m: None)
     assert result == {"done": 2, "skipped": 0, "failed": 0}
-    assert ("V1", 2500, sva.REMAINDER_SUFFIX) in state["submitted"]
+    assert ("V1", 20100, sva.REMAINDER_SUFFIX) in state["submitted"]
     assert {(r, c) for r, c, _v in sheet.updates if c == 2} == {(2, 2), (3, 2)}
 
 

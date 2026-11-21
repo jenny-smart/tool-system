@@ -185,7 +185,7 @@ def _wait_manual_submit(page: Page, order_no: str, amount: str, note: str) -> No
 
 
 def _submit_adjustment(page: Page, item: dict[str, object], date_text: str, *, manual_submit: bool = False) -> bool:
-    """manual_submit：只填表，由人工按送出（VIP待退券歸零的剩餘餘額）。"""
+    """manual_submit：只填表，由人工按送出（VIP待退券歸零）。"""
     order_no = str(item["order_no"])
     amount = str(item["amount"])
     note = build_note(str(item["note"]), date_text, str(item["suffix"]))
@@ -254,10 +254,7 @@ def _balances(page: Page, order_no: str) -> tuple[int, int]:
 
 
 def _zero_out(page: Page, item: dict[str, object], date_text: str) -> bool:
-    """VIP待退券：依頁面餘額把儲值金及購物金都扣到 0，扣款筆數見 zero_out_steps。
-
-    扣退款金額或儲值金的那一筆由 Agent 直接送出；扣剩餘餘額的那一筆（含重跑時只剩購物金）
-    一律由 Agent 填表、等人工確認按送出。"""
+    """VIP待退券：依頁面餘額把儲值金及購物金一次扣到 0（zero_out_steps），Agent 填表、等人工確認按送出。"""
     order_no = str(item["order_no"])
     stored, shopping = _balances(page, order_no)
     if stored < 0 or shopping < 0:
@@ -315,8 +312,8 @@ def run(area: str, cdp_url: str, selected_rows: set[int]) -> int:
 
 # ---------------------------------------------------------------- 雲端版：先盤點、再執行（Tools App）
 #
-# Mac 版 run() 連本機 Chrome，VIP待退券的剩餘餘額那一筆要在 Chrome 裡人工按送出。
-# 雲端版改用無頭瀏覽器：盤點時就把每一筆要扣的金額（含歸零的剩餘餘額）算好列給人確認，
+# Mac 版 run() 連本機 Chrome，VIP待退券歸零那一筆要在 Chrome 裡人工按送出。
+# 雲端版改用無頭瀏覽器：盤點時就把每一筆要扣的金額（含歸零金額）算好列給人確認，
 # 確認後執行才全部自動送出；執行前再讀一次餘額，跟盤點時不同就略過該列，不照舊金額扣。
 
 
