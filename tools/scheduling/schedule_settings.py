@@ -116,6 +116,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "lemon_ren_count": ("jenny-smart/order-system:lemon-ren-count-schedule.yml", {}),
     # 2026-11-21 Jenny：每日 11:10 order-system「記錄未配班人員」（台北，明天起 14 天只剩 1 位未配班的時段）→ 行事曆
     "unassigned_staff_record": ("jenny-smart/order-system:unassigned-staff-record-schedule.yml", {}),
+    # 2026-11-22 Jenny：08:30～17:30 每小時 order-system「未配班成立保留單」（區間暫訂 2027/01/22～02/04）
+    "unassigned_reserve_create": ("jenny-smart/order-system:unassigned-reserve-schedule.yml", {}),
     # 2026-11-11 Jenny：官網評價不滿意→清潔客訴（07:00）、預約下次服務→評價預約（07:20）
     "rating_complaint_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "complaint"}),
     "rating_booking_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "booking"}),
@@ -236,10 +238,14 @@ DEFAULT_ROWS: list[list] = [
     [True, "lemon_ren_count", "檸檬人統計：待換專員進度（台北）", "11:00", "每日", "", "照跑", MODE_DIRECT,
      "程式在 order-system（lemon-ren-count-schedule.yml）；統計範圍＝明天～＋3 個月的月底；"
      "不含檸檬保留單、未配班、合併訂單（檸檬人勿動）；結果記 tpe@／jenny@lemonclean.com.tw 行事曆"],
-    # 2026-11-21 Jenny：每日 11:10 記錄未配班人員（只剩 1 位專員的時段，例「2026/11/24 下午-1」）→ 行事曆
-    [True, "unassigned_staff_record", "記錄未配班人員：未來 2 週只剩 1 位未配班的時段（台北）", "11:10", "每日", "", "照跑", MODE_DIRECT,
+    # 2026-11-22 Jenny：記錄未配班人員改 08:30～17:30 每小時（原每日 11:10）
+    [True, "unassigned_staff_record", "記錄未配班人員：未來 2 週只剩 1 位未配班的時段（台北）", "08:30~17:30 每小時", "每日", "", "照跑", MODE_DIRECT,
      "程式在 order-system（unassigned-staff-record-schedule.yml）；範圍＝明天起 14 天，不含檸檬人、晚上時段；"
-     "記 order-system Secret SCHEDULE_NOTICE_CALENDAR_ID 的獨立行事曆，還沒設定時記 tpe@／jenny@lemonclean.com.tw"],
+     "格式「2026/11/24 下午-1」，記排程行事曆（SCHEDULE_NOTICE_CALENDAR_ID）"],
+    # 2026-11-22 Jenny：08:30～17:30 每小時，未配班成立檸檬保留單
+    [True, "unassigned_reserve_create", "未配班成立保留單（台北，暫訂 2027/01/22～02/04）", "08:30~17:30 每小時", "每日", "", "照跑", MODE_DIRECT,
+     "程式在 order-system（unassigned-reserve-schedule.yml）；有未配班就成立檸檬保留單，同時段合成一張、時數取最短；"
+     "區間改 order-system repository variable UNASSIGNED_RESERVE_START／END"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,

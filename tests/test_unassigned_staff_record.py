@@ -16,15 +16,19 @@ class UnassignedStaffRecordTests(unittest.TestCase):
         when = dt.datetime.fromisoformat(value).replace(tzinfo=cs.TZ)
         return {k: (w, i) for w, i, k in cs.plan(when, rules=ss.default_rules(), is_workday=lambda d: d.weekday() < 5)}
 
-    def test_dispatched_daily_1110_to_order_system(self):
-        for day in ['2026-11-21', '2026-11-22', '2026-11-23']:
-            self.assertEqual(self.jobs(day + 'T11:10').get('unassigned_staff_record'),
-                             ('jenny-smart/order-system:unassigned-staff-record-schedule.yml', {}))
-            self.assertNotIn('unassigned_staff_record', self.jobs(day + 'T11:00'))
-        self.assertEqual(ss.system_name('unassigned_staff_record'), 'order-system')
+    def test_dispatched_hourly_0830_to_1730(self):
+        for key, wf in [('unassigned_staff_record', 'unassigned-staff-record-schedule.yml'),
+                        ('unassigned_reserve_create', 'unassigned-reserve-schedule.yml')]:
+            for t in ['08:30', '12:30', '17:30']:
+                self.assertEqual(self.jobs('2026-11-22T' + t).get(key), ('jenny-smart/order-system:' + wf, {}))
+            for t in ['07:30', '08:40', '18:30']:
+                self.assertNotIn(key, self.jobs('2026-11-22T' + t))
+            self.assertEqual(ss.system_name(key), 'order-system')
 
     def test_default_row_exists_so_router_appends_it(self):
-        self.assertIn('unassigned_staff_record', [row[1] for row in ss.DEFAULT_ROWS])
+        keys = [row[1] for row in ss.DEFAULT_ROWS]
+        self.assertIn('unassigned_staff_record', keys)
+        self.assertIn('unassigned_reserve_create', keys)
 
 
 if __name__ == '__main__':
