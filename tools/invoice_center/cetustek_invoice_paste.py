@@ -693,11 +693,18 @@ def process_pending_invoice_payloads(page: Any, area: str) -> int:
             except Exception as exc:
                 raise LookupFailed(str(exc)) from exc
             if awaiting and not existing:
-                # 上次已貼入、可能已按儲存（中止或卡住）：查不到也不重開，請人工確認
-                raise RuntimeError(
-                    f"{order_no} 上次已貼入發票資料、等待儲存，但鯨躍查不到 {lookup} 的發票；"
-                    "為避免重複開立，已停止。請到鯨躍確認：已開立就把發票號碼填入 O 欄；沒開立就把佇列狀態改為 pending 再執行"
-                )
+                # 2026-11-21 Jenny：上次已貼入（中止或沒存檔）→ 一樣先查，查不到就開立。
+                # 為免金額對不上而漏查，再不限金額查一次：這張訂單登記日後有任何發票就停下請人工確認
+                try:
+                    loose = find_existing_invoice(page, lookup, amount="", not_before=registered_on)
+                except Exception as exc:
+                    raise LookupFailed(str(exc)) from exc
+                if loose:
+                    raise RuntimeError(
+                        f"{order_no} 上次已貼入發票資料；鯨躍有 {lookup} 的發票 {loose} 但金額與這次不同，"
+                        "為避免重複開立，已停止。請到鯨躍確認：是這張就把發票號碼填入 O 欄；不是就把佇列狀態改為 pending 再執行"
+                    )
+                print(f"[{area}] {order_no}：上次已貼入但鯨躍查無發票（未存檔），重新開立", flush=True)
             if existing:
                 result_number, reused = existing, True
             else:

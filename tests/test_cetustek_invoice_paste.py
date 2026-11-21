@@ -201,28 +201,41 @@ class CetustekInvoicePasteTest(unittest.TestCase):
             "已從查詢頁復原並回填 O/AA：DM51790871",
         )
 
-    def test_awaiting_save_without_query_result_never_opens_new_invoice(self) -> None:
+    def test_awaiting_save_with_other_amount_invoice_stops(self) -> None:
         page = MagicMock()
         item = {
-            "_row": 8,
-            "source_row": 13,
-            "order_no": "LC002145591",
-            "payload_json": json.dumps({"orderid": "LC002145591"}),
-            "status": "awaiting_save",
+            "_row": 8, "source_row": 13, "order_no": "LC002145591",
+            "payload_json": json.dumps({"orderid": "LC002145591"}), "status": "awaiting_save",
         }
         paste.list_pending_payloads.return_value = [item]
-
-        with patch.object(
-            paste,
-            "_extract_invoice_no_for_order",
-            return_value="",
-        ), patch.object(paste, "_source_row_values", return_value=("2026/11/21", "")), patch.object(
-            paste, "find_existing_invoice", return_value=None
-        ), patch.object(paste, "_open_invoice_create") as open_invoice:
+        # 照金額查不到，不限金額查到 → 停下
+        with patch.object(paste, "_extract_invoice_no_for_order", return_value=""), patch.object(
+            paste, "_source_row_values", return_value=("2026/11/21", "")
+        ), patch.object(paste, "find_existing_invoice", side_effect=[None, "HR11111111"]), patch.object(
+            paste, "_open_invoice_create"
+        ) as open_invoice:
             with self.assertRaisesRegex(RuntimeError, "為避免重複開立"):
                 paste.process_pending_invoice_payloads(page, "台北")
-
         open_invoice.assert_not_called()
+
+    def test_awaiting_save_without_any_invoice_issues(self) -> None:
+        # 2026-11-21 桃園 LC00220013：前一天貼入沒存檔，鯨躍查無 → 要開立
+        item = {
+            "_row": 8, "source_row": 13, "order_no": "LC00220013",
+            "payload_json": json.dumps({"orderid": "LC00220013-1"}), "status": "awaiting_save",
+        }
+        paste.list_pending_payloads.return_value = [item]
+        from tools.invoice_center import ei_issue
+        with patch.object(paste, "_extract_invoice_no_for_order", return_value=""), patch.object(
+            paste, "_source_row_values", return_value=("2026/11/20", "")
+        ), patch.object(paste, "find_existing_invoice", return_value=None), patch.object(
+            ei_issue, "issue_invoice", return_value=ei_issue.InvoiceResult("HR22222222", False)
+        ) as issue, patch.object(paste, "write_invoice_result") as write_result, patch.object(
+            paste, "update_payload_status"
+        ):
+            self.assertEqual(paste.process_pending_invoice_payloads(MagicMock(), "桃園"), 1)
+        issue.assert_called_once()
+        write_result.assert_called_once_with("桃園", 13, "LC00220013", "HR22222222")
 
     def test_processes_all_pending_in_sequence(self) -> None:
         page = MagicMock()
