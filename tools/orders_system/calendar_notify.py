@@ -7,6 +7,11 @@
 GOOGLE_OAUTH_CLIENT_ID／SECRET）；尚未設定時改用 tools.common.config_loader 的
 共用服務帳號（不載入 orders.py 整個大檔）。事件一律建在 Jenny 的
 行事曆（jenny@hers.com.tw），不用共用日曆（lemonclean925），也不另寄邀請信。
+
+2026-11-22（Jenny）：設定 SCHEDULE_NOTICE_CALENDAR_ID（排程行事曆）後，原本要建在
+jenny@hers.com.tw、jenny@lemonclean.com.tw 的所有事件（排程完成紀錄、各種提醒）改建在排程行事曆，
+用 GOOGLE_CALENDAR_REFRESH_TOKEN（jenny@lemonclean.com.tw 授權）寫入，不用新 token。
+沒設定時維持原本行為。業務用日曆（VIP、各區客服日曆）不受影響。
 """
 from __future__ import annotations
 
@@ -27,6 +32,17 @@ TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 NOTIFY_CALENDAR_ID = "jenny@hers.com.tw"
 LEMONCLEAN_CALENDAR_ID = "jenny@lemonclean.com.tw"
 HERS_CALENDAR_REFRESH_TOKEN_KEY = "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN"
+# 排程行事曆（與 order-system 同一個 Secret 名稱）
+NOTICE_CALENDAR_ENV = "SCHEDULE_NOTICE_CALENDAR_ID"
+REDIRECTED_CALENDAR_IDS = {NOTIFY_CALENDAR_ID, LEMONCLEAN_CALENDAR_ID}
+
+
+def notice_calendar_id() -> str:
+    """排程行事曆 ID（逗號分隔時取第一個）；沒設定回傳空字串。"""
+    from tools.common.google_auth import _oauth_value
+
+    value = _oauth_value(NOTICE_CALENDAR_ENV)
+    return next((x.strip() for x in value.split(",") if x.strip()), "")
 EVENT_DURATION_MINUTES = 30
 REMINDER_MINUTES = [10, 20]
 
@@ -79,6 +95,9 @@ def calendar_for(calendar_id: str = ""):
     from tools.common.google_auth import _oauth_value
 
     calendar_id = calendar_id or NOTIFY_CALENDAR_ID
+    notice = notice_calendar_id()
+    if notice and calendar_id in REDIRECTED_CALENDAR_IDS:
+        return _calendar_service(notice), notice
     if calendar_id == NOTIFY_CALENDAR_ID and not _oauth_value(HERS_CALENDAR_REFRESH_TOKEN_KEY):
         print(f"⚠️ 還沒設定 {HERS_CALENDAR_REFRESH_TOKEN_KEY}，行事曆事件先建在 {LEMONCLEAN_CALENDAR_ID}", flush=True)
         calendar_id = LEMONCLEAN_CALENDAR_ID
