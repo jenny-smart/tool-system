@@ -406,6 +406,14 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         self.assertEqual(paste.lookup_order_no(self.MERGED_ITEM), "LC00221068")
         self.assertEqual(paste.lookup_order_no({"order_no": "LC001 LC002", "payload_json": "{}"}), "LC001")
         self.assertEqual(paste.payload_amount(self.MERGED_ITEM, "3600"), "10800")
+        import base64
+        detail = base64.b64encode("CLEAN|居家清潔|式|1|3600|3600|x\nCLEAN|居家清潔|式|1|7200|7200|y".encode()).decode()
+        three = {"payload_json": json.dumps({"detaildata": detail, "totalamount": "11340"})}
+        self.assertEqual(paste.payload_amount(three), "10800|11340")
+        rows = ["1 115/11/21 HR60354608 115/11/21 LC00221068-1 76941045 10,286 514 10,800 ATM"]
+        self.assertEqual(paste.parse_invoice_rows(rows, "LC00221068", amount="10800|11340",
+                                                  not_before="2026/11/21"), "HR60354608")
+        self.assertIsNone(paste.parse_invoice_rows(rows, "LC00221068", amount="11340"))
         self.assertEqual(paste.payload_amount({"payload_json": "{}"}, "3600"), "3600")
         self.assertEqual(paste.merged_orders(self.MERGED_ITEM), ["LC00221068", "LC00221069", "LC00221070"])
         self.assertEqual(paste.merged_orders({"payload_json": json.dumps({"mainremark": "車馬費發票"})}), [])
@@ -428,7 +436,7 @@ class CetustekInvoicePasteTest(unittest.TestCase):
         ):
             self.assertEqual(paste.process_pending_invoice_payloads(MagicMock(), "台北"), 1)
         self.assertEqual(calls, ["allowance", "find"])  # 先折讓原訂單，再查合併發票
-        find.assert_called_once_with(unittest.mock.ANY, "LC00221068", amount="10800", not_before="2026/11/21")
+        find.assert_called_once_with(unittest.mock.ANY, "LC00221068", amount=unittest.mock.ANY, not_before="2026/11/21")
         self.assertEqual(allowances.call_args.kwargs["skip_invoices"], set())
         paste_one.assert_not_called()
         write_result.assert_called_once_with("台北", 40, self.MERGED_ITEM["order_no"], "HR60354608")
