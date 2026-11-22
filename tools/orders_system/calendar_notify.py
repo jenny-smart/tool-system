@@ -98,6 +98,9 @@ def calendar_for(calendar_id: str = ""):
     notice = notice_calendar_id()
     if notice and calendar_id in REDIRECTED_CALENDAR_IDS:
         return _calendar_service(notice), notice
+    if not notice and calendar_id in REDIRECTED_CALENDAR_IDS:
+        # 2026-11-23：讀不到排程行事曆時明確提示，方便查出是哪個環境（GitHub／本機 Agent／Streamlit）少設定
+        print(f"⚠️ 讀不到 {NOTICE_CALENDAR_ENV}（這個執行環境沒設定），行事曆事件仍建在 {calendar_id}", flush=True)
     if calendar_id == NOTIFY_CALENDAR_ID and not _oauth_value(HERS_CALENDAR_REFRESH_TOKEN_KEY):
         print(f"⚠️ 還沒設定 {HERS_CALENDAR_REFRESH_TOKEN_KEY}，行事曆事件先建在 {LEMONCLEAN_CALENDAR_ID}", flush=True)
         calendar_id = LEMONCLEAN_CALENDAR_ID
