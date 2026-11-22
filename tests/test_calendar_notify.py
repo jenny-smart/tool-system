@@ -27,7 +27,7 @@ def test_default_calendar_is_jenny_without_invite(monkeypatch):
     monkeypatch.setattr(calendar_notify, "_calendar_service", lambda *_a: service)
     calendar_notify.create_notify_event(summary="ATM對帳完成")
     call = service.calls[0]
-    assert call["calendarId"] in ("jenny@hers.com.tw", "jenny@lemonclean.com.tw")
+    assert call["calendarId"] == calendar_notify.notice_calendar_id()  # 2026-11-23：一律排程日曆
     assert call["sendUpdates"] == "none" and "attendees" not in call["body"]
     assert [r["minutes"] for r in call["body"]["reminders"]["overrides"]] == [10, 20]
 
@@ -69,14 +69,16 @@ def test_calendar_client_override_matches_refresh_token_client(monkeypatch):
     assert (creds.client_id, creds.client_secret) == ("cal-id", "cal-secret")
 
 
-def test_hers_calendar_falls_back_to_lemonclean_without_token(monkeypatch):
+def test_without_notice_secret_uses_default_notice_calendar(monkeypatch):
+    """2026-11-23：讀不到 SCHEDULE_NOTICE_CALENDAR_ID 也寫排程日曆，不再退回 jenny@hers／lemonclean。"""
     from tools.common import google_auth
 
     monkeypatch.setattr(calendar_notify, "_calendar_service", lambda *_a: "svc")
-    monkeypatch.setattr(google_auth, "_oauth_value", lambda name: "")
-    assert calendar_notify.calendar_for() == ("svc", "jenny@lemonclean.com.tw")
-    monkeypatch.setattr(google_auth, "_oauth_value", lambda name: "tok" if name == "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN" else "")
-    assert calendar_notify.calendar_for() == ("svc", "jenny@hers.com.tw")
+    for token in ("", "tok"):
+        monkeypatch.setattr(google_auth, "_oauth_value",
+                            lambda name, t=token: t if name == "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN" else "")
+        assert calendar_notify.calendar_for() == ("svc", calendar_notify.DEFAULT_NOTICE_CALENDAR_ID)
+        assert calendar_notify.calendar_for("jenny@lemonclean.com.tw") == ("svc", calendar_notify.DEFAULT_NOTICE_CALENDAR_ID)
 
 
 def test_replace_prefix_deletes_same_day_events_before_insert(monkeypatch):
