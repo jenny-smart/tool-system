@@ -22,11 +22,12 @@ class NoticeCalendarTests(unittest.TestCase):
         env = {"SCHEDULE_NOTICE_CALENDAR_ID": "notice@x"}
         self.assertEqual(self._for("lemonclean925@gmail.com", env)[0], "lemonclean925@gmail.com")
 
-    def test_without_notice_keeps_old_behavior(self):
+    def test_without_notice_uses_default_notice_calendar(self):
+        from tools.orders_system import calendar_notify as cn
+
         env = {"SCHEDULE_NOTICE_CALENDAR_ID": "", "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN": "t"}
         with patch("tools.common.google_auth._oauth_value", side_effect=lambda k: {"GOOGLE_HERS_CALENDAR_REFRESH_TOKEN": "t"}.get(k, "")):
-            self.assertEqual(self._for("jenny@hers.com.tw", env)[0], "jenny@hers.com.tw")
-
+            self.assertEqual(self._for("jenny@hers.com.tw", env)[0], cn.DEFAULT_NOTICE_CALENDAR_ID)
 
 if __name__ == "__main__":
     unittest.main()

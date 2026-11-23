@@ -35,6 +35,9 @@ HERS_CALENDAR_REFRESH_TOKEN_KEY = "GOOGLE_HERS_CALENDAR_REFRESH_TOKEN"
 # 排程行事曆（與 order-system 同一個 Secret 名稱）
 NOTICE_CALENDAR_ENV = "SCHEDULE_NOTICE_CALENDAR_ID"
 REDIRECTED_CALENDAR_IDS = {NOTIFY_CALENDAR_ID, LEMONCLEAN_CALENDAR_ID}
+# 2026-11-23 Jenny：排程日曆（jenny@lemonclean.com.tw 擁有）。環境讀不到 SCHEDULE_NOTICE_CALENDAR_ID 時用這個，
+# 不再退回 jenny@hers.com.tw（GitHub／本機 Agent／Streamlit 不用各設一次）。與 order-system 相同。
+DEFAULT_NOTICE_CALENDAR_ID = "c_a0817c73e9200275a30c8ef72e4c7716dec7a0c29e87abdd87395b768fd17731@group.calendar.google.com"
 
 
 def notice_calendar_id() -> str:
@@ -42,7 +45,7 @@ def notice_calendar_id() -> str:
     from tools.common.google_auth import _oauth_value
 
     value = _oauth_value(NOTICE_CALENDAR_ENV)
-    return next((x.strip() for x in value.split(",") if x.strip()), "")
+    return next((x.strip() for x in value.split(",") if x.strip()), DEFAULT_NOTICE_CALENDAR_ID)
 EVENT_DURATION_MINUTES = 30
 REMINDER_MINUTES = [10, 20]
 

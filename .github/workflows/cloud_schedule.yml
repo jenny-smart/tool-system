@@ -51,7 +51,7 @@ jobs:
           args=()
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/cloud_schedule.py --timestamp "$SLOT_TIMESTAMP" "${args[@]}"
-      - name: 排程完成記行事曆（jenny@hers.com.tw，依「排程設定」K 欄）
+      - name: 排程完成記行事曆（排程日曆，依「排程設定」完成記行事曆欄）
         if: always() && !inputs.dry_run
         continue-on-error: true
         env:

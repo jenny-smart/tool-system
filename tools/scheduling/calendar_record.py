@@ -1,4 +1,5 @@
-"""排程完成記行事曆（2026-11-16 Jenny）：主控表「排程設定」的功能跑完後，在 jenny@hers.com.tw 行事曆留一則紀錄。
+"""排程完成記行事曆（2026-11-16 Jenny）：主控表「排程設定」的功能跑完後，在排程日曆留一則紀錄
+（2026-11-23 起：SCHEDULE_NOTICE_CALENDAR_ID，讀不到時用 calendar_notify.DEFAULT_NOTICE_CALENDAR_ID，不再寫 jenny@hers.com.tw）。
 
 Cloud Schedule Router 每 10 分鐘跑一次，派送完這個時段的功能後接著跑本程式：
   1. 讀「排程設定」，K 欄「完成記行事曆」是 TRUE 的功能（空白＝預設，高頻功能預設不記）。
