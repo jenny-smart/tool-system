@@ -124,7 +124,8 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     if counts:
         st.write("本次會執行：" + "、".join(f"{batch.ACTIONS[a][0]} {n} 筆" for a, n in counts.items()))
     if any("triplicate" in item["actions"] for item in selected):
-        st.radio("二聯改三聯：原發票處理方式", ["作廢原發票", "開立折讓單（全額）"], horizontal=True,
+        # 2026-11-24 Jenny：二聯改三聯一律預設開立折讓單（全額），要作廢再手動切換
+        st.radio("二聯改三聯：原發票處理方式", ["開立折讓單（全額）", "作廢原發票"], horizontal=True,
                  key="change_order_triplicate_action",
                  help="同【鯨躍發票】二聯改三聯：先作廢或全額折讓原二聯發票，再開新三聯發票（新票由你按下一步及儲存）")
     if any("correction" in item["actions"] for item in selected):
@@ -181,7 +182,7 @@ def _prepare_triplicates(region: str, rows: list[int], kind: str = "triplicate")
     if region not in keys:
         raise ValueError(f"鯨躍發票沒有「{region}」的設定")
     label = "修正發票金額" if kind == "correction" else "二聯改三聯"
-    action = "allowance" if kind == "correction" or st.session_state.get("change_order_triplicate_action") == "開立折讓單（全額）" else "cancel"
+    action = "cancel" if kind != "correction" and st.session_state.get("change_order_triplicate_action") == "作廢原發票" else "allowance"
     ws = get_worksheet(region)
     values = ws.get_all_values()
     backend = BackendClient(keys[region])

@@ -101,7 +101,7 @@ def test_result_keeps_original_and_payment_status(source, backend):
 
 def setup_process(monkeypatch, source, backend):
     from tools.invoice_center import cetustek_invoice_paste as paste
-    plan = prepare("taipei", source, backend)
+    plan = prepare("taipei", source, backend, original_action="cancel")
     ws = MagicMock()
     ws.get.return_value = [row_for(source)]
     state = {}
@@ -187,7 +187,7 @@ def test_confirmed_unsaved_retry_keeps_allowance_and_refills(
 def test_cancel_browser_fixture(source, backend, original_buyer_id, result_ready):
     """Exercise selectors and confirmation on a local synthetic page, never EI."""
     from playwright.sync_api import sync_playwright
-    plan = prepare("taipei", source, backend)
+    plan = prepare("taipei", source, backend, original_action="cancel")
     html = '''<label><input type="radio">已開立發票</label>
     <table><tr><td>發票號碼</td><td><input><input></td></tr>
     <tr><td>發票日期</td><td><input id="date1" readonly value="115/09/24"><input id="date2" readonly></td></tr></table>
@@ -269,7 +269,7 @@ def test_allowance_uncertain_result_blocks_retry_and_mode_change(monkeypatch, so
         runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
     with pytest.raises(RuntimeError, match='禁止自動重試'):
         runner.process(MagicMock(), ws, plan, state, save, backend, 'taipei')
-    cancel_plan = prepare('taipei', source, backend)
+    cancel_plan = prepare('taipei', source, backend, original_action='cancel')
     with pytest.raises(RuntimeError, match='不同的處理記錄'):
         runner.process(MagicMock(), ws, cancel_plan, state, save, backend, 'taipei')
     assert events == ['allowance_submitting']
@@ -507,3 +507,10 @@ def test_parse_requirements_rejects_two_ids_or_no_company():
         parse_requirements("田宅工程有限公司 53699764 另一組 12345678")
     with pytest.raises(ValueError):
         parse_requirements("53699764")
+
+
+
+def test_prepare_defaults_to_allowance(source, backend):
+    """2026-11-24：二聯改三聯預設全額折讓原發票，作廢需明確指定。"""
+    assert prepare("taipei", source, backend)["original_action"] == "allowance"
+    assert "original_action" not in prepare("taipei", source, backend, original_action="cancel")
