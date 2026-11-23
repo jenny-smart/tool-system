@@ -92,16 +92,17 @@ def _calendar_service(calendar_id: str = ""):
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
 
-def calendar_for(calendar_id: str = ""):
+def calendar_for(calendar_id: str = "", keep: bool = False):
     """回傳 (service, 實際要用的行事曆 ID)。要建在 jenny@hers.com.tw 但還沒有 hers 授權時，
-    改用 jenny@lemonclean.com.tw（並印出提醒），排程不會因此失敗。"""
+    改用 jenny@lemonclean.com.tw（並印出提醒），排程不會因此失敗。
+    keep=True：不轉到排程行事曆（2026-11-24 Jenny：資產快照仍記 jenny@hers.com.tw）。"""
     from tools.common.google_auth import _oauth_value
 
     calendar_id = calendar_id or NOTIFY_CALENDAR_ID
-    notice = notice_calendar_id()
+    notice = "" if keep else notice_calendar_id()
     if notice and calendar_id in REDIRECTED_CALENDAR_IDS:
         return _calendar_service(notice), notice
-    if not notice and calendar_id in REDIRECTED_CALENDAR_IDS:
+    if not keep and not notice and calendar_id in REDIRECTED_CALENDAR_IDS:
         # 2026-11-23：讀不到排程行事曆時明確提示，方便查出是哪個環境（GitHub／本機 Agent／Streamlit）少設定
         print(f"⚠️ 讀不到 {NOTICE_CALENDAR_ENV}（這個執行環境沒設定），行事曆事件仍建在 {calendar_id}", flush=True)
     if calendar_id == NOTIFY_CALENDAR_ID and not _oauth_value(HERS_CALENDAR_REFRESH_TOKEN_KEY):

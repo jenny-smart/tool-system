@@ -40,6 +40,24 @@ _SETUP_STEPS = ("Set up job", "Complete job", "Checkout", "Set up Python", "Setu
                 "Verify", "Post ", "Commit", "actions/", "Run actions/")
 CONCLUSION_MARK = {"success": "✅", "failure": "❌ 失敗", "cancelled": "⚠️ 取消", "timed_out": "❌ 逾時",
                    "skipped": "⏭ 略過", "neutral": "✅", "action_required": "⚠️ 待處理", "startup_failure": "❌ 啟動失敗"}
+# 2026-11-24 Jenny：程式自己會把結果記行事曆的功能，成功時不再另記【排程】（避免重複）；失敗仍記。
+# 富邦明細排程只排入 Mac，結果由 Agent 下載完記「【富邦明細】…」。
+SELF_RECORDED_KEYS = {
+    "stored_value_notice_daily",   # 【儲值金客服備註空白】
+    "customer_memo_daily",         # 【客人備註】
+    "rating_complaint_daily",      # 【評價客訴】
+    "rating_booking_daily",        # 【評價預約】
+    "lemon_ren_count",             # 【檸檬人待換專員】
+    "unassigned_staff_record",     # 【未配班剩1人】
+    "unassigned_reserve_create",   # 【未配班保留單】
+    "fubon_statement",             # 【富邦明細】（Mac Agent 下載完記）
+}
+# 2026-11-24 Jenny：這些功能的【排程】紀錄仍記 jenny@hers.com.tw（不轉到排程行事曆）
+HERS_KEYS = {"invest_snapshot"}
+
+
+def skip_record(rule_key: str, run: dict) -> bool:
+    return rule_key in SELF_RECORDED_KEYS and run.get("conclusion") in ("success", "neutral", "skipped")
 
 
 def github_api(path: str, repo: str = "", token: str = "") -> dict:
@@ -122,10 +140,12 @@ def result_lines(log_text: str, limit: int = MAX_RESULT_LINES) -> list[str]:
         if text and (not lines or lines[-1] != text):
             lines.append(text)
     # 程式有印「台北／客人備註：…」這種每區每種一行的結果時，SAVE／FINISH 摘要行就不重複列
+    # 2026-11-24 Jenny：有這種結果行時只留結果行與 ❌／⚠️（過程訊息如「某週找到 0 筆」不列，行事曆只看結果）
     if any(_REGION_LINE_RE.match(t) for t in lines):
-        lines = [t for t in lines if not t.startswith(("SAVE ", "FINISH "))]
-    outcomes = [t for t in lines if _OUTCOME_RE.search(t)]
-    lines = outcomes or lines[-3:]
+        lines = [t for t in lines if _REGION_LINE_RE.match(t) or t.startswith(("❌", "⚠️"))]
+    else:
+        outcomes = [t for t in lines if _OUTCOME_RE.search(t)]
+        lines = outcomes or lines[-3:]
     if len(lines) > limit:
         # 太多時：❌／⚠️ 全留（最多 limit 行），其餘留最後幾行，順序不變
         keep = {i for i, t in enumerate(lines) if t.startswith(("❌", "⚠️"))}
@@ -294,14 +314,25 @@ def record(now: Optional[dt.datetime] = None, rules: Optional[list[ss.Rule]] = N
     if not runs:
         log("完成記行事曆：沒有新完成的排程")
         return 0
-    if service is None:
-        from tools.orders_system import calendar_notify
+    targets: dict = {}
 
-        service, calendar_id = calendar_notify.calendar_for(RECORD_CALENDAR_ID)
-    calendar_id = calendar_id or RECORD_CALENDAR_ID
-    done = recorded_ids(service, calendar_id, since - dt.timedelta(days=1))
+    def target(keep: bool):
+        """(service, 行事曆 ID, 已記過的 run)；keep＝記在 jenny@hers.com.tw、不轉排程行事曆。"""
+        if keep not in targets:
+            if service is not None:
+                svc, cid = service, calendar_id or RECORD_CALENDAR_ID
+            else:
+                from tools.orders_system import calendar_notify
+
+                svc, cid = calendar_notify.calendar_for(RECORD_CALENDAR_ID, keep=keep)
+            targets[keep] = (svc, cid, recorded_ids(svc, cid, since - dt.timedelta(days=1)))
+        return targets[keep]
+
     count = 0
     for rule, run, slot, repo in runs:
+        if skip_record(rule.key, run):
+            continue
+        svc, cal_id, done = target(rule.key in HERS_KEYS)
         rid = run_id(repo, run)
         if rid in done:
             continue
@@ -314,13 +345,13 @@ def record(now: Optional[dt.datetime] = None, rules: Optional[list[ss.Rule]] = N
         try:
             results = run_results(jobs, repo, fetch_log=fetch_log, log=log)
             body = build_event(rule, run, slot, repo, jobs, results)
-            service.events().insert(calendarId=calendar_id, body=body, sendUpdates="none").execute()
+            svc.events().insert(calendarId=cal_id, body=body, sendUpdates="none").execute()
         except Exception as exc:
             log(f"::warning::完成記行事曆：{rule.key} 建立事件失敗：{exc}")
             continue
         done.add(rid)
         count += 1
-        log(f"已在 {calendar_id} 行事曆記錄：{body['summary']}")
+        log(f"已在 {cal_id} 行事曆記錄：{body['summary']}")
     return count
 
 

@@ -319,7 +319,49 @@ def run_download(
         f"富邦明細完成：共 {len(table.rows)} 筆；新增 {len(new_table.rows)} 筆；"
         f"工作表新增 {sheet_rows} 筆；財報新增 {report_rows} 筆。"
     )
+    record_result_calendar(account.area, new_table, sheet_rows, report_rows)
     return page
+
+
+def _amount(value) -> float:
+    text = str(value or "").replace(",", "").replace("$", "").strip()
+    try:
+        return float(text) if text else 0.0
+    except ValueError:
+        return 0.0
+
+
+def statement_totals(table: CapturedTable) -> dict:
+    """新增明細的筆數與金額：支出／存入（富邦 B:H＝交易日、帳務日、說明、支出、存入、餘額、備註）。"""
+    def col(key: str, default: int) -> int:
+        return next((i for i, h in enumerate(table.headers) if key in str(h)), default)
+
+    out_i, in_i = col("支出", 3), col("存入", 4)
+    out_rows = [r for r in table.rows if out_i < len(r) and _amount(r[out_i])]
+    in_rows = [r for r in table.rows if in_i < len(r) and _amount(r[in_i])]
+    return {"count": len(table.rows),
+            "in_count": len(in_rows), "in_total": sum(_amount(r[in_i]) for r in in_rows),
+            "out_count": len(out_rows), "out_total": sum(_amount(r[out_i]) for r in out_rows)}
+
+
+def record_result_calendar(area: str, new_table: CapturedTable, sheet_rows: int, report_rows: int) -> None:
+    """2026-11-24 Jenny：下載完把結果（筆數、金額）記行事曆；沒有新明細就不記。失敗只印警告。"""
+    if not new_table.rows:
+        return
+    try:
+        from tools.orders_system import calendar_notify
+
+        t = statement_totals(new_table)
+        summary = f"【富邦明細】{area} 新增 {t['count']} 筆（存入 ${t['in_total']:,.0f}／支出 ${t['out_total']:,.0f}）"
+        description = "\n".join([
+            f"存入 {t['in_count']} 筆，共 ${t['in_total']:,.0f}",
+            f"支出 {t['out_count']} 筆，共 ${t['out_total']:,.0f}",
+            f"工作表新增 {sheet_rows} 筆；財報新增 {report_rows} 筆",
+        ])
+        calendar_notify.create_notify_event(summary=summary, description=description, reminder_minutes=[])
+        print(f"已記行事曆：{summary}")
+    except Exception as exc:
+        print(f"⚠️ 富邦明細結果記行事曆失敗：{exc}")
 
 
 def parse_args() -> argparse.Namespace:

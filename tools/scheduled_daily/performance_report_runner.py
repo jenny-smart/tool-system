@@ -710,8 +710,18 @@ def _build_period_overview_df(
     out = out.sort_values(["_sort_dt", "id"], ascending=[False, False]).drop(columns=["_sort_dt"])
     out = out.reset_index(drop=True)
 
-    log(f"✅ {period_label}統計報表完成，筆數 = {len(out)}")
+    # 2026-11-24 Jenny：行事曆要看結果——印各區業績金額與合計（原本印歷史筆數，看不出內容）
+    log(f"✅ {period_label}（{stat_month}）業績：" + "／".join(
+        f"{city} {_money(new_row[city + '業績'])}" for city in ("台北", "台中", "桃園", "新竹", "高雄"))
+        + f"；合計 {_money(new_row['全區合計'])}")
     return out[cols]
+
+
+def _money(value) -> str:
+    try:
+        return f"{int(round(float(value))):,}"
+    except (TypeError, ValueError):
+        return str(value or 0)
 
 
 def build_daily_overview_df(df4: pd.DataFrame, source: str = "dashboard", run_dt: Optional[datetime] = None) -> pd.DataFrame:
