@@ -139,8 +139,13 @@ def _label(plan) -> str:
 def allowance_original(page, plan, before_submit):
     """原發票全額折讓（共用 ei_issue.issue_allowance：先查鯨躍是否已折讓過，有就沿用不重開）。"""
     from .ei_issue import issue_allowance
-    # 修正發票金額：折讓原票全額（S 欄換算），新票是修正後金額；鯨躍可折讓額與它不符就停
-    amount = plan.get("allowance_amount") or plan["total"]
+    if plan["source"].get("kind") == "correction":
+        # 修正發票金額：折讓原票全額（S 欄換算），新票是修正後金額；鯨躍可折讓額與它不符就停
+        amount = plan.get("allowance_amount") or plan["total"]
+    else:
+        # 2026-11-24 Jenny：二聯改三聯＝整張折讓，金額取鯨躍原票可折讓額；
+        # 不可用新三聯金額（plan["total"]，後台現在的訂單金額），兩者不同時會被擋下
+        amount = ""
     year = int(plan["paid_date"][:4]) if plan.get("paid_date") else None
     return issue_allowance(page, plan["source"]["old_invoice"], amount, invoice_year=year,
                            require_full=True, before_save=before_submit).number
