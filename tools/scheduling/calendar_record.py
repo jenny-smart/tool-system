@@ -52,8 +52,12 @@ SELF_RECORDED_KEYS = {
     "unassigned_reserve_create",   # 【未配班保留單】
     "fubon_statement",             # 【富邦明細】（Mac Agent 下載完記）
 }
-# 2026-11-24 Jenny：這些功能的【排程】紀錄仍記 jenny@hers.com.tw（不轉到排程行事曆）
-HERS_KEYS = {"invest_snapshot"}
+# 2026-11-24 Jenny：投資相關（investment-system 的功能）的【排程】紀錄都記 jenny@hers.com.tw（不轉到排程行事曆）
+HERS_SYSTEMS = {"investment-system"}
+
+
+def record_in_hers(rule_key: str) -> bool:
+    return ss.system_name(rule_key) in HERS_SYSTEMS or rule_key.startswith("invest_")
 
 
 def skip_record(rule_key: str, run: dict) -> bool:
@@ -332,7 +336,7 @@ def record(now: Optional[dt.datetime] = None, rules: Optional[list[ss.Rule]] = N
     for rule, run, slot, repo in runs:
         if skip_record(rule.key, run):
             continue
-        svc, cal_id, done = target(rule.key in HERS_KEYS)
+        svc, cal_id, done = target(record_in_hers(rule.key))
         rid = run_id(repo, run)
         if rid in done:
             continue
