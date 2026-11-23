@@ -12,8 +12,10 @@ def test_self_recorded_success_skipped_failure_kept():
     assert not cr.skip_record("performance_report", {"conclusion": "success"})
 
 
-def test_invest_snapshot_goes_to_hers():
-    assert "invest_snapshot" in cr.HERS_KEYS
+def test_investment_records_go_to_hers():
+    for key in ("invest_snapshot", "invest_night_futures", "invest_stock_radar"):
+        assert cr.record_in_hers(key)
+    assert not cr.record_in_hers("performance_report")
 
 
 def test_statement_totals():
