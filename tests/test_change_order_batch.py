@@ -304,7 +304,7 @@ def test_run_plan_keeps_cetustek_login_between_steps(monkeypatch):
     assert "CETUSTEK_KEEP_LOGIN" not in os.environ
 
 
-def test_run_plan_failed_step_stops_rest_of_region_but_still_syncs(monkeypatch):
+def test_run_plan_failed_step_blocks_only_its_rows_and_still_syncs(monkeypatch):
     calls = []
     monkeypatch.setattr(batch, "sync_region", lambda region, log, rows: calls.append(("sync", region))
                         or {"done": [], "failed": []})
@@ -319,8 +319,25 @@ def test_run_plan_failed_step_stops_rest_of_region_but_still_syncs(monkeypatch):
         return 1 if action == "allowance" else 0
 
     assert batch.run_plan(plan, log=lambda *_: None, run_step=run_step) == 1
-    assert calls == [("allowance", "台北"), ("cetustek_logout", "台北"), ("sync", "台北"),
-                     ("stored_value", "台中"), ("sync", "台中")]
+    # 第 7 列折讓單失敗 → 第 7 列不退款；第 9 列扣儲值金照做
+    assert calls == [("allowance", "台北"), ("cetustek_logout", "台北"), ("stored_value", "台北"),
+                     ("sync", "台北"), ("stored_value", "台中"), ("sync", "台中")]
+
+
+def test_run_plan_triplicate_failure_does_not_block_other_rows(monkeypatch):
+    """2026-11-24：二聯改三聯第 377 列失敗，第 375 列退款、第 376／378 列扣儲值金照做。"""
+    calls = []
+    monkeypatch.setattr(batch, "sync_region", lambda region, log, rows: calls.append(("sync", sorted(rows)))
+                        or {"done": [], "failed": []})
+    monkeypatch.setattr(batch, "record_to_calendar", lambda *a, **k: None)
+    monkeypatch.setattr(batch, "run_triplicates", lambda *a, **k: calls.append(("triplicate",)) or 1)
+    plan = [{"region": "台北", "steps": {"triplicate": [377], "credit_refund": [375], "stored_value": [376, 378]},
+             "triplicate_plans": {"377": {}}, "sync_rows": [375, 376, 377, 378]}]
+    code = batch.run_plan(plan, log=lambda *_: None,
+                          run_step=lambda action, region, rows, cdp: calls.append((action, rows)) or 0)
+    assert code == 1
+    assert calls == [("triplicate",), ("cetustek_logout", []), ("credit_refund", [375]),
+                     ("stored_value", [376, 378]), ("sync", [375, 376, 377, 378])]
 
 
 def test_vip_refund_coupon_flow():

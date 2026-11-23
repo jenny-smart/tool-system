@@ -133,7 +133,7 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
                           key="change_order_batch_sync")
     st.caption("整批排成一筆本機 Agent 任務，逐區依序執行：① 鯨躍開立折讓單＋開立發票（含車馬費發票）＋二聯改三聯／修正發票金額（發票每筆需人工按下一步及儲存）"
                "→ ② 退款：信用卡登入藍新、ATM 登入富邦（需手機核准）→ ③ 檸檬後台儲值金 → 回寫系統。"
-               "某一步失敗就不做該區後面的步驟；回寫完成會在 Jenny 行事曆留一筆紀錄。")
+               "某列一步失敗就不做該列後面的步驟，其他列照常執行；回寫完成會在 Jenny 行事曆留一筆紀錄。")
 
     if st.button("▶️ 執行勾選的動作", key="change_order_batch_run", disabled=not selected):
         agent_items = [item for item in selected if set(item["actions"]) - {"sync"}]
