@@ -1794,6 +1794,28 @@ def get_pending_rows(region: str, row_spec: str = None, ui_logger=None):
     return pending
 
 
+# 2026-11-24 Jenny：回寫系統時加收金流／退款金流不得空白（取 R 欄；儲值金類固定填「儲值金」）
+STATUS_STORED_VALUE_FLOW = {"待扣儲值金", "已扣儲值金", "待回儲值金", "待返儲值金", "已返儲值金"}
+
+
+def _require_payment_flow(status: str, raw: list) -> None:
+    """加收／退款類狀態但 R 欄（收款資訊待退：信用卡／ATM…）空白 → 不回寫，避免後台金流空白。"""
+    if status in STATUS_STORED_VALUE_FLOW or str(_sheet_cell(raw, "R") or "").strip():
+        return
+    if status in STATUS_PENDING_CHARGE_ALIASES or status in STATUS_DONE_CHARGE_ALIASES:
+        raise RuntimeError("R 欄付款方式空白：加收金流不得空白，未回寫，請先補 R 欄")
+    if status in STATUS_PENDING_REFUND_ALIASES or status in STATUS_DONE_REFUND_ALIASES:
+        raise RuntimeError("R 欄付款方式空白：退款金流不得空白，未回寫，請先補 R 欄")
+
+
+def _set_flow_field(form_data: dict, controls: dict, names: list, value, label: str, **kwargs) -> None:
+    """金流欄位一定要寫進表單；值空白或找不到後台欄位就停，不送出。"""
+    if not str(value or "").strip():
+        raise RuntimeError(f"{label}空白，未回寫")
+    if not _set_field(form_data, controls, names, value, **kwargs):
+        raise RuntimeError(f"找不到後台「{label}」欄位，未回寫")
+
+
 def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
                             order: dict = None, ui_logger=None):
     """依 Sheet B 欄狀態，把該列資料套到後台 edit 表單。"""
@@ -1819,14 +1841,16 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
                            keywords=["財務備註"], ui_logger=ui_logger)
         return
 
+    _require_payment_flow(status, raw)
+
     if status in STATUS_PENDING_CHARGE_ALIASES:
         _set_radio_value(form_data, controls, "isCharge", "1", ui_logger=ui_logger)
         _set_progress_done(form_data, controls, ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
         charge_payment = "儲值金" if status == "待扣儲值金" else _sheet_cell(raw, "R")
-        _set_field(form_data, controls, FIELD_CHARGE_PAYMENT, charge_payment,
-                   keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
+        _set_flow_field(form_data, controls, FIELD_CHARGE_PAYMENT, charge_payment, "加收金流",
+                        keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
                    keywords=["加收金額", "收款金額"], fallback_name="chargeAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_INVOICE, charge_invoice,
@@ -1852,8 +1876,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
         _set_field(form_data, controls, FIELD_REFUND_NUMBER, _sheet_cell(raw, "AB"),
                    keywords=["折讓單號碼", "退款編號"], fallback_name="refundNumber", ui_logger=ui_logger)
         refund_flow = "儲值金" if status == "待返儲值金" else _sheet_refund_payway(raw)
-        _set_field(form_data, controls, FIELD_REFUND_FLOW, refund_flow,
-                   keywords=["退款金流"], ui_logger=ui_logger)
+        _set_flow_field(form_data, controls, FIELD_REFUND_FLOW, refund_flow, "退款金流",
+                        keywords=["退款金流"], ui_logger=ui_logger)
         refund_note = _build_refund_note(backend_note, refund_date)
         _set_field(form_data, controls, FIELD_REFUND_NOTE, refund_note,
                    keywords=["待退備註", "退款備註"], fallback_name="refundNote", ui_logger=ui_logger)
@@ -1869,8 +1893,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
         _set_field(form_data, controls, FIELD_CHARGE_DATE, charge_date,
                    keywords=["加收日期", "收款日期", "收款時間"], fallback_name="chargeDate", ui_logger=ui_logger)
         charge_payment = "儲值金" if status == "已扣儲值金" else _sheet_cell(raw, "R")
-        _set_field(form_data, controls, FIELD_CHARGE_PAYMENT, charge_payment,
-                   keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
+        _set_flow_field(form_data, controls, FIELD_CHARGE_PAYMENT, charge_payment, "加收金流",
+                        keywords=["加收金流", "收款方式", "收款金流"], fallback_name="chargePayment", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_AMOUNT, _sheet_cell(raw, "N"),
                    keywords=["加收金額", "收款金額"], fallback_name="chargeAmount", ui_logger=ui_logger)
         _set_field(form_data, controls, FIELD_CHARGE_INVOICE, charge_invoice,
@@ -1912,8 +1936,8 @@ def apply_sheet_row_to_form(form_data: dict, controls: dict, item: dict,
         _set_field(form_data, controls, FIELD_REFUND_NUMBER, _sheet_cell(raw, "AB"),
                    keywords=["折讓單號碼", "退款編號"], fallback_name="refundNumber", ui_logger=ui_logger)
         refund_flow = "儲值金" if status == "已返儲值金" else _sheet_refund_payway(raw)
-        _set_field(form_data, controls, FIELD_REFUND_FLOW, refund_flow,
-                   keywords=["退款金流"], ui_logger=ui_logger)
+        _set_flow_field(form_data, controls, FIELD_REFUND_FLOW, refund_flow, "退款金流",
+                        keywords=["退款金流"], ui_logger=ui_logger)
         refund_note = _build_refund_note(backend_note, refund_date)
         _set_field(form_data, controls, FIELD_REFUND_NOTE, refund_note,
                    keywords=["待退備註", "退款備註"], fallback_name="refundNote", ui_logger=ui_logger)
