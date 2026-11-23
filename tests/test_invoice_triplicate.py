@@ -514,3 +514,17 @@ def test_prepare_defaults_to_allowance(source, backend):
     """2026-11-24：二聯改三聯預設全額折讓原發票，作廢需明確指定。"""
     assert prepare("taipei", source, backend)["original_action"] == "allowance"
     assert "original_action" not in prepare("taipei", source, backend, original_action="cancel")
+
+
+def test_triplicate_allowance_uses_ei_full_amount_not_new_total(monkeypatch):
+    """二聯改三聯整張折讓：金額留空由鯨躍原票可折讓額決定，不可拿新三聯金額比對。"""
+    from tools.invoice_center import allowance_create, cetustek_invoice_paste
+    calls = {}
+    monkeypatch.setattr(cetustek_invoice_paste, "_clear_dialog_handlers", lambda page: None)
+    monkeypatch.setattr(allowance_create, "_open_allowance", lambda page: None)
+    monkeypatch.setattr(allowance_create, "find_existing_allowance", lambda *a, **k: None)
+    monkeypatch.setattr(allowance_create, "_create_one",
+                        lambda page, no, amount, **kw: calls.update(no=no, amount=amount, **kw) or "AL87654321")
+    plan = {"source": {"old_invoice": "HR60354863"}, "total": "3600", "paid_date": "2026-11-20"}
+    assert runner.allowance_original(object(), plan, lambda: None) == "AL87654321"
+    assert calls["amount"] == "" and calls["require_full"] and calls["invoice_year"] == 2026

@@ -147,8 +147,14 @@ def _search_recent_years(page: Page, invoice_no: str, years: int = 2) -> None:
             print(f"{invoice_no} 在 {year.locator('option').nth(index).inner_text().strip()} 年度查無，改查前一年")
 
 
-def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int | None = None,
-                require_full: bool = False, before_save=None) -> str:
+def remaining_allowable(page: Page, invoice_no: str, invoice_year: int | None = None) -> Decimal:
+    """只讀不開：進折讓開立頁查原發票，回傳鯨躍原票目前可折讓銷售額（應稅）；讀不到回 -1。"""
+    _open_allowance(page)
+    return _load_original(page, invoice_no, invoice_year)
+
+
+def _load_original(page: Page, invoice_no: str, invoice_year: int | None = None) -> Decimal:
+    """折讓開立頁：選原發票年度並查詢，回傳可折讓銷售額（應稅）；讀不到回 -1。"""
     year = page.locator("#qyear")
     if invoice_year is None:
         _search_recent_years(page, invoice_no)
@@ -170,7 +176,12 @@ def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int 
 
     available_text = page.locator("body").inner_text()
     sales_match = re.search(r"銷售額[\s\S]*?應稅:\$\s*([\d,]+(?:\.\d+)?)", available_text)
-    sales_amount = _money(sales_match.group(1)) if sales_match else Decimal("-1")
+    return _money(sales_match.group(1)) if sales_match else Decimal("-1")
+
+
+def _create_one(page: Page, invoice_no: str, untaxed: str, *, invoice_year: int | None = None,
+                require_full: bool = False, before_save=None) -> str:
+    sales_amount = _load_original(page, invoice_no, invoice_year)
     if require_full and not str(untaxed or "").strip():
         # 2026-11-21 Jenny：合併開立的原訂單發票全額折讓——金額直接取鯨躍原票可折讓銷售額
         if sales_amount <= 0:

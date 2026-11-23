@@ -60,6 +60,19 @@ def issue_allowance(page: Any, invoice_no: str, untaxed: str, *, invoice_year: O
             raise LookupFailed(str(exc)) from exc
         if found:
             found_date, number = found
+            if require_full and not str(untaxed or "").strip():
+                # 2026-11-24 Jenny：整張折讓不比金額，查到任何折讓單都會被當成已折讓；
+                # 若原票仍有可折讓額，代表那張只是部分折讓，沿用會讓原票沒沖完就開新票
+                _clear_dialog_handlers(page)
+                try:
+                    remaining = allowance.remaining_allowable(page, invoice_no, invoice_year)
+                except Exception as exc:
+                    print(f"[鯨躍] {invoice_no} 讀不到剩餘可折讓額（{exc}），視為已全額折讓", flush=True)
+                    remaining = None
+                if remaining is not None and remaining > 0:
+                    raise RuntimeError(
+                        f"{invoice_no} 已有折讓單 {number}，但鯨躍原票仍可折讓 {remaining}："
+                        "疑似部分折讓，禁止沿用及開新票，請人工核對")
             print(f"[鯨躍] {invoice_no} 已有折讓單 {number}，不重開", flush=True)
             return AllowanceResult(number, found_date or _today(), True)
     _clear_dialog_handlers(page)

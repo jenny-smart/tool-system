@@ -97,3 +97,27 @@ def test_full_allowance_takes_every_detail_line_in_one_allowance(monkeypatch):
     assert allowance_create._create_one(page, "HR11111111", "", require_full=True) == "HR22222222"
     assert saved == [True]
     assert [c.args[0] for c in products.nth.call_args_list] == [0, 1, 2]
+
+
+def test_full_allowance_reuses_existing_when_nothing_left(monkeypatch, allowance):
+    from decimal import Decimal
+    monkeypatch.setattr(allowance_create, "find_existing_allowance", lambda *a, **k: ("2026/11/09", "AL1"))
+    monkeypatch.setattr(allowance_create, "remaining_allowable", lambda *a, **k: Decimal("0"))
+    monkeypatch.setattr(allowance_create, "_create_one", lambda *a, **k: pytest.fail("不得重開"))
+    result = ei_issue.issue_allowance(MagicMock(), "AB12345678", "", require_full=True)
+    assert result.number == "AL1" and result.reused
+
+
+def test_full_allowance_stops_when_existing_is_partial(monkeypatch, allowance):
+    from decimal import Decimal
+    monkeypatch.setattr(allowance_create, "find_existing_allowance", lambda *a, **k: ("2026/11/09", "AL1"))
+    monkeypatch.setattr(allowance_create, "remaining_allowable", lambda *a, **k: Decimal("1200"))
+    monkeypatch.setattr(allowance_create, "_create_one", lambda *a, **k: pytest.fail("不得開立"))
+    with pytest.raises(RuntimeError, match="部分折讓"):
+        ei_issue.issue_allowance(MagicMock(), "AB12345678", "", require_full=True)
+
+
+def test_amount_matched_reuse_skips_remaining_check(monkeypatch, allowance):
+    monkeypatch.setattr(allowance_create, "find_existing_allowance", lambda *a, **k: ("2026/11/09", "AL1"))
+    monkeypatch.setattr(allowance_create, "remaining_allowable", lambda *a, **k: pytest.fail("有金額時不需再查"))
+    assert ei_issue.issue_allowance(MagicMock(), "AB12345678", "8000", require_full=True).reused
