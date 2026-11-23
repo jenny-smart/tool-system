@@ -121,3 +121,19 @@ def test_amount_matched_reuse_skips_remaining_check(monkeypatch, allowance):
     monkeypatch.setattr(allowance_create, "find_existing_allowance", lambda *a, **k: ("2026/11/09", "AL1"))
     monkeypatch.setattr(allowance_create, "remaining_allowable", lambda *a, **k: pytest.fail("有金額時不需再查"))
     assert ei_issue.issue_allowance(MagicMock(), "AB12345678", "8000", require_full=True).reused
+
+
+@pytest.mark.parametrize("remaining", ["-1", "error"])
+def test_full_allowance_stops_when_remaining_cannot_be_verified(monkeypatch, allowance, remaining):
+    from decimal import Decimal
+
+    def read(*a, **k):
+        if remaining == "error":
+            raise RuntimeError("查無原發票")
+        return Decimal(remaining)
+
+    monkeypatch.setattr(allowance_create, "find_existing_allowance", lambda *a, **k: ("2026/11/09", "AL1"))
+    monkeypatch.setattr(allowance_create, "remaining_allowable", read)
+    monkeypatch.setattr(allowance_create, "_create_one", lambda *a, **k: pytest.fail("不得開立"))
+    with pytest.raises(RuntimeError, match="禁止沿用"):
+        ei_issue.issue_allowance(MagicMock(), "AB12345678", "", require_full=True)
