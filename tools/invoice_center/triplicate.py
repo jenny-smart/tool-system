@@ -58,17 +58,44 @@ def source_candidate(row: list, row_no: int, kind: str = TRIPLICATE_KIND) -> dic
     return correction_candidate(row, row_no) if kind == CORRECTION_KIND else candidate(row, row_no)
 
 
+# 2026-11-24 Jenny：K 欄統編／公司名稱不限寫法——「統編 公司名稱」「公司名稱 統編」「抬頭：公司名稱 統編：12345678」
+# 都可以（順序可對調、可換行、冒號全半形皆可）；整格只能有一組 8 碼統編和一個公司名稱。
+LABELED_ID_RE = re.compile(r"統(?:一)?編(?:號)?\s*[：:]?\s*(\d{8})(?!\d)")
+LABELED_NAME_RE = re.compile(r"(?:抬頭|發票抬頭|公司名稱|買受人)\s*[：:]\s*(.+?)(?=\s*(?:統(?:一)?編|[\n；;，,]|$))")
+TAX_ID_RE = re.compile(r"(?<![A-Za-z0-9])(\d{8})(?!\d)")  # 訂單號碼 LC00220070、發票 AB12345678 不會被抓
+COMPANY_RE = re.compile(r"([^\s：:，,;；/／()（）]+?(?:股份有限公司|有限公司|公司|商行|企業社|企業|工作室|事務所|協會|基金會))")
+
+
+def _buyer_from_labels(text: str):
+    """「抬頭：XX 統編：12345678」→ (統編, 公司名稱)；不是唯一一組回傳 None。"""
+    ids = list(dict.fromkeys(LABELED_ID_RE.findall(text)))
+    names = list(dict.fromkeys(n.strip() for n in LABELED_NAME_RE.findall(text) if n.strip()))
+    return (ids[0], names[0]) if len(ids) == 1 and len(names) == 1 else None
+
+
+def _buyer_anywhere(text: str):
+    """整格剛好一組 8 碼統編＋一個公司名稱（順序、換行、有沒有標示都可以）；否則 None。"""
+    ids = list(dict.fromkeys(TAX_ID_RE.findall(text)))
+    names = list(dict.fromkeys(m.strip() for m in COMPANY_RE.findall(text)))
+    names = [n for n in names if not any(n != other and n in other for other in names)]
+    return (ids[0], names[0]) if len(ids) == 1 and len(names) == 1 else None
+
+
 def parse_requirements(note: str) -> dict[str, Any]:
     text = str(note or "").strip()
-    matches = list(re.finditer(r"(?<![A-Za-z0-9])(\d{8})(?!\d)\s+([^\n；;]+)", text))
-    if len(matches) != 1:
-        raise ValueError("K 欄須有唯一的 8 碼統編及公司名稱（統編 公司名稱）")
-    match = matches[0]
-    name = re.split(r"\s*[/／]\s*|地址(?:要)?(?:刪除|移除)", match[2])[0].strip()
+    # 原寫法「統編 公司名稱」同一行（可接「／地址刪除」等說明）
+    matches = list(re.finditer(r"(?<![A-Za-z0-9])(\d{8})(?!\d)[ \t\u3000]+([^\n；;]+)", text))
+    found = _buyer_from_labels(text) or (
+        (matches[0][1], matches[0][2]) if len(matches) == 1 and len(set(TAX_ID_RE.findall(text))) == 1 else None
+    ) or _buyer_anywhere(text)
+    if not found:
+        raise ValueError("K 欄須有唯一的 8 碼統編及公司名稱（例：53699764 田宅工程有限公司）")
+    buyer_id, raw_name = found
+    name = re.split(r"\s*[/／]\s*|地址(?:要)?(?:刪除|移除)", raw_name)[0].strip()
     if not name or not re.search(r"公司|商行|企業|工作室|事務所|協會|基金會|行$|社$", name):
         raise ValueError("無法明確辨識 K 欄公司名稱，請整理為『統編 公司名稱』獨立一行")
     return {
-        "buyer_identifier": match[1], "buyer_name": name,
+        "buyer_identifier": buyer_id, "buyer_name": name,
         "remove_address": bool(re.search(r"地址\s*(?:要|需|請)?\s*(?:刪除|移除)|(?:刪除|移除)\s*地址", text)),
     }
 

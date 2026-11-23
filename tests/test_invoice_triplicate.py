@@ -475,3 +475,35 @@ def test_correction_allowance_uses_old_amount(monkeypatch):
             "allowance_amount": "8000", "paid_date": ""}
     assert runner.allowance_original(object(), plan, lambda: None) == "AL12345678"
     assert calls["amount"] == "8000" and calls["invoice_year"] is None and calls["require_full"]
+
+
+def test_parse_requirements_labeled_title_and_tax_id():
+    note = "2026/11/23 LC00220070 異動發票--更改三聯\n抬頭：田宅工程有限公司 統編：53699764"
+    assert parse_requirements(note) == {"buyer_identifier": "53699764", "buyer_name": "田宅工程有限公司",
+                                        "remove_address": False}
+    reversed_note = "改三聯 統一編號: 53699764，發票抬頭: 田宅工程有限公司"
+    assert parse_requirements(reversed_note)["buyer_name"] == "田宅工程有限公司"
+
+
+def test_parse_requirements_labeled_must_be_unique():
+    import pytest
+
+    with pytest.raises(ValueError):
+        parse_requirements("抬頭：甲有限公司 統編：12345678\n抬頭：乙有限公司 統編：87654321")
+
+
+def test_parse_requirements_any_order_without_labels():
+    head = "2026/11/23 LC00220070 異動發票--更改三聯\n"
+    for body in ["田宅工程有限公司 53699764", "田宅工程有限公司\n53699764", "田宅工程有限公司 統編：53699764",
+                 "抬頭：田宅工程有限公司 53699764", "53699764 田宅工程有限公司", "統編53699764 田宅工程有限公司"]:
+        result = parse_requirements(head + body)
+        assert (result["buyer_identifier"], result["buyer_name"]) == ("53699764", "田宅工程有限公司"), body
+
+
+def test_parse_requirements_rejects_two_ids_or_no_company():
+    import pytest
+
+    with pytest.raises(ValueError):
+        parse_requirements("田宅工程有限公司 53699764 另一組 12345678")
+    with pytest.raises(ValueError):
+        parse_requirements("53699764")
