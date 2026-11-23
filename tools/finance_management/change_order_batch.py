@@ -1146,6 +1146,11 @@ def scheduled_fill(regions=None, log: Callable[[str], None] = print) -> int:
     items = scan(regions, log=log)
     missing = [i for i in items if i["missing"]]
     log(f"清潔異動補齊完成：盤點 {len(items)} 列，仍未備妥 {len(missing)} 列（每日 10:00 檢查會提醒）")
+    # 2026-11-24 Jenny：行事曆要看得出哪幾列、少什麼（補了什麼由上面「已自檸檬後台補齊 N 格：…」那行列出）
+    for i in missing:
+        who = " ".join(x for x in (str(i.get("order_no") or ""), str(i.get("customer") or "")) if x)
+        log(f"⚠️ 未備妥【{i.get('region', '')}】第{i.get('row', '')}列 {who}：{'、'.join(map(str, i['missing']))}"
+            .replace("  ", " "))
     try:
         from tools.finance_management.execution_log import log_execution
 
