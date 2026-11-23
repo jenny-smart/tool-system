@@ -58,17 +58,35 @@ def source_candidate(row: list, row_no: int, kind: str = TRIPLICATE_KIND) -> dic
     return correction_candidate(row, row_no) if kind == CORRECTION_KIND else candidate(row, row_no)
 
 
+# 2026-11-24 Jenny：客服常寫「抬頭：公司名稱 統編：12345678」（順序可對調、冒號全半形皆可）
+LABELED_ID_RE = re.compile(r"統(?:一)?編(?:號)?\s*[：:]?\s*(\d{8})(?!\d)")
+LABELED_NAME_RE = re.compile(r"(?:抬頭|發票抬頭|公司名稱|買受人)\s*[：:]\s*(.+?)(?=\s*(?:統(?:一)?編|[\n；;，,]|$))")
+
+
+def _buyer_from_labels(text: str):
+    """「抬頭：XX 統編：12345678」→ (統編, 公司名稱)；不是唯一一組回傳 None。"""
+    ids = list(dict.fromkeys(LABELED_ID_RE.findall(text)))
+    names = list(dict.fromkeys(n.strip() for n in LABELED_NAME_RE.findall(text) if n.strip()))
+    return (ids[0], names[0]) if len(ids) == 1 and len(names) == 1 else None
+
+
 def parse_requirements(note: str) -> dict[str, Any]:
     text = str(note or "").strip()
     matches = list(re.finditer(r"(?<![A-Za-z0-9])(\d{8})(?!\d)\s+([^\n；;]+)", text))
-    if len(matches) != 1:
-        raise ValueError("K 欄須有唯一的 8 碼統編及公司名稱（統編 公司名稱）")
-    match = matches[0]
-    name = re.split(r"\s*[/／]\s*|地址(?:要)?(?:刪除|移除)", match[2])[0].strip()
+    labeled = _buyer_from_labels(text)
+    if LABELED_ID_RE.search(text):  # 有「統編：」標示就以標示為準（避免把「統編」後的下一行誤當公司名稱）
+        if not labeled:
+            raise ValueError("K 欄須有唯一的「抬頭：公司名稱 統編：8 碼統編」")
+        buyer_id, raw_name = labeled
+    elif len(matches) == 1:
+        buyer_id, raw_name = matches[0][1], matches[0][2]
+    else:
+        raise ValueError("K 欄須有唯一的 8 碼統編及公司名稱（「統編 公司名稱」或「抬頭：公司名稱 統編：統編」）")
+    name = re.split(r"\s*[/／]\s*|地址(?:要)?(?:刪除|移除)", raw_name)[0].strip()
     if not name or not re.search(r"公司|商行|企業|工作室|事務所|協會|基金會|行$|社$", name):
         raise ValueError("無法明確辨識 K 欄公司名稱，請整理為『統編 公司名稱』獨立一行")
     return {
-        "buyer_identifier": match[1], "buyer_name": name,
+        "buyer_identifier": buyer_id, "buyer_name": name,
         "remove_address": bool(re.search(r"地址\s*(?:要|需|請)?\s*(?:刪除|移除)|(?:刪除|移除)\s*地址", text)),
     }
 
