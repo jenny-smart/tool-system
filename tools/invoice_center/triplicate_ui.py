@@ -30,7 +30,8 @@ def render_triplicate() -> None:
 
     options = dict((label, key) for key, label in get_area_options())
     label = st.selectbox("執行區域", list(options), key="triplicate_area")
-    action_label = st.radio("原發票處理方式", ["作廢原發票", "開立折讓單（全額）"], key="triplicate_original_action")
+    # 2026-11-24 Jenny：預設開立折讓單（全額），要作廢再手動切換
+    action_label = st.radio("原發票處理方式", ["開立折讓單（全額）", "作廢原發票"], key="triplicate_original_action")
     action = "cancel" if action_label == "作廢原發票" else "allowance"
     st.caption("先完成原票作廢或全額折讓，再填入新三聯發票；新票仍由你按下一步及儲存。")
     try:

@@ -130,7 +130,8 @@ def _single_line_note(value: str) -> str:
     return "，".join(part for part in parts if part)
 
 
-def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: str = "cancel") -> dict[str, Any]:
+def prepare(area: str, item: dict[str, Any], backend: Any, *, original_action: str = "allowance") -> dict[str, Any]:
+    """original_action 預設 allowance（2026-11-24 Jenny：二聯改三聯一律預設全額折讓原發票，作廢需明確指定 cancel）。"""
     from .bridge import build_invoice_payload_from_backend_order
     from .invoice import build_add_invoice_payload
 
