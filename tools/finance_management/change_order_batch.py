@@ -70,6 +70,21 @@ def _error_text(exc: Exception) -> str:
 IGNORED_STATUSES = {"異動不處理", ""}
 # 未完全完成也可先回寫目前進度的狀態（回寫後 B 欄不變）
 PARTIAL_SYNC_STATUSES = {"待收款", "待退款", "VIP待退券"}
+# 2026-11-24 Jenny：回寫系統時加收金流／退款金流（取 R 欄）不得空白；儲值金類自動填「儲值金」不看 R
+FLOW_CHARGE_STATUSES = {"待收款", "已收款"}
+FLOW_REFUND_STATUSES = {"待退款", "VIP待退券", "已退款", "VIP已退券"}
+MISSING_FLOW_PREFIX = "缺付款方式（R）"
+
+
+def flow_missing(row: list, status: str) -> str:
+    """回寫成 status 時需要 R 欄（加收金流／退款金流）卻空白 → 回傳未備妥說明；不需要或有填回傳空字串。"""
+    if _cell(row, "R"):
+        return ""
+    if status in FLOW_CHARGE_STATUSES:
+        return f"{MISSING_FLOW_PREFIX}：回寫系統加收金流不得空白"
+    if status in FLOW_REFUND_STATUSES:
+        return f"{MISSING_FLOW_PREFIX}：回寫系統退款金流不得空白"
+    return ""
 
 # 動作 → (顯示名稱, 本機 Agent action)
 ACTIONS = {
@@ -195,7 +210,11 @@ def partial_sync_due(row: list) -> bool:
 
 def _add_partial_sync(item: dict, row: list) -> None:
     """B 欄還沒完成的列一律留在盤點清單；已先回寫過的標示出來，完成後要再回寫，避免漏掉。"""
-    if partial_sync_due(row):
+    if partial_sync_due(row) and (missing := flow_missing(row, item["status"])):
+        if not any(m.startswith(MISSING_FLOW_PREFIX) for m in item["missing"]):
+            item["missing"].append(missing)
+        item["progress"].append("R 欄補上付款方式後才回寫目前進度")
+    elif partial_sync_due(row):
         item["actions"].append("sync")
         item["target_status"] = item["status"]
         item["progress"].append("先回寫目前進度，完成後再回寫一次")
@@ -254,6 +273,9 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
         if not needs_sync(row):
             return None
         item["amount"] = _amount(_cell(row, "S") or _cell(row, "N"))
+        if missing := flow_missing(row, status):
+            item["missing"].append(missing)
+            return item
         item["actions"].append("sync")
         item["target_status"] = status
         orders = row_orders(row)
@@ -264,6 +286,9 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
     target = ready_target(row)
     if target:
         item["amount"] = _amount(_cell(row, "S") or _cell(row, "N"))
+        if missing := flow_missing(row, target):
+            item["missing"].append(missing)
+            return item
         item["actions"].append("sync")
         item["target_status"] = target
         item["progress"].append(f"已處理好，回寫後 B 欄改為「{target}」")

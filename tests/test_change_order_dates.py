@@ -21,6 +21,26 @@ def load_functions():
 
 
 class ChangeOrderDatesTest(unittest.TestCase):
+    def test_blank_payment_flow_is_not_synced(self):
+        """2026-11-24：R 欄空白時加收／退款金流不得空白，不回寫；儲值金類固定填儲值金。"""
+        ns = load_functions()
+        refund_controls = {'refundPayway': [{'type': 'select', 'context': '退款金流'}]}
+        for status, label in [('已退款', '退款金流'), ('待退款', '退款金流'), ('已收款', '加收金流'), ('待收款', '加收金流')]:
+            with self.subTest(status=status):
+                raw = [''] * 31
+                raw[1], raw[6] = status, 'LC001'
+                with self.assertRaisesRegex(RuntimeError, label):
+                    ns['apply_sheet_row_to_form']({}, refund_controls, {'raw': raw, 'status': status})
+        raw = [''] * 31
+        raw[1], raw[6], raw[17] = '已退款', 'LC001', '信用卡'
+        with self.assertRaisesRegex(RuntimeError, '找不到後台「退款金流」欄位'):
+            ns['apply_sheet_row_to_form']({}, {}, {'raw': raw, 'status': '已退款'})
+        raw[1] = '已返儲值金'
+        raw[17] = ''
+        form = {}
+        ns['apply_sheet_row_to_form'](form, refund_controls, {'raw': raw, 'status': '已返儲值金'})
+        self.assertEqual(form['refundPayway'], '儲值金')
+
     def test_scan_form_and_completion_preserve_dates(self):
         ns = load_functions()
         statuses = ['待收款', '待加收', '待扣儲值金', '已收款', '已加收', '已扣儲值金',
@@ -29,7 +49,7 @@ class ChangeOrderDatesTest(unittest.TestCase):
             with self.subTest(status=status):
                 raw = [''] * 31
                 for index, value in [(1, status), (6, 'TEST'), (12, '2026-09-20'),
-                                     (28, '2026-09-25'), (13, '100'), (18, '100')]:
+                                     (28, '2026-09-25'), (13, '100'), (17, '信用卡'), (18, '100')]:
                     raw[index] = value
                 ws = Mock()
                 ws.get_all_values.return_value = [['header'], raw]
@@ -37,7 +57,8 @@ class ChangeOrderDatesTest(unittest.TestCase):
                 items = ns['get_pending_rows']('test')
                 self.assertEqual(len(items), 1)
                 form = {}
-                ns['apply_sheet_row_to_form'](form, {}, items[0])
+                controls = {'refundPayway': [{'type': 'select', 'context': '退款金流'}]}
+                ns['apply_sheet_row_to_form'](form, controls, items[0])
                 charge = status in statuses[:6]
                 self.assertEqual(form['chargeDate' if charge else 'refundDate'],
                                  '2026-09-20' if charge else '2026-09-25')

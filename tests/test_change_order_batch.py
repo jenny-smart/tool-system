@@ -26,9 +26,9 @@ def test_before_cutoff_and_synced_rows_are_skipped():
 
 
 def test_done_rows_need_sync_until_marker_matches():
-    assert plan(B="已退款")["actions"] == ["sync"]
-    assert plan(B="已收款", AE="更新系統（B欄：待收款）")["actions"] == ["sync"]
-    assert plan(B="已處理發票", AE="建立異動")["actions"] == ["sync"]
+    assert plan(R="信用卡", B="已退款")["actions"] == ["sync"]
+    assert plan(R="信用卡", B="已收款", AE="更新系統（B欄：待收款）")["actions"] == ["sync"]
+    assert plan(R="信用卡", B="已處理發票", AE="建立異動")["actions"] == ["sync"]
 
 
 def test_pending_refund_atm_and_credit():
@@ -57,16 +57,16 @@ def test_missing_data_is_not_ready_and_blocks_actions():
 
 def test_pending_charge_invoice_does_not_wait_for_payment():
     # 客人還沒付款也先開發票，但每日檢查仍要提醒收款
-    item = plan(B="待收款")
+    item = plan(R="信用卡", B="待收款")
     assert item["missing"] == ["客人尚未付款（M 收款時間空白）"] and item["actions"] == ["invoice"]
-    item = plan(B="待收款", M="2026/09/20")
+    item = plan(R="信用卡", B="待收款", M="2026/09/20")
     assert item["missing"] == ["缺收款金額（N）"] and item["actions"] == ["invoice"]
-    item = plan(B="待收款", O="AB1", AA="2026/10/29")
+    item = plan(R="信用卡", B="待收款", O="AB1", AA="2026/10/29")
     assert item["actions"] == ["sync"] and item["missing"] == ["客人尚未付款（M 收款時間空白）"] and item["manual"] == []
-    item = plan(B="待收款", M="2026/09/20", N="500")
+    item = plan(R="信用卡", B="待收款", M="2026/09/20", N="500")
     assert item["missing"] == [] and item["manual"] == [] and item["actions"] == ["invoice"]
-    assert plan(B="待收款", M="2026/09/20", N="500", O="AB1", AA="2026/10/19")["actions"] == ["sync"]
-    item = plan(B="待收款", M="2026/09/20", N="500", O="AB1")
+    assert plan(R="信用卡", B="待收款", M="2026/09/20", N="500", O="AB1", AA="2026/10/19")["actions"] == ["sync"]
+    item = plan(R="信用卡", B="待收款", M="2026/09/20", N="500", O="AB1")
     assert item["actions"] == ["sync"] and "AA" in item["manual"][0]
 
 
@@ -146,8 +146,8 @@ def test_record_text_lists_rows_by_region():
 
 
 def test_sync_region_only_touches_done_rows(monkeypatch):
-    values = [["h"], row(B="已退款"), row(B="待退款"), row(B="已收款", AE="更新系統（B欄：已收款）"),
-              row(B="已扣儲值金", E="2026/10/15")]
+    values = [["h"], row(R="信用卡", B="已退款"), row(B="待退款"), row(B="已收款", AE="更新系統（B欄：已收款）"),
+              row(R="信用卡", B="已扣儲值金", E="2026/10/15")]
 
     class WS:
         def get_all_values(self):
@@ -187,8 +187,8 @@ def test_sync_respects_selected_rows(monkeypatch):
 
 def test_already_processed_pending_rows_go_straight_to_sync():
     cases = [
-        (dict(B="待退款", S="1000", AB="AL1", AC="2026/10/17"), "已退款"),
-        (dict(B="待收款", M="2026/10/17", N="500", O="AB12345678", AA="2026/10/19 10:00:00"), "已收款"),
+        (dict(B="待退款", S="1000", AB="AL1", AC="2026/10/17", R="信用卡"), "已退款"),
+        (dict(B="待收款", M="2026/10/17", N="500", O="AB12345678", AA="2026/10/19 10:00:00", R="ATM"), "已收款"),
         (dict(B="待扣儲值金", N="500", M="2026/10/17"), "已扣儲值金"),
         (dict(B="待返儲值金", S="300", AC="2026/10/17"), "已返儲值金"),
         (dict(B="待處理發票", C="車馬費發票", O="AB1"), "已處理發票"),
@@ -200,7 +200,7 @@ def test_already_processed_pending_rows_go_straight_to_sync():
 
 
 def test_sync_region_sets_done_status_for_processed_pending_rows(monkeypatch):
-    values = [["h"], row(B="待收款", M="2026/10/17", N="500", O="AB1", AA="2026/10/19")]
+    values = [["h"], row(R="信用卡", B="待收款", M="2026/10/17", N="500", O="AB1", AA="2026/10/19")]
     b_updates, synced, marked = [], [], []
 
     class WS:
@@ -366,8 +366,8 @@ def test_vip_refund_coupon_flow():
     # ④ 退款完成 → 回寫，B 欄改為 VIP已退券
     item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", AC="2026/10/22", S="1000", R="ATM")
     assert item["actions"] == ["sync"] and item["target_status"] == "VIP已退券"
-    assert plan(B="VIP已退券")["actions"] == ["sync"]
-    assert plan(B="VIP已退券", AE="更新系統（B欄：VIP已退券）") is None
+    assert plan(R="信用卡", B="VIP已退券")["actions"] == ["sync"]
+    assert plan(R="信用卡", B="VIP已退券", AE="更新系統（B欄：VIP已退券）") is None
 
 
 def test_formula_fixes_include_vip_refund_coupon():
@@ -377,7 +377,7 @@ def test_formula_fixes_include_vip_refund_coupon():
 
 
 def test_sync_region_logs_out_after_sync(monkeypatch):
-    values = [["h"], row(B="已退款")]
+    values = [["h"], row(R="信用卡", B="已退款")]
     gets = []
 
     class WS:
@@ -414,24 +414,24 @@ def test_sync_region_logs_out_after_sync(monkeypatch):
 
 def test_partial_progress_is_synced_once_with_current_status():
     # 新竹第 15 列：待收款、已開發票、客人未付款 → 先回寫，B 欄不變
-    item = plan("新竹", B="待收款", O="FP1", AA="2026/10/29")
+    item = plan("新竹", R="信用卡", B="待收款", O="FP1", AA="2026/10/29")
     assert item["actions"] == ["sync"] and item["target_status"] == "待收款"
     # 已用目前狀態回寫過就不再列出；完成（已收款）時再回寫
-    assert plan("新竹", B="待收款", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）") is not None
-    item = plan("新竹", B="待收款", O="FP1", AA="2026/10/29", AD="2026-10-29 18:20:00", AE="更新系統（B欄：待收款）")
+    assert plan("新竹", R="信用卡", B="待收款", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）") is not None
+    item = plan("新竹", R="信用卡", B="待收款", O="FP1", AA="2026/10/29", AD="2026-10-29 18:20:00", AE="更新系統（B欄：待收款）")
     # 已先回寫過：沒有要做的動作，但仍留在盤點清單並標示完成後要再回寫
     assert item["actions"] == [] and "已先回寫目前進度（2026-10-29 18:20:00），B 欄完成後需再回寫" in item["progress"]
-    item = plan(B="待收款", M="2026/10/30", N="1200", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）")
+    item = plan(R="信用卡", B="待收款", M="2026/10/30", N="1200", O="FP1", AA="2026/10/29", AE="更新系統（B欄：待收款）")
     assert item["actions"] == ["sync"] and item["target_status"] == "已收款"
     # 沒有任何進度的列不回寫；待扣儲值金回寫會改成完成狀態，不做部分回寫
     assert "sync" not in plan(B="待退款", X="AB1", Z="952", S="1000", R="信用卡")["actions"]
-    assert "sync" not in plan(B="待扣儲值金", N="500")["actions"]
+    assert "sync" not in plan(R="信用卡", B="待扣儲值金", N="500")["actions"]
     # 待退款已開折讓單、還在等退款：退款與回寫都排入
     assert plan(B="待退款", AB="AL1", S="1000", R="信用卡")["actions"] == ["credit_refund", "sync"]
 
 
 def test_sync_region_writes_partial_rows_without_changing_status(monkeypatch):
-    values = [["h"], row(B="待收款", O="FP1", AA="2026/10/29"), row(B="待退款", AB="AL1", S="10", R="ATM")]
+    values = [["h"], row(B="待收款", O="FP1", AA="2026/10/29", R="ATM"), row(B="待退款", AB="AL1", S="10", R="ATM")]
     b_updates, marked = [], []
 
     class WS:
@@ -507,13 +507,13 @@ def test_backend_writeback_merged_and_replacement_invoice(monkeypatch):
 def test_paid_but_uninvoiced_change_invoice_opens_invoice_first():
     """2026-11 Jenny：已收款但 O 還沒有發票的異動發票（含多張訂單合併）→ 先開立發票，不是直接回寫。"""
     multi = "LC00217202 LC00217177 LC00217199"
-    item = plan(B="已收款", C="異動發票", G=multi, N="14000")
+    item = plan(R="信用卡", B="已收款", C="異動發票", G=multi, N="14000")
     assert item["actions"] == ["invoice"] and item["amount"] == "14000"
-    assert plan(B="已收款", C="異動發票", G="LC00214828", N="500")["actions"] == ["invoice"]
+    assert plan(R="信用卡", B="已收款", C="異動發票", G="LC00214828", N="500")["actions"] == ["invoice"]
     # 已經有發票 → 照舊回寫
-    assert plan(B="已收款", C="異動發票", G=multi, N="14000", O="AB12345678")["actions"] == ["sync"]
+    assert plan(R="信用卡", B="已收款", C="異動發票", G=multi, N="14000", O="AB12345678")["actions"] == ["sync"]
     # 一般已收款（不是異動發票、單張訂單）照舊回寫
-    assert plan(B="已收款", C="專員回報加時", G="LC00214828", N="500")["actions"] == ["sync"]
+    assert plan(R="信用卡", B="已收款", C="專員回報加時", G="LC00214828", N="500")["actions"] == ["sync"]
 
 
 def test_pending_invoice_candidates_merged_for_any_status(monkeypatch):
@@ -542,15 +542,15 @@ def test_merged_orders_listed_in_j_note():
     four = ["LC00217389", "LC00217386", "LC00217387", "LC00217388"]
     assert batch.row_orders(row(G="LC00217389", J=j)) == four
     # 已收款、還沒發票 → 先合併開立
-    item = plan(B="已收款", C="異動發票", G="LC00217389", J=j)
+    item = plan(R="信用卡", B="已收款", C="異動發票", G="LC00217389", J=j)
     assert item["actions"] == ["invoice"] and "合併開立" in item["progress"][0]
     # 之前只回寫 G 那一張（AE 是舊標記）→ 重新列出補回寫四張
-    old = plan(B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678", AE="更新系統（B欄：已收款）")
+    old = plan(R="信用卡", B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678", AE="更新系統（B欄：已收款）")
     assert old["actions"] == ["sync"] and "補回寫 4 張" in old["progress"][0]
-    assert plan(B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678",
+    assert plan(R="信用卡", B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678",
                 AE="更新系統（B欄：已收款）｜合併4張") is None
     # G 事後補齊訂單、AE 還是舊標記（當時只回寫一張）→ 也要重新回寫
-    redo = plan(B="已收款", C="異動發票", G="LC00217389\nLC00217386\nLC00217387\nLC00217388", J=j, O="AB1",
+    redo = plan(R="信用卡", B="已收款", C="異動發票", G="LC00217389\nLC00217386\nLC00217387\nLC00217388", J=j, O="AB1",
                 AE="更新系統（B欄：已收款）")
     assert redo["actions"] == ["sync"] and "補回寫 4 張" in redo["progress"][0]
     # 不是合併開立：J 沒寫「合併」、G 只有一張 → 只有 G
@@ -559,7 +559,7 @@ def test_merged_orders_listed_in_j_note():
     g = "LC00217389\nLC00217386\nLC00217387\nLC00217388 \nLC00217389"
     assert batch.row_orders(row(G=g, K="另有 LC00217400")) == four + ["LC00217400"]
     # 合併開立一定接回寫，不受「回寫系統」勾選影響
-    item = plan(B="待處理發票", C="異動發票", G=g, J=j)
+    item = plan(R="信用卡", B="待處理發票", C="異動發票", G=g, J=j)
     assert item["merged_orders"] == four and "回寫 4 張訂單發票號碼" in item["progress"][-1]
     assert batch.build_plan([dict(item, row=48)], do_sync=False)[0]["sync_rows"] == [48]
 
@@ -575,7 +575,7 @@ def test_merged_orders_listed_in_j_note():
     mp = pytest.MonkeyPatch()
     mp.setattr(co, "_post_purchase_edit", fake_post)
     try:
-        raw = row(B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678")
+        raw = row(R="信用卡", B="已收款", C="異動發票", G="LC00217389", J=j, O="AB12345678")
         co.sync_one_to_purchase_edit({"order_no": raw[6], "raw": raw, "status": "已收款"}, session=None)
     finally:
         mp.undo()
@@ -809,3 +809,16 @@ def test_scheduled_fill_writes_execution_log(monkeypatch):
     assert calls == [{"tool": "清潔異動補齊＋同步ATM工作表", "area": "台北", "status": "成功",
                       "message": "盤點 2 列，仍未備妥 1 列"}]
     assert not [t for t in logs if "執行 Log 寫入失敗" in t]
+
+
+
+def test_blank_payment_flow_r_blocks_sync():
+    """2026-11-24：回寫系統加收／退款金流取 R 欄，R 空白就列為未備妥、不回寫（儲值金類不看 R）。"""
+    done = plan(B="已退款")
+    assert done["actions"] == [] and done["missing"] == ["缺付款方式（R）：回寫系統退款金流不得空白"]
+    ready = plan(B="待收款", M="2026/10/17", N="500", O="AB12345678", AA="2026/10/19")
+    assert ready["actions"] == [] and "加收金流" in ready["missing"][0]
+    partial = plan(B="待退款", S="10", AB="AL1")
+    assert "sync" not in partial["actions"] and any("退款金流" in m or m == "缺付款方式（R）" for m in partial["missing"])
+    assert plan(B="已扣儲值金")["actions"] == ["sync"]
+    assert plan(B="已退款", R="信用卡")["actions"] == ["sync"]
