@@ -33,7 +33,7 @@
     待退款／待收款且 R＝ATM → 同步補進同地區 ATM 工作表待配對區（同訂單同金額不重複，見 sync_atm_sheet）。
 執行（2026-10-29 與 Jenny 確認）：整批只排一筆本機 Agent 任務（change_order.batch_run），
   依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 退款（信用卡登入藍新、ATM 登入富邦）
-  ③ 儲值金 → 回寫系統。前一步失敗就不做該區後面的步驟（回寫仍只回寫已完成的列），避免順序錯亂。
+  ③ 儲值金 → 回寫系統。某列前一步失敗就不做該列後面的步驟（同一列順序不亂），其他列照常執行；回寫只回寫已完成的列。
 回寫完成後在 Jenny 行事曆建一筆紀錄事件（不跳提醒）。
 """
 from __future__ import annotations
@@ -988,7 +988,9 @@ def run_triplicates(region: str, rows: list[int], plans: dict, cdp_url: str,
 def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str = "http://127.0.0.1:9222",
              run_step: Callable[[str, str, list[int], str], int] = _run_step) -> int:
     """逐區依序：鯨躍（折讓單→發票→二聯改三聯，同一次登入，做完才登出）→ 藍新／富邦退款 → 儲值金 → 回寫系統。
-    某一步失敗就不做該區後面的步驟（鯨躍仍會登出），但仍回寫該區已完成的列；最後留一筆行事曆紀錄。"""
+    某一步失敗：只有該步驟的列後面的步驟不做（同一列順序不能亂），其他列照常往下執行
+    （2026-11-24 Jenny：二聯改三聯失敗不應擋住別列的退款、扣儲值金）；鯨躍仍會登出，
+    最後回寫該區已完成的列，並留一筆行事曆紀錄。"""
     import os
     from contextlib import contextmanager
 
@@ -1018,8 +1020,13 @@ def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str 
     for entry in plan:
         region = entry["region"]
         logged_in = False  # 這區已經跑過鯨躍步驟、還沒登出
+        blocked: set[int] = set()  # 前面步驟失敗的列：後面的步驟都不做
         for action in ACTION_ORDER:
-            rows = entry["steps"].get(action)
+            planned = entry["steps"].get(action) or []
+            rows = [r for r in planned if int(r) not in blocked]
+            skipped = [r for r in planned if int(r) in blocked]
+            if skipped:
+                log(f"⚠️ 【{region}】第 {'、'.join(map(str, skipped))} 列前面步驟失敗，略過{ACTIONS[action][0]}")
             if not rows:
                 continue
             if logged_in and action not in CETUSTEK_ACTIONS:
@@ -1042,8 +1049,8 @@ def run_plan(plan: list[dict], log: Callable[[str], None] = print, cdp_url: str 
                 code = 1
             if code != 0:
                 failed = True
-                log(f"❌ 【{region}】{ACTIONS[action][0]}失敗（exit {code}），本區後面的步驟先不做")
-                break
+                blocked.update(int(r) for r in rows)
+                log(f"❌ 【{region}】{ACTIONS[action][0]}失敗（exit {code}），第 {'、'.join(map(str, rows))} 列後面的步驟先不做，其他列繼續")
         if logged_in:
             logout(region)
         if entry.get("sync_rows"):
