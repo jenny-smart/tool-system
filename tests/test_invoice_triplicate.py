@@ -490,3 +490,20 @@ def test_parse_requirements_labeled_must_be_unique():
 
     with pytest.raises(ValueError):
         parse_requirements("抬頭：甲有限公司 統編：12345678\n抬頭：乙有限公司 統編：87654321")
+
+
+def test_parse_requirements_any_order_without_labels():
+    head = "2026/11/23 LC00220070 異動發票--更改三聯\n"
+    for body in ["田宅工程有限公司 53699764", "田宅工程有限公司\n53699764", "田宅工程有限公司 統編：53699764",
+                 "抬頭：田宅工程有限公司 53699764", "53699764 田宅工程有限公司", "統編53699764 田宅工程有限公司"]:
+        result = parse_requirements(head + body)
+        assert (result["buyer_identifier"], result["buyer_name"]) == ("53699764", "田宅工程有限公司"), body
+
+
+def test_parse_requirements_rejects_two_ids_or_no_company():
+    import pytest
+
+    with pytest.raises(ValueError):
+        parse_requirements("田宅工程有限公司 53699764 另一組 12345678")
+    with pytest.raises(ValueError):
+        parse_requirements("53699764")
