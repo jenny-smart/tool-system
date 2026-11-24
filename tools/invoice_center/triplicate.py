@@ -16,8 +16,13 @@ INVOICE_RE = re.compile(r"[A-Z]{2}\d{8}\Z")
 # 「重新開立修正發票金額$9000」「重新開立發票金額$18000」「修正發票金額$9000」都算
 CORRECTION_RE = re.compile(r"(?:重新開立\s*(?:修正)?|修正)\s*發票金額\s*[：:]?\s*(?:NT)?\s*\$\s*([\d,]+(?:\.\d+)?)")
 TRIPLICATE_KIND, CORRECTION_KIND = "triplicate", "correction"
+# 2026-11-24 Jenny：二聯改三聯只看關鍵字「三聯」（C 或 K 欄有「三聯」即可，不限「改三聯」「轉三聯」寫法）
+TRIPLICATE_KEYWORD_RE = re.compile(r"三\s*聯")
 
 
+def wants_triplicate(detail: str, note: str) -> bool:
+    """C 欄細項或 K 欄備註有「三聯」→ 要改開三聯發票。"""
+    return bool(TRIPLICATE_KEYWORD_RE.search(f"{detail} {note}"))
 def correction_amounts(note: str) -> list[str]:
     """K 欄所有「修正發票金額$金額」（去重、保留順序）。"""
     found = [format_amount(m) for m in CORRECTION_RE.findall(str(note or ""))]
@@ -26,7 +31,7 @@ def correction_amounts(note: str) -> list[str]:
 
 def is_correction(row: list) -> bool:
     r = list(row) + [""] * 27
-    return bool(CORRECTION_RE.search(str(r[10]))) and not re.search(r"(?:改|轉)\s*三聯", f"{r[2]} {r[10]}")
+    return bool(CORRECTION_RE.search(str(r[10]))) and not wants_triplicate(r[2], r[10])
 
 
 def correction_candidate(row: list, row_no: int) -> dict[str, Any] | None:
@@ -105,7 +110,7 @@ def candidate(row: list, row_no: int) -> dict[str, Any] | None:
     detail = str(r[2]).strip()
     if str(r[1]).strip() != "待處理發票" or detail not in {"異動發票", "二聯轉三聯", "二聯改三聯"}:
         return None
-    if not re.search(r"(?:改|轉)\s*三聯", f"{detail} {r[10]}") or not str(r[6]).strip() or str(r[14]).strip():
+    if not wants_triplicate(detail, r[10]) or not str(r[6]).strip() or str(r[14]).strip():
         return None
     return {"source_row": row_no, "order_no": str(r[6]).strip(), "customer": str(r[7]).strip(),
             "note": str(r[10]).strip(), "old_invoice": str(r[23]).strip().upper(),

@@ -153,26 +153,57 @@ def remaining_allowable(page: Page, invoice_no: str, invoice_year: int | None = 
     return _load_original(page, invoice_no, invoice_year)
 
 
+def _current_year() -> int:
+    return datetime.now(ZoneInfo("Asia/Taipei")).year
+
+
+def _year_value(year, invoice_year: int) -> str | None:
+    """鯨躍年度下拉中 invoice_year（西元或民國）對應的 value；沒有這個年度回傳 None。"""
+    choices = []
+    for option in year.locator("option").all():
+        value = str(option.get_attribute("value") or "")
+        label = option.inner_text().strip()
+        if value in {str(invoice_year), str(invoice_year - 1911)} or label in {
+            str(invoice_year), str(invoice_year - 1911), f"{invoice_year}年", f"{invoice_year - 1911}年"
+        }:
+            choices.append(value)
+    return choices[0] if len(choices) == 1 else None
+
+
 def _load_original(page: Page, invoice_no: str, invoice_year: int | None = None) -> Decimal:
-    """折讓開立頁：選原發票年度並查詢，回傳可折讓銷售額（應稅）；讀不到回 -1。"""
+    """折讓開立頁：選原發票年度並查詢，回傳可折讓銷售額（應稅）；讀不到回 -1。
+
+    2026-11-24 Jenny：先查當年度；當年度查不到原發票，再用訂單已付款日期的年度（invoice_year）查。
+    沒有付款年度（invoice_year=None）時照舊從最新年度往前查。"""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
     year = page.locator("#qyear")
     if invoice_year is None:
         _search_recent_years(page, invoice_no)
     else:
-        choices = []
-        for option in year.locator("option").all():
-            value = str(option.get_attribute("value") or "")
-            label = option.inner_text().strip()
-            if value in {str(invoice_year), str(invoice_year - 1911)} or label in {
-                str(invoice_year), str(invoice_year - 1911), f"{invoice_year}年", f"{invoice_year - 1911}年"
-            }:
-                choices.append(value)
-        if len(choices) != 1:
-            raise RuntimeError("找不到原發票年度，禁止折讓")
-        year.select_option(value=choices[0])
-    if invoice_year is not None:
-        _search_invoice(page, invoice_no)
-        page.locator("#s_remark").wait_for(state="visible")
+        remark = page.locator("#s_remark")
+        years = list(dict.fromkeys([_current_year(), invoice_year]))
+        tried = []
+        for index, candidate in enumerate(years):
+            value = _year_value(year, candidate)
+            if value is None:
+                tried.append(f"{candidate}（下拉沒有這個年度）")
+                continue
+            year.select_option(value=value)
+            _search_invoice(page, invoice_no)
+            last = index == len(years) - 1
+            try:
+                remark.wait_for(state="visible", timeout=30_000 if last else 10_000)
+                break
+            except PlaywrightTimeoutError:
+                tried.append(str(candidate))
+                ok = page.locator("#alertify-ok")
+                if ok.is_visible():
+                    ok.click()  # 關掉「查無發票」提示再查付款年度
+                if not last:
+                    print(f"{invoice_no} 在 {candidate} 年度查無，改用訂單付款日期年度 {years[-1]} 查", flush=True)
+        else:
+            raise RuntimeError(f"原發票 {invoice_no} 在 {'、'.join(tried)} 年度都查無，禁止折讓（請確認發票號碼／付款日期）")
 
     available_text = page.locator("body").inner_text()
     sales_match = re.search(r"銷售額[\s\S]*?應稅:\$\s*([\d,]+(?:\.\d+)?)", available_text)

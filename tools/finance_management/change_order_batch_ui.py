@@ -41,7 +41,7 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         "缺的資料（ATM 退款銀行代碼／帳號 P／Q 除外）自檸檬後台補齊空白格；"
         "待退款／待收款付款方式為 ATM 會同步補進 ATM 工作表（同訂單同金額不重複）；"
         "待收款開立發票同【鯨躍發票】開立發票（沿用訂單發票設定，需人工按下一步及儲存）；"
-        "二聯改三聯請到【鯨躍發票】對應功能處理。"
+        "二聯改三聯（C 或 K 欄有「三聯」）在這裡直接執行：全額折讓原票＋開新三聯發票（需人工按下一步及儲存）。"
     )
     regions = st.multiselect("地區", batch.REGIONS, default=batch.REGIONS, key="change_order_batch_regions")
     c_scan, c_preview, c_fill = st.columns([1, 1, 1])

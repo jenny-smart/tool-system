@@ -82,7 +82,7 @@ def test_stored_value_and_invoice_rows():
     # 二聯改三聯：資料齊全直接執行，不再需人工
     tri = plan(B="待處理發票", C="異動發票", K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")
     assert tri["actions"] == ["triplicate"] and not tri["manual"] and not tri["missing"]
-    assert "改三聯" in plan(B="待處理發票", C="異動發票", K="改金額")["missing"][0]
+    assert "「三聯」" in plan(B="待處理發票", C="異動發票", K="改金額")["missing"][0]
     assert "X 欄" in plan(B="待處理發票", C="二聯改三聯", K="12345678 檸檬清潔有限公司", X="", Y="二聯式")["missing"][0]
     assert plan(B="待處理發票", C="其他")["manual"]
 
@@ -822,3 +822,13 @@ def test_blank_payment_flow_r_blocks_sync():
     assert "sync" not in partial["actions"] and any("退款金流" in m or m == "缺付款方式（R）" for m in partial["missing"])
     assert plan(B="已扣儲值金")["actions"] == ["sync"]
     assert plan(B="已退款", R="信用卡")["actions"] == ["sync"]
+
+
+def test_triplicate_keyword_only_needs_sanlian():
+    """2026-11-24 Jenny：只要 C 或 K 有關鍵字「三聯」就排二聯改三聯。"""
+    for k in ("開三聯 抬頭：田宅工程有限公司 統編：53699764", "需要三聯發票 統編：53699764 抬頭：田宅工程有限公司",
+              "2026/11/24 LC00217726 異動發票--更改三聯 抬頭：田宅工程有限公司 統編：53699764"):
+        item = plan(B="待處理發票", C="異動發票", K=k, X="FP56437015", Y="二聯")
+        assert item["actions"] == ["triplicate"], (k, item)
+    assert plan(B="待處理發票", C="異動發票", K="抬頭：田宅工程有限公司 統編：53699764",
+                X="FP56437015", Y="二聯")["actions"] == []
