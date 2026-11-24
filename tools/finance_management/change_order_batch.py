@@ -382,14 +382,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
             return item
         from tools.invoice_center.merged import MERGED_INVOICE_DETAILS
         from tools.invoice_center.triplicate import (correction_blocker, correction_candidate, is_correction,
-                                                     noted_new_invoice, wants_triplicate)
-
-        if noted := noted_new_invoice(row):
-            # 2026-11-24 Jenny：K 已記錄新發票號碼、O 卻空白（新票已開但沒回填 O）→ 列為未備妥提醒，
-            # 不再排二聯改三聯／修正發票金額，避免重複開票；O 補上後盤點會改列為回寫系統
-            item["missing"].append(f"K 欄已記錄新發票號碼 {noted}，但 O 欄空白：請到鯨躍確認後把 {noted} 填入 O 欄"
-                                   "（不會重開），填好後盤點會改為回寫系統")
-            return item
+                                                     wants_triplicate)
 
         if is_correction(row):
             # 2026-11 Jenny：修正發票金額＝原票全額折讓 → 以原發票設定開修正金額的新發票（同二聯改三聯流程）

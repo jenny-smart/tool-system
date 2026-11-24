@@ -23,23 +23,6 @@ TRIPLICATE_KEYWORD_RE = re.compile(r"三\s*聯")
 def wants_triplicate(detail: str, note: str) -> bool:
     """C 欄細項或 K 欄備註有「三聯」→ 要改開三聯發票。"""
     return bool(TRIPLICATE_KEYWORD_RE.search(f"{detail} {note}"))
-# complete() 回填時會在 K 欄加註「新發票號碼：XX12345678」（與 O 欄同一次寫入）
-NOTED_NEW_INVOICE_RE = re.compile(r"新發票號碼\s*[：:]\s*([A-Za-z]{2}\d{8})")
-
-
-def noted_new_invoice(row: list) -> str:
-    """2026-11-24 Jenny：K 欄已記錄「新發票號碼：XX12345678」但 O 欄空白 → 回傳該號碼（新票其實已開、O 沒回填）；
-    沒有、或 O 已有值、或與 X 原發票相同時回傳空字串。這種列不能再當成待開新票，避免重複開立。"""
-    r = list(row) + [""] * 27
-    if str(r[14]).strip():
-        return ""
-    old = str(r[23]).strip().upper()
-    for number in NOTED_NEW_INVOICE_RE.findall(str(r[10])):
-        if number.upper() != old:
-            return number.upper()
-    return ""
-
-
 def correction_amounts(note: str) -> list[str]:
     """K 欄所有「修正發票金額$金額」（去重、保留順序）。"""
     found = [format_amount(m) for m in CORRECTION_RE.findall(str(note or ""))]
@@ -55,8 +38,6 @@ def correction_candidate(row: list, row_no: int) -> dict[str, Any] | None:
     r = list(row) + [""] * 27
     if str(r[1]).strip() != "待處理發票" or not is_correction(r) or not str(r[6]).strip() or str(r[14]).strip():
         return None
-    if noted_new_invoice(r):
-        return None  # K 已記錄新發票號碼：新票已開，不可再開
     amounts = correction_amounts(r[10])
     return {"kind": CORRECTION_KIND, "source_row": row_no, "order_no": str(r[6]).strip(),
             "customer": str(r[7]).strip(), "note": str(r[10]).strip(),
@@ -131,8 +112,6 @@ def candidate(row: list, row_no: int) -> dict[str, Any] | None:
         return None
     if not wants_triplicate(detail, r[10]) or not str(r[6]).strip() or str(r[14]).strip():
         return None
-    if noted_new_invoice(r):
-        return None  # K 已記錄新發票號碼：新票已開，不可再開
     return {"source_row": row_no, "order_no": str(r[6]).strip(), "customer": str(r[7]).strip(),
             "note": str(r[10]).strip(), "old_invoice": str(r[23]).strip().upper(),
             "old_type": str(r[24]).strip()}

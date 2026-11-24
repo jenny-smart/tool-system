@@ -824,21 +824,6 @@ def test_blank_payment_flow_r_blocks_sync():
     assert plan(B="已退款", R="信用卡")["actions"] == ["sync"]
 
 
-def test_noted_new_invoice_without_o_is_flagged_not_reissued():
-    """2026-11-24：K 已記錄新發票號碼、O 空白 → 未備妥提醒，不再排二聯改三聯（避免重複開票）。"""
-    k = ("2026/11/23 LC00220070 異動發票--更改三聯，抬頭：田宅工程有限公司 統編：53699764，"
-         "原發票號碼：HR60354863，新發票號碼：HR60354610")
-    item = plan(B="待處理發票", C="異動發票", K=k, X="HR60354863", Y="二聯式")
-    assert item["actions"] == []
-    assert "HR60354610" in item["missing"][0] and "O 欄空白" in item["missing"][0]
-    # O 補上後改為回寫系統
-    done = plan(B="待處理發票", C="異動發票", K=k, X="HR60354863", Y="二聯式", O="HR60354610")
-    assert done["actions"] == ["sync"] and done["target_status"] == "已處理發票"
-    # 「新發票號碼」與 X 原發票相同不算已開新票
-    from tools.invoice_center.triplicate import noted_new_invoice
-    assert noted_new_invoice(row(K="改三聯 新發票號碼：HR60354863", X="HR60354863")) == ""
-
-
 def test_triplicate_keyword_only_needs_sanlian():
     """2026-11-24 Jenny：只要 C 或 K 有關鍵字「三聯」就排二聯改三聯。"""
     for k in ("開三聯 抬頭：田宅工程有限公司 統編：53699764", "需要三聯發票 統編：53699764 抬頭：田宅工程有限公司",
