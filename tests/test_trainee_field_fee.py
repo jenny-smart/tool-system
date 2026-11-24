@@ -232,3 +232,30 @@ def test_plan_formula_copies_from_nearest_formula_row():
     # 第 5 列：J 取第 3 列；M 已有公式不動
     assert (9, 3, 5) in copies and all(not (c == 12 and d == 5) for c, _, d in copies)
     assert all(c in (9, 12) for c, _, _ in copies) and warnings == []
+
+
+def test_refunded_rows_with_blank_h_still_checked_for_fee_sheet():
+    from tools.finance_management.trainee_field_fee import compute_refunded_amounts, plan_fee_append
+
+    refund = [
+        ["h"] * 9,
+        ["t", "曾儷玲", "", "", "", "", "", "", "2026/11/20"],          # 已退款、H 空白 → 試算
+        ["t", "王小明", "", "", "", "", "", "2400", "2026/11/20"],      # 已退款、H 有值 → 不試算
+        ["t", "黃詠宸", "", "", "", "", "此筆略過", "", "2026/11/20"],  # 略過
+        ["t", "李大華"] + [""] * 7,                                      # 未退款 → 不在這裡算
+    ]
+    deposits = deposit_lookup([["專員姓名"], ["曾儷玲", "2000"], ["王小明", "2000"], ["黃詠宸", "2000"]])
+    refunded = compute_refunded_amounts(refund, {"曾儷玲": Decimal(400)}, deposits)
+    assert refunded == {2: Decimal(2400)}
+    plan = plan_fee_append(refund, refunded, [["姓名"], []])
+    assert plan["new_names"] == ["曾儷玲", "王小明"]
+
+
+def test_d_formula_full_formula_copied_as_is():
+    from tools.finance_management.trainee_field_fee import d_formula_for_row, is_full_formula
+
+    old = '=ARRAYFORMULA(IF(A3="","",IFERROR(VLOOKUP(A3,X,{2,3,5},FALSE),)))'
+    assert d_formula_for_row(old, 27) == '=ARRAYFORMULA(IF(A27="","",IFERROR(VLOOKUP(A27,X,2,FALSE),)))'
+    new = '=IF(A3="","",LET(r,IFERROR(ARRAYFORMULA(VLOOKUP(A3,X,{2,3,5},FALSE)),{"","",""}),HSTACK(INDEX(r,1,1))))'
+    assert is_full_formula(new) and not is_full_formula(old)
+    assert d_formula_for_row(new, 27) == new.replace("A3", "A27")
