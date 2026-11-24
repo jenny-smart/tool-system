@@ -20,7 +20,7 @@
             但仍列為未備妥讓每日檢查提醒收款
   - 待扣儲值金／待返儲值金 → 【檸檬後台】異動儲值金
   - 待處理發票（2026-11 Jenny：不再需人工）：車馬費發票 → 開立發票（同待收款，金額取 J 欄「車馬費 $金額」）；
-    異動發票／二聯改三聯（C 或 K 有「改三聯」）→ 二聯改三聯（作廢或全額折讓原票＋開新三聯，同【鯨躍發票】二聯改三聯）；
+    異動發票／二聯改三聯（C 或 K 有關鍵字「三聯」，2026-11-24 Jenny）→ 二聯改三聯（作廢或全額折讓原票＋開新三聯，同【鯨躍發票】二聯改三聯）；
     K 有「修正發票金額$金額」（不論 C 欄）→ 修正發票金額（同二聯改三聯流程：原票全額折讓＋開新發票，
     原發票設定照舊、只改金額；舊金額以鯨躍原發票可折讓額核對 S 欄，新金額＝K 欄並核對後台訂單金額）
   - 回寫系統：B 欄為 已退款／VIP已退券／已收款／已扣儲值金／已返儲值金／已處理發票，
@@ -237,7 +237,7 @@ def triplicate_blocker(row: list, row_no: int) -> str:
 
     item = candidate(list(row), row_no)
     if item is None:
-        return "K 欄或 C 欄沒有寫「改三聯」，不知道要怎麼處理這張發票"
+        return "K 欄或 C 欄沒有「三聯」，不知道要怎麼處理這張發票"
     try:
         parse_requirements(item["note"])
     except ValueError as exc:
@@ -381,7 +381,15 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
                 item["actions"].append("invoice")
             return item
         from tools.invoice_center.merged import MERGED_INVOICE_DETAILS
-        from tools.invoice_center.triplicate import correction_blocker, correction_candidate, is_correction
+        from tools.invoice_center.triplicate import (correction_blocker, correction_candidate, is_correction,
+                                                     noted_new_invoice, wants_triplicate)
+
+        if noted := noted_new_invoice(row):
+            # 2026-11-24 Jenny：K 已記錄新發票號碼、O 卻空白（新票已開但沒回填 O）→ 列為未備妥提醒，
+            # 不再排二聯改三聯／修正發票金額，避免重複開票；O 補上後盤點會改列為回寫系統
+            item["missing"].append(f"K 欄已記錄新發票號碼 {noted}，但 O 欄空白：請到鯨躍確認後把 {noted} 填入 O 欄"
+                                   "（不會重開），填好後盤點會改為回寫系統")
+            return item
 
         if is_correction(row):
             # 2026-11 Jenny：修正發票金額＝原票全額折讓 → 以原發票設定開修正金額的新發票（同二聯改三聯流程）
@@ -395,8 +403,7 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
                 item["progress"].append(f"原發票 {source['old_invoice']} 全額折讓 ${source['old_total']} → 新發票 ${source['new_total']}")
             return item
         orders = row_orders(row)
-        is_triplicate = item["detail"] in TRIPLICATE_DETAILS and re.search(
-            r"(?:改|轉)\s*三聯", f"{item['detail']} {_cell(row, 'K')}")
+        is_triplicate = item["detail"] in TRIPLICATE_DETAILS and wants_triplicate(item["detail"], _cell(row, "K"))
         if item["detail"] in MERGED_INVOICE_DETAILS or (len(orders) >= 2 and not is_triplicate):
             # 2026-11 Jenny：合併開立發票——以第一張訂單的發票資料開一張（品項＝各訂單合計），回寫時每張訂單都寫發票號碼
             if len(orders) < 2:

@@ -528,3 +528,35 @@ def test_triplicate_allowance_uses_ei_full_amount_not_new_total(monkeypatch):
     plan = {"source": {"old_invoice": "HR60354863"}, "total": "3600", "paid_date": "2026-11-20"}
     assert runner.allowance_original(object(), plan, lambda: None) == "AL87654321"
     assert calls["amount"] == "" and calls["require_full"] and calls["invoice_year"] == 2026
+
+
+def test_load_original_tries_current_year_then_paid_year(monkeypatch):
+    """2026-11-24 Jenny：當年度查不到原發票 → 改用訂單已付款日期的年度查。"""
+    from decimal import Decimal
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    from tools.invoice_center import allowance_create as allowance
+
+    monkeypatch.setattr(allowance, "_current_year", lambda: 2026)
+    page, locators = MagicMock(), {}
+    page.locator.side_effect = lambda sel: locators.setdefault(sel, MagicMock())
+
+    def opt(value):
+        o = MagicMock()
+        o.get_attribute.return_value = value
+        o.inner_text.return_value = f"{value}年"
+        return o
+
+    page.locator("#qyear").locator.return_value.all.return_value = [opt("115"), opt("114")]
+    selected = []
+    page.locator("#qyear").select_option.side_effect = lambda value: selected.append(value)
+    page.locator("#s_remark").wait_for.side_effect = lambda **kw: (
+        None if selected[-1] == "114" else (_ for _ in ()).throw(PlaywrightTimeoutError("查無")))
+    page.locator("#alertify-ok").is_visible.return_value = False
+    page.locator("body").inner_text.return_value = "銷售額 應稅:$4,800"
+    assert allowance._load_original(page, "FP56437015", invoice_year=2025) == Decimal("4800")
+    assert selected == ["115", "114"]
+    # 兩個年度都查無 → 停止
+    selected.clear()
+    page.locator("#s_remark").wait_for.side_effect = PlaywrightTimeoutError("查無")
+    with pytest.raises(RuntimeError, match="2026、2025 年度都查無"):
+        allowance._load_original(page, "FP56437015", invoice_year=2025)

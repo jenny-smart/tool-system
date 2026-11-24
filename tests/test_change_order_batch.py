@@ -82,7 +82,7 @@ def test_stored_value_and_invoice_rows():
     # 二聯改三聯：資料齊全直接執行，不再需人工
     tri = plan(B="待處理發票", C="異動發票", K="改三聯\n12345678 檸檬清潔有限公司", X="AB12345678", Y="二聯式")
     assert tri["actions"] == ["triplicate"] and not tri["manual"] and not tri["missing"]
-    assert "改三聯" in plan(B="待處理發票", C="異動發票", K="改金額")["missing"][0]
+    assert "「三聯」" in plan(B="待處理發票", C="異動發票", K="改金額")["missing"][0]
     assert "X 欄" in plan(B="待處理發票", C="二聯改三聯", K="12345678 檸檬清潔有限公司", X="", Y="二聯式")["missing"][0]
     assert plan(B="待處理發票", C="其他")["manual"]
 
@@ -822,3 +822,28 @@ def test_blank_payment_flow_r_blocks_sync():
     assert "sync" not in partial["actions"] and any("退款金流" in m or m == "缺付款方式（R）" for m in partial["missing"])
     assert plan(B="已扣儲值金")["actions"] == ["sync"]
     assert plan(B="已退款", R="信用卡")["actions"] == ["sync"]
+
+
+def test_noted_new_invoice_without_o_is_flagged_not_reissued():
+    """2026-11-24：K 已記錄新發票號碼、O 空白 → 未備妥提醒，不再排二聯改三聯（避免重複開票）。"""
+    k = ("2026/11/23 LC00220070 異動發票--更改三聯，抬頭：田宅工程有限公司 統編：53699764，"
+         "原發票號碼：HR60354863，新發票號碼：HR60354610")
+    item = plan(B="待處理發票", C="異動發票", K=k, X="HR60354863", Y="二聯式")
+    assert item["actions"] == []
+    assert "HR60354610" in item["missing"][0] and "O 欄空白" in item["missing"][0]
+    # O 補上後改為回寫系統
+    done = plan(B="待處理發票", C="異動發票", K=k, X="HR60354863", Y="二聯式", O="HR60354610")
+    assert done["actions"] == ["sync"] and done["target_status"] == "已處理發票"
+    # 「新發票號碼」與 X 原發票相同不算已開新票
+    from tools.invoice_center.triplicate import noted_new_invoice
+    assert noted_new_invoice(row(K="改三聯 新發票號碼：HR60354863", X="HR60354863")) == ""
+
+
+def test_triplicate_keyword_only_needs_sanlian():
+    """2026-11-24 Jenny：只要 C 或 K 有關鍵字「三聯」就排二聯改三聯。"""
+    for k in ("開三聯 抬頭：田宅工程有限公司 統編：53699764", "需要三聯發票 統編：53699764 抬頭：田宅工程有限公司",
+              "2026/11/24 LC00217726 異動發票--更改三聯 抬頭：田宅工程有限公司 統編：53699764"):
+        item = plan(B="待處理發票", C="異動發票", K=k, X="FP56437015", Y="二聯")
+        assert item["actions"] == ["triplicate"], (k, item)
+    assert plan(B="待處理發票", C="異動發票", K="抬頭：田宅工程有限公司 統編：53699764",
+                X="FP56437015", Y="二聯")["actions"] == []

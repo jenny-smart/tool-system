@@ -16,6 +16,28 @@ INVOICE_RE = re.compile(r"[A-Z]{2}\d{8}\Z")
 # 「重新開立修正發票金額$9000」「重新開立發票金額$18000」「修正發票金額$9000」都算
 CORRECTION_RE = re.compile(r"(?:重新開立\s*(?:修正)?|修正)\s*發票金額\s*[：:]?\s*(?:NT)?\s*\$\s*([\d,]+(?:\.\d+)?)")
 TRIPLICATE_KIND, CORRECTION_KIND = "triplicate", "correction"
+# 2026-11-24 Jenny：二聯改三聯只看關鍵字「三聯」（C 或 K 欄有「三聯」即可，不限「改三聯」「轉三聯」寫法）
+TRIPLICATE_KEYWORD_RE = re.compile(r"三\s*聯")
+
+
+def wants_triplicate(detail: str, note: str) -> bool:
+    """C 欄細項或 K 欄備註有「三聯」→ 要改開三聯發票。"""
+    return bool(TRIPLICATE_KEYWORD_RE.search(f"{detail} {note}"))
+# complete() 回填時會在 K 欄加註「新發票號碼：XX12345678」（與 O 欄同一次寫入）
+NOTED_NEW_INVOICE_RE = re.compile(r"新發票號碼\s*[：:]\s*([A-Za-z]{2}\d{8})")
+
+
+def noted_new_invoice(row: list) -> str:
+    """2026-11-24 Jenny：K 欄已記錄「新發票號碼：XX12345678」但 O 欄空白 → 回傳該號碼（新票其實已開、O 沒回填）；
+    沒有、或 O 已有值、或與 X 原發票相同時回傳空字串。這種列不能再當成待開新票，避免重複開立。"""
+    r = list(row) + [""] * 27
+    if str(r[14]).strip():
+        return ""
+    old = str(r[23]).strip().upper()
+    for number in NOTED_NEW_INVOICE_RE.findall(str(r[10])):
+        if number.upper() != old:
+            return number.upper()
+    return ""
 
 
 def correction_amounts(note: str) -> list[str]:
@@ -26,13 +48,15 @@ def correction_amounts(note: str) -> list[str]:
 
 def is_correction(row: list) -> bool:
     r = list(row) + [""] * 27
-    return bool(CORRECTION_RE.search(str(r[10]))) and not re.search(r"(?:改|轉)\s*三聯", f"{r[2]} {r[10]}")
+    return bool(CORRECTION_RE.search(str(r[10]))) and not wants_triplicate(r[2], r[10])
 
 
 def correction_candidate(row: list, row_no: int) -> dict[str, Any] | None:
     r = list(row) + [""] * 27
     if str(r[1]).strip() != "待處理發票" or not is_correction(r) or not str(r[6]).strip() or str(r[14]).strip():
         return None
+    if noted_new_invoice(r):
+        return None  # K 已記錄新發票號碼：新票已開，不可再開
     amounts = correction_amounts(r[10])
     return {"kind": CORRECTION_KIND, "source_row": row_no, "order_no": str(r[6]).strip(),
             "customer": str(r[7]).strip(), "note": str(r[10]).strip(),
@@ -105,8 +129,10 @@ def candidate(row: list, row_no: int) -> dict[str, Any] | None:
     detail = str(r[2]).strip()
     if str(r[1]).strip() != "待處理發票" or detail not in {"異動發票", "二聯轉三聯", "二聯改三聯"}:
         return None
-    if not re.search(r"(?:改|轉)\s*三聯", f"{detail} {r[10]}") or not str(r[6]).strip() or str(r[14]).strip():
+    if not wants_triplicate(detail, r[10]) or not str(r[6]).strip() or str(r[14]).strip():
         return None
+    if noted_new_invoice(r):
+        return None  # K 已記錄新發票號碼：新票已開，不可再開
     return {"source_row": row_no, "order_no": str(r[6]).strip(), "customer": str(r[7]).strip(),
             "note": str(r[10]).strip(), "old_invoice": str(r[23]).strip().upper(),
             "old_type": str(r[24]).strip()}
