@@ -9,7 +9,10 @@
    逐年讀「{年度}專員薪資相關-{地區}」加總到今年度；名冊沒有此人時，今年度找不到才找前一年度）
 2. 新訓退訓實境費用：只往下補新人，表上已有的列（含手動加的）都保留；
    工具包押金退款 H > 2000、且表上還沒有的人，接在 A3 起最後一筆之後填姓名，B 欄＝H − 2000；
-   D 欄若 D3 是公式就把公式往下填滿（公式改成只回傳身分證，不再溢出到 E–F）；
+   D 欄若 D3 是公式就把公式往下填滿：
+   - 舊公式（VLOOKUP {2,3,5} 直接溢出）改成只回傳身分證，E–F 由程式寫入；
+   - 新公式（含 HSTACK，生日已在公式內轉民國年）整條照抄，E–F 交給公式溢出，程式不寫；
+   已退款（I 欄有日期）但 H 欄空白的人，也會試算金額判斷要不要補（H 欄不回填，只提醒）；
    E–F 取「{今年}專員名冊與時數-{地區}」的「基本資料、協議規章」E 欄生日、G 欄地址，
    找不到才沿用既有資料或工具包押金 M–N；生日是 4 位數西元年（2026 年起建檔都是）
    一律減 1911 轉成民國年（例如 1997/2/4 → 86/02/04），已是民國年的原樣帶入。
@@ -46,6 +49,7 @@ ROSTER_NAME = "{year}專員名冊與時數-{area}"
 SALARY_NAME = "{year}專員薪資相關-{area}"
 ROSTER_SHEET = "基本資料、協議規章"
 _ID_ONLY_RE = re.compile(r"\{\s*2\s*(?:,\s*\d+\s*)+\}")
+_FULL_FORMULA_RE = re.compile(r"\bHSTACK\s*\(", re.IGNORECASE)
 
 
 def _cell(row: list, idx: int) -> str:
@@ -163,6 +167,21 @@ def compute_refund_updates(
             continue
         updates[rows[0]] = fees.get(name, Decimal(0)) + deposit_amount(deposits[name])
     return updates, warnings
+
+
+def compute_refunded_amounts(
+    refund_values: list[list],
+    fees: dict[str, Decimal],
+    deposits: dict[str, list],
+) -> dict[int, Decimal]:
+    """已退款（I 欄有日期）但 H 欄空白的列：試算金額，只用來判斷是否要補新訓退訓實境費用。"""
+    result: dict[int, Decimal] = {}
+    for sheet_row, row in enumerate(refund_values[1:], start=2):
+        name = _cell(row, 1)
+        if (name and _cell(row, 8) and not _cell(row, 7) and "略過" not in _cell(row, 6)
+                and name in deposits):
+            result[sheet_row] = fees.get(name, Decimal(0)) + deposit_amount(deposits[name])
+    return result
 
 
 def deposit_amount(row: list) -> Decimal:
@@ -335,9 +354,18 @@ def sum_fees_by_year(
     }
 
 
+def is_full_formula(formula: str) -> bool:
+    """D 欄新公式：用 HSTACK 自己溢出身分證／民國年生日／地址，E–F 不需程式寫入。"""
+    return bool(_FULL_FORMULA_RE.search(formula))
+
+
 def d_formula_for_row(d3_formula: str, row: int) -> str:
-    """D3 公式改成第 row 列使用，且 VLOOKUP 只回傳身分證（不溢出到 E–F）。"""
-    return _ID_ONLY_RE.sub("2", re.sub(r"\bA3\b", f"A{row}", d3_formula))
+    """D3 公式改成第 row 列使用。
+
+    新公式（HSTACK）整條照抄；舊公式的 VLOOKUP 只回傳身分證（不溢出到 E–F）。
+    """
+    formula = re.sub(r"\bA3\b", f"A{row}", d3_formula)
+    return formula if is_full_formula(formula) else _ID_ONLY_RE.sub("2", formula)
 
 
 REFUND_FORMULA_COLS = "JMNOPQR"  # 工具包押金退款填 H 欄時，這些欄沿用上一列公式
@@ -479,9 +507,11 @@ def _update_refund_and_fee_sheet(area: str) -> dict[str, object]:
 
     # 新人實境／實習從該人在基本資料、協議規章的建檔年度開始找，加總到今年度
     current_year = datetime.now(TW_TZ).year
+    # 未退款（I 空白）＋已退款但 H 欄空白的人都要算實境費用
     pending_names = {
         _cell(row, 1) for row in refund_values[1:]
-        if _cell(row, 1) and not _cell(row, 8) and "略過" not in _cell(row, 6)
+        if _cell(row, 1) and "略過" not in _cell(row, 6)
+        and (not _cell(row, 8) or not _cell(row, 7))
     }
     start_from = field_start_years(
         pending_names, roster_start_years(roster_values), field_names(field_sheets), current_year
@@ -524,7 +554,15 @@ def _update_refund_and_fee_sheet(area: str) -> dict[str, object]:
 
         warnings += copy_prev_row_format_and_formulas(service, spreadsheet_id, refund_title, sorted(changed))
 
+    # 已退款但 H 欄空白：試算金額只用來判斷是否補新訓退訓實境費用，H 欄不回填
+    refunded = compute_refunded_amounts(refund_values, fees, deposits)
     fee_values = _read(service, spreadsheet_id, FEE_SHEET, "A:F")
+    listed = {_cell(row, 0) for row in fee_values[2:]}
+    for r, v in refunded.items():
+        name = _cell(refund_values[r - 1], 1)
+        if v > DEPOSIT_BASE and name not in listed:
+            warnings.append(f"{name}（第 {r} 列）已退款但 H 欄空白，試算 {_fmt(v)}，已補入新訓退訓實境費用，H 欄請人工確認")
+    updates = {**refunded, **updates}
     plan = plan_fee_append(refund_values, updates, fee_values)
     has_id = find_id_owners(plan["new_names"] + plan["recheck_names"]) if (
         plan["new_names"] or plan["recheck_names"]
@@ -549,7 +587,9 @@ def _update_refund_and_fee_sheet(area: str) -> dict[str, object]:
         ).execute().get("values", [[""]])
         d3_text = str(d3[0][0] if d3 and d3[0] else "")
         data.append({"range": f"'{FEE_SHEET}'!A{start}:C{end}", "values": [r[:3] for r in new_rows]})
-        data.append({"range": f"'{FEE_SHEET}'!E{start}:F{end}", "values": [r[4:] for r in new_rows]})
+        if not (d3_text.startswith("=") and is_full_formula(d3_text)):
+            # 新公式會自己溢出到 E–F，寫值會擋住溢出（#REF!），所以只有舊公式／無公式才寫
+            data.append({"range": f"'{FEE_SHEET}'!E{start}:F{end}", "values": [r[4:] for r in new_rows]})
         if d3_text.startswith("="):
             # D 欄沿用 D3 公式（改成只回傳身分證，E–F 由程式寫入）
             data.append({
