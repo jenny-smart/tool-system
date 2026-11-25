@@ -138,6 +138,9 @@ def col_letter(index: int) -> str:
 
 
 def parse_sheet_date(value: Any) -> date | None:
+    """日期格顯示成「11/19」（格式只顯示月日），所以讀 SERIAL_NUMBER；也接受 2026/11/19 文字。"""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return date(1899, 12, 30) + timedelta(days=int(value)) if 30000 < value < 80000 else None
     text = str(value or "").strip()
     for fmt in ("%Y/%m/%d", "%Y-%m-%d"):
         try:
@@ -281,7 +284,8 @@ def run(until: date, cdp_url: str, dry_run: bool = False, log: Callable[[str], N
     spreadsheet_id = target_spreadsheet(until, log)
     head = _execute(sheets.spreadsheets().values().batchGet(
         spreadsheetId=spreadsheet_id,
-        ranges=[f"'{STATS_SHEET}'!{WEEKDAY_ROW}:{WEEKDAY_ROW}", f"'{STATS_SHEET}'!{FIRST_ROW}:{FIRST_ROW}"]))
+        ranges=[f"'{STATS_SHEET}'!{WEEKDAY_ROW}:{WEEKDAY_ROW}", f"'{STATS_SHEET}'!{FIRST_ROW}:{FIRST_ROW}"],
+        valueRenderOption="UNFORMATTED_VALUE", dateTimeRenderOption="SERIAL_NUMBER"))
     ranges = head.get("valueRanges", [])
     weekday_row = (ranges[0].get("values") or [[]])[0]
     date_row = (ranges[1].get("values") or [[]])[0]
