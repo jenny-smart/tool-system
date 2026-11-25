@@ -12,7 +12,7 @@
                  （一次扣儲值金＋購物金合計，跟退款金額無關）；Agent 填表、人工確認按送出，
                  完成後填 M 歸零時間
               ② 開折讓單（同待退款）
-              ③ 退款（M 已歸零、AB 折讓單已開才退）：R＝信用卡 → 藍新退款（各區皆同）；
+              ③ 退款（M 已歸零、AB 折讓單已開才退；①② 排在同一次執行時一併排入，2026-11-25 Jenny）：R＝信用卡 → 藍新退款（各區皆同）；
                  R＝ATM → 台北／台中富邦 ATM 退款；桃園／新竹／高雄 Agent 不處理，由財務退款後填 AC
               ④ M／AB／AC 都有值 → 回寫檸檬後台，B 欄改為 VIP已退券
   - 待收款：O 發票空白 → 開立發票（同【鯨躍發票】開立發票：沿用訂單發票設定、Agent 填表、
@@ -32,8 +32,8 @@
   - 盤點時自動補齊（2026-11-12 Jenny）：除 ATM 待退款的 P／Q 外，缺的資料自檸檬後台查詢補上空白格（見 fill_from_backend）；
     待退款／待收款且 R＝ATM → 同步補進同地區 ATM 工作表待配對區（同訂單同金額不重複，見 sync_atm_sheet）。
 執行（2026-10-29 與 Jenny 確認）：整批只排一筆本機 Agent 任務（change_order.batch_run），
-  依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 退款（信用卡登入藍新、ATM 登入富邦）
-  ③ 儲值金 → 回寫系統。某列前一步失敗就不做該列後面的步驟（同一列順序不亂），其他列照常執行；回寫只回寫已完成的列。
+  依地區逐區、每區依序：① 鯨躍（開立折讓單＋開立發票）② 儲值金 ③ 退款（信用卡登入藍新、ATM 登入富邦）
+  → 回寫系統。某列前一步失敗就不做該列後面的步驟（同一列順序不亂），其他列照常執行；回寫只回寫已完成的列。
 回寫完成後在 Jenny 行事曆建一筆紀錄事件（不跳提醒）。
 """
 from __future__ import annotations
@@ -97,8 +97,10 @@ ACTIONS = {
     "correction": ("修正發票金額", "cetustek.triplicate"),  # 同二聯改三聯 runner（原票全額折讓→開新票）
     "sync": ("回寫系統", ""),
 }
-# 每區依序執行：鯨躍（折讓單＋發票＋二聯改三聯）→ 退款（藍新信用卡、富邦 ATM）→ 儲值金，最後回寫系統
-ACTION_ORDER = ("allowance", "invoice", "triplicate", "correction", "credit_refund", "atm_refund", "stored_value")
+# 每區依序執行：鯨躍（折讓單＋發票＋二聯改三聯）→ 儲值金 → 退款（藍新信用卡、富邦 ATM），最後回寫系統
+# 2026-11-25 Jenny：VIP待退券歸零、折讓單、退款同一次整合執行做完 → 儲值金排在退款前面
+#（退款程式登入前會再檢查折讓單號與 M 歸零時間，前一步沒完成就不退）
+ACTION_ORDER = ("allowance", "invoice", "triplicate", "correction", "stored_value", "credit_refund", "atm_refund")
 # 鯨躍步驟：同一區沿用同一次登入，全部做完才登出（2026-11 Jenny：不要登出再登入）
 CETUSTEK_ACTIONS = ("allowance", "invoice", "triplicate", "correction")
 REISSUE_ACTIONS = ("triplicate", "correction")  # 原票處理＋開新票，每列各一個計畫
@@ -323,7 +325,8 @@ def plan_row(region: str, row_no: int, row: list) -> Optional[dict[str, Any]]:
                 item["missing"].append("缺付款方式（R）")
             elif is_vip and "ATM" in payway and region not in ATM_REFUND_REGIONS:
                 item["progress"].append("退款由財務處理（完成後填 AC 退款時間）")
-            elif is_vip and not (_cell(row, "M") and _cell(row, "AB")):
+            elif is_vip and not ((_cell(row, "M") or "stored_value" in item["actions"])
+                                 and (_cell(row, "AB") or "allowance" in item["actions"])):
                 item["progress"].append("儲值金歸零及折讓單完成後才退款")
             elif "ATM" in payway:
                 if not re.sub(r"\D", "", _cell(row, "P")) or not re.sub(r"\D", "", _cell(row, "Q")):

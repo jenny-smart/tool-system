@@ -280,7 +280,7 @@ def test_run_plan_goes_region_by_region_in_order(monkeypatch):
     # 鯨躍步驟（折讓單→發票）同一次登入，做完才登出一次，再做退款
     assert calls == [
         ("allowance", "台北"), ("invoice", "台北"), ("cetustek_logout", "台北"),
-        ("credit_refund", "台北"), ("stored_value", "台北"),
+        ("stored_value", "台北"), ("credit_refund", "台北"),
         ("sync", "台北", [6, 7, 9]),
         ("allowance", "桃園"), ("cetustek_logout", "桃園"), ("atm_refund", "桃園"), ("sync", "桃園", [2]),
         ("calendar",),
@@ -336,18 +336,22 @@ def test_run_plan_triplicate_failure_does_not_block_other_rows(monkeypatch):
     code = batch.run_plan(plan, log=lambda *_: None,
                           run_step=lambda action, region, rows, cdp: calls.append((action, rows)) or 0)
     assert code == 1
-    assert calls == [("triplicate",), ("cetustek_logout", []), ("credit_refund", [375]),
-                     ("stored_value", [376, 378]), ("sync", [375, 376, 377, 378])]
+    assert calls == [("triplicate",), ("cetustek_logout", []), ("stored_value", [376, 378]),
+                     ("credit_refund", [375]), ("sync", [375, 376, 377, 378])]
 
 
 def test_vip_refund_coupon_flow():
-    # ① 尚未歸零：儲值金／購物金歸零＋開折讓單，不退款
+    # ① 尚未歸零：歸零＋折讓單＋退款排在同一次執行（2026-11-25）
     item = plan(B="VIP待退券", X="AB1", Z="952", S="1000", R="信用卡")
-    assert item["actions"] == ["stored_value", "allowance"] and item["manual"] == []
-    assert "儲值金歸零及折讓單完成後才退款" in item["progress"]
-    # 已歸零但折讓單還沒開：只開折讓單，不退款
+    assert item["actions"] == ["stored_value", "allowance", "credit_refund"] and item["manual"] == []
+    item = plan("台中", B="VIP待退券", X="AB1", Z="952", S="1000", T="985", R="ATM", P="012", Q="1")
+    assert item["actions"] == ["stored_value", "allowance", "atm_refund"]
+    # 折讓單缺資料（不能排入）→ 不退款
+    item = plan(B="VIP待退券", M="2026/10/21", S="1000", R="信用卡")
+    assert "credit_refund" not in item["actions"]
+    # 已歸零但折讓單還沒開：開折讓單＋退款
     item = plan(B="VIP待退券", M="2026/10/21", X="AB1", Z="952", S="1000", R="信用卡")
-    assert item["actions"] == ["allowance"]
+    assert item["actions"] == ["allowance", "credit_refund"]
     # ② 已歸零（M）、折讓單完成：信用卡走藍新
     item = plan(B="VIP待退券", M="2026/10/21", AB="AL1", S="1000", R="信用卡")
     assert item["actions"] == ["credit_refund", "sync"] and item["manual"] == []
