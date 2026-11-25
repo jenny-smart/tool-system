@@ -847,6 +847,13 @@ GIT_PULL_SCRIPT = (
 )
 
 
+def build_recruit_104_weekly(params: dict[str, Any]) -> list[str]:
+    cdp_url = str(params.get("cdp_url") or "http://127.0.0.1:9222").strip()
+    end_date = str(params.get("end_date") or "").strip()
+    return [sys.executable, "-m", "tools.field_management.recruit_104_stats", "--cdp-url", cdp_url] + (
+        ["--end", end_date] if end_date else [])
+
+
 def build_notify_popup(params: dict[str, Any]) -> list[str]:
     title = str(params.get("title") or "").strip()
     if not title:
@@ -919,6 +926,7 @@ register_action("fubon.internal_payment", build_fubon_internal_payment)
 register_action("fubon.fixed_expense_transfer", build_fubon_fixed_expense_transfer)
 register_action("fubon.captcha", build_fubon_captcha)
 register_action("fubon.verify", build_fubon_verify)
+register_action("recruit104.weekly_stats", build_recruit_104_weekly)
 register_action("yuanta.login", build_yuanta_login)
 register_action("yuanta.download", build_yuanta_download)
 register_action("yuanta.salary_status", build_yuanta_salary_status)
@@ -986,6 +994,7 @@ ACTION_LABELS = {
     "fubon.fixed_expense_transfer": "【財報】各區固定費用匯款",
     "fubon.captcha": "【富邦銀行】擷取驗證碼",
     "fubon.verify": "【富邦銀行】送出驗證碼",
+    "recruit104.weekly_stats": "【外場】104 週報（每週數據 → 104統計表）",
     "yuanta.login": "【元大銀行】元大登入",
     "yuanta.download": "【元大銀行】元大明細下載",
     "yuanta.salary_status": "【元大銀行】檢查薪資付款狀態",

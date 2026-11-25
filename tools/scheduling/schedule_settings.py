@@ -12,7 +12,7 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
                 時間要是 10 分鐘的倍數（Router 每 10 分鐘一次）
   E 頻率        每日／每週／每月／單月／雙月
   F 日期／星期  每週：一,二,…,日；每月：1,5,10、18-25、月底
-  G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期遇例假日改到前一個工作日）
+  G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期、每週的星期遇例假日改到前一個工作日）
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
   J 系統名稱    功能屬於哪個系統（tool-system／order-system／investment-system／salary-system／op-system），程式自動填，顯示用
@@ -95,6 +95,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "performance_report": ("performance_report.yml", {}),
     "fubon_statement": ("scheduled_fubon_statement.yml", {}),
     "yuanta_statement": ("scheduled_yuanta_statement.yml", {}),
+    # 2026-11-26 Jenny：104 每週數據 → 台北名冊 104統計副表／104統計表（排入 Mac，Agent Chrome 要登入 104）
+    "recruit_104_weekly": ("scheduled_recruit_104.yml", {}),
     "gmail_401": ("Scheduled_gmail_401.yml", {}),
     "atm_unpaid": ("scheduled_atm_unpaid.yml", {}),
     "atm_match_reconcile": ("jenny-smart/order-system:atm-match-reconcile-schedule.yml", {}),
@@ -285,6 +287,9 @@ DEFAULT_ROWS: list[list] = [
     [True, "monthly_checklist", "【整合執行】月度盤點（更新主控表「月度盤點」分頁＋過期提醒）", "17:00", "每日", "", "照跑",
      MODE_DIRECT, "過了應完成日還沒做完的項目合併成一則提醒"],
     [True, "yuanta_statement", "元大明細下載（排入 Mac）", "11:00", "每月", "25", "提前", MODE_QUEUE, ""],
+    # 2026-11-26 Jenny：每週五 04:40，遇例假日提前到前一個工作日
+    [True, "recruit_104_weekly", "【外場】104 週報 → 台北名冊 104統計副表／104統計表（排入 Mac）", "04:40", "每週", "五", "提前",
+     MODE_QUEUE, "Agent Chrome 要登入 104 招募管理；從統計表最後一天補到昨天（提前或漏跑下次自動補齊）"],
     [True, "gmail_401", "Gmail 401 歸檔", "00:00", "每月", "20", "照跑", MODE_DIRECT, ""],
     # investment-system：2026-11-06 Jenny 確認（台股／美股／基金由每 30 分鐘改成每 10 分鐘）
     # 預設不啟用：investment-system 的 workflow 要先能接受 scheduled_slot、tool-system 要有
@@ -469,6 +474,14 @@ def _month_ok(rule: Rule, month: int) -> bool:
 
 def target_date(rule: Rule, day: date, is_workday: Callable[[date], bool]) -> Optional[date]:
     """day 要執行時，對應的原訂日期（遇例假日提前時可能是下個月初，例如 11/1 週日 → 10/30 執行、原訂 11/1）。"""
+    if rule.freq == "每週" and rule.holiday == HOLIDAY_EARLIER:
+        # 2026-11-26 Jenny（104 週報）：每週的星期遇例假日提前到前一個工作日（例：週五國定假日 → 週四）
+        weekdays = _weekdays(rule.days)
+        for offset in range(14):
+            target = day + timedelta(days=offset)
+            if target.weekday() in weekdays and previous_workday(target, is_workday) == day:
+                return target
+        return None
     if rule.freq in ("每日", "每週"):
         hit = rule.freq == "每日" or day.weekday() in _weekdays(rule.days)
         return day if hit and (rule.holiday == HOLIDAY_RUN or is_workday(day)) else None
