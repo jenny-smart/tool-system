@@ -42,7 +42,7 @@ def test_last_date_column_and_stats_columns():
     row = ["", ""] + [""] * 11 + ["台北", "02/27", "2026/11/18", "2026/11/19", ""]
     assert r.last_date_column(row) == (16, date(2026, 11, 19))
     days = [date(2026, 11, 20 + i) for i in range(7)]
-    sub = [["11/20"] * 7, [1] * 7, [10] * 7, [0.1] * 7, [], ["11/20"] * 7, [2] * 7, [20] * 7, [0.1] * 7, []]
+    sub = [["11/19"] * 7, [1] * 7, [10] * 7, [0.1] * 7, [], ["11/20"] * 7, [2] * 7, [20] * 7, [0.1] * 7, []]
     cols = r.stats_columns(sub, days, days[2:], 17)
     assert [c[0] for c in cols] == [17, 18, 19, 20, 21]
     col, day, values = cols[0]
@@ -83,3 +83,97 @@ def test_registered_everywhere():
     assert any(row[1] == "recruit_104_weekly" for row in ss.DEFAULT_ROWS)
     assert local_agent.command_for({"action": "recruit104.weekly_stats", "params_json": "{}"})[2] == \
         "tools.field_management.recruit_104_stats"
+
+
+def test_target_spreadsheet_reads_taipei_roster_from_real_config(monkeypatch):
+    from tools.field_management import roster_raise
+
+    seen = []
+    monkeypatch.setattr(roster_raise, "year_file_id", lambda fid, ym, drive=None: seen.append((fid, ym)) or fid)
+    assert r.target_spreadsheet(date(2026, 11, 25), print) == "1hsmwhA36I0BPXQ8d6OYGGn8R_SETQe4vTR_FB5Sp8Uc"
+    assert seen == [("1hsmwhA36I0BPXQ8d6OYGGn8R_SETQe4vTR_FB5Sp8Uc", "202611")]
+
+
+class _Req:
+    def __init__(self, result):
+        self.result = result
+
+    def execute(self):
+        return self.result
+
+
+class _FakeSheets:
+    """只記錄呼叫；副表 O12:U30 回傳固定結果。"""
+
+    def __init__(self, date_row, weekday_row):
+        self.calls = []
+        self.date_row, self.weekday_row = date_row, weekday_row
+
+    def spreadsheets(self):
+        return self
+
+    def values(self):
+        return self
+
+    def get(self, **kw):
+        self.calls.append(("get", kw))
+        if "fields" in kw:
+            return _Req({"sheets": [{"properties": {"sheetId": 99, "title": r.STATS_SHEET}}]})
+        sub = [["11/19"] * 7, [1, 2, 3, 4, 5, 6, 7], [10] * 7, [0.1] * 7, [],
+               ["11/20"] * 7, [0] * 7, [5] * 7, [0] * 7, [], ["11/20"] * 7, [1] * 7, [8] * 7, [0.125] * 7, [],
+               ["11/20"] * 7, [0] * 7, [0] * 7, ["#DIV/0!"] * 7]
+        return _Req({"values": sub})
+
+    def batchGet(self, **kw):
+        return _Req({"valueRanges": [{"values": [self.weekday_row]}, {"values": [self.date_row]}]})
+
+    def clear(self, **kw):
+        self.calls.append(("clear", kw))
+        return _Req({})
+
+    def update(self, **kw):
+        self.calls.append(("update", kw))
+        return _Req({})
+
+    def batchUpdate(self, **kw):
+        self.calls.append(("batchUpdate", kw))
+        return _Req({})
+
+
+def test_run_end_to_end_with_fake_sheets(monkeypatch):
+    from tools.field_management import roster_raise, staff_profile
+
+    date_row = [""] * 13 + ["台北"] + [""] * 265 + ["2026/11/19"]  # JT（序號 279）＝11/19
+    weekday_row = [""] * 280 + ["五", "六 ", "日", "一", "二", "三"]
+    fake = _FakeSheets(date_row, weekday_row)
+    monkeypatch.setattr(staff_profile, "get_sheets_service", lambda: fake)
+    monkeypatch.setattr(roster_raise, "year_file_id", lambda fid, ym, drive=None: fid)
+    monkeypatch.setattr(roster_raise, "execute_with_retry", lambda req: req.execute())
+    monkeypatch.setattr(r, "fetch_weekly", lambda cdp, s, e: (META, [JOB, CLOSED]))
+
+    out = r.run(date(2026, 11, 25), "cdp", log=print)
+    assert out["written"] == 6  # 11/20～11/25
+    kinds = [c[0] for c in fake.calls]
+    assert kinds[:2] == ["clear", "update"]
+    values_update = [c for c in fake.calls if c[0] == "batchUpdate" and "valueInputOption" in c[1]["body"]][0][1]["body"]
+    ranges = {d["range"]: d["values"] for d in values_update["data"]}
+    assert ranges["'104統計表'!JU12:JU30"][0] == ["2026/11/20"] and ranges["'104統計表'!JU12:JU30"][1] == [2]  # 查 11/19～11/25，11/20 是第 2 天
+    assert ranges["'104統計表'!JZ12:JZ30"][1] == [7]          # 11/25 是第 7 天
+    assert "'104統計表'!JU11" not in ranges                    # 已有星期不覆蓋
+    assert not any(k.endswith("6") and "SUM" in str(v) for k, v in ranges.items())  # 沒有週四就不加週合計
+
+
+def test_friday_run_adds_week_total_on_thursday(monkeypatch):
+    from tools.field_management import roster_raise, staff_profile
+
+    date_row = [""] * 13 + ["台北"] + [""] * 265 + ["2026/11/19"]
+    fake = _FakeSheets(date_row, [])
+    monkeypatch.setattr(staff_profile, "get_sheets_service", lambda: fake)
+    monkeypatch.setattr(roster_raise, "year_file_id", lambda fid, ym, drive=None: fid)
+    monkeypatch.setattr(roster_raise, "execute_with_retry", lambda req: req.execute())
+    monkeypatch.setattr(r, "fetch_weekly", lambda cdp, s, e: (META, [JOB]))
+    assert r.run(date(2026, 11, 26), "cdp", log=print)["written"] == 7
+    body = [c for c in fake.calls if c[0] == "batchUpdate" and "valueInputOption" in c[1]["body"]][0][1]["body"]
+    ranges = {d["range"]: d["values"] for d in body["data"]}
+    assert ranges["'104統計表'!KA6"] == [["=SUM(JU13:KA13)"]]
+    assert ranges["'104統計表'!JU11"] == [["五"]]

@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Asia/Taipei")
 AREA = "台北"
+SYSTEM_NAME = "外場排程系統"  # config/systems.yaml 的系統名稱（同 resume_system／roster_raise）
 SUB_SHEET = "104統計副表"
 STATS_SHEET = "104統計表"
 API_URL = "https://auth.vip.104.com.tw/api/statistics/statisticsWeekly"
@@ -200,7 +201,7 @@ def target_spreadsheet(day: date, log: Callable[[str], None]) -> str:
     from tools.field_management.roster_raise import year_file_id
     from tools.field_management.staff_profile import get_spreadsheet_id, load_system_config
 
-    configured = get_spreadsheet_id(load_system_config(), "roster", AREA)
+    configured = get_spreadsheet_id(load_system_config(SYSTEM_NAME), "roster", AREA)
     try:
         return year_file_id(configured, day.strftime("%Y%m"))
     except FileNotFoundError:
