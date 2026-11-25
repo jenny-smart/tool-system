@@ -1,0 +1,20 @@
+📋 log_spreadsheet_id 已從設定檔載入
+📝 外場排程打卡：外場訂單 / running
+Command: /opt/hostedtoolcache/Python/3.11.18/x64/bin/python -u -m tools.field_management.orders --date 20261126 --system-name 外場排程系統 --run-type 排程
+[2026-11-26 02:14:14] 開始處理訂單資料：20261126訂單-台北
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1OpN1SdVQbajHS07NrT1RMpyKy8hfk_HksUw0-XDRFGw
+🗑️ 已刪除來源暫存 Google Sheet：1OpN1SdVQbajHS07NrT1RMpyKy8hfk_HksUw0-XDRFGw
+[2026-11-26 02:14:31] 完成：20261126訂單-台北.xls → 訂單資料!A:ZZ / rows=1342
+[2026-11-26 02:14:33] ⚠ 專員訂單：找不到上個月最後幾天的匯出檔，只列本月訂單
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+[2026-11-26 02:14:36] 專員訂單：已寫入 699 筆
+[2026-11-26 02:14:38] 開始處理訂單資料：20261126訂單-台中
+🔄 Jenny OAuth 已將來源 Excel 轉成暫存 Google Sheet：1y9a7dC1gMVoCXdyeEV2j05sR89HM5orT8BYvFuHxyrI
+🗑️ 已刪除來源暫存 Google Sheet：1y9a7dC1gMVoCXdyeEV2j05sR89HM5orT8BYvFuHxyrI
+[2026-11-26 02:14:49] 完成：20261126訂單-台中.xls → 訂單資料!A:ZZ / rows=123
+[2026-11-26 02:14:50] ⚠ 專員訂單：找不到上個月最後幾天的匯出檔，只列本月訂單
+[2026-11-26 02:14:52] 專員訂單：已寫入 67 筆
+[2026-11-26 02:14:53] orders.py 全部完成
+
+📝 外場排程打卡：外場訂單 / success
+field_management scheduler 全部完成
