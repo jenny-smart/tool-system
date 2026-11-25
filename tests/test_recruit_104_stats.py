@@ -185,3 +185,62 @@ def test_parse_sheet_date_serial_number_shown_as_month_day():
     assert r.parse_sheet_date("台北") is None and r.parse_sheet_date(72) is None
     row = [""] * 13 + ["台北", 46080] + [""] * 264 + [46344, 46345]
     assert r.last_date_column(row) == (280, date(2026, 11, 19))
+
+
+class _Loc:
+    def __init__(self, page, sel):
+        self.page, self.sel = page, sel
+
+    @property
+    def first(self):
+        return self
+
+    def count(self):
+        return 1
+
+    def input_value(self):
+        return self.page.email
+
+    def fill(self, value):
+        self.page.filled = value
+
+    def click(self):
+        self.page.clicked = True
+
+
+class _Page:
+    def __init__(self, email="jenny@example.com", ok=True):
+        self.email, self.ok, self.url, self.filled, self.clicked = email, ok, "https://bsignin.104.com.tw/login", "", False
+
+    def locator(self, sel):
+        return _Loc(self, sel)
+
+    def wait_for_url(self, *a, **k):
+        pass
+
+    def goto(self, url, **k):
+        self.url = url if self.ok else "https://bsignin.104.com.tw/login"
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+def test_auto_login_fills_only_password(monkeypatch):
+    monkeypatch.setenv("RECRUIT_104_PASSWORD", "pw")
+    page = _Page()
+    r.auto_login(page)
+    assert page.filled == "pw" and page.clicked and "vip.104.com.tw" in page.url
+
+
+def test_auto_login_failures_raise_need_login(monkeypatch, tmp_path):
+    import pytest
+
+    monkeypatch.delenv("RECRUIT_104_PASSWORD", raising=False)
+    monkeypatch.setattr(r, "PASSWORD_FILE", tmp_path / "none.txt")
+    with pytest.raises(r.NeedLogin, match="沒有 104 密碼"):
+        r.auto_login(_Page())
+    monkeypatch.setenv("RECRUIT_104_PASSWORD", "pw")
+    with pytest.raises(r.NeedLogin, match="電子信箱"):
+        r.auto_login(_Page(email=""))
+    with pytest.raises(r.NeedLogin, match="自動登入失敗"):
+        r.auto_login(_Page(ok=False))
