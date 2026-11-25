@@ -1,0 +1,15 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+【台北】未備妥 1 筆
+【台北】未備妥：第382列 LC00220740（待退款）缺退款銀行代碼／帳號（P／Q）
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+⚠️ 【桃園】同步 ATM 工作表失敗：沒有權限開啟試算表（請把 tool-system 服務帳號加為編輯者）
+【桃園】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+❌ 【高雄】讀取清潔異動失敗：APIError: [429]: Quota exceeded for quota metric 'Read requests' and limit 'Read requests per minute per user' of service 'sheets.googleapis.com' for consumer 'project_number:1042663213860'.
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+已建立 11:00 提醒（jenny@hers.com.tw）
+{'todo': [{'region': '台北', 'row': 382, 'status': '待退款', 'detail': '異動服務退款', 'order_no': 'LC00220740', 'customer': 'Christin', 'payway': 'ATM', 'amount': '2385', 'progress': ['折讓單 ✓', '已先回寫目前進度（2026-11-24 19:02:30），B 欄完成後需再回寫'], 'actions': [], 'missing': ['缺退款銀行代碼／帳號（P／Q）'], 'manual': [], 'note': '2026/11/24 LC00220740 異動服務退款--11/24 LC00220740 服務當天異動，收50%異動費$2400，餘額退款'}], 'failed': ['高雄']}
