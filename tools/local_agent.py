@@ -1060,6 +1060,9 @@ def run_task(task: dict[str, str], *, service: Any, spreadsheet_id: str) -> int:
         command = command_for(task)
         record(f"[{now_text()}] START {task['action']}")
         child_env = os.environ.copy()
+        # 子程式 stdout 接 pipe 時 Python 會整塊緩衝，print 要等程式結束才出現在 Log；
+        # 例如 VIP待退券歸零「請在異動視窗按送出」的提示會看不到。強制不緩衝。
+        child_env["PYTHONUNBUFFERED"] = "1"
         project_root_str = str(PROJECT_ROOT)
         existing_pp = child_env.get("PYTHONPATH", "")
         pp_parts = [p for p in existing_pp.split(os.pathsep) if p]
