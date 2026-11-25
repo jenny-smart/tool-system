@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -39,7 +41,44 @@ DATE_HEADER_COL = 13  # N 欄（0 起算）是「台北」標題，日期從 O �
 
 
 class NeedLogin(RuntimeError):
-    """Agent Chrome 沒有登入 104 招募管理。"""
+    """Agent Chrome 沒有登入 104 招募管理（自動登入也失敗）。"""
+
+
+# 2026-11-26 Jenny：Agent Chrome 已「記住帳號」（電子信箱會自動帶入），只存密碼；第一次登入的驗證已在該視窗做過。
+# 密碼只放 Mac 本機（不進 repo／試算表／GitHub）：~/104 account/password.txt，或環境變數 RECRUIT_104_PASSWORD。
+PASSWORD_FILE = Path.home() / "104 account" / "password.txt"
+LOGIN_HOST = "bsignin.104.com.tw"
+
+
+def load_password() -> str:
+    env = os.environ.get("RECRUIT_104_PASSWORD", "").strip()
+    if env:
+        return env
+    try:
+        return PASSWORD_FILE.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+
+
+def auto_login(page) -> None:
+    """在 104 登入頁填密碼（電子信箱已記住）→ 立即登入。失敗丟 NeedLogin。"""
+    password = load_password()
+    if not password:
+        raise NeedLogin(f"104 招募管理未登入，且 Mac 沒有 104 密碼（{PASSWORD_FILE}）")
+    email = page.locator('input[type="email"], input[placeholder*="信箱"]').first
+    if email.count() and not (email.input_value() or "").strip():
+        raise NeedLogin("104 登入頁沒有帶入電子信箱（請在 Agent Chrome 登入一次並勾選「記住帳號」）")
+    page.locator('input[type="password"]').first.fill(password)
+    page.locator('button:has-text("立即登入")').first.click()
+    try:
+        page.wait_for_url(lambda url: LOGIN_HOST not in url or "/product" in url, timeout=30000)
+    except Exception:
+        pass
+    page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(2000)
+    if "vip.104.com.tw" not in page.url:
+        raise NeedLogin(f"104 自動登入失敗（目前在 {page.url}，可能要驗證碼或密碼已變更）")
+    print("104 招募管理：已自動登入", flush=True)
 
 
 # ── 104 資料 ──────────────────────────────────────
@@ -77,7 +116,7 @@ def fetch_weekly(cdp_url: str, start: date, end: date) -> tuple[dict, list[dict]
             page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(2000)
             if "vip.104.com.tw" not in page.url:
-                raise NeedLogin(f"104 招募管理未登入（目前在 {page.url}）")
+                auto_login(page)
             result = page.evaluate(FETCH_JS, [API_URL, _ymd(start), _ymd(end)])
         finally:
             if opened:
@@ -321,13 +360,13 @@ def run(until: date, cdp_url: str, dry_run: bool = False, log: Callable[[str], N
     return {"written": len(written_total), "spreadsheet_id": spreadsheet_id}
 
 
-def notify_login() -> None:
+def notify_login(reason: str = "") -> None:
     """Mac 跳提醒視窗：請到 Agent Chrome 登入 104。"""
     import subprocess
 
     subprocess.run([sys.executable, "-m", "tools.notify_popup", "--title", "104 週報：請登入 104 招募管理",
-                    "--message", "排程要抓 104 每週數據，但 Agent Chrome 沒有登入 104 招募管理。\n"
-                                 "請在 Agent Chrome 打開 https://vip.104.com.tw 登入後，到 Tools App 重新執行「104 週報」。",
+                    "--message", f"{reason}\n\n排程要抓 104 每週數據，但 Agent Chrome 沒有登入 104 招募管理，自動登入也沒成功。\n"
+                                 "請在 Agent Chrome 打開 https://vip.104.com.tw 登入後，到 Tools App 外場排程「【新人排程】104週報（排入 Mac）」重新執行。",
                     "--system", "", "--function", "", "--scan", ""], check=False)
 
 
@@ -343,7 +382,7 @@ def main() -> int:
         run(until, args.cdp_url, args.dry_run)
     except NeedLogin as exc:
         print(f"❌ {exc}", flush=True)
-        notify_login()
+        notify_login(str(exc))
         return 2
     return 0
 

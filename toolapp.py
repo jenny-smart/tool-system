@@ -4300,6 +4300,7 @@ SYSTEM_FUNCTIONS_BY_TYPE = {
         "【新人排程】104履歷-All",
         "【新人排程】104履歷回覆信",
         "【新人排程】104履歷-雙北專員",
+        "【新人排程】104週報（排入 Mac）",
         "【新人排程】新人訓練",
         "【新人排程】新人入職",
         "【新訓退款】新訓退訓實境費用",
@@ -4415,12 +4416,14 @@ FIELD_SCRIPT_MAP = {
 FIELD_ROSTER_RAISE_FUNCTIONS = ("【月排程】新增專員名冊", "【月排程】新增專員調薪")
 FIELD_RESUME_FUNCTIONS = ("【新人排程】104履歷-All", "【新人排程】104履歷回覆信", "【新人排程】104履歷-雙北專員")
 FIELD_PLACEHOLDER_FUNCTIONS = ("【新人排程】新人訓練", "【新人排程】新人入職")
+# 2026-11-26 Jenny：104 每週數據 → 台北名冊 104統計副表／104統計表（排程每週五 04:40；這裡手動排入 Mac Agent）
+FIELD_RECRUIT_104_WEEKLY = "【新人排程】104週報（排入 Mac）"
 FIELD_CLAIM_BATCH = "【專員請款】請款資料審核"
 FIELD_CLAIM_FUNCTIONS = (FIELD_CLAIM_BATCH,)
 FIELD_TRAINEE_FEE_FUNCTIONS = ("【新訓退款】新訓退訓實境費用", "【新訓退款】新訓退訓實境費用已退款")
 FIELD_EXTRA_FUNCTIONS = (
     FIELD_ROSTER_RAISE_FUNCTIONS + FIELD_CLAIM_FUNCTIONS + FIELD_RESUME_FUNCTIONS
-    + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS
+    + FIELD_PLACEHOLDER_FUNCTIONS + FIELD_TRAINEE_FEE_FUNCTIONS + (FIELD_RECRUIT_104_WEEKLY,)
 )
 
 # ── ★ 客服排程：功能 → --step 對應表 ───────────────────────
@@ -5711,6 +5714,19 @@ with date_col:
                 icon="🧾",
             )
 
+        elif selected_function == FIELD_RECRUIT_104_WEEKLY:
+            st.info(
+                "排入 Mac Agent：在 Agent Chrome（已登入 104 招募管理；被登出時用 Mac 本機密碼自動登入）抓 104 每週數據，"
+                "寫入台北名冊「104統計副表」A:L，再把副表 O12:U30 的結果接在「104統計表」最後一天後面（只限台北名冊，地區選項不影響）。"
+                "從統計表最後一天的隔天補到下面的日期，已寫過的日期不重複。",
+                icon="📊",
+            )
+            st.markdown('<div class="field-label">📆 補到哪一天</div>', unsafe_allow_html=True)
+            recruit_104_end_date = st.date_input(
+                "補到哪一天", value=today_date - timedelta(days=1), max_value=today_date - timedelta(days=1),
+                label_visibility="collapsed", key="recruit_104_end_date",
+            )
+
         elif selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
             st.info(
                 "工具包押金退款 H 欄（I 欄退款日期空白的列）＝新人實境＋新人實習（A 欄空白）J×K 加總（從基本資料、協議規章建檔年度開始找）＋工具包押金 B 欄；"
@@ -6864,6 +6880,14 @@ if run_clicked:
             try:
                 if selected_function == "【新訓退款】新訓退訓實境費用已退款":
                     add_log(f"✅ {run_trainee_field_fee_mark_refunded(area=selected_area_value)}", "success")
+
+                elif selected_function == FIELD_RECRUIT_104_WEEKLY:
+                    task = create_local_agent_task(
+                        "recruit104.weekly_stats",
+                        {"cdp_url": "http://127.0.0.1:9222", "end_date": recruit_104_end_date.strftime("%Y-%m-%d")},
+                        created_by=st.session_state.get("username", "Tool System"),
+                    )
+                    add_log(f"✅ 已排入 Mac Agent：104 週報（補到 {recruit_104_end_date:%Y/%m/%d}）task_id={task['task_id']}", "success")
 
                 elif selected_function in FIELD_TRAINEE_FEE_FUNCTIONS:
                     add_log(f"✅ {run_trainee_field_fee_update(area=selected_area_value)}", "success")
