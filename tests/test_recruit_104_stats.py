@@ -177,3 +177,11 @@ def test_friday_run_adds_week_total_on_thursday(monkeypatch):
     ranges = {d["range"]: d["values"] for d in body["data"]}
     assert ranges["'104統計表'!KA6"] == [["=SUM(JU13:KA13)"]]
     assert ranges["'104統計表'!JU11"] == [["五"]]
+
+
+def test_parse_sheet_date_serial_number_shown_as_month_day():
+    assert r.parse_sheet_date(46345) == date(2026, 11, 19)   # 統計表 JT12 顯示 11/19，實際值是日期
+    assert r.parse_sheet_date("2026/11/19") == date(2026, 11, 19)
+    assert r.parse_sheet_date("台北") is None and r.parse_sheet_date(72) is None
+    row = [""] * 13 + ["台北", 46080] + [""] * 264 + [46344, 46345]
+    assert r.last_date_column(row) == (280, date(2026, 11, 19))
