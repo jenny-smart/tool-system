@@ -49,6 +49,32 @@ def test_extended_report_crosses_year_and_preserves_existing_reports(tmp_path, m
     assert current_only["history"]["次次月"][1:] == saved["history"]["次次月"]
 
 
+def test_reserve_amount_uses_net_history_debit_including_zero():
+    from types import SimpleNamespace
+    from tools.scheduled_daily.reserve_deductions import resolve_deductions
+
+    pages = {
+        "1": '[{"orderNo":"LC100000","debit":-600},{"orderNo":"LC200000","debit":-300}]',
+        "2": '[{"orderNo":"LC100000","credit":100},{"orderNo":"LC200000","credit":300}]',
+    }
+
+    def get(url, *, params, **kwargs):
+        return SimpleNamespace(
+            text="storedValueList: " + pages.get(params["page"], "[]"),
+            raise_for_status=lambda: None,
+        )
+
+    items = [
+        {"member_id": "42", "order_no": "LC100000"},
+        {"member_id": "42", "order_no": "LC200000"},
+        {"member_id": "42", "order_no": "LC300000"},
+    ]
+    amounts = resolve_deductions(SimpleNamespace(get=get), items, "https://example.com/purchase", {})
+    assert amounts == {"LC100000": 500, "LC200000": 0}
+    assert report._reserve_amount({"total": 999, "__actual_reserve_deduction": amounts["LC200000"]}) == 0
+    assert report._reserve_amount({"total": 999}) == 999
+
+
 def test_configurable_month_ranges_cross_year():
     assert report.get_report_month_ranges("2026-11", "2027-02") == [
         ("2026/11", "2026-11-01", "2026-11-30"),

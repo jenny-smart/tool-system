@@ -2014,16 +2014,29 @@ def render_report() -> None:
         st.markdown("</div>", unsafe_allow_html=True)
 
     with report_tabs[2]:
-        st.caption("保留單的服務月份範圍為本月到次次次月。")
+        st.caption("更新保留單時，查詢明天起到次次次月底已付款、姓名包含「保留」的訂單。")
         if st.button("🔄 更新保留單", use_container_width=True):
             with st.spinner("正在更新各區保留單…"):
                 update_performance_report("reserve")
         if "reserve_details" in extended:
             st.caption(f"保留單更新時間 {extended.get('reserve_updated_at') or extended.get('updated_at')}")
+            if any("金額來源" not in row for row in extended["reserve_details"]):
+                st.warning("這批保留單是舊版金額，按「更新保留單」即可依實際儲值金扣款重新核對。")
+            reserve_summary = pd.DataFrame(extended.get("reserve", []))
+            reserve_details = pd.DataFrame(extended["reserve_details"])
+            regions = [
+                str(region) for region in reserve_summary.get("地區", [])
+                if region != "加總"
+            ]
+            selected_region = st.selectbox("地區", ["全部", *regions], key="performance_reserve_region")
+            if selected_region != "全部":
+                reserve_summary = reserve_summary[reserve_summary["地區"] == selected_region]
+                if not reserve_details.empty:
+                    reserve_details = reserve_details[reserve_details["地區"] == selected_region]
             st.markdown("#### 保留單業績")
-            render_html_table(pd.DataFrame(extended.get("reserve", [])))
+            render_html_table(reserve_summary)
             st.markdown("#### 保留單明細")
-            render_html_table(pd.DataFrame(extended["reserve_details"]), max_height=360)
+            render_html_table(reserve_details, max_height=360)
         else:
             st.info("按「更新保留單」即可讀取明細。")
 

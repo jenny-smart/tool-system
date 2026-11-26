@@ -28,6 +28,8 @@ except ModuleNotFoundError:  # 直接以腳本執行（cd 到此資料夾再 pyt
     _sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
     from tools.common.lemon_backend_login import login as backend_login
 
+from tools.scheduled_daily.reserve_deductions import resolve_deductions
+
 try:
     import streamlit as st
     HAS_STREAMLIT = True
@@ -524,7 +526,7 @@ def build_month_performance_summary(raw_df: pd.DataFrame, month_ranges) -> pd.Da
     return pd.DataFrame(rows, columns=cols)
 
 
-def build_reserve_summary(records, month_ranges) -> pd.DataFrame:
+def build_reserve_summary(records, month_ranges, amount_for_item=_purchase_amount) -> pd.DataFrame:
     cols = ["地區"]
     for label, _, _ in month_ranges:
         cols.extend([f"{label}保留單時數", f"{label}保留單業績"])
@@ -536,7 +538,7 @@ def build_reserve_summary(records, month_ranges) -> pd.DataFrame:
         for display_label, start, end in month_ranges:
             selected = [x for x in city_records if start <= str(x.get("date_clean") or x.get("service_date") or "")[:10] <= end]
             row[f"{display_label}保留單時數"] = sum(_purchase_person_hours(x) for x in selected)
-            row[f"{display_label}保留單業績"] = sum(_purchase_amount(x) for x in selected)
+            row[f"{display_label}保留單業績"] = sum(amount_for_item(x) for x in selected)
         rows.append(row)
     total = {"地區": "加總"}
     for col in cols[1:]:
@@ -1227,6 +1229,13 @@ def build_extended_performance(raw_df, month_ranges):
     return summary
 
 
+def _reserve_amount(item):
+    actual = item.get("__actual_reserve_deduction")
+    if actual is not None:
+        return actual
+    return safe_int(item.get("total") or item.get("amount") or item.get("price") or 0)
+
+
 def build_extended_reserve_details(records, month_ranges):
     start, end = month_ranges[0][1], month_ranges[-1][2]
     rows = []
@@ -1239,7 +1248,8 @@ def build_extended_reserve_details(records, month_ranges):
             "服務日期": date,
             "訂單編號": str(item.get("order_no") or item.get("orderNo") or item.get("purchase_id") or ""),
             "保留單時數": _purchase_person_hours(item),
-            "保留單業績": _purchase_amount(item),
+            "訂單金額": _reserve_amount(item),
+            "金額來源": "儲值金實際扣款" if item.get("__actual_reserve_deduction") is not None else "訂單列總金額（歷程未對到）",
         })
     return sorted(rows, key=lambda row: (row["服務日期"], row["地區"], row["訂單編號"]))
 
@@ -1275,7 +1285,7 @@ def save_extended_report(raw_df, order_rows, reserve_records, month_ranges, orde
                 orders={label: frame.to_dict("records") for label, frame in orders.items()},
             )
         if reserve_records is not None:
-            reserve = build_reserve_summary(reserve_records, month_ranges)
+            reserve = build_reserve_summary(reserve_records, month_ranges, amount_for_item=_reserve_amount)
             payload.update(
                 reserve_updated_at=timestamp, reserve=reserve.to_dict("records"),
                 reserve_details=build_extended_reserve_details(reserve_records, month_ranges),
@@ -1857,6 +1867,7 @@ def generate_sales_report(
         (next_month_label, n_start, n_end),
     ]
     four_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
+    reserve_detail_start = (now_dt() + timedelta(days=1)).strftime("%Y-%m-%d")
     if update_scope == "all":
         requested_month_ranges.extend(report_month_ranges)
     extra_month_labels = {month[0] for month in four_month_ranges[2:]}
@@ -1873,6 +1884,15 @@ def generate_sales_report(
     order_date_report_rows = []
     reserve_records = []
     city_errors = []
+
+    def upcoming_reserves(items):
+        return [
+            item for item in items
+            if "保留" in str(item.get("name") or item.get("customer_name") or "")
+            and _purchase_is_paid(item)
+            and not _purchase_is_cancelled(item)
+            and reserve_detail_start <= _purchase_service_date(item) <= four_month_ranges[-1][2]
+        ]
 
     enabled_cities = [city for city in CITY_ORDER if city in ACCOUNTS]
     missing_cities = [city for city in CITY_ORDER if city not in ACCOUNTS]
@@ -1989,13 +2009,25 @@ def generate_sales_report(
                     reserve_ranges = four_month_ranges if reserve_only else report_month_ranges
                     if update_scope == "all" and web_report:
                         reserve_ranges = sorted([*report_month_ranges, *four_month_ranges])
+                    reserve_filters = {"name": "保留", "purchase_status": "1"} if reserve_only else {}
                     reserve_items = _fetch_purchase_items(
                         session,
-                        clean_date_s=reserve_ranges[0][1],
+                        clean_date_s=reserve_detail_start if reserve_only else reserve_ranges[0][1],
                         clean_date_e=reserve_ranges[-1][2],
+                        **reserve_filters,
                     )
                     for item in reserve_items:
                         item["__city"] = city
+                    if web_report:
+                        if reserve_only:
+                            detail_items = [item for item in reserve_items if not _purchase_is_cancelled(item) and _purchase_is_reserve(item)]
+                        else:
+                            detail_items = upcoming_reserves(reserve_items)
+                        deductions = resolve_deductions(session, detail_items, PURCHASE_URL, HEADERS)
+                        for item in detail_items:
+                            order_no = str(item.get("order_no") or item.get("orderNo") or item.get("purchase_id") or "").strip()
+                            if order_no in deductions:
+                                item["__actual_reserve_deduction"] = deductions[order_no]
                     city_reserve_records.extend(reserve_items)
                 except Exception as extra_exc:
                     msg = f"{city} 新增報表資料抓取失敗：{extra_exc}"
@@ -2127,10 +2159,11 @@ def generate_sales_report(
 
     if persist_dashboard:
         if web_report and not missing_cities and not city_errors:
+            upcoming_paid_reserves = upcoming_reserves(reserve_records) if update_scope == "all" else None
             save_extended_report(
                 report_raw_df,
                 order_date_report_rows if update_scope == "all" else None,
-                reserve_records if update_scope == "all" else None,
+                upcoming_paid_reserves,
                 four_month_ranges, order_start_date, order_end_date,
             )
         persist_dashboard_payload(
