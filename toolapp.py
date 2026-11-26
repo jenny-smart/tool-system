@@ -1745,6 +1745,7 @@ def render_html_table(
 # ═══════════════════════════════════════════════════════════
 def render_report() -> None:
     latest_dir = Path("dashboard_data/latest")
+    extended_path = latest_dir.parent / "tool_report_extended" / "report.json"
     df4_path = latest_dir / "df4.csv"
     daily_path = latest_dir / "daily_df.csv"
     next_path = latest_dir / "next_month_daily_df.csv"
@@ -1827,7 +1828,7 @@ def render_report() -> None:
         selected_order_end = st.session_state.get("performance_order_end_date", default_order_end)
         selected_month_start = st.session_state.get("performance_report_start_month", default_start_date)
         selected_month_end = st.session_state.get("performance_report_end_month", default_end_date)
-        if scope in {"all", "order"} and selected_order_start > selected_order_end:
+        if scope in {"all", "order", "extended"} and selected_order_start > selected_order_end:
             st.error("訂購日期迄日不可早於起日")
             return
         if scope == "all" and selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
@@ -1839,10 +1840,11 @@ def render_report() -> None:
                 "current": "目前總表",
                 "order": "訂購日期付款彙總",
                 "all": "全部報表",
+                "extended": "擴充報表",
             }[scope]
             add_log(f"開始更新{label}", "info")
-            args = ["dashboard", "true", "--scope", scope]
-            if scope in {"all", "order"}:
+            args = ["dashboard", "false" if scope == "extended" else "true", "--scope", scope]
+            if scope in {"all", "order", "extended"}:
                 args.extend([
                     "--order-start-date", selected_order_start.strftime("%Y-%m-%d"),
                     "--order-end-date", selected_order_end.strftime("%Y-%m-%d"),
@@ -1912,7 +1914,14 @@ def render_report() -> None:
         st.warning("業績報表資料為空，請重新執行「日排程系統 → 業績報表」。")
         return
 
-    report_tabs = st.tabs(["📍 目前總表", "🧾 訂購日期付款彙總", "📅 月份業績統整"])
+    extended = {}
+    if extended_path.exists():
+        try:
+            extended = json.loads(extended_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            st.warning("擴充報表暫時無法讀取。")
+
+    report_tabs = st.tabs(["📍 目前總表", "🧾 訂購日期付款彙總", "📅 月份業績統整", "📈 擴充報表"])
 
     with report_tabs[0]:
         k1, k2, k3, k4 = st.columns(4)
@@ -2016,6 +2025,34 @@ def render_report() -> None:
         st.caption("保留單時數以『人數 × 每人服務時數』計算。")
         render_html_table(reserve_df)
         st.markdown("</div>", unsafe_allow_html=True)
+
+    with report_tabs[3]:
+        st.caption("擴充報表使用「訂購日期付款彙總」頁籤設定的訂購日期，服務月份為本月到次次次月。")
+        if st.button("🔄 更新擴充報表", use_container_width=True):
+            with st.spinner("正在更新業績、訂購日期與保留單…"):
+                update_performance_report("extended")
+        if not extended:
+            st.info("首次更新後會開始累積次次月與次次次月的每日業績。")
+        else:
+            st.caption(
+                f"最新更新 {extended['updated_at']}｜訂購日期 {extended['order_start']}～{extended['order_end']}"
+            )
+            st.markdown("#### 次次月與次次次月業績")
+            render_html_table(pd.DataFrame(extended["summary"]))
+            st.markdown("#### 月度追蹤")
+            periods = ("次次月", "次次次月")
+            tracking = st.tabs([f"{name}每日業績" for name in periods])
+            for tab, name in zip(tracking, periods):
+                with tab:
+                    render_html_table(pd.DataFrame(extended["history"][name]), max_height=360)
+            st.markdown("#### 訂購日期付款彙總")
+            for name, records in extended["orders"].items():
+                st.markdown(f"##### {name}")
+                render_html_table(pd.DataFrame(records), split_payment_header=True)
+            st.markdown("#### 保留單業績")
+            render_html_table(pd.DataFrame(extended["reserve"]))
+            st.markdown("#### 保留單明細")
+            render_html_table(pd.DataFrame(extended["reserve_details"]), max_height=360)
 
     with st.expander("🔎 Debug：查看 df2 / raw_df", expanded=False):
         debug_dir = Path("dashboard_data/latest")

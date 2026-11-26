@@ -1,7 +1,40 @@
 import pandas as pd
+import json
+from datetime import datetime
 
 from tools.scheduled_daily import performance_report as report
 from tools.scheduled_daily import performance_report_runner as runner
+
+
+def test_extended_report_crosses_year_and_preserves_existing_reports(tmp_path, monkeypatch):
+    output = tmp_path / "extended" / "report.json"
+    old_report = tmp_path / "df4.csv"
+    old_report.write_bytes(b"legacy")
+    monkeypatch.setattr(report, "EXTENDED_REPORT_FILE", output)
+    monkeypatch.setattr(report, "LATEST_DIR", str(tmp_path))
+    monkeypatch.setattr(report, "now_dt", lambda: datetime(2026, 11, 26, 10, 30))
+    ranges = report.get_order_service_month_ranges("2026-11-26")
+    raw = pd.DataFrame([
+        {"城市": "台北", "月份": "2027/01", "服務": "居家清潔", "收入類型": "現金收入",
+         "已付款": 100, "待付款": 50},
+        {"城市": "台中", "月份": "2027/01", "服務": "居家清潔", "收入類型": "現金收入",
+         "已付款": 50, "待付款": 0},
+    ])
+    orders = [{"地區": "台北", "付款狀態": "已付款", "月份金額": {"2027/02": 90}}]
+    reserves = [{"__city": "台北", "name": "系統保留單", "date_clean": "2027-02-12",
+                 "order_no": "reserve-1", "total": 500, "person": 2, "hour": 3}]
+    for _ in range(2):
+        report.save_extended_report(raw, orders, reserves, ranges, "2026-11-26", "2026-11-26")
+    saved = json.loads(output.read_text(encoding="utf-8"))
+    assert old_report.read_bytes() == b"legacy"
+    assert saved["summary"][0]["次次月加總"] == 150
+    assert saved["summary"][0]["次次月佔比"] == 0.75
+    assert saved["orders"]["已付款"][0]["2027/02已付款"] == 90
+    assert saved["reserve_details"][0]["保留單時數"] == 6
+    for period, month in (("次次月", "2027/01"), ("次次次月", "2027/02")):
+        rows = saved["history"][period]
+        assert [r["統計月份"] for r in rows] == [month, month]
+        assert len({r["id"] for r in rows}) == 2
 
 
 def test_configurable_month_ranges_cross_year():

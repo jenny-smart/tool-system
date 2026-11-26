@@ -3,9 +3,11 @@ import json
 import calendar
 import re
 import smtplib
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -118,6 +120,8 @@ DAILY_HISTORY_DIR = os.path.join(DASHBOARD_DIR, "daily_overview_history")
 NEXT_MONTH_HISTORY_DIR = os.path.join(DASHBOARD_DIR, "next_month_overview_history")
 MONTH_END_HISTORY_FILE = os.path.join(DAILY_HISTORY_DIR, "month_end_summary.csv")
 OUTPUT_LOG_FILE = os.path.join(DASHBOARD_DIR, "output_file_log.csv")
+EXTENDED_REPORT_FILE = Path(DASHBOARD_DIR) / "tool_report_extended" / "report.json"
+EXTENDED_PERIOD_NAMES = ("次次月", "次次次月")
 
 
 def log(msg: str):
@@ -1122,6 +1126,7 @@ def _build_period_overview_df(
     latest_filename: str,
     period_label: str,
     run_dt: Optional[datetime] = None,
+    historical_rows: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     cols = [
         "id",
@@ -1145,14 +1150,9 @@ def _build_period_overview_df(
     row_id = f"{now_obj.strftime('%Y%m%d%H%M%S')}_{period_label}"
     date_text = now_obj.strftime("%Y/%m/%d %H:%M:%S")
 
-    if period_label == "次月":
-        y, m = now_obj.year, now_obj.month
-        if m == 12:
-            stat_month = f"{y + 1}/01"
-        else:
-            stat_month = f"{y}/{m + 1:02d}"
-    else:
-        stat_month = now_obj.strftime("%Y/%m")
+    period_names = ("本月", "次月", *EXTENDED_PERIOD_NAMES)
+    offset = period_names.index(period_label)
+    stat_month = get_order_service_month_ranges(now_obj, month_count=offset + 1)[offset][0]
 
     def get_val(city, col):
         try:
@@ -1163,7 +1163,9 @@ def _build_period_overview_df(
         except Exception:
             return 0
 
-    if os.path.exists(latest_path):
+    if historical_rows is not None:
+        old_df = historical_rows.copy()
+    elif os.path.exists(latest_path):
         try:
             old_df = pd.read_csv(latest_path, encoding="utf-8-sig")
         except Exception:
@@ -1206,6 +1208,85 @@ def _build_period_overview_df(
 
     log(f"✅ {period_label}統計報表完成，筆數 = {len(out)}")
     return out[cols]
+
+
+def build_extended_performance(raw_df, month_ranges):
+    summary = pd.DataFrame({"城市": [*CITY_ORDER, "加總"]})
+    for period, (month, _, _) in zip(EXTENDED_PERIOD_NAMES, month_ranges[2:4]):
+        # Reuse the same service classification and totals as the existing main report.
+        if raw_df.empty:
+            summary[f"{period}加總"] = 0
+            summary[f"{period}佔比"] = 0.0
+        else:
+            monthly_raw = raw_df.assign(月份=raw_df["月份"].map({month: "本月"}))
+            monthly = build_region4_df(build_region2_df(monthly_raw))
+            monthly = monthly[["城市", "本月加總", "本月佔比"]].rename(
+                columns={"本月加總": f"{period}加總", "本月佔比": f"{period}佔比"}
+            )
+            summary = summary.merge(monthly, on="城市", validate="one_to_one")
+    return summary
+
+
+def build_extended_reserve_details(records, month_ranges):
+    start, end = month_ranges[0][1], month_ranges[-1][2]
+    rows = []
+    for item in records:
+        date = _purchase_service_date(item)
+        if not start <= date <= end or _purchase_is_cancelled(item) or not _purchase_is_reserve(item):
+            continue
+        rows.append({
+            "地區": item["__city"],
+            "服務日期": date,
+            "訂單編號": str(item.get("order_no") or item.get("orderNo") or item.get("purchase_id") or ""),
+            "保留單時數": _purchase_person_hours(item),
+            "保留單業績": _purchase_amount(item),
+        })
+    return sorted(rows, key=lambda row: (row["服務日期"], row["地區"], row["訂單編號"]))
+
+
+def save_extended_report(raw_df, order_rows, reserve_records, month_ranges, order_start, order_end):
+    import fcntl
+    from uuid import uuid4
+
+    summary = build_extended_performance(raw_df, month_ranges)
+    orders = build_order_date_summaries_from_report_rows(order_rows, month_ranges)
+    reserve = build_reserve_summary(reserve_records, month_ranges)
+    details = build_extended_reserve_details(reserve_records, month_ranges)
+    run_dt = now_dt()
+    path = EXTENDED_REPORT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        history = {}
+        for name in EXTENDED_PERIOD_NAMES:
+            old_rows = previous.get("history", {}).get(name, [])
+            history_frame = _build_period_overview_df(
+                summary, "dashboard", f"{name}加總", f"{name}佔比", "",
+                name, run_dt=run_dt, historical_rows=pd.DataFrame(),
+            )
+            newest = history_frame.to_dict("records")[0]
+            newest["id"] += f"-{uuid4().hex}"
+            history[name] = [newest, *old_rows]
+
+        payload = {
+            "updated_at": run_dt.strftime("%Y/%m/%d %H:%M:%S"),
+            "order_start": order_start,
+            "order_end": order_end,
+            "summary": summary.to_dict("records"),
+            "history": history,
+            "orders": {label: frame.to_dict("records") for label, frame in orders.items()},
+            "reserve": reserve.to_dict("records"),
+            "reserve_details": details,
+        }
+        fd, temp_path = tempfile.mkstemp(dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, allow_nan=False)
+            os.replace(temp_path, path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
 
 def build_daily_overview_df(df4: pd.DataFrame, source: str = "dashboard", run_dt: Optional[datetime] = None) -> pd.DataFrame:
@@ -1753,8 +1834,9 @@ def generate_sales_report(
 ):
     log("🔥 開始業績報表")
 
-    if update_scope not in {"all", "current"}:
-        raise ValueError("更新範圍只支援 all 或 current")
+    if update_scope not in {"all", "current", "extended"}:
+        raise ValueError("不支援的業績報表更新範圍")
+    extended = update_scope == "extended"
 
     ensure_dirs()
     (m_start, m_end), (n_start, n_end) = get_ranges()
@@ -1772,7 +1854,10 @@ def generate_sales_report(
         (current_month_label, m_start, m_end),
         (next_month_label, n_start, n_end),
     ]
-    if update_scope == "all":
+    if extended:
+        report_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
+        requested_month_ranges = report_month_ranges[2:]
+    elif update_scope == "all":
         requested_month_ranges.extend(report_month_ranges)
     for month_range in requested_month_ranges:
         if month_range[0] not in seen_months:
@@ -1841,7 +1926,7 @@ def generate_sales_report(
                         rows = parse_html(res.text, payment_status=status)
                         city_row_count += len(rows)
 
-                        if not rows:
+                        if not rows and not extended:
                             log(f"⚠️ {city} / {label} / status={status} / kw={kw} 沒抓到資料，HTML 長度={len(res.text)}")
                             try:
                                 debug_dir = os.path.join(DASHBOARD_DIR, "_debug_html")
@@ -1882,7 +1967,7 @@ def generate_sales_report(
                             city_merged[key]["已付款"] += row["已付款"]
                             city_merged[key]["待付款"] += row["待付款"]
 
-            if update_scope == "all":
+            if update_scope in {"all", "extended"}:
                 try:
                     for payment_status in (0, 1):
                         city_order_date_rows.append(
@@ -1909,7 +1994,7 @@ def generate_sales_report(
                     errors.append(msg)
                     log(f"⚠️ {msg}")
 
-            if city_row_count == 0:
+            if city_row_count == 0 and not extended:
                 msg = f"{city}：登入成功，但沒有抓到任何表格資料"
                 errors.append(msg)
                 log(f"⚠️ {msg}")
@@ -1931,6 +2016,14 @@ def generate_sales_report(
             city_errors.extend(errors)
 
     report_raw_df = pd.DataFrame(merged.values())
+    if extended:
+        if missing_cities or city_errors or len(order_date_report_rows) != 2 * len(CITY_ORDER):
+            raise RuntimeError("擴充報表抓取不完整，已保留前次資料")
+        save_extended_report(
+            report_raw_df, order_date_report_rows, reserve_records,
+            report_month_ranges, order_start_date, order_end_date,
+        )
+        return {"error": None}
     raw_df = report_raw_df.copy()
     if not raw_df.empty:
         raw_df.loc[raw_df["月份"] == current_month_label, "月份"] = "本月"
