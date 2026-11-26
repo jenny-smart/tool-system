@@ -1,8 +1,9 @@
 """新年度盤點與切換（toolapp「新年度盤點與切換」用）。
 
 三個動作：
-1. 新年度盤點：年度參數是否已是新年度、「年度根目錄設定」每列新年度檔是否都找得到、
-   哪些列可以切換根目錄，以及「換年檢查清單」還沒完成的項目。只讀（另把找檔結果寫入 M 欄）。
+1. 新年度盤點：生成新年度各功能是否已執行（生成新年度Log）、年度參數是否已是新年度、
+   「年度根目錄設定」每列新年度檔是否都找得到、哪些列可以切換根目錄、「換年檢查清單」還沒完成的項目、
+   「程式寫死ID盤點」標需重設的項目、四系統新年度執行Log分頁。只讀（另把找檔結果寫入 M 欄）。
 2. 一鍵更新年度參數：主控表「參數設定」裡跟年度有關的設定值（年度彙總列代號、名冊預設年度）改成新年度。
 3. 一鍵切換根目錄：「年度根目錄設定」K 欄仍是「比對」、且新年度檔都找得到、L 欄沒有不一致的列，
    一次改成「根目錄」；有缺檔或不一致的列不動，並列出原因。
@@ -16,6 +17,9 @@ from tools.common import year_roots
 
 PARAM_SHEET = "參數設定"
 CHECKLIST_SHEET = "換年檢查清單"
+GENERATE_LOG_SHEET = "生成新年度Log"
+HARDCODED_SHEET = "程式寫死ID盤點"
+LOG_REPOS = ("tool-system", "orders-system", "order-system", "salary-system")
 
 # 參數設定裡要跟著換年度的項目：(執行系統, 執行功能, 設定項目)
 YEAR_PARAM_ITEMS: List[Tuple[str, str, str]] = [
@@ -135,10 +139,66 @@ def open_checklist_items(values: List[List[str]]) -> List[Dict[str, str]]:
     return items
 
 
+# ---------- 生成新年度 ----------
+def generate_status(values: List[List[str]], year: int, functions: List[str]) -> List[Dict[str, str]]:
+    """依「生成新年度Log」（A 執行時間、B 新年度、C 功能、E 模式）判斷每個生成功能是否已對 year 執行。"""
+    latest: Dict[Tuple[str, str], str] = {}
+    for row in values[1:]:
+        if _cell(row, 1) != str(year):
+            continue
+        key = (_cell(row, 2), _cell(row, 4))
+        latest[key] = max(latest.get(key, ""), _cell(row, 0))
+    result = []
+    for name in functions:
+        done = latest.get((name, "執行"))
+        preview = latest.get((name, "預覽"))
+        if done:
+            status, note = "已執行", f"最後執行 {done}"
+        elif preview:
+            status, note = "只預覽", f"最後預覽 {preview}，尚未執行"
+        else:
+            status, note = "未執行", f"「{GENERATE_LOG_SHEET}」沒有 {year} 的執行紀錄"
+        result.append({"功能": name, "狀態": status, "說明": note})
+    return result
+
+
+# ---------- 程式寫死ID ----------
+def hardcoded_todo(values: List[List[str]]) -> List[Dict[str, str]]:
+    """「程式寫死ID盤點」I 欄（總表年度處理）標「需重設」的列。"""
+    items = []
+    for row in values[1:]:
+        if "需重設" not in _cell(row, 8):
+            continue
+        items.append({"項目": f"{_cell(row, 0)} {_cell(row, 3)}:{_cell(row, 4)}（{_cell(row, 2)}）",
+                      "說明": "；".join(x for x in (_cell(row, 8), _cell(row, 9)) if x)})
+    return items
+
+
+# ---------- 執行Log ----------
+def missing_log_tabs(titles: List[str], year: int) -> List[str]:
+    have = set(titles)
+    return [f"{repo}執行Log-{year}" for repo in LOG_REPOS if f"{repo}執行Log-{year}" not in have]
+
+
+def _read(sheets, spreadsheet_id: str, rng: str) -> List[List[str]]:
+    try:
+        return sheets.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id, range=rng).execute().get("values", [])
+    except Exception as exc:  # 分頁不存在等：盤點照常進行，該區塊顯示讀取失敗
+        print(f"⚠ 讀取 {rng} 失敗：{exc}", flush=True)
+        return []
+
+
 # ---------- 整合盤點 ----------
-def inventory(sheets, spreadsheet_id: str, roots: year_roots.YearRoots, year: int
-              ) -> Tuple[str, List[Dict[str, str]]]:
+def inventory(sheets, spreadsheet_id: str, roots: year_roots.YearRoots, year: int,
+              generate_functions: Optional[List[str]] = None) -> Tuple[str, List[Dict[str, str]]]:
     rows: List[Dict[str, str]] = []
+
+    gen_rows = generate_status(_read(sheets, spreadsheet_id, f"'{GENERATE_LOG_SHEET}'!A1:H"),
+                               year, list(generate_functions or []))
+    gen_todo = [g for g in gen_rows if g["狀態"] != "已執行"]
+    for g in gen_rows:
+        rows.append({"區塊": "生成新年度", "項目": g["功能"], "狀態": g["狀態"], "說明": g["說明"]})
 
     params = sheets.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id, range=f"'{PARAM_SHEET}'!A1:E"
@@ -165,12 +225,28 @@ def inventory(sheets, spreadsheet_id: str, roots: year_roots.YearRoots, year: in
         rows.append({"區塊": "換年檢查清單", "項目": f"{item['序號']}. {item['項目']}",
                      "狀態": "未完成", "說明": "；".join(x for x in (item["何時做"], item["備註"]) if x)})
 
+    hard = hardcoded_todo(_read(sheets, spreadsheet_id, f"'{HARDCODED_SHEET}'!A1:J"))
+    for h in hard:
+        rows.append({"區塊": "程式寫死ID", "項目": h["項目"], "狀態": "需重設", "說明": h["說明"]})
+
+    try:
+        meta = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id,
+                                         fields="sheets.properties.title").execute()
+        titles = [x["properties"]["title"] for x in meta.get("sheets", [])]
+        missing_logs = missing_log_tabs(titles, year)
+    except Exception as exc:
+        print(f"⚠ 讀取主控表分頁清單失敗：{exc}", flush=True)
+        missing_logs = []
+    for title in missing_logs:
+        rows.append({"區塊": "執行Log", "項目": title, "狀態": "尚未建立",
+                     "說明": f"{year}/1/1 後各系統第一次執行時自動建立；1 月仍沒有請檢查該系統"})
+
     count = lambda verdict: sum(1 for p in plan if p["判斷"] == verdict)  # noqa: E731
     missing_files = sum(1 for r in check_rows if r["結果"].startswith("找不到"))
     message = (
-        f"{year} 新年度盤點：參數設定待更新 {len(params_todo)} 項；"
+        f"{year} 新年度盤點：生成新年度未執行 {len(gen_todo)} 項；參數設定待更新 {len(params_todo)} 項；"
         f"年度根目錄 {len(plan)} 列（已是根目錄 {count('已是根目錄')}、可切換 {count('可切換')}、"
         f"不切換 {count('不切換')}），新年度找不到檔 {missing_files} 個（明細寫入 {year_roots.CHECK_COLUMN} 欄）；"
-        f"換年檢查清單未完成 {len(open_items)} 項"
+        f"換年檢查清單未完成 {len(open_items)} 項；程式寫死ID需重設 {len(hard)} 項；執行Log未建立 {len(missing_logs)} 張"
     )
     return message, rows

@@ -3947,7 +3947,8 @@ def run_new_year_console(action, year, on_progress=None):
     roots = year_roots.YearRoots(values, get_drive_service, writer=None, log=log)
 
     if action == "新年度盤點":
-        return new_year_console.inventory(sheets, master_id, roots, year)
+        return new_year_console.inventory(sheets, master_id, roots, year,
+                                          generate_functions=list(NEW_YEAR_FUNCTION_ROWS))
 
     if action.startswith("一鍵切換根目錄"):
         plan = new_year_console.plan_root_switch(roots, year)
@@ -5897,7 +5898,8 @@ with date_col:
         )
         st.radio("動作", NEW_YEAR_CONSOLE_ACTIONS, key="new_year_console_action")
         st.caption(
-            "建議順序：①「新年度盤點」看參數設定、年度根目錄每列新年度檔是否都找得到、換年檢查清單未完成項目"
+            "建議順序：①「新年度盤點」看生成新年度各功能是否已執行、參數設定、年度根目錄每列新年度檔是否都找得到、"
+            "換年檢查清單未完成項目、程式寫死ID需重設項目、四系統新年度執行Log"
             "（找檔結果寫入「年度根目錄設定」M 欄，不改設定）；"
             "② 1/1 執行「一鍵更新年度參數」，把參數設定的年度彙總列代號、名冊預設年度改成新年度；"
             "③ 全部確認後執行「一鍵切換根目錄」：K 欄是「比對」、新年度檔都找得到、L 欄沒有不一致的列改為「根目錄」，"

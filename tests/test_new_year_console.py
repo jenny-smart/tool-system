@@ -118,3 +118,48 @@ def test_read_param_respects_disabled(monkeypatch):
     assert nyc.read_param("外場排程系統", "外場排班統計表", "名冊預設年度", "2026") == "2027"
     assert nyc.read_param("共用", "測試", "停用項", "D") == "D"
     assert nyc.read_param("沒有", "這", "列", "D") == "D"
+
+
+def test_generate_status_uses_latest_run_for_year():
+    values = [
+        ["執行時間", "新年度", "功能", "區域", "模式"],
+        ["2026/10/09 7:17:17", "2027", "財務報表", "全區", "執行"],
+        ["2026/10/18 03:51:17", "2027", "內勤表單", "高雄", "預覽"],
+        ["2025/10/01 1:00:00", "2026", "內勤薪資", "全區", "執行"],
+    ]
+    status = {g["功能"]: g for g in nyc.generate_status(values, 2027, ["財務報表", "內勤表單", "內勤薪資"])}
+    assert status["財務報表"]["狀態"] == "已執行"
+    assert status["內勤表單"]["狀態"] == "只預覽"
+    assert status["內勤薪資"]["狀態"] == "未執行"
+
+
+def test_hardcoded_todo_and_missing_logs():
+    values = [
+        ["repo", "系統", "功能", "檔案", "行", "類型", "ID", "程式碼", "總表年度處理", "總表檔名"],
+        ["tool-system", "財務", "富邦", "sheet_filter.py", "283", "ID", "x", "", "需重設（改依地區）", "ATM"],
+        ["tool-system", "財務", "春酒", "spring.py", "41", "ID", "y", "", "改讀年度根目錄設定", ""],
+    ]
+    assert [h["項目"] for h in nyc.hardcoded_todo(values)] == ["tool-system sheet_filter.py:283（富邦）"]
+    titles = ["tool-system執行Log-2027", "salary-system執行Log-2026"]
+    assert nyc.missing_log_tabs(titles, 2027) == [
+        "orders-system執行Log-2027", "order-system執行Log-2027", "salary-system執行Log-2027"]
+
+
+def test_inventory_smoke(monkeypatch):
+    class Sheets(FakeSheets):
+        def get(self, spreadsheetId, range=None, fields=None):
+            if fields:
+                return _Req({"sheets": [{"properties": {"title": "tool-system執行Log-2027"}}]})
+            return super().get(spreadsheetId, range)
+
+    monkeypatch.setattr(year_roots, "check_year", lambda roots, year: [])
+    monkeypatch.setattr(year_roots, "write_check_column", lambda *a, **k: None)
+    sheets = Sheets({
+        nyc.PARAM_SHEET: PARAMS,
+        nyc.GENERATE_LOG_SHEET: [["執行時間", "新年度", "功能", "區域", "模式"],
+                                 ["2026/10/09", "2027", "財務報表", "全區", "執行"]],
+    })
+    message, rows = nyc.inventory(sheets, "master", _Roots([]), 2027, ["財務報表", "內勤薪資"])
+    assert "生成新年度未執行 1 項" in message and "執行Log未建立 3 張" in message
+    blocks = {r["區塊"] for r in rows}
+    assert {"生成新年度", "參數設定", "執行Log"} <= blocks
