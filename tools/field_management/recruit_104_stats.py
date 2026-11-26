@@ -9,6 +9,9 @@
 - 104 每次最多查 7 天：從統計表最後一天的隔天開始，每 7 天一段補到昨天
   （提前執行或 Mac 沒開機漏跑時，下一次會自動補齊，不會跳日也不會重複）。
 - 檔案：config 的 spreadsheet_ids.roster.台北，換成資料日期所屬年度的檔案（年度切換後自動用新年度檔）。
+- 換年（2026-11-26 Jenny）：新年度名冊是 10 月從前一年度複製的，統計表還留著前一年的日期欄。
+  寫新年度檔時若最後一天還是前一年，先清掉 O 欄起的舊日期欄（第 6～30 列的值，格式保留），從 1/1 開始；
+  1 月前兩週執行時，先把前一年度檔補到 12/31 再寫新年度檔。
 
 手動：python -m tools.field_management.recruit_104_stats [--end YYYY-MM-DD] [--dry-run]
 """
@@ -239,16 +242,27 @@ def _execute(request):
     return execute_with_retry(request)
 
 
-def target_spreadsheet(day: date, log: Callable[[str], None]) -> str:
+def target_spreadsheet(day: date, log: Callable[[str], None]) -> tuple[str, int]:
+    """回傳 (試算表ID, 檔案年度)；新年度名冊還沒建立時先寫前一年度檔。"""
     from tools.field_management.roster_raise import year_file_id
     from tools.field_management.staff_profile import get_spreadsheet_id, load_system_config
 
     configured = get_spreadsheet_id(load_system_config(SYSTEM_NAME), "roster", AREA)
     try:
-        return year_file_id(configured, day.strftime("%Y%m"))
+        return year_file_id(configured, day.strftime("%Y%m")), day.year
     except FileNotFoundError:
         log(f"⚠️ {day.year} 年度台北名冊還沒建立，先寫 {day.year - 1} 年度檔案")
-        return year_file_id(configured, f"{day.year - 1}12")
+        return year_file_id(configured, f"{day.year - 1}12"), day.year - 1
+
+
+def needs_year_reset(last_day: date, file_year: int) -> bool:
+    """新年度名冊是從前一年度複製的：統計表最後一天還是前一年 → 清掉舊日期欄，從 1/1 開始。"""
+    return last_day.year < file_year
+
+
+def reset_range(last_col: int) -> str:
+    """要清的舊資料：O 欄起到最後一個日期欄，第 6 列（週合計）～第 30 列；格式保留。"""
+    return f"'{STATS_SHEET}'!{col_letter(DATE_HEADER_COL + 1)}6:{col_letter(last_col)}{LAST_ROW}"
 
 
 def sheet_id_of(sheets, spreadsheet_id: str, title: str) -> int:
@@ -276,11 +290,11 @@ def write_stats_columns(sheets, spreadsheet_id: str, columns: list[tuple[int, da
         return
     first, last = columns[0][0], columns[-1][0]
     sid = sheet_id_of(sheets, spreadsheet_id, STATS_SHEET)
-    # 格式（百分比、框線、粗體）照前面一週的 7 欄
+    # 格式（百分比、框線、粗體）照前面一週的 7 欄；新年度第一欄前面沒有日期欄時沿用原格式
     width = last - first + 1
     src_left = max(DATE_HEADER_COL + 1, first - MAX_DAYS)
     requests = []
-    for i in range(width):
+    for i in range(width if first > src_left else 0):
         src = src_left + (i % min(MAX_DAYS, first - src_left))
         requests.append({"copyPaste": {
             "source": {"sheetId": sid, "startRowIndex": 5, "endRowIndex": LAST_ROW,
@@ -288,7 +302,8 @@ def write_stats_columns(sheets, spreadsheet_id: str, columns: list[tuple[int, da
             "destination": {"sheetId": sid, "startRowIndex": 5, "endRowIndex": LAST_ROW,
                             "startColumnIndex": first + i, "endColumnIndex": first + i + 1},
             "pasteType": "PASTE_FORMAT"}})
-    _execute(sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}))
+    if requests:
+        _execute(sheets.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={"requests": requests}))
 
     data = []
     for col, day, values in columns:
@@ -316,11 +331,22 @@ def week_summary(columns: list[tuple[int, date, list[Any]]]) -> str:
 
 # ── 主流程 ──────────────────────────────────────
 
+YEAR_START_CATCHUP_DAYS = 14  # 1 月前兩週執行時，先把前一年度檔補到 12/31
+
+
 def run(until: date, cdp_url: str, dry_run: bool = False, log: Callable[[str], None] = print) -> dict:
+    """補到 until。年初先把前一年度檔補到 12/31，再寫新年度檔（新年度檔從 1/1 開始）。"""
+    year_start = date(until.year, 1, 1)
+    if (until - year_start).days < YEAR_START_CATCHUP_DAYS:
+        _run_file(year_start - timedelta(days=1), cdp_url, dry_run, log)
+    return _run_file(until, cdp_url, dry_run, log)
+
+
+def _run_file(until: date, cdp_url: str, dry_run: bool = False, log: Callable[[str], None] = print) -> dict:
     from tools.field_management.staff_profile import get_sheets_service
 
     sheets = get_sheets_service()
-    spreadsheet_id = target_spreadsheet(until, log)
+    spreadsheet_id, file_year = target_spreadsheet(until, log)
     head = _execute(sheets.spreadsheets().values().batchGet(
         spreadsheetId=spreadsheet_id,
         ranges=[f"'{STATS_SHEET}'!{WEEKDAY_ROW}:{WEEKDAY_ROW}", f"'{STATS_SHEET}'!{FIRST_ROW}:{FIRST_ROW}"],
@@ -329,12 +355,20 @@ def run(until: date, cdp_url: str, dry_run: bool = False, log: Callable[[str], N
     weekday_row = (ranges[0].get("values") or [[]])[0]
     date_row = (ranges[1].get("values") or [[]])[0]
     last_col, last_day = last_date_column(date_row)
+    if needs_year_reset(last_day, file_year):
+        log(f"{STATS_SHEET} 還是 {last_day.year} 年的資料（最後 {_ymd(last_day)}），"
+            f"{file_year} 年度檔改從 {file_year}/01/01 開始")
+        if not dry_run:
+            _execute(sheets.spreadsheets().values().clear(
+                spreadsheetId=spreadsheet_id, range=reset_range(last_col), body={}))
+        weekday_row = list(weekday_row[:DATE_HEADER_COL + 1])
+        last_col, last_day = DATE_HEADER_COL, date(file_year - 1, 12, 31)
     log(f"{STATS_SHEET} 最後一天：{_ymd(last_day)}（{col_letter(last_col)} 欄）；補到 {_ymd(until)}")
 
     plan = windows(last_day, until)
     if not plan:
         log("✅ 已是最新，沒有要補的日期")
-        return {"written": 0}
+        return {"written": 0, "spreadsheet_id": spreadsheet_id}
 
     written_total = []
     next_col, done_until = last_col + 1, last_day

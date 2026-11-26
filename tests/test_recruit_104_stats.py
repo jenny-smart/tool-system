@@ -90,7 +90,7 @@ def test_target_spreadsheet_reads_taipei_roster_from_real_config(monkeypatch):
 
     seen = []
     monkeypatch.setattr(roster_raise, "year_file_id", lambda fid, ym, drive=None: seen.append((fid, ym)) or fid)
-    assert r.target_spreadsheet(date(2026, 11, 25), print) == "1hsmwhA36I0BPXQ8d6OYGGn8R_SETQe4vTR_FB5Sp8Uc"
+    assert r.target_spreadsheet(date(2026, 11, 25), print) == ("1hsmwhA36I0BPXQ8d6OYGGn8R_SETQe4vTR_FB5Sp8Uc", 2026)
     assert seen == [("1hsmwhA36I0BPXQ8d6OYGGn8R_SETQe4vTR_FB5Sp8Uc", "202611")]
 
 
@@ -244,3 +244,38 @@ def test_auto_login_failures_raise_need_login(monkeypatch, tmp_path):
         r.auto_login(_Page(email=""))
     with pytest.raises(r.NeedLogin, match="自動登入失敗"):
         r.auto_login(_Page(ok=False))
+
+
+def test_new_year_file_with_last_year_dates_restarts_on_jan_1(monkeypatch):
+    """2027 名冊是從 2026 複製的（統計表最後 2026/10/07）：清舊日期欄，從 O 欄 2027/01/01 開始。"""
+    from tools.field_management import roster_raise, staff_profile
+
+    date_row = [""] * 13 + ["台北"] + [""] * 200 + ["2026/10/07"]
+    fake = _FakeSheets(date_row, [""] * 14 + ["一"] * 201)
+    monkeypatch.setattr(staff_profile, "get_sheets_service", lambda: fake)
+    monkeypatch.setattr(roster_raise, "year_file_id", lambda fid, ym, drive=None: f"file{ym[:4]}")
+    monkeypatch.setattr(roster_raise, "execute_with_retry", lambda req: req.execute())
+    monkeypatch.setattr(r, "fetch_weekly", lambda cdp, s, e: (META, [JOB]))
+    seen_files = []
+    real = r._run_file
+
+    def spy(until, *a, **k):
+        seen_files.append(until)
+        return real(until, *a, **k)
+
+    monkeypatch.setattr(r, "_run_file", spy)
+    out = r.run(date(2027, 1, 7), "cdp", log=print)
+    assert seen_files == [date(2026, 12, 31), date(2027, 1, 7)]   # 年初先補前一年度檔到 12/31
+    clears = [c[1]["range"] for c in fake.calls if c[0] == "clear" and "104統計表" in c[1]["range"]]
+    assert clears[-1] == "'104統計表'!O6:HG30"
+    body = [c for c in fake.calls if c[0] == "batchUpdate" and "valueInputOption" in c[1]["body"]][-1][1]["body"]
+    ranges = {d["range"]: d["values"] for d in body["data"]}
+    assert ranges["'104統計表'!O12:O30"][0] == ["2027/01/01"]
+    assert ranges["'104統計表'!O11"] == [["五"]]              # 星期列也重寫
+    assert out["written"] == 7
+
+
+def test_needs_year_reset():
+    assert r.needs_year_reset(date(2026, 10, 7), 2027)
+    assert not r.needs_year_reset(date(2027, 1, 3), 2027)
+    assert not r.needs_year_reset(date(2026, 12, 31), 2026)   # 新年度檔還沒建、先寫前一年度檔時不清
