@@ -10,8 +10,8 @@ cron-job.org 每 10 分鐘叫一次 Cloud Schedule Router（scripts/cloud_schedu
   C 功能名稱    顯示用
   D 時間        HH:MM，多個用逗號（08:00,11:00,16:30）；區間＋每小時：04:00~23:00 每小時
                 時間要是 10 分鐘的倍數（Router 每 10 分鐘一次）
-  E 頻率        每日／每週／每月／單月／雙月
-  F 日期／星期  每週：一,二,…,日；每月：1,5,10、18-25、月底
+  E 頻率        每日／每週／每月／單月／雙月／每年
+  F 日期／星期  每週：一,二,…,日；每月：1,5,10、18-25、月底；每年：12/25、12/25-12/31（月/日）
   G 遇例假日    照跑／略過（例假日不跑）／提前（每月的日期、每週的星期遇例假日改到前一個工作日）
   H 執行方式    直接執行／盤點後自動排入／盤點後等確認（只盤點＋行事曆提醒，你確認後到 Tools App 執行）
   I 備註
@@ -120,6 +120,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "unassigned_staff_record": ("jenny-smart/order-system:unassigned-staff-record-schedule.yml", {}),
     # 2026-11-22 Jenny：08:30～17:30 每小時 order-system「未配班成立保留單」（區間暫訂 2027/01/22～02/04）
     "unassigned_reserve_create": ("jenny-smart/order-system:unassigned-reserve-schedule.yml", {}),
+    # 2026-11-26 Jenny：每年 12/25 起把隔年政府辦公日曆補進 order-system config/taiwan_work_calendar.json
+    "work_calendar_yearly": ("jenny-smart/order-system:work-calendar-yearly.yml", {}),
     # 2026-11-11 Jenny：官網評價不滿意→清潔客訴（07:00）、預約下次服務→評價預約（07:20）
     "rating_complaint_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "complaint"}),
     "rating_booking_daily": ("jenny-smart/order-system:rating-schedule.yml", {"job": "booking"}),
@@ -247,7 +249,11 @@ DEFAULT_ROWS: list[list] = [
     # 2026-11-22 Jenny：08:30～17:30 每小時，未配班成立檸檬保留單
     [True, "unassigned_reserve_create", "未配班成立保留單（台北，暫訂 2027/01/22～02/04）", "08:30~17:30 每小時", "每日", "", "照跑", MODE_DIRECT,
      "程式在 order-system（unassigned-reserve-schedule.yml）；有未配班就成立檸檬保留單，同時段合成一張、時數取最短；"
-     "區間改 order-system repository variable UNASSIGNED_RESERVE_START／END"],
+     "區間與停止日在 order-system「未配班檢查 → ① 成立保留單 → ⏰ 自動排程設定」設定（存主控表參數設定）"],
+    # 2026-11-26 Jenny：每年 12/25 自動把隔年辦公日曆（國定假日、補班）設定好；已有就不動，抓不到隔天再試
+    [True, "work_calendar_yearly", "辦公日曆：補上隔年（政府行政機關辦公日曆表）", "09:00", "每年", "12/25-12/31", "照跑",
+     MODE_DIRECT, "程式在 order-system（work-calendar-yearly.yml）；補進 config/taiwan_work_calendar.json 並同步 tool-system；"
+     "已有隔年就不動，所以 12/26 以後只是確認"],
     [True, "change_order_scan", "【整合執行】清潔異動盤點", "09:30", "每週", "二,五", "照跑", MODE_CONFIRM,
      "盤點後等確認：只建提醒；改成盤點後自動排入會直接排給 Mac Agent"],
     [True, "fubon_pending_check", "【整合執行】富邦內部請款盤點", "10:30", "每週", "二,五", "照跑", MODE_CONFIRM,
@@ -410,8 +416,10 @@ def parse_row(row: list, record=None) -> Optional[Rule]:
         rule.errors.append(f"這個功能已停用（{RETIRED_KEYS[key]}），請刪除這列")
     elif key not in FUNCTIONS:
         rule.errors.append(f"不認得的功能代號：{key}")
-    if rule.freq not in ("每日", "每週", "每月", "單月", "雙月"):
-        rule.errors.append(f"頻率要是 每日／每週／每月／單月／雙月：{rule.freq}")
+    if rule.freq not in ("每日", "每週", "每月", "單月", "雙月", "每年"):
+        rule.errors.append(f"頻率要是 每日／每週／每月／單月／雙月／每年：{rule.freq}")
+    elif rule.freq == "每年" and rule.days and not year_dates(rule.days, 2000):
+        rule.errors.append(f"每年的日期要寫 月/日，例如 12/25 或 12/25-12/31：{rule.days}")
     if rule.holiday not in (HOLIDAY_RUN, HOLIDAY_SKIP, HOLIDAY_EARLIER):
         rule.errors.append(f"遇例假日要是 照跑／略過／提前：{rule.holiday}")
     if rule.mode not in MODES:
@@ -445,6 +453,24 @@ def month_days(text: str, day: date) -> list[int]:
             result.extend(d for d in range(int(m.group(1)), int(m.group(2)) + 1) if d <= last)
         elif part.isdigit() and int(part) <= last:
             result.append(int(part))
+    return sorted(set(result))
+
+
+def year_dates(text: str, year: int) -> list[date]:
+    """每年的日期：「12/25」「12/25-12/31」「12/25-31」，逗號分隔。"""
+    result = []
+    for part in re.split(r"[,，、]", text or ""):
+        m = re.match(r"^\s*(\d{1,2})/(\d{1,2})\s*(?:[-~～－]\s*(?:(\d{1,2})/)?(\d{1,2}))?\s*$", part)
+        if not m:
+            continue
+        try:
+            start = date(year, int(m.group(1)), int(m.group(2)))
+            end = date(year, int(m.group(3) or m.group(1)), int(m.group(4))) if m.group(4) else start
+        except ValueError:
+            continue
+        while start <= end:
+            result.append(start)
+            start += timedelta(days=1)
     return sorted(set(result))
 
 
@@ -482,6 +508,14 @@ def target_date(rule: Rule, day: date, is_workday: Callable[[date], bool]) -> Op
             if target.weekday() in weekdays and previous_workday(target, is_workday) == day:
                 return target
         return None
+    if rule.freq == "每年":
+        if rule.holiday == HOLIDAY_EARLIER:
+            for target in year_dates(rule.days, day.year) + year_dates(rule.days, day.year + 1):
+                if target >= day and previous_workday(target, is_workday) == day:
+                    return target
+            return None
+        hit = day in year_dates(rule.days, day.year)
+        return day if hit and (rule.holiday == HOLIDAY_RUN or is_workday(day)) else None
     if rule.freq in ("每日", "每週"):
         hit = rule.freq == "每日" or day.weekday() in _weekdays(rule.days)
         return day if hit and (rule.holiday == HOLIDAY_RUN or is_workday(day)) else None
