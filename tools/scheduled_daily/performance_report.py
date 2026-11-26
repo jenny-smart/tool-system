@@ -1248,37 +1248,38 @@ def save_extended_report(raw_df, order_rows, reserve_records, month_ranges, orde
     import fcntl
     from uuid import uuid4
 
-    summary = build_extended_performance(raw_df, month_ranges)
-    orders = build_order_date_summaries_from_report_rows(order_rows, month_ranges)
-    reserve = build_reserve_summary(reserve_records, month_ranges)
-    details = build_extended_reserve_details(reserve_records, month_ranges)
+    summary = build_extended_performance(raw_df, month_ranges) if raw_df is not None else None
     run_dt = now_dt()
     path = EXTENDED_REPORT_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         previous = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        history = {}
-        for name in EXTENDED_PERIOD_NAMES:
-            old_rows = previous.get("history", {}).get(name, [])
-            history_frame = _build_period_overview_df(
-                summary, "dashboard", f"{name}加總", f"{name}佔比", "",
-                name, run_dt=run_dt, historical_rows=pd.DataFrame(),
+        payload = dict(previous)
+        timestamp = run_dt.strftime("%Y/%m/%d %H:%M:%S")
+        if summary is not None:
+            history = dict(previous.get("history", {}))
+            for name in EXTENDED_PERIOD_NAMES:
+                history_frame = _build_period_overview_df(
+                    summary, "dashboard", f"{name}加總", f"{name}佔比", "",
+                    name, run_dt=run_dt, historical_rows=pd.DataFrame(),
+                )
+                newest = history_frame.to_dict("records")[0]
+                newest["id"] += f"-{uuid4().hex}"
+                history[name] = [newest, *history.get(name, [])]
+            payload.update(updated_at=timestamp, summary=summary.to_dict("records"), history=history)
+        if order_rows is not None:
+            orders = build_order_date_summaries_from_report_rows(order_rows, month_ranges)
+            payload.update(
+                order_updated_at=timestamp, order_start=order_start, order_end=order_end,
+                orders={label: frame.to_dict("records") for label, frame in orders.items()},
             )
-            newest = history_frame.to_dict("records")[0]
-            newest["id"] += f"-{uuid4().hex}"
-            history[name] = [newest, *old_rows]
-
-        payload = {
-            "updated_at": run_dt.strftime("%Y/%m/%d %H:%M:%S"),
-            "order_start": order_start,
-            "order_end": order_end,
-            "summary": summary.to_dict("records"),
-            "history": history,
-            "orders": {label: frame.to_dict("records") for label, frame in orders.items()},
-            "reserve": reserve.to_dict("records"),
-            "reserve_details": details,
-        }
+        if reserve_records is not None:
+            reserve = build_reserve_summary(reserve_records, month_ranges)
+            payload.update(
+                reserve_updated_at=timestamp, reserve=reserve.to_dict("records"),
+                reserve_details=build_extended_reserve_details(reserve_records, month_ranges),
+            )
         fd, temp_path = tempfile.mkstemp(dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -1834,9 +1835,10 @@ def generate_sales_report(
 ):
     log("🔥 開始業績報表")
 
-    if update_scope not in {"all", "current", "extended"}:
+    if update_scope not in {"all", "current", "reserve"}:
         raise ValueError("不支援的業績報表更新範圍")
-    extended = update_scope == "extended"
+    reserve_only = update_scope == "reserve"
+    web_report = trigger == "dashboard" and persist_dashboard
 
     ensure_dirs()
     (m_start, m_end), (n_start, n_end) = get_ranges()
@@ -1854,17 +1856,20 @@ def generate_sales_report(
         (current_month_label, m_start, m_end),
         (next_month_label, n_start, n_end),
     ]
-    if extended:
-        report_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
-        requested_month_ranges = report_month_ranges[2:]
-    elif update_scope == "all":
+    four_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
+    if update_scope == "all":
         requested_month_ranges.extend(report_month_ranges)
+    extra_month_labels = {month[0] for month in four_month_ranges[2:]}
+    if reserve_only:
+        requested_month_ranges = []
+    elif web_report:
+        requested_month_ranges.extend(four_month_ranges[2:])
     for month_range in requested_month_ranges:
         if month_range[0] not in seen_months:
             seen_months.add(month_range[0])
             fetch_month_ranges.append(month_range)
     merged = {}
-    order_month_ranges = get_order_service_month_ranges(m_start, month_count=4)
+    order_month_ranges = four_month_ranges
     order_date_report_rows = []
     reserve_records = []
     city_errors = []
@@ -1926,7 +1931,7 @@ def generate_sales_report(
                         rows = parse_html(res.text, payment_status=status)
                         city_row_count += len(rows)
 
-                        if not rows and not extended:
+                        if not rows and (not web_report or label not in extra_month_labels):
                             log(f"⚠️ {city} / {label} / status={status} / kw={kw} 沒抓到資料，HTML 長度={len(res.text)}")
                             try:
                                 debug_dir = os.path.join(DASHBOARD_DIR, "_debug_html")
@@ -1967,9 +1972,9 @@ def generate_sales_report(
                             city_merged[key]["已付款"] += row["已付款"]
                             city_merged[key]["待付款"] += row["待付款"]
 
-            if update_scope in {"all", "extended"}:
+            if update_scope == "all" or reserve_only:
                 try:
-                    for payment_status in (0, 1):
+                    for payment_status in (() if reserve_only else (0, 1)):
                         city_order_date_rows.append(
                             _fetch_order_date_report_row(
                                 session,
@@ -1981,10 +1986,13 @@ def generate_sales_report(
                             )
                         )
 
+                    reserve_ranges = four_month_ranges if reserve_only else report_month_ranges
+                    if update_scope == "all" and web_report:
+                        reserve_ranges = sorted([*report_month_ranges, *four_month_ranges])
                     reserve_items = _fetch_purchase_items(
                         session,
-                        clean_date_s=report_month_ranges[0][1],
-                        clean_date_e=report_month_ranges[-1][2],
+                        clean_date_s=reserve_ranges[0][1],
+                        clean_date_e=reserve_ranges[-1][2],
                     )
                     for item in reserve_items:
                         item["__city"] = city
@@ -1994,7 +2002,7 @@ def generate_sales_report(
                     errors.append(msg)
                     log(f"⚠️ {msg}")
 
-            if city_row_count == 0 and not extended:
+            if city_row_count == 0 and not reserve_only:
                 msg = f"{city}：登入成功，但沒有抓到任何表格資料"
                 errors.append(msg)
                 log(f"⚠️ {msg}")
@@ -2016,12 +2024,11 @@ def generate_sales_report(
             city_errors.extend(errors)
 
     report_raw_df = pd.DataFrame(merged.values())
-    if extended:
-        if missing_cities or city_errors or len(order_date_report_rows) != 2 * len(CITY_ORDER):
-            raise RuntimeError("擴充報表抓取不完整，已保留前次資料")
+    if reserve_only:
+        if missing_cities or city_errors:
+            raise RuntimeError("保留單明細抓取不完整，已保留前次資料")
         save_extended_report(
-            report_raw_df, order_date_report_rows, reserve_records,
-            report_month_ranges, order_start_date, order_end_date,
+            None, None, reserve_records, four_month_ranges, None, None,
         )
         return {"error": None}
     raw_df = report_raw_df.copy()
@@ -2119,6 +2126,13 @@ def generate_sales_report(
     error_msg = None if not city_errors else " / ".join(city_errors)
 
     if persist_dashboard:
+        if web_report and not missing_cities and not city_errors:
+            save_extended_report(
+                report_raw_df,
+                order_date_report_rows if update_scope == "all" else None,
+                reserve_records if update_scope == "all" else None,
+                four_month_ranges, order_start_date, order_end_date,
+            )
         persist_dashboard_payload(
             df4, daily_df, next_month_daily_df, month_end_df, email_html,
             order_date_df=order_date_df,

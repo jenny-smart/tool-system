@@ -1814,7 +1814,7 @@ def render_report() -> None:
               📊 業績報表
             </div>
             <div style="font-size:0.85rem;font-weight:800;color:#94a3b8;letter-spacing:5px;margin-top:4px;">
-              LATEST DATA · CURRENT / NEXT MONTH / SNAPSHOT
+              LATEST DATA · CURRENT / NEXT 3 MONTHS / SNAPSHOT
             </div>
           </div>
         </div>
@@ -1828,7 +1828,7 @@ def render_report() -> None:
         selected_order_end = st.session_state.get("performance_order_end_date", default_order_end)
         selected_month_start = st.session_state.get("performance_report_start_month", default_start_date)
         selected_month_end = st.session_state.get("performance_report_end_month", default_end_date)
-        if scope in {"all", "order", "extended"} and selected_order_start > selected_order_end:
+        if scope in {"all", "order"} and selected_order_start > selected_order_end:
             st.error("訂購日期迄日不可早於起日")
             return
         if scope == "all" and selected_month_start.replace(day=1) > selected_month_end.replace(day=1):
@@ -1840,11 +1840,11 @@ def render_report() -> None:
                 "current": "目前總表",
                 "order": "訂購日期付款彙總",
                 "all": "全部報表",
-                "extended": "擴充報表",
+                "reserve": "保留單明細",
             }[scope]
             add_log(f"開始更新{label}", "info")
-            args = ["dashboard", "false" if scope == "extended" else "true", "--scope", scope]
-            if scope in {"all", "order", "extended"}:
+            args = ["dashboard", "false" if scope == "reserve" else "true", "--scope", scope]
+            if scope in {"all", "order"}:
                 args.extend([
                     "--order-start-date", selected_order_start.strftime("%Y-%m-%d"),
                     "--order-end-date", selected_order_end.strftime("%Y-%m-%d"),
@@ -1873,7 +1873,8 @@ def render_report() -> None:
 
     with top_cols[1]:
         if st.button("🔄 更新目前總表", use_container_width=True):
-            update_performance_report("current")
+            with st.spinner("正在更新本月到次次次月業績…"):
+                update_performance_report("current")
 
     with top_cols[2]:
         if st.button("🔄 更新全部報表", use_container_width=True):
@@ -1919,32 +1920,66 @@ def render_report() -> None:
         try:
             extended = json.loads(extended_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            st.warning("擴充報表暫時無法讀取。")
+            st.warning("次次月、次次次月與保留單的已存資料暫時無法讀取。")
 
-    report_tabs = st.tabs(["📍 目前總表", "🧾 訂購日期付款彙總", "📅 月份業績統整", "📈 擴充報表"])
+    periods = ("次次月", "次次次月")
+    additional = pd.DataFrame(extended.get("summary", []))
+    extra_columns = [f"{name}{field}" for name in periods for field in ("加總", "佔比")]
+    summary = df4.copy()
+    if not additional.empty:
+        summary = summary.merge(additional, on="城市", how="left", validate="one_to_one")
+        position = summary.columns.get_loc("次月佔比") + 1
+        old_columns = [col for col in summary if col not in extra_columns]
+        summary = summary[old_columns[:position] + extra_columns + old_columns[position:]]
+
+    order_tables = {
+        "待付款": order_date_df,
+        "已付款": order_date_paid_df,
+        "待付款＋已付款": order_date_combined_df,
+    }
+    previous_order_at = str(extended.get("order_updated_at") or extended.get("updated_at") or "").replace("/", "-")
+    saved_order_at = str(meta.get("order_date_updated_at") or meta.get("updated_at") or "").replace("/", "-")
+    use_saved_four_month_orders = bool(
+        extended.get("orders") and (order_date_df.empty or previous_order_at > saved_order_at)
+    )
+    if use_saved_four_month_orders:
+        order_tables = {name: pd.DataFrame(rows) for name, rows in extended["orders"].items()}
+
+    report_tabs = st.tabs(["📍 目前總表", "🧾 訂購日期付款彙總", "📅 保留單明細", "📊 月份業績統整"])
 
     with report_tabs[0]:
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
         with k1:
             st.metric("本月加總", get_total(df4, "本月加總"))
         with k2:
             st.metric("次月加總", get_total(df4, "次月加總"))
         with k3:
-            st.metric("本月家電加總", get_total(df4, "本月家電加總"))
+            st.metric("次次月加總", get_total(summary, "次次月加總") if not additional.empty else "—")
         with k4:
+            st.metric("次次次月加總", get_total(summary, "次次次月加總") if not additional.empty else "—")
+        with k5:
+            st.metric("本月家電加總", get_total(df4, "本月家電加總"))
+        with k6:
             st.metric("儲值金", get_total(df4, "儲值金"))
 
         st.markdown('<div class="card"><div class="card-title">📍 目前總表</div>', unsafe_allow_html=True)
-        render_html_table(df4)
+        render_html_table(summary)
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="card"><div class="card-title">📈 目前月度追蹤</div>', unsafe_allow_html=True)
-        tracking_tabs = st.tabs(["當月每日業績", "次月每日業績", "月底快照"])
+        tracking_tabs = st.tabs(["當月每日業績", "次月每日業績", "次次月每日業績", "次次次月每日業績", "月底快照"])
         with tracking_tabs[0]:
             render_html_table(daily_df, max_height=360)
         with tracking_tabs[1]:
             render_html_table(next_df, max_height=360)
-        with tracking_tabs[2]:
+        for tab, name in zip(tracking_tabs[2:4], periods):
+            with tab:
+                history = pd.DataFrame(extended.get("history", {}).get(name, []))
+                if history.empty:
+                    st.info("按「更新目前總表」即可開始累積每日業績。")
+                else:
+                    render_html_table(history, max_height=360)
+        with tracking_tabs[4]:
             render_html_table(month_end_df, max_height=360)
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1971,15 +2006,28 @@ def render_report() -> None:
         ):
             with st.spinner("正在平行更新各區訂購日期付款彙總…"):
                 update_performance_report("order")
-        st.markdown("#### 待付款")
-        render_html_table(order_date_df, split_payment_header=True)
-        st.markdown("#### 已付款")
-        render_html_table(order_date_paid_df, split_payment_header=True)
-        st.markdown("#### 待付款＋已付款")
-        render_html_table(order_date_combined_df, split_payment_header=True)
+        if use_saved_four_month_orders:
+            st.caption(f"目前顯示的訂購日期 {extended['order_start']}～{extended['order_end']}")
+        for name, table in order_tables.items():
+            st.markdown(f"#### {name}")
+            render_html_table(table, split_payment_header=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     with report_tabs[2]:
+        st.caption("保留單的服務月份範圍為本月到次次次月。")
+        if st.button("🔄 更新保留單", use_container_width=True):
+            with st.spinner("正在更新各區保留單…"):
+                update_performance_report("reserve")
+        if "reserve_details" in extended:
+            st.caption(f"保留單更新時間 {extended.get('reserve_updated_at') or extended.get('updated_at')}")
+            st.markdown("#### 保留單業績")
+            render_html_table(pd.DataFrame(extended.get("reserve", [])))
+            st.markdown("#### 保留單明細")
+            render_html_table(pd.DataFrame(extended["reserve_details"]), max_height=360)
+        else:
+            st.info("按「更新保留單」即可讀取明細。")
+
+    with report_tabs[3]:
         st.markdown('<div class="card"><div class="card-title">📅 月份業績統整</div>', unsafe_allow_html=True)
         month_cols = st.columns(2)
         with month_cols[0]:
@@ -2025,34 +2073,6 @@ def render_report() -> None:
         st.caption("保留單時數以『人數 × 每人服務時數』計算。")
         render_html_table(reserve_df)
         st.markdown("</div>", unsafe_allow_html=True)
-
-    with report_tabs[3]:
-        st.caption("擴充報表使用「訂購日期付款彙總」頁籤設定的訂購日期，服務月份為本月到次次次月。")
-        if st.button("🔄 更新擴充報表", use_container_width=True):
-            with st.spinner("正在更新業績、訂購日期與保留單…"):
-                update_performance_report("extended")
-        if not extended:
-            st.info("首次更新後會開始累積次次月與次次次月的每日業績。")
-        else:
-            st.caption(
-                f"最新更新 {extended['updated_at']}｜訂購日期 {extended['order_start']}～{extended['order_end']}"
-            )
-            st.markdown("#### 次次月與次次次月業績")
-            render_html_table(pd.DataFrame(extended["summary"]))
-            st.markdown("#### 月度追蹤")
-            periods = ("次次月", "次次次月")
-            tracking = st.tabs([f"{name}每日業績" for name in periods])
-            for tab, name in zip(tracking, periods):
-                with tab:
-                    render_html_table(pd.DataFrame(extended["history"][name]), max_height=360)
-            st.markdown("#### 訂購日期付款彙總")
-            for name, records in extended["orders"].items():
-                st.markdown(f"##### {name}")
-                render_html_table(pd.DataFrame(records), split_payment_header=True)
-            st.markdown("#### 保留單業績")
-            render_html_table(pd.DataFrame(extended["reserve"]))
-            st.markdown("#### 保留單明細")
-            render_html_table(pd.DataFrame(extended["reserve_details"]), max_height=360)
 
     with st.expander("🔎 Debug：查看 df2 / raw_df", expanded=False):
         debug_dir = Path("dashboard_data/latest")

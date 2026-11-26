@@ -36,6 +36,18 @@ def test_extended_report_crosses_year_and_preserves_existing_reports(tmp_path, m
         assert [r["統計月份"] for r in rows] == [month, month]
         assert len({r["id"] for r in rows}) == 2
 
+    report.save_extended_report(None, None, [], ranges, None, None)
+    reserve_only = json.loads(output.read_text(encoding="utf-8"))
+    assert reserve_only["reserve_details"] == []
+    assert reserve_only["orders"] == saved["orders"]
+    assert reserve_only["history"] == saved["history"]
+
+    report.save_extended_report(raw, None, None, ranges, None, None)
+    current_only = json.loads(output.read_text(encoding="utf-8"))
+    assert current_only["orders"] == saved["orders"]
+    assert current_only["reserve_details"] == []
+    assert current_only["history"]["次次月"][1:] == saved["history"]["次次月"]
+
 
 def test_configurable_month_ranges_cross_year():
     assert report.get_report_month_ranges("2026-11", "2027-02") == [
