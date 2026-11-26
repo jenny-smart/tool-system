@@ -1666,11 +1666,46 @@ def run_script(script_path: str, args: list[str] | None = None) -> str:
 
     return f"{display_name} 執行完成"
 
+def _report_month_labels(base=None) -> dict:
+    """本月/次月/次次月/次次次月 → 2026/11、2026/12…（依報表產生日計算，預設今天）。"""
+    if isinstance(base, str):
+        try:
+            base = datetime.strptime(base[:10].replace("/", "-"), "%Y-%m-%d")
+        except ValueError:
+            base = None
+    base = base or datetime.now(TW_TZ)
+    labels = {}
+    for offset, name in enumerate(["本月", "次月", "次次月", "次次次月", "次次次次月"]):
+        idx = base.month - 1 + offset
+        labels[name] = f"{base.year + idx // 12}/{idx % 12 + 1:02d}"
+    return labels
+
+
+def _split_month_header(col, month_labels=None, sub_renames=None):
+    """欄名拆成（月份, 副標題）：「2026/12待付款」→（2026/12, 待付款）、
+    「次月加總」→（2026/12, 加總）；拆不了回傳 None。"""
+    text = str(col)
+    match = re.fullmatch(r"(\d{4}/\d{2})(.+)", text)
+    parts = match.groups() if match else None
+    if parts is None and month_labels:
+        for name in sorted(month_labels, key=len, reverse=True):  # 長的先比，避免「次次月」被「次月」吃掉
+            if text.startswith(name) and len(text) > len(name):
+                parts = (month_labels[name], text[len(name):])
+                break
+    if parts is None:
+        return None
+    return parts[0], (sub_renames or {}).get(parts[1], parts[1])
+
+
 def render_html_table(
     df: pd.DataFrame,
     max_height: int | None = None,
     split_payment_header: bool = False,
+    month_labels: dict | None = None,
+    sub_renames: dict | None = None,
 ) -> None:
+    """split_payment_header=True 或給 month_labels 時用雙重表頭：上方月份、下方副標題，
+    相鄰同月份的欄位合併成一格月份表頭；地區、儲值金等其他欄位上下兩列合併。"""
     if df.empty:
         st.info("尚無資料")
         return
@@ -1706,24 +1741,30 @@ def render_html_table(
 
     height_style = f'max-height:{int(max_height)}px;overflow:auto;' if max_height else ''
     out = [f'<div class="report-table-wrap" style="{height_style}"><table class="report-table"><thead><tr>']
-    split_headers = []
-    for col in show.columns:
-        match = re.fullmatch(r"(\d{4}/\d{2})(待付款|已付款|待付款＋已付款)", str(col))
-        split_headers.append(match.groups() if match else None)
-
-    use_split_header = split_payment_header and any(split_headers)
-    for col, parts in zip(show.columns, split_headers):
-        if use_split_header and parts:
-            out.append(f"<th>{html.escape(parts[0])}</th>")
-        else:
+    split_headers = [_split_month_header(col, month_labels, sub_renames) for col in show.columns]
+    use_split_header = (split_payment_header or bool(month_labels) or bool(sub_renames)) and any(split_headers)
+    sub_headers = []
+    cols = list(show.columns)
+    i = 0
+    while i < len(cols):
+        parts = split_headers[i]
+        if not use_split_header or not parts:
             rowspan = ' rowspan="2"' if use_split_header else ""
-            out.append(f"<th{rowspan}>{html.escape(str(col))}</th>")
+            out.append(f"<th{rowspan}>{html.escape(str(cols[i]))}</th>")
+            i += 1
+            continue
+        j = i
+        while j < len(cols) and split_headers[j] and split_headers[j][0] == parts[0]:
+            sub_headers.append(split_headers[j][1])
+            j += 1
+        colspan = f' colspan="{j - i}"' if j - i > 1 else ""
+        out.append(f"<th{colspan}>{html.escape(parts[0])}</th>")
+        i = j
 
     if use_split_header:
         out.append("</tr><tr>")
-        for parts in split_headers:
-            if parts:
-                out.append(f"<th>{html.escape(parts[1])}</th>")
+        for sub in sub_headers:
+            out.append(f"<th>{html.escape(sub)}</th>")
 
     out.append("</tr></thead><tbody>")
 
@@ -1965,7 +2006,8 @@ def render_report() -> None:
             st.metric("儲值金", get_total(df4, "儲值金"))
 
         st.markdown('<div class="card"><div class="card-title">📍 目前總表</div>', unsafe_allow_html=True)
-        render_html_table(summary)
+        # 雙重表頭：上方月份（依報表產生日），下方加總／佔比／家電加總。
+        render_html_table(summary, month_labels=_report_month_labels(meta.get("updated_at")))
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown('<div class="card"><div class="card-title">📈 目前月度追蹤</div>', unsafe_allow_html=True)
@@ -2036,7 +2078,11 @@ def render_report() -> None:
                 if not reserve_details.empty:
                     reserve_details = reserve_details[reserve_details["地區"] == selected_region]
             st.markdown("#### 保留單業績")
-            render_html_table(reserve_summary)
+            # 雙重表頭：上方月份，下方保留時數／保留單金額。
+            render_html_table(
+                reserve_summary,
+                sub_renames={"保留單時數": "保留時數", "保留單業績": "保留單金額"},
+            )
             st.markdown("#### 保留單明細")
             render_html_table(reserve_details, max_height=360)
         else:
