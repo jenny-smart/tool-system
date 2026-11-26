@@ -21,6 +21,26 @@ import streamlit as st
 
 TW_TZ = ZoneInfo("Asia/Taipei")
 
+# 表格與卡片樣式放在這裡，op-system、tool-system 顯示一致（tool-system 主 CSS 也有同樣規則，重複無妨）。
+REPORT_CSS = """
+<style>
+  .card { background:white; border-radius:20px; padding:16px 20px; margin-bottom:14px;
+          box-shadow:0 4px 12px rgba(0,32,48,0.06); border:1px solid #e2edf2; }
+  .card-title { font-size:0.96rem; font-weight:800; color:#164a5e; margin-bottom:12px;
+                padding-bottom:8px; border-bottom:1.5px solid #e7f0f5; }
+  .report-table-wrap { overflow-x:auto; border:1px solid #e2e8f0; border-radius:16px; background:white; }
+  table.report-table { width:100%; border-collapse:separate; border-spacing:0; font-size:0.95rem; }
+  .report-table th { background:#f8fafc; color:#64748b; font-weight:800; text-align:center; padding:13px 14px;
+                     border-bottom:1px solid #e2e8f0; border-right:1px solid #e2e8f0; white-space:nowrap; }
+  .report-table td { padding:12px 14px; border-bottom:1px solid #edf2f7; border-right:1px solid #edf2f7;
+                     color:#1e293b; background:white; white-space:nowrap; }
+  .report-table td.num { text-align:right !important; font-variant-numeric:tabular-nums; }
+  .report-table td.text { text-align:left; }
+  .report-table tr.total-row td { background:#f8fafc; font-weight:900; }
+  .report-table tr:hover td { background:#f1f5f9; }
+</style>
+"""
+
 
 def _report_month_labels(base=None) -> dict:
     """本月/次月/次次月/次次次月 → 2026/11、2026/12…（依報表產生日計算，預設今天）。"""
@@ -152,6 +172,8 @@ def render_report(run_script, add_log=None, on_back=None, standalone_link: str |
     if add_log is None:
         def add_log(message, level="info"):
             return None
+
+    st.markdown(REPORT_CSS, unsafe_allow_html=True)
     latest_dir = Path("dashboard_data/latest")
     extended_path = latest_dir.parent / "tool_report_extended" / "report.json"
     df4_path = latest_dir / "df4.csv"
