@@ -1671,7 +1671,11 @@ from tools.performance_report_ui import report_page as _performance_report_page
 
 def render_report() -> None:
     """業績報表頁：畫面在 tools/performance_report_ui/report_page.py（由 op-system 同步，請改 op-system）。"""
-    _performance_report_page.render_report(
+    # Streamlit 不會自動重新載入子模組；op-system 同步新版後，每次都重新載入以免跑到舊版。
+    import importlib
+
+    page = importlib.reload(_performance_report_page)
+    page.render_report(
         run_script=run_script,
         add_log=add_log,
         on_back=lambda: set_view("main"),
