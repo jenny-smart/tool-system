@@ -31,29 +31,34 @@ def render(log: Callable[[str], None], username: str = "") -> None:
 
     st.caption("盤點清潔異動表的待扣／待返儲值金、VIP待退券（未歸零）；VIP待退券會先讀後台餘額，"
                "列出歸零要扣的每一筆金額。確認後按「執行」在雲端送出，不需要 Mac。")
-    area = st.selectbox("地區", SUPPORTED_AREAS, key=f"{PREFIX}_area")
+    picked = st.multiselect("地區", SUPPORTED_AREAS, default=list(SUPPORTED_AREAS), key=f"{PREFIX}_areas")
+    areas = [area for area in SUPPORTED_AREAS if area in picked]
     state_key = f"{PREFIX}_items"
-    if st.button("🔍 盤點", key=f"{PREFIX}_scan", type="primary"):
-        try:
-            with st.spinner("讀取清潔異動表、後台餘額中…"):
-                st.session_state[state_key] = (area, adjustment.plan_adjustments(area, log=log))
-            reset_select_all(PREFIX)
-        except Exception as exc:
-            st.error(f"盤點失敗：{exc}")
+    if st.button("🔍 盤點", key=f"{PREFIX}_scan", type="primary", disabled=not areas):
+        scanned_items: list[dict] = []
+        with st.spinner("讀取清潔異動表、後台餘額中…"):
+            for area in areas:
+                try:
+                    scanned_items += [{**item, "area": area} for item in adjustment.plan_adjustments(area, log=log)]
+                except Exception as exc:
+                    st.error(f"{area} 盤點失敗：{exc}")
+        st.session_state[state_key] = (areas, scanned_items)
+        reset_select_all(PREFIX)
     scanned = st.session_state.get(state_key)
     if not scanned:
         return
-    if scanned[0] != area:
+    if list(scanned[0]) != areas:
         st.info("地區已變更，請重新按「盤點」。")
         return
     items = scanned[1]
     if not items:
-        st.success(f"{area}目前沒有待異動的儲值金。")
+        st.success(f"{'、'.join(areas)}目前沒有待異動的儲值金。")
         return
     st.markdown(f"共 **{len(items)}** 筆（已預設打勾）。執行時若 VIP待退券的餘額跟盤點時不同，該列會略過。")
     override, editor_key = select_all_controls(PREFIX)
     table = pd.DataFrame([{
         RUN_COLUMN: checked(True, override),
+        "地區": item["area"],
         "列數": item["sheet_row"], "狀態": item["status"], "訂單編號": item["order_no"],
         "異動": item["action"], "要送出的金額": _steps_text(item), "目前餘額": _balance_text(item),
         "備註": item["note"],
@@ -64,19 +69,23 @@ def render(log: Callable[[str], None], username: str = "") -> None:
     selected = [item for item, flag in zip(items, edited[RUN_COLUMN]) if flag]
     st.caption(f"已勾選 {len(selected)} 筆")
     if st.button("▶️ 執行勾選的異動", key=f"{PREFIX}_run", disabled=not selected):
-        with st.spinner("後台送出中…"):
-            try:
-                result = adjustment.execute_plan(area, selected, log=log)
-            except Exception as exc:
-                st.error(f"執行失敗：{exc}")
-                return
         st.session_state.pop(state_key, None)
-        message = f"完成 {result['done']} 筆、略過 {result['skipped']} 筆、失敗 {result['failed']} 筆"
-        (st.success if not result["failed"] else st.warning)(message)
-        try:
-            from tools.finance_management.execution_log import log_execution
+        for area in areas:
+            area_items = [{k: v for k, v in item.items() if k != "area"} for item in selected if item["area"] == area]
+            if not area_items:
+                continue
+            with st.spinner(f"{area} 後台送出中…"):
+                try:
+                    result = adjustment.execute_plan(area, area_items, log=log)
+                except Exception as exc:
+                    st.error(f"{area} 執行失敗：{exc}")
+                    continue
+            message = f"{area}：完成 {result['done']} 筆、略過 {result['skipped']} 筆、失敗 {result['failed']} 筆"
+            (st.success if not result["failed"] else st.warning)(message)
+            try:
+                from tools.finance_management.execution_log import log_execution
 
-            log_execution("【檸檬後台】異動儲值金", area, "完成" if not result["failed"] else "部分失敗",
-                          f"{message}（{username or 'Tools App'}）")
-        except Exception:
-            pass
+                log_execution("【檸檬後台】異動儲值金", area, "完成" if not result["failed"] else "部分失敗",
+                              f"{message}（{username or 'Tools App'}）")
+            except Exception:
+                pass
