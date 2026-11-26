@@ -78,7 +78,10 @@ OFFICE_KEEP_SHEETS = [
     "信用卡", "ATM", "清潔異動", "專員收現", "專員回報", "專員請款", "清潔客訴",
     "客訴統計表", "專員個人資料", "偏遠區域個案服務規範與流程", "報價單", "工具組內容",
     "專員跨區表", "裝細評估", "搬家打包評估", "系數參數", "外場排程系統執行Log", "週末提醒",
+    # 2026-11-26 Jenny：以下也要保留（office_rollover.KEEP_EXTRA_SHEETS）
+    "VIP名單", "系統執行Log", "捷運站表", "消毒除蟲同步(勿動)",
 ]
+# 客人備註、客服備註、line比對、專員訂單：程式第一次寫入時會自動建立，新年度不帶舊資料
 OFFICE_KEEP_CONTAINS = ["儲值金不足"]  # 分頁名稱含這些字也保留（例：202611儲值金不足）
 OFFICE_ATM_CELL = "'ATM'!A2"
 
@@ -1907,6 +1910,7 @@ class Rollover:
         1. 「{前一年度}目標」分頁改名為「{新年度}目標」
         2. 清除 OFFICE_CLEAR_RANGES；清潔異動 A2:AE 清內容與底色
         3. ATM!A2 改成 FILTER(IMPORTRANGE(新年度該區財報 富邦更新))
+        4. 評價預約只留新年度的列（1/1 再用「新年度盤點與切換」從前一年度檔重新帶一次最新內容）
         """
         targets = [r for r in records if r["kind"] == "檔案" and r.get("created") and r.get("new_id")]
         if not targets:
@@ -1960,6 +1964,9 @@ class Rollover:
                     "range": OFFICE_ATM_CELL,
                     "values": [[OFFICE_ATM_FORMULA.format(fid=finance["id"])]],
                 }])
+            from tools.annual_rollover.office_rollover import prune_rating_in_place
+
+            prune_rating_in_place(self.sheets, r["new_id"], int(self.new_year), log=self.log)
 
     # ---------- 財務報表專用整理 ----------
     def _values_batch(self, file_id: str, data: List[Dict[str, Any]]) -> None:

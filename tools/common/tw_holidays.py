@@ -11,7 +11,20 @@ from __future__ import annotations
 import json
 import urllib.request
 from datetime import date
+from pathlib import Path
 from typing import Dict, Iterable, Optional, Set, Tuple
+
+# order-system 同步過來的辦公日曆（每年 12/25 自動補上隔年）；線上抓不到時用
+CALENDAR_FILE = Path(__file__).resolve().parents[1] / "orders_system" / "config" / "taiwan_work_calendar.json"
+
+
+def local_calendar(year: int, path: Path = None) -> Optional[Tuple[Set[date], Set[date]]]:
+    try:
+        days = json.loads(Path(path or CALENDAR_FILE).read_text(encoding="utf-8")).get("days", {})
+    except (OSError, ValueError):
+        return None
+    rows = [{"date": key, "isHoliday": bool(off)} for key, off in days.items() if key.startswith(f"{year}-")]
+    return parse_calendar(rows) if rows else None
 
 CALENDAR_URL = "https://cdn.jsdelivr.net/gh/ruyut/TaiwanCalendar/data/{year}.json"
 
@@ -45,11 +58,16 @@ def parse_calendar(rows: Iterable[dict]) -> Tuple[Set[date], Set[date]]:
 
 
 def calendar_for(year: int, fallback: Iterable[date] = ()) -> Tuple[Set[date], Set[date], bool]:
-    """回傳 (假日, 補班日, 是否取得官方日曆)。抓不到時用 fallback 裡同年份的日子。"""
+    """回傳 (假日, 補班日, 是否取得官方日曆)。
+    依序：線上政府辦公日曆 → tools/orders_system/config/taiwan_work_calendar.json → fallback 同年份的日子。"""
     if year not in _CACHE:
         rows = _fetch(year)
         if rows:
             _CACHE[year] = parse_calendar(rows)
+        else:
+            local = local_calendar(year)
+            if local:
+                _CACHE[year] = local
     if year in _CACHE:
         holidays, makeup = _CACHE[year]
         return holidays, makeup, True

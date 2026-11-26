@@ -3842,7 +3842,10 @@ NEW_YEAR_CONSOLE_ACTIONS = [
     "新年度盤點",
     "一鍵更新年度參數（參數設定改為新年度）",
     "一鍵切換根目錄（新年度檔都找得到的列）",
+    "全部改為根目錄（K 欄每一列）",
+    "內勤表單換年整理（1/1 執行：評價預約只留新年度、補分頁）",
 ]
+OFFICE_ROLLOVER_AREAS = ["台北", "台中", "高雄"]
 
 
 def run_new_year_console(action, year, on_progress=None):
@@ -3884,6 +3887,33 @@ def run_new_year_console(action, year, on_progress=None):
         message = (f"已切換為根目錄 {len(switched)} 列" + (f"：第 {'、'.join(map(str, switched))} 列" if switched else "")
                    + f"；未切換 {len(skipped)} 列（原因見結果表）")
         return message, plan
+
+    if action.startswith("全部改為根目錄"):
+        changed = year_roots.set_modes(sheets, master_id, roots, year_roots.MODE_ROOT)
+        return (f"已改為根目錄 {len(changed)} 列" + (f"：第 {'、'.join(map(str, changed))} 列" if changed else "")
+                + "（找不到檔時各功能仍會退回原設定，並記在 L 欄）"), []
+
+    if action.startswith("內勤表單換年整理"):
+        from tools.annual_rollover import office_rollover
+
+        office_rollover = importlib.reload(office_rollover)
+        rows = []
+        for area in OFFICE_ROLLOVER_AREAS:
+            try:
+                prev_id = roots.locate("內勤工作表單", area, year - 1)
+                new_id = roots.locate("內勤工作表單", area, year)
+            except Exception as exc:
+                rows.append({"地區": area, "結果": f"找不到內勤工作表單：{exc}"})
+                continue
+            log(f"{area}：{year - 1} → {year} 內勤工作表單")
+            added = office_rollover.copy_missing_tabs(sheets, prev_id, new_id, log=log)
+            try:
+                rating = office_rollover.rollover_rating(sheets, prev_id, new_id, year, log=log)
+                rating_text = f"評價預約留 {rating['kept']} 列、刪 {rating['deleted']} 列"
+            except RuntimeError as exc:
+                rating_text = str(exc)
+            rows.append({"地區": area, "結果": f"補分頁：{'、'.join(added) or '無'}；{rating_text}"})
+        return f"{year} 內勤表單換年整理完成（{len(rows)} 區）", rows
 
     raise ValueError(f"未知動作：{action}")
 
