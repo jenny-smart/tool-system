@@ -1680,6 +1680,8 @@ def render_html_table(
 
     for col in show.columns:
         col_text = str(col)
+        if col_text == "金額來源":
+            continue
         if "佔比" in col_text:
             show[col] = (
                 pd.to_numeric(show[col], errors="coerce")
