@@ -1,0 +1,6 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+清潔異動補齊完成：盤點 6 列，仍未備妥 3 列（每日 10:00 檢查會提醒）
+⚠️ 未備妥【台北】第382列 LC00220740 Christin：缺退款銀行代碼／帳號（P／Q）
+⚠️ 未備妥【高雄】第57列 LC00220718 官紀暄：缺儲值金金額（N）
+⚠️ 未備妥【高雄】第58列 LC00208332 洪可欣：缺儲值金金額（S）
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
