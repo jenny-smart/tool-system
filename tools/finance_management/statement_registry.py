@@ -30,9 +30,7 @@ REPORT_SHEET_TITLES = {
     "現金": "股東損益表_現金",
 }
 
-ALL_REPORT_AREA = "2026-all"
-CASH_GAP_AREA = "2026-現金"
-REVIEW_SPREADSHEET_AREA = "2026"
+REVIEW_SPREADSHEET_AREA = "2026"  # 最後備用列；實際先找今年列，再用參數設定「年度彙總列代號」
 
 
 def _review_row(year: int | None = None) -> list[str]:
