@@ -29,19 +29,29 @@ def render_triplicate() -> None:
     from .triplicate import candidates, prepare, validate_source
 
     options = dict((label, key) for key, label in get_area_options())
-    label = st.selectbox("執行區域", list(options), key="triplicate_area")
+    picked_labels = st.multiselect("地區", list(options), default=list(options), key="triplicate_areas")
+    labels = [name for name in options if name in picked_labels]
     # 2026-11-24 Jenny：預設開立折讓單（全額），要作廢再手動切換
     action_label = st.radio("原發票處理方式", ["開立折讓單（全額）", "作廢原發票"], key="triplicate_original_action")
     action = "cancel" if action_label == "作廢原發票" else "allowance"
     st.caption("先完成原票作廢或全額折讓，再填入新三聯發票；新票仍由你按下一步及儲存。")
+    if not labels:
+        st.info("請選擇地區")
+        return
     try:
-        ws = get_worksheet(label)
-        items = candidates(ws.get_all_values())
-        if not items:
+        sheets = {}
+        pairs = []
+        for name in labels:
+            sheets[name] = get_worksheet(name)
+            pairs += [(name, row) for row in candidates(sheets[name].get_all_values())]
+        if not pairs:
             st.info("沒有待處理的二聯改三聯資料")
             return
-        item = st.selectbox("選擇訂單", items,
-                            format_func=lambda r: f"第 {r['source_row']} 列｜{r['order_no']}｜{r['customer']}")
+        label, item = st.selectbox(
+            "選擇訂單", pairs,
+            format_func=lambda p: f"{p[0]}｜第 {p[1]['source_row']} 列｜{p[1]['order_no']}｜{p[1]['customer']}",
+        )
+        ws = sheets[label]
         st.text(item["note"])
         if st.button("讀取後台並預覽", key="triplicate_preview"):
             st.session_state.pop("triplicate_plan", None)

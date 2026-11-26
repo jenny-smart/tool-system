@@ -302,10 +302,20 @@ def install(ui) -> None:
         key_by_label = {display: key for key, display in options}
 
         st.markdown("### 📍 執行區域")
-        area_label = st.selectbox("執行區域", labels, label_visibility="collapsed", key="invoice_pending_picker_area")
-        area_key = key_by_label[area_label]
-        st.caption(f"只執行：{area_label}")
+        picked = st.multiselect("地區", labels, default=labels[:1], label_visibility="collapsed",
+                                key="invoice_pending_picker_areas", placeholder="請選擇地區")
+        # 每列都要查後台發票設定，預設只帶第一個地區，需要再加選。
+        picked = [label for label in labels if label in picked]
+        if not picked:
+            st.caption("⚠️ 請至少選擇一個地區")
+        for area_label in picked:
+            if len(picked) > 1:
+                st.markdown(f"#### {area_label}")
+            _render_area(area_label, key_by_label[area_label])
 
+        _render_active_payload()
+
+    def _render_area(area_label: str, area_key: str) -> None:
         try:
             task_snapshot = _find_invoice_task(area_label)
         except Exception as exc:
@@ -382,6 +392,7 @@ def install(ui) -> None:
             type="primary",
             use_container_width=True,
             disabled=not queue or bool(invalid),
+            key=f"invoice_pending_run_{area_label}",
         ):
             try:
                 prepared = _prepare(queue, area_key)
@@ -394,8 +405,6 @@ def install(ui) -> None:
                 st.session_state.pop("invoice_active_payloads", None)
                 st.session_state.pop("invoice_active_area", None)
                 st.error(f"發票流程啟動失敗：{exc}")
-
-        _render_active_payload()
 
     ui.render_invoice_create = render_invoice_create
     ui.queue_pending_invoices = queue_pending_invoices

@@ -72,14 +72,12 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     this_month = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y%m")
     period = st.text_input("期別（YYYYMM，預設上個月）", value=previous_month(this_month),
                            key=f"{PREFIX}_period").strip()
-    st.caption("勾選地區按「盤點」→ 勾選科目 → 「新增分錄」只寫台北／各區富邦更新分錄；"
-               "「富邦匯款給台北」另外勾地區（預設台中），匯完自動同步明細、補分錄、回填第74列。")
+    st.caption("選擇地區按「盤點」→ 勾選科目 → 「新增分錄」只寫台北／各區富邦更新分錄；"
+               "「富邦匯款給台北」另外選地區（預設台中），匯完自動同步明細、補分錄、回填第74列。")
     st.caption("每月 10 日 04:00 排程（排程設定 fixed_expense_remit）會自動盤點高雄以外各區並排入富邦匯款。")
 
-    st.markdown("**地區**")
-    columns = st.columns(len(_areas()))
-    areas = [area for area, column in zip(_areas(), columns)
-             if column.checkbox(area, value=True, key=f"{PREFIX}_area_{area}")]
+    picked_areas = st.multiselect("地區", _areas(), default=_areas(), key=f"{PREFIX}_areas")
+    areas = [area for area in _areas() if area in picked_areas]
 
     if st.button("🔍 盤點", key=f"{PREFIX}_scan", type="primary", disabled=not areas):
         if len(period) != 6 or not period.isdigit():
@@ -94,7 +92,7 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
     result = st.session_state.get(f"{PREFIX}_result")
     if not result or result["period"] != period or result["areas"] != areas:
         if areas:
-            st.info("勾選地區後按「盤點」。")
+            st.info("選擇地區後按「盤點」。")
         return
 
     if result.get("revenue_note"):
@@ -148,10 +146,10 @@ def render(create_task: Callable, log: Callable[[str], None], username: str = ""
         return
     st.caption("銀行端停在確認頁，請核對後在電腦上按確認；成功後同步該區富邦明細、補寫缺的分錄、回填第74列"
                "（台中另外逐科目寫請款記錄／台中，已付款）。分錄已先新增也可以匯。")
-    columns = st.columns(len(remittable))
-    remit = {area: selected[area] for area, column in zip(remittable, columns)
-             if column.checkbox(area, value=area in FUBON_DEFAULT, key=f"{PREFIX}_remit_{period}_{area}")}
-    if st.button("💸 富邦匯款給台北：" + ("、".join(remit) or "請勾選地區"), key=f"{PREFIX}_remit_run",
+    remit_areas = st.multiselect("匯款地區", remittable, default=[a for a in remittable if a in FUBON_DEFAULT],
+                                 key=f"{PREFIX}_remit_{period}_{'_'.join(remittable)}")
+    remit = {area: selected[area] for area in remittable if area in remit_areas}
+    if st.button("💸 富邦匯款給台北：" + ("、".join(remit) or "請選擇地區"), key=f"{PREFIX}_remit_run",
                  disabled=not remit):
         _queue_remit(period, remit, create_task, log, username)
         st.session_state.pop(f"{PREFIX}_result", None)

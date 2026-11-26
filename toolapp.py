@@ -4367,6 +4367,24 @@ MONTHLY_SCRIPT_MAP = {
 STORED_VALUE_COMBO = "儲值金結算＋儲值金預收"
 STORED_VALUE_COMBO_STEPS = ("儲值金結算", "儲值金預收")
 
+# ── 執行區域（標籤式複選）──────────────────────────────────
+# 組合／彙總選項：已包含在「全選」裡，預設不勾。
+AREA_EXTRA_OPTIONS = ("新竹＋高雄", "年度review工作表")
+# 執行前要先載入單一地區資料讓人勾選列的功能：一次只能選一個地區。
+AREA_SINGLE_PREVIEW_FUNCTIONS = (
+    "【藍新金流】藍新信用卡待退款",
+    "【鯨躍發票】開立折讓單",
+    "【富邦銀行】異動 ATM 退款",
+    "【富邦銀行】請款記錄",
+    "【富邦銀行】工具包押金退款",
+    "【富邦銀行】清潔用品採購",
+    "【元大銀行】薪資檔上傳待放行",
+)
+# 預覽只支援單一地區或全區的功能（客服排程系統一律背景單跑）：選一個或全選。
+AREA_ALL_OR_ONE_FUNCTIONS = (
+    "【財報】各區固定費用匯款",
+)
+
 # 儲值金結算／儲值金預收不套用「月排程系統」的承攬費總根目錄，
 # 而是存在財務自己的根目錄（YYYY/YYYYMM，無地區子資料夾）。
 STORED_VALUE_FUNCTIONS = {"儲值金結算", "儲值金預收", "儲值金結算＋儲值金預收"}
@@ -6002,24 +6020,66 @@ with area_col:
     else:
         area_select_key = f"area_select_{system_type}_{system_name}_{selected_function}"
 
-    remembered_area = st.session_state.get(area_select_key)
-    if remembered_area not in area_select_options:
-        st.session_state[area_select_key] = area_select_options[0]
-
-    selected_area_value = st.selectbox(
-        "執行區域",
-        area_select_options,
-        label_visibility="collapsed",
-        key=area_select_key,
+    # 地區改成標籤式複選（同【整合執行】清潔異動已備妥）：
+    # - 全部地區都選 = 原本的「全區」（只跑一次，後端自己展開）
+    # - 只選一個 = 只跑該地區
+    # - 選部分地區 = 依序一個地區跑一次（按一次執行，自動接續下一個地區）
+    _has_all_area = "全區" in area_select_options
+    area_chip_options = [area for area in area_select_options if area != "全區"] or ["全區"]
+    # 組合／彙總選項（新竹＋高雄、年度review工作表）已包含在全選裡，預設不勾。
+    area_full_set = [area for area in area_chip_options if area not in AREA_EXTRA_OPTIONS] or area_chip_options
+    area_single_only = selected_function in AREA_SINGLE_PREVIEW_FUNCTIONS and not _has_all_area
+    area_all_or_one = not area_single_only and (
+        system_type == "service_schedule" or selected_function in AREA_ALL_OR_ONE_FUNCTIONS
     )
+
+    area_multi_key = f"{area_select_key}__multi"
+    remembered_areas = st.session_state.get(area_multi_key)
+    if not isinstance(remembered_areas, list):
+        # 沿用舊版單選記住的地區
+        _old = st.session_state.get(area_select_key)
+        remembered_areas = area_full_set if _old in (None, "全區") else [_old]
+    _had_pick = bool(remembered_areas)
+    remembered_areas = [area for area in remembered_areas if area in area_chip_options]
+    if area_single_only:
+        remembered_areas = remembered_areas[:1]
+    # 使用者自己清空時保持空白；換功能後原選項都不適用才回到預設
+    if not remembered_areas and (_had_pick or area_multi_key not in st.session_state):
+        remembered_areas = area_chip_options[:1] if area_single_only else list(area_full_set)
+    st.session_state[area_multi_key] = remembered_areas
+
+    picked_areas = st.multiselect(
+        "地區",
+        area_chip_options,
+        key=area_multi_key,
+        max_selections=1 if area_single_only else None,
+        placeholder="請選擇地區",
+    )
+    picked_areas = [area for area in area_chip_options if area in picked_areas]
+
+    area_run_blocked = False
+    if not picked_areas:
+        run_area_queue = []
+        area_run_blocked = True
+        st.caption("⚠️ 請至少選擇一個地區")
+    elif _has_all_area and all(area in picked_areas for area in area_full_set) and len(area_full_set) > 1:
+        run_area_queue = ["全區"]
+        st.caption("將執行全部已啟用地區")
+    elif len(picked_areas) == 1:
+        run_area_queue = picked_areas
+        st.caption(f"只執行：{picked_areas[0]}")
+    elif area_all_or_one:
+        run_area_queue = picked_areas[:1]
+        area_run_blocked = True
+        st.caption("⚠️ 此功能只能選一個地區或全選")
+    else:
+        run_area_queue = picked_areas
+        st.caption(f"依序執行：{'、'.join(picked_areas)}")
+
+    selected_area_value = run_area_queue[0] if run_area_queue else area_chip_options[0]
     _unified_log.set_context(st, area=selected_area_value)
 
     selected_areas = [selected_area_value]
-
-    if selected_area_value == "全區":
-        st.caption("將執行全部已啟用地區")
-    else:
-        st.caption(f"只執行：{selected_area_value}")
 
 if system_type == "finance_management" and selected_function == "【財報】各區固定費用匯款":
     if re.fullmatch(r"20\d{2}(0[1-9]|1[0-2])", (period or "").strip()):
@@ -6455,11 +6515,38 @@ run_clicked = st.button(
     _run_button_label,
     use_container_width=True,
     disabled=(
-        system_type == "finance_management"
-        and selected_function == "【元大銀行】薪資檔上傳待放行"
-        and not yuanta_salary_preview_ready
+        area_run_blocked
+        or (
+            system_type == "finance_management"
+            and selected_function == "【元大銀行】薪資檔上傳待放行"
+            and not yuanta_salary_preview_ready
+        )
     ),
 )
+
+# 選了部分地區（多個）：按一次執行先跑第一個地區，其餘排進佇列；
+# 每個地區跑完都會 st.rerun()，下一輪自動接續下一個地區。
+_area_run_signature = f"{system_type}|{system_name}|{selected_function}"
+_area_run_pending = st.session_state.pop("_area_run_pending", None)
+_area_run_continuing = False
+if run_clicked:
+    if len(run_area_queue) > 1:
+        st.session_state["_area_run_pending"] = {
+            "sig": _area_run_signature,
+            "areas": run_area_queue[1:],
+            "total": len(run_area_queue),
+        }
+elif _area_run_pending and _area_run_pending.get("sig") == _area_run_signature and _area_run_pending.get("areas"):
+    run_clicked = True
+    _area_run_continuing = True
+    selected_area_value = _area_run_pending["areas"][0]
+    selected_areas = [selected_area_value]
+    _unified_log.set_context(st, area=selected_area_value)
+    if len(_area_run_pending["areas"]) > 1:
+        st.session_state["_area_run_pending"] = {
+            **_area_run_pending,
+            "areas": _area_run_pending["areas"][1:],
+        }
 
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -6766,8 +6853,13 @@ if can_access_page("settings"):
 # ═══════════════════════════════════════════════════════════
 if run_clicked:
     # 每次按執行都是新的一輪，依地區進度板從空的開始，不會混到上一輪
-    # 不相關的地區×類型殘留紀錄。
-    st.session_state.area_log = {}
+    # 不相關的地區×類型殘留紀錄。（多地區依序執行的接續輪不清空）
+    if not _area_run_continuing:
+        st.session_state.area_log = {}
+    _area_run_total = (st.session_state.get("_area_run_pending") or _area_run_pending or {}).get("total")
+    if _area_run_continuing or st.session_state.get("_area_run_pending"):
+        _area_run_left = len((st.session_state.get("_area_run_pending") or {}).get("areas", []))
+        add_log(f"▶ 多地區依序執行（{_area_run_total - _area_run_left}/{_area_run_total}）：{selected_area_value}")
     _service_bg_started = False
 
     if not selected_system:
