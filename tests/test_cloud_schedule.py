@@ -358,3 +358,31 @@ class ScheduleTests(unittest.TestCase):
             api.assert_not_called()
 
 if __name__=='__main__': unittest.main()
+
+
+def test_yearly_frequency_work_calendar_dec_25_to_31():
+    from datetime import date, datetime
+
+    from tools.scheduling import schedule_settings as ss
+
+    rule = next(r for r in ss.default_rules() if r.key == "work_calendar_yearly")
+    assert rule.freq == "每年" and not rule.errors
+    assert ss.FUNCTIONS["work_calendar_yearly"][0] == "jenny-smart/order-system:work-calendar-yearly.yml"
+    workday = lambda d: d.weekday() < 5  # noqa: E731
+    assert ss.matches_day(rule, date(2027, 12, 25), workday)      # 週六也照跑
+    assert ss.matches_day(rule, date(2027, 12, 31), workday)
+    assert not ss.matches_day(rule, date(2027, 12, 24), workday)
+    assert not ss.matches_day(rule, date(2028, 1, 1), workday)
+    assert not ss.matches_day(rule, date(2027, 11, 25), workday)  # 只有 12 月
+    assert [r.key for r in ss.due([rule], datetime(2027, 12, 25, 9, 0), workday)] == ["work_calendar_yearly"]
+
+
+def test_yearly_dates_parsing_and_validation():
+    from datetime import date
+
+    from tools.scheduling import schedule_settings as ss
+
+    assert ss.year_dates("12/25-31", 2027)[-1] == date(2027, 12, 31)
+    assert ss.year_dates("1/1,12/25", 2027) == [date(2027, 1, 1), date(2027, 12, 25)]
+    bad = ss.parse_row([True, "work_calendar_yearly", "x", "09:00", "每年", "25", "照跑", ss.MODE_DIRECT])
+    assert any("月/日" in e for e in bad.errors)
