@@ -48,6 +48,7 @@ SELF_RECORDED_KEYS = {
     "rating_complaint_daily",      # 【評價客訴】
     "rating_booking_daily",        # 【評價預約】
     "lemon_ren_count",             # 【檸檬人待換專員】
+    "price_period_check",          # 【金額期間檢查】
     "unassigned_staff_record",     # 【未配班剩1人】
     "unassigned_reserve_create",   # 【未配班保留單】
     "fubon_statement",             # 【富邦明細】（Mac Agent 下載完記）
