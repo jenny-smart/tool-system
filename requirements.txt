@@ -17,3 +17,4 @@ python-calamine
 pdfplumber>=0.11.4
 
 playwright>=1.48,<2
+toml
