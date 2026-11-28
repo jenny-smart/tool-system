@@ -116,6 +116,8 @@ FUNCTIONS: dict[str, tuple[str, object]] = {
     "lemon_ren_clear": ("jenny-smart/order-system:lemon-ren-clear-schedule.yml", {}),
     # 2026-11-20 Jenny：每日 11:00 order-system「檸檬人統計」（台北，明天～＋3 個月月底）→ tpe／jenny 行事曆
     "lemon_ren_count": ("jenny-smart/order-system:lemon-ren-count-schedule.yml", {}),
+    # 2026-11-28 Jenny：每日 17:00 order-system「金額期間檢查」（前日 17:00～當日 17:00 成立的訂單）→ 排程行事曆
+    "price_period_check": ("jenny-smart/order-system:price-period-check-schedule.yml", {}),
     # 2026-11-21 Jenny：每日 11:10 order-system「記錄未配班人員」（台北，明天起 14 天只剩 1 位未配班的時段）→ 行事曆
     "unassigned_staff_record": ("jenny-smart/order-system:unassigned-staff-record-schedule.yml", {}),
     # 2026-11-22 Jenny：08:30～17:30 每小時 order-system「未配班成立保留單」（區間暫訂 2027/01/22～02/04）
@@ -242,6 +244,10 @@ DEFAULT_ROWS: list[list] = [
     [True, "lemon_ren_count", "檸檬人統計：待換專員進度（台北）", "11:00", "每日", "", "照跑", MODE_DIRECT,
      "程式在 order-system（lemon-ren-count-schedule.yml）；統計範圍＝明天～＋3 個月的月底；"
      "不含檸檬保留單、未配班、合併訂單（檸檬人勿動）；結果記 tpe@／jenny@lemonclean.com.tw 行事曆"],
+    # 2026-11-28 Jenny：每日 17:00 檢查前日 17:00～當日 17:00 成立的訂單金額（改期跨大掃除期間未重算）
+    [True, "price_period_check", "金額期間檢查：前日 17:00～當日 17:00 成立的訂單（台北／台中）", "17:00", "每日", "", "照跑", MODE_DIRECT,
+     "程式在 order-system（price-period-check-schedule.yml）；只查居家清潔、已付款／待付款；金額剛好是其他期間或平假日價格才列出"
+     "（同日其他訂單合計、退款、加收調整後仍不符）；結果記排程行事曆（SCHEDULE_NOTICE_CALENDAR_ID）【金額期間檢查】"],
     # 2026-11-22 Jenny：記錄未配班人員改 08:30～17:30 每小時（原每日 11:10）
     [True, "unassigned_staff_record", "記錄未配班人員：未來 2 週只剩 1 位未配班的時段（台北）", "08:30~17:30 每小時", "每日", "", "照跑", MODE_DIRECT,
      "程式在 order-system（unassigned-staff-record-schedule.yml）；範圍＝明天起 14 天，不含檸檬人、晚上時段；"
