@@ -1,0 +1,17 @@
+=== 儲值金系統設定.py 版本：2026-05-03-final-staff-notice-aa ===
+[登入] 已登入
+【台北】檸檬後台已登出
+【台北】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【台中】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【桃園】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【新竹】未備妥 0 筆
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+【高雄】未備妥 2 筆
+【高雄】未備妥：第57列 LC00220718（待扣儲值金）缺儲值金金額（N）
+【高雄】未備妥：第58列 LC00208332（待返儲值金）缺儲值金金額（S）
+[config] spreadsheet_id='1nNAXy6rvBnGR8ACnqKKzKNA4-UwZtZp47i806EPmR_8'
+非工作日或已過 11:00，不建提醒
+{'todo': [{'region': '高雄', 'row': 57, 'status': '待扣儲值金', 'detail': '其他', 'order_no': 'LC00220718', 'customer': '官紀暄', 'payway': '', 'amount': '', 'progress': [], 'actions': [], 'missing': ['缺儲值金金額（N）'], 'manual': [], 'note': '2026/11/15 LC00220718 其他--扣除購物金$2500'}, {'region': '高雄', 'row': 58, 'status': '待返儲值金', 'detail': '專員回報減時', 'order_no': 'LC00208332', 'customer': '洪可欣', 'payway': '', 'amount': '', 'progress': [], 'actions': [], 'missing': ['缺儲值金金額（S）'], 'manual': [], 'note': '2026/11/25 LC00208332 專員回報減時--11/25 13:40-16:40 專員蕭亦圻回報16:00結束，客戶確認無其他施作區域，減時40分鐘（2人），等比例返儲值金$667'}], 'failed': []}
