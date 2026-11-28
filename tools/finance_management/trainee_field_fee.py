@@ -290,6 +290,11 @@ def _find_spreadsheet(prefix: str) -> str:
     return pick_spreadsheet(prefix, res.get("files", []))
 
 
+def _is_missing_sheet(exc: Exception) -> bool:
+    """Sheets API 找不到分頁時回 HttpError 400「Unable to parse range」。"""
+    return "Unable to parse range" in str(exc)
+
+
 def read_roster_values(service, area: str) -> list[list]:
     """今年度＋前一年度的「基本資料、協議規章」。
 
@@ -301,7 +306,13 @@ def read_roster_values(service, area: str) -> list[list]:
     current_id = _find_spreadsheet(current_name)
     if not current_id:
         raise RuntimeError(f"雲端找不到試算表「{current_name}」")
-    current = _read(service, current_id, ROSTER_SHEET, "A:G")
+    try:
+        current = _read(service, current_id, ROSTER_SHEET, "A:G")
+    except Exception as exc:
+        # 2026-11-28 Jenny：台中名冊沒有「基本資料、協議規章」分頁＝沒有新訓要退款，不算異常
+        if not _is_missing_sheet(exc):
+            raise
+        current = []
     previous: list[list] = []
     previous_id = _find_spreadsheet(ROSTER_NAME.format(year=year - 1, area=area))
     if previous_id:

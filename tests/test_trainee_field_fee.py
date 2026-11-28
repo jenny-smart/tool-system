@@ -259,3 +259,26 @@ def test_d_formula_full_formula_copied_as_is():
     new = '=IF(A3="","",LET(r,IFERROR(ARRAYFORMULA(VLOOKUP(A3,X,{2,3,5},FALSE)),{"","",""}),HSTACK(INDEX(r,1,1))))'
     assert is_full_formula(new) and not is_full_formula(old)
     assert d_formula_for_row(new, 27) == new.replace("A3", "A27")
+
+
+def test_read_roster_values_missing_tab_is_empty(monkeypatch):
+    """2026-11-28：台中名冊沒有「基本資料、協議規章」分頁時視為沒有資料，不要整支失敗。"""
+    from tools.finance_management import trainee_field_fee as m
+
+    monkeypatch.setattr(m, "_find_spreadsheet", lambda name: "sid" if str(m.datetime.now(m.TW_TZ).year) in name else "")
+
+    def fake_read(service, sid, title, cols="A:Z"):
+        raise Exception("<HttpError 400 ... Unable to parse range: '基本資料、協議規章'!A:G>")
+
+    monkeypatch.setattr(m, "_read", fake_read)
+    assert m.read_roster_values(None, "台中") == []
+
+
+def test_read_roster_values_other_errors_still_raise(monkeypatch):
+    import pytest
+    from tools.finance_management import trainee_field_fee as m
+
+    monkeypatch.setattr(m, "_find_spreadsheet", lambda name: "sid")
+    monkeypatch.setattr(m, "_read", lambda *a, **k: (_ for _ in ()).throw(Exception("HttpError 403 permission")))
+    with pytest.raises(Exception):
+        m.read_roster_values(None, "台中")
